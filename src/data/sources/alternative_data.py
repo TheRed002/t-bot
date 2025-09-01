@@ -26,12 +26,15 @@ from src.core.config import Config
 
 # Import from P-001 core components
 from src.core.exceptions import DataSourceError
+from src.core.logging import get_logger
 
 # Import from P-002A error handling
 from src.error_handling.error_handler import ErrorHandler
 
 # Import from P-007A utilities
 from src.utils.decorators import retry, time_execution
+
+logger = get_logger(__name__)
 
 
 class DataType(Enum):
@@ -94,9 +97,16 @@ class AlternativeDataSource(BaseComponent):
         self.error_handler = ErrorHandler(config)
 
         # API configurations
-        self.fred_config = config.alternative_data.get("fred", {})
-        self.weather_config = config.alternative_data.get("weather", {})
-        self.satellite_config = config.alternative_data.get("satellite", {})
+        alt_data_config = getattr(config, "alternative_data", {})
+        self.fred_config = (
+            alt_data_config.get("fred", {}) if hasattr(alt_data_config, "get") else {}
+        )
+        self.weather_config = (
+            alt_data_config.get("weather", {}) if hasattr(alt_data_config, "get") else {}
+        )
+        self.satellite_config = (
+            alt_data_config.get("satellite", {}) if hasattr(alt_data_config, "get") else {}
+        )
 
         # HTTP session
         self.session: aiohttp.ClientSession | None = None
@@ -107,10 +117,14 @@ class AlternativeDataSource(BaseComponent):
         self.satellite_cache: dict[str, list[AlternativeDataPoint]] = {}
 
         # Monitoring settings
-        self.update_interval = config.alternative_data.get("update_interval", 3600)  # 1 hour
+        self.update_interval = (
+            alt_data_config.get("update_interval", 3600)
+            if hasattr(alt_data_config, "get")
+            else 3600
+        )  # 1 hour
 
         # Statistics
-        self.stats = {
+        self.stats: dict[str, Any] = {
             "total_data_points": 0,
             "successful_requests": 0,
             "failed_requests": 0,
@@ -127,19 +141,32 @@ class AlternativeDataSource(BaseComponent):
     @retry(max_attempts=3, base_delay=2.0)
     async def initialize(self) -> None:
         """Initialize alternative data source connections."""
+        session = None
         try:
             # Create HTTP session
-            self.session = aiohttp.ClientSession(
+            session = aiohttp.ClientSession(
                 timeout=aiohttp.ClientTimeout(total=60),
                 headers={"User-Agent": "TradingBot/1.0", "Accept": "application/json"},
             )
 
             # Test available data sources
+            self.session = session
             await self._test_data_sources()
 
             self.logger.info("AlternativeDataSource initialized successfully")
 
         except Exception as e:
+            # Cleanup session on initialization failure
+            if session:
+                try:
+                    await session.close()
+                except Exception as e:
+                    logger.error(f"Failed to close session during cleanup: {e}")
+                    # Continue cleanup process
+                # Don't set self.session if initialization failed
+                if self.session == session:
+                    self.session = None
+
             self.logger.error(f"Failed to initialize AlternativeDataSource: {e!s}")
             raise DataSourceError(f"Alternative data source initialization failed: {e!s}")
 
@@ -605,9 +632,12 @@ class AlternativeDataSource(BaseComponent):
 
     async def cleanup(self) -> None:
         """Cleanup alternative data source resources."""
+        session = None
         try:
             if self.session:
-                await self.session.close()
+                session = self.session
+                self.session = None
+                await session.close()
 
             self.indicators_cache.clear()
             self.weather_cache.clear()
@@ -617,3 +647,9 @@ class AlternativeDataSource(BaseComponent):
 
         except Exception as e:
             self.logger.error(f"Error during AlternativeDataSource cleanup: {e!s}")
+        finally:
+            if session and not session.closed:
+                try:
+                    await session.close()
+                except Exception as e:
+                    self.logger.warning(f"Failed to close session in finally block: {e!s}")

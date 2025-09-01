@@ -694,9 +694,9 @@ class AlternativeFeatureCalculator:
                             symbol
                         )
                     elif feature.upper() == "MARKET_MICROSTRUCTURE":
-                        results["MARKET_MICROSTRUCTURE"] = (
-                            await self.calculate_market_microstructure(symbol)
-                        )
+                        results[
+                            "MARKET_MICROSTRUCTURE"
+                        ] = await self.calculate_market_microstructure(symbol)
                     else:
                         self.logger.warning(f"Unknown alternative feature: {feature}")
 

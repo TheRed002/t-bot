@@ -7,6 +7,7 @@ circular dependencies and provide a centralized location for data types.
 
 from dataclasses import dataclass
 from datetime import datetime
+from decimal import Decimal
 from enum import Enum
 from typing import Any
 
@@ -26,6 +27,7 @@ class DataPipelineStage(Enum):
 
     INGESTION = "ingestion"
     VALIDATION = "validation"
+    PROCESSING = "processing"
     TRANSFORMATION = "transformation"
     ENRICHMENT = "enrichment"
     STORAGE = "storage"
@@ -40,9 +42,9 @@ class DataMetrics:
     records_valid: int = 0
     records_invalid: int = 0
     processing_time_ms: int = 0
-    throughput_per_second: float = 0.0
-    error_rate: float = 0.0
-    cache_hit_rate: float = 0.0
+    throughput_per_second: Decimal = Decimal("0.0")
+    error_rate: Decimal = Decimal("0.0")
+    cache_hit_rate: Decimal = Decimal("0.0")
 
 
 class DataRequest(BaseModel):
@@ -59,7 +61,7 @@ class DataRequest(BaseModel):
 
     @field_validator("end_time")
     @classmethod
-    def validate_time_range(cls, v, info):
+    def validate_time_range(cls, v: datetime | None, info: Any) -> datetime | None:
         if v and hasattr(info, "data") and "start_time" in info.data and info.data["start_time"]:
             if v <= info.data["start_time"]:
                 raise ValueError("end_time must be after start_time")

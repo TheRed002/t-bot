@@ -50,7 +50,7 @@ class TestDataValidator:
     def valid_market_data(self) -> MarketData:
         """Create valid market data for testing"""
         return MarketData(
-            symbol="BTCUSDT",
+            symbol="BTC/USDT",
             timestamp=datetime.now(timezone.utc),
             open=Decimal("49900.00"),
             high=Decimal("50100.00"),
@@ -64,7 +64,7 @@ class TestDataValidator:
     def valid_signal(self) -> Signal:
         """Create valid signal for testing"""
         return Signal(
-            symbol="BTCUSDT",
+            symbol="BTC/USDT",
             direction=SignalDirection.BUY,
             strength=0.75,
             timestamp=datetime.now(timezone.utc),
@@ -97,7 +97,7 @@ class TestDataValidator:
         # Since Pydantic prevents None values, test with data that has validation issues
         # but is still valid Pydantic structure
         invalid_data = MarketData(
-            symbol="BTCUSDT",
+            symbol="BTC/USDT",
             timestamp=datetime.now(timezone.utc),
             open=Decimal("49900.00"),
             high=Decimal("50100.00"),
@@ -120,7 +120,7 @@ class TestDataValidator:
     async def test_validate_market_data_invalid_price(self, validator: DataValidator):
         """Test validation with invalid price"""
         invalid_data = MarketData(
-            symbol="BTCUSDT",
+            symbol="BTC/USDT",
             timestamp=datetime.now(timezone.utc),
             open=Decimal("49900.00"),
             high=Decimal("50100.00"),
@@ -143,7 +143,7 @@ class TestDataValidator:
     async def test_validate_market_data_invalid_bid_ask(self, validator: DataValidator):
         """Test validation with invalid bid/ask spread"""
         invalid_data = MarketData(
-            symbol="BTCUSDT",
+            symbol="BTC/USDT",
             timestamp=datetime.now(timezone.utc),
             open=Decimal("49900.00"),
             high=Decimal("50100.00"),
@@ -170,7 +170,7 @@ class TestDataValidator:
         """Test validation with future timestamp"""
         future_time = datetime.now(timezone.utc) + timedelta(hours=1)
         invalid_data = MarketData(
-            symbol="BTCUSDT",
+            symbol="BTC/USDT",
             timestamp=future_time,
             open=Decimal("49900.00"),
             high=Decimal("50100.00"),
@@ -195,7 +195,7 @@ class TestDataValidator:
         """Test validation with old data"""
         old_time = datetime.now(timezone.utc) - timedelta(minutes=2)
         invalid_data = MarketData(
-            symbol="BTCUSDT",
+            symbol="BTC/USDT",
             timestamp=old_time,
             open=Decimal("49900.00"),
             high=Decimal("50100.00"),
@@ -233,7 +233,7 @@ class TestDataValidator:
             direction=SignalDirection.BUY,
             strength=0.0,  # Minimum strength (edge case)
             timestamp=datetime.now(timezone.utc),
-            symbol="BTCUSDT",
+            symbol="BTC/USDT",
             source="test_strategy",
         )
 
@@ -253,7 +253,7 @@ class TestDataValidator:
             direction=SignalDirection.BUY,
             strength=0.75,
             timestamp=datetime.now(timezone.utc),
-            symbol="BTCUSDT",
+            symbol="BTC/USDT",
             source="test_strategy",
         )
 
@@ -266,28 +266,23 @@ class TestDataValidator:
     @pytest.mark.asyncio
     async def test_validate_signal_invalid_symbol(self, validator: DataValidator):
         """Test validation with invalid symbol"""
-        invalid_signal = Signal(
-            direction=SignalDirection.BUY,
-            strength=0.75,
-            timestamp=datetime.now(timezone.utc),
-            symbol="",  # Empty symbol
-            source="test_strategy",
-        )
-
-        is_valid, issues = await validator.validate_signal(invalid_signal)
-
-        assert is_valid is False
-        assert len(issues) > 0
-
-        # Check for symbol validation issue
-        symbol_issues = [issue for issue in issues if issue.field == "symbol"]
-        assert len(symbol_issues) > 0
+        from src.core.exceptions import ValidationError
+        
+        # Test that creating a Signal with empty symbol raises ValidationError
+        with pytest.raises(ValidationError):
+            Signal(
+                direction=SignalDirection.BUY,
+                strength=0.75,
+                timestamp=datetime.now(timezone.utc),
+                symbol="",  # Empty symbol
+                source="test_strategy",
+            )
 
     @pytest.mark.asyncio
     async def test_validate_cross_source_consistency_valid(self, validator: DataValidator):
         """Test cross-source consistency validation with valid data"""
         primary_data = MarketData(
-            symbol="BTCUSDT",
+            symbol="BTC/USDT",
             timestamp=datetime.now(timezone.utc),
             open=Decimal("49900.00"),
             high=Decimal("50100.00"),
@@ -298,7 +293,7 @@ class TestDataValidator:
         )
 
         secondary_data = MarketData(
-            symbol="BTCUSDT",
+            symbol="BTC/USDT",
             timestamp=datetime.now(timezone.utc),
             open=Decimal("49900.00"),
             high=Decimal("50100.00"),
@@ -321,7 +316,7 @@ class TestDataValidator:
     ):
         """Test cross-source consistency with symbol mismatch"""
         primary_data = MarketData(
-            symbol="BTCUSDT",
+            symbol="BTC/USDT",
             timestamp=datetime.now(timezone.utc),
             open=Decimal("49900.00"),
             high=Decimal("50100.00"),
@@ -332,7 +327,7 @@ class TestDataValidator:
         )
 
         secondary_data = MarketData(
-            symbol="ETHUSDT",  # Different symbol
+            symbol="ETH/USDT",  # Different symbol
             timestamp=datetime.now(timezone.utc),
             open=Decimal("2990.00"),
             high=Decimal("3010.00"),
@@ -358,7 +353,7 @@ class TestDataValidator:
     async def test_validate_cross_source_consistency_price_drift(self, validator: DataValidator):
         """Test cross-source consistency with significant price difference"""
         primary_data = MarketData(
-            symbol="BTCUSDT",
+            symbol="BTC/USDT",
             timestamp=datetime.now(timezone.utc),
             open=Decimal("49900.00"),
             high=Decimal("50100.00"),
@@ -369,7 +364,7 @@ class TestDataValidator:
         )
 
         secondary_data = MarketData(
-            symbol="BTCUSDT",
+            symbol="BTC/USDT",
             timestamp=datetime.now(timezone.utc),
             open=Decimal("50900.00"),
             high=Decimal("51100.00"),
@@ -395,7 +390,7 @@ class TestDataValidator:
     async def test_outlier_detection(self, validator: DataValidator):
         """Test statistical outlier detection"""
         # Add historical data to create distribution
-        symbol = "BTCUSDT"
+        symbol = "BTC/USDT"
         for i in range(20):
             price = 50000 + i * 10  # Normal price progression
             data = MarketData(
@@ -433,12 +428,12 @@ class TestDataValidator:
     async def test_symbol_format_validation(self, validator: DataValidator):
         """Test symbol format validation"""
         # Test valid symbols
-        valid_symbols = ["BTCUSDT", "ETH-BTC", "ADAUSDT"]
+        valid_symbols = ["BTC/USDT", "ETH/BTC", "ADA/USDT"]
         for symbol in valid_symbols:
             assert validator._is_valid_symbol_format(symbol) is True
 
         # Test invalid symbols
-        invalid_symbols = ["", "BTC", "BTC@USDT", "BTC USDT"]
+        invalid_symbols = ["", "BTC", "BTC@USDT", "BTC USDT", "BTCUSDT", "BTC/", "/USDT", "B/USDT", "BTC/U"]
         for symbol in invalid_symbols:
             assert validator._is_valid_symbol_format(symbol) is False
 
@@ -468,7 +463,7 @@ class TestDataValidator:
         # Test with data that has validation issues (but is still valid
         # Pydantic)
         malformed_data = MarketData(
-            symbol="BTCUSDT",
+            symbol="BTC/USDT",
             timestamp=datetime.now(timezone.utc),
             open=Decimal("49900.00"),
             high=Decimal("50100.00"),

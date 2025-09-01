@@ -42,8 +42,14 @@ class DataIntegrationService(BaseComponent):
     Use DataService directly for new implementations.
     """
 
-    def __init__(self, config: Config):
-        """Initialize the legacy data integration service."""
+    def __init__(self, config: Config, data_service: DataService | None = None):
+        """
+        Initialize the legacy data integration service.
+
+        Args:
+            config: Configuration
+            data_service: Optional injected DataService
+        """
         super().__init__()
 
         # Issue deprecation warning
@@ -56,8 +62,8 @@ class DataIntegrationService(BaseComponent):
         self.config = config
         self.error_handler = ErrorHandler(config)
 
-        # Initialize new DataService
-        self._data_service = DataService(config)
+        # Use injected DataService or create one as fallback
+        self._data_service = data_service or DataService(config)
 
         # Legacy configuration for compatibility
         storage_config = getattr(config, "data_storage", {})

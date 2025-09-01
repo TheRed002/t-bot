@@ -22,12 +22,24 @@ Dependencies:
 """
 
 # Keep __init__ lightweight to avoid importing heavy dependencies at import time.
-# Import only quality submodules and core services here; other submodules should be imported directly
+# Import only quality submodules and core services here; other submodules should be imported
+# directly
 # by consumers as needed to avoid circular or heavy dependency trees (e.g., exchanges).
+# DI registration functions
+from .di_registration import (
+    configure_data_dependencies,
+    get_data_cache,
+    get_data_service,
+    get_data_service_factory,
+    get_data_storage,
+    get_data_validator,
+    get_service_data_validator,
+    register_data_services,
+)
 from .factory import DataServiceFactory
 from .interfaces import (
     DataCacheInterface,
-    DataServiceInterface, 
+    DataServiceInterface,
     DataStorageInterface,
     DataValidatorInterface,
 )
@@ -39,16 +51,25 @@ from .services import DataIntegrationService, DataService
 __all__ = [
     "DataCleaner",
     # Data Services
-    "DataIntegrationService", 
+    "DataIntegrationService",
     "DataService",
     "DataServiceFactory",
     # Data Interfaces
     "DataServiceInterface",
     "DataStorageInterface",
-    "DataCacheInterface", 
+    "DataCacheInterface",
     "DataValidatorInterface",
     # Data Quality Management
     "DataValidator",
     "QualityMonitor",
+    # Dependency Injection
+    "register_data_services",
+    "configure_data_dependencies",
+    "get_data_service",
+    "get_data_service_factory",
+    "get_data_storage",
+    "get_data_cache",
+    "get_data_validator",
+    "get_service_data_validator",
     # Quality submodule exports only (other submodules must be imported directly)
 ]

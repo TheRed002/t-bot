@@ -13,7 +13,6 @@ Dependencies:
 """
 
 import uuid
-from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
@@ -30,6 +29,10 @@ from src.data.validation.data_validator import (
     ValidationSeverity,
 )
 from src.utils.decorators import time_execution
+from src.utils.pipeline_utilities import (
+    PipelineAction,
+    PipelineMetrics as SharedPipelineMetrics,
+)
 
 
 class ValidationStage(Enum):
@@ -46,30 +49,12 @@ class ValidationStage(Enum):
     COMPLETED = "completed"
 
 
-class ValidationAction(Enum):
-    """Validation action enumeration."""
-
-    ACCEPT = "accept"
-    ACCEPT_WITH_WARNING = "accept_with_warning"
-    QUARANTINE = "quarantine"
-    REJECT = "reject"
-    RETRY = "retry"
+# Use shared PipelineAction enum with alias for backward compatibility
+ValidationAction = PipelineAction
 
 
-@dataclass
-class ValidationMetrics:
-    """Validation pipeline metrics."""
-
-    total_records: int = 0
-    accepted_records: int = 0
-    quarantined_records: int = 0
-    rejected_records: int = 0
-    processing_time_ms: int = 0
-    validation_stages_completed: int = 0
-    critical_issues: int = 0
-    error_issues: int = 0
-    warning_issues: int = 0
-    average_quality_score: float = 0.0
+# Use shared PipelineMetrics with alias for backward compatibility
+ValidationMetrics = SharedPipelineMetrics
 
 
 class ValidationPipelineConfig(BaseModel):
@@ -138,8 +123,14 @@ class DataValidationPipeline(BaseComponent):
     - Comprehensive monitoring and alerting
     """
 
-    def __init__(self, config: Config):
-        """Initialize the validation pipeline."""
+    def __init__(self, config: Config, validator: DataValidator | None = None):
+        """
+        Initialize the validation pipeline.
+
+        Args:
+            config: Configuration
+            validator: Optional injected validator
+        """
         super().__init__()
         self.config = config
 
@@ -147,7 +138,7 @@ class DataValidationPipeline(BaseComponent):
         self._setup_configuration()
 
         # Initialize components
-        self.validator = DataValidator(config)
+        self.validator = validator or DataValidator(config)
         self.data_pipeline: DataPipeline | None = None
 
         # Pipeline state
@@ -265,9 +256,9 @@ class DataValidationPipeline(BaseComponent):
 
             self.logger.info(
                 f"Validation pipeline {pipeline_id} completed - "
-                f"Accepted: {metrics.accepted_records}, "
-                f"Quarantined: {metrics.quarantined_records}, "
-                f"Rejected: {metrics.rejected_records}"
+                f"Accepted: {metrics.successful_records}, "
+                f"Quarantined: {metrics.records_quarantined}, "
+                f"Rejected: {metrics.records_rejected}"
             )
 
             return result
@@ -275,8 +266,8 @@ class DataValidationPipeline(BaseComponent):
         except Exception as e:
             self.logger.error(f"Validation pipeline execution failed: {e}")
 
-            # Mark pipeline as failed
-            if pipeline_id in self._active_validations:
+            # Mark pipeline as failed (only if pipeline_id was created)
+            if 'pipeline_id' in locals() and pipeline_id in self._active_validations:
                 self._active_validations[pipeline_id]["stage"] = "failed"
                 self._active_validations[pipeline_id]["error"] = str(e)
 
@@ -505,17 +496,17 @@ class DataValidationPipeline(BaseComponent):
     ) -> ValidationMetrics:
         """Calculate pipeline metrics from dispositions."""
         metrics = ValidationMetrics()
-        metrics.total_records = len(data)
+        metrics.total_records_processed = len(data)
 
         for disposition in dispositions.values():
             if disposition.action == ValidationAction.ACCEPT:
-                metrics.accepted_records += disposition.metadata.get("total_records", 1)
+                metrics.successful_records += disposition.metadata.get("total_records", 1)
             elif disposition.action == ValidationAction.ACCEPT_WITH_WARNING:
-                metrics.accepted_records += disposition.metadata.get("total_records", 1)
+                metrics.successful_records += disposition.metadata.get("total_records", 1)
             elif disposition.action == ValidationAction.QUARANTINE:
-                metrics.quarantined_records += disposition.metadata.get("total_records", 1)
+                metrics.records_quarantined += disposition.metadata.get("total_records", 1)
             elif disposition.action == ValidationAction.REJECT:
-                metrics.rejected_records += disposition.metadata.get("total_records", 1)
+                metrics.records_rejected += disposition.metadata.get("total_records", 1)
 
             metrics.critical_issues += disposition.critical_issues
             metrics.error_issues += disposition.error_issues
@@ -530,10 +521,10 @@ class DataValidationPipeline(BaseComponent):
 
     def _update_session_metrics(self, pipeline_metrics: ValidationMetrics) -> None:
         """Update session-level metrics."""
-        self._session_metrics.total_records += pipeline_metrics.total_records
-        self._session_metrics.accepted_records += pipeline_metrics.accepted_records
-        self._session_metrics.quarantined_records += pipeline_metrics.quarantined_records
-        self._session_metrics.rejected_records += pipeline_metrics.rejected_records
+        self._session_metrics.total_records_processed += pipeline_metrics.total_records_processed
+        self._session_metrics.successful_records += pipeline_metrics.successful_records
+        self._session_metrics.records_quarantined += pipeline_metrics.records_quarantined
+        self._session_metrics.records_rejected += pipeline_metrics.records_rejected
         self._session_metrics.critical_issues += pipeline_metrics.critical_issues
         self._session_metrics.error_issues += pipeline_metrics.error_issues
         self._session_metrics.warning_issues += pipeline_metrics.warning_issues
@@ -578,7 +569,7 @@ class DataValidationPipeline(BaseComponent):
             "quarantined_symbols": len(self._quarantine_store),
             "quarantined_records": sum(len(records) for records in self._quarantine_store.values()),
             "session_metrics": self._session_metrics,
-            "configuration": self.pipeline_config.dict(),
+            "configuration": self.pipeline_config.model_dump(),
         }
 
     async def health_check(self) -> dict[str, Any]:
@@ -632,3 +623,6 @@ class DataValidationPipeline(BaseComponent):
 
         except Exception as e:
             self.logger.error(f"DataValidationPipeline cleanup error: {e}")
+        finally:
+            # Always set initialized to False, even if cleanup fails
+            self._initialized = False

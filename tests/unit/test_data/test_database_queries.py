@@ -37,6 +37,9 @@ class TestMarketDataRecordQueries:
         session.add = MagicMock()
         session.flush = AsyncMock()
         session.refresh = AsyncMock()
+        session.close = AsyncMock()  # Fix: Use AsyncMock for async session.close()
+        session.rollback = AsyncMock()
+        session.invalidate = MagicMock()
         return session
 
     @pytest_asyncio.fixture
@@ -154,6 +157,9 @@ class TestFeatureRecordQueries:
         session.add_all = MagicMock()
         session.flush = AsyncMock()
         session.refresh = AsyncMock()
+        session.close = AsyncMock()  # Fix: Use AsyncMock for async session.close()
+        session.rollback = AsyncMock()
+        session.invalidate = MagicMock()
         return session
 
     @pytest_asyncio.fixture
@@ -233,6 +239,9 @@ class TestDataQualityRecordQueries:
         session.add = MagicMock()
         session.flush = AsyncMock()
         session.refresh = AsyncMock()
+        session.close = AsyncMock()  # Fix: Use AsyncMock for async session.close()
+        session.rollback = AsyncMock()
+        session.invalidate = MagicMock()
         return session
 
     @pytest_asyncio.fixture
@@ -305,6 +314,9 @@ class TestDataPipelineRecordQueries:
         session.add = MagicMock()
         session.flush = AsyncMock()
         session.refresh = AsyncMock()
+        session.close = AsyncMock()  # Fix: Use AsyncMock for async session.close()
+        session.rollback = AsyncMock()
+        session.invalidate = MagicMock()
         return session
 
     @pytest_asyncio.fixture
@@ -402,6 +414,9 @@ class TestQueryErrorHandling:
         session.commit = AsyncMock(side_effect=Exception("Commit error"))
         session.add = MagicMock(side_effect=Exception("Add error"))
         session.add_all = MagicMock(side_effect=Exception("Add error"))
+        session.close = AsyncMock()  # Fix: Use AsyncMock for async session.close()
+        session.rollback = AsyncMock()
+        session.invalidate = MagicMock()
         return session
 
     @pytest_asyncio.fixture
@@ -479,6 +494,9 @@ class TestQueryParameterHandling:
         session.add = MagicMock()
         session.flush = AsyncMock()
         session.refresh = AsyncMock()
+        session.close = AsyncMock()  # Fix: Use AsyncMock for async session.close()
+        session.rollback = AsyncMock()
+        session.invalidate = MagicMock()
         return session
 
     @pytest_asyncio.fixture

@@ -12,7 +12,7 @@ from .refactored_data_service import RefactoredDataService
 
 __all__ = [
     "DataIntegrationService",
-    "DataService", 
-    "RefactoredDataService",
+    "DataService",
     "MLDataService",
+    "RefactoredDataService",
 ]

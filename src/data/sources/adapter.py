@@ -1,11 +1,13 @@
 """Adapter to standardize different data source interfaces."""
 
+import asyncio
 import re
 from collections.abc import AsyncIterator
+from decimal import Decimal, getcontext
 from typing import Any
 
 from src.core.base.component import BaseComponent
-from src.core.exceptions import ConfigurationError
+from src.core.exceptions import ConfigurationError, DataError
 from src.data.interfaces import DataSourceInterface
 
 
@@ -190,36 +192,50 @@ class DataSourceAdapter(BaseComponent):
         if self.source_type == "binance":
             # Binance kline format: [timestamp, open, high, low, close, volume, ...]
             if isinstance(record, list):
+                # Set precision context for financial calculations (8 decimal places for crypto)
+                getcontext().prec = 16
                 standard_record = {
                     "timestamp": record[0],
-                    "open": float(record[1]),
-                    "high": float(record[2]),
-                    "low": float(record[3]),
-                    "close": float(record[4]),
-                    "volume": float(record[5]),
+                    "open": Decimal(str(record[1])).quantize(Decimal("0.00000001")),
+                    "high": Decimal(str(record[2])).quantize(Decimal("0.00000001")),
+                    "low": Decimal(str(record[3])).quantize(Decimal("0.00000001")),
+                    "close": Decimal(str(record[4])).quantize(Decimal("0.00000001")),
+                    "volume": Decimal(str(record[5])).quantize(Decimal("0.00000001")),
                     "source": "binance",
                 }
             else:
                 # Dictionary format
+                getcontext().prec = 16
                 standard_record = {
                     "timestamp": record.get("openTime", record.get("t")),
-                    "open": float(record.get("open", record.get("o", 0))),
-                    "high": float(record.get("high", record.get("h", 0))),
-                    "low": float(record.get("low", record.get("l", 0))),
-                    "close": float(record.get("close", record.get("c", 0))),
-                    "volume": float(record.get("volume", record.get("v", 0))),
+                    "open": Decimal(str(record.get("open", record.get("o", 0)))).quantize(
+                        Decimal("0.00000001")
+                    ),
+                    "high": Decimal(str(record.get("high", record.get("h", 0)))).quantize(
+                        Decimal("0.00000001")
+                    ),
+                    "low": Decimal(str(record.get("low", record.get("l", 0)))).quantize(
+                        Decimal("0.00000001")
+                    ),
+                    "close": Decimal(str(record.get("close", record.get("c", 0)))).quantize(
+                        Decimal("0.00000001")
+                    ),
+                    "volume": Decimal(str(record.get("volume", record.get("v", 0)))).quantize(
+                        Decimal("0.00000001")
+                    ),
                     "source": "binance",
                 }
 
         elif self.source_type == "coinbase":
             # Coinbase format
+            getcontext().prec = 16
             standard_record = {
                 "timestamp": record.get("time"),
-                "open": float(record.get("open", 0)),
-                "high": float(record.get("high", 0)),
-                "low": float(record.get("low", 0)),
-                "close": float(record.get("close", 0)),
-                "volume": float(record.get("volume", 0)),
+                "open": Decimal(str(record.get("open", 0))).quantize(Decimal("0.00000001")),
+                "high": Decimal(str(record.get("high", 0))).quantize(Decimal("0.00000001")),
+                "low": Decimal(str(record.get("low", 0))).quantize(Decimal("0.00000001")),
+                "close": Decimal(str(record.get("close", 0))).quantize(Decimal("0.00000001")),
+                "volume": Decimal(str(record.get("volume", 0))).quantize(Decimal("0.00000001")),
                 "source": "coinbase",
             }
 
@@ -227,13 +243,16 @@ class DataSourceAdapter(BaseComponent):
             # OKX format
             if isinstance(record, list):
                 # OKX returns arrays: [timestamp, open, high, low, close, volume, ...]
+                getcontext().prec = 16
                 standard_record = {
                     "timestamp": int(record[0]),
-                    "open": float(record[1]),
-                    "high": float(record[2]),
-                    "low": float(record[3]),
-                    "close": float(record[4]),
-                    "volume": float(record[5]) if len(record) > 5 else 0,
+                    "open": Decimal(str(record[1])).quantize(Decimal("0.00000001")),
+                    "high": Decimal(str(record[2])).quantize(Decimal("0.00000001")),
+                    "low": Decimal(str(record[3])).quantize(Decimal("0.00000001")),
+                    "close": Decimal(str(record[4])).quantize(Decimal("0.00000001")),
+                    "volume": Decimal(str(record[5] if len(record) > 5 else 0)).quantize(
+                        Decimal("0.00000001")
+                    ),
                     "source": "okx",
                 }
             else:
@@ -308,13 +327,21 @@ class DataSourceAdapter(BaseComponent):
     # Connection management
     async def connect(self) -> None:
         """Connect to data source."""
-        await self.source.connect()
-        self.logger.info(f"Connected to {self.source_type} data source")
+        try:
+            await asyncio.wait_for(self.source.connect(), timeout=30.0)
+            self.logger.info(f"Connected to {self.source_type} data source")
+        except asyncio.TimeoutError:
+            raise DataError(f"Connection timeout for {self.source_type} data source")
 
     async def disconnect(self) -> None:
         """Disconnect from data source."""
-        await self.source.disconnect()
-        self.logger.info(f"Disconnected from {self.source_type} data source")
+        try:
+            await asyncio.wait_for(self.source.disconnect(), timeout=10.0)
+            self.logger.info(f"Disconnected from {self.source_type} data source")
+        except asyncio.TimeoutError:
+            self.logger.warning(f"Disconnect timeout for {self.source_type} data source")
+        except Exception as e:
+            self.logger.warning(f"Error disconnecting from {self.source_type}: {e}")
 
     def is_connected(self) -> bool:
         """Check if connected to data source."""

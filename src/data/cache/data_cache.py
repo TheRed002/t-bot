@@ -18,89 +18,31 @@ import pickle
 import sys
 from collections import OrderedDict
 from collections.abc import Callable
-from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from enum import Enum
 from typing import Any
 
 import redis.asyncio as redis
 from pydantic import BaseModel, ConfigDict, Field
 
 from src.core.base.component import BaseComponent
+from src.core.base.interfaces import HealthCheckResult, HealthStatus
 from src.core.config import Config
+from src.utils.cache_utilities import (
+    CacheEntry,
+    CacheLevel,
+    CacheMode,
+    CacheStats,
+    CacheStrategy,
+)
 from src.utils.decorators import time_execution
 
-
-class CacheLevel(Enum):
-    """Cache level enumeration."""
-
-    L1_MEMORY = "l1_memory"
-    L2_REDIS = "l2_redis"
-    L3_DATABASE = "l3_database"
+# Cache enums are now imported from shared utilities
 
 
-class CacheStrategy(Enum):
-    """Cache strategy enumeration."""
-
-    LRU = "lru"  # Least Recently Used
-    LFU = "lfu"  # Least Frequently Used
-    FIFO = "fifo"  # First In First Out
-    TTL = "ttl"  # Time To Live based
+# CacheEntry is now imported from shared utilities
 
 
-class CacheMode(Enum):
-    """Cache operation mode."""
-
-    READ_THROUGH = "read_through"
-    WRITE_THROUGH = "write_through"
-    WRITE_BEHIND = "write_behind"
-    CACHE_ASIDE = "cache_aside"
-
-
-@dataclass
-class CacheEntry:
-    """Cache entry with metadata."""
-
-    key: str
-    value: Any
-    created_at: datetime
-    last_accessed: datetime
-    access_count: int = 0
-    ttl_seconds: int | None = None
-    size_bytes: int = 0
-    metadata: dict[str, Any] = field(default_factory=dict)
-
-    def is_expired(self) -> bool:
-        """Check if cache entry is expired."""
-        if not self.ttl_seconds:
-            return False
-        age = (datetime.now(timezone.utc) - self.created_at).total_seconds()
-        return age > self.ttl_seconds
-
-    def update_access(self) -> None:
-        """Update access metadata."""
-        self.last_accessed = datetime.now(timezone.utc)
-        self.access_count += 1
-
-
-@dataclass
-class CacheStats:
-    """Cache statistics."""
-
-    hits: int = 0
-    misses: int = 0
-    evictions: int = 0
-    writes: int = 0
-    deletes: int = 0
-    size_bytes: int = 0
-    entry_count: int = 0
-    hit_rate: float = 0.0
-    memory_usage_mb: float = 0.0
-
-    def calculate_hit_rate(self) -> None:
-        """Calculate hit rate."""
-        total = self.hits + self.misses
-        self.hit_rate = (self.hits / total) if total > 0 else 0.0
+# CacheStats is now imported from shared utilities
 
 
 class CacheConfig(BaseModel):
@@ -116,7 +58,7 @@ class CacheConfig(BaseModel):
     serialization_format: str = "json"  # json, pickle, msgpack
     key_prefix: str = "tbot"
 
-    model_config = ConfigDict(use_enum_values=True)
+    model_config = ConfigDict(use_enum_values=False)
 
 
 class L1MemoryCache(BaseComponent):
@@ -317,9 +259,9 @@ class L2RedisCache(BaseComponent):
             redis_password = os.environ.get("REDIS_PASSWORD") or self.redis_config.get("password")
 
             self._redis_client = redis.Redis(
-                host=self.redis_config.get("host", "localhost"),
-                port=self.redis_config.get("port", 6379),
-                db=self.redis_config.get("db", 0),
+                host=self.redis_config.get("host", os.environ.get("REDIS_HOST", "127.0.0.1")),
+                port=self.redis_config.get("port", int(os.environ.get("REDIS_PORT", "6379"))),
+                db=self.redis_config.get("db", int(os.environ.get("REDIS_DB", "0"))),
                 password=redis_password,
                 max_connections=self.redis_config.get("max_connections", 20),
                 decode_responses=False,  # Handle binary data
@@ -327,8 +269,8 @@ class L2RedisCache(BaseComponent):
                 socket_timeout=10,
             )
 
-            # Test connection
-            await self._redis_client.ping()
+            # Test connection with timeout
+            await asyncio.wait_for(self._redis_client.ping(), timeout=5.0)
             self.logger.info("Redis cache connection established")
 
         except Exception as e:
@@ -342,7 +284,8 @@ class L2RedisCache(BaseComponent):
 
         try:
             full_key = f"{self.config.key_prefix}:{key}"
-            data = await self._redis_client.get(full_key)
+            # Add timeout to Redis get operation
+            data = await asyncio.wait_for(self._redis_client.get(full_key), timeout=3.0)
 
             if data:
                 value = self._deserialize(data)
@@ -369,7 +312,9 @@ class L2RedisCache(BaseComponent):
             serialized_data = self._serialize(value)
 
             ttl_seconds = ttl or self.config.default_ttl
-            await self._redis_client.setex(full_key, ttl_seconds, serialized_data)
+            await asyncio.wait_for(
+                self._redis_client.setex(full_key, ttl_seconds, serialized_data), timeout=3.0
+            )
 
             self._stats.writes += 1
             return True
@@ -385,7 +330,7 @@ class L2RedisCache(BaseComponent):
 
         try:
             full_key = f"{self.config.key_prefix}:{key}"
-            deleted = await self._redis_client.delete(full_key)
+            deleted = await asyncio.wait_for(self._redis_client.delete(full_key), timeout=3.0)
 
             if deleted:
                 self._stats.deletes += 1
@@ -402,10 +347,10 @@ class L2RedisCache(BaseComponent):
 
         try:
             pattern = f"{self.config.key_prefix}:*"
-            keys = await self._redis_client.keys(pattern)
+            keys = await asyncio.wait_for(self._redis_client.keys(pattern), timeout=5.0)
 
             if keys:
-                await self._redis_client.delete(*keys)
+                await asyncio.wait_for(self._redis_client.delete(*keys), timeout=10.0)
 
         except Exception as e:
             self.logger.error(f"Redis cache clear failed: {e}")
@@ -417,7 +362,7 @@ class L2RedisCache(BaseComponent):
 
         try:
             full_keys = [f"{self.config.key_prefix}:{key}" for key in keys]
-            values = await self._redis_client.mget(full_keys)
+            values = await asyncio.wait_for(self._redis_client.mget(full_keys), timeout=5.0)
 
             result = {}
             for _i, (original_key, value) in enumerate(zip(keys, values, strict=False)):
@@ -441,17 +386,18 @@ class L2RedisCache(BaseComponent):
             return False
 
         try:
-            pipe = self._redis_client.pipeline()
             ttl_seconds = ttl or self.config.default_ttl
 
-            for key, value in data.items():
-                full_key = f"{self.config.key_prefix}:{key}"
-                serialized_data = self._serialize(value)
-                pipe.setex(full_key, ttl_seconds, serialized_data)
+            # Use async context manager for pipeline with timeout
+            async with self._redis_client.pipeline() as pipe:
+                for key, value in data.items():
+                    full_key = f"{self.config.key_prefix}:{key}"
+                    serialized_data = self._serialize(value)
+                    pipe.setex(full_key, ttl_seconds, serialized_data)
 
-            await pipe.execute()
-            self._stats.writes += len(data)
-            return True
+                await asyncio.wait_for(pipe.execute(), timeout=10.0)
+                self._stats.writes += len(data)
+                return True
 
         except Exception as e:
             self.logger.error(f"Redis batch set failed: {e}")
@@ -510,13 +456,27 @@ class L2RedisCache(BaseComponent):
             if self._redis_client:
                 redis_client = self._redis_client
                 self._redis_client = None
-                await redis_client.close()
+                await asyncio.wait_for(redis_client.close(), timeout=5.0)
+        except asyncio.TimeoutError:
+            self.logger.warning("Redis close timeout, forcing cleanup")
+            if redis_client:
+                try:
+                    await redis_client.connection_pool.disconnect()
+                except Exception:
+                    pass
         except Exception as e:
             self.logger.warning(f"Redis cleanup error during primary close: {e}")
         finally:
-            if redis_client and not redis_client.closed:
+            if redis_client:
                 try:
-                    await redis_client.close()
+                    if not redis_client.connection_pool.closed:
+                        await asyncio.wait_for(redis_client.close(), timeout=2.0)
+                except asyncio.TimeoutError:
+                    self.logger.warning("Redis final close timeout")
+                    try:
+                        await redis_client.connection_pool.disconnect()
+                    except Exception:
+                        pass
                 except Exception as e:
                     self.logger.warning(f"Redis cleanup error during final close: {e}")
 
@@ -836,8 +796,8 @@ class DataCache(BaseComponent):
 
     async def _process_prefetch_request(self, request: dict[str, Any]) -> None:
         """Process a cache prefetch request."""
-        # Implementation depends on specific prefetch strategy
-        pass
+        # Prefetch strategy not implemented - using lazy loading instead
+        self.logger.debug(f"Prefetch request ignored: {request.get('key', 'unknown')}")
 
     async def _perform_cache_maintenance(self) -> None:
         """Perform periodic cache maintenance."""
@@ -870,10 +830,10 @@ class DataCache(BaseComponent):
             self.logger.error(f"Failed to get cache stats: {e}")
             return {}
 
-    async def health_check(self) -> dict[str, Any]:
+    async def health_check(self) -> HealthCheckResult:
         """Perform cache health check."""
-        health = {
-            "status": "healthy",
+        overall_status = HealthStatus.HEALTHY
+        details = {
             "initialized": self._initialized,
             "levels": {},
         }
@@ -881,7 +841,7 @@ class DataCache(BaseComponent):
         try:
             # Check L1 cache
             l1_stats = await self._l1_cache.get_stats()
-            health["levels"]["l1"] = {
+            details["levels"]["l1"] = {
                 "status": "healthy",
                 "entries": l1_stats.entry_count,
                 "memory_mb": l1_stats.memory_usage_mb,
@@ -891,28 +851,37 @@ class DataCache(BaseComponent):
             # Check L2 cache
             try:
                 l2_stats = await self._l2_cache.get_stats()
-                health["levels"]["l2"] = {
+                details["levels"]["l2"] = {
                     "status": "healthy",
                     "hit_rate": l2_stats.hit_rate,
                     "redis_available": self._l2_cache._redis_client is not None,
                 }
             except Exception as e:
-                health["levels"]["l2"] = {
+                details["levels"]["l2"] = {
                     "status": f"unhealthy: {e}",
                     "redis_available": False,
                 }
-                health["status"] = "degraded"
+                overall_status = HealthStatus.DEGRADED
 
         except Exception as e:
-            health["status"] = f"unhealthy: {e}"
+            overall_status = HealthStatus.UNHEALTHY
+            details["error"] = str(e)
 
-        return health
+        return HealthCheckResult(
+            status=overall_status,
+            details=details,
+            message=f"Cache health check: {overall_status.value}",
+        )
 
     async def cleanup(self) -> None:
         """Cleanup cache resources."""
+        background_tasks = []
         try:
+            # Collect background tasks for cleanup
+            background_tasks = list(self._background_tasks)
+
             # Cancel background tasks
-            for task in self._background_tasks:
+            for task in background_tasks:
                 task.cancel()
                 try:
                     await task
@@ -925,8 +894,39 @@ class DataCache(BaseComponent):
             # Cleanup L2 cache
             await self._l2_cache.cleanup()
 
+            self._background_tasks.clear()
             self._initialized = False
             self.logger.info("DataCache cleanup completed")
 
         except Exception as e:
             self.logger.error(f"DataCache cleanup error: {e}")
+        finally:
+            # Force cleanup any remaining resources
+            try:
+                # Force cancel any remaining background tasks
+                for task in background_tasks:
+                    if not task.done():
+                        task.cancel()
+                        try:
+                            await task
+                        except asyncio.CancelledError:
+                            pass
+                        except Exception:
+                            pass
+
+                # Force cleanup L2 cache
+                try:
+                    await self._l2_cache.cleanup()
+                except Exception as e:
+                    self.logger.warning(f"Error in L2 cache cleanup: {e}")
+
+                # Force clear all caches
+                try:
+                    await self._l1_cache.clear()
+                except Exception:
+                    pass
+
+                self._background_tasks.clear()
+                self._initialized = False
+            except Exception as e:
+                self.logger.warning(f"Error in final cache cleanup: {e}")

@@ -19,11 +19,9 @@ import json
 import statistics
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from decimal import Decimal
+from decimal import Decimal, getcontext
 from enum import Enum
 from typing import Any
-
-import numpy as np
 
 from src.core.base.component import BaseComponent
 from src.core.config import Config
@@ -78,17 +76,23 @@ class DataCleaner(BaseComponent):
     outliers, noise, and data quality issues.
     """
 
-    def __init__(self, config: Config | dict[str, Any]):
+    def __init__(self, config: Config | dict[str, Any], error_handler: ErrorHandler | None = None):
         """
         Initialize the data cleaner with configuration.
 
         Args:
             config: Application configuration
+            error_handler: Optional error handler for DI
         """
         super().__init__()  # Initialize BaseComponent
         self.config = config
         cfg_get = config.get if isinstance(config, dict) else getattr
-        self.error_handler = ErrorHandler(config if not isinstance(config, dict) else Config())
+
+        # Use injected error handler or create fallback
+        if error_handler:
+            self.error_handler = error_handler
+        else:
+            self.error_handler = ErrorHandler(config if not isinstance(config, dict) else Config())
 
         # Cleaning thresholds
         self.outlier_threshold = (
@@ -112,9 +116,9 @@ class DataCleaner(BaseComponent):
             else getattr(config, "duplicate_threshold", 1.0)
         )
 
-        # Data history for cleaning
-        self.price_history: dict[str, list[float]] = {}
-        self.volume_history: dict[str, list[float]] = {}
+        # Data history for cleaning - use Decimal for precision
+        self.price_history: dict[str, list[Decimal]] = {}
+        self.volume_history: dict[str, list[Decimal]] = {}
         self.max_history_size = (
             cfg_get("max_history_size", 1000)
             if isinstance(config, dict)
@@ -406,7 +410,7 @@ class DataCleaner(BaseComponent):
             self.price_history[data.symbol] = []
 
         price_history = self.price_history[data.symbol]
-        current_price = float(data.close)
+        current_price = Decimal(str(data.close))
 
         # Add current price to history
         price_history.append(current_price)
@@ -417,19 +421,27 @@ class DataCleaner(BaseComponent):
 
         # Outlier detection (need at least 10 data points)
         if len(price_history) >= 10:
-            mean_price = statistics.mean(price_history[:-1])  # Exclude current price
-            std_price = statistics.stdev(price_history[:-1]) if len(price_history) > 1 else 0
+            # Convert to float for statistics calculations, maintain Decimal precision
+            history_floats = [float(p) for p in price_history[:-1]]  # Exclude current price
+            getcontext().prec = 16
+            mean_price = Decimal(str(statistics.mean(history_floats)))
+            std_price = (
+                Decimal(str(statistics.stdev(history_floats)))
+                if len(price_history) > 1
+                else Decimal("0")
+            )
 
             if std_price > 0:
                 z_score = abs(current_price - mean_price) / std_price
 
-                if z_score > self.outlier_threshold:
+                if z_score > Decimal(str(self.outlier_threshold)):
                     # Strategy: adjust to mean + threshold * std
                     if self.config.get("outlier_strategy") == CleaningStrategy.ADJUST:
+                        sign = Decimal("1") if current_price > mean_price else Decimal("-1")
                         adjusted_price = mean_price + (
-                            self.outlier_threshold * std_price * np.sign(current_price - mean_price)
+                            Decimal(str(self.outlier_threshold)) * std_price * sign
                         )
-                        data.close = Decimal(str(adjusted_price))
+                        data.close = adjusted_price.quantize(Decimal("0.00000001"))
                         adjusted_count += 1
                         self.logger.warning(
                             "Price outlier adjusted",
@@ -455,7 +467,7 @@ class DataCleaner(BaseComponent):
 
         if data.volume and data.symbol in self.volume_history:
             volume_history = self.volume_history[data.symbol]
-            current_volume = float(data.volume)
+            current_volume = Decimal(str(data.volume))
 
             volume_history.append(current_volume)
 
@@ -463,20 +475,26 @@ class DataCleaner(BaseComponent):
                 volume_history.pop(0)
 
             if len(volume_history) >= 10:
-                mean_volume = statistics.mean(volume_history[:-1])
-                std_volume = statistics.stdev(volume_history[:-1]) if len(volume_history) > 1 else 0
+                # Convert to float for statistics calculations, maintain Decimal precision
+                volume_floats = [float(v) for v in volume_history[:-1]]
+                getcontext().prec = 16
+                mean_volume = Decimal(str(statistics.mean(volume_floats)))
+                std_volume = (
+                    Decimal(str(statistics.stdev(volume_floats)))
+                    if len(volume_history) > 1
+                    else Decimal("0")
+                )
 
                 if std_volume > 0:
                     z_score = abs(current_volume - mean_volume) / std_volume
 
-                    if z_score > self.outlier_threshold:
+                    if z_score > Decimal(str(self.outlier_threshold)):
                         if self.config.get("outlier_strategy") == CleaningStrategy.ADJUST:
+                            sign = Decimal("1") if current_volume > mean_volume else Decimal("-1")
                             adjusted_volume = mean_volume + (
-                                self.outlier_threshold
-                                * std_volume
-                                * np.sign(current_volume - mean_volume)
+                                Decimal(str(self.outlier_threshold)) * std_volume * sign
                             )
-                            data.volume = Decimal(str(adjusted_volume))
+                            data.volume = adjusted_volume.quantize(Decimal("0.00000001"))
                             adjusted_count += 1
                         else:
                             data.volume = None
@@ -494,7 +512,7 @@ class DataCleaner(BaseComponent):
             self.price_history[data.symbol] = []
 
         price_history = self.price_history[data.symbol]
-        current_price = float(data.close)
+        current_price = Decimal(str(data.close))
 
         # Add current price to history
         price_history.append(current_price)
@@ -505,16 +523,21 @@ class DataCleaner(BaseComponent):
 
         # Apply smoothing if enough data points
         if len(price_history) >= self.smoothing_window:
-            # Simple moving average smoothing
-            smoothed_price = statistics.mean(price_history[-self.smoothing_window :])
-            data.close = Decimal(str(smoothed_price))
+            # Simple moving average smoothing - maintain Decimal precision
+            recent_prices = [float(p) for p in price_history[-self.smoothing_window :]]
+            getcontext().prec = 16
+            smoothed_price = Decimal(str(statistics.mean(recent_prices)))
+            data.close = smoothed_price.quantize(Decimal("0.00000001"))
 
             # Smooth volume if available
             if data.volume and data.symbol in self.volume_history:
                 volume_history = self.volume_history[data.symbol]
                 if len(volume_history) >= self.smoothing_window:
-                    smoothed_volume = statistics.mean(volume_history[-self.smoothing_window :])
-                    data.volume = Decimal(str(smoothed_volume))
+                    # Convert to float for statistics, maintain Decimal precision
+                    recent_volumes = [float(v) for v in volume_history[-self.smoothing_window :]]
+                    getcontext().prec = 16
+                    smoothed_volume = Decimal(str(statistics.mean(recent_volumes)))
+                    data.volume = smoothed_volume.quantize(Decimal("0.00000001"))
 
         return data
 
@@ -569,8 +592,11 @@ class DataCleaner(BaseComponent):
         # Use median of recent prices
         recent_prices = self.price_history[symbol][-10:]  # Last 10 prices
         if recent_prices:
-            median_price = statistics.median(recent_prices)
-            return Decimal(str(median_price))
+            # Convert to float for statistics, maintain Decimal precision
+            price_floats = [float(p) for p in recent_prices]
+            getcontext().prec = 16
+            median_price = Decimal(str(statistics.median(price_floats)))
+            return median_price.quantize(Decimal("0.00000001"))
 
         return Decimal("50000.00")  # Default price
 
@@ -583,8 +609,11 @@ class DataCleaner(BaseComponent):
         # Use median of recent volumes
         recent_volumes = self.volume_history[symbol][-10:]  # Last 10 volumes
         if recent_volumes:
-            median_volume = statistics.median(recent_volumes)
-            return Decimal(str(median_volume))
+            # Convert to float for statistics, maintain Decimal precision
+            volume_floats = [float(v) for v in recent_volumes]
+            getcontext().prec = 16
+            median_volume = Decimal(str(statistics.median(volume_floats)))
+            return median_volume.quantize(Decimal("0.00000001"))
 
         return Decimal("100.0")  # Default volume
 
@@ -634,7 +663,11 @@ class DataCleaner(BaseComponent):
             "timestamp": data.timestamp.isoformat() if data.timestamp else "",
         }
 
-        hash_string = json.dumps(hash_data, sort_keys=True)
+        try:
+            hash_string = json.dumps(hash_data, sort_keys=True)
+        except (TypeError, ValueError) as e:
+            self.logger.warning(f"Failed to serialize data for hash, using fallback: {e}")
+            hash_string = str(sorted(hash_data.items()))
         return hashlib.md5(hash_string.encode()).hexdigest()
 
     @time_execution

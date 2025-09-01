@@ -24,6 +24,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from src.core.base.component import BaseComponent
+from src.core.base.interfaces import HealthCheckResult, HealthStatus
 from src.core.config import Config
 
 
@@ -87,17 +88,7 @@ class Alert:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
-@dataclass
-class HealthCheckResult:
-    """Health check result with detailed information."""
-
-    component: str
-    status: MonitoringStatus
-    response_time_ms: float
-    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-    details: dict[str, Any] = field(default_factory=dict)
-    metrics: dict[str, MetricValue] = field(default_factory=dict)
-    issues: list[str] = field(default_factory=list)
+# Remove duplicate HealthCheckResult class - use the one from core.base.interfaces
 
 
 class MonitoringConfig(BaseModel):
@@ -337,21 +328,18 @@ class DataMonitor(BaseComponent):
 
                 # Create health check result
                 health_result = HealthCheckResult(
-                    component=component_name,
-                    status=status,
-                    response_time_ms=response_time_ms,
-                    details=health_data if isinstance(health_data, dict) else {},
+                    status=HealthStatus.HEALTHY
+                    if status == MonitoringStatus.HEALTHY
+                    else HealthStatus.UNHEALTHY,
+                    details={
+                        "component": component_name,
+                        "response_time_ms": response_time_ms,
+                        **(health_data if isinstance(health_data, dict) else {}),
+                    },
+                    message=f"Health check for {component_name}",
                 )
 
-                # Add metrics
-                health_result.metrics["response_time_ms"] = MetricValue(
-                    name="response_time_ms",
-                    value=response_time_ms,
-                    unit="ms",
-                    tags={"component": component_name},
-                )
-
-                # Store result
+                # Store health check result
                 self._health_status[component_name] = health_result
 
                 # Record metric
@@ -806,14 +794,16 @@ class DataMonitor(BaseComponent):
             return True
         return False
 
-    async def health_check(self) -> dict[str, Any]:
+    async def health_check(self) -> HealthCheckResult:
         """Perform monitor health check."""
-        return {
-            "status": "healthy",
+        active_alerts = len([a for a in self._alerts.values() if not a.resolved])
+        status = HealthStatus.HEALTHY if active_alerts == 0 else HealthStatus.DEGRADED
+
+        details = {
             "initialized": self._initialized,
             "monitoring_tasks_running": len([t for t in self._monitoring_tasks if not t.done()]),
             "components_monitored": len(self._monitored_components),
-            "active_alerts": len([a for a in self._alerts.values() if not a.resolved]),
+            "active_alerts": active_alerts,
             "configuration": {
                 "health_check_interval": self.monitoring_config.health_check_interval,
                 "metric_collection_interval": self.monitoring_config.metric_collection_interval,
@@ -821,11 +811,19 @@ class DataMonitor(BaseComponent):
             },
         }
 
+        return HealthCheckResult(
+            status=status, details=details, message=f"Data monitor health: {status.value}"
+        )
+
     async def cleanup(self) -> None:
         """Cleanup monitoring system resources."""
+        monitoring_tasks = []
         try:
+            # Collect monitoring tasks for cleanup
+            monitoring_tasks = list(self._monitoring_tasks)
+
             # Cancel monitoring tasks
-            for task in self._monitoring_tasks:
+            for task in monitoring_tasks:
                 task.cancel()
                 try:
                     await task
@@ -840,9 +838,36 @@ class DataMonitor(BaseComponent):
             self._threshold_rules.clear()
             self._alert_cooldowns.clear()
             self._alert_counts.clear()
+            self._monitoring_tasks.clear()
 
             self._initialized = False
             self.logger.info("DataMonitor cleanup completed")
 
         except Exception as e:
             self.logger.error(f"DataMonitor cleanup error: {e}")
+        finally:
+            # Force cleanup any remaining resources
+            try:
+                # Force cancel any remaining monitoring tasks
+                for task in monitoring_tasks:
+                    if not task.done():
+                        task.cancel()
+                        try:
+                            await task
+                        except asyncio.CancelledError:
+                            pass
+                        except Exception:
+                            pass
+
+                # Clear all data structures
+                self._monitored_components.clear()
+                self._health_status.clear()
+                self._metrics.clear()
+                self._alerts.clear()
+                self._threshold_rules.clear()
+                self._alert_cooldowns.clear()
+                self._alert_counts.clear()
+                self._monitoring_tasks.clear()
+                self._initialized = False
+            except Exception as e:
+                self.logger.warning(f"Error in final monitoring cleanup: {e}")

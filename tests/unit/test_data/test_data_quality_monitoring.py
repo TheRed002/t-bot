@@ -22,11 +22,10 @@ from src.core.types import MarketData, Signal, SignalDirection
 # Import the components to test
 from src.data.quality.monitoring import (
     DriftAlert,
-    DriftType,
-    QualityLevel,
     QualityMetric,
     QualityMonitor,
 )
+from src.core.types import DriftType, QualityLevel
 
 
 class TestQualityMonitor:
@@ -51,7 +50,7 @@ class TestQualityMonitor:
     def valid_market_data(self) -> MarketData:
         """Create valid market data for testing"""
         return MarketData(
-            symbol="BTCUSDT",
+            symbol="BTC/USDT",
             timestamp=datetime.now(timezone.utc),
             open=Decimal("49900.00"),
             high=Decimal("50100.00"),
@@ -66,14 +65,14 @@ class TestQualityMonitor:
         """Create valid signals for testing"""
         return [
             Signal(
-                symbol="BTCUSDT",
+                symbol="BTC/USDT",
                 direction=SignalDirection.BUY,
                 strength=0.75,
                 timestamp=datetime.now(timezone.utc),
                 source="test_strategy",
             ),
             Signal(
-                symbol="ETHUSDT",
+                symbol="ETH/USDT",
                 direction=SignalDirection.SELL,
                 strength=0.85,
                 timestamp=datetime.now(timezone.utc) + timedelta(seconds=1),
@@ -108,7 +107,7 @@ class TestQualityMonitor:
     async def test_monitor_data_quality_invalid(self, monitor: QualityMonitor):
         """Test monitoring of invalid market data"""
         invalid_data = MarketData(
-            symbol="BTCUSDT",
+            symbol="BTC/USDT",
             timestamp=datetime.now(timezone.utc),
             open=Decimal("50000.00"),
             high=Decimal("50000.00"),
@@ -128,7 +127,7 @@ class TestQualityMonitor:
     async def test_monitor_data_quality_missing_fields(self, monitor: QualityMonitor):
         """Test monitoring of data with missing fields"""
         incomplete_data = MarketData(
-            symbol="BTCUSDT",
+            symbol="BTC/USDT",
             timestamp=datetime.now(timezone.utc),
             open=Decimal("49900.00"),
             high=Decimal("50100.00"),
@@ -174,7 +173,7 @@ class TestQualityMonitor:
                 strength=0.3 + (i * 0.01),
                 # Low confidence with slight variation
                 timestamp=datetime.now(timezone.utc) + timedelta(seconds=i),
-                symbol="BTCUSDT",
+                symbol="BTC/USDT",
                 source="test_strategy",
             )
             low_confidence_signals.append(signal)
@@ -217,12 +216,12 @@ class TestQualityMonitor:
         # Add data for specific symbol
         await monitor.monitor_data_quality(valid_market_data)
 
-        report = await monitor.generate_quality_report(symbol="BTCUSDT")
+        report = await monitor.generate_quality_report(symbol="BTC/USDT")
 
         assert "symbol_quality_scores" in report
-        assert "BTCUSDT" in report["symbol_quality_scores"]
+        assert "BTC/USDT" in report["symbol_quality_scores"]
 
-        symbol_data = report["symbol_quality_scores"]["BTCUSDT"]
+        symbol_data = report["symbol_quality_scores"]["BTC/USDT"]
         assert "current_score" in symbol_data
         assert "avg_score" in symbol_data
         assert "trend" in symbol_data
@@ -230,7 +229,7 @@ class TestQualityMonitor:
     @pytest.mark.asyncio
     async def test_drift_detection(self, monitor: QualityMonitor):
         """Test drift detection functionality"""
-        symbol = "BTCUSDT"
+        symbol = "BTC/USDT"
 
         # Add historical data (stable distribution)
         for i in range(50):
@@ -283,7 +282,7 @@ class TestQualityMonitor:
                 direction=SignalDirection.BUY if i % 2 == 0 else SignalDirection.SELL,
                 strength=0.8,  # Stable high confidence
                 timestamp=datetime.now(timezone.utc) + timedelta(seconds=i),
-                symbol="BTCUSDT",
+                symbol="BTC/USDT",
                 source="test_strategy",
             )
             stable_signals.append(signal)
@@ -303,7 +302,7 @@ class TestQualityMonitor:
                 strength=0.3 + (i * 0.01),
                 # Low confidence with slight variation
                 timestamp=datetime.now(timezone.utc) + timedelta(seconds=i),
-                symbol="BTCUSDT",
+                symbol="BTC/USDT",
                 source="test_strategy",
             )
             low_confidence_signals.append(signal)
@@ -320,7 +319,7 @@ class TestQualityMonitor:
         """Test quality score calculation"""
         # Test with complete, valid data
         complete_data = MarketData(
-            symbol="BTCUSDT",
+            symbol="BTC/USDT",
             timestamp=datetime.now(timezone.utc),
             open=Decimal("49900.00"),
             high=Decimal("50100.00"),
@@ -338,7 +337,7 @@ class TestQualityMonitor:
 
         # Test with incomplete data
         incomplete_data = MarketData(
-            symbol="BTCUSDT",
+            symbol="BTC/USDT",
             timestamp=datetime.now(timezone.utc),
             open=Decimal("49900.00"),
             high=Decimal("50100.00"),
@@ -354,7 +353,7 @@ class TestQualityMonitor:
 
         # Test with invalid data
         invalid_data = MarketData(
-            symbol="BTCUSDT",
+            symbol="BTC/USDT",
             timestamp=datetime.now(timezone.utc),
             open=Decimal("50000.00"),
             high=Decimal("50000.00"),
@@ -436,7 +435,7 @@ class TestQualityMonitor:
     async def test_alert_tracking(self, monitor: QualityMonitor):
         """Test alert tracking functionality"""
         # Add some drift alerts
-        symbol = "BTCUSDT"
+        symbol = "BTC/USDT"
         # First add stable historical data
         for i in range(25):
             price = 50000 + i * 10

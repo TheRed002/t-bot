@@ -457,7 +457,7 @@ class DataMonitoringService(BaseComponent):
             monitoring_task = asyncio.create_task(self._monitoring_loop())
             alert_cleanup_task = asyncio.create_task(self._alert_cleanup_loop())
             metrics_cleanup_task = asyncio.create_task(self._metrics_cleanup_loop())
-            
+
             self._background_tasks.extend([monitoring_task, alert_cleanup_task, metrics_cleanup_task])
 
             self._initialized = True

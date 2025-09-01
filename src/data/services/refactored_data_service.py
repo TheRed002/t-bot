@@ -16,7 +16,7 @@ from src.data.interfaces import (
     DataCacheInterface,
     DataServiceInterface,
     DataStorageInterface,
-    DataValidatorInterface,
+    ServiceDataValidatorInterface,
 )
 from src.data.types import CacheLevel, DataMetrics, DataRequest
 from src.database.models import MarketDataRecord
@@ -26,7 +26,7 @@ from src.monitoring import MetricsCollector
 class RefactoredDataService(BaseComponent, DataServiceInterface):
     """
     Refactored data service that uses dependency injection.
-    
+
     This service depends on abstractions rather than concrete implementations,
     allowing for better testability and flexibility.
     """
@@ -36,7 +36,7 @@ class RefactoredDataService(BaseComponent, DataServiceInterface):
         config: Config,
         storage: DataStorageInterface,
         cache: DataCacheInterface | None = None,
-        validator: DataValidatorInterface | None = None,
+        validator: ServiceDataValidatorInterface | None = None,
         metrics_collector: MetricsCollector | None = None,
     ):
         """
@@ -69,11 +69,11 @@ class RefactoredDataService(BaseComponent, DataServiceInterface):
         self.logger.info("Initializing RefactoredDataService...")
 
         # Initialize storage
-        if hasattr(self.storage, 'initialize'):
+        if hasattr(self.storage, "initialize"):
             await self.storage.initialize()
 
         # Initialize cache if available
-        if self.cache and hasattr(self.cache, 'initialize'):
+        if self.cache and hasattr(self.cache, "initialize"):
             await self.cache.initialize()
 
         self._initialized = True
@@ -132,7 +132,7 @@ class RefactoredDataService(BaseComponent, DataServiceInterface):
 
         except Exception as e:
             self.logger.error(f"Market data storage failed: {e}")
-            self._metrics.records_invalid += len(data_list) if 'data_list' in locals() else 1
+            self._metrics.records_invalid += len(data_list) if "data_list" in locals() else 1
             return False
 
     async def get_market_data(self, request: DataRequest) -> list[MarketDataRecord]:
@@ -184,11 +184,7 @@ class RefactoredDataService(BaseComponent, DataServiceInterface):
 
             # Create a data request
             request = DataRequest(
-                symbol=symbol, 
-                exchange=exchange, 
-                limit=limit, 
-                use_cache=True, 
-                cache_ttl=3600
+                symbol=symbol, exchange=exchange, limit=limit, use_cache=True, cache_ttl=3600
             )
 
             # Get records from storage

@@ -89,6 +89,23 @@ class SimpleCache(DataCacheInterface):
         """Check if key exists."""
         return key in self._cache
 
+    async def health_check(self) -> dict[str, Any]:
+        """Perform cache health check."""
+        return {
+            "status": "healthy",
+            "cache_size": len(self._cache),
+            "timestamps_size": len(self._timestamps)
+        }
+
+    async def initialize(self) -> None:
+        """Initialize the cache."""
+        # Simple cache doesn't need initialization
+        pass
+
+    async def cleanup(self) -> None:
+        """Cleanup cache resources."""
+        await self.clear()
+
 
 class BaseDataSource(DataSourceInterface):
     """Base implementation with common functionality for data sources."""

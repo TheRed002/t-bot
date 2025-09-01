@@ -22,6 +22,7 @@ import aiohttp
 from src.core.base.component import BaseComponent
 from src.core.config import Config
 from src.core.exceptions import DataSourceError
+from src.core.logging import get_logger
 
 # Import from P-001 core components
 from src.core.types import NewsSentiment
@@ -31,6 +32,8 @@ from src.error_handling.error_handler import ErrorHandler
 
 # Import from P-007A utilities
 from src.utils.decorators import retry, time_execution
+
+logger = get_logger(__name__)
 
 
 @dataclass
@@ -69,8 +72,13 @@ class NewsDataSource(BaseComponent):
         self.error_handler = ErrorHandler(config)
 
         # API configuration
-        self.api_key = config.news_api.get("api_key")
-        self.base_url = config.news_api.get("base_url", "https://newsapi.org/v2")
+        news_config = getattr(config, "news_api", {})
+        self.api_key = news_config.get("api_key") if hasattr(news_config, "get") else None
+        self.base_url = (
+            news_config.get("base_url", "https://newsapi.org/v2")
+            if hasattr(news_config, "get")
+            else "https://newsapi.org/v2"
+        )
         self.session: aiohttp.ClientSession | None = None
 
         # Data storage
@@ -79,8 +87,12 @@ class NewsDataSource(BaseComponent):
 
         # Monitoring
         self.active = False
-        self.update_interval = config.news_api.get("update_interval", 300)  # 5 minutes
-        self.max_articles_per_symbol = config.news_api.get("max_articles", 100)
+        self.update_interval = (
+            news_config.get("update_interval", 300) if hasattr(news_config, "get") else 300
+        )  # 5 minutes
+        self.max_articles_per_symbol = (
+            news_config.get("max_articles", 100) if hasattr(news_config, "get") else 100
+        )
 
         # Statistics
         self.stats = {
@@ -95,22 +107,35 @@ class NewsDataSource(BaseComponent):
     @retry(max_attempts=3, base_delay=2.0)
     async def initialize(self) -> None:
         """Initialize news data source connections."""
+        session = None
         try:
             if not self.api_key:
                 raise DataSourceError("NewsAPI key not configured")
 
             # Create HTTP session
-            self.session = aiohttp.ClientSession(
+            session = aiohttp.ClientSession(
                 timeout=aiohttp.ClientTimeout(total=30),
                 headers={"Authorization": f"Bearer {self.api_key}", "User-Agent": "TradingBot/1.0"},
             )
 
             # Test API connection
+            self.session = session
             await self._test_connection()
 
             self.logger.info("NewsDataSource initialized successfully")
 
         except Exception as e:
+            # Cleanup session on initialization failure
+            if session:
+                try:
+                    await session.close()
+                except Exception as e:
+                    logger.error(f"Failed to close session during cleanup: {e}")
+                    # Continue cleanup process
+                # Don't set self.session if initialization failed
+                if self.session == session:
+                    self.session = None
+
             self.logger.error(f"Failed to initialize NewsDataSource: {e!s}")
             raise DataSourceError(f"News data source initialization failed: {e!s}")
 
@@ -450,11 +475,14 @@ class NewsDataSource(BaseComponent):
 
     async def cleanup(self) -> None:
         """Cleanup news data source resources."""
+        session = None
         try:
             self.active = False
 
             if self.session:
-                await self.session.close()
+                session = self.session
+                self.session = None
+                await session.close()
 
             self.news_cache.clear()
             self.sentiment_cache.clear()
@@ -463,3 +491,9 @@ class NewsDataSource(BaseComponent):
 
         except Exception as e:
             self.logger.error(f"Error during NewsDataSource cleanup: {e!s}")
+        finally:
+            if session and not session.closed:
+                try:
+                    await session.close()
+                except Exception as e:
+                    self.logger.warning(f"Failed to close session in finally block: {e!s}")

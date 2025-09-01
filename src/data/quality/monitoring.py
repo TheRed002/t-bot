@@ -17,6 +17,7 @@ Dependencies:
 import statistics
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from typing import Any
 
 from src.core.base.component import BaseComponent
@@ -89,8 +90,8 @@ class QualityMonitor(BaseComponent):
         self.alert_cooldown = getattr(config, "alert_cooldown", 3600)  # 1 hour cooldown
 
         # Data storage for monitoring
-        self.price_distributions: dict[str, list[float]] = {}
-        self.volume_distributions: dict[str, list[float]] = {}
+        self.price_distributions: dict[str, list[Decimal]] = {}
+        self.volume_distributions: dict[str, list[Decimal]] = {}
         self.quality_scores: dict[str, list[float]] = {}
         self.drift_alerts: list[DriftAlert] = []
 
@@ -185,7 +186,7 @@ class QualityMonitor(BaseComponent):
                 return 1.0, []
 
             # Calculate signal quality metrics
-            confidence_scores = [signal.strength for signal in signals]
+            confidence_scores = [float(signal.strength) for signal in signals]
             avg_confidence = statistics.mean(confidence_scores)
 
             # Check for signal distribution drift
@@ -294,7 +295,7 @@ class QualityMonitor(BaseComponent):
             report["alert_summary"] = {
                 "total_alerts_24h": len(recent_alerts),
                 "critical_alerts": len(
-                    [a for a in recent_alerts if a.severity == QualityLevel.CRITICAL]
+                    [a for a in recent_alerts if a.severity == QualityLevel.UNUSABLE]
                 ),
                 "high_alerts": len([a for a in recent_alerts if a.severity == QualityLevel.POOR]),
             }
@@ -323,7 +324,7 @@ class QualityMonitor(BaseComponent):
             self.price_distributions[data.symbol] = []
 
         if data.close:
-            self.price_distributions[data.symbol].append(float(data.close))
+            self.price_distributions[data.symbol].append(Decimal(str(data.close)))
 
             # Maintain distribution size
             if len(self.price_distributions[data.symbol]) > self.distribution_window:
@@ -334,7 +335,7 @@ class QualityMonitor(BaseComponent):
             self.volume_distributions[data.symbol] = []
 
         if data.volume:
-            self.volume_distributions[data.symbol].append(float(data.volume))
+            self.volume_distributions[data.symbol].append(Decimal(str(data.volume)))
 
             # Maintain distribution size
             if len(self.volume_distributions[data.symbol]) > self.distribution_window:
@@ -396,8 +397,9 @@ class QualityMonitor(BaseComponent):
             recent_prices = self.price_distributions[data.symbol][-10:]
             if data.close:
                 current_price = float(data.close)
-                mean_price = statistics.mean(recent_prices)
-                std_price = statistics.stdev(recent_prices) if len(recent_prices) > 1 else 0
+                recent_prices_float = [float(p) for p in recent_prices]
+                mean_price = statistics.mean(recent_prices_float)
+                std_price = statistics.stdev(recent_prices_float) if len(recent_prices_float) > 1 else 0
 
                 if std_price > 0:
                     z_score = abs(current_price - mean_price) / std_price
@@ -446,14 +448,20 @@ class QualityMonitor(BaseComponent):
                                 drift_type=DriftType.FEATURE,
                                 feature="price",
                                 severity=(
-                                    QualityLevel.POOR if drift_score > 0.2 else QualityLevel.ACCEPTABLE
+                                    QualityLevel.POOR
+                                    if drift_score > 0.2
+                                    else QualityLevel.ACCEPTABLE
                                 ),
                                 description=f"Price distribution drift detected: {drift_score:.3f}",
                                 timestamp=datetime.now(timezone.utc),
                                 metadata={
                                     "drift_score": drift_score,
-                                    "recent_mean": statistics.mean(recent_prices),
-                                    "historical_mean": statistics.mean(historical_prices),
+                                    "recent_mean": float(
+                                        statistics.mean([float(p) for p in recent_prices])
+                                    ),
+                                    "historical_mean": float(
+                                        statistics.mean([float(p) for p in historical_prices])
+                                    ),
                                 },
                             )
                         )
@@ -487,7 +495,9 @@ class QualityMonitor(BaseComponent):
                                 drift_type=DriftType.FEATURE,
                                 feature="volume",
                                 severity=(
-                                    QualityLevel.POOR if drift_score > 0.2 else QualityLevel.ACCEPTABLE
+                                    QualityLevel.POOR
+                                    if drift_score > 0.2
+                                    else QualityLevel.ACCEPTABLE
                                 ),
                                 description=(
                                     f"Volume distribution drift detected: {drift_score:.3f}"
@@ -495,8 +505,12 @@ class QualityMonitor(BaseComponent):
                                 timestamp=datetime.now(timezone.utc),
                                 metadata={
                                     "drift_score": drift_score,
-                                    "recent_mean": statistics.mean(recent_volumes),
-                                    "historical_mean": statistics.mean(historical_volumes),
+                                    "recent_mean": float(
+                                        statistics.mean([float(v) for v in recent_volumes])
+                                    ),
+                                    "historical_mean": float(
+                                        statistics.mean([float(v) for v in historical_volumes])
+                                    ),
                                 },
                             )
                         )
@@ -518,7 +532,7 @@ class QualityMonitor(BaseComponent):
             return alerts
 
         # Analyze signal confidence distribution
-        confidences = [signal.strength for signal in signals]
+        confidences = [float(signal.strength) for signal in signals]
 
         if len(confidences) >= 10:
             mean_confidence = statistics.mean(confidences)
@@ -563,18 +577,22 @@ class QualityMonitor(BaseComponent):
         return alerts
 
     async def _calculate_distribution_drift(
-        self, recent: list[float], historical: list[float]
+        self, recent: list[Decimal], historical: list[Decimal]
     ) -> float:
         """Calculate distribution drift using statistical measures"""
         if not recent or not historical:
             return 0.0
 
         try:
-            # Calculate basic statistics
-            recent_mean = statistics.mean(recent)
-            historical_mean = statistics.mean(historical)
-            recent_std = statistics.stdev(recent) if len(recent) > 1 else 0
-            historical_std = statistics.stdev(historical) if len(historical) > 1 else 0
+            # Calculate basic statistics - convert to float for statistics calculations
+            recent_floats = [float(r) for r in recent]
+            historical_floats = [float(h) for h in historical]
+            recent_mean = statistics.mean(recent_floats)
+            historical_mean = statistics.mean(historical_floats)
+            recent_std = statistics.stdev(recent_floats) if len(recent_floats) > 1 else 0
+            historical_std = (
+                statistics.stdev(historical_floats) if len(historical_floats) > 1 else 0
+            )
 
             # Calculate drift score using multiple metrics
             mean_drift = abs(recent_mean - historical_mean) / max(historical_mean, 1e-6)

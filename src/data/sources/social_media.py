@@ -24,6 +24,7 @@ import aiohttp
 from src.core.base.component import BaseComponent
 from src.core.config import Config
 from src.core.exceptions import DataSourceError
+from src.core.logging import get_logger
 
 # Import from P-001 core components
 from src.core.types import SocialSentiment
@@ -35,6 +36,9 @@ from src.error_handling.error_handler import ErrorHandler
 from src.utils.decorators import retry, time_execution
 
 # SocialSentiment enum moved to src.core.types to avoid circular dependencies
+
+
+logger = get_logger(__name__)
 
 
 @dataclass
@@ -88,8 +92,9 @@ class SocialMediaDataSource(BaseComponent):
         self.error_handler = ErrorHandler(config)
 
         # Platform configurations
-        self.twitter_config = config.social_media.get("twitter", {})
-        self.reddit_config = config.social_media.get("reddit", {})
+        social_media_config = getattr(config, "social_media", {})
+        self.twitter_config = social_media_config.get("twitter", {})
+        self.reddit_config = social_media_config.get("reddit", {})
 
         # HTTP session
         self.session: aiohttp.ClientSession | None = None
@@ -100,11 +105,11 @@ class SocialMediaDataSource(BaseComponent):
 
         # Monitoring settings
         self.active = False
-        self.update_interval = config.social_media.get("update_interval", 300)  # 5 minutes
-        self.max_posts_per_symbol = config.social_media.get("max_posts", 200)
+        self.update_interval = social_media_config.get("update_interval", 300)  # 5 minutes
+        self.max_posts_per_symbol = social_media_config.get("max_posts", 200)
 
         # Statistics
-        self.stats = {
+        self.stats: dict[str, Any] = {
             "total_posts_processed": 0,
             "successful_requests": 0,
             "failed_requests": 0,
@@ -120,19 +125,32 @@ class SocialMediaDataSource(BaseComponent):
     @retry(max_attempts=3, base_delay=2.0)
     async def initialize(self) -> None:
         """Initialize social media data source connections."""
+        session = None
         try:
             # Create HTTP session with appropriate headers
-            self.session = aiohttp.ClientSession(
+            session = aiohttp.ClientSession(
                 timeout=aiohttp.ClientTimeout(total=30),
                 headers={"User-Agent": "TradingBot/1.0", "Accept": "application/json"},
             )
 
             # Test connections to available platforms
+            self.session = session
             await self._test_connections()
 
             self.logger.info("SocialMediaDataSource initialized successfully")
 
         except Exception as e:
+            # Cleanup session on initialization failure
+            if session:
+                try:
+                    await session.close()
+                except Exception as e:
+                    logger.error(f"Failed to close session during cleanup: {e}")
+                    # Continue cleanup process
+                # Don't set self.session if initialization failed
+                if self.session == session:
+                    self.session = None
+
             self.logger.error(f"Failed to initialize SocialMediaDataSource: {e!s}")
             raise DataSourceError(f"Social media data source initialization failed: {e!s}")
 
@@ -525,11 +543,14 @@ class SocialMediaDataSource(BaseComponent):
 
     async def cleanup(self) -> None:
         """Cleanup social media data source resources."""
+        session = None
         try:
             self.active = False
 
             if self.session:
-                await self.session.close()
+                session = self.session
+                self.session = None
+                await session.close()
 
             self.posts_cache.clear()
             self.metrics_cache.clear()
@@ -538,3 +559,9 @@ class SocialMediaDataSource(BaseComponent):
 
         except Exception as e:
             self.logger.error(f"Error during SocialMediaDataSource cleanup: {e!s}")
+        finally:
+            if session and not session.closed:
+                try:
+                    await session.close()
+                except Exception as e:
+                    self.logger.warning(f"Failed to close session in finally block: {e!s}")

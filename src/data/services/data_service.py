@@ -2,13 +2,14 @@
 DataService - Comprehensive Data Management Service
 
 ⚠️ NOTICE: This service has infrastructure coupling issues.
-For new implementations, prefer RefactoredDataService from the factory:
+For new implementations, prefer RefactoredDataService from the DI container:
 
 ```python
-from src.data import DataServiceFactory
+from src.data.di_registration import configure_data_dependencies
 
 # Create service with dependency injection
-service = DataServiceFactory.create_data_service(config)
+injector = configure_data_dependencies()
+service = injector.resolve("DataServiceInterface")
 ```
 
 This module provides enterprise-grade data infrastructure for the trading bot,
@@ -22,16 +23,18 @@ Dependencies:
 - P-007A: Utility functions and decorators
 """
 
+import asyncio
 import json
 import uuid
 from contextlib import nullcontext
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 
 import redis.asyncio as redis
 
 from src.core.base.component import BaseComponent
+from src.core.base.interfaces import HealthCheckResult, HealthStatus
 
 # Caching imports
 from src.core.caching import (
@@ -39,6 +42,10 @@ from src.core.caching import (
     get_cache_manager,
 )
 from src.core.config import Config
+
+# Monitoring imports
+# Import core exceptions
+from src.core.exceptions import DataError, DataValidationError
 from src.core.types import MarketData
 
 # Import shared types
@@ -48,21 +55,14 @@ from src.data.types import (
     DataPipelineStage,
     DataRequest,
 )
-from src.database import get_async_session
+from src.database.interfaces import DatabaseServiceInterface
 from src.database.models import MarketDataRecord
-from src.database.queries import DatabaseQueries
 from src.error_handling.decorators import retry_with_backoff
-
-# Monitoring imports
-# Import core exceptions
-from src.core.exceptions import DataError
 
 # Monitoring imports
 from src.monitoring import MetricsCollector, Status, StatusCode
 from src.utils.decorators import cache_result, time_execution
 from src.utils.validators import validate_decimal_precision, validate_market_data
-
-
 
 
 class DataService(BaseComponent):
@@ -78,10 +78,16 @@ class DataService(BaseComponent):
     - Disaster recovery and backup strategies
     """
 
-    def __init__(self, config: Config, metrics_collector: MetricsCollector | None = None):
+    def __init__(
+        self,
+        config: Config,
+        metrics_collector: MetricsCollector | None = None,
+        database_service: DatabaseServiceInterface | None = None,
+    ):
         """Initialize the DataService with comprehensive configuration."""
         super().__init__()
         self.config = config
+        self.database_service = database_service
 
         # Configuration
         self._setup_configuration()
@@ -93,14 +99,15 @@ class DataService(BaseComponent):
         # Initialize cache manager
         self.cache_manager = get_cache_manager(config=config)
 
-        # Metrics tracking - use standard MetricsCollector
-        self.metrics_collector = metrics_collector or MetricsCollector(registry=None)
-        self._metrics = DataMetrics()  # Keep for backward compatibility
+        # Metrics tracking - use injected MetricsCollector
+        self.metrics_collector = metrics_collector
+        self._metrics_data: DataMetrics = DataMetrics()  # Keep for backward compatibility
         self._last_metrics_reset = datetime.now(timezone.utc)
 
         # Initialize tracer for distributed tracing
         try:
             from opentelemetry import trace
+
             self.tracer = trace.get_tracer(__name__)
         except Exception as e:
             self.logger.warning(f"Failed to initialize tracer: {e}")
@@ -115,6 +122,8 @@ class DataService(BaseComponent):
     def _setup_configuration(self) -> None:
         """Setup service configuration with defaults."""
         data_config = getattr(self.config, "data_service", {})
+        if data_config is None:
+            data_config = {}
 
         # Cache configuration
         self.cache_config = {
@@ -124,28 +133,45 @@ class DataService(BaseComponent):
             "l3_ttl_days": data_config.get("l3_cache_ttl_days", 30),
         }
 
-        # Pipeline configuration
+        # Aligned processing configuration for consistent batch/stream paradigms
         self.pipeline_config = {
             "batch_size": data_config.get("batch_size", 1000),
             "max_workers": data_config.get("max_workers", 4),
             "timeout_seconds": data_config.get("timeout_seconds", 30),
             "retry_attempts": data_config.get("retry_attempts", 3),
+            "processing_mode": data_config.get(
+                "processing_mode", "hybrid"
+            ),  # batch, stream, hybrid
         }
 
-        # Streaming configuration
+        # Streaming configuration aligned with batch processing
         self.streaming_config = {
             "buffer_size": data_config.get("streaming_buffer_size", 10000),
             "heartbeat_interval": data_config.get("heartbeat_interval", 30),
             "reconnect_delay": data_config.get("reconnect_delay", 5),
+            "stream_batch_size": data_config.get(
+                "stream_batch_size", self.pipeline_config["batch_size"]
+            ),
+            "auto_batch_streams": data_config.get("auto_batch_streams", True),
         }
 
-        # Redis configuration
+        # Financial validation bounds
+        self.validation_config = {
+            "max_financial_value": data_config.get("max_financial_value", 1e15),
+            "decimal_precision": data_config.get("decimal_precision", 8),
+        }
+
+        # Redis configuration with environment variable fallback
         redis_config = getattr(self.config, "redis", {})
+        if redis_config is None:
+            redis_config = {}
+        import os
+
         self.redis_config = {
-            "host": redis_config.get("host", "localhost"),
-            "port": redis_config.get("port", 6379),
-            "db": redis_config.get("db", 0),
-            "password": redis_config.get("password"),
+            "host": redis_config.get("host", os.environ.get("REDIS_HOST", "127.0.0.1")),
+            "port": redis_config.get("port", int(os.environ.get("REDIS_PORT", "6379"))),
+            "db": redis_config.get("db", int(os.environ.get("REDIS_DB", "0"))),
+            "password": redis_config.get("password") or os.environ.get("REDIS_PASSWORD"),
             "max_connections": redis_config.get("max_connections", 10),
         }
 
@@ -188,10 +214,13 @@ class DataService(BaseComponent):
                 decode_responses=True,
                 socket_connect_timeout=5,
                 socket_timeout=5,
+                socket_keepalive=True,
+                socket_keepalive_options={},
+                health_check_interval=30,
             )
 
-            # Test connection
-            await self._redis_client.ping()
+            # Test connection with timeout
+            await asyncio.wait_for(self._redis_client.ping(), timeout=5.0)
             self.logger.info("Redis connection established")
 
         except Exception as e:
@@ -214,7 +243,6 @@ class DataService(BaseComponent):
         self.logger.info("Metrics collection setup completed")
 
     @time_execution
-    @retry_with_backoff(max_attempts=3)
     async def store_market_data(
         self,
         data: MarketData | list[MarketData],
@@ -258,6 +286,18 @@ class DataService(BaseComponent):
 
                 # Normalize input
                 data_list = data if isinstance(data, list) else [data]
+                
+                # Validate empty list
+                if not data_list:
+                    raise DataValidationError(
+                        "Empty data list provided",
+                        field_name="data_list",
+                        field_value="[]",
+                        validation_rule="non_empty_list"
+                    )
+
+                # Apply boundary validation for data consistency
+                await self._validate_data_at_boundary(data_list, "input", {"exchange": exchange})
 
                 if validate:
                     data_list = await self._validate_market_data(data_list)
@@ -265,6 +305,9 @@ class DataService(BaseComponent):
                 if not data_list:
                     self.logger.warning("No valid market data to store")
                     return False
+
+                # Apply boundary validation before database storage
+                await self._validate_data_at_boundary(data_list, "database", {"exchange": exchange})
 
                 # Execute storage pipeline
                 pipeline_id = await self._execute_storage_pipeline(data_list, exchange)
@@ -274,8 +317,8 @@ class DataService(BaseComponent):
                     await self._update_caches(data_list, cache_levels)
 
                 # Update metrics
-                self._metrics.records_processed += len(data_list)
-                self._metrics.records_valid += len(data_list)
+                self._metrics_data.records_processed += len(data_list)
+                self._metrics_data.records_valid += len(data_list)
 
                 # Record metrics to Prometheus
                 if self.metrics_collector and hasattr(self.metrics_collector, "increment_counter"):
@@ -300,11 +343,18 @@ class DataService(BaseComponent):
                 self.logger.info(f"Successfully stored {len(data_list)} market data records")
                 return True
 
+            except DataValidationError as e:
+                # Re-raise validation errors for test expectations
+                self.logger.error(f"Market data validation failed: {e}")
+                if span:
+                    span.record_exception(e)
+                    span.set_status(Status(StatusCode.ERROR, str(e)))
+                raise
             except Exception as e:
                 self.logger.error(f"Market data storage failed: {e}")
                 # data_list is always defined after line 279
                 if "data_list" in locals() and data_list:
-                    self._metrics.records_invalid += len(data_list)
+                    self._metrics_data.records_invalid += len(data_list)
                     # Record invalid metrics to Prometheus
                     if self.metrics_collector and hasattr(
                         self.metrics_collector, "increment_counter"
@@ -319,7 +369,7 @@ class DataService(BaseComponent):
                             },
                         )
                 else:
-                    self._metrics.records_invalid += 1
+                    self._metrics_data.records_invalid += 1
                     if self.metrics_collector and hasattr(
                         self.metrics_collector, "increment_counter"
                     ):
@@ -340,32 +390,100 @@ class DataService(BaseComponent):
                 return False
 
     async def _validate_market_data(self, data_list: list[MarketData]) -> list[MarketData]:
-        """Validate market data with comprehensive checks."""
+        """Validate market data using consistent core validation patterns."""
         valid_data = []
 
         for data in data_list:
             try:
-                # Use consistent validation patterns from data validator
-                from src.data.validation.data_validator import DataValidator
-                
-                # Create temporary validator for boundary validation
-                temp_validator = DataValidator(self.config)
-                validation_result = await temp_validator._validate_single(data, include_statistical=False)
-                
-                if not validation_result.is_valid:
-                    self.logger.warning(f"Invalid market data for {data.symbol}: {validation_result.issues}")
+                # Use utility validation functions
+                if not validate_market_data(data.model_dump()):
+                    self.logger.warning(f"Invalid market data structure for {data.symbol}")
                     continue
+
+                # Consistent decimal validation for all financial fields
+                financial_fields = [
+                    "price",
+                    "open_price",
+                    "high_price",
+                    "low_price",
+                    "close_price",
+                    "volume",
+                    "bid",
+                    "ask",
+                ]
+
+                for field in financial_fields:
+                    value = getattr(data, field, None)
+                    if value is not None:
+                        try:
+                            # Use consistent decimal conversion
+                            from src.utils.decimal_utils import to_decimal
+
+                            decimal_value = to_decimal(value)
+
+                            # Apply consistent validation rules
+                            if field in [
+                                "price",
+                                "open_price",
+                                "high_price",
+                                "low_price",
+                                "close_price",
+                                "bid",
+                                "ask",
+                            ]:
+                                if decimal_value <= 0:
+                                    self.logger.warning(
+                                        f"Invalid {field} for {data.symbol}: must be positive"
+                                    )
+                                    raise ValueError(f"{field} must be positive")
+                            elif field in ["volume"]:
+                                if decimal_value < 0:
+                                    self.logger.warning(
+                                        f"Invalid {field} for {data.symbol}: cannot be negative"
+                                    )
+                                    raise ValueError(f"{field} cannot be negative")
+
+                            # Validate decimal precision using consistent patterns
+                            precision = self.validation_config["decimal_precision"]
+                            if not validate_decimal_precision(float(decimal_value), places=precision):
+                                self.logger.warning(f"Invalid {field} precision for {data.symbol}")
+                                raise ValueError(f"{field} precision exceeds {precision} decimal places")
+
+                        except (ValueError, TypeError) as e:
+                            self.logger.warning(f"Invalid {field} format for {data.symbol}: {e}")
+                            raise
+
+                # Validate symbol format consistency
+                if hasattr(data, "symbol") and data.symbol:
+                    symbol_clean = data.symbol.strip().upper()
+                    if "/" in symbol_clean:
+                        parts = symbol_clean.split("/")
+                        if len(parts) != 2 or not all(parts):
+                            self.logger.warning(
+                                f"Invalid symbol format for {data.symbol}: expected BASE/QUOTE"
+                            )
+                            continue
+
+                # Validate timestamp consistency
+                if hasattr(data, "timestamp") and data.timestamp:
+                    if data.timestamp.tzinfo is None:
+                        self.logger.warning(
+                            f"Timestamp for {data.symbol} missing timezone information"
+                        )
+                        continue
 
                 valid_data.append(data)
 
             except Exception as e:
-                self.logger.error(f"Market data validation error: {e}")
+                self.logger.error(
+                    f"Market data validation error for {getattr(data, 'symbol', 'unknown')}: {e}"
+                )
                 continue
 
         return valid_data
 
     async def _execute_storage_pipeline(self, data_list: list[MarketData], exchange: str) -> str:
-        """Execute the data storage pipeline."""
+        """Execute the data storage pipeline with aligned batch/stream processing."""
         pipeline_id = str(uuid.uuid4())
 
         try:
@@ -375,39 +493,135 @@ class DataService(BaseComponent):
                 "records_total": len(data_list),
                 "records_processed": 0,
                 "start_time": datetime.now(timezone.utc),
+                "processing_mode": self.pipeline_config["processing_mode"],
             }
 
-            # Stage 1: Data ingestion (already done)
-            await self._update_pipeline_stage(pipeline_id, DataPipelineStage.VALIDATION)
-
-            # Stage 2: Validation (already done)
-            await self._update_pipeline_stage(pipeline_id, DataPipelineStage.TRANSFORMATION)
-
-            # Stage 3: Transform to database records
-            db_records = await self._transform_to_db_records(data_list, exchange)
-
-            await self._update_pipeline_stage(pipeline_id, DataPipelineStage.STORAGE)
-
-            # Stage 4: Store to database
-            await self._store_to_database(db_records)
-
-            await self._update_pipeline_stage(pipeline_id, DataPipelineStage.INDEXING)
-
-            # Stage 5: Update indexes and complete
-            await self._update_indexes(db_records)
-
-            # Mark pipeline as complete
-            if pipeline_id in self._active_pipelines:
-                self._active_pipelines[pipeline_id]["stage"] = "completed"
-                self._active_pipelines[pipeline_id]["end_time"] = datetime.now(timezone.utc)
-
-            return pipeline_id
+            # Apply processing paradigm alignment
+            processing_mode = self.pipeline_config["processing_mode"]
+            if (
+                processing_mode in ["batch", "hybrid"]
+                and len(data_list) > self.pipeline_config["batch_size"]
+            ):
+                # Process in batches
+                return await self._execute_batch_pipeline(data_list, exchange, pipeline_id)
+            elif processing_mode in ["stream", "hybrid"]:
+                # Process as stream with consistent batch alignment
+                return await self._execute_stream_pipeline(data_list, exchange, pipeline_id)
+            else:
+                # Default processing
+                return await self._execute_default_pipeline(data_list, exchange, pipeline_id)
 
         except Exception as e:
             if pipeline_id in self._active_pipelines:
                 self._active_pipelines[pipeline_id]["stage"] = "failed"
                 self._active_pipelines[pipeline_id]["error"] = str(e)
             raise
+
+    async def _execute_batch_pipeline(
+        self, data_list: list[MarketData], exchange: str, pipeline_id: str
+    ) -> str:
+        """Execute batch processing pipeline with consistent patterns."""
+        batch_size = self.pipeline_config["batch_size"]
+
+        # Process data in batches for consistent resource usage
+        for i in range(0, len(data_list), batch_size):
+            batch = data_list[i : i + batch_size]
+
+            await self._update_pipeline_stage(pipeline_id, DataPipelineStage.VALIDATION)
+            # Batch validation already done in _validate_market_data
+
+            await self._update_pipeline_stage(pipeline_id, DataPipelineStage.TRANSFORMATION)
+            db_records = await self._transform_to_db_records(batch, exchange)
+
+            await self._update_pipeline_stage(pipeline_id, DataPipelineStage.STORAGE)
+            await self._store_to_database(db_records)
+
+            # Update processed count
+            if pipeline_id in self._active_pipelines:
+                self._active_pipelines[pipeline_id]["records_processed"] += len(batch)
+
+        await self._update_pipeline_stage(pipeline_id, DataPipelineStage.INDEXING)
+        await self._update_indexes([])  # Bulk index update handled by database
+
+        # Mark pipeline as complete
+        if pipeline_id in self._active_pipelines:
+            self._active_pipelines[pipeline_id]["stage"] = "completed"
+            self._active_pipelines[pipeline_id]["end_time"] = datetime.now(timezone.utc)
+
+        return pipeline_id
+
+    async def _execute_stream_pipeline(
+        self, data_list: list[MarketData], exchange: str, pipeline_id: str
+    ) -> str:
+        """Execute stream processing pipeline with batch alignment."""
+        stream_batch_size = self.streaming_config["stream_batch_size"]
+
+        # Use stream processing pattern with aligned batch sizes
+        if self.streaming_config["auto_batch_streams"] and len(data_list) > stream_batch_size:
+            # Convert stream to aligned batches using messaging patterns
+            from src.utils.messaging_patterns import ProcessingParadigmAligner
+
+            # Group stream data into aligned batches
+            batches = []
+            for i in range(0, len(data_list), stream_batch_size):
+                batch = data_list[i : i + stream_batch_size]
+                # Convert stream items to batch format for consistency
+                batch_data = ProcessingParadigmAligner.create_batch_from_stream(
+                    [item.model_dump() for item in batch]
+                )
+                batches.append(batch_data)
+
+            # Process aligned batches
+            for batch_data in batches:
+                batch_items = [MarketData(**item) for item in batch_data["items"]]
+                await self._process_stream_batch(batch_items, exchange, pipeline_id)
+        else:
+            # Process as single batch to maintain consistency
+            await self._process_stream_batch(data_list, exchange, pipeline_id)
+
+        # Mark pipeline as complete
+        if pipeline_id in self._active_pipelines:
+            self._active_pipelines[pipeline_id]["stage"] = "completed"
+            self._active_pipelines[pipeline_id]["end_time"] = datetime.now(timezone.utc)
+
+        return pipeline_id
+
+    async def _execute_default_pipeline(
+        self, data_list: list[MarketData], exchange: str, pipeline_id: str
+    ) -> str:
+        """Execute default processing pipeline (legacy behavior)."""
+        await self._update_pipeline_stage(pipeline_id, DataPipelineStage.VALIDATION)
+        # Validation already done in _validate_market_data
+
+        await self._update_pipeline_stage(pipeline_id, DataPipelineStage.TRANSFORMATION)
+        db_records = await self._transform_to_db_records(data_list, exchange)
+
+        await self._update_pipeline_stage(pipeline_id, DataPipelineStage.STORAGE)
+        await self._store_to_database(db_records)
+
+        await self._update_pipeline_stage(pipeline_id, DataPipelineStage.INDEXING)
+        await self._update_indexes(db_records)
+
+        # Mark pipeline as complete
+        if pipeline_id in self._active_pipelines:
+            self._active_pipelines[pipeline_id]["stage"] = "completed"
+            self._active_pipelines[pipeline_id]["end_time"] = datetime.now(timezone.utc)
+
+        return pipeline_id
+
+    async def _process_stream_batch(
+        self, batch: list[MarketData], exchange: str, pipeline_id: str
+    ) -> None:
+        """Process a stream batch with consistent patterns."""
+        await self._update_pipeline_stage(pipeline_id, DataPipelineStage.TRANSFORMATION)
+        db_records = await self._transform_to_db_records(batch, exchange)
+
+        await self._update_pipeline_stage(pipeline_id, DataPipelineStage.STORAGE)
+        await self._store_to_database(db_records)
+
+        # Update processed count
+        if pipeline_id in self._active_pipelines:
+            self._active_pipelines[pipeline_id]["records_processed"] += len(batch)
 
     async def _update_pipeline_stage(self, pipeline_id: str, stage: DataPipelineStage) -> None:
         """Update pipeline stage."""
@@ -418,56 +632,278 @@ class DataService(BaseComponent):
     async def _transform_to_db_records(
         self, data_list: list[MarketData], exchange: str
     ) -> list[MarketDataRecord]:
-        """Transform MarketData to database records."""
+        """Transform MarketData to database records using consistent patterns."""
         records = []
 
+        try:
+            # Import consistent decimal conversion utility
+            from src.utils.decimal_utils import to_decimal
+        except ImportError:
+            # Fallback conversion
+            to_decimal = lambda x: Decimal(str(x)) if x is not None else None
+
         for data in data_list:
-            record = MarketDataRecord(
-                symbol=data.symbol,
-                exchange=exchange,
-                timestamp=data.timestamp or datetime.now(timezone.utc),
-                open_price=float(data.open_price) if data.open_price else None,
-                high_price=float(data.high_price) if data.high_price else None,
-                low_price=float(data.low_price) if data.low_price else None,
-                close_price=float(data.price) if data.price else None,
-                price=float(data.price) if data.price else None,
-                volume=float(data.volume) if data.volume else None,
-                bid=float(data.bid) if data.bid else None,
-                ask=float(data.ask) if data.ask else None,
-                data_source="exchange",
-                quality_score=1.0,
-                validation_status="valid",
-            )
-            records.append(record)
+            try:
+                # Use consistent decimal-to-float conversion for database storage
+                record = MarketDataRecord(
+                    symbol=data.symbol,
+                    exchange=exchange,
+                    timestamp=data.timestamp or datetime.now(timezone.utc),
+                    # Convert using consistent patterns - database expects float
+                    open_price=float(to_decimal(data.open_price))
+                    if data.open_price is not None
+                    else None,
+                    high_price=float(to_decimal(data.high_price))
+                    if data.high_price is not None
+                    else None,
+                    low_price=float(to_decimal(data.low_price))
+                    if data.low_price is not None
+                    else None,
+                    close_price=float(to_decimal(data.price)) if data.price is not None else None,
+                    price=float(to_decimal(data.price)) if data.price is not None else None,
+                    volume=float(to_decimal(data.volume)) if data.volume is not None else None,
+                    bid=float(to_decimal(data.bid)) if data.bid is not None else None,
+                    ask=float(to_decimal(data.ask)) if data.ask is not None else None,
+                    # Consistent metadata
+                    data_source="exchange",
+                    quality_score=1.0,
+                    validation_status="valid",
+                )
+                records.append(record)
+
+            except (ValueError, TypeError) as e:
+                self.logger.error(f"Failed to transform data for {data.symbol}: {e}")
+                # Skip invalid records but continue processing
+                continue
 
         return records
 
-    async def _store_to_database(self, records: list[MarketDataRecord]) -> None:
-        """Store records to database with proper error handling."""
-        session = None
+    async def _validate_data_at_boundary(
+        self, 
+        data_list: list[MarketData] | dict[str, Any], 
+        boundary_type: str | None = None, 
+        context: dict[str, Any] | None = None,
+        validate_input: bool = False,
+        validate_database: bool = False,
+        validate_cache: bool = False
+    ) -> None:
+        """Validate data at module boundaries for consistency."""
         try:
-            session = get_async_session()
-            async with session:
-                db_queries = DatabaseQueries(session, config=None)
+            # Handle new test signature with boolean flags
+            if boundary_type is None and (validate_input or validate_database or validate_cache):
+                # Convert single dict to list for processing
+                if isinstance(data_list, dict):
+                    data_items = [data_list]
+                else:
+                    data_items = [data.model_dump() if hasattr(data, 'model_dump') else data for data in data_list]
+                
+                for data_dict in data_items:
+                    if validate_input:
+                        self._validate_input_boundary(data_dict)
+                    if validate_database:
+                        self._validate_database_boundary(data_dict)
+                    if validate_cache:
+                        self._validate_cache_boundary(data_dict)
+                return
 
-                # Use the standard bulk_create method
-                await db_queries.bulk_create(records)
+            # Handle original signature (boundary_type specified)
+            if context is None:
+                context = {}
+                
+            # Convert to list if single MarketData
+            if isinstance(data_list, dict):
+                data_items = [data_list]
+            else:
+                data_items = data_list if isinstance(data_list, list) else [data_list]
 
-                await session.commit()
-                self.logger.debug(f"Stored {len(records)} records to database")
+            for data in data_items:
+                # Convert to dict format for boundary validation
+                if hasattr(data, 'model_dump'):
+                    data_dict = data.model_dump()
+                else:
+                    data_dict = data
+                data_dict.update(context)
+
+                # Apply boundary-specific validation
+                if boundary_type == "input":
+                    # Validate input data from external sources
+                    self._validate_input_boundary(data_dict)
+                elif boundary_type == "database":
+                    # Validate data before database storage
+                    self._validate_database_boundary(data_dict)
+                elif boundary_type == "cache":
+                    # Validate data before cache storage
+                    self._validate_cache_boundary(data_dict)
+
+        except Exception as e:
+            # Use consistent error propagation patterns
+            try:
+                from src.utils.messaging_patterns import ErrorPropagationMixin
+                error_propagator = ErrorPropagationMixin()
+                error_propagator.propagate_validation_error(
+                    e, f"data_service_boundary_{boundary_type or 'mixed'}"
+                )
+            except Exception:
+                # Fallback error handling if propagation fails
+                raise DataValidationError(
+                    f"Boundary validation failed at {boundary_type or 'mixed'}: {e}",
+                    field_name="boundary_validation",
+                    field_value=str(boundary_type or 'mixed'),
+                    validation_rule=f"{boundary_type or 'mixed'}_boundary",
+                ) from e
+
+    def _validate_input_boundary(self, data_dict: dict[str, Any]) -> None:
+        """Validate data at input boundary."""
+        # Required fields for input data - use actual field names from MarketData model
+        required_fields = ["symbol", "timestamp", "exchange"]
+        
+        # Check for price field (either 'close' from model or 'price' from legacy)
+        price_fields = ["close", "price"]
+        
+        for field in required_fields:
+            if field not in data_dict or data_dict[field] is None:
+                raise DataValidationError(
+                    f"Required field {field} missing at input boundary",
+                    field_name=field,
+                    field_value=data_dict.get(field),
+                    validation_rule="required_input_field",
+                )
+        
+        # Check for at least one price field
+        if not any(data_dict.get(field) is not None for field in price_fields):
+            raise DataValidationError(
+                f"Required price field missing at input boundary (expected one of: {', '.join(price_fields)})",
+                field_name="price_field",
+                field_value=None,
+                validation_rule="required_price_field",
+            )
+
+        # Apply consistent financial data transformations for price fields
+        price_field = None
+        if "price" in data_dict and data_dict["price"] is not None:
+            price_field = "price"
+        elif "close" in data_dict and data_dict["close"] is not None:
+            price_field = "close"
+        
+        if price_field:
+            try:
+                from src.utils.decimal_utils import to_decimal
+
+                data_dict[price_field] = to_decimal(data_dict[price_field])
+            except (ValueError, TypeError) as e:
+                raise DataValidationError(
+                    f"Invalid {price_field} format at input boundary: {data_dict[price_field]}",
+                    field_name=price_field,
+                    field_value=str(data_dict[price_field]),
+                    validation_rule="decimal_conversion",
+                ) from e
+
+        # Validate timestamp has timezone
+        if data_dict.get("timestamp"):
+            if (
+                isinstance(data_dict["timestamp"], datetime)
+                and data_dict["timestamp"].tzinfo is None
+            ):
+                raise DataValidationError(
+                    "Timestamp missing timezone information at input boundary",
+                    field_name="timestamp",
+                    field_value=str(data_dict["timestamp"]),
+                    validation_rule="timezone_required",
+                )
+
+    def _validate_database_boundary(self, data_dict: dict[str, Any]) -> None:
+        """Validate data at database boundary."""
+        # Ensure all financial fields are properly formatted for database
+        # Use both actual model fields and legacy names for compatibility
+        financial_fields = [
+            "close", "price",  # Price fields
+            "open", "open_price",
+            "high", "high_price", 
+            "low", "low_price",
+            "volume",
+            "bid_price", "bid",
+            "ask_price", "ask",
+        ]
+
+        for field in financial_fields:
+            if field in data_dict and data_dict[field] is not None:
+                try:
+                    from src.utils.decimal_utils import to_decimal
+
+                    decimal_value = to_decimal(data_dict[field])
+
+                    # Database expects float values, validate conversion
+                    float_value = float(decimal_value)
+
+                    # Check for precision loss or invalid values
+                    if not (0 <= float_value <= self.validation_config["max_financial_value"]):
+                        raise DataValidationError(
+                            f"Financial field {field} value out of bounds at database boundary",
+                            field_name=field,
+                            field_value=str(data_dict[field]),
+                            validation_rule="financial_bounds",
+                        )
+
+                except (ValueError, TypeError, OverflowError) as e:
+                    raise DataValidationError(
+                        f"Invalid {field} format at database boundary: {data_dict[field]}",
+                        field_name=field,
+                        field_value=str(data_dict[field]),
+                        validation_rule="database_format",
+                    ) from e
+
+    def _validate_cache_boundary(self, data_dict: dict[str, Any]) -> None:
+        """Validate data at cache boundary."""
+        # Ensure data can be serialized for cache storage
+        try:
+            import json
+
+            json.dumps(data_dict, default=str)  # Test serialization
+        except (TypeError, ValueError) as e:
+            raise DataValidationError(
+                "Data cannot be serialized for cache storage",
+                field_name="serialization",
+                field_value="cache_data",
+                validation_rule="cache_serializable",
+            ) from e
+
+        # Validate cache key components are present
+        cache_key_fields = ["symbol", "exchange", "timestamp"]
+        for field in cache_key_fields:
+            if field not in data_dict or data_dict[field] is None:
+                raise DataValidationError(
+                    f"Cache key field {field} missing at cache boundary",
+                    field_name=field,
+                    field_value=data_dict.get(field),
+                    validation_rule="cache_key_field",
+                )
+
+    async def _store_to_database(self, records: list[MarketDataRecord]) -> None:
+        """Store records to database through proper repository pattern."""
+        try:
+            if not self.database_service:
+                raise DataError("Database service not available")
+
+            # Use proper repository pattern through database service's transaction context
+            async with self.database_service.transaction() as session:
+                from src.database.repository.market_data import MarketDataRepository
+                repository = MarketDataRepository(session)
+
+                # Store records individually or in batch
+                for record in records:
+                    await repository.create(record)
+
+            self.logger.debug(f"Stored {len(records)} records to database")
 
         except Exception as e:
             self.logger.error(f"Database storage failed: {e}")
             raise
-        finally:
-            if session:
-                await session.close()
 
     async def _update_indexes(self, records: list[MarketDataRecord]) -> None:
         """Update database indexes for faster querying."""
-        # Index updates would be handled by database automatically
-        # This is a placeholder for any custom indexing logic
-        pass
+        # Index updates are handled automatically by the database
+        # No action required for database-managed indexes
+        self.logger.debug(f"Index update completed for {len(records)} records")
 
     async def _update_caches(
         self, data_list: list[MarketData], cache_levels: list[CacheLevel]
@@ -495,21 +931,22 @@ class DataService(BaseComponent):
             return
 
         try:
-            pipe = self._redis_client.pipeline()
+            # Use async pipeline with timeout
+            async with self._redis_client.pipeline() as pipe:
+                for data in data_list:
+                    cache_key = f"market_data:{data.symbol}:latest"
+                    cache_data = {
+                        "symbol": data.symbol,
+                        "price": str(data.price) if data.price else None,
+                        "volume": str(data.volume) if data.volume else None,
+                        "timestamp": data.timestamp.isoformat() if data.timestamp else None,
+                    }
 
-            for data in data_list:
-                cache_key = f"market_data:{data.symbol}:latest"
-                cache_data = {
-                    "symbol": data.symbol,
-                    "price": str(data.price) if data.price else None,
-                    "volume": str(data.volume) if data.volume else None,
-                    "timestamp": data.timestamp.isoformat() if data.timestamp else None,
-                }
+                    pipe.hset(cache_key, mapping=cache_data)
+                    pipe.expire(cache_key, self.cache_config["l2_ttl"])
 
-                pipe.hset(cache_key, mapping=cache_data)
-                pipe.expire(cache_key, self.cache_config["l2_ttl"])
-
-            await pipe.execute()
+                # Execute with timeout to prevent hanging
+                await asyncio.wait_for(pipe.execute(), timeout=10.0)
 
         except Exception as e:
             self.logger.error(f"L2 cache update failed: {e}")
@@ -535,13 +972,13 @@ class DataService(BaseComponent):
             if request.use_cache:
                 cached_data = await self._get_from_l1_cache(request)
                 if cached_data:
-                    self._metrics.cache_hit_rate += 1
+                    self._metrics_data.cache_hit_rate += 1
                     return cached_data
 
                 # Try L2 cache
                 cached_data = await self._get_from_l2_cache(request)
                 if cached_data:
-                    self._metrics.cache_hit_rate += 1
+                    self._metrics_data.cache_hit_rate += 1
                     return cached_data
 
             # Fetch from database
@@ -581,7 +1018,8 @@ class DataService(BaseComponent):
 
         try:
             cache_key = self._build_cache_key(request)
-            cached_json = await self._redis_client.get(cache_key)
+            # Use timeout for cache retrieval
+            cached_json = await asyncio.wait_for(self._redis_client.get(cache_key), timeout=5.0)
 
             if cached_json:
                 data = json.loads(cached_json)
@@ -594,22 +1032,45 @@ class DataService(BaseComponent):
 
     async def _get_from_database(self, request: DataRequest) -> list[MarketDataRecord]:
         """Retrieve data from database."""
-        session = None
         try:
-            session = get_async_session()
-            async with session:
-                db_queries = DatabaseQueries(session, config=None)
+            if not self.database_service:
+                raise DataError("Database service not available")
 
-                return await db_queries.get_market_data_records(
-                    symbol=request.symbol,
-                    exchange=request.exchange,
-                    start_time=request.start_time,
-                    end_time=request.end_time,
-                    limit=request.limit,
+            # Build filters based on request
+            filters = {}
+            if request.symbol:
+                filters["symbol"] = request.symbol
+            if request.exchange:
+                filters["exchange"] = request.exchange
+
+            # Use proper repository pattern through database service's transaction context
+            async with self.database_service.session() as session:
+                from src.database.repository.market_data import MarketDataRepository
+                repository = MarketDataRepository(session)
+
+                # Build filters for the query
+                filters = {}
+                if request.symbol:
+                    filters["symbol"] = request.symbol
+                if request.exchange:
+                    filters["exchange"] = request.exchange
+                if request.start_time or request.end_time:
+                    time_filter = {}
+                    if request.start_time:
+                        time_filter["gte"] = request.start_time
+                    if request.end_time:
+                        time_filter["lte"] = request.end_time
+                    filters["data_timestamp"] = time_filter
+
+                # Get records using repository
+                return await repository.get_all(
+                    filters=filters,
+                    order_by="-data_timestamp",
+                    limit=request.limit
                 )
-        finally:
-            if session:
-                await session.close()
+        except Exception as e:
+            self.logger.error(f"Database retrieval failed: {e}")
+            raise DataError(f"Failed to retrieve data from database: {e}")
 
     async def _cache_data(self, request: DataRequest, data: list[MarketDataRecord]) -> None:
         """Cache data in appropriate cache levels."""
@@ -648,7 +1109,10 @@ class DataService(BaseComponent):
                 cache_json = json.dumps(cache_data)
                 ttl = request.cache_ttl or self.cache_config["l2_ttl"]
 
-                await self._redis_client.setex(cache_key, ttl, cache_json)
+                # Use timeout for cache storage
+                await asyncio.wait_for(
+                    self._redis_client.setex(cache_key, ttl, cache_json), timeout=5.0
+                )
 
             except Exception as e:
                 self.logger.error(f"L2 cache storage failed: {e}")
@@ -670,64 +1134,82 @@ class DataService(BaseComponent):
 
         return ":".join(key_parts)
 
-    async def get_metrics(self) -> DataMetrics:
+    def get_metrics(self) -> dict[str, Any]:
         """Get current data service metrics."""
         # Calculate derived metrics
         elapsed = (datetime.now(timezone.utc) - self._last_metrics_reset).total_seconds()
 
         if elapsed > 0:
-            self._metrics.throughput_per_second = self._metrics.records_processed / elapsed
-
-        if self._metrics.records_processed > 0:
-            self._metrics.error_rate = (
-                self._metrics.records_invalid / self._metrics.records_processed
+            self._metrics_data.throughput_per_second = (
+                self._metrics_data.records_processed / elapsed
             )
 
-        return self._metrics
+        if self._metrics_data.records_processed > 0:
+            self._metrics_data.error_rate = (
+                self._metrics_data.records_invalid / self._metrics_data.records_processed
+            )
 
-    async def reset_metrics(self) -> None:
+        return {
+            "records_processed": self._metrics_data.records_processed,
+            "records_valid": self._metrics_data.records_valid,
+            "records_invalid": self._metrics_data.records_invalid,
+            "processing_time_ms": self._metrics_data.processing_time_ms,
+            "throughput_per_second": self._metrics_data.throughput_per_second,
+            "error_rate": self._metrics_data.error_rate,
+            "cache_hit_rate": self._metrics_data.cache_hit_rate,
+        }
+
+    def reset_metrics(self) -> None:
         """Reset metrics counters."""
-        self._metrics = DataMetrics()
+        self._metrics_data = DataMetrics()
         self._last_metrics_reset = datetime.now(timezone.utc)
 
-    async def health_check(self) -> dict[str, Any]:
+    async def health_check(self) -> HealthCheckResult:
         """Perform comprehensive health check."""
-        health = {
-            "status": "healthy",
+        status = HealthStatus.HEALTHY
+        components = {}
+
+        # Check Redis connection with timeout
+        if self._redis_client:
+            try:
+                await asyncio.wait_for(self._redis_client.ping(), timeout=3.0)
+                components["redis"] = "healthy"
+            except asyncio.TimeoutError:
+                components["redis"] = "unhealthy: ping timeout"
+                status = HealthStatus.DEGRADED
+            except Exception as e:
+                components["redis"] = f"unhealthy: {e}"
+                status = HealthStatus.DEGRADED
+        else:
+            components["redis"] = "disabled"
+
+        # Check database connection via DatabaseService
+        try:
+            if self.database_service:
+                db_health = await self.database_service.get_health_status()
+                if db_health.name == "HEALTHY":
+                    components["database"] = "healthy"
+                elif db_health.name == "DEGRADED":
+                    components["database"] = "degraded"
+                    status = HealthStatus.DEGRADED
+                else:
+                    components["database"] = "unhealthy"
+                    status = HealthStatus.UNHEALTHY
+            else:
+                components["database"] = "unavailable"
+                status = HealthStatus.DEGRADED
+        except Exception as e:
+            components["database"] = f"unhealthy: {e}"
+            status = HealthStatus.UNHEALTHY
+
+        details = {
             "initialized": self._initialized,
-            "components": {},
-            "metrics": await self.get_metrics(),
+            "components": components,
+            "metrics": self.get_metrics(),
             "active_pipelines": len(self._active_pipelines),
         }
 
-        # Check Redis connection
-        if self._redis_client:
-            try:
-                await self._redis_client.ping()
-                health["components"]["redis"] = "healthy"
-            except Exception as e:
-                health["components"]["redis"] = f"unhealthy: {e}"
-                health["status"] = "degraded"
-        else:
-            health["components"]["redis"] = "disabled"
-
-        # Check database connection
-        session = None
-        try:
-            session = get_async_session()
-            async with session:
-                from sqlalchemy import text
-
-                await session.execute(text("SELECT 1"))
-            health["components"]["database"] = "healthy"
-        except Exception as e:
-            health["components"]["database"] = f"unhealthy: {e}"
-            health["status"] = "unhealthy"
-        finally:
-            if session:
-                await session.close()
-
-        return health
+        return HealthCheckResult(status=status, details=details, message="DataService health check")
 
     # Strategy integration methods
     async def get_data_count(self, symbol: str, exchange: str = "binance") -> int:
@@ -736,20 +1218,18 @@ class DataService(BaseComponent):
             if not self._initialized:
                 await self.initialize()
 
-            session = None
-            try:
-                session = get_async_session()
-                async with session:
-                    db_queries = DatabaseQueries(session, config=None)
+            if not self.database_service:
+                raise DataError("Database service not available")
 
-                    # Use get_market_data_records to count records
-                    records = await db_queries.get_market_data_records(
-                        symbol=symbol, exchange=exchange, limit=None
-                    )
-                    return len(records)
-            finally:
-                if session:
-                    await session.close()
+            # Use proper repository pattern through database service's transaction context
+            async with self.database_service.session() as session:
+                from src.database.repository.market_data import MarketDataRepository
+                repository = MarketDataRepository(session)
+
+                # Get count using repository
+                filters = {"symbol": symbol, "exchange": exchange}
+                records = await repository.get_all(filters=filters)
+                return len(records)
 
         except Exception as e:
             self.logger.error(f"Data count retrieval failed for {symbol}: {e}")
@@ -764,7 +1244,9 @@ class DataService(BaseComponent):
                 await self.initialize()
 
             # Create a data request
-            request = DataRequest(symbol=symbol, exchange=exchange, limit=limit, use_cache=True, cache_ttl=3600)
+            request = DataRequest(
+                symbol=symbol, exchange=exchange, limit=limit, use_cache=True, cache_ttl=3600
+            )
 
             # Get records from the service
             records = await self.get_market_data(request)
@@ -780,6 +1262,7 @@ class DataService(BaseComponent):
                     low=record.low_price or record.close_price or Decimal("0"),
                     close=record.close_price or Decimal("0"),
                     volume=record.volume or Decimal("0"),
+                    exchange=record.exchange or exchange,
                 )
                 market_data.append(data)
 
@@ -796,11 +1279,17 @@ class DataService(BaseComponent):
         """Cleanup service resources."""
         redis_client = None
         try:
-            # Close Redis connection
+            # Close Redis connection with proper cleanup
             if self._redis_client:
                 redis_client = self._redis_client
                 self._redis_client = None
-                await redis_client.close()
+                try:
+                    await asyncio.wait_for(redis_client.close(), timeout=5.0)
+                except asyncio.TimeoutError:
+                    self.logger.warning("Redis close timeout, forcing connection cleanup")
+                    await redis_client.connection_pool.disconnect()
+                except Exception as e:
+                    self.logger.error(f"Error closing Redis connection: {e}")
 
             # Clear caches
             self._memory_cache.clear()
@@ -814,8 +1303,13 @@ class DataService(BaseComponent):
         except Exception as e:
             self.logger.error(f"DataService cleanup error: {e}")
         finally:
-            if redis_client and not redis_client.closed:
+            if redis_client:
                 try:
-                    await redis_client.close()
+                    if hasattr(redis_client, "aclose") and not redis_client.connection_pool.closed:
+                        await asyncio.wait_for(redis_client.aclose(), timeout=2.0)
+                    elif not redis_client.connection_pool.closed:
+                        await asyncio.wait_for(redis_client.close(), timeout=2.0)
+                except asyncio.TimeoutError:
+                    self.logger.warning("Final Redis cleanup timeout")
                 except Exception as e:
-                    self.logger.warning(f"Failed to close Redis client: {e}")
+                    self.logger.warning(f"Failed to close Redis client in finally block: {e}")

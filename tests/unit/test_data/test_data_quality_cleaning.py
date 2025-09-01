@@ -47,7 +47,7 @@ class TestDataCleaner:
     def valid_market_data(self) -> MarketData:
         """Create valid market data for testing"""
         return MarketData(
-            symbol="BTCUSDT",
+            symbol="BTC/USDT",
             timestamp=datetime.now(timezone.utc),
             open=Decimal("49900.00"),
             high=Decimal("50100.00"),
@@ -62,14 +62,14 @@ class TestDataCleaner:
         """Create valid signals for testing"""
         return [
             Signal(
-                symbol="BTCUSDT",
+                symbol="BTC/USDT",
                 direction=SignalDirection.BUY,
                 strength=0.75,
                 timestamp=datetime.now(timezone.utc),
                 source="test_strategy",
             ),
             Signal(
-                symbol="ETHUSDT",
+                symbol="ETH/USDT",
                 direction=SignalDirection.SELL,
                 strength=0.85,
                 timestamp=datetime.now(timezone.utc) + timedelta(seconds=1),
@@ -108,7 +108,7 @@ class TestDataCleaner:
         """Test cleaning with missing price data"""
         # Since Pydantic prevents None values, test with zero price
         data_with_zero_price = MarketData(
-            symbol="BTCUSDT",
+            symbol="BTC/USDT",
             timestamp=datetime.now(timezone.utc),
             open=Decimal("49900.00"),
             high=Decimal("50100.00"),
@@ -122,7 +122,7 @@ class TestDataCleaner:
         for i in range(10):
             price = 50000 + i * 10
             historical_data = MarketData(
-                symbol="BTCUSDT",
+                symbol="BTC/USDT",
                 timestamp=datetime.now(timezone.utc),
                 open=Decimal(str(price - 50)),
                 high=Decimal(str(price + 50)),
@@ -144,7 +144,7 @@ class TestDataCleaner:
     async def test_clean_market_data_missing_ohlc(self, cleaner: DataCleaner):
         """Test cleaning with missing OHLC data"""
         data_with_missing_ohlc = MarketData(
-            symbol="BTCUSDT",
+            symbol="BTC/USDT",
             timestamp=datetime.now(timezone.utc),
             open=Decimal("49900.00"),
             high=Decimal("50100.00"),
@@ -166,7 +166,7 @@ class TestDataCleaner:
     async def test_clean_market_data_outlier_detection(self, cleaner: DataCleaner):
         """Test outlier detection and handling"""
         # Add historical data to create distribution
-        symbol = "BTCUSDT"
+        symbol = "BTC/USDT"
         for i in range(20):
             price = 50000 + i * 10  # Normal price progression
             data = MarketData(
@@ -203,7 +203,7 @@ class TestDataCleaner:
     async def test_clean_market_data_smoothing(self, cleaner: DataCleaner):
         """Test data smoothing functionality"""
         # Add historical data for smoothing
-        symbol = "BTCUSDT"
+        symbol = "BTC/USDT"
         for i in range(10):
             price = 50000 + i * 100  # Some variation
             data = MarketData(
@@ -252,7 +252,7 @@ class TestDataCleaner:
     async def test_clean_market_data_normalization(self, cleaner: DataCleaner):
         """Test data normalization"""
         data_with_issues = MarketData(
-            symbol="btcusdt",  # Lowercase
+            symbol="btc/usdt",  # Lowercase
             timestamp=datetime.now(),  # No timezone
             open=Decimal("49900.123456789"),
             high=Decimal("50100.123456789"),
@@ -266,7 +266,7 @@ class TestDataCleaner:
 
         # Should normalize data
         assert "data_normalization" in cleaning_result.applied_strategies
-        assert cleaned_data.symbol == "BTCUSDT"  # Should be uppercase
+        assert cleaned_data.symbol == "BTC/USDT"  # Should be uppercase
         assert cleaned_data.timestamp.tzinfo is not None  # Should have timezone
 
     @pytest.mark.asyncio
@@ -289,14 +289,14 @@ class TestDataCleaner:
                 direction=SignalDirection.BUY,
                 strength=0.0,  # Minimum confidence (edge case)
                 timestamp=datetime.now(timezone.utc),
-                symbol="BTCUSDT",
+                symbol="BTC/USDT",
                 source="test_strategy",
             ),
             Signal(
                 direction=SignalDirection.SELL,
                 strength=1.0,  # Maximum confidence (edge case)
                 timestamp=datetime.now(timezone.utc),
-                symbol="BTCUSDT",
+                symbol="BTC/USDT",
                 source="test_strategy",
             ),
         ]
@@ -316,7 +316,7 @@ class TestDataCleaner:
                 direction=SignalDirection.BUY,
                 strength=0.75,
                 timestamp=datetime.now(timezone.utc),
-                symbol="BTCUSDT",
+                symbol="BTC/USDT",
                 source="test_strategy",
             ),
             Signal(
@@ -324,7 +324,7 @@ class TestDataCleaner:
                 strength=0.75,
                 # Very close timestamp
                 timestamp=datetime.now(timezone.utc) + timedelta(seconds=0.5),
-                symbol="BTCUSDT",
+                symbol="BTC/USDT",
                 source="test_strategy",
             ),
         ]
@@ -344,14 +344,14 @@ class TestDataCleaner:
                 direction=SignalDirection.BUY,
                 strength=0.999,  # Very high confidence
                 timestamp=datetime.now(timezone.utc),
-                symbol="BTCUSDT",
+                symbol="BTC/USDT",
                 source="test_strategy",
             ),
             Signal(
                 direction=SignalDirection.SELL,
                 strength=0.001,  # Very low confidence
                 timestamp=datetime.now(timezone.utc),
-                symbol="ETHUSDT",
+                symbol="ETH/USDT",
                 source="test_strategy",
             ),
         ]
@@ -372,7 +372,7 @@ class TestDataCleaner:
         """Test missing data handling"""
         # Test with data that has zero values (which can be imputed)
         data_with_zeros = MarketData(
-            symbol="BTCUSDT",
+            symbol="BTC/USDT",
             timestamp=datetime.now(timezone.utc),
             open=Decimal("49900.00"),
             high=Decimal("50100.00"),
@@ -386,7 +386,7 @@ class TestDataCleaner:
         for i in range(10):
             price = 50000 + i * 10
             historical_data = MarketData(
-                symbol="BTCUSDT",
+                symbol="BTC/USDT",
                 timestamp=datetime.now(timezone.utc),
                 open=Decimal(str(price - 50)),
                 high=Decimal(str(price + 50)),
@@ -406,7 +406,7 @@ class TestDataCleaner:
     async def test_handle_outliers(self, cleaner: DataCleaner):
         """Test outlier handling"""
         # Add historical data
-        symbol = "BTCUSDT"
+        symbol = "BTC/USDT"
         for i in range(20):
             price = 50000 + i * 10
             data = MarketData(
@@ -442,7 +442,7 @@ class TestDataCleaner:
     async def test_smooth_data(self, cleaner: DataCleaner):
         """Test data smoothing"""
         # Add historical data
-        symbol = "BTCUSDT"
+        symbol = "BTC/USDT"
         for i in range(10):
             price = 50000 + i * 100
             data = MarketData(
@@ -491,7 +491,7 @@ class TestDataCleaner:
     async def test_normalize_data(self, cleaner: DataCleaner):
         """Test data normalization"""
         data_to_normalize = MarketData(
-            symbol="btcusdt",
+            symbol="btc/usdt",
             timestamp=datetime.now(),  # No timezone
             open=Decimal("49900.123456789"),
             high=Decimal("50100.123456789"),
@@ -503,7 +503,7 @@ class TestDataCleaner:
 
         normalized_data = await cleaner._normalize_data(data_to_normalize)
 
-        assert normalized_data.symbol == "BTCUSDT"
+        assert normalized_data.symbol == "BTC/USDT"
         assert normalized_data.timestamp.tzinfo is not None
         assert str(normalized_data.close).count(".") == 1
         assert len(str(normalized_data.close).split(".")[1]) <= 8
@@ -516,7 +516,7 @@ class TestDataCleaner:
             direction=SignalDirection.BUY,
             strength=0.75,
             timestamp=datetime.now(timezone.utc),
-            symbol="BTCUSDT",
+            symbol="BTC/USDT",
             source="test_strategy",
         )
         assert await cleaner._is_valid_signal(valid_signal) is True
@@ -526,7 +526,7 @@ class TestDataCleaner:
             direction=SignalDirection.SELL,
             strength=0.0,  # Minimum confidence
             timestamp=datetime.now(timezone.utc),
-            symbol="BTCUSDT",
+            symbol="BTC/USDT",
             source="test_strategy",
         )
         assert await cleaner._is_valid_signal(edge_signal) is True
@@ -549,7 +549,7 @@ class TestDataCleaner:
             direction=SignalDirection.BUY,
             strength=0.75,
             timestamp=datetime.now(timezone.utc),
-            symbol="BTCUSDT",
+            symbol="BTC/USDT",
             source="test_strategy",
         )
 
@@ -560,7 +560,7 @@ class TestDataCleaner:
             direction=SignalDirection.BUY,
             strength=0.75,
             timestamp=base_signal.timestamp + timedelta(seconds=0.5),
-            symbol="BTCUSDT",
+            symbol="BTC/USDT",
             source="test_strategy",
         )
         assert await cleaner._is_duplicate_signal(duplicate_signal, existing_signals) is True
@@ -570,7 +570,7 @@ class TestDataCleaner:
             direction=SignalDirection.SELL,
             strength=0.75,
             timestamp=datetime.now(timezone.utc),
-            symbol="BTCUSDT",
+            symbol="BTC/USDT",
             source="test_strategy",
         )
         assert await cleaner._is_duplicate_signal(different_signal, existing_signals) is False
@@ -585,7 +585,7 @@ class TestDataCleaner:
 
         # Different data should produce different hash
         different_data = MarketData(
-            symbol="ETHUSDT",
+            symbol="ETH/USDT",
             timestamp=datetime.now(timezone.utc),
             open=Decimal("2990.00"),
             high=Decimal("3010.00"),
@@ -624,7 +624,7 @@ class TestDataCleaner:
 
         # Test with data that has validation issues but is still valid Pydantic
         malformed_data = MarketData(
-            symbol="BTCUSDT",
+            symbol="BTC/USDT",
             timestamp=datetime.now(timezone.utc),
             open=Decimal("49900.00"),
             high=Decimal("50100.00"),

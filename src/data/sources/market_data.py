@@ -74,12 +74,13 @@ class MarketDataSource(BaseComponent):
     unified market data access for the trading system.
     """
 
-    def __init__(self, config: Config):
+    def __init__(self, config: Config, exchange_factory: ExchangeFactory = None):
         """
         Initialize market data source.
 
         Args:
             config: Application configuration
+            exchange_factory: Optional exchange factory for dependency injection
         """
         super().__init__()  # Initialize BaseComponent
         self.config = config
@@ -89,8 +90,8 @@ class MarketDataSource(BaseComponent):
         self.connection_manager = ConnectionManager(config)
         self.pattern_analytics = ErrorPatternAnalytics(config)
 
-        # Exchange management
-        self.exchange_factory = ExchangeFactory(config)
+        # Exchange management with dependency injection support
+        self.exchange_factory = exchange_factory or ExchangeFactory(config)
         self.exchanges: dict[str, BaseExchange] = {}
 
         # Data subscription management
@@ -117,27 +118,68 @@ class MarketDataSource(BaseComponent):
 
     async def initialize(self) -> None:
         """Initialize exchange connections and data sources."""
+        connected_exchanges = []
         try:
             # Initialize exchanges
             supported_exchanges = ["binance", "okx", "coinbase"]
 
             for exchange_name in supported_exchanges:
+                exchange = None
                 try:
                     exchange = await self.exchange_factory.create_exchange(exchange_name)
-                    if await exchange.connect():
+                    # Add timeout to exchange connection
+                    connected = await asyncio.wait_for(exchange.connect(), timeout=30.0)
+                    if connected:
                         self.exchanges[exchange_name] = exchange
+                        connected_exchanges.append(exchange_name)
                         self.logger.info(f"Connected to {exchange_name} for market data")
                     else:
                         self.logger.warning(f"Failed to connect to {exchange_name}")
+                        # Clean up failed connection
+                        if exchange:
+                            try:
+                                await exchange.disconnect()
+                            except Exception:
+                                pass
+                except asyncio.TimeoutError:
+                    self.logger.error(f"Connection timeout for {exchange_name}")
+                    # Clean up timed out connection
+                    if exchange:
+                        try:
+                            await exchange.disconnect()
+                        except Exception:
+                            pass
                 except Exception as e:
                     self.logger.error(f"Error initializing {exchange_name}: {e!s}")
+                    # Clean up failed connection
+                    if exchange:
+                        try:
+                            await exchange.disconnect()
+                        except Exception:
+                            pass
 
             if not self.exchanges:
+                # Clean up any partial connections before raising error
+                for exchange in connected_exchanges:
+                    if exchange in self.exchanges:
+                        try:
+                            await self.exchanges[exchange].disconnect()
+                        except Exception:
+                            pass
+                self.exchanges.clear()
                 raise DataSourceError("No exchanges connected for market data")
 
             self.logger.info(f"MarketDataSource initialized with {len(self.exchanges)} exchanges")
 
         except Exception as e:
+            # Clean up any partial connections on initialization failure
+            for exchange in connected_exchanges:
+                try:
+                    if exchange in self.exchanges:
+                        await self.exchanges[exchange].disconnect()
+                except Exception:
+                    pass
+            self.exchanges.clear()
             self.logger.error(f"Failed to initialize MarketDataSource: {e!s}")
             raise DataSourceError(f"Market data source initialization failed: {e!s}")
 
@@ -403,24 +445,42 @@ class MarketDataSource(BaseComponent):
 
     async def cleanup(self) -> None:
         """Cleanup market data source resources."""
+        stream_tasks = []
+        exchanges = []
         try:
             # Stop all streams
             for stream_key in list(self.active_streams.keys()):
                 self.active_streams[stream_key] = False
 
-            # Cancel all stream tasks
-            for task in self.stream_tasks.values():
+            # Cancel all stream tasks with proper cleanup
+            stream_tasks = list(self.stream_tasks.values())
+            for task in stream_tasks:
                 if not task.done():
                     task.cancel()
 
-            # Disconnect from exchanges
-            for exchange in self.exchanges.values():
-                await exchange.disconnect()
+            # Wait for task cancellation with timeout
+            if stream_tasks:
+                try:
+                    await asyncio.wait_for(
+                        asyncio.gather(*stream_tasks, return_exceptions=True), timeout=10.0
+                    )
+                except asyncio.TimeoutError:
+                    self.logger.warning("Timeout waiting for stream tasks to complete")
+
+            # Disconnect from exchanges with proper error handling
+            exchanges = list(self.exchanges.values())
+            for exchange in exchanges:
+                try:
+                    await exchange.disconnect()
+                except Exception as e:
+                    self.logger.warning(f"Error disconnecting exchange: {e}")
 
             # Clear caches
             self.ticker_cache.clear()
             self.order_book_cache.clear()
             self.trade_cache.clear()
+            self.stream_tasks.clear()
+            self.exchanges.clear()
 
             self.logger.info("MarketDataSource cleanup completed")
 
@@ -441,6 +501,36 @@ class MarketDataSource(BaseComponent):
             self.pattern_analytics.add_error_event(error_context.__dict__)
 
             self.logger.error(f"Error during MarketDataSource cleanup: {e!s}")
+        finally:
+            # Force cleanup any remaining resources
+            try:
+                # Force cancel any remaining tasks
+                for task in stream_tasks:
+                    if not task.done():
+                        task.cancel()
+                        try:
+                            await task
+                        except asyncio.CancelledError:
+                            pass
+                        except Exception:
+                            pass
+
+                # Force disconnect any remaining exchanges
+                for exchange in exchanges:
+                    try:
+                        await exchange.disconnect()
+                    except Exception:
+                        pass
+
+                # Clear all data structures
+                self.ticker_cache.clear()
+                self.order_book_cache.clear()
+                self.trade_cache.clear()
+                self.stream_tasks.clear()
+                self.exchanges.clear()
+                self.active_streams.clear()
+            except Exception as e:
+                self.logger.warning(f"Error in final cleanup: {e}")
 
     async def get_error_analytics(self) -> dict[str, Any]:
         """Get error pattern analytics, connection status, and circuit breaker status."""

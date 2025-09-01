@@ -24,12 +24,12 @@ Dependencies:
 import warnings
 from dataclasses import dataclass
 from datetime import datetime
+from decimal import Decimal, getcontext
 from enum import Enum
 from typing import Any
 
 import numpy as np
 import pandas as pd
-import talib
 
 from src.core.base.component import BaseComponent
 from src.core.config import Config
@@ -42,6 +42,14 @@ from src.error_handling.error_handler import ErrorHandler
 
 # Import from P-007A utilities
 from src.utils.decorators import time_execution
+from src.utils.technical_indicators import (
+    calculate_atr_talib,
+    calculate_bollinger_bands_talib,
+    calculate_ema_talib,
+    calculate_macd_talib,
+    calculate_rsi_talib,
+    calculate_sma_talib,
+)
 
 
 class IndicatorType(Enum):
@@ -72,7 +80,7 @@ class IndicatorResult:
     indicator_name: str
     symbol: str
     timestamp: datetime
-    value: float | None
+    value: Decimal | None
     metadata: dict[str, Any]
     calculation_time: float
 
@@ -181,10 +189,14 @@ class TechnicalIndicators(BaseComponent):
             if not data:
                 return {}
 
-            # Convert market data to numpy arrays for efficiency
-            prices = np.array([float(d.price) for d in data if d.price])
-            high_prices = np.array([float(d.high_price) for d in data if d.high_price])
-            low_prices = np.array([float(d.low_price) for d in data if d.low_price])
+            # Convert market data to numpy arrays for efficiency - use Decimal for precision
+            prices = np.array([float(d.price) for d in data if d.price], dtype=np.float64)
+            high_prices = np.array(
+                [float(d.high_price) for d in data if d.high_price], dtype=np.float64
+            )
+            low_prices = np.array(
+                [float(d.low_price) for d in data if d.low_price], dtype=np.float64
+            )
 
             if len(prices) == 0:
                 return {}
@@ -194,7 +206,7 @@ class TechnicalIndicators(BaseComponent):
                 indicators = ["sma_20", "ema_20", "rsi_14", "macd", "bollinger_bands"]
 
             params = parameters or {}
-            results = {}
+            results: dict[str, Decimal | dict[str, Decimal]] = {}
 
             # Calculate each requested indicator
             for indicator in indicators:
@@ -232,17 +244,15 @@ class TechnicalIndicators(BaseComponent):
                     elif indicator == "macd":
                         macd_params = params.get("macd", [12, 26, 9])
                         macd_result = await self._calculate_macd(prices, *macd_params)
-                        value = macd_result  # Dictionary of MACD values
-                        if value is not None:
-                            results[indicator] = value
+                        if macd_result is not None:
+                            results[indicator] = macd_result
 
                     elif indicator == "bollinger_bands":
                         period = params.get("bb_period", 20)
-                        std_dev = params.get("bb_std", 2)
+                        std_dev = Decimal(str(params.get("bb_std", 2)))
                         bb_result = await self._calculate_bollinger_bands(prices, period, std_dev)
-                        value = bb_result  # Dictionary of Bollinger Band values
-                        if value is not None:
-                            results[indicator] = value
+                        if bb_result is not None:
+                            results[indicator] = bb_result
 
                     elif indicator.startswith("atr_"):
                         period = (
@@ -273,167 +283,105 @@ class TechnicalIndicators(BaseComponent):
             self.calculation_stats["failed_calculations"] += 1
             return {}
 
-    async def _calculate_sma(self, prices: np.ndarray, period: int) -> float | None:
-        """Calculate Simple Moving Average."""
-        try:
-            if len(prices) < period:
-                return None
-            sma_values = talib.SMA(prices, timeperiod=period)
-            return float(sma_values[-1]) if not np.isnan(sma_values[-1]) else None
-        except Exception as e:
-            self.logger.error(f"SMA calculation failed: {e}")
-            return None
+    async def _calculate_sma(self, prices: np.ndarray, period: int) -> Decimal | None:
+        """Calculate Simple Moving Average using shared utility."""
+        return calculate_sma_talib(prices, period)
 
-    async def _calculate_ema(self, prices: np.ndarray, period: int) -> float | None:
-        """Calculate Exponential Moving Average."""
-        try:
-            if len(prices) < period:
-                return None
-            ema_values = talib.EMA(prices, timeperiod=period)
-            return float(ema_values[-1]) if not np.isnan(ema_values[-1]) else None
-        except Exception as e:
-            self.logger.error(f"EMA calculation failed: {e}")
-            return None
+    async def _calculate_ema(self, prices: np.ndarray, period: int) -> Decimal | None:
+        """Calculate Exponential Moving Average using shared utility."""
+        return calculate_ema_talib(prices, period)
 
-    async def _calculate_rsi(self, prices: np.ndarray, period: int) -> float | None:
-        """Calculate Relative Strength Index."""
-        try:
-            if len(prices) < period + 1:
-                return None
-            rsi_values = talib.RSI(prices, timeperiod=period)
-            return float(rsi_values[-1]) if not np.isnan(rsi_values[-1]) else None
-        except Exception as e:
-            self.logger.error(f"RSI calculation failed: {e}")
-            return None
+    async def _calculate_rsi(self, prices: np.ndarray, period: int) -> Decimal | None:
+        """Calculate Relative Strength Index using shared utility."""
+        return calculate_rsi_talib(prices, period)
 
     async def _calculate_macd(
         self, prices: np.ndarray, fast: int = 12, slow: int = 26, signal: int = 9
-    ) -> dict[str, float] | None:
-        """Calculate MACD (Moving Average Convergence Divergence)."""
-        try:
-            if len(prices) < slow + signal:
-                return None
-            macd_line, macd_signal, macd_histogram = talib.MACD(
-                prices, fastperiod=fast, slowperiod=slow, signalperiod=signal
-            )
-
-            if not (
-                np.isnan(macd_line[-1]) or np.isnan(macd_signal[-1]) or np.isnan(macd_histogram[-1])
-            ):
-                return {
-                    "macd": float(macd_line[-1]),
-                    "signal": float(macd_signal[-1]),
-                    "histogram": float(macd_histogram[-1]),
-                }
-            return None
-        except Exception as e:
-            self.logger.error(f"MACD calculation failed: {e}")
-            return None
+    ) -> dict[str, Decimal] | None:
+        """Calculate MACD using shared utility."""
+        return calculate_macd_talib(prices, fast, slow, signal)
 
     async def _calculate_bollinger_bands(
-        self, prices: np.ndarray, period: int = 20, std_dev: float = 2
-    ) -> dict[str, float] | None:
-        """Calculate Bollinger Bands."""
-        try:
-            if len(prices) < period:
-                return None
-            upper, middle, lower = talib.BBANDS(
-                prices, timeperiod=period, nbdevup=std_dev, nbdevdn=std_dev
-            )
-
-            if not (np.isnan(upper[-1]) or np.isnan(middle[-1]) or np.isnan(lower[-1])):
-                return {
-                    "upper": float(upper[-1]),
-                    "middle": float(middle[-1]),
-                    "lower": float(lower[-1]),
-                    "width": float(upper[-1] - lower[-1]),
-                    "position": (
-                        float((prices[-1] - lower[-1]) / (upper[-1] - lower[-1]))
-                        if upper[-1] != lower[-1]
-                        else 0.5
-                    ),
-                }
-            return None
-        except Exception as e:
-            self.logger.error(f"Bollinger Bands calculation failed: {e}")
-            return None
+        self, prices: np.ndarray, period: int = 20, std_dev: Decimal = Decimal("2")
+    ) -> dict[str, Decimal] | None:
+        """Calculate Bollinger Bands using shared utility."""
+        return calculate_bollinger_bands_talib(prices, period, std_dev)
 
     async def _calculate_atr(
         self, high: np.ndarray, low: np.ndarray, close: np.ndarray, period: int = 14
-    ) -> float | None:
-        """Calculate Average True Range."""
-        try:
-            if len(high) < period or len(low) < period or len(close) < period:
-                return None
-            atr_values = talib.ATR(high, low, close, timeperiod=period)
-            return float(atr_values[-1]) if not np.isnan(atr_values[-1]) else None
-        except Exception as e:
-            self.logger.error(f"ATR calculation failed: {e}")
-            return None
+    ) -> Decimal | None:
+        """Calculate Average True Range using shared utility."""
+        return calculate_atr_talib(high, low, close, period)
 
     # Legacy methods for backward compatibility - DEPRECATED
-    async def sma(self, prices: list[float], period: int = 20) -> float | None:
+    async def sma(self, prices: list[Decimal], period: int = 20) -> Decimal | None:
         """DEPRECATED: Use calculate_indicators_batch instead."""
         warnings.warn(
             "sma() is deprecated. Use calculate_indicators_batch() instead.",
             DeprecationWarning,
             stacklevel=2,
         )
-        return await self._calculate_sma(np.array(prices), period)
+        prices_array = np.array([float(p) for p in prices], dtype=np.float64)
+        return await self._calculate_sma(prices_array, period)
 
-    async def ema(self, prices: list[float], period: int = 20) -> float | None:
+    async def ema(self, prices: list[Decimal], period: int = 20) -> Decimal | None:
         """DEPRECATED: Use calculate_indicators_batch instead."""
         warnings.warn(
             "ema() is deprecated. Use calculate_indicators_batch() instead.",
             DeprecationWarning,
             stacklevel=2,
         )
-        return await self._calculate_ema(np.array(prices), period)
+        prices_array = np.array([float(p) for p in prices], dtype=np.float64)
+        return await self._calculate_ema(prices_array, period)
 
-    async def rsi(self, prices: list[float], period: int = 14) -> float | None:
+    async def rsi(self, prices: list[Decimal], period: int = 14) -> Decimal | None:
         """DEPRECATED: Use calculate_indicators_batch instead."""
         warnings.warn(
             "rsi() is deprecated. Use calculate_indicators_batch() instead.",
             DeprecationWarning,
             stacklevel=2,
         )
-        return await self._calculate_rsi(np.array(prices), period)
+        prices_array = np.array([float(p) for p in prices], dtype=np.float64)
+        return await self._calculate_rsi(prices_array, period)
 
-    async def macd(self, prices: list[float]) -> dict[str, float] | None:
+    async def macd(self, prices: list[Decimal]) -> dict[str, Decimal] | None:
         """DEPRECATED: Use calculate_indicators_batch instead."""
         warnings.warn(
             "macd() is deprecated. Use calculate_indicators_batch() instead.",
             DeprecationWarning,
             stacklevel=2,
         )
-        return await self._calculate_macd(np.array(prices))
+        prices_array = np.array([float(p) for p in prices], dtype=np.float64)
+        return await self._calculate_macd(prices_array)
 
     async def bollinger_bands(
-        self, prices: list[float], period: int = 20, std_dev: float = 2
-    ) -> dict[str, float] | None:
+        self, prices: list[Decimal], period: int = 20, std_dev: Decimal = Decimal("2")
+    ) -> dict[str, Decimal] | None:
         """DEPRECATED: Use calculate_indicators_batch instead."""
         warnings.warn(
             "bollinger_bands() is deprecated. Use calculate_indicators_batch() instead.",
             DeprecationWarning,
             stacklevel=2,
         )
-        return await self._calculate_bollinger_bands(np.array(prices), period, std_dev)
+        prices_array = np.array([float(p) for p in prices], dtype=np.float64)
+        return await self._calculate_bollinger_bands(prices_array, period, std_dev)
 
-    async def volume_sma(self, volumes: list[float], period: int = 20) -> float | None:
+    async def volume_sma(self, volumes: list[Decimal], period: int = 20) -> Decimal | None:
         """DEPRECATED: Use calculate_indicators_batch instead."""
         warnings.warn(
             "volume_sma() is deprecated. Use calculate_indicators_batch() instead.",
             DeprecationWarning,
             stacklevel=2,
         )
-        return await self._calculate_sma(np.array(volumes), period)
+        volumes_array = np.array([float(v) for v in volumes], dtype=np.float64)
+        return await self._calculate_sma(volumes_array, period)
 
     def get_calculation_stats(self) -> dict[str, Any]:
         """Get calculation statistics."""
         return self.calculation_stats.copy()
 
     # Symbol-based wrapper methods for strategy integration
-    async def calculate_sma(self, symbol: str, period: int) -> float | None:
+    async def calculate_sma(self, symbol: str, period: int) -> Decimal | None:
         """Calculate SMA using symbol - wrapper for strategy integration."""
         try:
             if not self.feature_store:
@@ -445,14 +393,14 @@ class TechnicalIndicators(BaseComponent):
             if not price_data or len(price_data) < period:
                 return None
 
-            prices = np.array([float(d.price) for d in price_data if d.price])
+            prices = np.array([float(d.price) for d in price_data if d.price], dtype=np.float64)
             return await self._calculate_sma(prices, period)
 
         except Exception as e:
             self.logger.error(f"SMA calculation failed for {symbol}: {e}")
             return None
 
-    async def calculate_rsi(self, symbol: str, period: int) -> float | None:
+    async def calculate_rsi(self, symbol: str, period: int) -> Decimal | None:
         """Calculate RSI using symbol - wrapper for strategy integration."""
         try:
             if not self.feature_store:
@@ -464,14 +412,14 @@ class TechnicalIndicators(BaseComponent):
             if not price_data or len(price_data) < period + 1:
                 return None
 
-            prices = np.array([float(d.price) for d in price_data if d.price])
+            prices = np.array([float(d.price) for d in price_data if d.price], dtype=np.float64)
             return await self._calculate_rsi(prices, period)
 
         except Exception as e:
             self.logger.error(f"RSI calculation failed for {symbol}: {e}")
             return None
 
-    async def calculate_momentum(self, symbol: str, period: int) -> float | None:
+    async def calculate_momentum(self, symbol: str, period: int) -> Decimal | None:
         """Calculate price momentum - NEW implementation for strategy integration."""
         try:
             if not self.feature_store:
@@ -483,21 +431,27 @@ class TechnicalIndicators(BaseComponent):
             if not price_data or len(price_data) < period + 1:
                 return None
 
-            prices = np.array([float(d.price) for d in price_data if d.price])
+            prices = np.array([float(d.price) for d in price_data if d.price], dtype=np.float64)
 
             # Calculate momentum as percent change over period
             if len(prices) >= period + 1:
-                current_price = prices[-1]
-                past_price = prices[-(period + 1)]
-                momentum = (current_price - past_price) / past_price if past_price != 0 else 0.0
-                return float(momentum)
+                getcontext().prec = 16
+                current_price = Decimal(str(prices[-1]))
+                past_price = Decimal(str(prices[-(period + 1)]))
+                if past_price != 0:
+                    momentum = ((current_price - past_price) / past_price).quantize(
+                        Decimal("0.000001")
+                    )
+                else:
+                    momentum = Decimal("0")
+                return momentum
             return None
 
         except Exception as e:
             self.logger.error(f"Momentum calculation failed for {symbol}: {e}")
             return None
 
-    async def calculate_volatility(self, symbol: str, period: int) -> float | None:
+    async def calculate_volatility(self, symbol: str, period: int) -> Decimal | None:
         """Calculate historical volatility - NEW implementation for strategy integration."""
         try:
             if not self.feature_store:
@@ -509,7 +463,7 @@ class TechnicalIndicators(BaseComponent):
             if not price_data or len(price_data) < period:
                 return None
 
-            prices = np.array([float(d.price) for d in price_data if d.price])
+            prices = np.array([float(d.price) for d in price_data if d.price], dtype=np.float64)
 
             # Calculate returns
             if len(prices) < 2:
@@ -521,13 +475,14 @@ class TechnicalIndicators(BaseComponent):
 
             # Calculate volatility as standard deviation of returns
             volatility = np.std(returns[-period:]) if len(returns) >= period else np.std(returns)
-            return float(volatility)
+            getcontext().prec = 16
+            return Decimal(str(volatility)).quantize(Decimal("0.000001"))
 
         except Exception as e:
             self.logger.error(f"Volatility calculation failed for {symbol}: {e}")
             return None
 
-    async def calculate_volume_ratio(self, symbol: str, period: int) -> float | None:
+    async def calculate_volume_ratio(self, symbol: str, period: int) -> Decimal | None:
         """Calculate volume ratio - NEW implementation for strategy integration."""
         try:
             if not self.feature_store:
@@ -540,31 +495,36 @@ class TechnicalIndicators(BaseComponent):
                 return None
 
             # Extract volumes
-            volumes: list[float] = []
+            volumes: list[Decimal] = []
             for d in price_data:
                 if hasattr(d, "volume") and d.volume:
-                    volumes.append(float(d.volume))
+                    volumes.append(Decimal(str(d.volume)))
                 else:
                     # Use a default volume if not available
-                    volumes.append(1.0)
+                    volumes.append(Decimal("1.0"))
 
             if len(volumes) < period + 1:
                 return None
 
-            volumes_array = np.array(volumes)
-
             # Calculate volume ratio as current volume vs average volume
-            current_volume = volumes_array[-1]
-            avg_volume = np.mean(volumes_array[-period:]) if len(volumes_array) >= period else np.mean(volumes_array)
+            current_volume = volumes[-1]
+            recent_volumes = volumes[-period:] if len(volumes) >= period else volumes
+            avg_volume = (
+                sum(recent_volumes) / len(recent_volumes) if recent_volumes else Decimal("1.0")
+            )
 
-            volume_ratio = current_volume / avg_volume if avg_volume > 0 else 1.0
-            return float(volume_ratio)
+            if avg_volume > 0:
+                getcontext().prec = 16
+                volume_ratio = (current_volume / avg_volume).quantize(Decimal("0.0001"))
+            else:
+                volume_ratio = Decimal("1.0")
+            return volume_ratio
 
         except Exception as e:
             self.logger.error(f"Volume ratio calculation failed for {symbol}: {e}")
             return None
 
-    async def calculate_atr(self, symbol: str, period: int) -> float | None:
+    async def calculate_atr(self, symbol: str, period: int) -> Decimal | None:
         """Calculate ATR using symbol - wrapper for strategy integration."""
         try:
             if not self.feature_store:
@@ -612,8 +572,8 @@ class TechnicalIndicators(BaseComponent):
             return None
 
     async def calculate_bollinger_bands(
-        self, symbol: str, period: int = 20, std_dev: float = 2.0
-    ) -> dict[str, float] | None:
+        self, symbol: str, period: int = 20, std_dev: Decimal = Decimal("2.0")
+    ) -> dict[str, Decimal] | None:
         """Calculate Bollinger Bands using symbol - wrapper for strategy integration."""
         try:
             if not self.feature_store:
@@ -625,7 +585,7 @@ class TechnicalIndicators(BaseComponent):
             if not price_data or len(price_data) < period:
                 return None
 
-            prices = np.array([float(d.price) for d in price_data if d.price])
+            prices = np.array([float(d.price) for d in price_data if d.price], dtype=np.float64)
             return await self._calculate_bollinger_bands(prices, period, std_dev)
 
         except Exception as e:

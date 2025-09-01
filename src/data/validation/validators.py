@@ -1,14 +1,22 @@
-"""Common data validators."""
+"""
+Common data validators refactored to use consolidated validation utilities.
 
+These validators now serve as thin wrappers around the consolidated
+MarketDataValidationUtils to eliminate code duplication.
+"""
+
+from decimal import Decimal
 from typing import Any
 
-from src.data.interfaces import DataValidatorInterface
+from src.core.exceptions import ValidationError
+from src.utils.validation.base_validator import BaseRecordValidator
+from src.utils.validation.market_data_validation import MarketDataValidationUtils
 
 
-class PriceValidator(DataValidatorInterface):
-    """Validator for price data."""
+class PriceValidator(BaseRecordValidator):
+    """Validator for price data using consolidated utilities."""
 
-    def __init__(self, min_price: float = 0, max_price: float = float("inf")):
+    def __init__(self, min_price: Decimal = Decimal("0"), max_price: Decimal = Decimal("1000000")):
         """
         Initialize price validator.
 
@@ -16,167 +24,119 @@ class PriceValidator(DataValidatorInterface):
             min_price: Minimum valid price
             max_price: Maximum valid price
         """
+        super().__init__()
         self.min_price = min_price
         self.max_price = max_price
-        self.errors: list[str] = []
-
-    def validate(self, data: Any) -> bool:
-        """Validate price data."""
-        self.errors.clear()
-
-        if isinstance(data, dict):
-            # Single record
-            return self._validate_record(data)
-        elif isinstance(data, list):
-            # Multiple records
-            all_valid = True
-            for i, record in enumerate(data):
-                if not self._validate_record(record, index=i):
-                    all_valid = False
-            return all_valid
-        else:
-            self.errors.append(f"Invalid data type: {type(data)}")
-            return False
 
     def _validate_record(self, record: dict, index: int | None = None) -> bool:
-        """Validate a single record."""
-        prefix = f"Record {index}: " if index is not None else ""
-
+        """Validate a single record using consolidated utilities."""
         if "price" not in record:
-            self.errors.append(f"{prefix}Missing 'price' field")
+            self._add_error("Missing 'price' field", index)
             return False
-
-        price = record["price"]
 
         try:
-            price_float = float(price)
-        except (TypeError, ValueError):
-            self.errors.append(f"{prefix}Invalid price type: {type(price)}")
+            # Use consolidated validation utilities
+            MarketDataValidationUtils.validate_price_value(
+                record["price"],
+                "price",
+                self.min_price,
+                self.max_price
+            )
+            return True
+        except ValidationError as e:
+            self._add_error(str(e), index)
             return False
 
-        if price_float < self.min_price:
-            self.errors.append(f"{prefix}Price {price_float} below minimum {self.min_price}")
-            return False
 
-        if price_float > self.max_price:
-            self.errors.append(f"{prefix}Price {price_float} above maximum {self.max_price}")
-            return False
+class VolumeValidator(BaseRecordValidator):
+    """Validator for volume data using consolidated utilities."""
 
-        return True
-
-    def get_errors(self) -> list[str]:
-        """Get validation errors."""
-        return self.errors.copy()
-
-    def reset(self) -> None:
-        """Reset validator state."""
-        self.errors.clear()
-
-
-class VolumeValidator(DataValidatorInterface):
-    """Validator for volume data."""
-
-    def __init__(self, min_volume: float = 0):
+    def __init__(self, min_volume: Decimal = Decimal("0")):
         """
         Initialize volume validator.
 
         Args:
             min_volume: Minimum valid volume
         """
+        super().__init__()
         self.min_volume = min_volume
-        self.errors: list[str] = []
-
-    def validate(self, data: Any) -> bool:
-        """Validate volume data."""
-        self.errors.clear()
-
-        if isinstance(data, dict):
-            return self._validate_record(data)
-        elif isinstance(data, list):
-            all_valid = True
-            for i, record in enumerate(data):
-                if not self._validate_record(record, index=i):
-                    all_valid = False
-            return all_valid
-        else:
-            self.errors.append(f"Invalid data type: {type(data)}")
-            return False
 
     def _validate_record(self, record: dict, index: int | None = None) -> bool:
-        """Validate a single record."""
-        prefix = f"Record {index}: " if index is not None else ""
-
+        """Validate a single record using consolidated utilities."""
         if "volume" not in record:
-            self.errors.append(f"{prefix}Missing 'volume' field")
+            self._add_error("Missing 'volume' field", index)
             return False
-
-        volume = record["volume"]
 
         try:
-            volume_float = float(volume)
-        except (TypeError, ValueError):
-            self.errors.append(f"{prefix}Invalid volume type: {type(volume)}")
+            # Use consolidated validation utilities
+            MarketDataValidationUtils.validate_volume_value(
+                record["volume"],
+                "volume",
+                self.min_volume
+            )
+            return True
+        except ValidationError as e:
+            self._add_error(str(e), index)
             return False
 
-        if volume_float < self.min_volume:
-            self.errors.append(f"{prefix}Volume {volume_float} below minimum {self.min_volume}")
-            return False
 
-        return True
+class TimestampValidator(BaseRecordValidator):
+    """Validator for timestamp data using consolidated utilities."""
 
-    def get_errors(self) -> list[str]:
-        """Get validation errors."""
-        return self.errors.copy()
-
-    def reset(self) -> None:
-        """Reset validator state."""
-        self.errors.clear()
-
-
-class TimestampValidator(DataValidatorInterface):
-    """Validator for timestamp data."""
-
-    def __init__(self, require_ordered: bool = False):
+    def __init__(self, require_ordered: bool = False, max_future_seconds: int = 300, max_age_seconds: int = 3600):
         """
         Initialize timestamp validator.
 
         Args:
             require_ordered: Whether timestamps must be in order
+            max_future_seconds: Maximum seconds in future allowed
+            max_age_seconds: Maximum age in seconds allowed
         """
+        super().__init__()
         self.require_ordered = require_ordered
-        self.errors: list[str] = []
+        self.max_future_seconds = max_future_seconds
+        self.max_age_seconds = max_age_seconds
         self.last_timestamp: int | float | str | None = None
 
     def validate(self, data: Any) -> bool:
-        """Validate timestamp data."""
-        self.errors.clear()
+        """Override to reset timestamp tracking."""
         self.last_timestamp = None
-
-        if isinstance(data, dict):
-            return self._validate_record(data)
-        elif isinstance(data, list):
-            all_valid = True
-            for i, record in enumerate(data):
-                if not self._validate_record(record, index=i):
-                    all_valid = False
-            return all_valid
-        else:
-            self.errors.append(f"Invalid data type: {type(data)}")
-            return False
+        return super().validate(data)
 
     def _validate_record(self, record: dict, index: int | None = None) -> bool:
-        """Validate a single record."""
-        prefix = f"Record {index}: " if index is not None else ""
-
+        """Validate a single record using consolidated utilities."""
         if "timestamp" not in record:
-            self.errors.append(f"{prefix}Missing 'timestamp' field")
+            self._add_error("Missing 'timestamp' field", index)
             return False
 
         timestamp = record["timestamp"]
 
-        # Validate timestamp format/type
+        # Basic type validation
         if not isinstance(timestamp, int | float | str):
-            self.errors.append(f"{prefix}Invalid timestamp type: {type(timestamp)}")
+            self._add_error(f"Invalid timestamp type: {type(timestamp)}", index)
+            return False
+
+        # Convert to datetime if needed for consolidated validation
+        try:
+            from datetime import datetime, timezone
+            if isinstance(timestamp, (int, float)):
+                timestamp_dt = datetime.fromtimestamp(timestamp, tz=timezone.utc)
+            else:
+                timestamp_dt = datetime.fromisoformat(str(timestamp).replace("Z", "+00:00"))
+
+            # Use consolidated validation utilities
+            MarketDataValidationUtils.validate_timestamp_value(
+                timestamp_dt,
+                "timestamp",
+                self.max_future_seconds,
+                self.max_age_seconds
+            )
+
+        except (ValidationError, ValueError, OSError) as e:
+            if isinstance(e, ValidationError):
+                self._add_error(str(e), index)
+            else:
+                self._add_error(f"Invalid timestamp format: {timestamp}", index)
             return False
 
         # Check ordering if required
@@ -186,7 +146,7 @@ class TimestampValidator(DataValidatorInterface):
                 last = float(self.last_timestamp) if not isinstance(self.last_timestamp, str) else 0
 
                 if current < last:
-                    self.errors.append(f"{prefix}Timestamp {current} is before previous {last}")
+                    self._add_error(f"Timestamp {current} is before previous {last}", index)
                     return False
             except (TypeError, ValueError):
                 # Skip ordering check if conversion fails
@@ -195,17 +155,13 @@ class TimestampValidator(DataValidatorInterface):
         self.last_timestamp = timestamp
         return True
 
-    def get_errors(self) -> list[str]:
-        """Get validation errors."""
-        return self.errors.copy()
-
     def reset(self) -> None:
-        """Reset validator state."""
-        self.errors.clear()
+        """Reset validator state including timestamp tracking."""
+        super().reset()
         self.last_timestamp = None
 
 
-class SchemaValidator(DataValidatorInterface):
+class SchemaValidator(BaseRecordValidator):
     """Validator for data schema."""
 
     def __init__(self, required_fields: list[str], optional_fields: list[str] | None = None):
@@ -216,38 +172,20 @@ class SchemaValidator(DataValidatorInterface):
             required_fields: List of required field names
             optional_fields: List of optional field names
         """
+        super().__init__()
         self.required_fields = set(required_fields)
         self.optional_fields = set(optional_fields or [])
-        self.errors: list[str] = []
-
-    def validate(self, data: Any) -> bool:
-        """Validate data schema."""
-        self.errors.clear()
-
-        if isinstance(data, dict):
-            return self._validate_record(data)
-        elif isinstance(data, list):
-            all_valid = True
-            for i, record in enumerate(data):
-                if not self._validate_record(record, index=i):
-                    all_valid = False
-            return all_valid
-        else:
-            self.errors.append(f"Invalid data type: {type(data)}")
-            return False
 
     def _validate_record(self, record: dict, index: int | None = None) -> bool:
         """Validate a single record."""
         if not isinstance(record, dict):
-            self.errors.append(f"Record {index}: Not a dictionary")
+            self._add_error("Not a dictionary", index)
             return False
-
-        prefix = f"Record {index}: " if index is not None else ""
 
         # Check required fields
         missing = self.required_fields - set(record.keys())
         if missing:
-            self.errors.append(f"{prefix}Missing required fields: {missing}")
+            self._add_error(f"Missing required fields: {missing}", index)
             return False
 
         # Check for unknown fields (optional)
@@ -255,15 +193,7 @@ class SchemaValidator(DataValidatorInterface):
         unknown = set(record.keys()) - all_fields
         if unknown and len(all_fields) > 0:
             # Only warn about unknown fields if we have a defined schema
-            self.errors.append(f"{prefix}Unknown fields: {unknown}")
+            self._add_error(f"Unknown fields: {unknown}", index)
             # This is a warning, not a failure
 
         return len(missing) == 0
-
-    def get_errors(self) -> list[str]:
-        """Get validation errors."""
-        return self.errors.copy()
-
-    def reset(self) -> None:
-        """Reset validator state."""
-        self.errors.clear()

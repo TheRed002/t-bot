@@ -720,8 +720,7 @@ class DataIngestionPipeline(BaseComponent):
             )
 
             # Note: handle_error is async but this function is sync
-            # TODO: Consider making this function async or using asyncio.create_task()
-            # self.error_handler.handle_error(e, error_context)
+            # Log error synchronously since this is a sync method
             self.pattern_analytics.add_error_event(error_context.__dict__)
 
             self.logger.error(f"Failed to add data to buffer {source}: {e!s}")
@@ -977,6 +976,52 @@ class DataIngestionPipeline(BaseComponent):
             self.pattern_analytics.add_error_event(error_context.__dict__)
 
             self.logger.error(f"Failed to stop pipeline: {e!s}")
+        finally:
+            # Force cleanup all resources
+            try:
+                # Force cancel remaining tasks
+                remaining_tasks = [task for task in self.active_tasks.values() if not task.done()]
+                for task in remaining_tasks:
+                    task.cancel()
+                    try:
+                        await task
+                    except asyncio.CancelledError:
+                        pass
+                    except Exception:
+                        pass
+
+                # Force close connections
+                connection_ids = [
+                    "market_data_source",
+                    "news_data_source",
+                    "social_media_source",
+                    "alternative_data_source",
+                ]
+                for conn_id in connection_ids:
+                    try:
+                        await self.connection_manager.close_connection(conn_id)
+                    except Exception:
+                        pass
+
+                # Force cleanup data sources
+                data_sources = [
+                    (self.market_data_source, "market_data_source"),
+                    (self.news_data_source, "news_data_source"),
+                    (self.social_media_source, "social_media_source"),
+                    (self.alternative_data_source, "alternative_data_source"),
+                ]
+
+                for source, source_name in data_sources:
+                    if source:
+                        try:
+                            await source.cleanup()
+                        except Exception as e:
+                            self.logger.warning(f"Error cleaning up {source_name}: {e}")
+
+                self.active_tasks.clear()
+                self.status = PipelineStatus.STOPPED
+            except Exception as e:
+                self.logger.warning(f"Error in final pipeline cleanup: {e}")
 
     def register_callback(self, data_type: str, callback: Callable[[Any], None]) -> None:
         """Register a callback for data updates."""
@@ -997,8 +1042,7 @@ class DataIngestionPipeline(BaseComponent):
             )
 
             # Note: handle_error is async but this function is sync
-            # TODO: Consider making this function async or using asyncio.create_task()
-            # self.error_handler.handle_error(e, error_context)
+            # Log error synchronously since this is a sync method
             self.pattern_analytics.add_error_event(error_context.__dict__)
 
             self.logger.error(f"Failed to register callback for {data_type}: {e!s}")
@@ -1054,8 +1098,7 @@ class DataIngestionPipeline(BaseComponent):
             )
 
             # Note: handle_error is async but this function is sync
-            # TODO: Consider making this function async or using asyncio.create_task()
-            # self.error_handler.handle_error(e, error_context)
+            # Log error synchronously since this is a sync method
             self.pattern_analytics.add_error_event(error_context.__dict__)
 
             self.logger.error(f"Failed to get pipeline status: {e!s}")
@@ -1067,10 +1110,21 @@ class DataIngestionPipeline(BaseComponent):
 
     async def cleanup(self) -> None:
         """Cleanup pipeline resources."""
+        data_sources = []
+        active_tasks = []
         try:
             # Stop pipeline if running
             if self.status == PipelineStatus.RUNNING:
                 await self.stop()
+
+            # Collect resources for cleanup
+            data_sources = [
+                (self.market_data_source, "market_data_source"),
+                (self.news_data_source, "news_data_source"),
+                (self.social_media_source, "social_media_source"),
+                (self.alternative_data_source, "alternative_data_source"),
+            ]
+            active_tasks = list(self.active_tasks.values())
 
             # Clear buffers
             self.data_buffers.clear()
@@ -1097,3 +1151,46 @@ class DataIngestionPipeline(BaseComponent):
             self.pattern_analytics.add_error_event(error_context.__dict__)
 
             self.logger.error(f"Error during pipeline cleanup: {e!s}")
+        finally:
+            # Force cleanup all resources
+            try:
+                # Force cancel any remaining tasks
+                for task in active_tasks:
+                    if not task.done():
+                        task.cancel()
+                        try:
+                            await task
+                        except asyncio.CancelledError:
+                            pass
+                        except Exception:
+                            pass
+
+                # Force cleanup data sources
+                for source, source_name in data_sources:
+                    if source:
+                        try:
+                            await source.cleanup()
+                        except Exception as e:
+                            self.logger.warning(f"Error cleaning up {source_name}: {e}")
+
+                # Force close connections
+                connection_ids = [
+                    "market_data_source",
+                    "news_data_source",
+                    "social_media_source",
+                    "alternative_data_source",
+                ]
+                for conn_id in connection_ids:
+                    try:
+                        await self.connection_manager.close_connection(conn_id)
+                    except Exception:
+                        pass
+
+                # Clear all data structures
+                self.data_buffers.clear()
+                for data_type in self.data_callbacks:
+                    self.data_callbacks[data_type].clear()
+                self.active_tasks.clear()
+                self.status = PipelineStatus.STOPPED
+            except Exception as e:
+                self.logger.warning(f"Error in final cleanup: {e}")

@@ -19,11 +19,14 @@ Performance Targets:
 - Latency: <100μs for real-time indicators
 """
 
+from __future__ import annotations
+
 import threading
 import time
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from decimal import Decimal, getcontext
 from typing import Any
 
 import numpy as np
@@ -32,6 +35,13 @@ from numba import float64, jit, prange, vectorize
 from src.core.config import Config
 from src.core.exceptions import DataProcessingError
 from src.core.logging import get_logger
+from src.utils.technical_indicators import (
+    calculate_bollinger_bands_vectorized,
+    calculate_ema_vectorized,
+    calculate_macd_vectorized,
+    calculate_rsi_vectorized,
+    calculate_sma_vectorized,
+)
 
 
 @vectorize([float64(float64, float64)], nopython=True, target="parallel")
@@ -40,117 +50,8 @@ def fast_ema_weight(price: float, alpha: float) -> float:
     return price * alpha
 
 
-@jit(nopython=True, parallel=True, cache=True)
-def calculate_sma_vectorized(prices: np.ndarray, period: int) -> np.ndarray:
-    """Vectorized Simple Moving Average calculation."""
-    n = len(prices)
-    sma = np.empty(n, dtype=np.float64)
-
-    # Fill initial values with NaN
-    for i in prange(period - 1):
-        sma[i] = np.nan
-
-    # Calculate SMA for valid periods
-    for i in prange(period - 1, n):
-        sma[i] = np.mean(prices[i - period + 1 : i + 1])
-
-    return sma
-
-
-@jit(nopython=True, parallel=True, cache=True)
-def calculate_ema_vectorized(prices: np.ndarray, period: int) -> np.ndarray:
-    """High-performance Exponential Moving Average calculation."""
-    n = len(prices)
-    alpha = 2.0 / (period + 1.0)
-    ema = np.empty(n, dtype=np.float64)
-
-    # Initialize first EMA value
-    ema[0] = prices[0]
-
-    # Calculate EMA using vectorized operations
-    for i in prange(1, n):
-        ema[i] = alpha * prices[i] + (1.0 - alpha) * ema[i - 1]
-
-    return ema
-
-
-@jit(nopython=True, parallel=True, cache=True)
-def calculate_rsi_vectorized(prices: np.ndarray, period: int = 14) -> np.ndarray:
-    """Vectorized RSI calculation with SIMD optimizations."""
-    n = len(prices)
-    rsi = np.empty(n, dtype=np.float64)
-
-    # Calculate price changes
-    deltas = np.diff(prices)
-
-    # Separate gains and losses
-    gains = np.maximum(deltas, 0.0)
-    losses = -np.minimum(deltas, 0.0)
-
-    # Calculate initial averages
-    avg_gain = np.mean(gains[:period])
-    avg_loss = np.mean(losses[:period])
-
-    # Fill initial values
-    for i in prange(period):
-        rsi[i] = np.nan
-
-    # Calculate RSI using Wilder's smoothing
-    for i in prange(period, n - 1):
-        avg_gain = (avg_gain * (period - 1) + gains[i]) / period
-        avg_loss = (avg_loss * (period - 1) + losses[i]) / period
-
-        if avg_loss == 0:
-            rsi[i + 1] = 100.0
-        else:
-            rs = avg_gain / avg_loss
-            rsi[i + 1] = 100.0 - (100.0 / (1.0 + rs))
-
-    return rsi
-
-
-@jit(nopython=True, parallel=True, cache=True)
-def calculate_bollinger_bands_vectorized(
-    prices: np.ndarray, period: int = 20, std_dev: float = 2.0
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Vectorized Bollinger Bands calculation."""
-    n = len(prices)
-    middle_band = np.empty(n, dtype=np.float64)
-    upper_band = np.empty(n, dtype=np.float64)
-    lower_band = np.empty(n, dtype=np.float64)
-
-    # Fill initial values with NaN
-    for i in prange(period - 1):
-        middle_band[i] = np.nan
-        upper_band[i] = np.nan
-        lower_band[i] = np.nan
-
-    # Calculate bands
-    for i in prange(period - 1, n):
-        window = prices[i - period + 1 : i + 1]
-        mean_val = np.mean(window)
-        std_val = np.std(window)
-
-        middle_band[i] = mean_val
-        upper_band[i] = mean_val + (std_dev * std_val)
-        lower_band[i] = mean_val - (std_dev * std_val)
-
-    return upper_band, middle_band, lower_band
-
-
-@jit(nopython=True, parallel=True, cache=True)
-def calculate_macd_vectorized(
-    prices: np.ndarray, fast_period: int = 12, slow_period: int = 26, signal_period: int = 9
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Vectorized MACD calculation."""
-    ema_fast = calculate_ema_vectorized(prices, fast_period)
-    ema_slow = calculate_ema_vectorized(prices, slow_period)
-
-    macd_line = ema_fast - ema_slow
-    signal_line = calculate_ema_vectorized(macd_line, signal_period)
-    histogram = macd_line - signal_line
-
-    return macd_line, signal_line, histogram
+# NOTE: Vectorized calculation functions are now imported from src.utils.technical_indicators
+# This eliminates code duplication and ensures consistency across the codebase.
 
 
 @jit(nopython=True, parallel=True, cache=True)
@@ -222,7 +123,10 @@ class HighPerformanceDataBuffer:
             self.buffer = self.mmap_buffer
         except Exception as e:
             # Fallback to regular array
-            self.logger.warning(f"Memory mapping failed, using regular array: {e}")
+            from src.core.logging import get_logger
+
+            logger = get_logger(__name__)
+            logger.warning(f"Memory mapping failed, using regular array: {e}")
             self.use_mmap = False
 
     def append_batch(self, data: np.ndarray) -> None:
@@ -304,31 +208,53 @@ class VectorizedProcessor:
     with minimal latency and maximum throughput.
     """
 
-    def __init__(self, config: Config) -> None:
+    def __init__(
+        self,
+        config: Config,
+        price_buffer_factory=None,
+        trade_buffer_factory=None,
+        indicator_cache_factory=None,
+        thread_pool_factory=None,
+    ) -> None:
         self.config = config
         self.logger = get_logger(__name__)
 
-        # High-performance buffers
-        self.price_buffer = HighPerformanceDataBuffer(
-            size=500000, num_fields=6
-        )  # OHLCV + timestamp
-        self.trade_buffer = HighPerformanceDataBuffer(
-            size=1000000, num_fields=4
-        )  # price, volume, timestamp, side
+        # High-performance buffers with factory pattern
+        if price_buffer_factory:
+            self.price_buffer = price_buffer_factory(size=500000, num_fields=6)
+        else:
+            self.price_buffer = HighPerformanceDataBuffer(
+                size=500000, num_fields=6
+            )  # OHLCV + timestamp
 
-        # Indicator caches
-        self.indicator_cache = IndicatorCache(data={}, last_updated=time.time())
+        if trade_buffer_factory:
+            self.trade_buffer = trade_buffer_factory(size=1000000, num_fields=4)
+        else:
+            self.trade_buffer = HighPerformanceDataBuffer(
+                size=1000000, num_fields=4
+            )  # price, volume, timestamp, side
 
-        # Thread pool for parallel processing
-        # Get processing threads from config safely
+        # Indicator caches with factory pattern
+        if indicator_cache_factory:
+            self.indicator_cache = indicator_cache_factory(data={}, last_updated=time.time())
+        else:
+            self.indicator_cache = IndicatorCache(data={}, last_updated=time.time())
+
+        # Thread pool for parallel processing with factory pattern
         processing_threads = 4  # default
         if hasattr(config, "data") and hasattr(config.data, "processing_threads"):
             processing_threads = config.data.processing_threads or 4
 
-        self.thread_pool = ThreadPoolExecutor(
-            max_workers=min(8, processing_threads),
-            thread_name_prefix="vectorized-processor",
-        )
+        if thread_pool_factory:
+            self.thread_pool = thread_pool_factory(
+                max_workers=min(8, processing_threads),
+                thread_name_prefix="vectorized-processor",
+            )
+        else:
+            self.thread_pool = ThreadPoolExecutor(
+                max_workers=min(8, processing_threads),
+                thread_name_prefix="vectorized-processor",
+            )
 
         # Performance metrics
         self.metrics = {
@@ -393,8 +319,7 @@ class VectorizedProcessor:
         except Exception as e:
             self.logger.error("Batch processing failed", error=str(e))
             raise DataProcessingError(
-                f"Batch processing failed: {e}",
-                processing_step="market_data_batch"
+                f"Batch processing failed: {e}", processing_step="market_data_batch"
             )
 
     def _convert_to_numpy(self, market_data: list[dict[str, Any]]) -> np.ndarray:
@@ -403,13 +328,15 @@ class VectorizedProcessor:
         data_array = np.zeros((n, 6), dtype=np.float64)
 
         for i, record in enumerate(market_data):
+            # Use Decimal precision for financial data conversion
+            getcontext().prec = 16
             data_array[i] = [
                 record.get("timestamp", time.time()),
-                float(record.get("open", 0)),
-                float(record.get("high", 0)),
-                float(record.get("low", 0)),
-                float(record.get("close", 0)),
-                float(record.get("volume", 0)),
+                float(Decimal(str(record.get("open", 0)))),
+                float(Decimal(str(record.get("high", 0)))),
+                float(Decimal(str(record.get("low", 0)))),
+                float(Decimal(str(record.get("close", 0)))),
+                float(Decimal(str(record.get("volume", 0)))),
             ]
 
         return data_array
@@ -469,12 +396,11 @@ class VectorizedProcessor:
             except Exception as e:
                 self.logger.warning(f"Indicator calculation failed: {name}", error=str(e))
 
-        # Cache results - skip caching for now as it expects different types
-        # self.indicator_cache.set(cache_key, indicators)
+        # Caching disabled for indicators - performance optimization needed
 
         return indicators
 
-    def calculate_real_time_indicators(self, current_price: float) -> dict[str, float]:
+    def calculate_real_time_indicators(self, current_price: Decimal) -> dict[str, Decimal]:
         """
         Calculate real-time indicators for a single price update.
         Optimized for <100μs latency.
@@ -488,32 +414,43 @@ class VectorizedProcessor:
             prices = recent_data[:, 4]  # Close prices
 
             # Add current price
-            all_prices = np.append(prices, current_price)
+            all_prices = np.append(prices, float(current_price))
 
             # Calculate fast indicators
+            getcontext().prec = 16
             indicators = {
-                "ema_12": calculate_ema_vectorized(all_prices, 12)[-1],
-                "ema_26": calculate_ema_vectorized(all_prices, 26)[-1],
-                "rsi": calculate_rsi_vectorized(all_prices)[-1],
+                "ema_12": Decimal(str(calculate_ema_vectorized(all_prices, 12)[-1])).quantize(
+                    Decimal("0.00000001")
+                ),
+                "ema_26": Decimal(str(calculate_ema_vectorized(all_prices, 26)[-1])).quantize(
+                    Decimal("0.00000001")
+                ),
+                "rsi": Decimal(str(calculate_rsi_vectorized(all_prices)[-1])).quantize(
+                    Decimal("0.0001")
+                ),
             }
 
             # Calculate MACD
             macd_line, macd_signal, macd_histogram = calculate_macd_vectorized(all_prices)
             indicators.update(
                 {
-                    "macd_line": macd_line[-1],
-                    "macd_signal": macd_signal[-1],
-                    "macd_histogram": macd_histogram[-1],
+                    "macd_line": Decimal(str(macd_line[-1])).quantize(Decimal("0.00000001")),
+                    "macd_signal": Decimal(str(macd_signal[-1])).quantize(Decimal("0.00000001")),
+                    "macd_histogram": Decimal(str(macd_histogram[-1])).quantize(
+                        Decimal("0.00000001")
+                    ),
                 }
             )
 
-            return {k: float(v) for k, v in indicators.items() if not np.isnan(v)}
+            return {
+                k: v for k, v in indicators.items() if not (isinstance(v, float) and np.isnan(v))
+            }
 
         except Exception as e:
             self.logger.error("Real-time indicator calculation failed", error=str(e))
             raise DataProcessingError(
                 f"Real-time indicator calculation failed: {e}",
-                processing_step="real_time_indicators"
+                processing_step="real_time_indicators",
             )
 
     def _update_metrics(self, batch_size: int, processing_time_us: float) -> None:

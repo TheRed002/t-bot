@@ -15,7 +15,6 @@ Dependencies:
 """
 
 import statistics
-from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
@@ -33,22 +32,32 @@ from src.error_handling.recovery_scenarios import DataFeedInterruptionRecovery
 
 # Import from P-007A utilities
 from src.utils.decorators import time_execution
+from src.utils.validation.validation_types import ValidationCategory, ValidationIssue
 
 # ValidationLevel and ValidationResult are now imported from core.types
 
 
-@dataclass
-class ValidationIssue:
-    """Data validation issue record"""
-
-    field: str
-    value: Any
-    expected: Any
-    message: str
-    level: ValidationLevel
-    timestamp: datetime
-    source: str
-    metadata: dict[str, Any]
+def create_validation_issue(
+    field: str,
+    value: Any,
+    expected: Any,
+    message: str,
+    level: ValidationLevel,
+    category: ValidationCategory = ValidationCategory.SCHEMA,
+    source: str = "DataValidator",
+    metadata: dict[str, Any] | None = None,
+) -> ValidationIssue:
+    """Helper function to create standardized validation issues."""
+    return ValidationIssue(
+        field=field,
+        value=value,
+        expected=expected,
+        message=message,
+        level=level,
+        source=source,
+        metadata=metadata or {},
+        category=category,
+    )
 
 
 class DataValidator(BaseComponent):
@@ -135,9 +144,9 @@ class DataValidator(BaseComponent):
                     expected="valid_market_data",
                     message="Market data is None",
                     level=ValidationLevel.CRITICAL,
-                    timestamp=datetime.now(timezone.utc),
                     source="DataValidator",
                     metadata={"error_type": "NoneData"},
+                    category=ValidationCategory.SCHEMA,
                 )
                 return False, [issue]
 
@@ -218,9 +227,9 @@ class DataValidator(BaseComponent):
                 expected="successful_validation",
                 message=f"Validation system error: {e!s}",
                 level=ValidationLevel.CRITICAL,
-                timestamp=datetime.now(timezone.utc),
                 source="DataValidator",
                 metadata=metadata,
+                category=ValidationCategory.INTEGRITY,
             )
             return False, [issue]
 
@@ -247,9 +256,9 @@ class DataValidator(BaseComponent):
                         expected="valid_direction",
                         message="Signal direction is required",
                         level=ValidationLevel.CRITICAL,
-                        timestamp=datetime.now(timezone.utc),
                         source="DataValidator",
                         metadata={},
+                        category=ValidationCategory.SCHEMA,
                     )
                 )
 
@@ -262,9 +271,9 @@ class DataValidator(BaseComponent):
                         expected="0.0_to_1.0",
                         message="Signal confidence must be between 0 and 1",
                         level=ValidationLevel.HIGH,
-                        timestamp=datetime.now(timezone.utc),
                         source="DataValidator",
                         metadata={},
+                        category=ValidationCategory.RANGE,
                     )
                 )
 
@@ -277,9 +286,9 @@ class DataValidator(BaseComponent):
                         expected="current_or_past_time",
                         message="Signal timestamp is in the future",
                         level=ValidationLevel.MEDIUM,
-                        timestamp=datetime.now(timezone.utc),
                         source="DataValidator",
                         metadata={},
+                        category=ValidationCategory.TEMPORAL,
                     )
                 )
 
@@ -292,9 +301,9 @@ class DataValidator(BaseComponent):
                         expected="valid_symbol",
                         message="Signal symbol is required",
                         level=ValidationLevel.CRITICAL,
-                        timestamp=datetime.now(timezone.utc),
                         source="DataValidator",
                         metadata={},
+                        category=ValidationCategory.SCHEMA,
                     )
                 )
 
@@ -352,9 +361,9 @@ class DataValidator(BaseComponent):
                 expected="successful_validation",
                 message=f"Signal validation system error: {e!s}",
                 level=ValidationLevel.CRITICAL,
-                timestamp=datetime.now(timezone.utc),
                 source="DataValidator",
                 metadata=metadata,
+                category=ValidationCategory.INTEGRITY,
             )
             return False, [issue]
 
@@ -1177,21 +1186,24 @@ class DataValidator(BaseComponent):
         if not symbol or not isinstance(symbol, str):
             return False
 
-        # Must be at least 6 characters for trading pairs (e.g., BTCUSD)
-        if len(symbol) < 6:
+        # Must contain "/" separator for trading pairs (e.g., BTC/USDT)
+        if "/" not in symbol:
             return False
 
-        # Must contain only alphanumeric characters and allowed separators
-        allowed_chars = set("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-")
-        if not all(c in allowed_chars for c in symbol.upper()):
+        # Split by separator and validate parts
+        parts = symbol.split("/")
+        if len(parts) != 2:
             return False
 
-        # Must not start or end with separator
-        if symbol.startswith("-") or symbol.endswith("-"):
+        # Each part must be at least 3 characters
+        if len(parts[0]) < 3 or len(parts[1]) < 3:
             return False
 
-        # Must not have consecutive separators
-        if "--" in symbol:
+        # Must contain only alphanumeric characters
+        allowed_chars = set("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
+        if not all(c in allowed_chars for c in parts[0].upper()):
+            return False
+        if not all(c in allowed_chars for c in parts[1].upper()):
             return False
 
         return True

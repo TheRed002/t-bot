@@ -47,7 +47,7 @@ class DataValidationPipeline(BaseComponent):
 
     def validate(self, data: Any) -> tuple[bool, list[str]]:
         """
-        Run all validators and collect errors.
+        Run all validators and collect errors with consistent error handling.
 
         Args:
             data: Data to validate
@@ -57,28 +57,49 @@ class DataValidationPipeline(BaseComponent):
         """
         errors = []
 
+        # Module boundary validation
+        if not self.validators:
+            self.logger.warning("No validators configured in pipeline")
+            return True, []
+
+        if data is None:
+            errors.append("Cannot validate None data")
+            return False, errors
+
         for validator in self.validators:
             try:
-                # Reset validator state
+                # Reset validator state for clean validation
                 validator.reset()
 
-                # Run validation
+                # Run validation with consistent error handling
                 if not validator.validate(data):
                     validator_errors = validator.get_errors()
                     if validator_errors:
                         errors.extend(validator_errors)
                     else:
-                        errors.append(f"{validator.__class__.__name__} validation failed")
+                        errors.append(
+                            f"{validator.__class__.__name__} validation failed (no specific errors reported)"
+                        )
 
             except Exception as e:
-                error_msg = f"{validator.__class__.__name__} raised exception: {e!s}"
+                # Use consistent error propagation pattern
+                error_msg = f"{validator.__class__.__name__} validation error: {e!s}"
                 self.logger.error(error_msg)
                 errors.append(error_msg)
+
+                # Log the full exception for debugging while maintaining consistent interface
+                self.logger.debug(
+                    f"Validator exception details: {type(e).__name__}: {e!s}", exc_info=True
+                )
 
         is_valid = len(errors) == 0
 
         if not is_valid:
-            self.logger.warning(f"Validation failed with {len(errors)} errors")
+            self.logger.warning(
+                f"Validation pipeline failed with {len(errors)} errors for data type: {type(data).__name__}"
+            )
+        else:
+            self.logger.debug(f"Validation pipeline passed for {len(self.validators)} validators")
 
         return is_valid, errors
 

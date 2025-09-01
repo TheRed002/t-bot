@@ -13,7 +13,7 @@ Dependencies:
 """
 
 import statistics
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from enum import Enum
@@ -22,9 +22,15 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 from src.core.base.component import BaseComponent
+from src.core.base.interfaces import HealthCheckResult, HealthStatus
 from src.core.config import Config
 from src.core.types import MarketData
 from src.utils.decorators import time_execution
+
+
+def _get_utc_now() -> datetime:
+    """Get current UTC datetime."""
+    return datetime.now(timezone.utc)
 
 
 class ValidationSeverity(Enum):
@@ -66,11 +72,11 @@ class ValidationIssue:
     severity: ValidationSeverity
     dimension: QualityDimension
     message: str
-    field: str | None = None
+    field_name: str | None = None
     value: Any | None = None
     expected: Any | None = None
     rule_name: str = ""
-    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    timestamp: datetime = field(default_factory=_get_utc_now)
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
@@ -110,7 +116,7 @@ class ValidationRule(BaseModel):
     enabled: bool = True
     parameters: dict[str, Any] = Field(default_factory=dict)
 
-    model_config = ConfigDict(use_enum_values=True)
+    model_config = ConfigDict()
 
 
 class MarketDataValidationResult(BaseModel):
@@ -121,7 +127,7 @@ class MarketDataValidationResult(BaseModel):
     quality_score: QualityScore
     issues: list[ValidationIssue] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
-    validation_timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    validation_timestamp: datetime = Field(default_factory=_get_utc_now)
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -154,14 +160,14 @@ class DataValidator(BaseComponent):
         self._initialize_rules()
 
         # Statistics for adaptive thresholds
-        self._price_stats: dict[str, dict[str, float]] = {}
-        self._volume_stats: dict[str, dict[str, float]] = {}
+        self._price_stats: dict[str, dict[str, Decimal | datetime]] = {}
+        self._volume_stats: dict[str, dict[str, Decimal | datetime]] = {}
 
         self._initialized = False
 
     def _setup_configuration(self) -> None:
         """Setup validator configuration."""
-        validator_config = getattr(self.config, "data_validator", {})
+        validator_config = getattr(self.config, "data_validator", {}) or {}
 
         self.validation_config = {
             "enable_schema_validation": validator_config.get("enable_schema", True),
@@ -418,7 +424,7 @@ class DataValidator(BaseComponent):
                             severity=rule.severity,
                             dimension=rule.dimension,
                             message=f"Required field '{field}' is missing",
-                            field=field,
+                            field_name=field,
                             rule_name=rule.name,
                         )
                     )
@@ -437,7 +443,7 @@ class DataValidator(BaseComponent):
                             severity=rule.severity,
                             dimension=rule.dimension,
                             message="Price must be numeric",
-                            field="price",
+                            field_name="price",
                             value=data.price,
                             rule_name=rule.name,
                         )
@@ -454,7 +460,7 @@ class DataValidator(BaseComponent):
                             severity=rule.severity,
                             dimension=rule.dimension,
                             message="Volume must be numeric",
-                            field="volume",
+                            field_name="volume",
                             value=data.volume,
                             rule_name=rule.name,
                         )
@@ -470,7 +476,7 @@ class DataValidator(BaseComponent):
         rule = self._rules.get("positive_price")
         if rule and rule.enabled and data.price is not None:
             try:
-                price_value = float(data.price)
+                price_value = Decimal(str(data.price))
                 if price_value <= 0:
                     issues.append(
                         ValidationIssue(
@@ -478,20 +484,21 @@ class DataValidator(BaseComponent):
                             severity=rule.severity,
                             dimension=rule.dimension,
                             message="Price must be positive",
-                            field="price",
+                            field_name="price",
                             value=price_value,
                             expected="positive number",
                             rule_name=rule.name,
                         )
                     )
-            except (ValueError, TypeError):
-                pass  # Type validation handled in schema validation
+            except (ValueError, TypeError) as e:
+                self.logger.debug(f"Validation failed due to format error: {e}")
+                # Skip validation for non-numeric values  # Type validation handled in schema validation
 
         # Positive volume check
         rule = self._rules.get("positive_volume")
         if rule and rule.enabled and data.volume is not None:
             try:
-                volume_value = float(data.volume)
+                volume_value = Decimal(str(data.volume))
                 if volume_value < 0:
                     issues.append(
                         ValidationIssue(
@@ -499,21 +506,22 @@ class DataValidator(BaseComponent):
                             severity=rule.severity,
                             dimension=rule.dimension,
                             message="Volume must be non-negative",
-                            field="volume",
+                            field_name="volume",
                             value=volume_value,
                             expected="non-negative number",
                             rule_name=rule.name,
                         )
                     )
-            except (ValueError, TypeError):
-                pass
+            except (ValueError, TypeError) as e:
+                self.logger.debug(f"Validation failed due to format error: {e}")
+                # Skip validation for non-numeric values
 
         # Bid-ask spread check
         rule = self._rules.get("bid_ask_spread")
         if rule and rule.enabled and data.bid is not None and data.ask is not None:
             try:
-                bid_value = float(data.bid)
-                ask_value = float(data.ask)
+                bid_value = Decimal(str(data.bid))
+                ask_value = Decimal(str(data.ask))
                 if bid_value >= ask_value:
                     issues.append(
                         ValidationIssue(
@@ -521,13 +529,14 @@ class DataValidator(BaseComponent):
                             severity=rule.severity,
                             dimension=rule.dimension,
                             message="Bid price should be less than ask price",
-                            field="bid_ask",
+                            field_name="bid_ask",
                             value=f"bid: {bid_value}, ask: {ask_value}",
                             rule_name=rule.name,
                         )
                     )
-            except (ValueError, TypeError):
-                pass
+            except (ValueError, TypeError) as e:
+                self.logger.debug(f"Validation failed due to format error: {e}")
+                # Skip validation for non-numeric values
 
         return issues
 
@@ -539,55 +548,62 @@ class DataValidator(BaseComponent):
         rule = self._rules.get("price_outlier")
         if rule and rule.enabled and data.price is not None and data.symbol in self._price_stats:
             try:
-                price_value = float(data.price)
+                price_value = Decimal(str(data.price))
                 stats = self._price_stats[data.symbol]
 
-                if "mean" in stats and "std" in stats and stats["std"] > 0:
-                    z_score = abs(price_value - stats["mean"]) / stats["std"]
+                mean_val = stats.get("mean")
+                std_val = stats.get("std")
+                if isinstance(mean_val, Decimal) and isinstance(std_val, Decimal) and std_val > 0:
+                    z_score = abs(price_value - mean_val) / std_val
                     threshold = rule.parameters.get("z_score_threshold", 3.0)
 
-                    if z_score > threshold:
+                    threshold_decimal = Decimal(str(threshold))
+                    if z_score > threshold_decimal:
                         issues.append(
                             ValidationIssue(
                                 category=rule.category,
                                 severity=rule.severity,
                                 dimension=rule.dimension,
-                                message=f"Price is statistical outlier (z-score: {z_score:.2f})",
-                                field="price",
+                                message=f"Price is statistical outlier (z-score: {float(z_score):.2f})",
+                                field_name="price",
                                 value=price_value,
                                 rule_name=rule.name,
-                                metadata={"z_score": z_score, "threshold": threshold},
+                                metadata={"z_score": float(z_score), "threshold": threshold},
                             )
                         )
-            except (ValueError, TypeError):
-                pass
+            except (ValueError, TypeError) as e:
+                self.logger.debug(f"Validation failed due to format error: {e}")
+                # Skip validation for non-numeric values
 
         # Volume spike detection
         rule = self._rules.get("volume_spike")
         if rule and rule.enabled and data.volume is not None and data.symbol in self._volume_stats:
             try:
-                volume_value = float(data.volume)
+                volume_value = Decimal(str(data.volume))
                 stats = self._volume_stats[data.symbol]
 
-                if "mean" in stats and stats["mean"] > 0:
-                    multiplier = volume_value / stats["mean"]
+                mean_val = stats.get("mean")
+                if isinstance(mean_val, Decimal) and mean_val > 0:
+                    multiplier = volume_value / mean_val
                     threshold = rule.parameters.get("spike_multiplier", 5.0)
+                    threshold_decimal = Decimal(str(threshold))
 
-                    if multiplier > threshold:
+                    if multiplier > threshold_decimal:
                         issues.append(
                             ValidationIssue(
                                 category=rule.category,
                                 severity=rule.severity,
                                 dimension=rule.dimension,
-                                message=f"Volume spike detected ({multiplier:.1f}x normal)",
-                                field="volume",
+                                message=f"Volume spike detected ({float(multiplier):.1f}x normal)",
+                                field_name="volume",
                                 value=volume_value,
                                 rule_name=rule.name,
-                                metadata={"multiplier": multiplier, "threshold": threshold},
+                                metadata={"multiplier": float(multiplier), "threshold": threshold},
                             )
                         )
-            except (ValueError, TypeError):
-                pass
+            except (ValueError, TypeError) as e:
+                self.logger.debug(f"Validation failed due to format error: {e}")
+                # Skip validation for non-numeric values
 
         return issues
 
@@ -613,7 +629,7 @@ class DataValidator(BaseComponent):
                         severity=rule.severity,
                         dimension=rule.dimension,
                         message="Timestamp is in the future",
-                        field="timestamp",
+                        field_name="timestamp",
                         value=data.timestamp.isoformat(),
                         rule_name=rule.name,
                     )
@@ -633,7 +649,7 @@ class DataValidator(BaseComponent):
                         severity=rule.severity,
                         dimension=rule.dimension,
                         message=f"Data is stale (age: {age.total_seconds() / 60:.1f} minutes)",
-                        field="timestamp",
+                        field_name="timestamp",
                         value=data.timestamp.isoformat(),
                         rule_name=rule.name,
                         metadata={"age_minutes": age.total_seconds() / 60},
@@ -660,7 +676,9 @@ class DataValidator(BaseComponent):
                         _, digits, exponent = decimal_value.as_tuple()
 
                         # Count decimal places
-                        decimal_places = -exponent if exponent < 0 else 0
+                        decimal_places = (
+                            -int(exponent) if isinstance(exponent, int) and exponent < 0 else 0
+                        )
 
                         if decimal_places > max_places:
                             issues.append(
@@ -668,8 +686,11 @@ class DataValidator(BaseComponent):
                                     category=rule.category,
                                     severity=rule.severity,
                                     dimension=rule.dimension,
-                                    message=f"Too many decimal places in {field_name} ({decimal_places} > {max_places})",
-                                    field=field_name,
+                                    message=(
+                                f"Too many decimal places in {field_name} "
+                                f"({decimal_places} > {max_places})"
+                            ),
+                                    field_name=field_name,
                                     value=value,
                                     rule_name=rule.name,
                                     metadata={
@@ -678,8 +699,11 @@ class DataValidator(BaseComponent):
                                     },
                                 )
                             )
-                    except (ValueError, TypeError, InvalidOperation):
-                        pass
+                    except (ValueError, TypeError, InvalidOperation) as e:
+                        self.logger.debug(
+                            f"Decimal precision validation failed for field {field_name}: {e}"
+                        )
+                        # Skip validation for invalid decimal values
 
         return issues
 
@@ -744,24 +768,28 @@ class DataValidator(BaseComponent):
     async def _update_statistics(self, data_list: list[MarketData]) -> None:
         """Update statistical baselines for validation."""
         # Group data by symbol
-        symbol_groups = {}
+        symbol_groups: dict[str, list[MarketData]] = {}
         for data in data_list:
             if data.symbol not in symbol_groups:
                 symbol_groups[data.symbol] = []
             symbol_groups[data.symbol].append(data)
 
-        # Update statistics for each symbol
+        # Update statistics for each symbol using Decimal precision
         for symbol, symbol_data in symbol_groups.items():
             # Price statistics
-            prices = [float(d.price) for d in symbol_data if d.price is not None]
+            prices = [Decimal(str(d.price)) for d in symbol_data if d.price is not None]
             if prices:
                 if symbol not in self._price_stats:
                     self._price_stats[symbol] = {}
 
+                # Convert to float for statistics calculations, then back to Decimal
+                price_floats = [float(p) for p in prices]
                 self._price_stats[symbol].update(
                     {
-                        "mean": statistics.mean(prices),
-                        "std": statistics.stdev(prices) if len(prices) > 1 else 0.0,
+                        "mean": Decimal(str(statistics.mean(price_floats))),
+                        "std": Decimal(str(statistics.stdev(price_floats)))
+                        if len(prices) > 1
+                        else Decimal("0"),
                         "min": min(prices),
                         "max": max(prices),
                         "count": len(prices),
@@ -770,15 +798,19 @@ class DataValidator(BaseComponent):
                 )
 
             # Volume statistics
-            volumes = [float(d.volume) for d in symbol_data if d.volume is not None]
+            volumes = [Decimal(str(d.volume)) for d in symbol_data if d.volume is not None]
             if volumes:
                 if symbol not in self._volume_stats:
                     self._volume_stats[symbol] = {}
 
+                # Convert to float for statistics calculations, then back to Decimal
+                volume_floats = [float(v) for v in volumes]
                 self._volume_stats[symbol].update(
                     {
-                        "mean": statistics.mean(volumes),
-                        "std": statistics.stdev(volumes) if len(volumes) > 1 else 0.0,
+                        "mean": Decimal(str(statistics.mean(volume_floats))),
+                        "std": Decimal(str(statistics.stdev(volume_floats)))
+                        if len(volumes) > 1
+                        else Decimal("0"),
                         "min": min(volumes),
                         "max": max(volumes),
                         "count": len(volumes),
@@ -825,10 +857,12 @@ class DataValidator(BaseComponent):
             "volume_stats_symbols": len(self._volume_stats),
         }
 
-    async def health_check(self) -> dict[str, Any]:
+    async def health_check(self) -> HealthCheckResult:
         """Perform validator health check."""
-        return {
-            "status": "healthy",
+        status = HealthStatus.HEALTHY if self._initialized else HealthStatus.DEGRADED
+
+        details = {
+            "status": "healthy" if self._initialized else "degraded",
             "initialized": self._initialized,
             "validation_stats": await self.get_validation_stats(),
             "configuration": {
@@ -839,6 +873,10 @@ class DataValidator(BaseComponent):
                 "regulatory_validation": self.validation_config["enable_regulatory_validation"],
             },
         }
+
+        return HealthCheckResult(
+            status=status, details=details, message="DataValidator health check"
+        )
 
     async def cleanup(self) -> None:
         """Cleanup validator resources."""
