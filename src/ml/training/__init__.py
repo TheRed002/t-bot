@@ -7,10 +7,10 @@ hyperparameter optimization, cross-validation, and automated training pipelines.
 
 from .cross_validation import CrossValidationService
 from .hyperparameter_optimization import HyperparameterOptimizationService
-from .trainer import TrainingService
+from .trainer import ModelTrainingService
 
 __all__ = [
     "CrossValidationService",
     "HyperparameterOptimizationService",
-    "TrainingService",
+    "ModelTrainingService",
 ]

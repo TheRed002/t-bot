@@ -123,6 +123,7 @@ class ModelRegistryService(BaseService):
 
         # Service dependencies - resolved during startup
         self.data_service: Any = None
+        self.ml_repository: Any = None
 
         # Internal state
         self._model_cache: dict[str, tuple[ModelMetadata, Any, datetime]] = {}
@@ -143,6 +144,7 @@ class ModelRegistryService(BaseService):
 
         # Add required dependencies
         self.add_dependency("DataService")
+        self.add_dependency("MLRepository")
 
     async def _do_start(self) -> None:
         """Start the model registry service."""
@@ -150,6 +152,7 @@ class ModelRegistryService(BaseService):
 
         # Resolve dependencies
         self.data_service = self.resolve_dependency("DataService")
+        self.ml_repository = self.resolve_dependency("MLRepository")
 
         # Load existing model metadata if persistence is enabled
         if self.registry_config.enable_persistence:
@@ -240,7 +243,7 @@ class ModelRegistryService(BaseService):
                 await self._save_model_to_file(request.model, model_file_path)
                 metadata.file_path = str(model_file_path)
 
-            # Store model metadata in data service
+            # Store model metadata through repository
             await self._store_model_metadata(metadata)
 
             # Cache the model and metadata
@@ -412,8 +415,8 @@ class ModelRegistryService(BaseService):
     ) -> list[dict[str, Any]]:
         """Internal model listing implementation."""
         try:
-            # Get all model metadata from data service
-            models_data = await self.data_service.get_all_models(
+            # Get all model metadata from repository
+            models_data = await self.ml_repository.get_all_models(
                 model_type=model_type,
                 stage=stage,
                 active_only=active_only,
@@ -631,8 +634,8 @@ class ModelRegistryService(BaseService):
                         self._executor, registry_file.unlink
                     )
 
-            # Remove from data service
-            await self.data_service.delete_model(model_id)
+            # Remove from repository
+            await self.ml_repository.delete_model(model_id)
 
             # Remove from caches
             if model_id in self._model_cache:
@@ -725,7 +728,7 @@ class ModelRegistryService(BaseService):
     async def _generate_model_id_and_version(self, name: str, model_type: str) -> tuple[str, str]:
         """Generate unique model ID and version."""
         # Check existing models
-        existing_models = await self.data_service.get_models_by_name_and_type(name, model_type)
+        existing_models = await self.ml_repository.get_models_by_name_and_type(name, model_type)
 
         if existing_models:
             # Get latest version and increment
@@ -756,7 +759,7 @@ class ModelRegistryService(BaseService):
             return await self._get_model_metadata(model_id)
 
         # Search by other criteria
-        models_data = await self.data_service.find_models(
+        models_data = await self.ml_repository.find_models(
             name=model_name,
             model_type=model_type,
             version=version,
@@ -782,8 +785,8 @@ class ModelRegistryService(BaseService):
             else:
                 del self._model_metadata_cache[model_id]
 
-        # Get from data service
-        model_data = await self.data_service.get_model_by_id(model_id)
+        # Get from repository
+        model_data = await self.ml_repository.get_model_by_id(model_id)
         if not model_data:
             return None
 
@@ -795,12 +798,12 @@ class ModelRegistryService(BaseService):
         return metadata
 
     async def _store_model_metadata(self, metadata: ModelMetadata) -> None:
-        """Store model metadata in data service."""
-        await self.data_service.store_model_metadata(metadata.dict())
+        """Store model metadata through repository."""
+        await self.ml_repository.store_model_metadata(metadata.dict())
 
     async def _update_model_metadata(self, metadata: ModelMetadata) -> None:
-        """Update model metadata in data service."""
-        await self.data_service.update_model_metadata(metadata.model_id, metadata.dict())
+        """Update model metadata through repository."""
+        await self.ml_repository.update_model_metadata(metadata.model_id, metadata.dict())
 
     async def _save_model_to_file(self, model: Any, file_path: Path) -> None:
         """Save model to file."""
@@ -817,13 +820,8 @@ class ModelRegistryService(BaseService):
         """Save object as pickle file."""
         import pickle
 
-        f = None
-        try:
-            f = open(file_path, "wb")
+        with open(file_path, "wb") as f:
             pickle.dump(obj, f)
-        finally:
-            if f:
-                f.close()
 
     async def _load_model_from_file(self, file_path: Path) -> Any:
         """Load model from file."""
@@ -839,23 +837,13 @@ class ModelRegistryService(BaseService):
         """Load object from pickle file."""
         import pickle
 
-        f = None
-        try:
-            f = open(file_path, "rb")
+        with open(file_path, "rb") as f:
             return pickle.load(f)
-        finally:
-            if f:
-                f.close()
 
     def _load_json_file(self, file_path: Path) -> dict[str, Any]:
         """Load JSON file."""
-        f = None
-        try:
-            f = open(file_path)
+        with open(file_path) as f:
             return json.load(f)
-        finally:
-            if f:
-                f.close()
 
     async def _save_registry_entry(self, metadata: ModelMetadata) -> None:
         """Save registry entry to file."""
@@ -880,13 +868,8 @@ class ModelRegistryService(BaseService):
 
     def _save_json_file(self, data: dict[str, Any], file_path: Path) -> None:
         """Save data as JSON file."""
-        f = None
-        try:
-            f = open(file_path, "w")
+        with open(file_path, "w") as f:
             json.dump(data, f, indent=2, default=str)
-        finally:
-            if f:
-                f.close()
 
     async def _load_existing_metadata(self) -> None:
         """Load existing model metadata from files."""
@@ -952,9 +935,9 @@ class ModelRegistryService(BaseService):
             "service": "ModelRegistryService",
         }
 
-        # Store audit entry through data service
+        # Store audit entry through repository
         try:
-            await self.data_service.store_audit_entry("model_registry", audit_entry)
+            await self.ml_repository.store_audit_entry("model_registry", audit_entry)
         except Exception as e:
             self._logger.warning(f"Failed to log audit event: {e}")
 
@@ -1010,10 +993,10 @@ class ModelRegistryService(BaseService):
         """Clean up old model versions."""
         try:
             # Get all models grouped by name and type
-            all_models = await self.data_service.get_all_models()
+            all_models = await self.ml_repository.get_all_models()
 
             # Group by name and type
-            model_groups = {}
+            model_groups: dict[tuple[str | None, str | None], list[dict[str, Any]]] = {}
             for model in all_models:
                 key = (model.get("name"), model.get("model_type"))
                 if key not in model_groups:

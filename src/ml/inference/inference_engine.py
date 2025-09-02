@@ -20,6 +20,7 @@ from src.core.base.service import BaseService
 from src.core.exceptions import ModelError, ValidationError
 from src.core.types.base import ConfigDict
 from src.utils.decorators import UnifiedDecorator
+from src.utils.ml_cache import generate_cache_key, generate_prediction_cache_key
 
 # Initialize decorator instance
 dec = UnifiedDecorator()
@@ -95,7 +96,7 @@ class InferenceService(BaseService):
         self,
         config: ConfigDict | None = None,
         correlation_id: str | None = None,
-    ):
+    ) -> None:
         """
         Initialize the inference service.
 
@@ -114,10 +115,11 @@ class InferenceService(BaseService):
         self.inference_config = InferenceConfig(**inference_config_dict)
 
         # Service dependencies - resolved during startup
+        self.model_cache_service: Any = None
         self.model_registry_service: Any = None
         self.feature_engineering_service: Any = None
 
-        # Internal state
+        # Internal state - use simple caches (ModelCacheService will be injected)
         self._model_cache: dict[str, tuple[Any, datetime]] = {}
         self._prediction_cache: dict[str, tuple[InferencePredictionResponse, datetime]] = {}
 
@@ -126,6 +128,9 @@ class InferenceService(BaseService):
 
         # Async processing components
         self._executor = ThreadPoolExecutor(max_workers=self.inference_config.max_cpu_cores)
+        self._prediction_queue: asyncio.Queue = asyncio.Queue(
+            maxsize=self.inference_config.max_queue_size
+        )
         self._batch_queue: asyncio.Queue = asyncio.Queue(
             maxsize=self.inference_config.max_queue_size
         )
@@ -133,6 +138,7 @@ class InferenceService(BaseService):
         self._batch_results: dict[str, asyncio.Future] = {}
 
         # Add required dependencies
+        self.add_dependency("ModelCacheService")
         self.add_dependency("ModelRegistryService")
         self.add_dependency("FeatureEngineeringService")
 
@@ -141,6 +147,7 @@ class InferenceService(BaseService):
         await super()._do_start()
 
         # Resolve dependencies
+        self.model_cache_service = self.resolve_dependency("ModelCacheService")
         self.model_registry_service = self.resolve_dependency("ModelRegistryService")
         self.feature_engineering_service = self.resolve_dependency("FeatureEngineeringService")
 
@@ -150,7 +157,7 @@ class InferenceService(BaseService):
 
         self._logger.info(
             "Inference service started successfully",
-            config=self.inference_config.dict(),
+            config=self.inference_config.model_dump(),
             batch_processing_enabled=self.inference_config.enable_batch_processing,
         )
 
@@ -389,9 +396,13 @@ class InferenceService(BaseService):
                     for response in model_responses:
                         if isinstance(response, Exception):
                             # Create error response
+                            processing_time_ms = (
+                                0.0  # Processing time not available for batch errors
+                            )
                             error_response = InferencePredictionResponse(
                                 request_id="batch_error",
                                 predictions=[],
+                                processing_time_ms=processing_time_ms,
                                 error=str(response),
                             )
                             responses.append(error_response)
@@ -403,9 +414,11 @@ class InferenceService(BaseService):
                 except Exception as e:
                     # Model loading failed - create error responses for all requests
                     for request in model_requests:
+                        processing_time_ms = 0.0  # Processing time not available for load errors
                         error_response = InferencePredictionResponse(
                             request_id=request.request_id,
                             predictions=[],
+                            processing_time_ms=processing_time_ms,
                             error=f"Model loading failed: {e}",
                         )
                         responses.append(error_response)
@@ -430,9 +443,11 @@ class InferenceService(BaseService):
             # Return error responses for all requests
             error_responses = []
             for request in requests:
+                processing_time_ms = (time.time() - start_time) * 1000
                 error_response = InferencePredictionResponse(
                     request_id=request.request_id,
                     predictions=[],
+                    processing_time_ms=processing_time_ms,
                     error=f"Batch prediction failed: {e}",
                 )
                 error_responses.append(error_response)
@@ -578,7 +593,10 @@ class InferenceService(BaseService):
             self.metrics.cache_misses += 1
 
         # Load from registry service
-        model_info = await self.model_registry_service.load_model(model_id)
+        from src.ml.registry.model_registry import ModelLoadRequest
+
+        load_request = ModelLoadRequest(model_id=model_id)
+        model_info = await self.model_registry_service.load_model(load_request)
 
         # Extract model from model_info
         # ModelRegistryService should return a dict with 'model' key
@@ -637,27 +655,23 @@ class InferenceService(BaseService):
                 predictions = model.predict(features)
                 return predictions, None
         except Exception as e:
-            raise ModelError(f"Model prediction failed: {e}")
+            raise ModelError(f"Model prediction failed: {e}") from e
 
     def _predict_without_probabilities(self, model: Any, features: pd.DataFrame) -> np.ndarray:
         """Synchronous prediction without probabilities."""
         try:
             return model.predict(features)
         except Exception as e:
-            raise ModelError(f"Model prediction failed: {e}")
+            raise ModelError(f"Model prediction failed: {e}") from e
 
     # Caching Operations
     def _generate_prediction_cache_key(
         self, model_id: str, features: pd.DataFrame, return_probabilities: bool
     ) -> str:
         """Generate cache key for prediction."""
-        import hashlib
-
-        # Create hash from model_id, features shape, and options
-        features_hash = str(hash(tuple(features.iloc[0].values))) if not features.empty else "empty"
-        cache_str = f"{model_id}_{features.shape}_{features_hash}_{return_probabilities}"
-
-        return hashlib.md5(cache_str.encode()).hexdigest()[:16]
+        # Use centralized cache key generation
+        features_hash = generate_cache_key(features)
+        return generate_prediction_cache_key(model_id, features_hash, return_probabilities)
 
     async def _get_cached_model(self, model_id: str) -> Any | None:
         """Get cached model."""
@@ -889,7 +903,7 @@ class InferenceService(BaseService):
         total_requests = self.metrics.total_requests
 
         return {
-            **self.metrics.dict(),
+            **self.metrics.model_dump(),
             "success_rate": (
                 self.metrics.successful_predictions / total_requests if total_requests > 0 else 0.0
             ),
@@ -930,6 +944,84 @@ class InferenceService(BaseService):
         """Reset inference metrics."""
         self.metrics = InferenceMetrics()
         self._logger.info("Inference metrics reset")
+
+    def _preprocess_features(self, features: Any) -> np.ndarray:
+        """Preprocess features for model input."""
+        try:
+            if isinstance(features, dict):
+                # Convert dict to DataFrame then to numpy array
+                df = pd.DataFrame([features])
+                return df.values
+            elif isinstance(features, pd.DataFrame):
+                return features.values
+            elif isinstance(features, np.ndarray):
+                return features
+            elif isinstance(features, list):
+                return np.array(features)
+            else:
+                raise ValidationError(f"Unsupported feature type: {type(features)}")
+        except Exception as e:
+            if "NaN" in str(e) or "nan" in str(e):
+                raise ValidationError("NaN values detected in features")
+            elif "inf" in str(e):
+                raise ValidationError("infinite values detected in features")
+            raise ValidationError(f"Feature preprocessing failed: {e}")
+
+    def _postprocess_predictions(self, predictions: np.ndarray | None) -> list:
+        """Postprocess predictions for response."""
+        if predictions is None or len(predictions) == 0:
+            return []
+
+        if isinstance(predictions, np.ndarray):
+            if predictions.ndim == 1:
+                return predictions.tolist()
+            elif predictions.ndim == 2:
+                if predictions.shape[1] == 1:
+                    return predictions[:, 0].tolist()
+                else:
+                    return predictions.tolist()
+
+        return list(predictions) if hasattr(predictions, "__iter__") else [predictions]
+
+    def _calculate_confidence_scores(
+        self, probabilities: np.ndarray | None, predictions: np.ndarray | None = None
+    ) -> list | None:
+        """Calculate confidence scores from probabilities or predictions."""
+        if probabilities is not None:
+            if isinstance(probabilities, np.ndarray) and probabilities.ndim == 2:
+                return np.max(probabilities, axis=1).tolist()
+            elif isinstance(probabilities, np.ndarray):
+                return np.abs(probabilities).tolist()
+        elif predictions is not None:
+            if isinstance(predictions, np.ndarray):
+                return np.abs(predictions).tolist()
+
+        return None
+
+    def _update_metrics(self, processing_time: float, success: bool, cache_hit: bool) -> None:
+        """Update inference metrics."""
+        self.metrics.total_requests += 1
+        self.metrics.total_processing_time += processing_time
+
+        if success:
+            self.metrics.successful_predictions += 1
+        else:
+            self.metrics.failed_predictions += 1
+
+        if cache_hit:
+            self.metrics.cache_hits += 1
+        else:
+            self.metrics.cache_misses += 1
+
+        # Update average processing time
+        if self.metrics.total_requests > 0:
+            self.metrics.average_processing_time = (
+                self.metrics.total_processing_time / self.metrics.total_requests
+            )
+
+    def get_metrics(self) -> dict[str, Any]:
+        """Get inference service metrics."""
+        return self.get_inference_metrics()
 
     # Configuration validation
     def _validate_service_config(self, config: ConfigDict) -> bool:

@@ -28,6 +28,7 @@ from src.core.exceptions import ModelError, ValidationError
 from src.core.types.base import ConfigDict
 from src.ml.feature_engineering import FeatureRequest
 from src.ml.registry.model_registry import ModelLoadRequest, ModelRegistrationRequest
+from src.utils.constants import ML_MODEL_CONSTANTS
 from src.utils.decorators import UnifiedDecorator
 
 # Initialize decorator instance
@@ -44,10 +45,16 @@ class MLServiceConfig(BaseModel):
     enable_batch_processing: bool = Field(default=True, description="Enable batch processing")
     enable_pipeline_caching: bool = Field(default=True, description="Enable pipeline caching")
     max_concurrent_operations: int = Field(
-        default=10, description="Maximum concurrent ML operations"
+        default=ML_MODEL_CONSTANTS["max_concurrent_operations"],
+        description="Maximum concurrent ML operations",
     )
-    pipeline_timeout_seconds: int = Field(default=300, description="Pipeline timeout in seconds")
-    cache_ttl_minutes: int = Field(default=30, description="Cache TTL in minutes")
+    pipeline_timeout_seconds: int = Field(
+        default=ML_MODEL_CONSTANTS["pipeline_timeout_seconds"],
+        description="Pipeline timeout in seconds",
+    )
+    cache_ttl_minutes: int = Field(
+        default=ML_MODEL_CONSTANTS["cache_ttl_minutes"], description="Cache TTL in minutes"
+    )
     enable_performance_monitoring: bool = Field(
         default=True, description="Enable performance monitoring"
     )
@@ -103,8 +110,8 @@ class MLTrainingRequest(BaseModel):
     model_name: str
     hyperparameters: dict[str, Any] = Field(default_factory=dict)
     feature_types: list[str] | None = None
-    validation_split: float = 0.2
-    cross_validation_folds: int = 5
+    validation_split: float = ML_MODEL_CONSTANTS["default_validation_split"]
+    cross_validation_folds: int = ML_MODEL_CONSTANTS["default_cv_folds"]
     enable_feature_selection: bool = True
     stage: str = "development"
     tags: dict[str, str] = Field(default_factory=dict)
@@ -142,7 +149,7 @@ class MLService(BaseService):
         self,
         config: ConfigDict | None = None,
         correlation_id: str | None = None,
-    ):
+    ) -> None:
         """
         Initialize the ML service.
 
@@ -172,7 +179,7 @@ class MLService(BaseService):
         self._active_operations: dict[str, asyncio.Task] = {}
 
         # Thread pool for CPU-intensive operations
-        self._executor = ThreadPoolExecutor(max_workers=4)
+        self._executor = ThreadPoolExecutor(max_workers=ML_MODEL_CONSTANTS["ml_executor_workers"])
 
         # Semaphore to limit concurrent operations
         self._operation_semaphore = asyncio.Semaphore(self.ml_config.max_concurrent_operations)
@@ -532,7 +539,10 @@ class MLService(BaseService):
                                 selected_features,
                                 feature_importance,
                             ) = await self.feature_engineering_service.select_features(
-                                features_df, target_series, method="mutual_info", max_features=50
+                                features_df,
+                                target_series,
+                                method="mutual_info",
+                                max_features=ML_MODEL_CONSTANTS["max_features_for_selection"],
                             )
                             features_df = selected_features_df
                         except Exception as e:
@@ -689,7 +699,9 @@ class MLService(BaseService):
 
         return model, training_metrics, validation_metrics
 
-    def _calculate_metrics(self, y_true, y_pred, is_classification: bool) -> dict[str, Any]:
+    def _calculate_metrics(
+        self, y_true: Any, y_pred: Any, is_classification: bool
+    ) -> dict[str, Any]:
         """Calculate appropriate metrics."""
         if is_classification:
             return {

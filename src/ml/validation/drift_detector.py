@@ -41,7 +41,7 @@ class DriftDetectionService(BaseService):
         drift_history: History of drift detections
     """
 
-    def __init__(self, config: ConfigDict | None = None, correlation_id: str | None = None):
+    def __init__(self, config: ConfigDict | None = None, correlation_id: str | None = None) -> None:
         """
         Initialize the drift detection service.
 
@@ -56,7 +56,8 @@ class DriftDetectionService(BaseService):
         )
 
         # Configuration parameters with defaults
-        ml_config = dict(self._config.get("ml", {}) if self._config else {})
+        ml_config_raw = self._config.get("ml", {}) if self._config else {}
+        ml_config = dict(ml_config_raw) if isinstance(ml_config_raw, dict) else {}
         self.drift_threshold = ml_config.get("drift_threshold", 0.1)
         self.min_samples = ml_config.get("min_drift_samples", 100)
         self.reference_window = ml_config.get("drift_reference_window", 1000)

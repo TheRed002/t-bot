@@ -157,7 +157,7 @@ class FeatureStoreService(BaseService):
 
         self._logger.info(
             "Feature store service started successfully",
-            config=self.fs_config.dict(),
+            config=self.fs_config.model_dump(),
             cached_features=len(self._feature_cache),
         )
 
@@ -278,7 +278,7 @@ class FeatureStoreService(BaseService):
                     symbol=request.symbol,
                     version=version,
                     feature_data=feature_data,
-                    metadata=metadata.dict(),
+                    metadata=metadata.model_dump(),
                 )
 
                 # Cache the features and metadata

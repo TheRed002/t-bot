@@ -9,6 +9,7 @@ risk controls, and automated decision making.
 import hashlib
 import uuid
 from datetime import datetime, timezone
+from decimal import ROUND_HALF_UP, Decimal, getcontext
 from enum import Enum
 from typing import Any
 
@@ -132,6 +133,10 @@ class ABTestFramework(BaseComponent):
         """
         super().__init__()
 
+        # Set precision context for financial calculations
+        getcontext().prec = 28
+        getcontext().rounding = ROUND_HALF_UP
+
         # A/B test management
         self.active_tests: dict[str, ABTest] = {}
         self.completed_tests: dict[str, ABTest] = {}
@@ -154,8 +159,9 @@ class ABTestFramework(BaseComponent):
         self,
         name: str,
         description: str,
-        control_model: str,
-        treatment_model: str,
+        control_model: str | None = None,
+        treatment_model: str | None = None,
+        variants: list[ABTestVariant] | None = None,
         traffic_split: float = 0.5,
         minimum_sample_size: int = 1000,
         confidence_level: float | None = None,
@@ -171,8 +177,9 @@ class ABTestFramework(BaseComponent):
         Args:
             name: Test name
             description: Test description
-            control_model: Control model name (baseline)
-            treatment_model: Treatment model name (new model)
+            control_model: Control model name (baseline) - used if variants not provided
+            treatment_model: Treatment model name (new model) - used if variants not provided
+            variants: List of pre-configured variants - takes priority over control/treatment models
             traffic_split: Fraction of traffic for treatment (0.0 to 1.0)
             minimum_sample_size: Minimum samples per variant
             confidence_level: Statistical confidence level
@@ -195,9 +202,37 @@ class ABTestFramework(BaseComponent):
                     f"Maximum concurrent tests ({self.max_concurrent_tests}) reached"
                 )
 
-            # Validate inputs
-            if not (0.0 < traffic_split < 1.0):
-                raise ValidationError("Traffic split must be between 0.0 and 1.0")
+            # Handle variants parameter vs individual model parameters
+            if variants is not None:
+                # Use provided variants (test interface)
+                test_variants = variants
+            elif control_model is not None and treatment_model is not None:
+                # Create variants from model names (original interface)
+                test_variants = [
+                    ABTestVariant(
+                        variant_id="control",
+                        name="Control Model",
+                        model_name=control_model,
+                        traffic_allocation=1.0 - traffic_split,
+                        metadata={"description": "Baseline model"},
+                    ),
+                    ABTestVariant(
+                        variant_id="treatment",
+                        name="Treatment Model",
+                        model_name=treatment_model,
+                        traffic_allocation=traffic_split,
+                        metadata={"description": "New model"},
+                    ),
+                ]
+            else:
+                raise ValidationError(
+                    "Either variants or both control_model and treatment_model must be provided"
+                )
+
+            # Validate traffic splits
+            total_traffic = sum(v.traffic_allocation for v in test_variants)
+            if not (0.95 <= total_traffic <= 1.05):  # Allow small floating point errors
+                raise ValidationError("Variant traffic allocations must sum to 1.0")
 
             if confidence_level is None:
                 confidence_level = self.default_confidence_level
@@ -207,29 +242,12 @@ class ABTestFramework(BaseComponent):
             # Create test ID
             test_id = str(uuid.uuid4())
 
-            # Create variants
-            control_variant = ABTestVariant(
-                variant_id=f"{test_id}_control",
-                name="Control",
-                model_name=control_model,
-                traffic_allocation=1.0 - traffic_split,
-                metadata={"variant_type": "control"},
-            )
-
-            treatment_variant = ABTestVariant(
-                variant_id=f"{test_id}_treatment",
-                name="Treatment",
-                model_name=treatment_model,
-                traffic_allocation=traffic_split,
-                metadata={"variant_type": "treatment"},
-            )
-
             # Create A/B test
             ab_test = ABTest(
                 test_id=test_id,
                 name=name,
                 description=description,
-                variants=[control_variant, treatment_variant],
+                variants=test_variants,
                 minimum_sample_size=minimum_sample_size,
                 confidence_level=confidence_level,
                 minimum_effect_size=minimum_effect_size,
@@ -591,10 +609,15 @@ class ABTestFramework(BaseComponent):
 
         returns_array = np.array(returns)
 
-        # Calculate trading metrics
+        # Calculate trading metrics with Decimal precision
+        returns_decimal = [Decimal(str(ret)) for ret in returns_array]
+        total_return_decimal = sum(returns_decimal)
+
         variant.trading_metrics = {
-            "total_return": float(np.sum(returns_array)),
-            "mean_return": float(np.mean(returns_array)),
+            "total_return": float(total_return_decimal),
+            "mean_return": float(
+                total_return_decimal / len(returns_decimal) if returns_decimal else Decimal("0")
+            ),
             "return_volatility": float(np.std(returns_array)),
             "sharpe_ratio": self._calculate_sharpe_ratio(returns_array),
             "max_drawdown": self._calculate_max_drawdown(returns_array),
@@ -603,23 +626,35 @@ class ABTestFramework(BaseComponent):
             "total_trades": len(returns),
         }
 
-    def _calculate_sharpe_ratio(self, returns: np.ndarray, risk_free_rate: float = 0.02) -> float:
+    def _calculate_sharpe_ratio(
+        self, returns: np.ndarray, risk_free_rate: Decimal = Decimal("0.02")
+    ) -> float:
         """Calculate Sharpe ratio."""
         if len(returns) == 0 or np.std(returns) == 0:
             return 0.0
 
-        # Annualize assuming daily returns
-        mean_return = np.mean(returns) * 252
-        std_return = np.std(returns) * np.sqrt(252)
+        # Annualize assuming daily returns with Decimal precision
+        mean_return_decimal = Decimal(str(np.mean(returns))) * Decimal("252")
+        std_return_decimal = Decimal(str(np.std(returns))) * Decimal(str(np.sqrt(252)))
 
-        return float((mean_return - risk_free_rate) / std_return)
+        if std_return_decimal == 0:
+            return 0.0
+
+        sharpe_decimal = (mean_return_decimal - risk_free_rate) / std_return_decimal
+        return float(sharpe_decimal)
 
     def _calculate_max_drawdown(self, returns: np.ndarray) -> float:
         """Calculate maximum drawdown."""
         if len(returns) == 0:
             return 0.0
 
-        cumulative = np.cumprod(1 + returns)
+        # Calculate drawdown with Decimal precision for initial calculations
+        cumulative_decimal = [Decimal("1")]
+        for ret in returns:
+            cumulative_decimal.append(cumulative_decimal[-1] * (Decimal("1") + Decimal(str(ret))))
+
+        # Convert to numpy for max calculations (precision maintained in key calculations)
+        cumulative = np.array([float(c) for c in cumulative_decimal[1:]])
         running_max = np.maximum.accumulate(cumulative)
         drawdown = (cumulative - running_max) / running_max
 
@@ -630,16 +665,21 @@ class ABTestFramework(BaseComponent):
         if len(returns) == 0:
             return 0.0
 
-        gross_profit = np.sum(returns[returns > 0])
-        gross_loss = abs(np.sum(returns[returns < 0]))
+        # Calculate with Decimal precision
+        gross_profit_decimal = sum(Decimal(str(ret)) for ret in returns if ret > 0)
+        gross_loss_decimal = abs(sum(Decimal(str(ret)) for ret in returns if ret < 0))
 
-        return float(gross_profit / gross_loss) if gross_loss != 0 else float("inf")
+        if gross_loss_decimal == 0:
+            return float("inf")
+
+        profit_factor_decimal = gross_profit_decimal / gross_loss_decimal
+        return float(profit_factor_decimal)
 
     async def _check_early_stopping(self, test: ABTest) -> None:
         """Check if test should be stopped early."""
         try:
             # Run analysis to check for significance
-            analysis = await self.analyze_ab_test(test.test_id)
+            analysis = self.analyze_ab_test(test.test_id)
 
             if "significance_tests" in analysis:
                 primary_test = analysis["significance_tests"].get(test.primary_metric)
@@ -753,8 +793,18 @@ class ABTestFramework(BaseComponent):
             z_alpha = stats.norm.ppf(1 - alpha / 2)
             z_beta = stats.norm.ppf(test.statistical_power)
 
+            # Handle zero effect size case
+            if estimated_effect_size == 0:
+                # Use minimum effect size as fallback
+                estimated_effect_size = test.minimum_effect_size
+
             required_n = (2 * (z_alpha + z_beta) ** 2 * assumed_std**2) / (estimated_effect_size**2)
-            required_n = int(np.ceil(required_n))
+
+            # Handle infinity case
+            if np.isinf(required_n) or np.isnan(required_n):
+                required_n = test.minimum_sample_size * 2  # Use reasonable fallback
+            else:
+                required_n = int(np.ceil(required_n))
 
             return {
                 "current_power_estimate": min(
@@ -884,13 +934,13 @@ class ABTestFramework(BaseComponent):
                     t_stat, p_value = stats.ttest_ind(treatment_returns, control_returns)
 
                     # Calculate effect size (Cohen's d)
-                    pooled_std = np.sqrt(
-                        (
-                            (len(control_returns) - 1) * np.var(control_returns, ddof=1)
-                            + (len(treatment_returns) - 1) * np.var(treatment_returns, ddof=1)
-                        )
-                        / (len(control_returns) + len(treatment_returns) - 2)
-                    )
+                    pooled_variance = (
+                        (len(control_returns) - 1) * np.var(control_returns, ddof=1)
+                        + (len(treatment_returns) - 1) * np.var(treatment_returns, ddof=1)
+                    ) / (len(control_returns) + len(treatment_returns) - 2)
+                    # Ensure non-negative variance before sqrt
+                    pooled_variance = max(0, pooled_variance)
+                    pooled_std = np.sqrt(pooled_variance)
 
                     cohens_d = (
                         (np.mean(treatment_returns) - np.mean(control_returns)) / pooled_std
@@ -1128,7 +1178,7 @@ class ABTestFramework(BaseComponent):
             del self.active_tests[test_id]
 
             # Final analysis
-            final_analysis = await self.analyze_ab_test(test_id)
+            final_analysis = self.analyze_ab_test(test_id)
 
             self.logger.info(
                 "A/B test stopped",
@@ -1183,4 +1233,4 @@ class ABTestFramework(BaseComponent):
         if test.results_history:
             return test.results_history[-1]
         else:
-            return await self.analyze_ab_test(test_id)
+            return self.analyze_ab_test(test_id)

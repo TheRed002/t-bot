@@ -49,7 +49,7 @@ class ModelCacheService(BaseService):
         self,
         config: ConfigDict | None = None,
         correlation_id: str | None = None,
-    ):
+    ) -> None:
         """
         Initialize the model cache service.
 
@@ -105,7 +105,7 @@ class ModelCacheService(BaseService):
 
         self._logger.info(
             "Model cache service started successfully",
-            config=self.mc_config.dict(),
+            config=self.mc_config.model_dump(),
             max_size=self.max_size,
             max_memory_mb=self.max_memory_mb,
             ttl_minutes=self.ttl_minutes,
@@ -133,7 +133,7 @@ class ModelCacheService(BaseService):
             self._logger.info("Cache cleanup thread stopped")
 
     @dec.enhance(log=True, monitor=True, log_level="info")
-    def cache_model(self, model_id: str, model: Any) -> bool:
+    async def cache_model(self, model_id: str, model: Any) -> bool:
         """
         Cache a model.
 
@@ -182,7 +182,7 @@ class ModelCacheService(BaseService):
                 return False
 
     @dec.enhance(monitor=True)
-    def get_model(self, model_id: str) -> Any | None:
+    async def get_model(self, model_id: str) -> Any | None:
         """
         Retrieve a model from cache.
 
@@ -497,12 +497,12 @@ class ModelCacheService(BaseService):
 
             return health
 
-    def __enter__(self):
+    def __enter__(self) -> "ModelCacheService":
         """Context manager entry."""
         self.start_cleanup_thread()
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         """Context manager exit."""
         self.stop_cleanup_thread()
 
@@ -545,6 +545,39 @@ class ModelCacheService(BaseService):
                 }
             )
             return stats
+
+    def get_cache_size(self) -> int:
+        """Get current cache size."""
+        with self.lock:
+            return len(self.cache)
+
+    def get_cache_memory_usage(self) -> float:
+        """Get current cache memory usage in MB."""
+        with self.lock:
+            return sum(self.memory_usage.values())
+
+    def get_cache_statistics(self) -> dict[str, Any]:
+        """Get cache statistics."""
+        return self.get_cache_stats()
+
+    def is_model_cached(self, model_id: str) -> bool:
+        """Check if model is cached."""
+        with self.lock:
+            return model_id in self.cache
+
+    def get_cached_model_ids(self) -> list[str]:
+        """Get list of cached model IDs."""
+        with self.lock:
+            return list(self.cache.keys())
+
+    # Test compatibility - add missing evict_model method
+    async def evict_model(self, model_id: str) -> bool:
+        """Evict a model from cache."""
+        with self.lock:
+            if model_id in self.cache:
+                self._remove_model(model_id, reason="manual eviction")
+                return True
+            return False
 
     # Configuration validation
     def _validate_service_config(self, config: ConfigDict) -> bool:

@@ -72,13 +72,8 @@ class PickleStorageBackend(ModelStorageBackend):
 
         try:
             filepath.parent.mkdir(parents=True, exist_ok=True)
-            f = None
-            try:
-                f = open(filepath, "wb")
+            with open(filepath, "wb") as f:
                 pickle.dump(model_data, f)
-            finally:
-                if f:
-                    f.close()
         except Exception as e:
             raise ModelError(
                 f"Failed to save model to {filepath}",
@@ -97,13 +92,8 @@ class PickleStorageBackend(ModelStorageBackend):
             raise ModelLoadError(f"Model file not found: {filepath}", model_path=str(filepath))
 
         try:
-            f = None
-            try:
-                f = open(filepath, "rb")
+            with open(filepath, "rb") as f:
                 return pickle.load(f)
-            finally:
-                if f:
-                    f.close()
         except Exception as e:
             raise ModelLoadError(
                 f"Failed to load model from {filepath}",

@@ -6,6 +6,7 @@ in financial markets using various algorithms and architectures.
 GPU acceleration is used when available for improved performance.
 """
 
+from decimal import Decimal
 from typing import Any
 
 import numpy as np
@@ -17,7 +18,6 @@ from sklearn.preprocessing import StandardScaler
 
 from src.core.exceptions import DataValidationError, ModelError, ValidationError
 from src.ml.models.base_model import BaseMLModel
-from src.utils.gpu_utils import gpu_manager
 
 # Try to import GPU-accelerated libraries
 try:
@@ -109,13 +109,15 @@ class PricePredictor(BaseMLModel):
         # Merge kwargs with stored model_params
         params = {**self.model_params, **kwargs}
 
-        # Log GPU availability
-        if gpu_manager.gpu_available:
+        # GPU availability check
+        gpu_available = CUML_AVAILABLE or (XGB_AVAILABLE and LGB_AVAILABLE)
+
+        if gpu_available:
             self._logger.info(f"GPU acceleration available for {self.algorithm} model")
 
         if self.algorithm == "linear":
             # Use GPU-accelerated version if available
-            if CUML_AVAILABLE and gpu_manager.gpu_available:
+            if CUML_AVAILABLE:
                 self._logger.info("Using cuML LinearRegression with GPU acceleration")
                 return cuLinearRegression(**params)
             return LinearRegression(**params)
@@ -132,7 +134,7 @@ class PricePredictor(BaseMLModel):
             default_params.update(params)
 
             # Use GPU-accelerated version if available
-            if CUML_AVAILABLE and gpu_manager.gpu_available:
+            if CUML_AVAILABLE:
                 self._logger.info("Using cuML RandomForestRegressor with GPU acceleration")
                 # Adjust parameters for cuML
                 cuml_params = default_params.copy()
@@ -155,11 +157,16 @@ class PricePredictor(BaseMLModel):
             }
 
             # Add GPU parameters if available
-            if gpu_manager.gpu_available:
-                default_params.update(
-                    {"tree_method": "gpu_hist", "predictor": "gpu_predictor", "gpu_id": 0}
-                )
-                self._logger.info("Using XGBoost with GPU acceleration")
+            if XGB_AVAILABLE:
+                try:
+                    # Try to enable GPU acceleration
+                    default_params.update(
+                        {"tree_method": "gpu_hist", "predictor": "gpu_predictor", "gpu_id": 0}
+                    )
+                    self._logger.info("Using XGBoost with GPU acceleration")
+                except Exception as e:
+                    # Fall back to CPU if GPU not available
+                    self._logger.info(f"GPU not available, using CPU for XGBoost: {e}")
 
             default_params.update(params)
             return xgb.XGBRegressor(**dict(default_params))
@@ -181,9 +188,16 @@ class PricePredictor(BaseMLModel):
             }
 
             # Add GPU parameters if available
-            if gpu_manager.gpu_available:
-                default_params.update({"device": "gpu", "gpu_platform_id": 0, "gpu_device_id": 0})
-                self._logger.info("Using LightGBM with GPU acceleration")
+            if LGB_AVAILABLE:
+                try:
+                    # Try to enable GPU acceleration
+                    default_params.update(
+                        {"device": "gpu", "gpu_platform_id": 0, "gpu_device_id": 0}
+                    )
+                    self._logger.info("Using LightGBM with GPU acceleration")
+                except Exception as e:
+                    # Fall back to CPU if GPU not available
+                    self._logger.info(f"GPU not available, using CPU for LightGBM: {e}")
 
             default_params.update(params)
             return lgb.LGBMRegressor(**dict(default_params))
@@ -203,7 +217,7 @@ class PricePredictor(BaseMLModel):
         # Handle missing values
         if X.isnull().any().any():
             self._logger.warning("Missing values found in features, filling with forward fill")
-            X = X.fillna(method="ffill").fillna(method="bfill").fillna(0)
+            X = X.ffill().bfill().fillna(0)
 
         # Handle infinite values
         X = X.replace([np.inf, -np.inf], 0)
@@ -239,7 +253,7 @@ class PricePredictor(BaseMLModel):
         # Handle missing values
         if y.isnull().any():
             self._logger.warning("Missing values found in targets, filling with forward fill")
-            y = y.fillna(method="ffill").fillna(method="bfill").fillna(0)
+            y = y.ffill().bfill().fillna(0)
 
         # Handle infinite values
         y = y.replace([np.inf, -np.inf], 0)
@@ -308,7 +322,6 @@ class PricePredictor(BaseMLModel):
                 "mape": float("inf"),
             }
 
-
     def create_target_from_prices(
         self, prices: pd.Series, target_type: str = "return", horizon: int | None = None
     ) -> pd.Series:
@@ -330,14 +343,41 @@ class PricePredictor(BaseMLModel):
             targets = prices.shift(-horizon)
 
         elif target_type == "return":
-            # Predict future return
+            # Predict future return with Decimal precision
             future_prices = prices.shift(-horizon)
-            targets = (future_prices / prices) - 1
+            targets = pd.Series(index=prices.index, dtype=float)
+
+            for i in range(len(prices)):
+                if (
+                    pd.notna(prices.iloc[i])
+                    and pd.notna(future_prices.iloc[i])
+                    and prices.iloc[i] != 0
+                ):
+                    price_decimal = Decimal(str(prices.iloc[i]))
+                    future_price_decimal = Decimal(str(future_prices.iloc[i]))
+                    return_decimal = (future_price_decimal / price_decimal) - Decimal("1")
+                    targets.iloc[i] = float(return_decimal)
+                else:
+                    targets.iloc[i] = np.nan
 
         elif target_type == "log_return":
-            # Predict future log return
+            # Predict future log return with Decimal precision
             future_prices = prices.shift(-horizon)
-            targets = np.log(future_prices / prices)
+            targets = pd.Series(index=prices.index, dtype=float)
+
+            for i in range(len(prices)):
+                if (
+                    pd.notna(prices.iloc[i])
+                    and pd.notna(future_prices.iloc[i])
+                    and prices.iloc[i] != 0
+                ):
+                    price_decimal = Decimal(str(prices.iloc[i]))
+                    future_price_decimal = Decimal(str(future_prices.iloc[i]))
+                    ratio = future_price_decimal / price_decimal
+                    # Use float log since Decimal doesn't have ln method
+                    targets.iloc[i] = float(np.log(float(ratio)))
+                else:
+                    targets.iloc[i] = np.nan
 
         else:
             raise ValidationError(f"Unknown target type: {target_type}")
@@ -380,8 +420,8 @@ class PricePredictor(BaseMLModel):
         return np.array(predictions)
 
     def calculate_trading_metrics(
-        self, y_true: np.ndarray, y_pred: np.ndarray, transaction_cost: float = 0.001
-    ) -> dict[str, float]:
+        self, y_true: np.ndarray, y_pred: np.ndarray, transaction_cost: Decimal = Decimal("0.001")
+    ) -> dict[str, Any]:
         """
         Calculate trading-specific performance metrics.
 
@@ -400,40 +440,62 @@ class PricePredictor(BaseMLModel):
         # Directional accuracy
         directional_accuracy = np.mean(true_direction == pred_direction)
 
-        # Calculate hypothetical returns from trading signals
-        returns = np.diff(y_true) / y_true[:-1]  # Actual returns
+        # Calculate hypothetical returns from trading signals using Decimal for precision
+        returns_decimal = []
+        for i in range(1, len(y_true)):
+            if y_true[i - 1] != 0:
+                returns_decimal.append(
+                    Decimal(str(y_true[i])) / Decimal(str(y_true[i - 1])) - Decimal("1")
+                )
+            else:
+                returns_decimal.append(Decimal("0"))
 
         # Simple trading strategy: buy if prediction > current, sell if < current
         positions = pred_direction
 
-        # Calculate strategy returns (simplified)
-        strategy_returns = positions * returns[1:]  # Align arrays
+        # Calculate strategy returns with Decimal precision
+        strategy_returns_decimal = []
+        for i, ret in enumerate(
+            returns_decimal[1:] if len(returns_decimal) > 1 else returns_decimal
+        ):
+            if i < len(positions):
+                strategy_returns_decimal.append(Decimal(str(positions[i])) * ret)
 
-        # Apply transaction costs
+        # Apply transaction costs with Decimal precision
         position_changes = np.diff(np.concatenate([[0], positions]))
-        transaction_costs = np.abs(position_changes) * transaction_cost
-        strategy_returns_net = strategy_returns - transaction_costs[1:]
+        strategy_returns_net_decimal = []
+        for i, strategy_ret in enumerate(strategy_returns_decimal):
+            if i + 1 < len(position_changes):
+                txn_cost = abs(Decimal(str(position_changes[i + 1]))) * transaction_cost
+                strategy_returns_net_decimal.append(strategy_ret - txn_cost)
+            else:
+                strategy_returns_net_decimal.append(strategy_ret)
 
-        # Calculate metrics
+        # Convert back to float for numpy operations in metrics
+        strategy_returns_net = np.array([float(ret) for ret in strategy_returns_net_decimal])
+
+        # Calculate metrics with financial precision
+        total_return = sum(strategy_returns_net_decimal)
+
         metrics = {
-            "directional_accuracy": directional_accuracy,
-            "strategy_return": np.sum(strategy_returns_net),
+            "directional_accuracy": float(directional_accuracy),
+            "strategy_return": float(total_return),
             "strategy_sharpe": (
-                np.mean(strategy_returns_net) / np.std(strategy_returns_net)
+                float(np.mean(strategy_returns_net) / np.std(strategy_returns_net))
                 if np.std(strategy_returns_net) > 0
-                else 0
+                else 0.0
             ),
             "max_drawdown": self._calculate_max_drawdown(np.cumsum(strategy_returns_net)),
-            "hit_rate": np.mean(strategy_returns_net > 0),
+            "hit_rate": float(np.mean(strategy_returns_net > 0)),
             "avg_win": (
-                np.mean(strategy_returns_net[strategy_returns_net > 0])
+                float(np.mean(strategy_returns_net[strategy_returns_net > 0]))
                 if np.any(strategy_returns_net > 0)
-                else 0
+                else 0.0
             ),
             "avg_loss": (
-                np.mean(strategy_returns_net[strategy_returns_net < 0])
+                float(np.mean(strategy_returns_net[strategy_returns_net < 0]))
                 if np.any(strategy_returns_net < 0)
-                else 0
+                else 0.0
             ),
         }
 

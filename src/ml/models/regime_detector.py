@@ -17,14 +17,14 @@ from sklearn.preprocessing import StandardScaler
 
 from src.core.config import Config
 from src.core.exceptions import ValidationError
-from src.ml.models.base_model import BaseModel
+from src.ml.models.base_model import BaseMLModel
 from src.utils.decorators import UnifiedDecorator
 
 # Initialize decorator instance
 dec = UnifiedDecorator()
 
 
-class RegimeDetector(BaseModel):
+class RegimeDetector(BaseMLModel):
     """
     Market regime detection model for identifying market conditions.
 
@@ -67,7 +67,7 @@ class RegimeDetector(BaseModel):
         self.n_regimes = n_regimes
         self.use_supervised = use_supervised
         self.lookback_window = lookback_window
-        
+
         super().__init__(
             model_name="regime_detector",
             version="1.0.0",
@@ -282,7 +282,7 @@ class RegimeDetector(BaseModel):
             regime_features = self._create_regime_features(X)
 
             # Handle NaN values for prediction
-            regime_features_clean = regime_features.fillna(method="ffill").fillna(0)
+            regime_features_clean = regime_features.ffill().fillna(0)
 
             # Scale features if scaler was used during training
             if self.scaler:
@@ -359,7 +359,7 @@ class RegimeDetector(BaseModel):
             else:
                 # Unsupervised evaluation
                 regime_features = self._create_regime_features(X)
-                regime_features_clean = regime_features.fillna(method="ffill").fillna(0)
+                regime_features_clean = regime_features.ffill().fillna(0)
 
                 if self.scaler:
                     features_scaled = self.scaler.transform(regime_features_clean)
@@ -444,9 +444,10 @@ class RegimeDetector(BaseModel):
                 if "high" in data.columns and "low" in data.columns:
                     # Parkinson volatility estimator
                     log_hl = np.log(data["high"] / data["low"])
-                    features["parkinson_vol"] = np.sqrt(
-                        log_hl.rolling(self.lookback_window).mean() / (4 * np.log(2))
-                    ) * np.sqrt(252)
+                    parkinson_base = log_hl.rolling(self.lookback_window).mean() / (4 * np.log(2))
+                    # Ensure non-negative values before sqrt to avoid warnings
+                    parkinson_base = parkinson_base.clip(lower=0)
+                    features["parkinson_vol"] = np.sqrt(parkinson_base) * np.sqrt(252)
 
                 # Volatility clustering
                 squared_returns = returns**2
@@ -552,7 +553,7 @@ class RegimeDetector(BaseModel):
 
             # Create regime features
             regime_features = self._create_regime_features(X)
-            regime_features_clean = regime_features.fillna(method="ffill").fillna(0)
+            regime_features_clean = regime_features.ffill().fillna(0)
 
             if self.scaler:
                 features_scaled = self.scaler.transform(regime_features_clean)
@@ -624,7 +625,8 @@ class RegimeDetector(BaseModel):
 
     def _calculate_metrics(self, y_true: np.ndarray, y_pred: np.ndarray) -> dict:
         """Calculate metrics for model evaluation."""
-        from sklearn.metrics import accuracy_score, silhouette_score
+        from sklearn.metrics import accuracy_score
+
         if self.use_supervised:
             return {"accuracy": accuracy_score(y_true, y_pred)}
         else:

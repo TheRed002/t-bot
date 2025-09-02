@@ -5,6 +5,7 @@ This module provides direction classification models that predict whether
 prices will move up, down, or remain stable in the next period.
 """
 
+from decimal import Decimal
 from typing import Any
 
 import numpy as np
@@ -69,6 +70,8 @@ class DirectionClassifier(BaseMLModel):
             prediction_horizon: Number of periods ahead to predict
         """
         super().__init__(model_name, version, config, correlation_id)
+
+        # Decimal context is already setup globally in decimal_utils
 
         self.algorithm = algorithm
         self.direction_threshold = direction_threshold
@@ -417,13 +420,44 @@ class DirectionClassifier(BaseMLModel):
     def _convert_to_direction_classes(self, price_data: pd.Series) -> np.ndarray:
         """Convert price data to direction classes."""
         try:
-            # Calculate returns
-            if self.prediction_horizon == 1:
-                returns = price_data.pct_change().shift(-1)  # Next period return
-            else:
-                returns = price_data.pct_change(self.prediction_horizon).shift(
-                    -self.prediction_horizon
-                )
+            # Calculate returns with Decimal precision
+            returns = pd.Series(index=price_data.index, dtype=float)
+
+            for i in range(len(price_data)):
+                if self.prediction_horizon == 1:
+                    # Next period return
+                    if i + 1 < len(price_data):
+                        current_price = price_data.iloc[i]
+                        next_price = price_data.iloc[i + 1]
+
+                        if pd.notna(current_price) and pd.notna(next_price) and current_price != 0:
+                            current_decimal = Decimal(str(current_price))
+                            next_decimal = Decimal(str(next_price))
+                            return_decimal = (next_decimal / current_decimal) - Decimal("1")
+                            returns.iloc[i] = float(return_decimal)
+                        else:
+                            returns.iloc[i] = np.nan
+                    else:
+                        returns.iloc[i] = np.nan
+                else:
+                    # Multi-period return
+                    if i + self.prediction_horizon < len(price_data):
+                        current_price = price_data.iloc[i]
+                        future_price = price_data.iloc[i + self.prediction_horizon]
+
+                        if (
+                            pd.notna(current_price)
+                            and pd.notna(future_price)
+                            and current_price != 0
+                        ):
+                            current_decimal = Decimal(str(current_price))
+                            future_decimal = Decimal(str(future_price))
+                            return_decimal = (future_decimal / current_decimal) - Decimal("1")
+                            returns.iloc[i] = float(return_decimal)
+                        else:
+                            returns.iloc[i] = np.nan
+                    else:
+                        returns.iloc[i] = np.nan
 
             # Convert to direction classes
             direction_classes = np.zeros(len(returns))

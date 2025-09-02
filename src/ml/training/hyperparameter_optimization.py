@@ -38,7 +38,7 @@ class HyperparameterOptimizationService(BaseService):
         optimization_history: History of optimization runs
     """
 
-    def __init__(self, config: ConfigDict | None = None, correlation_id: str | None = None):
+    def __init__(self, config: ConfigDict | None = None, correlation_id: str | None = None) -> None:
         """
         Initialize the hyperparameter optimization service.
 

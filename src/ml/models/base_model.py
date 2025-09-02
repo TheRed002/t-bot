@@ -589,7 +589,7 @@ class BaseMLModel(BaseService, abc.ABC):
     # Service Health and Metrics
     async def _service_health_check(self) -> "HealthStatus":
         """ML model service specific health check."""
-        from src.core.types import HealthStatus
+        from src.core.base.interfaces import HealthStatus
 
         try:
             # Check model state

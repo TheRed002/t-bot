@@ -8,7 +8,10 @@ capabilities for ML models using the service layer pattern without direct databa
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from decimal import Decimal
+
+# Import for type annotations
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import pandas as pd
@@ -31,7 +34,11 @@ from src.core.base.service import BaseService
 from src.core.exceptions import ModelError, ValidationError
 from src.core.types.base import ConfigDict
 from src.core.types.data import FeatureSet
+from src.utils.constants import ML_FEATURE_CONSTANTS, ML_MODEL_CONSTANTS
 from src.utils.decorators import UnifiedDecorator
+
+if TYPE_CHECKING:
+    from src.core.base.interfaces import HealthStatus
 
 # Initialize decorator instance
 dec = UnifiedDecorator()
@@ -40,15 +47,26 @@ dec = UnifiedDecorator()
 class FeatureEngineeringConfig(BaseModel):
     """Configuration for feature engineering service."""
 
-    max_features: int = Field(default=100, description="Maximum number of features to use")
-    feature_selection_threshold: float = Field(
-        default=0.01, description="Feature selection threshold"
+    max_features: int = Field(
+        default=ML_FEATURE_CONSTANTS["max_features"],
+        description="Maximum number of features to use",
     )
-    cache_ttl_hours: int = Field(default=4, description="Feature cache TTL in hours")
-    cache_max_size: int = Field(default=1000, description="Maximum cache size")
+    feature_selection_threshold: float = Field(
+        default=ML_FEATURE_CONSTANTS["feature_selection_threshold"],
+        description="Feature selection threshold",
+    )
+    cache_ttl_hours: int = Field(
+        default=ML_FEATURE_CONSTANTS["cache_ttl_hours"], description="Feature cache TTL in hours"
+    )
+    cache_max_size: int = Field(
+        default=ML_FEATURE_CONSTANTS["cache_max_size"], description="Maximum cache size"
+    )
     enable_feature_selection: bool = Field(default=True, description="Enable feature selection")
     enable_preprocessing: bool = Field(default=True, description="Enable feature preprocessing")
-    computation_workers: int = Field(default=4, description="Number of computation workers")
+    computation_workers: int = Field(
+        default=ML_FEATURE_CONSTANTS["computation_workers"],
+        description="Number of computation workers",
+    )
     default_scaling_method: str = Field(default="standard", description="Default scaling method")
     feature_types: list[str] = Field(
         default_factory=lambda: [
@@ -102,7 +120,7 @@ class FeatureEngineeringService(BaseService):
         self,
         config: ConfigDict | None = None,
         correlation_id: str | None = None,
-    ):
+    ) -> None:
         """
         Initialize the feature engineering service.
 
@@ -137,8 +155,6 @@ class FeatureEngineeringService(BaseService):
 
         # Add required dependencies
         self.add_dependency("DataService")
-        self.add_dependency("TechnicalIndicatorCalculator")
-        self.add_dependency("StatisticalFeatureCalculator")
 
     async def _do_start(self) -> None:
         """Start the feature engineering service."""
@@ -146,13 +162,18 @@ class FeatureEngineeringService(BaseService):
 
         # Resolve dependencies
         self.data_service = self.resolve_dependency("DataService")
-        self.technical_calculator = self.resolve_dependency("TechnicalIndicatorCalculator")
-        self.statistical_calculator = self.resolve_dependency("StatisticalFeatureCalculator")
+
+        # Initialize calculators directly instead of injecting them
+        from src.data.features.statistical_features import StatisticalFeatures
+        from src.data.features.technical_indicators import TechnicalIndicators
+
+        self.technical_calculator = TechnicalIndicators()
+        self.statistical_calculator = StatisticalFeatures()
 
         self._logger.info(
             "Feature engineering service started successfully",
             config=self.fe_config.dict(),
-            dependencies_resolved=3,
+            dependencies_resolved=1,
         )
 
     async def _do_stop(self) -> None:
@@ -227,7 +248,7 @@ class FeatureEngineeringService(BaseService):
             if cached_features is not None:
                 computation_time = (
                     datetime.now(timezone.utc) - computation_start
-                ).total_seconds() * 1000
+                ).total_seconds() * ML_MODEL_CONSTANTS["time_to_milliseconds"]
                 return FeatureResponse(
                     feature_set=FeatureSet(
                         feature_set_id=cache_key,
@@ -272,12 +293,12 @@ class FeatureEngineeringService(BaseService):
                 features=features_df.to_dict("records"),
                 feature_names=list(features_df.columns),
                 computation_time_ms=(datetime.now(timezone.utc) - computation_start).total_seconds()
-                * 1000,
+                * ML_MODEL_CONSTANTS["time_to_milliseconds"],
             )
 
             computation_time = (
                 datetime.now(timezone.utc) - computation_start
-            ).total_seconds() * 1000
+            ).total_seconds() * ML_MODEL_CONSTANTS["time_to_milliseconds"]
 
             self._logger.info(
                 "Features computed successfully",
@@ -299,7 +320,7 @@ class FeatureEngineeringService(BaseService):
         except Exception as e:
             computation_time = (
                 datetime.now(timezone.utc) - computation_start
-            ).total_seconds() * 1000
+            ).total_seconds() * ML_MODEL_CONSTANTS["time_to_milliseconds"]
             error_msg = f"Feature computation failed for {request.symbol}: {e}"
 
             self._logger.error(
@@ -412,10 +433,33 @@ class FeatureEngineeringService(BaseService):
             data.loc[range_mask, "open"] - data.loc[range_mask, "low"]
         ) / (data.loc[range_mask, "high"] - data.loc[range_mask, "low"])
 
-        # Multi-period returns
-        for period in [1, 2, 3, 5, 10, 20]:
-            features[f"return_{period}d"] = data["close"].pct_change(period)
-            features[f"log_return_{period}d"] = np.log(data["close"] / data["close"].shift(period))
+        # Multi-period returns with Decimal precision
+        for period in ML_FEATURE_CONSTANTS["price_return_periods"]:
+            # Calculate returns with Decimal precision
+            returns = pd.Series(index=data.index, dtype=float)
+            log_returns = pd.Series(index=data.index, dtype=float)
+
+            for i in range(period, len(data)):
+                current_price = data["close"].iloc[i]
+                past_price = data["close"].iloc[i - period]
+
+                if pd.notna(current_price) and pd.notna(past_price) and past_price != 0:
+                    current_decimal = Decimal(str(current_price))
+                    past_decimal = Decimal(str(past_price))
+
+                    # Calculate return with Decimal precision
+                    return_decimal = (current_decimal / past_decimal) - Decimal("1")
+                    returns.iloc[i] = float(return_decimal)
+
+                    # Calculate log return
+                    ratio = current_decimal / past_decimal
+                    log_returns.iloc[i] = float(np.log(float(ratio)))
+                else:
+                    returns.iloc[i] = np.nan
+                    log_returns.iloc[i] = np.nan
+
+            features[f"return_{period}d"] = returns
+            features[f"log_return_{period}d"] = log_returns
 
         return features
 
@@ -449,25 +493,27 @@ class FeatureEngineeringService(BaseService):
         features = pd.DataFrame(index=data.index)
 
         # Volume features
-        features["volume_sma_10"] = data["volume"].rolling(10).mean()
-        features["volume_sma_20"] = data["volume"].rolling(20).mean()
+        sma_periods = ML_FEATURE_CONSTANTS["technical_periods"]["volume_sma_periods"]
+        features[f"volume_sma_{sma_periods[0]}"] = data["volume"].rolling(sma_periods[0]).mean()
+        features[f"volume_sma_{sma_periods[1]}"] = data["volume"].rolling(sma_periods[1]).mean()
 
         # Safe division
-        volume_sma_20_mask = features["volume_sma_20"] != 0
+        volume_sma_col = f"volume_sma_{sma_periods[1]}"
+        volume_sma_mask = features[volume_sma_col] != 0
         features["volume_ratio"] = np.nan
-        features.loc[volume_sma_20_mask, "volume_ratio"] = (
-            data.loc[volume_sma_20_mask, "volume"]
-            / features.loc[volume_sma_20_mask, "volume_sma_20"]
+        features.loc[volume_sma_mask, "volume_ratio"] = (
+            data.loc[volume_sma_mask, "volume"] / features.loc[volume_sma_mask, volume_sma_col]
         )
         features["volume_change"] = data["volume"].pct_change()
 
         # Volume-price features
-        volume_sum = data["volume"].rolling(20).sum()
+        vwap_period = sma_periods[1]
+        volume_sum = data["volume"].rolling(vwap_period).sum()
         volume_sum_mask = volume_sum != 0
         features["vwap"] = np.nan
         features.loc[volume_sum_mask, "vwap"] = (
             data.loc[volume_sum_mask, "close"] * data.loc[volume_sum_mask, "volume"]
-        ).rolling(20).sum() / volume_sum.loc[volume_sum_mask]
+        ).rolling(vwap_period).sum() / volume_sum.loc[volume_sum_mask]
         features["price_volume"] = data["close"] * data["volume"]
         features["volume_price_trend"] = (
             features["price_volume"] / features["price_volume"].shift(1)
@@ -487,23 +533,25 @@ class FeatureEngineeringService(BaseService):
         features = pd.DataFrame(index=data.index)
 
         # Price volatility
-        features["close_volatility_5"] = data["close"].rolling(5).std()
-        features["close_volatility_10"] = data["close"].rolling(10).std()
-        features["close_volatility_20"] = data["close"].rolling(20).std()
+        vol_periods = ML_FEATURE_CONSTANTS["technical_periods"]["volatility_periods"]
+        for period in vol_periods:
+            features[f"close_volatility_{period}"] = data["close"].rolling(period).std()
 
         # True Range and Average True Range
         high_low = data["high"] - data["low"]
         high_close = np.abs(data["high"] - data["close"].shift())
         low_close = np.abs(data["low"] - data["close"].shift())
         features["true_range"] = np.maximum(high_low, np.maximum(high_close, low_close))
-        features["atr_14"] = features["true_range"].rolling(14).mean()
+        atr_period = ML_FEATURE_CONSTANTS["technical_periods"]["atr_period"]
+        features[f"atr_{atr_period}"] = features["true_range"].rolling(atr_period).mean()
 
         # Volatility ratios
-        vol_20_mask = features["close_volatility_20"] != 0
+        short_vol_col = f"close_volatility_{vol_periods[0]}"
+        long_vol_col = f"close_volatility_{vol_periods[2]}"
+        vol_mask = features[long_vol_col] != 0
         features["volatility_ratio"] = np.nan
-        features.loc[vol_20_mask, "volatility_ratio"] = (
-            features.loc[vol_20_mask, "close_volatility_5"]
-            / features.loc[vol_20_mask, "close_volatility_20"]
+        features.loc[vol_mask, "volatility_ratio"] = (
+            features.loc[vol_mask, short_vol_col] / features.loc[vol_mask, long_vol_col]
         )
 
         return features
@@ -520,31 +568,37 @@ class FeatureEngineeringService(BaseService):
         features = pd.DataFrame(index=data.index)
 
         # Rate of change
-        for period in [5, 10, 14, 20]:
+        roc_periods = ML_FEATURE_CONSTANTS["technical_periods"]["momentum_roc_periods"]
+        for period in roc_periods:
             close_shifted = data["close"].shift(period)
             close_shifted_mask = close_shifted != 0
             features[f"roc_{period}"] = np.nan
             features.loc[close_shifted_mask, f"roc_{period}"] = (
                 (data.loc[close_shifted_mask, "close"] - close_shifted.loc[close_shifted_mask])
                 / close_shifted.loc[close_shifted_mask]
-            ) * 100
+            ) * ML_FEATURE_CONSTANTS["percentage_multiplier"]
 
         # RSI
         delta = data["close"].diff()
         gain = delta.where(delta > 0, 0)
         loss = -delta.where(delta < 0, 0)
-        avg_gain = gain.rolling(14).mean()
-        avg_loss = loss.rolling(14).mean()
+        rsi_period = ML_FEATURE_CONSTANTS["technical_periods"]["rsi_period"]
+        avg_gain = gain.rolling(rsi_period).mean()
+        avg_loss = loss.rolling(rsi_period).mean()
 
         avg_loss_mask = avg_loss != 0
-        rs = np.nan
         rs_values = np.full_like(avg_gain, np.nan)
         rs_values[avg_loss_mask] = avg_gain[avg_loss_mask] / avg_loss[avg_loss_mask]
-        features["rsi_14"] = 100 - (100 / (1 + pd.Series(rs_values, index=data.index)))
+        multiplier = ML_FEATURE_CONSTANTS["percentage_multiplier"]
+        features[f"rsi_{rsi_period}"] = multiplier - (
+            multiplier / (1 + pd.Series(rs_values, index=data.index))
+        )
 
         # Stochastic oscillator
-        lowest_low = data["low"].rolling(14).min()
-        highest_high = data["high"].rolling(14).max()
+        stoch_period = ML_FEATURE_CONSTANTS["technical_periods"]["stoch_period"]
+        stoch_smooth = ML_FEATURE_CONSTANTS["technical_periods"]["stoch_smooth"]
+        lowest_low = data["low"].rolling(stoch_period).min()
+        highest_high = data["high"].rolling(stoch_period).max()
 
         hh_ll_diff = highest_high - lowest_low
         hh_ll_diff_mask = hh_ll_diff != 0
@@ -552,8 +606,8 @@ class FeatureEngineeringService(BaseService):
         features.loc[hh_ll_diff_mask, "stoch_k"] = (
             (data.loc[hh_ll_diff_mask, "close"] - lowest_low.loc[hh_ll_diff_mask])
             / hh_ll_diff.loc[hh_ll_diff_mask]
-        ) * 100
-        features["stoch_d"] = features["stoch_k"].rolling(3).mean()
+        ) * ML_FEATURE_CONSTANTS["percentage_multiplier"]
+        features["stoch_d"] = features["stoch_k"].rolling(stoch_smooth).mean()
 
         return features
 
@@ -567,12 +621,17 @@ class FeatureEngineeringService(BaseService):
         features = pd.DataFrame(index=data.index)
 
         # Moving averages
-        for period in [5, 10, 20, 50, 100, 200]:
+        all_periods = (
+            ML_FEATURE_CONSTANTS["technical_periods"]["short"]
+            + ML_FEATURE_CONSTANTS["technical_periods"]["medium"]
+            + ML_FEATURE_CONSTANTS["technical_periods"]["long"]
+        )
+        for period in all_periods:
             features[f"sma_{period}"] = data["close"].rolling(period).mean()
             features[f"ema_{period}"] = data["close"].ewm(span=period).mean()
 
         # Moving average crossovers
-        for short, long in [(5, 20), (10, 50), (12, 26)]:
+        for short, long in ML_FEATURE_CONSTANTS["ma_crossover_pairs"]:
             if f"sma_{long}" in features.columns and f"sma_{short}" in features.columns:
                 sma_long_mask = features[f"sma_{long}"] != 0
                 features[f"sma_{short}_{long}_ratio"] = np.nan
@@ -590,7 +649,7 @@ class FeatureEngineeringService(BaseService):
                 )
 
         # Price vs moving average
-        for period in [20, 50]:
+        for period in ML_FEATURE_CONSTANTS["price_vs_ma_periods"]:
             if f"sma_{period}" in features.columns:
                 sma_mask = features[f"sma_{period}"] != 0
                 features[f"price_vs_sma_{period}"] = np.nan
@@ -606,12 +665,17 @@ class FeatureEngineeringService(BaseService):
                 )
 
         # Trend strength
-        if "sma_5" in features.columns and "sma_20" in features.columns:
-            sma_20_mask = features["sma_20"] != 0
+        short_ma_period = ML_FEATURE_CONSTANTS["trend_comparison_periods"]["short"]
+        medium_ma_period = ML_FEATURE_CONSTANTS["trend_comparison_periods"]["medium"]
+        short_ma_col = f"sma_{short_ma_period}"
+        medium_ma_col = f"sma_{medium_ma_period}"
+
+        if short_ma_col in features.columns and medium_ma_col in features.columns:
+            ma_mask = features[medium_ma_col] != 0
             features["trend_strength"] = np.nan
-            features.loc[sma_20_mask, "trend_strength"] = (
-                features.loc[sma_20_mask, "sma_5"] - features.loc[sma_20_mask, "sma_20"]
-            ) / features.loc[sma_20_mask, "sma_20"]
+            features.loc[ma_mask, "trend_strength"] = (
+                features.loc[ma_mask, short_ma_col] - features.loc[ma_mask, medium_ma_col]
+            ) / features.loc[ma_mask, medium_ma_col]
 
         return features
 
@@ -665,13 +729,19 @@ class FeatureEngineeringService(BaseService):
                 max_features = min(self.fe_config.max_features, len(features_df.columns))
 
             # Choose selection method
+            classification_threshold = ML_FEATURE_CONSTANTS["classification_threshold"]
+            is_categorical = (
+                target_series.dtype in ["object", "category"]
+                or target_series.nunique() < classification_threshold
+            )
+
             if method == "mutual_info":
-                if target_series.dtype in ["object", "category"] or target_series.nunique() < 10:
+                if is_categorical:
                     score_func = mutual_info_classif
                 else:
                     score_func = mutual_info_regression
             elif method == "f_test":
-                if target_series.dtype in ["object", "category"] or target_series.nunique() < 10:
+                if is_categorical:
                     score_func = f_classif
                 else:
                     score_func = f_regression
@@ -721,7 +791,7 @@ class FeatureEngineeringService(BaseService):
 
         except Exception as e:
             self._logger.error("Feature selection failed", method=method, error=str(e))
-            raise ModelError(f"Feature selection failed: {e}")
+            raise ModelError(f"Feature selection failed: {e}") from e
 
     async def _preprocess_features(
         self, features_df: pd.DataFrame, scaling_method: str = "standard"
@@ -781,7 +851,7 @@ class FeatureEngineeringService(BaseService):
             self._logger.error(
                 "Feature preprocessing failed", scaling_method=scaling_method, error=str(e)
             )
-            raise ModelError(f"Feature preprocessing failed: {e}")
+            raise ModelError(f"Feature preprocessing failed: {e}") from e
 
     # Utility Methods
     def _handle_missing_values(self, features: pd.DataFrame) -> pd.DataFrame:
@@ -814,9 +884,10 @@ class FeatureEngineeringService(BaseService):
         )
 
         cache_str = f"{symbol}_{feature_types_str}_{data_shape}_{data_checksum}"
-        return hashlib.md5(cache_str.encode()).hexdigest()[:16]
+        digest_length = ML_MODEL_CONSTANTS["hash_digest_length"]
+        return hashlib.md5(cache_str.encode()).hexdigest()[:digest_length]
 
-    @dec.enhance(cache=True, cache_ttl=3600)  # 1 hour cache
+    @dec.enhance(cache=True, cache_ttl=ML_MODEL_CONSTANTS["cache_ttl_seconds"])
     async def _get_cached_features(self, cache_key: str) -> pd.DataFrame | None:
         """Get cached features."""
         if cache_key in self._feature_cache:

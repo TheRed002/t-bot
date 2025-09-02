@@ -18,11 +18,33 @@ Dependencies:
 - P-007A: Utility decorators
 """
 
+from .di_registration import register_ml_services
+from .factory import ModelFactory
 from .feature_engineering import FeatureEngineeringService
+from .interfaces import (
+    IBatchPredictionService,
+    IDriftDetectionService,
+    IFeatureEngineeringService,
+    IInferenceService,
+    IModelRegistryService,
+    IModelValidationService,
+    ITrainingService,
+)
 from .model_manager import ModelManagerService
+from .service import MLService
 
 __version__ = "1.0.0"
 __all__ = [
     "FeatureEngineeringService",
+    "IBatchPredictionService",
+    "IDriftDetectionService",
+    "IFeatureEngineeringService",
+    "IInferenceService",
+    "IModelRegistryService",
+    "IModelValidationService",
+    "ITrainingService",
+    "MLService",
+    "ModelFactory",
     "ModelManagerService",
+    "register_ml_services",
 ]

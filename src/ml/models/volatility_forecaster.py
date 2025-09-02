@@ -5,6 +5,7 @@ This module provides volatility forecasting models that predict future
 volatility levels for risk management and position sizing.
 """
 
+from decimal import Decimal
 from typing import Any
 
 import numpy as np
@@ -17,14 +18,14 @@ from xgboost import XGBRegressor
 
 from src.core.config import Config
 from src.core.exceptions import ValidationError
-from src.ml.models.base_model import BaseModel
+from src.ml.models.base_model import BaseMLModel
 from src.utils.decorators import UnifiedDecorator
 
 # Initialize decorator instance
 dec = UnifiedDecorator()
 
 
-class VolatilityForecaster(BaseModel):
+class VolatilityForecaster(BaseMLModel):
     """
     Volatility forecasting model for predicting future volatility.
 
@@ -68,6 +69,8 @@ class VolatilityForecaster(BaseModel):
             version="1.0.0",
             config=config,
         )
+
+        # Decimal context is already setup globally in decimal_utils
 
         self.algorithm = algorithm
         self.volatility_method = volatility_method
@@ -420,17 +423,41 @@ class VolatilityForecaster(BaseModel):
     def _calculate_realized_volatility(self, price_data: pd.Series) -> np.ndarray:
         """Calculate realized volatility using rolling standard deviation."""
         try:
-            # Calculate returns
-            if self.use_log_returns:
-                returns = np.log(price_data / price_data.shift(1))
-            else:
-                returns = price_data.pct_change()
+            # Calculate returns with Decimal precision
+            returns = pd.Series(index=price_data.index, dtype=float)
+
+            for i in range(1, len(price_data)):
+                current_price = price_data.iloc[i]
+                prev_price = price_data.iloc[i - 1]
+
+                if pd.notna(current_price) and pd.notna(prev_price) and prev_price != 0:
+                    current_decimal = Decimal(str(current_price))
+                    prev_decimal = Decimal(str(prev_price))
+
+                    if self.use_log_returns:
+                        ratio = current_decimal / prev_decimal
+                        returns.iloc[i] = float(np.log(float(ratio)))
+                    else:
+                        return_decimal = (current_decimal / prev_decimal) - Decimal("1")
+                        returns.iloc[i] = float(return_decimal)
+                else:
+                    returns.iloc[i] = np.nan
 
             # Calculate rolling volatility
             volatility = returns.rolling(window=self.volatility_window).std()
 
-            # Annualize volatility (assuming daily data)
-            volatility = volatility * np.sqrt(252)
+            # Annualize volatility (assuming daily data) with Decimal precision
+            annualization_factor = Decimal(str(np.sqrt(252)))
+            volatility_annualized = pd.Series(index=volatility.index, dtype=float)
+
+            for i in range(len(volatility)):
+                if pd.notna(volatility.iloc[i]):
+                    vol_decimal = Decimal(str(volatility.iloc[i]))
+                    volatility_annualized.iloc[i] = float(vol_decimal * annualization_factor)
+                else:
+                    volatility_annualized.iloc[i] = np.nan
+
+            volatility = volatility_annualized
 
             # Shift to create forecast targets
             if self.forecast_horizon > 0:
@@ -464,11 +491,14 @@ class VolatilityForecaster(BaseModel):
 
             # Calculate GARCH volatility
             for i in range(1, len(returns)):
-                volatility[i] = np.sqrt(
+                variance_term = (
                     alpha * returns.iloc[i - 1] ** 2
                     + beta * volatility[i - 1] ** 2
                     + (1 - alpha - beta) * returns.var()
                 )
+                # Ensure non-negative variance before sqrt
+                variance_term = max(0, variance_term)
+                volatility[i] = np.sqrt(variance_term)
 
             # Annualize volatility
             volatility = volatility * np.sqrt(252)
@@ -661,7 +691,8 @@ class VolatilityForecaster(BaseModel):
 
     def _calculate_metrics(self, y_true: np.ndarray, y_pred: np.ndarray) -> dict:
         """Calculate metrics for model evaluation."""
-        from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
+        from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+
         return {
             "mse": mean_squared_error(y_true, y_pred),
             "mae": mean_absolute_error(y_true, y_pred),
