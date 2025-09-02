@@ -47,6 +47,8 @@ if TYPE_CHECKING:
 from src.error_handling import ErrorHandler
 
 # MANDATORY: Import from P-007A
+from src.monitoring.financial_precision import safe_decimal_to_float
+from src.utils.decimal_utils import to_decimal
 from src.utils.decorators import time_execution
 
 
@@ -87,17 +89,14 @@ class RiskCalculator(BaseComponent):
         self.config = config
         self.risk_config = config.risk
         self.error_handler = ErrorHandler(config)
-        # Note: logger is a property from BaseComponent, no need to bind
-
-        # Database service integration (optional for backward compatibility)
         self.database_service = database_service
 
-        # DEPRECATED: Historical data for calculations
+        # DEPRECATED: Historical data for calculations - using Decimal for precision
         # NOTE: RiskService handles this with proper caching and state management
-        self.portfolio_values: list[float] = []
-        self.portfolio_returns: list[float] = []
-        self.position_returns: dict[str, list[float]] = {}
-        self.position_prices: dict[str, list[float]] = {}
+        self.portfolio_values: list[Decimal] = []
+        self.portfolio_returns: list[Decimal] = []
+        self.position_returns: dict[str, list[Decimal]] = {}
+        self.position_prices: dict[str, list[Decimal]] = {}
 
         if database_service:
             self.logger.warning(
@@ -111,9 +110,7 @@ class RiskCalculator(BaseComponent):
             )
 
     @time_execution
-    async def calculate_risk_metrics(
-        self, positions: list[Position], market_data: list[MarketData]
-    ) -> RiskMetrics:
+    async def calculate_risk_metrics(self, positions: list[Position], market_data: list[MarketData]) -> RiskMetrics:
         """
         Calculate comprehensive risk metrics for the portfolio.
 
@@ -150,7 +147,6 @@ class RiskCalculator(BaseComponent):
             # Determine risk level
             risk_level = await self._determine_risk_level(var_1d, current_drawdown, sharpe_ratio)
 
-            # Calculate total exposure (same as portfolio value for spot trading)
             total_exposure = portfolio_value
 
             # Create risk metrics object
@@ -169,9 +165,9 @@ class RiskCalculator(BaseComponent):
 
             self.logger.info(
                 "Risk metrics calculated",
-                var_1d=float(var_1d),
-                var_5d=float(var_5d),
-                current_drawdown=float(current_drawdown),
+                var_1d=safe_decimal_to_float(var_1d, "var_1d"),
+                var_5d=safe_decimal_to_float(var_5d, "var_5d"),
+                current_drawdown=safe_decimal_to_float(current_drawdown, "current_drawdown"),
                 risk_level=risk_level.value,
             )
 
@@ -203,9 +199,7 @@ class RiskCalculator(BaseComponent):
         )
 
     @time_execution
-    async def _calculate_portfolio_value(
-        self, positions: list[Position], market_data: list[MarketData]
-    ) -> Decimal:
+    async def _calculate_portfolio_value(self, positions: list[Position], market_data: list[MarketData]) -> Decimal:
         """
         Calculate current portfolio value.
 
@@ -226,7 +220,6 @@ class RiskCalculator(BaseComponent):
             if market and position.symbol == market.symbol:
                 # Calculate values without modifying position object
                 current_price = market.close
-                # unrealized_pnl = position.quantity * (current_price - position.entry_price)
 
                 # Add position value to portfolio
                 position_value = position.quantity * current_price
@@ -242,13 +235,13 @@ class RiskCalculator(BaseComponent):
         Args:
             portfolio_value: Current portfolio value
         """
-        self.portfolio_values.append(float(portfolio_value))
+        self.portfolio_values.append(portfolio_value)
 
-        # Calculate portfolio return if we have previous value
+        # Calculate portfolio return if we have previous value using Decimal precision
         if len(self.portfolio_values) > 1:
             prev_value = self.portfolio_values[-2]
-            if prev_value > 0:
-                return_rate = (float(portfolio_value) - prev_value) / prev_value
+            if prev_value > Decimal("0"):
+                return_rate = (portfolio_value - prev_value) / prev_value
                 self.portfolio_returns.append(return_rate)
 
         # Keep only recent history
@@ -273,22 +266,20 @@ class RiskCalculator(BaseComponent):
             Decimal: VaR value
         """
         if len(self.portfolio_returns) < 30:
-            # Insufficient data, use conservative estimate scaled by sqrt(days)
             # This ensures 5-day VaR is larger than 1-day VaR
-            base_var_pct = Decimal("0.02")  # 2% base VaR
+            base_var_pct = Decimal(str(self.risk_config.base_var_pct or "0.02"))  # Base VaR percentage
             scaled_var_pct = base_var_pct * Decimal(str(np.sqrt(days)))
             return portfolio_value * scaled_var_pct
 
-        # Calculate daily volatility
-        returns_array = np.array(self.portfolio_returns)
-        daily_volatility = np.std(returns_array)
+        # Calculate daily volatility using safe decimal conversion for numpy
+        returns_float = [safe_decimal_to_float(ret, f"portfolio_return_{i}") for i, ret in enumerate(self.portfolio_returns)]
+        returns_array = np.array(returns_float)
+        daily_volatility = to_decimal(str(np.std(returns_array)))
 
         # Calculate VaR using normal distribution assumption
-        # VaR = portfolio_value * volatility * sqrt(days) * z_score
-        # Default VaR confidence level to 95%
-        confidence_level = 0.95
+        # Use configured VaR confidence level
+        confidence_level = self.risk_config.var_confidence_level
 
-        # Z-score for confidence level (90% = 1.282, 95% = 1.645, 99% = 2.326)
         if confidence_level == 0.90:
             z_score = 1.282
         elif confidence_level == 0.95:
@@ -301,9 +292,8 @@ class RiskCalculator(BaseComponent):
 
             z_score = norm.ppf(confidence_level)
 
-        # Formula: VaR = portfolio_value * (volatility * sqrt(days) * z_score)
-        var_percentage = daily_volatility * np.sqrt(days) * z_score
-        var_value = portfolio_value * Decimal(str(var_percentage))
+        var_percentage = daily_volatility * Decimal(str(np.sqrt(days))) * Decimal(str(z_score))
+        var_value = portfolio_value * var_percentage
 
         return var_value
 
@@ -323,11 +313,11 @@ class RiskCalculator(BaseComponent):
             return portfolio_value * Decimal("0.025")  # 2.5% ES
 
         # Calculate expected shortfall as average of worst returns
-        returns_array = np.array(self.portfolio_returns)
-        # Default VaR confidence level to 95%
-        confidence_level = 0.95
+        returns_float = [safe_decimal_to_float(ret, f"portfolio_return_{i}") for i, ret in enumerate(self.portfolio_returns)]
+        returns_array = np.array(returns_float)
+        # Use configured VaR confidence level
+        confidence_level = safe_decimal_to_float(self.risk_config.var_confidence_level, "var_confidence_level")
 
-        # Find threshold for worst (1-confidence_level) returns
         threshold = np.percentile(returns_array, (1 - confidence_level) * 100)
 
         # Calculate average of returns below threshold
@@ -351,13 +341,14 @@ class RiskCalculator(BaseComponent):
         if len(self.portfolio_values) < 2:
             return Decimal("0")
 
-        # Calculate running maximum and drawdown
-        running_max = np.maximum.accumulate(self.portfolio_values)
-        drawdowns = (running_max - self.portfolio_values) / running_max
+        # Calculate running maximum and drawdown using safe decimal conversion for numpy
+        portfolio_float = [safe_decimal_to_float(val, f"portfolio_value_{i}") for i, val in enumerate(self.portfolio_values)]
+        running_max = np.maximum.accumulate(portfolio_float)
+        drawdowns = (running_max - portfolio_float) / running_max
 
         max_drawdown = np.max(drawdowns)
 
-        return Decimal(str(max_drawdown))
+        return to_decimal(str(max_drawdown))
 
     @time_execution
     async def _calculate_current_drawdown(self, portfolio_value: Decimal) -> Decimal:
@@ -376,13 +367,13 @@ class RiskCalculator(BaseComponent):
         # Find peak value
         peak_value = max(self.portfolio_values)
 
-        if peak_value <= 0:
+        if peak_value <= Decimal("0"):
             return Decimal("0")
 
-        # Calculate current drawdown
-        current_drawdown = (peak_value - float(portfolio_value)) / peak_value
+        # Calculate current drawdown using Decimal precision
+        current_drawdown = (peak_value - portfolio_value) / peak_value
 
-        return Decimal(str(max(0, current_drawdown)))
+        return max(Decimal("0"), current_drawdown)
 
     @time_execution
     async def _calculate_sharpe_ratio(self) -> Decimal | None:
@@ -395,7 +386,9 @@ class RiskCalculator(BaseComponent):
         if len(self.portfolio_returns) < 30:
             return None  # Insufficient data
 
-        returns_array = np.array(self.portfolio_returns)
+        # Convert returns to float for numpy operations
+        returns_float = [float(ret) for ret in self.portfolio_returns]
+        returns_array = np.array(returns_float)
 
         # Calculate annualized metrics
         mean_return = np.mean(returns_array) * 252  # Annualize daily returns
@@ -405,10 +398,8 @@ class RiskCalculator(BaseComponent):
         if volatility == 0:
             return None
 
-        # Risk-free rate (assume 0% for crypto)
         risk_free_rate = 0.0
 
-        # Sharpe ratio = (return - risk_free_rate) / volatility
         sharpe_ratio = (mean_return - risk_free_rate) / volatility
 
         return Decimal(str(sharpe_ratio))
@@ -432,13 +423,8 @@ class RiskCalculator(BaseComponent):
         current_portfolio_value = self.portfolio_values[-1] if self.portfolio_values else 1
 
         # Calculate VaR as percentage of portfolio value
-        var_1d_pct = (
-            var_1d / Decimal(str(current_portfolio_value))
-            if current_portfolio_value > 0
-            else Decimal("0")
-        )
+        var_1d_pct = var_1d / Decimal(str(current_portfolio_value)) if current_portfolio_value > 0 else Decimal("0")
 
-        # Risk level thresholds (as percentages)
         var_threshold_high = Decimal("0.05")  # 5% VaR
         var_threshold_critical = Decimal("0.10")  # 10% VaR
         drawdown_threshold_high = Decimal("0.10")  # 10% drawdown
@@ -469,7 +455,7 @@ class RiskCalculator(BaseComponent):
         return RiskLevel.LOW
 
     @time_execution
-    async def update_position_returns(self, symbol: str, price: float) -> None:
+    async def update_position_returns(self, symbol: str, price: Decimal) -> None:
         """
         Update position return history for individual position risk.
 
@@ -481,13 +467,13 @@ class RiskCalculator(BaseComponent):
             self.position_returns[symbol] = []
             self.position_prices[symbol] = []
 
-        # Store the current price
+        # Store the current price as Decimal
         self.position_prices[symbol].append(price)
 
-        # Calculate return if we have previous price
+        # Calculate return if we have previous price using Decimal precision
         if len(self.position_prices[symbol]) > 1:
             prev_price = self.position_prices[symbol][-2]
-            if prev_price > 0:
+            if prev_price > Decimal("0"):
                 return_rate = (price - prev_price) / prev_price
                 self.position_returns[symbol].append(return_rate)
 
@@ -509,16 +495,16 @@ class RiskCalculator(BaseComponent):
         if not self.portfolio_values:
             return {"error": "No portfolio data available"}
 
-        current_value = self.portfolio_values[-1] if self.portfolio_values else 0
-        peak_value = max(self.portfolio_values) if self.portfolio_values else 0
+        current_value = self.portfolio_values[-1] if self.portfolio_values else Decimal("0")
+        peak_value = max(self.portfolio_values) if self.portfolio_values else Decimal("0")
 
         summary = {
-            "current_portfolio_value": current_value,
-            "peak_portfolio_value": peak_value,
+            "current_portfolio_value": float(current_value),
+            "peak_portfolio_value": float(peak_value),
             "total_return": (
-                (current_value - self.portfolio_values[0]) / self.portfolio_values[0]
-                if len(self.portfolio_values) > 1
-                else 0
+                float((current_value - self.portfolio_values[0]) / self.portfolio_values[0])
+                if len(self.portfolio_values) > 1 and self.portfolio_values[0] > Decimal("0")
+                else 0.0
             ),
             "data_points": len(self.portfolio_values),
             "return_data_points": len(self.portfolio_returns),

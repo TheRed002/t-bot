@@ -76,9 +76,7 @@ class CorrelationMonitor(BaseComponent):
         super().__init__()  # Initialize BaseComponent
         self.config = config
         self.thresholds = thresholds or CorrelationThresholds()
-        # Note: logger is a property from BaseComponent, no need to bind
 
-        # Price history storage: symbol -> deque of (price, timestamp)
         self.price_history: dict[str, deque[tuple[Decimal, datetime]]] = defaultdict(
             lambda: deque(maxlen=self.thresholds.lookback_periods)
         )
@@ -125,7 +123,6 @@ class CorrelationMonitor(BaseComponent):
                     return_pct = (price - prev_price) / prev_price
                     self.return_history[symbol].append(return_pct)
 
-            # Clear correlation cache for this symbol (invalidate related correlations)
             keys_to_remove = [key for key in self._correlation_cache.keys() if symbol in key]
             for key in keys_to_remove:
                 del self._correlation_cache[key]
@@ -164,7 +161,6 @@ class CorrelationMonitor(BaseComponent):
             if len(returns1) < min_periods or len(returns2) < min_periods:
                 return None
 
-            # Align data (take minimum length)
             min_len = min(len(returns1), len(returns2))
             if min_len < min_periods:
                 return None
@@ -224,14 +220,10 @@ class CorrelationMonitor(BaseComponent):
                 return correlation
 
             except Exception as e:
-                self.logger.warning(
-                    "Correlation calculation failed", symbol1=symbol1, symbol2=symbol2, error=str(e)
-                )
+                self.logger.warning("Correlation calculation failed", symbol1=symbol1, symbol2=symbol2, error=str(e))
                 return None
 
-    async def calculate_portfolio_correlation(
-        self, positions: list[Position]
-    ) -> CorrelationMetrics:
+    async def calculate_portfolio_correlation(self, positions: list[Position]) -> CorrelationMetrics:
         """
         Calculate comprehensive correlation metrics for portfolio.
 
@@ -269,9 +261,7 @@ class CorrelationMonitor(BaseComponent):
                     correlation = await self.calculate_pairwise_correlation(symbol1, symbol2)
 
                     if correlation is not None:
-                        key: tuple[str, str] = (
-                            (symbol1, symbol2) if symbol1 < symbol2 else (symbol2, symbol1)
-                        )
+                        key: tuple[str, str] = (symbol1, symbol2) if symbol1 < symbol2 else (symbol2, symbol1)
                         correlation_matrix[key] = correlation
                         correlations.append(abs(correlation))  # Use absolute value
 
@@ -293,9 +283,7 @@ class CorrelationMonitor(BaseComponent):
             # Calculate metrics using Decimal precision
             if correlations:
                 # Calculate average using Decimal arithmetic
-                avg_correlation = sum(Decimal(str(c)) for c in correlations) / Decimal(
-                    str(len(correlations))
-                )
+                avg_correlation = sum(Decimal(str(c)) for c in correlations) / Decimal(str(len(correlations)))
                 max_correlation = max(Decimal(str(c)) for c in correlations)
             else:
                 avg_correlation = Decimal("0.0")
@@ -307,8 +295,11 @@ class CorrelationMonitor(BaseComponent):
                 or avg_correlation > self.thresholds.warning_threshold
             )
 
-            # Calculate concentration risk (weighted by position sizes)
-            total_value = sum(abs(pos.current_price * pos.quantity) for pos in positions)
+            total_value = sum(
+                abs(pos.current_price * pos.quantity)
+                for pos in positions
+                if pos.current_price is not None and pos.quantity is not None
+            )
             concentration_risk = Decimal("0.0")
 
             if total_value > 0:
@@ -317,12 +308,17 @@ class CorrelationMonitor(BaseComponent):
                 for i, pos1 in enumerate(positions):
                     for pos2 in positions[i + 1 :]:
                         weight_key: tuple[str, str] = (
-                            (pos1.symbol, pos2.symbol)
-                            if pos1.symbol < pos2.symbol
-                            else (pos2.symbol, pos1.symbol)
+                            (pos1.symbol, pos2.symbol) if pos1.symbol < pos2.symbol else (pos2.symbol, pos1.symbol)
                         )
                         if weight_key in correlation_matrix:
-                            # Use Decimal for all weight calculations
+                            # Use Decimal for all weight calculations with null checks
+                            if (
+                                pos1.current_price is None
+                                or pos1.quantity is None
+                                or pos2.current_price is None
+                                or pos2.quantity is None
+                            ):
+                                continue
                             value1 = abs(pos1.current_price * pos1.quantity)
                             value2 = abs(pos2.current_price * pos2.quantity)
                             weight1 = value1 / total_value
@@ -355,9 +351,7 @@ class CorrelationMonitor(BaseComponent):
                 error_code="CORRELATION_CALCULATION_FAILED",
             ) from e
 
-    async def get_position_limits_for_correlation(
-        self, correlation_metrics: CorrelationMetrics
-    ) -> dict[str, Any]:
+    async def get_position_limits_for_correlation(self, correlation_metrics: CorrelationMetrics) -> dict[str, Any]:
         """
         Calculate position limits based on current correlation levels.
 
@@ -401,7 +395,7 @@ class CorrelationMonitor(BaseComponent):
         """
         try:
             # Use timeout to prevent hanging during cleanup
-            async with asyncio.timeout(10.0):
+            async def _do_cleanup():
                 async with self._lock:
                     symbols_cleaned = 0
                     cache_entries_cleaned = 0
@@ -439,6 +433,9 @@ class CorrelationMonitor(BaseComponent):
                         cutoff_time=cutoff_time.isoformat(),
                     )
 
+            # Execute cleanup with timeout
+            await asyncio.wait_for(_do_cleanup(), timeout=10.0)
+
         except asyncio.TimeoutError:
             self.logger.error("Data cleanup timed out after 10 seconds")
         except Exception as e:
@@ -451,16 +448,13 @@ class CorrelationMonitor(BaseComponent):
         Called when cache grows too large.
         """
         try:
-            # Remove old cache entries (keep only recent ones)
             current_time = datetime.now(timezone.utc)
             entries_removed = 0
 
             # Create new cache with only recent entries
             new_cache = {}
             for key, (correlation, cache_time) in self._correlation_cache.items():
-                if (
-                    current_time - cache_time < self._cache_timeout * 2
-                ):  # Keep entries for 2x timeout
+                if current_time - cache_time < self._cache_timeout * 2:  # Keep entries for 2x timeout
                     new_cache[key] = (correlation, cache_time)
                 else:
                     entries_removed += 1
@@ -516,20 +510,14 @@ class CorrelationMonitor(BaseComponent):
                     "lookback_periods": self.thresholds.lookback_periods,
                     "min_periods": self.thresholds.min_periods,
                 },
-                "data_points_per_symbol": {
-                    symbol: len(history) for symbol, history in self.return_history.items()
-                },
+                "data_points_per_symbol": {symbol: len(history) for symbol, history in self.return_history.items()},
                 "resource_usage": {
                     "estimated_memory_mb": (total_price_points + total_return_points)
                     * 8
                     / 1024
                     / 1024,  # Rough estimate
                     "symbols_with_insufficient_data": len(
-                        [
-                            s
-                            for s, h in self.return_history.items()
-                            if len(h) < self.thresholds.min_periods
-                        ]
+                        [s for s, h in self.return_history.items() if len(h) < self.thresholds.min_periods]
                     ),
                 },
             }

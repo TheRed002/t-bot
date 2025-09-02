@@ -19,57 +19,35 @@ legacy components (deprecated) and the new RiskService architecture.
 
 ## Quick Start:
 
-### Using New RiskService (Recommended):
+### RECOMMENDED: Using RiskManagementController:
 ```python
-from src.risk_management import create_risk_service
+from src.risk_management.factory import create_risk_management_controller
 
-# Create RiskService with dependencies
+controller = create_risk_management_controller(
+    database_service=database_service, state_service=state_service, config=config
+)
+
+# Main operations
+position_size = await controller.calculate_position_size(signal, capital, price)
+is_valid = await controller.validate_signal(signal)
+risk_metrics = await controller.calculate_risk_metrics(positions, market_data)
+```
+
+### Using RiskService directly:
+```python
+from src.risk_management.factory import create_risk_service
+
 risk_service = create_risk_service(
     database_service=database_service, state_service=state_service, config=config
 )
 
-# Calculate position size
-position_size = await risk_service.calculate_position_size(
-    signal=signal, available_capital=capital, current_price=price
-)
-
-# Calculate risk metrics
+position_size = await risk_service.calculate_position_size(signal, capital, price)
 risk_metrics = await risk_service.calculate_risk_metrics(positions, market_data)
-
-# Get risk summary
-risk_summary = await risk_service.get_risk_summary()
 ```
-
-### Using Factory Pattern:
-```python
-from src.risk_management import get_risk_factory
-
-factory = get_risk_factory(
-    database_service=database_service, state_service=state_service, config=config
-)
-
-# Get recommended component (RiskService or RiskManager fallback)
-risk_component = factory.get_recommended_component()
-```
-
-### Legacy Usage (Deprecated):
-```python
-from src.risk_management import RiskManager
-
-# DEPRECATED - migrate to RiskService
-risk_manager = RiskManager(config)
-position_size = await risk_manager.calculate_position_size(signal, capital, price)
-```
-
-## Migration Guide:
-- RiskManager.calculate_position_size() -> RiskService.calculate_position_size()
-- RiskManager.validate_signal() -> RiskService.validate_signal()
-- RiskManager.calculate_risk_metrics() -> RiskService.calculate_risk_metrics()
-- PositionSizer -> Use RiskService.calculate_position_size()
-- RiskCalculator -> Use RiskService.calculate_risk_metrics()
 
 ## Features:
-- Multiple position sizing methods (Fixed %, Kelly Criterion, Volatility-Adjusted, Confidence-Weighted)
+- Multiple position sizing methods (Fixed %, Kelly Criterion, Volatility-Adjusted,
+  Confidence-Weighted)
 - Comprehensive risk metrics (VaR, Expected Shortfall, Drawdown, Sharpe Ratio)
 - Real-time risk monitoring and alerting
 - Emergency stop controls
@@ -84,13 +62,28 @@ P-002A (error handling), and P-007A (utils) components.
 """
 
 # New Architecture - RECOMMENDED
-# Support modules
 from .base import BaseRiskManager
+from .controller import RiskManagementController
+
+# Dependency injection registration
+from .di_registration import (
+    configure_risk_management_dependencies,
+    register_risk_management_services,
+)
 from .factory import (
     RiskManagementFactory,
     create_recommended_risk_component,
+    create_risk_management_controller,
     create_risk_service,
     get_risk_factory,
+)
+from .interfaces import (
+    AbstractRiskService,
+    PositionSizingServiceInterface,
+    RiskMetricsServiceInterface,
+    RiskMonitoringServiceInterface,
+    RiskServiceInterface,
+    RiskValidationServiceInterface,
 )
 from .portfolio_limits import PortfolioLimits
 from .position_sizing import PositionSizer
@@ -99,6 +92,12 @@ from .position_sizing import PositionSizer
 from .risk_manager import RiskManager
 from .risk_metrics import RiskCalculator
 from .service import RiskService
+from .services import (
+    PositionSizingService,
+    RiskMetricsService,
+    RiskMonitoringService,
+    RiskValidationService,
+)
 
 # Legacy circuit breakers and emergency controls (if they exist)
 try:
@@ -108,25 +107,40 @@ try:
     _has_legacy_controls = True
 except ImportError:
     _has_legacy_controls = False
-    BaseCircuitBreaker = None
-    CircuitBreakerManager = None
-    EmergencyControls = None
+    BaseCircuitBreaker = None  # type: ignore
+    CircuitBreakerManager = None  # type: ignore
+    EmergencyControls = None  # type: ignore
 
-# Public API - prioritizes new architecture
+# Public API - prioritizes new service architecture
 __all__ = [
-    # Support
+    "AbstractRiskService",
+    # Core components
     "BaseRiskManager",
     "PortfolioLimits",
     "PositionSizer",
+    "PositionSizingService",
+    "PositionSizingServiceInterface",
     "RiskCalculator",
+    # RECOMMENDED Architecture
+    "RiskManagementController",
     "RiskManagementFactory",
+    "RiskService",
+    "RiskServiceInterface",
     # Legacy Components (DEPRECATED)
     "RiskManager",
-    # New Architecture (RECOMMENDED)
-    "RiskService",
+    "RiskMetricsService",
+    "RiskMetricsServiceInterface",
+    "RiskMonitoringService",
+    "RiskMonitoringServiceInterface",
+    "RiskValidationService",
+    "RiskValidationServiceInterface",
+    # Dependency injection
+    "configure_risk_management_dependencies",
     "create_recommended_risk_component",
+    "create_risk_management_controller",  # RECOMMENDED
     "create_risk_service",
     "get_risk_factory",
+    "register_risk_management_services",
 ]
 
 # Add legacy controls if available
@@ -140,6 +154,6 @@ if _has_legacy_controls:
     )
 
 # Version information
-__version__ = "2.0.0"
+__version__ = "2.1.0"
 __author__ = "Trading Bot Framework"
-__description__ = "Enterprise Risk Management System with Service Architecture (P-008, P-009)"
+__description__ = "Enterprise Risk Management System with Controller-Service-Repository Architecture " "(P-008, P-009)"

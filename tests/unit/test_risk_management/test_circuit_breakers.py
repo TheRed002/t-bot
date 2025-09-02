@@ -43,6 +43,10 @@ class TestBaseCircuitBreaker:
         """Create mock configuration."""
         config = Mock(spec=Config)
         config.risk = Mock()
+        config.risk.daily_loss_limit_pct = 0.05
+        config.risk.volatility_spike_threshold = 0.05
+        config.risk.volatility_lookback_period = 20
+        config.risk.breaker_evaluation_timeout = 30.0
         config.risk.max_daily_loss_pct = 0.05
         config.risk.max_drawdown = 0.15
         return config
@@ -112,6 +116,10 @@ class TestDailyLossLimitBreaker:
         """Create mock configuration."""
         config = Mock(spec=Config)
         config.risk = Mock()
+        config.risk.daily_loss_limit_pct = 0.05
+        config.risk.volatility_spike_threshold = 0.05
+        config.risk.volatility_lookback_period = 20
+        config.risk.breaker_evaluation_timeout = 30.0
         config.risk.max_daily_loss_pct = 0.05  # 5%
         return config
 
@@ -287,6 +295,8 @@ class TestVolatilitySpikeBreaker:
         """Create mock configuration."""
         config = Mock(spec=Config)
         config.risk = Mock()
+        config.risk.volatility_spike_threshold = 0.05
+        config.risk.volatility_lookback_period = 20
         return config
 
     @pytest.fixture
@@ -489,6 +499,14 @@ class TestCircuitBreakerManager:
         """Create mock configuration."""
         config = Mock(spec=Config)
         config.risk = Mock()
+        config.risk.daily_loss_limit_pct = 0.05
+        config.risk.volatility_spike_threshold = 0.05
+        config.risk.volatility_lookback_period = 20
+        config.risk.breaker_evaluation_timeout = 30.0
+        config.risk.daily_loss_limit_pct = 0.05
+        config.risk.volatility_spike_threshold = 0.05
+        config.risk.volatility_lookback_period = 20
+        config.risk.breaker_evaluation_timeout = 30.0
         config.risk.max_daily_loss_pct = 0.05
         config.risk.max_drawdown = 0.15
         return config
@@ -603,6 +621,14 @@ class TestCircuitBreakerIntegration:
         """Create mock configuration."""
         config = Mock(spec=Config)
         config.risk = Mock()
+        config.risk.daily_loss_limit_pct = 0.05
+        config.risk.volatility_spike_threshold = 0.05
+        config.risk.volatility_lookback_period = 20
+        config.risk.breaker_evaluation_timeout = 30.0
+        config.risk.daily_loss_limit_pct = 0.05
+        config.risk.volatility_spike_threshold = 0.05
+        config.risk.volatility_lookback_period = 20
+        config.risk.breaker_evaluation_timeout = 30.0
         config.risk.max_daily_loss_pct = 0.05
         config.risk.max_drawdown = 0.15
         return config

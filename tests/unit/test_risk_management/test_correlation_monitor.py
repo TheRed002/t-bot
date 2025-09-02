@@ -15,7 +15,7 @@ import pytest
 
 from src.core.config import Config
 from src.core.types.market import MarketData
-from src.core.types.trading import OrderSide, Position
+from src.core.types.trading import OrderSide, Position, PositionSide, PositionStatus
 from src.risk_management.correlation_monitor import (
     CorrelationMetrics,
     CorrelationMonitor,
@@ -128,7 +128,8 @@ def sample_positions():
             entry_price=Decimal("50000.00"),
             current_price=Decimal("50100.00"),
             unrealized_pnl=Decimal("100.00"),
-            side=OrderSide.BUY,
+            side=PositionSide.LONG,
+            status=PositionStatus.OPEN,
             opened_at=timestamp,
             exchange="binance",
             metadata={},
@@ -139,7 +140,8 @@ def sample_positions():
             entry_price=Decimal("3000.00"),
             current_price=Decimal("3030.00"),
             unrealized_pnl=Decimal("300.00"),
-            side=OrderSide.BUY,
+            side=PositionSide.LONG,
+            status=PositionStatus.OPEN,
             opened_at=timestamp,
             exchange="binance",
             metadata={},
@@ -483,12 +485,11 @@ class TestCorrelationMonitor:
         cutoff_time = datetime.now(timezone.utc) - timedelta(hours=1)
         await correlation_monitor.cleanup_old_data(cutoff_time)
 
-        # The cleanup method has a bug with asyncio.timeout in Python 3.10, so it fails
-        # and doesn't actually clean up data. The test should verify the current behavior.
-        # Data remains unchanged because cleanup failed
-        assert len(correlation_monitor.price_history["BTC/USD"]) == 3
-        assert len(correlation_monitor.return_history["BTC/USD"]) == 2
-        # Cache should still be cleared even if cleanup fails
+        # The cleanup method works correctly and removes old data
+        # Since all data is older than cutoff and less than 5 items, symbol is removed
+        assert "BTC/USD" not in correlation_monitor.price_history
+        assert "BTC/USD" not in correlation_monitor.return_history
+        # Cache should be cleared
         assert len(correlation_monitor._correlation_cache) == 0
 
     @pytest.mark.asyncio
@@ -650,7 +651,8 @@ class TestCorrelationDecimalPrecision:
                 entry_price=Decimal("50000.123456789"),
                 current_price=Decimal("50005.123456789"),
                 unrealized_pnl=Decimal("5.0"),
-                side=OrderSide.BUY,
+                side=PositionSide.LONG,
+            status=PositionStatus.OPEN,
                 opened_at=datetime.now(timezone.utc),
                 exchange="binance",
                 metadata={},
@@ -661,7 +663,8 @@ class TestCorrelationDecimalPrecision:
                 entry_price=Decimal("3000.987654321"),
                 current_price=Decimal("3005.987654321"),
                 unrealized_pnl=Decimal("55.0"),
-                side=OrderSide.BUY,
+                side=PositionSide.LONG,
+            status=PositionStatus.OPEN,
                 opened_at=datetime.now(timezone.utc),
                 exchange="binance",
                 metadata={},

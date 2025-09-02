@@ -14,7 +14,7 @@ from src.core.config import Config
 from src.core.exceptions import RiskManagementError
 from src.core.types.market import MarketData
 from src.core.types.risk import RiskLevel, RiskMetrics
-from src.core.types.trading import OrderSide, Position
+from src.core.types.trading import OrderSide, Position, PositionSide, PositionStatus
 from src.risk_management.risk_metrics import RiskCalculator
 
 
@@ -35,12 +35,13 @@ class TestRiskCalculator:
     def sample_position(self):
         """Create a sample position."""
         return Position(
-            symbol="BTCUSDT",
+            symbol="BTC/USDT",
             quantity=Decimal("0.1"),
             entry_price=Decimal("50000"),
             current_price=Decimal("51000"),
             unrealized_pnl=Decimal("100"),
-            side=OrderSide.BUY,
+            side=PositionSide.LONG,
+            status=PositionStatus.OPEN,
             opened_at=datetime.now(timezone.utc),
             exchange="binance",
             metadata={},
@@ -50,7 +51,7 @@ class TestRiskCalculator:
     def sample_market_data(self):
         """Create sample market data."""
         return MarketData(
-            symbol="BTCUSDT",
+            symbol="BTC/USDT",
             timestamp=datetime.now(timezone.utc),
             open=Decimal("50000"),
             high=Decimal("52000"),
@@ -148,7 +149,7 @@ class TestRiskCalculator:
         assert len(risk_calculator.portfolio_values) == 2
         assert len(risk_calculator.portfolio_returns) == 1
         # (11000-10000)/10000
-        assert risk_calculator.portfolio_returns[0] == 0.1
+        assert risk_calculator.portfolio_returns[0] == Decimal('0.1')
 
     @pytest.mark.asyncio
     async def test_calculate_var(self, risk_calculator):
@@ -325,7 +326,7 @@ class TestRiskCalculator:
     @pytest.mark.asyncio
     async def test_update_position_returns(self, risk_calculator):
         """Test position returns update."""
-        symbol = "BTCUSDT"
+        symbol = "BTC/USDT"
         price = 50000.0
 
         await risk_calculator.update_position_returns(symbol, price)
@@ -337,7 +338,7 @@ class TestRiskCalculator:
     @pytest.mark.asyncio
     async def test_update_position_returns_with_history(self, risk_calculator):
         """Test position returns update with history."""
-        symbol = "BTCUSDT"
+        symbol = "BTC/USDT"
 
         # Add first price
         await risk_calculator.update_position_returns(symbol, 50000.0)
@@ -356,7 +357,7 @@ class TestRiskCalculator:
         """Test risk summary generation."""
         # Add some portfolio data
         risk_calculator.portfolio_values = [10000, 11000, 9000, 12000, 8000, 13000]
-        risk_calculator.position_returns["BTCUSDT"] = [0.01, 0.02, 0.01]
+        risk_calculator.position_returns["BTC/USDT"] = [0.01, 0.02, 0.01]
 
         summary = await risk_calculator.get_risk_summary()
 

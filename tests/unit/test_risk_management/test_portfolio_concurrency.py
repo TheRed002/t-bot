@@ -26,7 +26,7 @@ import pytest
 from src.core.config import Config
 from src.core.types.market import MarketData
 from src.core.types.risk import RiskLevel
-from src.core.types.trading import OrderSide, Position
+from src.core.types.trading import OrderSide, Position, PositionSide, PositionStatus
 from src.risk_management.risk_metrics import RiskCalculator
 
 
@@ -53,7 +53,7 @@ class TestPortfolioConcurrency:
     def sample_positions(self):
         """Create sample positions for testing."""
         positions = []
-        symbols = ["BTCUSDT", "ETHUSDT", "ADAUSDT", "DOTUSDT", "LINKUSDT"]
+        symbols = ["BTC/USDT", "ETH/USDT", "ADA/USDT", "DOTUSDT", "LINKUSDT"]
 
         for i, symbol in enumerate(symbols):
             position = Position(
@@ -62,7 +62,8 @@ class TestPortfolioConcurrency:
                 entry_price=Decimal(f"{1000 + i * 100}"),
                 current_price=Decimal(f"{1100 + i * 100}"),
                 unrealized_pnl=Decimal(f"{100 + i * 10}"),
-                side=OrderSide.BUY,
+                side=PositionSide.LONG,
+            status=PositionStatus.OPEN,
                 opened_at=datetime.now(timezone.utc),
                 exchange="binance",
                 metadata={},
@@ -75,7 +76,7 @@ class TestPortfolioConcurrency:
     def sample_market_data(self):
         """Create sample market data for testing."""
         market_data = []
-        symbols = ["BTCUSDT", "ETHUSDT", "ADAUSDT", "DOTUSDT", "LINKUSDT"]
+        symbols = ["BTC/USDT", "ETH/USDT", "ADA/USDT", "DOTUSDT", "LINKUSDT"]
 
         for i, symbol in enumerate(symbols):
             data = MarketData(
@@ -184,7 +185,7 @@ class TestPortfolioConcurrency:
     @pytest.mark.asyncio
     async def test_concurrent_position_return_updates(self, risk_calculator):
         """Test concurrent position return updates are thread-safe."""
-        symbols = ["BTCUSDT", "ETHUSDT", "ADAUSDT"]
+        symbols = ["BTC/USDT", "ETH/USDT", "ADA/USDT"]
         num_tasks = 15
         updates_per_symbol = 100
 
@@ -251,7 +252,7 @@ class TestPortfolioConcurrency:
 
         # Verify no data corruption - values should be valid numbers
         for value in risk_calculator.portfolio_values:
-            assert isinstance(value, (int, float))
+            assert isinstance(value, (int, float, Decimal))
             assert value >= 10000  # All values should be >= base value
 
     @pytest.mark.asyncio
@@ -306,7 +307,6 @@ class TestPortfolioConcurrency:
         async def calculate_var(days):
             """Calculate VaR for given time horizon."""
             result = await risk_calculator._calculate_var(days, portfolio_value)
-            print(f"VaR for {days} days: {result}")
             return result
 
         # Run concurrent VaR calculations
@@ -335,13 +335,9 @@ class TestPortfolioConcurrency:
         # Verify VaR scaling relationship (longer horizon = higher VaR)
         var_values = {horizon: values[0] for horizon, values in grouped_results.items()}
 
-        # Debug: Print VaR values to understand the issue
-        print(f"VaR values: {var_values}")
-
         # KNOWN ISSUE: VaR calculation currently has a bug where it doesn't properly scale with time horizon
         # All VaR values are identical regardless of days parameter
         # For now, just verify that the VaR calculations are consistent and positive
-        # TODO: Fix the VaR calculation to properly scale with sqrt(time)
 
         # Verify all values are identical (current buggy behavior)
         all_values = list(var_values.values())

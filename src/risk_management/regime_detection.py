@@ -8,6 +8,7 @@ CRITICAL: This module integrates with existing risk management framework from P-
 """
 
 from datetime import datetime, timezone
+from decimal import Decimal
 from typing import Any
 
 import numpy as np
@@ -40,7 +41,6 @@ class MarketRegimeDetector(BaseComponent):
         self.correlation_window = config.get("correlation_window", 30)
         self.regime_change_threshold = config.get("regime_change_threshold", 0.7)
 
-        # Volatility thresholds (annualized)
         self.volatility_thresholds = {
             MarketRegime.LOW_VOLATILITY: 0.15,  # < 15% annualized
             MarketRegime.MEDIUM_VOLATILITY: 0.30,  # 15-30% annualized
@@ -92,7 +92,6 @@ class MarketRegimeDetector(BaseComponent):
             # Calculate returns
             returns = np.diff(np.log(price_data))
 
-            # Calculate rolling volatility (annualized)
             volatility = np.std(returns) * np.sqrt(252)  # Annualized
 
             # Classify volatility regime
@@ -103,7 +102,7 @@ class MarketRegimeDetector(BaseComponent):
             else:
                 regime = MarketRegime.HIGH_VOLATILITY
 
-            self.logger.debug(
+            self.logger.info(
                 "Volatility regime detected",
                 symbol=symbol,
                 volatility=volatility,
@@ -137,15 +136,17 @@ class MarketRegimeDetector(BaseComponent):
                 )
                 return MarketRegime.RANGING
 
-            # Calculate linear regression slope
-            x = np.arange(len(price_data))
-            slope, intercept = np.polyfit(x, price_data, 1)
+            # Convert to numpy array for proper operations
+            price_array = np.array(price_data)
 
-            # Calculate R-squared (trend strength)
+            # Calculate linear regression slope
+            x = np.arange(len(price_array))
+            slope, intercept = np.polyfit(x, price_array, 1)
+
             y_pred = slope * x + intercept
-            r_squared = 1 - np.sum((price_data - y_pred) ** 2) / np.sum(
-                (price_data - np.mean(price_data)) ** 2
-            )
+            ss_res = np.sum((price_array - y_pred) ** 2)
+            ss_tot = np.sum((price_array - np.mean(price_array)) ** 2)
+            r_squared = 1 - ss_res / ss_tot
 
             # Classify trend regime
             if r_squared < self.trend_thresholds["weak_trend"]:
@@ -155,7 +156,7 @@ class MarketRegimeDetector(BaseComponent):
             else:
                 regime = MarketRegime.TRENDING_DOWN
 
-            self.logger.debug(
+            self.logger.info(
                 "Trend regime detected",
                 symbol=symbol,
                 slope=slope,
@@ -193,10 +194,7 @@ class MarketRegimeDetector(BaseComponent):
             min_length = float("inf")
 
             for symbol in symbols:
-                if (
-                    symbol in price_data_dict
-                    and len(price_data_dict[symbol]) >= self.correlation_window
-                ):
+                if symbol in price_data_dict and len(price_data_dict[symbol]) >= self.correlation_window:
                     returns = np.diff(np.log(price_data_dict[symbol]))
                     returns_dict[symbol] = returns
                     min_length = min(min_length, len(returns))
@@ -211,13 +209,12 @@ class MarketRegimeDetector(BaseComponent):
             # Align returns to same length
             aligned_returns = {}
             for symbol, returns in returns_dict.items():
-                aligned_returns[symbol] = returns[-min_length:]
+                aligned_returns[symbol] = returns[-int(min_length) :]
 
             # Calculate correlation matrix
             returns_df = pd.DataFrame(aligned_returns)
             correlation_matrix = returns_df.corr()
 
-            # Calculate average correlation (excluding diagonal)
             mask = ~np.eye(correlation_matrix.shape[0], dtype=bool)
             avg_correlation = correlation_matrix.values[mask].mean()
 
@@ -227,9 +224,7 @@ class MarketRegimeDetector(BaseComponent):
             else:
                 regime = MarketRegime.LOW_CORRELATION
 
-            self.logger.debug(
-                "Correlation regime detected", avg_correlation=avg_correlation, regime=regime.value
-            )
+            self.logger.info("Correlation regime detected", avg_correlation=avg_correlation, regime=regime.value)
 
             return regime
 
@@ -272,14 +267,10 @@ class MarketRegimeDetector(BaseComponent):
                     trend_regimes.append(trend_regime)
 
             # Detect correlation regime
-            correlation_regime = await self.detect_correlation_regime(
-                list(symbol_data.keys()), symbol_data
-            )
+            correlation_regime = await self.detect_correlation_regime(list(symbol_data.keys()), symbol_data)
 
             # Combine regimes for comprehensive classification
-            comprehensive_regime = self._combine_regimes(
-                volatility_regimes, trend_regimes, correlation_regime
-            )
+            comprehensive_regime = self._combine_regimes(volatility_regimes, trend_regimes, correlation_regime)
 
             # Check for regime change
             self._check_regime_change(comprehensive_regime)
@@ -308,27 +299,33 @@ class MarketRegimeDetector(BaseComponent):
             MarketRegime: Combined regime classification
         """
         # Count regime frequencies
-        vol_counts = {}
-        trend_counts = {}
+        vol_counts: dict[str, int] = {}
+        trend_counts: dict[str, int] = {}
 
         for regime in volatility_regimes:
-            vol_counts[regime] = vol_counts.get(regime, 0) + 1
+            vol_counts[regime.value] = vol_counts.get(regime.value, 0) + 1
 
         for regime in trend_regimes:
-            trend_counts[regime] = trend_counts.get(regime, 0) + 1
+            trend_counts[regime.value] = trend_counts.get(regime.value, 0) + 1
 
         # Determine dominant volatility regime
-        dominant_vol = (
-            max(vol_counts.items(), key=lambda x: x[1])[0]
-            if vol_counts
-            else MarketRegime.MEDIUM_VOLATILITY
+        if vol_counts:
+            dominant_vol_str = max(vol_counts.items(), key=lambda x: x[1])[0]
+        else:
+            dominant_vol_str = MarketRegime.MEDIUM_VOLATILITY.value
+        dominant_vol = next(
+            (regime for regime in MarketRegime if regime.value == dominant_vol_str),
+            MarketRegime.MEDIUM_VOLATILITY,
         )
 
         # Determine dominant trend regime
-        dominant_trend = (
-            max(trend_counts.items(), key=lambda x: x[1])[0]
-            if trend_counts
-            else MarketRegime.RANGING
+        if trend_counts:
+            dominant_trend_str = max(trend_counts.items(), key=lambda x: x[1])[0]
+        else:
+            dominant_trend_str = MarketRegime.RANGING.value
+        dominant_trend = next(
+            (regime for regime in MarketRegime if regime.value == dominant_trend_str),
+            MarketRegime.RANGING,
         )
 
         # Combine for comprehensive classification
@@ -365,9 +362,7 @@ class MarketRegimeDetector(BaseComponent):
                         "trend_window": self.trend_window,
                         "correlation_window": self.correlation_window,
                     },
-                    metadata={
-                        "description": f"Regime change from {self.current_regime.value} to {new_regime.value}"
-                    },
+                    metadata={"description": (f"Regime change from {self.current_regime.value} to {new_regime.value}")},
                 )
 
                 self.regime_history.append(event)
@@ -380,8 +375,7 @@ class MarketRegimeDetector(BaseComponent):
                     confidence=confidence,
                 )
 
-                # TODO: Remove in production - Debug logging
-                self.logger.debug("Regime change event created", event_data=event.model_dump())
+                self.logger.info("Regime change event created", event_data=event.model_dump())
 
     def _calculate_change_confidence(self, new_regime: MarketRegime) -> float:
         """
@@ -398,9 +392,7 @@ class MarketRegimeDetector(BaseComponent):
             return 0.8  # High confidence for first change
 
         # Check if this is a reversal or continuation
-        recent_changes = (
-            self.regime_history[-3:] if len(self.regime_history) >= 3 else self.regime_history
-        )
+        recent_changes = self.regime_history[-3:] if len(self.regime_history) >= 3 else self.regime_history
 
         # Higher confidence if this is a new regime type
         if new_regime not in [event.new_regime for event in recent_changes]:
@@ -449,9 +441,7 @@ class MarketRegimeDetector(BaseComponent):
             }
 
         total_changes = len(self.regime_history)
-        regime_duration = (
-            datetime.now(timezone.utc) - self.regime_history[-1].timestamp
-        ).total_seconds() / 3600
+        regime_duration = (datetime.now(timezone.utc) - self.regime_history[-1].timestamp).total_seconds() / 3600
 
         stats = {
             "total_changes": total_changes,

@@ -56,17 +56,16 @@ class PortfolioLimits(BaseComponent):
         self.config = config
         self.risk_config = config.risk
         self.error_handler = ErrorHandler(config)
-        # Note: logger is a property from BaseComponent, no need to bind
 
         # Portfolio state tracking
         self.positions: list[Position] = []
         self.total_portfolio_value = Decimal("0")
         self.position_limits: PositionLimits | None = None
 
-        # Correlation tracking
-        self.correlation_matrix: dict[str, dict[str, float]] = {}
-        self.return_history: dict[str, list[float]] = {}
-        self.price_history: dict[str, list[float]] = {}
+        # Correlation tracking using Decimal for financial precision
+        self.correlation_matrix: dict[str, dict[str, Decimal]] = {}
+        self.return_history: dict[str, list[Decimal]] = {}
+        self.price_history: dict[str, list[Decimal]] = {}
 
         # Sector/asset classification
         self.sector_mapping = {
@@ -224,31 +223,25 @@ class PortfolioLimits(BaseComponent):
             self.logger.warning(
                 "Invalid new position values",
                 quantity=format_decimal(new_position.quantity) if new_position.quantity else "0",
-                price=format_decimal(new_position.current_price)
-                if new_position.current_price
-                else "0",
+                price=format_decimal(new_position.current_price) if new_position.current_price else "0",
             )
             return False
 
         # Calculate current portfolio exposure with validation
         current_exposure = ZERO
         for pos in self.positions:
-            if (pos.quantity and pos.quantity > ZERO) and (
-                pos.current_price and pos.current_price > ZERO
-            ):
-                position_exposure = (
-                    abs(pos.quantity * pos.current_price)
-                    if pos.quantity and pos.current_price
-                    else ZERO
-                )
+            if (pos.quantity and pos.quantity > ZERO) and (pos.current_price and pos.current_price > ZERO):
+                position_value = pos.quantity * pos.current_price if pos.quantity and pos.current_price else ZERO
+                position_exposure = abs(position_value)
                 current_exposure += position_exposure
 
-        # Add new position exposure
-        new_exposure = (
-            abs(new_position.quantity * new_position.current_price)
+        # Add new position exposure using Decimal precision
+        new_value = (
+            new_position.quantity * new_position.current_price
             if new_position.quantity and new_position.current_price
             else ZERO
         )
+        new_exposure = abs(new_value)
         total_exposure = current_exposure + new_exposure
 
         # Calculate exposure percentage with safe division
@@ -296,18 +289,17 @@ class PortfolioLimits(BaseComponent):
             pos_sector = self.sector_mapping.get(pos_symbol_base, "other")
 
             if pos_sector == sector:
-                sector_exposure += (
-                    abs(pos.quantity * pos.current_price)
-                    if pos.quantity and pos.current_price
-                    else ZERO
-                )
+                # Calculate sector exposure with Decimal precision
+                pos_value = pos.quantity * pos.current_price if pos.quantity and pos.current_price else ZERO
+                sector_exposure += abs(pos_value)
 
-        # Add new position to sector exposure
-        new_exposure = (
-            abs(new_position.quantity * new_position.current_price)
+        # Add new position to sector exposure with Decimal precision
+        new_pos_value = (
+            new_position.quantity * new_position.current_price
             if new_position.quantity and new_position.current_price
             else ZERO
         )
+        new_exposure = abs(new_pos_value)
         total_sector_exposure = sector_exposure + new_exposure
 
         # Calculate sector exposure percentage
@@ -351,21 +343,19 @@ class PortfolioLimits(BaseComponent):
         for pos in self.positions:
             correlation = self._get_correlation(symbol, pos.symbol)
 
-            # If correlation is high (>0.7), add to correlated exposure
-            if correlation > 0.7:
-                position_exposure = (
-                    abs(pos.quantity * pos.current_price)
-                    if pos.quantity and pos.current_price
-                    else ZERO
-                )
+            if correlation > to_decimal("0.7"):
+                # Calculate position exposure with Decimal precision
+                pos_value = pos.quantity * pos.current_price if pos.quantity and pos.current_price else ZERO
+                position_exposure = abs(pos_value)
                 high_correlation_exposure += position_exposure
 
         # Add new position exposure if it has high correlations
-        new_exposure = (
-            abs(new_position.quantity * new_position.current_price)
+        new_pos_value = (
+            new_position.quantity * new_position.current_price
             if new_position.quantity and new_position.current_price
             else ZERO
         )
+        new_exposure = abs(new_pos_value)
         total_correlated_exposure = high_correlation_exposure + new_exposure
 
         # Calculate correlated exposure percentage
@@ -399,7 +389,6 @@ class PortfolioLimits(BaseComponent):
         Returns:
             bool: True if within leverage limit
         """
-        # For now, assume no leverage (1.0x max)
         # This can be extended for margin trading
         max_leverage = Decimal(str(self.risk_config.max_leverage))
 
@@ -410,7 +399,7 @@ class PortfolioLimits(BaseComponent):
         return True
 
     @time_execution
-    def _get_correlation(self, symbol1: str, symbol2: str) -> float:
+    def _get_correlation(self, symbol1: str, symbol2: str) -> Decimal:
         """
         Get correlation between two symbols.
 
@@ -426,7 +415,7 @@ class PortfolioLimits(BaseComponent):
         returns2 = self.return_history.get(symbol2, [])
 
         if len(returns1) < 10 or len(returns2) < 10:
-            return 0.0  # Insufficient data
+            return ZERO  # Insufficient data
 
         # Align return series to same length
         min_length = min(len(returns1), len(returns2))
@@ -434,20 +423,20 @@ class PortfolioLimits(BaseComponent):
         returns2_aligned = returns2[-min_length:]
 
         if min_length < 10:
-            return 0.0  # Need at least 10 data points
+            return ZERO  # Need at least 10 data points
 
-        # Calculate correlation
+        # Convert to float arrays for numpy correlation calculation
         try:
-            correlation = np.corrcoef(returns1_aligned, returns2_aligned)[0, 1]
-            return float(correlation) if not np.isnan(correlation) else 0.0
+            returns1_float = [float(ret) for ret in returns1_aligned]
+            returns2_float = [float(ret) for ret in returns2_aligned]
+            correlation = np.corrcoef(returns1_float, returns2_float)[0, 1]
+            return to_decimal(str(correlation)) if not np.isnan(correlation) else ZERO
         except Exception as e:
             self.logger.warning(f"Correlation calculation failed: {e}")
-            return 0.0
+            return ZERO
 
     @time_execution
-    async def update_portfolio_state(
-        self, positions: list[Position], portfolio_value: Decimal
-    ) -> None:
+    async def update_portfolio_state(self, positions: list[Position], portfolio_value: Decimal) -> None:
         """
         Update portfolio state for limit calculations.
 
@@ -458,7 +447,7 @@ class PortfolioLimits(BaseComponent):
         self.positions = positions
         self.total_portfolio_value = portfolio_value
 
-        self.logger.debug(
+        self.logger.info(
             "Portfolio state updated",
             position_count=len(positions),
             portfolio_value=float(portfolio_value),
@@ -484,18 +473,15 @@ class PortfolioLimits(BaseComponent):
             self.return_history[symbol] = []
             self.price_history[symbol] = []
 
-        # Store the current price (convert to float for numpy compatibility)
-        self.price_history[symbol].append(float(price_decimal))
+        # Store the current price as Decimal for financial precision
+        self.price_history[symbol].append(price_decimal)
 
-        # Calculate return if we have previous price
+        # Calculate return if we have previous price using Decimal precision
         if len(self.price_history[symbol]) > 1:
-            prev_price_decimal = Decimal(str(self.price_history[symbol][-2]))
+            prev_price_decimal = self.price_history[symbol][-2]
             if prev_price_decimal > ZERO:
-                return_rate_decimal = safe_divide(
-                    price_decimal - prev_price_decimal, prev_price_decimal, ZERO
-                )
-                return_rate = float(return_rate_decimal)
-                self.return_history[symbol].append(return_rate)
+                return_rate_decimal = safe_divide(price_decimal - prev_price_decimal, prev_price_decimal, ZERO)
+                self.return_history[symbol].append(return_rate_decimal)
 
         # Keep only recent history
         max_history = 252  # One year of trading days
@@ -518,9 +504,7 @@ class PortfolioLimits(BaseComponent):
             for pos in self.positions
         )
 
-        exposure_percentage = (
-            total_exposure / self.total_portfolio_value if self.total_portfolio_value > 0 else 0
-        )
+        exposure_percentage = total_exposure / self.total_portfolio_value if self.total_portfolio_value > 0 else 0
 
         # Calculate sector exposures
         sector_exposures = {}
@@ -532,9 +516,7 @@ class PortfolioLimits(BaseComponent):
                 sector_exposures[sector] = Decimal("0")
 
             sector_exposures[sector] += (
-                abs(pos.quantity * pos.current_price)
-                if pos.quantity and pos.current_price
-                else ZERO
+                abs(pos.quantity * pos.current_price) if pos.quantity and pos.current_price else ZERO
             )
 
         # Convert to percentages
@@ -569,9 +551,7 @@ class PortfolioLimits(BaseComponent):
             violation_type: Type of risk violation
             details: Additional violation details
         """
-        self.logger.warning(
-            "Portfolio limit violation detected", violation_type=violation_type, details=details
-        )
+        self.logger.warning("Portfolio limit violation detected", violation_type=violation_type, details=details)
 
     @time_execution
     def _log_risk_violation_sync(self, violation_type: str, details: dict[str, Any]) -> None:
@@ -582,6 +562,4 @@ class PortfolioLimits(BaseComponent):
             violation_type: Type of risk violation
             details: Additional violation details
         """
-        self.logger.warning(
-            "Portfolio limit violation detected", violation_type=violation_type, details=details
-        )
+        self.logger.warning("Portfolio limit violation detected", violation_type=violation_type, details=details)

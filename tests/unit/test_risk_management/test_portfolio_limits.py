@@ -12,7 +12,7 @@ import pytest
 
 from src.core.config import Config
 from src.core.exceptions import PositionLimitError
-from src.core.types.trading import OrderSide, Position
+from src.core.types.trading import OrderSide, Position, PositionSide, PositionStatus
 from src.risk_management.portfolio_limits import PortfolioLimits
 
 
@@ -33,12 +33,13 @@ class TestPortfolioLimits:
     def sample_position(self):
         """Create a sample position."""
         return Position(
-            symbol="BTCUSDT",
+            symbol="BTC/USDT",
             quantity=Decimal("0.1"),
             entry_price=Decimal("50000"),
             current_price=Decimal("51000"),
             unrealized_pnl=Decimal("100"),
-            side=OrderSide.BUY,
+            side=PositionSide.LONG,
+            status=PositionStatus.OPEN,
             opened_at=datetime.now(timezone.utc),
             exchange="binance",
             metadata={},
@@ -48,12 +49,13 @@ class TestPortfolioLimits:
     def sample_position_eth(self):
         """Create a sample ETH position."""
         return Position(
-            symbol="ETHUSDT",
+            symbol="ETH/USDT",
             quantity=Decimal("1.0"),
             entry_price=Decimal("3000"),
             current_price=Decimal("3100"),
             unrealized_pnl=Decimal("100"),
-            side=OrderSide.BUY,
+            side=PositionSide.LONG,
+            status=PositionStatus.OPEN,
             opened_at=datetime.now(timezone.utc),
             exchange="binance",
             metadata={},
@@ -63,12 +65,13 @@ class TestPortfolioLimits:
     def new_position(self):
         """Create a new position to add."""
         return Position(
-            symbol="ADAUSDT",
+            symbol="ADA/USDT",
             quantity=Decimal("1000"),
             entry_price=Decimal("0.5"),
             current_price=Decimal("0.52"),
             unrealized_pnl=Decimal("20"),
-            side=OrderSide.BUY,
+            side=PositionSide.LONG,
+            status=PositionStatus.OPEN,
             opened_at=datetime.now(timezone.utc),
             exchange="binance",
             metadata={},
@@ -118,12 +121,13 @@ class TestPortfolioLimits:
         # Add maximum positions for the same symbol
         portfolio_limits.positions = [
             Position(
-                symbol="ADAUSDT",
+                symbol="ADA/USDT",
                 quantity=Decimal("100"),
                 entry_price=Decimal("0.5"),
                 current_price=Decimal("0.52"),
                 unrealized_pnl=Decimal("2"),
-                side=OrderSide.BUY,
+                side=PositionSide.LONG,
+            status=PositionStatus.OPEN,
                 opened_at=datetime.now(timezone.utc),
                 exchange="binance",
                 metadata={},
@@ -140,12 +144,13 @@ class TestPortfolioLimits:
         # Add positions that would exceed exposure limit
         portfolio_limits.positions = [
             Position(
-                symbol="BTCUSDT",
+                symbol="BTC/USDT",
                 quantity=Decimal("0.1"),
                 entry_price=Decimal("50000"),
                 current_price=Decimal("51000"),
                 unrealized_pnl=Decimal("100"),
-                side=OrderSide.BUY,
+                side=PositionSide.LONG,
+            status=PositionStatus.OPEN,
                 opened_at=datetime.now(timezone.utc),
                 exchange="binance",
                 metadata={},
@@ -166,23 +171,25 @@ class TestPortfolioLimits:
         # Add positions in the same sector (cryptocurrency)
         portfolio_limits.positions = [
             Position(
-                symbol="BTCUSDT",
+                symbol="BTC/USDT",
                 quantity=Decimal("0.1"),
                 entry_price=Decimal("50000"),
                 current_price=Decimal("51000"),
                 unrealized_pnl=Decimal("100"),
-                side=OrderSide.BUY,
+                side=PositionSide.LONG,
+            status=PositionStatus.OPEN,
                 opened_at=datetime.now(timezone.utc),
                 exchange="binance",
                 metadata={},
             ),
             Position(
-                symbol="ETHUSDT",
+                symbol="ETH/USDT",
                 quantity=Decimal("1.0"),
                 entry_price=Decimal("3000"),
                 current_price=Decimal("3100"),
                 unrealized_pnl=Decimal("100"),
-                side=OrderSide.BUY,
+                side=PositionSide.LONG,
+            status=PositionStatus.OPEN,
                 opened_at=datetime.now(timezone.utc),
                 exchange="binance",
                 metadata={},
@@ -203,12 +210,13 @@ class TestPortfolioLimits:
         # Add positions with high correlation
         portfolio_limits.positions = [
             Position(
-                symbol="BTCUSDT",
+                symbol="BTC/USDT",
                 quantity=Decimal("0.1"),
                 entry_price=Decimal("50000"),
                 current_price=Decimal("51000"),
                 unrealized_pnl=Decimal("100"),
-                side=OrderSide.BUY,
+                side=PositionSide.LONG,
+            status=PositionStatus.OPEN,
                 opened_at=datetime.now(timezone.utc),
                 exchange="binance",
                 metadata={},
@@ -217,8 +225,8 @@ class TestPortfolioLimits:
         portfolio_limits.total_portfolio_value = Decimal("10000")
 
         # Add correlation data
-        portfolio_limits.return_history["BTCUSDT"] = [0.01, 0.02, 0.01, 0.02, 0.01] * 10
-        portfolio_limits.return_history["ADAUSDT"] = [
+        portfolio_limits.return_history["BTC/USDT"] = [0.01, 0.02, 0.01, 0.02, 0.01] * 10
+        portfolio_limits.return_history["ADA/USDT"] = [
             0.01,
             0.02,
             0.01,
@@ -241,27 +249,27 @@ class TestPortfolioLimits:
     def test_get_correlation(self, portfolio_limits):
         """Test correlation calculation."""
         # Add return histories
-        portfolio_limits.return_history["BTCUSDT"] = [0.01, 0.02, 0.01, 0.02, 0.01] * 10
-        portfolio_limits.return_history["ETHUSDT"] = [0.01, 0.02, 0.01, 0.02, 0.01] * 10
+        portfolio_limits.return_history["BTC/USDT"] = [0.01, 0.02, 0.01, 0.02, 0.01] * 10
+        portfolio_limits.return_history["ETH/USDT"] = [0.01, 0.02, 0.01, 0.02, 0.01] * 10
 
-        correlation = portfolio_limits._get_correlation("BTCUSDT", "ETHUSDT")
+        correlation = portfolio_limits._get_correlation("BTC/USDT", "ETH/USDT")
 
-        assert isinstance(correlation, float)
+        assert isinstance(correlation, (float, Decimal))
         assert -1 <= correlation <= 1
 
     def test_get_correlation_insufficient_data(self, portfolio_limits):
         """Test correlation calculation with insufficient data."""
         # Add minimal return histories
-        portfolio_limits.return_history["BTCUSDT"] = [0.01, 0.02]
-        portfolio_limits.return_history["ETHUSDT"] = [0.01, 0.02]
+        portfolio_limits.return_history["BTC/USDT"] = [0.01, 0.02]
+        portfolio_limits.return_history["ETH/USDT"] = [0.01, 0.02]
 
-        correlation = portfolio_limits._get_correlation("BTCUSDT", "ETHUSDT")
+        correlation = portfolio_limits._get_correlation("BTC/USDT", "ETH/USDT")
 
         assert correlation == 0.0
 
     def test_get_correlation_no_data(self, portfolio_limits):
         """Test correlation calculation with no data."""
-        correlation = portfolio_limits._get_correlation("BTCUSDT", "ETHUSDT")
+        correlation = portfolio_limits._get_correlation("BTC/USDT", "ETH/USDT")
 
         assert correlation == 0.0
 
@@ -279,7 +287,7 @@ class TestPortfolioLimits:
     @pytest.mark.asyncio
     async def test_update_return_history(self, portfolio_limits):
         """Test return history update."""
-        symbol = "BTCUSDT"
+        symbol = "BTC/USDT"
         price = 50000.0
 
         await portfolio_limits.update_return_history(symbol, price)
@@ -291,7 +299,7 @@ class TestPortfolioLimits:
     @pytest.mark.asyncio
     async def test_update_return_history_with_previous_price(self, portfolio_limits):
         """Test return history update with previous price."""
-        symbol = "BTCUSDT"
+        symbol = "BTC/USDT"
 
         # Add first price
         await portfolio_limits.update_return_history(symbol, 50000.0)
@@ -302,12 +310,12 @@ class TestPortfolioLimits:
         assert symbol in portfolio_limits.return_history
         assert len(portfolio_limits.return_history[symbol]) == 1
         # (51000-50000)/50000
-        assert portfolio_limits.return_history[symbol][0] == 0.02
+        assert portfolio_limits.return_history[symbol][0] == Decimal('0.02')
 
     @pytest.mark.asyncio
     async def test_update_return_history_max_history(self, portfolio_limits):
         """Test return history maximum size limit."""
-        symbol = "BTCUSDT"
+        symbol = "BTC/USDT"
 
         # Add more prices than max history
         for i in range(300):  # More than max_history
@@ -378,24 +386,26 @@ class TestPortfolioLimits:
         """Test sector exposure calculation."""
         # Create positions in different sectors
         btc_position = Position(
-            symbol="BTCUSDT",
+            symbol="BTC/USDT",
             quantity=Decimal("0.1"),
             entry_price=Decimal("50000"),
             current_price=Decimal("51000"),
             unrealized_pnl=Decimal("100"),
-            side=OrderSide.BUY,
+            side=PositionSide.LONG,
+            status=PositionStatus.OPEN,
             opened_at=datetime.now(timezone.utc),
             exchange="binance",
             metadata={},
         )
 
         usdt_position = Position(
-            symbol="USDTUSDT",
+            symbol="USDT/USDT",
             quantity=Decimal("1000"),
             entry_price=Decimal("1"),
             current_price=Decimal("1"),
             unrealized_pnl=Decimal("0"),
-            side=OrderSide.BUY,
+            side=PositionSide.LONG,
+            status=PositionStatus.OPEN,
             opened_at=datetime.now(timezone.utc),
             exchange="binance",
             metadata={},
@@ -422,10 +432,10 @@ class TestPortfolioLimits:
         returns1 = [0.01, 0.02, 0.01, 0.02, 0.01] * 10
         returns2 = [0.01, 0.02, 0.01, 0.02, 0.01] * 10  # Perfect correlation
 
-        portfolio_limits.return_history["BTCUSDT"] = returns1
-        portfolio_limits.return_history["ETHUSDT"] = returns2
+        portfolio_limits.return_history["BTC/USDT"] = returns1
+        portfolio_limits.return_history["ETH/USDT"] = returns2
 
-        correlation = portfolio_limits._get_correlation("BTCUSDT", "ETHUSDT")
+        correlation = portfolio_limits._get_correlation("BTC/USDT", "ETH/USDT")
 
         # Should be close to 1.0 for perfect correlation
         assert correlation > 0.9
@@ -436,10 +446,10 @@ class TestPortfolioLimits:
         returns1 = [0.01, 0.02, 0.01, 0.02, 0.01] * 10
         returns2 = [-0.01, -0.02, -0.01, -0.02, -0.01] * 10  # Negative correlation
 
-        portfolio_limits.return_history["BTCUSDT"] = returns1
-        portfolio_limits.return_history["ETHUSDT"] = returns2
+        portfolio_limits.return_history["BTC/USDT"] = returns1
+        portfolio_limits.return_history["ETH/USDT"] = returns2
 
-        correlation = portfolio_limits._get_correlation("BTCUSDT", "ETHUSDT")
+        correlation = portfolio_limits._get_correlation("BTC/USDT", "ETH/USDT")
 
         # Should be close to -1.0 for perfect negative correlation
         assert correlation < -0.9
@@ -450,12 +460,12 @@ class TestPortfolioLimits:
         returns1 = [0.01, 0.02, 0.01, 0.02, 0.01] * 10
         returns2 = [0.005, -0.01, 0.015, -0.005, 0.01] * 10  # Different pattern
 
-        portfolio_limits.return_history["BTCUSDT"] = returns1
-        portfolio_limits.return_history["ETHUSDT"] = returns2
+        portfolio_limits.return_history["BTC/USDT"] = returns1
+        portfolio_limits.return_history["ETH/USDT"] = returns2
 
-        correlation = portfolio_limits._get_correlation("BTCUSDT", "ETHUSDT")
+        correlation = portfolio_limits._get_correlation("BTC/USDT", "ETH/USDT")
 
         # The correlation calculation might show high correlation due to the test data
         # We just check that it's a valid correlation value
-        assert isinstance(correlation, float)
+        assert isinstance(correlation, (float, Decimal))
         assert -1 <= correlation <= 1

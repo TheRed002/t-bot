@@ -36,7 +36,7 @@ class TestKellyCriterionImproved:
     def sample_signal(self):
         """Create a sample trading signal."""
         return Signal(
-            symbol="BTCUSDT",
+            symbol="BTC/USDT",
             direction=SignalDirection.BUY,
             strength=0.8,
             timestamp=datetime.now(timezone.utc),
@@ -57,7 +57,7 @@ class TestKellyCriterionImproved:
         for _ in range(12):  # 40% losses
             returns.append(-0.01)
 
-        position_sizer.return_history["BTCUSDT"] = returns
+        position_sizer.return_history["BTC/USDT"] = returns
 
         position_size = await position_sizer.calculate_position_size(
             sample_signal, portfolio_value, PositionSizeMethod.KELLY_CRITERION
@@ -86,7 +86,7 @@ class TestKellyCriterionImproved:
         for _ in range(18):  # 60% losses
             returns.append(-0.01)
 
-        position_sizer.return_history["BTCUSDT"] = returns
+        position_sizer.return_history["BTC/USDT"] = returns
 
         position_size = await position_sizer.calculate_position_size(
             sample_signal, portfolio_value, PositionSizeMethod.KELLY_CRITERION
@@ -108,7 +108,7 @@ class TestKellyCriterionImproved:
         for _ in range(6):  # 20% losses
             returns.append(-0.01)
 
-        position_sizer.return_history["BTCUSDT"] = returns
+        position_sizer.return_history["BTC/USDT"] = returns
 
         position_size = await position_sizer.calculate_position_size(
             sample_signal, portfolio_value, PositionSizeMethod.KELLY_CRITERION
@@ -129,7 +129,7 @@ class TestKellyCriterionImproved:
         for _ in range(14):
             returns.append(-0.001)
 
-        position_sizer.return_history["BTCUSDT"] = returns
+        position_sizer.return_history["BTC/USDT"] = returns
 
         # Use very low confidence to trigger minimum
         sample_signal.strength = 0.01
@@ -154,7 +154,7 @@ class TestKellyCriterionImproved:
         for _ in range(1):  # 3% loss rate
             returns.append(-0.01)
 
-        position_sizer.return_history["BTCUSDT"] = returns
+        position_sizer.return_history["BTC/USDT"] = returns
         sample_signal.strength = 1.0  # Maximum confidence
 
         position_size = await position_sizer.calculate_position_size(
@@ -173,7 +173,7 @@ class TestKellyCriterionImproved:
         returns.extend([Decimal("-0.00567890") for _ in range(12)])
 
         # Convert to float for storage (as it comes from market data)
-        position_sizer.return_history["BTCUSDT"] = [float(r) for r in returns]
+        position_sizer.return_history["BTC/USDT"] = [float(r) for r in returns]
 
         position_size = await position_sizer.calculate_position_size(
             sample_signal, portfolio_value, PositionSizeMethod.KELLY_CRITERION
@@ -191,7 +191,7 @@ class TestKellyCriterionImproved:
 
         # All winning trades - should fallback to fixed percentage
         returns = [0.01 for _ in range(30)]
-        position_sizer.return_history["BTCUSDT"] = returns
+        position_sizer.return_history["BTC/USDT"] = returns
 
         position_size = await position_sizer.calculate_position_size(
             sample_signal, portfolio_value, PositionSizeMethod.KELLY_CRITERION
@@ -208,7 +208,7 @@ class TestKellyCriterionImproved:
 
         # All losing trades - should fallback to fixed percentage
         returns = [-0.01 for _ in range(30)]
-        position_sizer.return_history["BTCUSDT"] = returns
+        position_sizer.return_history["BTC/USDT"] = returns
 
         position_size = await position_sizer.calculate_position_size(
             sample_signal, portfolio_value, PositionSizeMethod.KELLY_CRITERION
@@ -230,7 +230,7 @@ class TestKellyCriterionImproved:
         for _ in range(10):
             returns.append(-0.00001)  # Very small loss
 
-        position_sizer.return_history["BTCUSDT"] = returns
+        position_sizer.return_history["BTC/USDT"] = returns
 
         position_size = await position_sizer.calculate_position_size(
             sample_signal, portfolio_value, PositionSizeMethod.KELLY_CRITERION
@@ -252,7 +252,7 @@ class TestKellyCriterionImproved:
         for _ in range(12):  # 40% losses
             returns.append(-0.01)
 
-        position_sizer.return_history["BTCUSDT"] = returns
+        position_sizer.return_history["BTC/USDT"] = returns
 
         # Test with different confidence levels
         confidences = [0.2, 0.5, 0.8, 1.0]
@@ -260,7 +260,7 @@ class TestKellyCriterionImproved:
 
         for confidence in confidences:
             signal = Signal(
-                symbol="BTCUSDT",
+                symbol="BTC/USDT",
                 direction=SignalDirection.BUY,
                 strength=confidence,
                 timestamp=datetime.now(timezone.utc),
@@ -292,7 +292,7 @@ class TestKellyCriterionImproved:
         for _ in range(15):
             returns.append(-0.01)  # Loss
 
-        position_sizer.return_history["BTCUSDT"] = returns
+        position_sizer.return_history["BTC/USDT"] = returns
 
         position_size = await position_sizer.calculate_position_size(
             sample_signal, portfolio_value, PositionSizeMethod.KELLY_CRITERION
@@ -319,7 +319,7 @@ class TestKellyCriterionImproved:
         for _ in range(12):
             returns.append(-0.01)
 
-        position_sizer.return_history["BTCUSDT"] = returns
+        position_sizer.return_history["BTC/USDT"] = returns
 
         with caplog.at_level("DEBUG"):
             await position_sizer.calculate_position_size(

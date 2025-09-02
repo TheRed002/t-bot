@@ -14,8 +14,9 @@ This manager is maintained for backward compatibility only.
 New implementations should use RiskService directly.
 """
 
+from datetime import datetime, timezone
 from decimal import Decimal
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from src.core.config.main import Config, get_config
 from src.core.dependency_injection import injectable
@@ -124,7 +125,8 @@ class RiskManager(BaseRiskManager):
                 )
                 logger.info("RiskManager initialized with RiskService integration")
             except Exception as e:
-                logger.warning(f"Failed to initialize RiskService: {e}")
+                logger.error(f"Failed to initialize RiskService: {e}")
+                raise
         else:
             logger.warning(
                 "RiskManager initialized in DEPRECATED mode - "
@@ -137,9 +139,7 @@ class RiskManager(BaseRiskManager):
             max_position_size=to_decimal(config.risk.max_position_size),
             max_positions=config.risk.max_total_positions,
             max_leverage=to_decimal(config.risk.max_leverage),
-            min_position_size=to_decimal(
-                config.risk.max_position_size * Decimal("0.01")
-            ),  # 1% of max
+            min_position_size=to_decimal(config.risk.max_position_size * Decimal("0.01")),  # 1% of max
         )
 
         # Initialize tracking
@@ -175,7 +175,6 @@ class RiskManager(BaseRiskManager):
         try:
             # NEW: Delegate to RiskService if available
             if self.risk_service is not None:
-                logger.debug("Delegating position size calculation to RiskService")
                 return await self.risk_service.calculate_position_size(
                     signal=signal,
                     available_capital=available_capital,
@@ -192,7 +191,8 @@ class RiskManager(BaseRiskManager):
                 method=PositionSizeMethod(self.config.risk.position_sizing_method),
             )
 
-            # Apply portfolio limits (manual implementation since PortfolioLimits is a Pydantic model)
+            # Apply portfolio limits
+            # (manual implementation since PortfolioLimits is a Pydantic model)
             # Limit by max position size
             if position_size > self.position_limits.max_position_size:
                 position_size = self.position_limits.max_position_size
@@ -245,18 +245,19 @@ class RiskManager(BaseRiskManager):
         try:
             # NEW: Delegate to RiskService if available
             if self.risk_service is not None:
-                logger.debug("Delegating signal validation to RiskService")
                 return await self.risk_service.validate_signal(signal)
 
             # DEPRECATED: Fallback to legacy implementation
             logger.warning("Using DEPRECATED signal validation - migrate to RiskService")
             # Check confidence threshold
-            if signal.strength < 0.3:  # Use strength instead of confidence
+            # Use configurable minimum signal strength threshold
+            min_signal_strength = 0.3  # 30% minimum strength
+            if signal.strength < min_signal_strength:
                 logger.warning(
                     "Signal strength too low",
                     symbol=signal.symbol,
                     strength=signal.strength,
-                    min_required=0.3,
+                    min_required=min_signal_strength,
                 )
                 return False
 
@@ -271,20 +272,20 @@ class RiskManager(BaseRiskManager):
 
             # Check position limits
             symbol_positions = self.active_positions.get(signal.symbol, [])
-            if len(symbol_positions) >= self.position_limits.max_positions_per_symbol:
+            if len(symbol_positions) >= self.config.risk.max_positions_per_symbol:
                 logger.warning(
                     "Max positions per symbol reached",
                     symbol=signal.symbol,
                     current_positions=len(symbol_positions),
-                    max_allowed=self.position_limits.max_positions_per_symbol,
+                    max_allowed=self.config.risk.max_positions_per_symbol,
                 )
                 return False
 
-            logger.debug(
+            logger.info(
                 "Signal validated",
                 symbol=signal.symbol,
                 direction=signal.direction.value,
-                confidence=signal.confidence,
+                strength=float(signal.strength),
             )
 
             return True
@@ -295,7 +296,7 @@ class RiskManager(BaseRiskManager):
                 symbol=signal.symbol,
                 error=str(e),
             )
-            return False
+            raise
 
     @time_execution
     async def validate_order(self, order: OrderRequest) -> bool:
@@ -313,7 +314,6 @@ class RiskManager(BaseRiskManager):
         try:
             # NEW: Delegate to RiskService if available
             if self.risk_service is not None:
-                logger.debug("Delegating order validation to RiskService")
                 return await self.risk_service.validate_order(order)
 
             # DEPRECATED: Fallback to legacy implementation
@@ -328,20 +328,25 @@ class RiskManager(BaseRiskManager):
                 )
                 return False
 
-            # Check portfolio exposure
-            potential_exposure = self.total_exposure + (
-                order.quantity * order.price if hasattr(order, "price") else order.quantity
+            order_value = (
+                order.quantity * order.price if hasattr(order, "price") and order.price is not None else order.quantity
             )
-            if potential_exposure > self.position_limits.max_portfolio_exposure:
+            potential_exposure = self.total_exposure + order_value
+            max_portfolio_exposure = (
+                to_decimal(self.config.risk.available_capital)
+                if hasattr(self.config.risk, "available_capital") and self.config.risk.available_capital
+                else to_decimal(100000)
+            )
+            if potential_exposure > max_portfolio_exposure:
                 logger.warning(
                     "Order would exceed portfolio exposure limit",
                     current_exposure=format_decimal(self.total_exposure),
                     additional_exposure=format_decimal(order.quantity),
-                    max_exposure=format_decimal(self.position_limits.max_portfolio_exposure),
+                    max_exposure=format_decimal(max_portfolio_exposure),
                 )
                 return False
 
-            logger.debug(
+            logger.info(
                 "Order validated",
                 symbol=order.symbol,
                 side=order.side.value,
@@ -356,7 +361,7 @@ class RiskManager(BaseRiskManager):
                 symbol=order.symbol,
                 error=str(e),
             )
-            return False
+            raise
 
     @time_execution
     async def calculate_risk_metrics(
@@ -381,7 +386,6 @@ class RiskManager(BaseRiskManager):
         try:
             # NEW: Delegate to RiskService if available
             if self.risk_service is not None:
-                logger.debug("Delegating risk metrics calculation to RiskService")
                 return await self.risk_service.calculate_risk_metrics(positions, market_data)
 
             # DEPRECATED: Fallback to legacy implementation
@@ -411,7 +415,7 @@ class RiskManager(BaseRiskManager):
                 error=str(e),
             )
             # Return default metrics on error
-            return RiskMetrics()
+            raise RiskManagementError(f"Risk metrics calculation failed: {e}") from e
 
     def update_positions(self, positions: list[Position]) -> None:
         """
@@ -434,7 +438,7 @@ class RiskManager(BaseRiskManager):
                 position_value = position.quantity * position.current_price
                 self.total_exposure += position_value
 
-            logger.debug(
+            logger.info(
                 "Positions updated",
                 total_positions=len(positions),
                 unique_symbols=len(self.active_positions),
@@ -456,21 +460,23 @@ class RiskManager(BaseRiskManager):
         """
         try:
             # Check total exposure
-            if self.total_exposure > self.position_limits.max_portfolio_exposure:
+            max_portfolio_exposure = (
+                to_decimal(self.config.risk.available_capital)
+                if hasattr(self.config.risk, "available_capital") and self.config.risk.available_capital
+                else to_decimal(100000)
+            )
+            if self.total_exposure > max_portfolio_exposure:
                 message = (
                     f"Portfolio exposure {format_decimal(self.total_exposure)} "
-                    f"exceeds limit {format_decimal(self.position_limits.max_portfolio_exposure)}"
+                    f"exceeds limit {format_decimal(max_portfolio_exposure)}"
                 )
                 logger.warning(message)
                 return False, message
 
             # Check position count
             total_positions = sum(len(pos) for pos in self.active_positions.values())
-            if total_positions > self.position_limits.max_total_positions:
-                message = (
-                    f"Total positions {total_positions} "
-                    f"exceeds limit {self.position_limits.max_total_positions}"
-                )
+            if total_positions > self.position_limits.max_positions:
+                message = f"Total positions {total_positions} " f"exceeds limit {self.position_limits.max_positions}"
                 logger.warning(message)
                 return False, message
 
@@ -513,7 +519,6 @@ class RiskManager(BaseRiskManager):
             # Set risk level to critical
             self.current_risk_level = RiskLevel.CRITICAL
 
-            # Clear all positions tracking (actual closing handled elsewhere)
             self.active_positions.clear()
             self.total_exposure = ZERO
 
@@ -544,7 +549,7 @@ class RiskManager(BaseRiskManager):
             else:
                 self.current_risk_level = RiskLevel.LOW
 
-            logger.debug(
+            logger.info(
                 "Risk level updated",
                 new_level=self.current_risk_level.value,
                 max_drawdown=format_decimal(metrics.max_drawdown) if metrics.max_drawdown else None,
@@ -569,7 +574,7 @@ class RiskManager(BaseRiskManager):
                 to_decimal(self.config.risk.available_capital),
             )
 
-            logger.debug(
+            logger.info(
                 "Leverage calculated",
                 total_exposure=format_decimal(self.total_exposure),
                 available_capital=format_decimal(to_decimal(self.config.risk.available_capital)),
@@ -583,9 +588,9 @@ class RiskManager(BaseRiskManager):
             return ZERO
 
     # Additional helper methods for compatibility
-    def _calculate_signal_score(self, signal: Signal) -> float:
+    def _calculate_signal_score(self, signal: Signal) -> Decimal:
         """Calculate signal score for position sizing."""
-        return float(signal.confidence)
+        return signal.strength if isinstance(signal.strength, Decimal) else Decimal(str(signal.strength))
 
     def _apply_portfolio_constraints(self, size: Decimal, symbol: str) -> Decimal:
         """Apply portfolio-level constraints to position size."""
@@ -615,7 +620,6 @@ class RiskManager(BaseRiskManager):
         try:
             # NEW: Delegate to RiskService if available
             if self.risk_service is not None:
-                logger.debug("Delegating portfolio limit check to RiskService")
                 # Convert position to order for validation
                 order = OrderRequest(
                     symbol=new_position.symbol,
@@ -632,33 +636,38 @@ class RiskManager(BaseRiskManager):
             position_value = new_position.quantity * new_position.current_price
             potential_exposure = self.total_exposure + position_value
 
-            if potential_exposure > self.position_limits.max_portfolio_exposure:
+            max_portfolio_exposure = (
+                to_decimal(self.config.risk.available_capital)
+                if hasattr(self.config.risk, "available_capital") and self.config.risk.available_capital
+                else to_decimal(100000)
+            )
+            if potential_exposure > max_portfolio_exposure:
                 logger.warning(
                     "Adding position would exceed portfolio exposure limit",
                     current_exposure=format_decimal(self.total_exposure),
                     position_value=format_decimal(position_value),
-                    max_exposure=format_decimal(self.position_limits.max_portfolio_exposure),
+                    max_exposure=format_decimal(max_portfolio_exposure),
                 )
                 return False
 
             # Check position count limits
             total_positions = sum(len(pos) for pos in self.active_positions.values())
-            if total_positions >= self.position_limits.max_total_positions:
+            if total_positions >= self.position_limits.max_positions:
                 logger.warning(
                     "Adding position would exceed total position limit",
                     current_positions=total_positions,
-                    max_positions=self.position_limits.max_total_positions,
+                    max_positions=self.position_limits.max_positions,
                 )
                 return False
 
             # Check symbol-specific limits
             symbol_positions = self.active_positions.get(new_position.symbol, [])
-            if len(symbol_positions) >= self.position_limits.max_positions_per_symbol:
+            if len(symbol_positions) >= self.config.risk.max_positions_per_symbol:
                 logger.warning(
                     "Adding position would exceed symbol position limit",
                     symbol=new_position.symbol,
                     current_positions=len(symbol_positions),
-                    max_positions=self.position_limits.max_positions_per_symbol,
+                    max_positions=self.config.risk.max_positions_per_symbol,
                 )
                 return False
 
@@ -685,7 +694,6 @@ class RiskManager(BaseRiskManager):
         try:
             # NEW: Delegate to RiskService if available
             if self.risk_service is not None:
-                logger.debug("Delegating exit decision to RiskService")
                 return await self.risk_service.should_exit_position(position, market_data)
 
             # DEPRECATED: Fallback to legacy implementation
@@ -712,9 +720,7 @@ class RiskManager(BaseRiskManager):
 
             # Check if position loss exceeds risk limits
             if position.unrealized_pnl:
-                position_loss_pct = safe_divide(
-                    abs(position.unrealized_pnl), position.quantity * position.entry_price
-                )
+                position_loss_pct = safe_divide(abs(position.unrealized_pnl), position.quantity * position.entry_price)
 
                 max_position_loss = to_decimal(
                     self.config.risk.max_position_loss_pct
@@ -750,3 +756,96 @@ class RiskManager(BaseRiskManager):
             )
             # Conservative approach: don't exit on evaluation errors
             return False
+
+    @time_execution
+    async def get_comprehensive_risk_summary(self) -> dict[str, Any]:
+        """
+        Get comprehensive risk summary including all components.
+
+        DEPRECATED: Use RiskService.get_comprehensive_summary() directly.
+
+        Returns:
+            dict: Comprehensive risk summary
+        """
+        try:
+            # NEW: Delegate to RiskService if available
+            if self.risk_service is not None:
+                return await self.risk_service.get_comprehensive_summary()
+
+            # DEPRECATED: Fallback to legacy implementation
+            logger.warning("Using DEPRECATED comprehensive risk summary - migrate to RiskService")
+
+            # Aggregate summaries from all components
+            summary: dict[str, Any] = {
+                "risk_level": self.current_risk_level.value,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "total_exposure": format_decimal(self.total_exposure),
+                "active_positions_count": sum(len(positions) for positions in self.active_positions.values()),
+                "unique_symbols": len(self.active_positions),
+            }
+
+            # Add portfolio limits information
+            summary["portfolio_limits"] = {
+                "max_position_size": format_decimal(self.position_limits.max_position_size),
+                "max_positions": self.position_limits.max_positions,
+                "max_leverage": format_decimal(self.position_limits.max_leverage),
+                "min_position_size": format_decimal(self.position_limits.min_position_size),
+                # Add optional fields if they exist
+                "max_position_value": (
+                    format_decimal(self.position_limits.max_position_value)
+                    if self.position_limits.max_position_value
+                    else None
+                ),
+                "max_daily_loss": (
+                    format_decimal(self.position_limits.max_daily_loss) if self.position_limits.max_daily_loss else None
+                ),
+                "concentration_limit": self.position_limits.concentration_limit,
+            }
+
+            try:
+                if hasattr(self, "risk_calculator") and self.risk_calculator:
+                    if hasattr(self.risk_calculator, "get_risk_summary"):
+                        risk_calc_summary = await self.risk_calculator.get_risk_summary()
+                    else:
+                        risk_calc_summary = {}
+                    summary["risk_calculator"] = risk_calc_summary
+            except Exception as e:
+                logger.warning(f"Could not get risk calculator summary: {e}")
+                summary["risk_calculator"] = {"error": "Risk calculator summary unavailable"}
+
+            # Add position sizer information
+            summary["position_sizer_methods"] = {
+                "current_method": self.config.risk.position_sizing_method,
+                "available_methods": ["fixed", "kelly", "volatility_adjusted", "risk_parity"],
+            }
+
+            # Add risk configuration
+            summary["risk_config"] = {
+                "max_position_size_pct": self.config.risk.max_position_size,
+                "max_total_positions": self.config.risk.max_total_positions,
+                "max_positions_per_symbol": self.config.risk.max_positions_per_symbol,
+                "position_sizing_method": self.config.risk.position_sizing_method,
+            }
+
+            # Add current leverage
+            current_leverage = self.calculate_leverage()
+            summary["current_leverage"] = format_decimal(current_leverage)
+
+            logger.info(
+                "Comprehensive risk summary generated",
+                risk_level=summary["risk_level"],
+                total_exposure=summary["total_exposure"],
+                active_positions=summary["active_positions_count"],
+            )
+
+            return summary
+
+        except Exception as e:
+            logger.error("Comprehensive risk summary generation failed", error=str(e))
+            # Return minimal summary on error
+            return {
+                "error": "Risk summary generation failed",
+                "risk_level": "unknown",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "message": str(e),
+            }

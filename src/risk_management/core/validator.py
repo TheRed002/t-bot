@@ -1,4 +1,4 @@
-"""Risk validation using centralized ValidationFramework."""
+"""Risk validation using centralized utilities to eliminate duplication."""
 
 import logging
 from decimal import Decimal
@@ -8,9 +8,11 @@ from src.core.base.component import BaseComponent
 from src.core.dependency_injection import injectable
 from src.core.exceptions import PositionLimitError, ValidationError
 from src.core.types.risk import RiskLevel, RiskLimits
-from src.core.types.trading import OrderRequest, Position, Signal, SignalDirection
+from src.core.types.trading import OrderRequest, Position, Signal
 from src.core.validator_registry import ValidatorInterface, register_validator
+from src.utils.decimal_utils import format_decimal
 from src.utils.decorators import UnifiedDecorator as dec
+from src.utils.risk_validation import UnifiedRiskValidator
 from src.utils.validation.core import ValidationFramework
 
 # Module level logger
@@ -26,7 +28,7 @@ class RiskValidator(BaseComponent, ValidatorInterface):
 
     def __init__(self, risk_limits: RiskLimits | None = None):
         """
-        Initialize risk validator.
+        Initialize risk validator using centralized utilities.
 
         Args:
             risk_limits: Risk limits configuration
@@ -34,7 +36,12 @@ class RiskValidator(BaseComponent, ValidatorInterface):
         super().__init__()  # Initialize BaseComponent
         self.base_validator = ValidationFramework()
         self.risk_limits = risk_limits or self._default_limits()
-        self._logger = logger
+        # Use the logger from BaseComponent instead of overriding
+        if logger:
+            self.logger.bind(**{"component": "risk_validator"})
+
+        # Use centralized risk validator
+        self.unified_validator = UnifiedRiskValidator(self.risk_limits)
 
     def _default_limits(self) -> RiskLimits:
         """Get default risk limits."""
@@ -82,7 +89,7 @@ class RiskValidator(BaseComponent, ValidatorInterface):
         current_positions: list[Position] | None = None,
     ) -> bool:
         """
-        Validate order against risk limits.
+        Validate order using centralized validator.
 
         Args:
             order: Order to validate
@@ -102,54 +109,27 @@ class RiskValidator(BaseComponent, ValidatorInterface):
                 "symbol": order.symbol,
                 "side": order.side,
                 "type": getattr(order, "type", None) or getattr(order, "order_type", None),
-                "quantity": float(order.quantity),
-                "price": float(order.price) if order.price else None,
+                "quantity": format_decimal(order.quantity),
+                "price": format_decimal(order.price) if order.price else None,
             }
         )
 
-        # Calculate order value
-        order_value = order.quantity * (order.price or Decimal("1"))
+        # Use centralized validator
+        is_valid, error_message = self.unified_validator.validate_order(order, portfolio_value, current_positions)
 
-        # Check position size limit
-        if order_value > self.risk_limits.max_position_size:
-            raise PositionLimitError(
-                f"Order value {order_value} exceeds max position size "
-                f"{self.risk_limits.max_position_size}"
-            )
-
-        # Check portfolio risk limit
-        portfolio_risk = order_value / portfolio_value
-        if portfolio_risk > self.risk_limits.max_portfolio_risk:
-            raise ValidationError(
-                f"Order risk {portfolio_risk:.2%} exceeds max portfolio risk "
-                f"{self.risk_limits.max_portfolio_risk:.2%}"
-            )
-
-        # Check max positions limit
-        if current_positions:
-            if len(current_positions) >= self.risk_limits.max_positions:
-                # Check if this is adding to existing position
-                existing_position = next(
-                    (p for p in current_positions if p.symbol == order.symbol), None
-                )
-                if not existing_position:
-                    raise PositionLimitError(
-                        f"Maximum number of positions ({self.risk_limits.max_positions}) reached"
-                    )
-
-        # Check leverage
-        if order.leverage and order.leverage > self.risk_limits.max_leverage:
-            raise ValidationError(
-                f"Order leverage {order.leverage} exceeds max leverage "
-                f"{self.risk_limits.max_leverage}"
-            )
+        if not is_valid:
+            # Determine appropriate exception type based on error
+            if "position" in error_message.lower() and "limit" in error_message.lower():
+                raise PositionLimitError(error_message)
+            else:
+                raise ValidationError(error_message)
 
         return True
 
     @dec.enhance(log=True)
     def validate_signal(self, signal: Signal, current_risk_level: RiskLevel | None = None) -> bool:
         """
-        Validate trading signal against risk constraints.
+        Validate trading signal using centralized validator.
 
         Args:
             signal: Signal to validate
@@ -161,48 +141,19 @@ class RiskValidator(BaseComponent, ValidatorInterface):
         Raises:
             ValidationError: If signal validation fails
         """
-        # Check signal fields
-        if not signal.symbol:
-            raise ValidationError("Signal must have a symbol")
+        # Use centralized validator
+        is_valid, error_message = self.unified_validator.validate_signal(
+            signal, current_risk_level, emergency_stop_active=False
+        )
 
-        # Handle both old and new signal formats
-        action = getattr(signal, "action", None)
-        if not action and hasattr(signal, "direction"):
-            # Convert direction to action
-            if signal.direction == SignalDirection.BUY:
-                action = "BUY"
-            elif signal.direction == SignalDirection.SELL:
-                action = "SELL"
-            else:
-                action = str(signal.direction)
-
-        if action and action not in ["BUY", "SELL", "CLOSE"]:
-            raise ValidationError(f"Invalid signal action: {action}")
-
-        # Check confidence threshold (handle both confidence and strength fields)
-        confidence = getattr(signal, "confidence", None) or getattr(signal, "strength", None)
-
-        min_confidence = 0.3  # Minimum confidence for high risk
-        if current_risk_level == RiskLevel.HIGH:
-            min_confidence = 0.6
-        elif current_risk_level == RiskLevel.CRITICAL:
-            min_confidence = 0.8
-
-        if confidence and confidence < min_confidence:
-            raise ValidationError(
-                f"Signal confidence {confidence:.2f} below minimum "
-                f"{min_confidence:.2f} for risk level {current_risk_level}"
-            )
-
-        # Check stop loss requirement
-        if action in ["BUY", "SELL"] and not getattr(signal, "stop_loss", None):
-            raise ValidationError("Signal must include stop loss")
+        if not is_valid:
+            raise ValidationError(error_message)
 
         return True
 
     def validate_position(self, position: Position, portfolio_value: Decimal) -> bool:
         """
-        Validate position against risk limits.
+        Validate position using centralized validator.
 
         Args:
             position: Position to validate
@@ -214,32 +165,17 @@ class RiskValidator(BaseComponent, ValidatorInterface):
         Raises:
             ValidationError: If position validation fails
         """
-        # Calculate position value
-        position_value = position.quantity * position.current_price
+        # Use centralized validator
+        is_valid, error_message = self.unified_validator.validate_position(position, portfolio_value)
 
-        # Check position concentration
-        concentration = position_value / portfolio_value
-        max_concentration = Decimal("0.3")  # Max 30% in single position
-
-        if concentration > max_concentration:
-            raise ValidationError(
-                f"Position concentration {concentration:.2%} exceeds "
-                f"maximum {max_concentration:.2%}"
-            )
-
-        # Check unrealized loss
-        if position.unrealized_pnl < 0:
-            loss_percentage = abs(position.unrealized_pnl) / position_value
-            if loss_percentage > Decimal("0.1"):  # 10% loss threshold
-                self._logger.warning(
-                    f"Position {position.symbol} has {loss_percentage:.2%} unrealized loss"
-                )
+        if not is_valid:
+            raise ValidationError(error_message)
 
         return True
 
     def validate_portfolio(self, portfolio_data: dict[str, Any], **kwargs) -> bool:
         """
-        Validate entire portfolio against risk limits.
+        Validate portfolio using centralized validator.
 
         Args:
             portfolio_data: Portfolio data including positions and metrics
@@ -251,52 +187,23 @@ class RiskValidator(BaseComponent, ValidatorInterface):
         Raises:
             ValidationError: If portfolio validation fails
         """
-        # Extract portfolio metrics
-        total_value = Decimal(str(portfolio_data.get("total_value", 0)))
-        positions = portfolio_data.get("positions", [])
-        current_drawdown = Decimal(str(portfolio_data.get("drawdown", 0)))
-        daily_pnl = Decimal(str(portfolio_data.get("daily_pnl", 0)))
+        # Use centralized validator
+        is_valid, error_message = self.unified_validator.validate_portfolio(portfolio_data)
 
-        # Check drawdown limit
-        if current_drawdown > self.risk_limits.max_drawdown:
-            raise ValidationError(
-                f"Portfolio drawdown {current_drawdown:.2%} exceeds "
-                f"maximum {self.risk_limits.max_drawdown:.2%}"
-            )
-
-        # Check daily loss limit
-        if daily_pnl < 0:
-            daily_loss = abs(daily_pnl) / total_value
-            if daily_loss > self.risk_limits.max_daily_loss:
-                raise ValidationError(
-                    f"Daily loss {daily_loss:.2%} exceeds "
-                    f"maximum {self.risk_limits.max_daily_loss:.2%}"
-                )
-
-        # Check position count
-        if len(positions) > self.risk_limits.max_positions:
-            raise ValidationError(
-                f"Position count {len(positions)} exceeds maximum {self.risk_limits.max_positions}"
-            )
-
-        # Check correlation risk
-        correlation = Decimal(str(portfolio_data.get("correlation", 0)))
-        if correlation > self.risk_limits.max_correlation:
-            self._logger.warning(
-                f"Portfolio correlation {correlation:.2f} exceeds "
-                f"recommended maximum {self.risk_limits.max_correlation:.2f}"
-            )
+        if not is_valid:
+            raise ValidationError(error_message)
 
         return True
 
     def update_limits(self, new_limits: RiskLimits) -> None:
         """
-        Update risk limits.
+        Update risk limits in both local and centralized validators.
 
         Args:
             new_limits: New risk limits configuration
         """
         self.risk_limits = new_limits
+        self.unified_validator.update_limits(new_limits)
         self._logger.info("Risk limits updated")
 
 

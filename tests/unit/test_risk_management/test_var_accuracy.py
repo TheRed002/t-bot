@@ -24,7 +24,7 @@ from scipy import stats
 
 from src.core.config import Config
 from src.core.types.market import MarketData
-from src.core.types.trading import OrderSide, Position
+from src.core.types.trading import OrderSide, Position, PositionSide, PositionStatus
 from src.risk_management.risk_metrics import RiskCalculator
 
 
@@ -53,12 +53,13 @@ class TestVaRAccuracy:
     def sample_position(self):
         """Create a sample position for testing."""
         return Position(
-            symbol="BTCUSDT",
+            symbol="BTC/USDT",
             quantity=Decimal("1.0"),
             entry_price=Decimal("50000"),
             current_price=Decimal("51000"),
             unrealized_pnl=Decimal("1000"),
-            side=OrderSide.BUY,
+            side=PositionSide.LONG,
+            status=PositionStatus.OPEN,
             opened_at=datetime.now(timezone.utc),
             exchange="binance",
             metadata={},
@@ -68,15 +69,16 @@ class TestVaRAccuracy:
     def sample_market_data(self):
         """Create sample market data."""
         return MarketData(
-            symbol="BTCUSDT",
-            price=Decimal("51000"),
-            volume=Decimal("1000"),
+            symbol="BTC/USDT",
             timestamp=datetime.now(timezone.utc),
-            bid=Decimal("50990"),
-            ask=Decimal("51010"),
-            open_price=Decimal("50000"),
-            high_price=Decimal("52000"),
-            low_price=Decimal("49000"),
+            open=Decimal("50000"),
+            high=Decimal("52000"),
+            low=Decimal("49000"),
+            close=Decimal("51000"),
+            volume=Decimal("1000"),
+            exchange="binance",
+            bid_price=Decimal("50990"),
+            ask_price=Decimal("51010"),
         )
 
     @pytest.mark.asyncio

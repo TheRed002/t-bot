@@ -51,10 +51,11 @@ from src.error_handling.decorators import (
 from src.monitoring.financial_precision import safe_decimal_to_float
 
 # Monitoring integration
-from src.monitoring.metrics import MetricsCollector
+from src.monitoring.interfaces import MetricsServiceInterface
 from src.state import StateType
 
 # StateService will be injected
+from src.utils.constants import POSITION_SIZING_LIMITS
 from src.utils.decimal_utils import (
     ONE,
     ZERO,
@@ -74,15 +75,9 @@ class RiskConfiguration(BaseModel):
 
     # Position sizing configuration
     position_sizing_method: PositionSizeMethod = PositionSizeMethod.KELLY_CRITERION
-    max_position_size_pct: Decimal = Field(
-        default=Decimal("0.10"), ge=Decimal("0.01"), le=Decimal("0.25")
-    )
-    min_position_size_pct: Decimal = Field(
-        default=Decimal("0.01"), ge=Decimal("0.001"), le=Decimal("0.05")
-    )
-    default_position_size_pct: Decimal = Field(
-        default=Decimal("0.05"), ge=Decimal("0.01"), le=Decimal("0.15")
-    )
+    max_position_size_pct: Decimal = Field(default=Decimal("0.10"), ge=Decimal("0.01"), le=Decimal("0.25"))
+    min_position_size_pct: Decimal = Field(default=Decimal("0.01"), ge=Decimal("0.001"), le=Decimal("0.05"))
+    default_position_size_pct: Decimal = Field(default=Decimal("0.05"), ge=Decimal("0.01"), le=Decimal("0.15"))
 
     # Kelly Criterion configuration
     kelly_lookback_days: int = Field(default=30, ge=10, le=252)
@@ -90,46 +85,28 @@ class RiskConfiguration(BaseModel):
 
     # Volatility adjustment
     volatility_window: int = Field(default=20, ge=5, le=100)
-    volatility_target: Decimal = Field(
-        default=Decimal("0.02"), ge=Decimal("0.005"), le=Decimal("0.10")
-    )
+    volatility_target: Decimal = Field(default=Decimal("0.02"), ge=Decimal("0.005"), le=Decimal("0.10"))
 
     # Portfolio limits
     max_total_positions: int = Field(default=10, ge=1, le=50)
     max_positions_per_symbol: int = Field(default=3, ge=1, le=10)
-    max_portfolio_exposure: Decimal = Field(
-        default=Decimal("0.80"), ge=Decimal("0.10"), le=Decimal("1.00")
-    )
-    max_sector_exposure: Decimal = Field(
-        default=Decimal("0.30"), ge=Decimal("0.05"), le=Decimal("0.50")
-    )
-    max_correlation_exposure: Decimal = Field(
-        default=Decimal("0.20"), ge=Decimal("0.05"), le=Decimal("0.40")
-    )
+    max_portfolio_exposure: Decimal = Field(default=Decimal("0.80"), ge=Decimal("0.10"), le=Decimal("1.00"))
+    max_sector_exposure: Decimal = Field(default=Decimal("0.30"), ge=Decimal("0.05"), le=Decimal("0.50"))
+    max_correlation_exposure: Decimal = Field(default=Decimal("0.20"), ge=Decimal("0.05"), le=Decimal("0.40"))
 
     # Risk thresholds
-    var_strength_level: Decimal = Field(
-        default=Decimal("0.95"), ge=Decimal("0.90"), le=Decimal("0.99")
-    )
-    max_drawdown_threshold: Decimal = Field(
-        default=Decimal("0.20"), ge=Decimal("0.05"), le=Decimal("0.50")
-    )
+    var_strength_level: Decimal = Field(default=Decimal("0.95"), ge=Decimal("0.90"), le=Decimal("0.99"))
+    max_drawdown_threshold: Decimal = Field(default=Decimal("0.20"), ge=Decimal("0.05"), le=Decimal("0.50"))
     min_sharpe_ratio: Decimal = Field(default=Decimal("0.50"), ge=Decimal("0.0"), le=Decimal("3.0"))
 
     # Stop-loss configuration
-    default_stop_loss_pct: Decimal = Field(
-        default=Decimal("0.05"), ge=Decimal("0.01"), le=Decimal("0.20")
-    )
+    default_stop_loss_pct: Decimal = Field(default=Decimal("0.05"), ge=Decimal("0.01"), le=Decimal("0.20"))
     trailing_stop_enabled: bool = Field(default=True)
-    trailing_stop_distance: Decimal = Field(
-        default=Decimal("0.03"), ge=Decimal("0.01"), le=Decimal("0.10")
-    )
+    trailing_stop_distance: Decimal = Field(default=Decimal("0.03"), ge=Decimal("0.01"), le=Decimal("0.10"))
 
     # Risk monitoring
     risk_check_interval: int = Field(default=60, ge=10, le=300)  # seconds
-    emergency_stop_threshold: Decimal = Field(
-        default=Decimal("0.30"), ge=Decimal("0.10"), le=Decimal("0.50")
-    )
+    emergency_stop_threshold: Decimal = Field(default=Decimal("0.30"), ge=Decimal("0.10"), le=Decimal("0.50"))
 
     model_config = ConfigDict(use_enum_values=True, validate_assignment=True)
 
@@ -199,9 +176,10 @@ class RiskService(BaseService):
         self,
         database_service=None,
         state_service=None,
+        analytics_service=None,
         config=None,
         correlation_id: str | None = None,
-        metrics_collector: MetricsCollector | None = None,
+        metrics_service: MetricsServiceInterface | None = None,
     ):
         """
         Initialize Risk Service.
@@ -209,24 +187,29 @@ class RiskService(BaseService):
         Args:
             database_service: Database service for data access (injected)
             state_service: State service for state management (injected)
+            analytics_service: Analytics service for risk metrics (injected)
             config: Application configuration
             correlation_id: Request correlation ID
+            metrics_service: Metrics service for monitoring (injected)
         """
         super().__init__(
             name="RiskService",
-            config=dict(
-                config.model_dump()
-                if config and hasattr(config, "model_dump")
-                else (config.__dict__ if config and hasattr(config, "__dict__") else {})
-            )
-            if config
-            else {},
+            config=(
+                dict(
+                    config.model_dump()
+                    if config and hasattr(config, "model_dump")
+                    else (config.__dict__ if config and hasattr(config, "__dict__") else {})
+                )
+                if config
+                else {}
+            ),
             correlation_id=correlation_id,
         )
 
         # Service dependencies
         self.database_service = database_service
         self.state_service = state_service
+        self.analytics_service = analytics_service
         self.app_config = config
 
         # Risk configuration with defaults if config not provided
@@ -254,10 +237,9 @@ class RiskService(BaseService):
         self._risk_alerts: list[RiskAlert] = []
         self._emergency_stop_triggered = False
 
-        # Historical data cache (in-memory for performance)
         self._price_history: dict[str, list[Decimal]] = defaultdict(list)
         self._return_history: dict[str, list[float]] = defaultdict(list)
-        self._portfolio_value_history: list[float] = []
+        self._portfolio_value_history: list[Decimal] = []
 
         # Locks for thread-safe access to shared state
         self._state_lock = asyncio.Lock()
@@ -293,42 +275,28 @@ class RiskService(BaseService):
         )
 
         # Initialize cache manager
-        self.cache_manager = get_cache_manager(config=config)
+        try:
+            self.cache_manager = get_cache_manager(config=config)
+        except Exception as e:
+            self._logger.warning(f"Failed to initialize cache manager: {e}")
+            # Create a minimal cache manager to prevent None assignment
+            from src.core.caching.cache_manager import CacheManager
+
+            self.cache_manager = CacheManager()
 
         # Initialize monitoring integration
-        self.metrics_collector = metrics_collector
-        if self.metrics_collector is None:
-            # Try to get from container as fallback for backward compatibility
-            try:
-                from src.core.dependency_injection import get_container
-
-                self.metrics_collector = get_container().get("MetricsCollectorProtocol")
-            except Exception as e:
-                self._logger.warning(f"Failed to get metrics collector from DI container: {e}")
-                # Last resort - create directly (deprecated)
-                try:
-                    self.metrics_collector = MetricsCollector()
-                    self._logger.warning("Created MetricsCollector directly - should be injected")
-                except Exception as e:
-                    self._logger.warning(f"Failed to initialize metrics collector: {e}")
-                    self.metrics_collector = None
+        self.metrics_service = metrics_service
 
         self._logger.info(
             "RiskService initialized",
             config=self.risk_config.model_dump(),
             dependencies=["DatabaseService", "StateService"],
-            monitoring_enabled=self.metrics_collector is not None,
+            monitoring_enabled=self.metrics_service is not None,
         )
 
     async def _do_start(self) -> None:
         """Start the risk service."""
         try:
-            # Resolve dependencies if not injected
-            if not self.database_service:
-                self.database_service = self.resolve_dependency("DatabaseService")
-            if not self.state_service:
-                self.state_service = self.resolve_dependency("StateService")
-
             # Verify dependencies are available
             if not await self._verify_dependencies():
                 raise ServiceError("Risk service dependencies not available")
@@ -347,19 +315,22 @@ class RiskService(BaseService):
 
     async def _do_stop(self) -> None:
         """Stop the risk service."""
+        task = None
         try:
             # Cancel background tasks with proper cleanup
             if hasattr(self, "_risk_monitor_task") and self._risk_monitor_task:
+                task = self._risk_monitor_task
                 try:
-                    self._risk_monitor_task.cancel()
+                    task.cancel()
                     # Wait for task to be cancelled with timeout
-                    await asyncio.wait_for(self._risk_monitor_task, timeout=5.0)
+                    await asyncio.wait_for(task, timeout=5.0)
                 except (asyncio.CancelledError, asyncio.TimeoutError):
-                    self._logger.debug("Risk monitoring task cancelled")
+                    self._logger.info("Risk monitoring task cancelled")
                 except Exception as e:
                     self._logger.warning(f"Error cancelling risk monitoring task: {e}")
                 finally:
-                    self._risk_monitor_task = None
+                    self._risk_monitor_task = None  # type: ignore
+                    task = None
 
             # Clean up all resources
             await self._cleanup_resources()
@@ -369,6 +340,7 @@ class RiskService(BaseService):
                 await self._save_risk_state()
             except Exception as e:
                 self._logger.error(f"Failed to save final risk state: {e}")
+                raise
 
             self._logger.info("RiskService stopped successfully")
 
@@ -381,12 +353,15 @@ class RiskService(BaseService):
                 await self._cleanup_resources()
             except Exception as cleanup_error:
                 self._logger.error(f"Cleanup error during shutdown: {cleanup_error}")
+            finally:
+                # Ensure task reference is cleared
+                task = None
 
     # Position Sizing Operations
 
     @with_error_context(component="risk_management", operation="calculate_position_size")
-    @with_circuit_breaker(failure_threshold=3, recovery_timeout=30.0)
-    @with_retry(max_attempts=2, base_delay=0.5)
+    @with_circuit_breaker(failure_threshold=3, recovery_timeout=30)
+    @with_retry(max_attempts=2, base_delay=Decimal("0.5"))
     @timeout(10.0)
     @time_execution
     @cached(
@@ -444,7 +419,7 @@ class RiskService(BaseService):
         if method is None:
             method = self.risk_config.position_sizing_method
 
-        self._logger.debug(
+        self._logger.info(
             "Calculating position size",
             signal_symbol=signal.symbol,
             signal_strength=signal.strength,
@@ -470,9 +445,7 @@ class RiskService(BaseService):
         position_size = self._apply_position_size_limits(position_size, available_capital)
 
         # Validate against portfolio constraints
-        position_size = await self._apply_portfolio_constraints(
-            position_size, signal.symbol, available_capital
-        )
+        position_size = await self._apply_portfolio_constraints(position_size, signal.symbol, available_capital)
 
         self._logger.info(
             "Position size calculated",
@@ -490,7 +463,7 @@ class RiskService(BaseService):
         base_size = available_capital * self.risk_config.default_position_size_pct
         strength_adjusted_size = base_size * to_decimal(signal.strength)
 
-        self._logger.debug(
+        self._logger.info(
             "Fixed percentage sizing",
             base_size=format_decimal(base_size),
             strength=signal.strength,
@@ -498,6 +471,59 @@ class RiskService(BaseService):
         )
 
         return strength_adjusted_size
+
+    def _validate_kelly_data(self, winning_returns: list, losing_returns: list, returns_decimal: list) -> bool:
+        """Validate data for Kelly Criterion calculation."""
+        if not winning_returns or not losing_returns:
+            self._logger.warning(
+                "Insufficient win/loss data for Kelly Criterion",
+                winning_trades=len(winning_returns),
+                losing_trades=len(losing_returns),
+            )
+            return False
+
+        total_trades = to_decimal(len(returns_decimal))
+        if total_trades <= ZERO:
+            self._logger.warning("No trades data available for Kelly calculation")
+            return False
+
+        win_count = to_decimal(len(winning_returns))
+        loss_count = to_decimal(len(losing_returns))
+
+        if win_count <= ZERO or loss_count <= ZERO:
+            self._logger.warning("Invalid win/loss counts for Kelly calculation")
+            return False
+
+        return True
+
+    def _calculate_kelly_statistics(
+        self, winning_returns: list, losing_returns: list, returns_decimal: list
+    ) -> tuple[Decimal, Decimal, Decimal]:
+        """Calculate Kelly statistics: win probability, win/loss ratio, and Kelly fraction."""
+        total_trades = to_decimal(len(returns_decimal))
+        win_count = to_decimal(len(winning_returns))
+        loss_count = to_decimal(len(losing_returns))
+
+        win_probability = win_count / total_trades
+
+        avg_win = sum(winning_returns, ZERO) / win_count
+        avg_loss = abs(sum(losing_returns, ZERO) / loss_count)
+
+        # Check for a reasonable min_avg_loss_threshold or use a default
+        min_threshold = POSITION_SIZING_LIMITS.get("min_avg_loss_threshold", 0.001)
+        if avg_loss <= to_decimal(str(min_threshold)) or avg_loss <= ZERO:
+            raise ValueError(f"Invalid average loss: {avg_loss}")
+
+        win_loss_ratio = safe_divide(avg_win, avg_loss, ZERO)
+        if win_loss_ratio <= ZERO:
+            raise ValueError(f"Invalid win/loss ratio: {win_loss_ratio}")
+
+        if win_probability <= ZERO or (ONE - win_probability) <= ZERO:
+            raise ValueError(f"Invalid probabilities: {win_probability}")
+
+        kelly_fraction = safe_divide(win_probability * win_loss_ratio - (ONE - win_probability), win_loss_ratio, ZERO)
+
+        return win_probability, win_loss_ratio, kelly_fraction
 
     @cache_result(ttl=60)  # Cache Kelly calculations for 1 minute
     async def _kelly_criterion_sizing(self, signal: Signal, available_capital: Decimal) -> Decimal:
@@ -515,75 +541,19 @@ class RiskService(BaseService):
             return await self._fixed_percentage_sizing(signal, available_capital)
 
         try:
-            # Get recent returns
+            # Get recent returns and prepare data
             recent_returns = returns[-self.risk_config.kelly_lookback_days :]
             returns_decimal = [to_decimal(r) for r in recent_returns]
-
-            # Calculate win/loss statistics
             winning_returns = [r for r in returns_decimal if r > ZERO]
             losing_returns = [r for r in returns_decimal if r < ZERO]
 
-            if not winning_returns or not losing_returns:
-                self._logger.warning(
-                    "Insufficient win/loss data for Kelly Criterion",
-                    winning_trades=len(winning_returns),
-                    losing_trades=len(losing_returns),
-                )
+            # Validate data
+            if not self._validate_kelly_data(winning_returns, losing_returns, returns_decimal):
                 return await self._fixed_percentage_sizing(signal, available_capital)
 
-            # Calculate probabilities and returns with safety checks
-            total_trades = to_decimal(len(returns_decimal))
-            if total_trades <= ZERO:
-                self._logger.warning("No trades data available for Kelly calculation")
-                return await self._fixed_percentage_sizing(signal, available_capital)
-
-            win_probability = to_decimal(len(winning_returns)) / total_trades
-            loss_probability = ONE - win_probability
-
-            # Safe division with validation
-            win_count = to_decimal(len(winning_returns))
-            loss_count = to_decimal(len(losing_returns))
-
-            if win_count <= ZERO or loss_count <= ZERO:
-                self._logger.warning("Invalid win/loss counts for Kelly calculation")
-                return await self._fixed_percentage_sizing(signal, available_capital)
-
-            avg_win = sum(winning_returns, ZERO) / win_count
-            avg_loss = abs(sum(losing_returns, ZERO) / loss_count)
-
-            if avg_loss <= to_decimal("0.0001"):
-                self._logger.warning("Average loss too small for Kelly calculation")
-                return await self._fixed_percentage_sizing(signal, available_capital)
-
-            # Kelly formula: f = (p*b - q) / b with comprehensive protection
-            if avg_loss <= ZERO:
-                self._logger.warning(
-                    "Zero or negative average loss, cannot calculate Kelly fraction",
-                    avg_loss=format_decimal(avg_loss),
-                )
-                return await self._fixed_percentage_sizing(signal, available_capital)
-
-            win_loss_ratio = safe_divide(avg_win, avg_loss, ZERO)
-            if win_loss_ratio <= ZERO:
-                self._logger.warning(
-                    "Invalid win/loss ratio for Kelly calculation",
-                    win_loss_ratio=format_decimal(win_loss_ratio),
-                    avg_win=format_decimal(avg_win),
-                    avg_loss=format_decimal(avg_loss),
-                )
-                return await self._fixed_percentage_sizing(signal, available_capital)
-
-            # Additional validation for Kelly inputs
-            if win_probability <= ZERO or loss_probability <= ZERO:
-                self._logger.warning(
-                    "Invalid probabilities for Kelly calculation",
-                    win_probability=format_decimal(win_probability),
-                    loss_probability=format_decimal(loss_probability),
-                )
-                return await self._fixed_percentage_sizing(signal, available_capital)
-
-            kelly_fraction = safe_divide(
-                win_probability * win_loss_ratio - loss_probability, win_loss_ratio, ZERO
+            # Calculate statistics
+            win_probability, win_loss_ratio, kelly_fraction = self._calculate_kelly_statistics(
+                winning_returns, losing_returns, returns_decimal
             )
 
             if kelly_fraction <= ZERO:
@@ -608,7 +578,7 @@ class RiskService(BaseService):
 
             position_size = available_capital * bounded_fraction
 
-            self._logger.debug(
+            self._logger.info(
                 "Kelly Criterion calculation",
                 win_probability=format_decimal(win_probability),
                 win_loss_ratio=format_decimal(win_loss_ratio),
@@ -621,13 +591,14 @@ class RiskService(BaseService):
 
             return position_size
 
+        except (ValueError, ZeroDivisionError) as e:
+            self._logger.warning(f"Kelly Criterion validation failed: {e}")
+            return await self._fixed_percentage_sizing(signal, available_capital)
         except Exception as e:
             self._logger.error(f"Kelly Criterion calculation failed: {e}")
             return await self._fixed_percentage_sizing(signal, available_capital)
 
-    async def _volatility_adjusted_sizing(
-        self, signal: Signal, available_capital: Decimal
-    ) -> Decimal:
+    async def _volatility_adjusted_sizing(self, signal: Signal, available_capital: Decimal) -> Decimal:
         """Calculate position size using volatility adjustment."""
         symbol = signal.symbol
         prices = self._price_history.get(symbol, [])
@@ -643,26 +614,27 @@ class RiskService(BaseService):
 
         try:
             # Calculate volatility
-            prices_array = np.array(
-                [float(p) for p in prices[-self.risk_config.volatility_window :]]
-            )
+            prices_array = np.array([safe_decimal_to_float(p, f"price_{signal.symbol}_{i}") for i, p in enumerate(prices[-self.risk_config.volatility_window :])])
             returns = np.diff(prices_array) / prices_array[:-1]
-            volatility = np.std(returns)
+            volatility = to_decimal(str(np.std(returns)))
 
             # Calculate adjustment factor
-            target_volatility = float(self.risk_config.volatility_target)
-            volatility_adjustment = target_volatility / max(volatility, 0.001)
+            target_volatility = self.risk_config.volatility_target
+            min_volatility = to_decimal(str(POSITION_SIZING_LIMITS["min_volatility_threshold"]))
+            volatility_adjustment = safe_divide(target_volatility, max(volatility, min_volatility), ONE)
 
-            # Cap adjustment to reasonable bounds
-            volatility_adjustment = max(0.1, min(volatility_adjustment, 5.0))
+            # Cap adjustment to reasonable bounds - configurable limits
+            min_volatility_adjustment = POSITION_SIZING_LIMITS["min_volatility_adjustment"]
+            max_volatility_adjustment = POSITION_SIZING_LIMITS["max_volatility_adjustment"]
+            volatility_adjustment = max(
+                min_volatility_adjustment, min(volatility_adjustment, max_volatility_adjustment)
+            )
 
             # Calculate position size
             base_size = available_capital * self.risk_config.default_position_size_pct
-            adjusted_size = (
-                base_size * to_decimal(volatility_adjustment) * to_decimal(signal.strength)
-            )
+            adjusted_size = base_size * to_decimal(volatility_adjustment) * to_decimal(signal.strength)
 
-            self._logger.debug(
+            self._logger.info(
                 "Volatility-adjusted sizing",
                 volatility=volatility,
                 target_volatility=target_volatility,
@@ -677,9 +649,7 @@ class RiskService(BaseService):
             self._logger.error(f"Volatility adjustment failed: {e}")
             return await self._fixed_percentage_sizing(signal, available_capital)
 
-    async def _strength_weighted_sizing(
-        self, signal: Signal, available_capital: Decimal
-    ) -> Decimal:
+    async def _strength_weighted_sizing(self, signal: Signal, available_capital: Decimal) -> Decimal:
         """Calculate position size using strength weighting for ML strategies."""
         base_size = available_capital * self.risk_config.default_position_size_pct
 
@@ -689,7 +659,7 @@ class RiskService(BaseService):
 
         position_size = base_size * strength_weight
 
-        self._logger.debug(
+        self._logger.info(
             "Confidence-weighted sizing",
             strength=format_decimal(strength),
             strength_weight=format_decimal(strength_weight),
@@ -702,36 +672,67 @@ class RiskService(BaseService):
     def _validate_position_sizing_inputs(
         self, signal: Signal, available_capital: Decimal, current_price: Decimal
     ) -> None:
-        """Validate inputs for position sizing."""
-        if not signal or not signal.symbol:
-            raise ValidationError("Invalid signal for position sizing")
+        """Validate inputs for position sizing with comprehensive security checks."""
+        # Validate signal object
+        if not signal:
+            raise ValidationError("Signal cannot be None")
+
+        if not hasattr(signal, "symbol") or not signal.symbol:
+            raise ValidationError("Signal must have a valid symbol")
+
+        # Sanitize and validate symbol
+        if not isinstance(signal.symbol, str):
+            raise ValidationError(f"Signal symbol must be string, got {type(signal.symbol)}")
+
+        symbol = signal.symbol.strip().upper()
+        if not symbol or len(symbol) > 20:  # Reasonable symbol length limit
+            raise ValidationError(f"Invalid symbol format: {signal.symbol}")
+
+        # Validate signal strength with bounds checking
+        if not hasattr(signal, "strength") or signal.strength is None:
+            raise ValidationError("Signal must have a strength value")
+
+        if not isinstance(signal.strength, int | float | Decimal):
+            raise ValidationError(f"Signal strength must be numeric, got {type(signal.strength)}")
 
         if not (0 < signal.strength <= 1):
-            raise ValidationError(
-                f"Signal strength must be between 0 and 1 (exclusive): {signal.strength}"
-            )
+            raise ValidationError(f"Signal strength must be between 0 and 1 (exclusive): {signal.strength}")
 
-        # Additional signal validation
+        # Validate signal direction
         if not hasattr(signal, "direction") or not signal.direction:
             raise ValidationError("Signal must have a valid direction")
 
-        if not hasattr(signal, "symbol") or not signal.symbol.strip():
-            raise ValidationError("Signal must have a valid symbol")
+        # Validate available capital with bounds
+        if not isinstance(available_capital, Decimal):
+            raise ValidationError(f"Available capital must be Decimal, got {type(available_capital)}")
 
         if available_capital <= ZERO:
             raise ValidationError(f"Available capital must be positive: {available_capital}")
 
+        # Sanity check for reasonable capital amounts
+        max_reasonable_capital = Decimal("1000000000")  # 1 billion limit
+        if available_capital > max_reasonable_capital:
+            raise ValidationError(f"Available capital exceeds reasonable limit: {available_capital}")
+
+        # Validate current price with bounds
+        if not isinstance(current_price, Decimal):
+            raise ValidationError(f"Current price must be Decimal, got {type(current_price)}")
+
         if current_price <= ZERO:
             raise ValidationError(f"Current price must be positive: {current_price}")
 
-    def _apply_position_size_limits(
-        self, position_size: Decimal, available_capital: Decimal
-    ) -> Decimal:
+        # Sanity check for reasonable price ranges
+        min_reasonable_price = Decimal("0.000001")
+        max_reasonable_price = Decimal("10000000")  # 10 million per unit
+        if not (min_reasonable_price <= current_price <= max_reasonable_price):
+            raise ValidationError(f"Current price outside reasonable range: {current_price}")
+
+    def _apply_position_size_limits(self, position_size: Decimal, available_capital: Decimal) -> Decimal:
         """Apply hard position size limits."""
         # Maximum limit
         max_size = min(
             available_capital * self.risk_config.max_position_size_pct,
-            available_capital * to_decimal("0.25"),  # Absolute 25% hard limit
+            available_capital * to_decimal(str(POSITION_SIZING_LIMITS["max_position_size_pct"])),
         )
 
         # Minimum limit
@@ -794,14 +795,12 @@ class RiskService(BaseService):
     # Risk Metrics and Monitoring
 
     @with_error_context(component="risk_management", operation="calculate_risk_metrics")
-    @with_circuit_breaker(failure_threshold=5, recovery_timeout=60.0)
-    @with_retry(max_attempts=3, base_delay=1.0)
+    @with_circuit_breaker(failure_threshold=5, recovery_timeout=60)
+    @with_retry(max_attempts=3, base_delay=Decimal("1.0"))
     @cache_result(ttl=30)  # Cache risk metrics for 30 seconds
     @time_execution
     @cache_risk_metrics(ttl=60)  # Use specialized risk metrics caching decorator
-    async def calculate_risk_metrics(
-        self, positions: list[Position], market_data: list[MarketData]
-    ) -> RiskMetrics:
+    async def calculate_risk_metrics(self, positions: list[Position], market_data: list[MarketData]) -> RiskMetrics:
         """
         Calculate comprehensive risk metrics for current portfolio.
 
@@ -843,8 +842,7 @@ class RiskService(BaseService):
 
             # Calculate additional metrics
             total_exposure = sum(
-                pos.quantity * pos.current_price if pos.quantity and pos.current_price else ZERO
-                for pos in positions
+                pos.quantity * pos.current_price if pos.quantity and pos.current_price else ZERO for pos in positions
             )
             beta = await self._calculate_portfolio_beta(positions)
             correlation_risk = await self._calculate_correlation_risk(positions)
@@ -863,28 +861,38 @@ class RiskService(BaseService):
             # Create risk metrics
             risk_metrics = RiskMetrics(
                 timestamp=datetime.now(timezone.utc),
-                total_exposure=total_exposure,
+                total_exposure=total_exposure if isinstance(total_exposure, Decimal) else ZERO,
                 var_1d=var_1d,
                 var_95=var_1d,
                 var_99=var_5d,
                 expected_shortfall=expected_shortfall,
                 max_drawdown=max_drawdown,
                 current_drawdown=current_drawdown,
-                sharpe_ratio=sharpe_ratio,
-                beta=beta,
+                sharpe_ratio=float(sharpe_ratio) if sharpe_ratio is not None else None,
+                beta=float(beta) if beta is not None else None,
                 correlation_risk=correlation_risk,
                 risk_level=risk_level,
                 portfolio_value=portfolio_value,
                 position_count=len(positions),
-                leverage=safe_divide(total_exposure, portfolio_value, ONE),
+                leverage=float(
+                    safe_divide(
+                        total_exposure if isinstance(total_exposure, Decimal) else ZERO,
+                        portfolio_value,
+                        ONE,
+                    )
+                ),
             )
 
             # Update portfolio metrics cache
             self._portfolio_metrics = PortfolioMetrics(
                 total_value=portfolio_value,
-                total_exposure=total_exposure,
+                total_exposure=total_exposure if isinstance(total_exposure, Decimal) else ZERO,
                 position_count=len(positions),
-                leverage=safe_divide(total_exposure, portfolio_value, ONE),
+                leverage=safe_divide(
+                    total_exposure if isinstance(total_exposure, Decimal) else ZERO,
+                    portfolio_value,
+                    ONE,
+                ),
                 correlation_risk=correlation_risk,
                 timestamp=datetime.now(timezone.utc),
             )
@@ -892,41 +900,60 @@ class RiskService(BaseService):
             # Save risk state
             await self._save_risk_metrics(risk_metrics)
 
+            # Send risk metrics to analytics service
+            if self.analytics_service:
+                try:
+                    await self.analytics_service.record_risk_metrics(risk_metrics)
+                    self._logger.info("Risk metrics sent to analytics service")
+                except Exception as e:
+                    self._logger.warning(f"Failed to send risk metrics to analytics: {e}")
+
             # Update monitoring metrics
-            if self.metrics_collector:
+            if self.metrics_service:
                 try:
                     # Update VaR metrics using specialized methods with safe conversion
                     if var_1d is not None:
-                        var_1d_float = safe_decimal_to_float(
-                            var_1d, "risk_var_1d", precision_digits=2
+                        var_1d_float = safe_decimal_to_float(var_1d, "risk_var_1d", precision_digits=2)
+                        # Record VaR metric via metrics service interface
+                        from src.monitoring.services import MetricRequest
+
+                        metric_request = MetricRequest(
+                            name="risk_var_1d",
+                            value=var_1d_float,
+                            labels={"confidence": "0.95", "horizon": "1d"},
                         )
-                        self.metrics_collector.risk_metrics.record_var(0.95, "1d", var_1d_float)
+                        self.metrics_service.record_gauge(metric_request)
+
                     if var_5d is not None:
-                        var_5d_float = safe_decimal_to_float(
-                            var_5d, "risk_var_5d", precision_digits=2
+                        var_5d_float = safe_decimal_to_float(var_5d, "risk_var_5d", precision_digits=2)
+                        # Record VaR metric via metrics service interface
+                        from src.monitoring.services import MetricRequest
+
+                        metric_request = MetricRequest(
+                            name="risk_var_5d",
+                            value=var_5d_float,
+                            labels={"confidence": "0.95", "horizon": "5d"},
                         )
-                        self.metrics_collector.risk_metrics.record_var(0.95, "5d", var_5d_float)
+                        self.metrics_service.record_gauge(metric_request)
 
                     # Update drawdown metrics using specialized method with safe conversion
                     if max_drawdown is not None:
-                        drawdown_float = safe_decimal_to_float(
-                            max_drawdown, "risk_max_drawdown", precision_digits=4
-                        )
-                        self.metrics_collector.risk_metrics.record_drawdown("30d", drawdown_float)
+                        drawdown_float = safe_decimal_to_float(max_drawdown, "risk_max_drawdown", precision_digits=4)
+                        # Record drawdown metric via metrics service interface
+                        await self.metrics_service.record_drawdown("30d", drawdown_float)
 
                     # Update Sharpe ratio using specialized method with safe conversion
                     if sharpe_ratio is not None:
-                        sharpe_float = safe_decimal_to_float(
-                            sharpe_ratio, "risk_sharpe_ratio", precision_digits=4
-                        )
-                        self.metrics_collector.risk_metrics.record_sharpe_ratio("30d", sharpe_float)
+                        sharpe_float = safe_decimal_to_float(sharpe_ratio, "risk_sharpe_ratio", precision_digits=4)
+                        # Record Sharpe ratio metric via metrics service interface
+                        await self.metrics_service.record_sharpe_ratio("30d", sharpe_float)
                 except Exception as e:
                     self._logger.warning(f"Failed to update monitoring metrics: {e}")
 
             self._logger.info(
                 "Risk metrics calculated",
                 portfolio_value=format_decimal(portfolio_value),
-                total_exposure=format_decimal(total_exposure),
+                total_exposure=format_decimal(total_exposure if isinstance(total_exposure, Decimal) else ZERO),
                 var_1d=format_decimal(var_1d),
                 current_drawdown=format_decimal(current_drawdown),
                 risk_level=risk_level.value,
@@ -958,9 +985,7 @@ class RiskService(BaseService):
             leverage=ONE,
         )
 
-    async def _calculate_portfolio_value(
-        self, positions: list[Position], market_data: list[MarketData]
-    ) -> Decimal:
+    async def _calculate_portfolio_value(self, positions: list[Position], market_data: list[MarketData]) -> Decimal:
         """Calculate current portfolio value."""
         portfolio_value = ZERO
 
@@ -982,35 +1007,26 @@ class RiskService(BaseService):
 
     async def _update_portfolio_history(self, portfolio_value: Decimal) -> None:
         """Update portfolio value history."""
-        # Store as string to preserve precision, convert back to Decimal when needed
-        self._portfolio_value_history.append(str(portfolio_value))
+        # Store as Decimal for precision
+        self._portfolio_value_history.append(portfolio_value)
 
         # Calculate returns if we have previous values
         if len(self._portfolio_value_history) > 1:
             prev_value = self._portfolio_value_history[-2]
-            if prev_value > 0:
-                # Use Decimal arithmetic to preserve precision
-                current_decimal = portfolio_value
-                prev_decimal = to_decimal(prev_value)
-                if prev_decimal > ZERO:
-                    portfolio_return = float((current_decimal - prev_decimal) / prev_decimal)
-                    # Store return in a dedicated history if needed
-                    self._logger.debug(
-                        "Portfolio return calculated", portfolio_return=portfolio_return
-                    )
-                else:
-                    self._logger.debug("Previous portfolio value is zero, cannot calculate return")
+            if prev_value > ZERO:
+                portfolio_return = (portfolio_value - prev_value) / prev_value
+                self._logger.info("Portfolio return calculated", portfolio_return=format_decimal(portfolio_return))
 
         # Limit history size for memory management
-        max_history = 252  # One year of daily data
-        if len(self._portfolio_value_history) > max_history:
-            self._portfolio_value_history = self._portfolio_value_history[-max_history:]
+        max_portfolio_history = POSITION_SIZING_LIMITS.get("max_portfolio_history", 252)
+        if len(self._portfolio_value_history) > max_portfolio_history:
+            self._portfolio_value_history = self._portfolio_value_history[-max_portfolio_history:]
 
     async def _calculate_var(self, days: int, portfolio_value: Decimal) -> Decimal:
         """Calculate Value at Risk for specified time horizon."""
         if len(self._portfolio_value_history) < 30:
             # Conservative estimate for insufficient data
-            base_var_pct = Decimal("0.02")  # 2% base VaR
+            base_var_pct = to_decimal(POSITION_SIZING_LIMITS["var_base_conservative"])
             scaled_var_pct = base_var_pct * Decimal(str(np.sqrt(days)))
             return portfolio_value * scaled_var_pct
 
@@ -1018,27 +1034,38 @@ class RiskService(BaseService):
         values = self._portfolio_value_history
         returns = []
         for i in range(1, len(values)):
-            prev_val = to_decimal(values[i - 1])
-            curr_val = to_decimal(values[i])
+            prev_val = values[i - 1]
+            curr_val = values[i]
             if prev_val > ZERO:
                 return_val = float(safe_divide(curr_val - prev_val, prev_val, ZERO))
                 returns.append(return_val)
 
         if not returns or len(returns) < 10:
-            # Need at least 10 returns for reliable VaR
-            self._logger.warning(f"Insufficient returns data for VaR: {len(returns)} returns")
-            return portfolio_value * Decimal("0.02")
+            # Need at least minimum returns for reliable VaR - use conservative fallback
+            min_returns_required = POSITION_SIZING_LIMITS["min_returns_for_var"]
+            conservative_var_pct = to_decimal(POSITION_SIZING_LIMITS["var_base_conservative"])
+            self._logger.warning(
+                "Insufficient returns data for VaR calculation",
+                available_returns=len(returns),
+                required_minimum=min_returns_required,
+            )
+            return portfolio_value * conservative_var_pct
 
         # Calculate daily volatility with validation
         daily_volatility = np.std(returns)
         if daily_volatility == 0 or np.isnan(daily_volatility):
+            conservative_var_fallback = to_decimal(POSITION_SIZING_LIMITS["var_fallback_conservative"])
             self._logger.warning("Zero or invalid volatility, using conservative VaR estimate")
-            return portfolio_value * Decimal("0.01")  # 1% conservative VaR
+            return portfolio_value * conservative_var_fallback
 
         # Z-score for strength level with validation
         strength_level = float(self.risk_config.var_strength_level)
         if not (0.5 <= strength_level <= 0.999):
-            self._logger.warning(f"Invalid strength level {strength_level}, using 0.95")
+            self._logger.warning(
+                "Invalid VaR confidence level, using default",
+                provided_level=strength_level,
+                default_level=0.95,
+            )
             strength_level = 0.95
 
         if strength_level == 0.95:
@@ -1057,25 +1084,29 @@ class RiskService(BaseService):
 
         # VaR calculation with bounds checking
         if days <= 0:
-            self._logger.warning(f"Invalid time horizon {days}, using 1 day")
+            self._logger.warning("Invalid VaR time horizon, using default", provided_days=days, default_days=1)
             days = 1
 
-        # VaR calculation: portfolio_value * volatility * sqrt(days) * z_score
         var_percentage = daily_volatility * np.sqrt(days) * z_score
 
-        # Apply reasonable bounds (max 50% VaR)
-        var_percentage = min(var_percentage, 0.5)
+        # Cap VaR at reasonable maximum
+        max_var_percentage = POSITION_SIZING_LIMITS["max_var_percentage"]
+        var_percentage = min(var_percentage, max_var_percentage)
 
         return portfolio_value * Decimal(str(var_percentage))
 
     async def _calculate_expected_shortfall(self, portfolio_value: Decimal) -> Decimal:
         """Calculate Expected Shortfall (Conditional VaR)."""
-        if len(self._portfolio_value_history) < 30:
-            return portfolio_value * Decimal("0.025")
+        if len(self._portfolio_value_history) < POSITION_SIZING_LIMITS["min_history_for_shortfall"]:
+            return portfolio_value * to_decimal(POSITION_SIZING_LIMITS["shortfall_base_conservative"])
 
-        # Calculate returns
+        # Calculate returns with safe division
         values = self._portfolio_value_history
-        returns = [(values[i] - values[i - 1]) / values[i - 1] for i in range(1, len(values))]
+        returns = []
+        for i in range(1, len(values)):
+            if values[i - 1] > ZERO:
+                return_rate = (values[i] - values[i - 1]) / values[i - 1]
+                returns.append(float(return_rate))
 
         if not returns:
             return portfolio_value * Decimal("0.025")
@@ -1086,7 +1117,7 @@ class RiskService(BaseService):
         worst_returns = [r for r in returns if r <= threshold]
 
         if not worst_returns:
-            return portfolio_value * Decimal("0.02")
+            return portfolio_value * to_decimal(POSITION_SIZING_LIMITS["shortfall_default_conservative"])
 
         expected_shortfall = portfolio_value * Decimal(str(abs(np.mean(worst_returns))))
         return expected_shortfall
@@ -1097,7 +1128,7 @@ class RiskService(BaseService):
             return ZERO
 
         # Calculate running maximum and drawdowns with safe division
-        values = [to_decimal(val) for val in self._portfolio_value_history]
+        values = self._portfolio_value_history
         if not values or all(v <= ZERO for v in values):
             self._logger.warning("All portfolio values are zero or negative")
             return ZERO
@@ -1107,7 +1138,7 @@ class RiskService(BaseService):
             running_max.append(max(running_max[-1], val))
 
         drawdowns = []
-        for i, (curr_val, peak_val) in enumerate(zip(values, running_max, strict=False)):
+        for _i, (curr_val, peak_val) in enumerate(zip(values, running_max, strict=False)):
             if peak_val > ZERO:
                 dd = float(safe_divide(peak_val - curr_val, peak_val, ZERO))
                 drawdowns.append(dd)
@@ -1123,8 +1154,8 @@ class RiskService(BaseService):
         if len(self._portfolio_value_history) < 2:
             return ZERO
 
-        # Convert string history back to Decimal for calculation
-        peak_value = max(to_decimal(val) for val in self._portfolio_value_history)
+        # Find peak value from Decimal history
+        peak_value = max(self._portfolio_value_history)
         if peak_value <= ZERO:
             return ZERO
 
@@ -1138,9 +1169,13 @@ class RiskService(BaseService):
         if len(self._portfolio_value_history) < 30:
             return None
 
-        # Calculate returns
+        # Calculate returns with safe division
         values = self._portfolio_value_history
-        returns = [(values[i] - values[i - 1]) / values[i - 1] for i in range(1, len(values))]
+        returns = []
+        for i in range(1, len(values)):
+            if values[i - 1] > ZERO:
+                return_rate = (values[i] - values[i - 1]) / values[i - 1]
+                returns.append(float(return_rate))
 
         if not returns:
             return None
@@ -1152,7 +1187,6 @@ class RiskService(BaseService):
         if volatility == 0:
             return None
 
-        # Sharpe ratio (assuming 0% risk-free rate for crypto)
         sharpe_ratio = mean_return / volatility
         return Decimal(str(sharpe_ratio))
 
@@ -1187,13 +1221,13 @@ class RiskService(BaseService):
         var_1d_pct = safe_divide(var_1d, portfolio_value, ZERO) if portfolio_value > ZERO else ZERO
 
         # Risk thresholds
-        var_critical = Decimal("0.10")  # 10% VaR
-        var_high = Decimal("0.05")  # 5% VaR
-        var_medium = Decimal("0.02")  # 2% VaR
+        var_critical = to_decimal(POSITION_SIZING_LIMITS["var_critical_threshold"])
+        var_high = to_decimal(POSITION_SIZING_LIMITS["var_high_threshold"])
+        var_medium = to_decimal(POSITION_SIZING_LIMITS["var_medium_threshold"])
 
-        drawdown_critical = Decimal("0.20")  # 20% drawdown
-        drawdown_high = Decimal("0.10")  # 10% drawdown
-        drawdown_medium = Decimal("0.05")  # 5% drawdown
+        drawdown_critical = to_decimal(POSITION_SIZING_LIMITS["drawdown_critical_threshold"])
+        drawdown_high = to_decimal(POSITION_SIZING_LIMITS["drawdown_high_threshold"])
+        drawdown_medium = to_decimal(POSITION_SIZING_LIMITS["drawdown_medium_threshold"])
 
         # Check for critical risk
         if var_1d_pct > var_critical or current_drawdown > drawdown_critical:
@@ -1229,8 +1263,8 @@ class RiskService(BaseService):
         return self._portfolio_metrics
 
     @with_error_context(component="risk_management", operation="validate_signal")
-    @with_circuit_breaker(failure_threshold=5, recovery_timeout=30.0)
-    @with_retry(max_attempts=3, base_delay=1.0)
+    @with_circuit_breaker(failure_threshold=5, recovery_timeout=30)
+    @with_retry(max_attempts=3, base_delay=Decimal("1.0"))
     @time_execution
     @cached(
         ttl=30,
@@ -1250,20 +1284,19 @@ class RiskService(BaseService):
         Returns:
             True if signal passes risk validation
         """
-        return await self.execute_with_monitoring(
-            "validate_signal", self._validate_signal_impl, signal
-        )
+        return await self.execute_with_monitoring("validate_signal", self._validate_signal_impl, signal)
 
     async def _validate_signal_impl(self, signal: Signal) -> bool:
         """Internal implementation of signal validation."""
         try:
             # Check signal strength threshold
-            if signal.strength < 0.3:  # Minimum 30% strength
+            min_signal_strength = to_decimal(POSITION_SIZING_LIMITS["min_signal_strength"])
+            if signal.strength < float(min_signal_strength):
                 self._logger.warning(
                     "Signal strength too low",
                     symbol=signal.symbol,
                     strength=signal.strength,
-                    min_required=0.3,
+                    min_required=float(min_signal_strength),
                 )
                 return False
 
@@ -1295,7 +1328,7 @@ class RiskService(BaseService):
                 )
                 return False
 
-            self._logger.debug(
+            self._logger.info(
                 "Signal validated successfully",
                 symbol=signal.symbol,
                 direction=signal.direction.value,
@@ -1309,8 +1342,8 @@ class RiskService(BaseService):
             return False
 
     @with_error_context(component="risk_management", operation="validate_order")
-    @with_circuit_breaker(failure_threshold=5, recovery_timeout=30.0)
-    @with_retry(max_attempts=3, base_delay=1.0)
+    @with_circuit_breaker(failure_threshold=5, recovery_timeout=30)
+    @with_retry(max_attempts=3, base_delay=Decimal("1.0"))
     @time_execution
     @cached(
         ttl=15,
@@ -1330,9 +1363,7 @@ class RiskService(BaseService):
         Returns:
             True if order passes risk validation
         """
-        return await self.execute_with_monitoring(
-            "validate_order", self._validate_order_impl, order
-        )
+        return await self.execute_with_monitoring("validate_order", self._validate_order_impl, order)
 
     async def _validate_order_impl(self, order: OrderRequest) -> bool:
         """Internal implementation of order validation."""
@@ -1346,9 +1377,7 @@ class RiskService(BaseService):
             portfolio_metrics = await self.get_portfolio_metrics()
             max_order_size = portfolio_metrics.total_value * self.risk_config.max_position_size_pct
 
-            order_value = order.quantity * (
-                order.price if hasattr(order, "price") else Decimal("1")
-            )
+            order_value = order.quantity * (order.price if hasattr(order, "price") else Decimal("1"))
 
             if order_value > max_order_size:
                 self._logger.warning(
@@ -1372,7 +1401,7 @@ class RiskService(BaseService):
                 )
                 return False
 
-            self._logger.debug(
+            self._logger.info(
                 "Order validated successfully",
                 symbol=order.symbol,
                 side=order.side.value,
@@ -1425,7 +1454,7 @@ class RiskService(BaseService):
             # Check for emergency stop conditions
             await self._check_emergency_stop_conditions(risk_metrics)
 
-            self._logger.debug(
+            self._logger.info(
                 "Risk check completed",
                 risk_level=risk_metrics.risk_level.value,
                 portfolio_value=format_decimal(risk_metrics.portfolio_value),
@@ -1442,7 +1471,7 @@ class RiskService(BaseService):
         # VaR threshold alerts
         if risk_metrics.var_95 and risk_metrics.portfolio_value > ZERO:
             var_pct = risk_metrics.var_95 / risk_metrics.portfolio_value
-            if var_pct > Decimal("0.05"):  # 5% VaR threshold
+            if var_pct > to_decimal(POSITION_SIZING_LIMITS["var_high_threshold"]):
                 alerts.append(
                     RiskAlert(
                         alert_id=f"var_high_{datetime.now(timezone.utc).isoformat()}",
@@ -1457,30 +1486,31 @@ class RiskService(BaseService):
                 )
 
         # Drawdown alerts
-        if risk_metrics.current_drawdown > Decimal("0.10"):  # 10% drawdown
+        drawdown_threshold = to_decimal(POSITION_SIZING_LIMITS["drawdown_high_threshold"])
+        if risk_metrics.current_drawdown > drawdown_threshold:
             alerts.append(
                 RiskAlert(
                     alert_id=f"drawdown_high_{datetime.now(timezone.utc).isoformat()}",
                     alert_type="HIGH_DRAWDOWN",
                     severity=RiskLevel.HIGH,
                     message=(
-                        f"Current drawdown exceeds 10%: "
-                        f"{format_decimal(risk_metrics.current_drawdown * 100)}%"
+                        f"Current drawdown exceeds 10%: " f"{format_decimal(risk_metrics.current_drawdown * 100)}%"
                     ),
                     details={"current_drawdown": str(risk_metrics.current_drawdown)},
                 )
             )
 
         # Correlation risk alerts
-        if risk_metrics.correlation_risk > Decimal("0.50"):  # 50% correlation risk
+        # 50% correlation risk (keeping as reasonable threshold)
+        correlation_threshold = to_decimal("0.50")
+        if risk_metrics.correlation_risk > correlation_threshold:
             alerts.append(
                 RiskAlert(
                     alert_id=f"correlation_high_{datetime.now(timezone.utc).isoformat()}",
                     alert_type="HIGH_CORRELATION",
                     severity=RiskLevel.MEDIUM,
                     message=(
-                        f"High correlation risk detected: "
-                        f"{format_decimal(risk_metrics.correlation_risk * 100)}%"
+                        f"High correlation risk detected: " f"{format_decimal(risk_metrics.correlation_risk * 100)}%"
                     ),
                     details={"correlation_risk": str(risk_metrics.correlation_risk)},
                 )
@@ -1488,6 +1518,15 @@ class RiskService(BaseService):
 
         # Add alerts to the list
         self._risk_alerts.extend(alerts)
+
+        # Send alerts to analytics service
+        if self.analytics_service and alerts:
+            try:
+                for alert in alerts:
+                    await self.analytics_service.record_risk_alert(alert)
+                self._logger.info(f"Sent {len(alerts)} risk alerts to analytics service")
+            except Exception as e:
+                self._logger.warning(f"Failed to send risk alerts to analytics: {e}")
 
         # Log alerts
         for alert in alerts:
@@ -1499,7 +1538,6 @@ class RiskService(BaseService):
                 message=alert.message,
             )
 
-        # Keep only recent alerts (last 24 hours)
         cutoff_time = datetime.now(timezone.utc) - timedelta(hours=24)
         self._risk_alerts = [alert for alert in self._risk_alerts if alert.timestamp > cutoff_time]
 
@@ -1509,14 +1547,13 @@ class RiskService(BaseService):
 
         # Check extreme drawdown
         if risk_metrics.current_drawdown > self.risk_config.emergency_stop_threshold:
-            emergency_conditions.append(
-                f"Extreme drawdown: {format_decimal(risk_metrics.current_drawdown * 100)}%"
-            )
+            emergency_conditions.append(f"Extreme drawdown: {format_decimal(risk_metrics.current_drawdown * 100)}%")
 
         # Check extreme VaR
         if risk_metrics.var_95 and risk_metrics.portfolio_value > ZERO:
             var_pct = risk_metrics.var_95 / risk_metrics.portfolio_value
-            if var_pct > Decimal("0.15"):  # 15% VaR emergency threshold
+            var_critical_threshold = to_decimal(POSITION_SIZING_LIMITS["var_critical_threshold"]) * to_decimal("1.5")
+            if var_pct > var_critical_threshold:
                 emergency_conditions.append(f"Extreme VaR: {format_decimal(var_pct * 100)}%")
 
         # Trigger emergency stop if conditions are met
@@ -1532,63 +1569,68 @@ class RiskService(BaseService):
         Args:
             reason: Reason for emergency stop
         """
-        async with self._emergency_lock:
-            try:
-                self._logger.critical(
-                    "EMERGENCY STOP TRIGGERED",
-                    reason=reason,
-                    risk_level=self._current_risk_level.value,
-                    portfolio_metrics=(
-                        self._portfolio_metrics.model_dump() if self._portfolio_metrics else None
-                    ),
-                )
+        lock = None
+        try:
+            lock = self._emergency_lock
+            async with lock:
+                try:
+                    self._logger.critical(
+                        "EMERGENCY STOP TRIGGERED",
+                        reason=reason,
+                        risk_level=self._current_risk_level.value,
+                        portfolio_metrics=(self._portfolio_metrics.model_dump() if self._portfolio_metrics else None),
+                    )
 
-                # Set emergency stop flag
-                self._emergency_stop_triggered = True
-                self._current_risk_level = RiskLevel.CRITICAL
+                    # Set emergency stop flag
+                    self._emergency_stop_triggered = True
+                    self._current_risk_level = RiskLevel.CRITICAL
 
-                # Create critical alert
-                emergency_alert = RiskAlert(
-                    alert_id=f"emergency_stop_{datetime.now(timezone.utc).isoformat()}",
-                    alert_type="EMERGENCY_STOP",
-                    severity=RiskLevel.CRITICAL,
-                    message=f"Emergency stop triggered: {reason}",
-                    details={"reason": reason, "timestamp": datetime.now(timezone.utc).isoformat()},
-                )
-                self._risk_alerts.append(emergency_alert)
+                    # Create critical alert
+                    emergency_alert = RiskAlert(
+                        alert_id=f"emergency_stop_{datetime.now(timezone.utc).isoformat()}",
+                        alert_type="EMERGENCY_STOP",
+                        severity=RiskLevel.CRITICAL,
+                        message=f"Emergency stop triggered: {reason}",
+                        details={
+                            "reason": reason,
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                        },
+                    )
+                    self._risk_alerts.append(emergency_alert)
 
-                # Save emergency state
-                await self._save_emergency_state(reason)
+                    # Save emergency state
+                    await self._save_emergency_state(reason)
 
-                # Notify other services via state service
-                await self.state_service.set_state(
-                    state_type=StateType.RISK_STATE,
-                    state_id="emergency_stop",
-                    state_data={
-                        "emergency_stop": True,
-                        "reason": reason,
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
-                        "risk_level": self._current_risk_level.value,
-                    },
-                    source_component="RiskService",
-                    reason=f"Emergency stop triggered: {reason}",
-                )
+                    # Notify other services via state service
+                    await self.state_service.set_state(
+                        state_type=StateType.RISK_STATE,
+                        state_id="emergency_stop",
+                        state_data={
+                            "emergency_stop": True,
+                            "reason": reason,
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                            "risk_level": self._current_risk_level.value,
+                        },
+                        source_component="RiskService",
+                        reason=f"Emergency stop triggered: {reason}",
+                    )
 
-                self._logger.info("Emergency stop completed successfully")
+                    self._logger.info("Emergency stop completed successfully")
 
-            except StateError as e:
-                self._logger.error(f"State service error during emergency stop: {e}")
-                # Still set the flag locally even if state service fails
-                self._emergency_stop_triggered = True
-                raise RiskManagementError(
-                    f"Emergency stop partially failed (state service error): {e}"
-                ) from e
-            except Exception as e:
-                self._logger.error(f"Emergency stop execution failed: {e}")
-                raise RiskManagementError(f"Emergency stop failed: {e}") from e
-            finally:
-                # Ensure emergency lock resources are cleaned up
-                pass
+                except StateError as e:
+                    self._logger.error(f"State service error during emergency stop: {e}")
+                    # Still set the flag locally even if state service fails
+                    self._emergency_stop_triggered = True
+                    raise RiskManagementError(f"Emergency stop partially failed (state service error): {e}") from e
+                except Exception as e:
+                    self._logger.error(f"Emergency stop execution failed: {e}")
+                    raise RiskManagementError(f"Emergency stop failed: {e}") from e
+                finally:
+                    # Ensure internal resources are properly handled
+                    pass
+        finally:
+            # Ensure lock reference is cleared
+            lock = None
 
     async def reset_emergency_stop(self, reason: str) -> None:
         """
@@ -1597,38 +1639,40 @@ class RiskService(BaseService):
         Args:
             reason: Reason for resetting emergency stop
         """
-        async with self._emergency_lock:
-            try:
-                self._logger.warning(
-                    "Emergency stop reset requested",
-                    reason=reason,
-                    current_state=self._emergency_stop_triggered,
-                )
+        lock = None
+        try:
+            lock = self._emergency_lock
+            async with lock:
+                try:
+                    self._logger.warning(
+                        "Emergency stop reset requested",
+                        reason=reason,
+                        current_state=self._emergency_stop_triggered,
+                    )
 
-                # Reset emergency stop flag
-                self._emergency_stop_triggered = False
-                self._current_risk_level = RiskLevel.LOW
+                    # Reset emergency stop flag
+                    self._emergency_stop_triggered = False
+                    self._current_risk_level = RiskLevel.LOW
 
-                # Clear emergency state
-                await self.state_service.delete_state(
-                    state_type=StateType.RISK_STATE, state_id="emergency_stop"
-                )
+                    # Clear emergency state
+                    await self.state_service.delete_state(state_type=StateType.RISK_STATE, state_id="emergency_stop")
 
-                self._logger.info("Emergency stop reset successfully", reason=reason)
+                    self._logger.info("Emergency stop reset successfully", reason=reason)
 
-            except StateError as e:
-                self._logger.error(f"State service error during emergency stop reset: {e}")
-                # Do NOT reset locally if state service fails to ensure consistency
-                # Re-raise to notify caller of failure
-                raise RiskManagementError(
-                    f"Failed to reset emergency stop in state service: {e}"
-                ) from e
-            except Exception as e:
-                self._logger.error(f"Emergency stop reset failed: {e}")
-                raise RiskManagementError(f"Emergency stop reset failed: {e}") from e
-            finally:
-                # Ensure emergency reset lock resources are cleaned up
-                pass
+                except StateError as e:
+                    self._logger.error(f"State service error during emergency stop reset: {e}")
+                    # Do NOT reset locally if state service fails to ensure consistency
+                    # Re-raise to notify caller of failure
+                    raise RiskManagementError(f"Failed to reset emergency stop in state service: {e}") from e
+                except Exception as e:
+                    self._logger.error(f"Emergency stop reset failed: {e}")
+                    raise RiskManagementError(f"Emergency stop reset failed: {e}") from e
+                finally:
+                    # Ensure internal resources are properly handled
+                    pass
+        finally:
+            # Ensure lock reference is cleared
+            lock = None
 
     # Market Data Integration
 
@@ -1641,8 +1685,10 @@ class RiskService(BaseService):
             symbol: Trading symbol
             price: Current price
         """
+        lock = None
         try:
-            async with self._history_lock:
+            lock = self._history_lock
+            async with lock:
                 try:
                     # Update price history
                     self._price_history[symbol].append(price)
@@ -1658,9 +1704,12 @@ class RiskService(BaseService):
                             self._return_history[symbol].append(return_rate)
 
                     # Limit history size for memory management with bounds checking
-                    max_history = max(self.risk_config.volatility_window * 2, 100)
+                    max_history = max(
+                        self.risk_config.volatility_window * 2,
+                        POSITION_SIZING_LIMITS.get("min_price_history", 100),
+                    )
                     # Add absolute maximum to prevent excessive memory usage
-                    max_history = min(max_history, 1000)  # Hard limit of 1000 data points
+                    max_history = min(max_history, POSITION_SIZING_LIMITS.get("max_price_history", 1000))
 
                     if len(self._price_history[symbol]) > max_history:
                         self._price_history[symbol] = self._price_history[symbol][-max_history:]
@@ -1669,10 +1718,10 @@ class RiskService(BaseService):
                         self._return_history[symbol] = self._return_history[symbol][-max_history:]
 
                     # Periodic cleanup of old symbols with no recent data
-                    if len(self._price_history) > 100:  # If we have too many symbols
+                    if len(self._price_history) > POSITION_SIZING_LIMITS.get("max_symbols_tracked", 100):
                         await self._cleanup_stale_symbols()
 
-                    self._logger.debug(
+                    self._logger.info(
                         "Price history updated",
                         symbol=symbol,
                         price=format_decimal(price),
@@ -1685,13 +1734,14 @@ class RiskService(BaseService):
                     self._logger.error(f"Price history update failed for {symbol}: {e}")
                     raise
                 finally:
-                    # Ensure lock resources are cleaned up
+                    # Ensure internal resources are cleaned up
                     pass
         except Exception as e:
             self._logger.error(f"Failed to acquire history lock for {symbol}: {e}")
             # Don't re-raise to prevent blocking other operations
-
-    # Database Integration (via DatabaseService)
+        finally:
+            # Ensure lock reference is cleared
+            lock = None
 
     async def _get_all_positions(self) -> list[Position]:
         """Get all current positions via DatabaseService."""
@@ -1786,7 +1836,7 @@ class RiskService(BaseService):
 
             if risk_config_state:
                 # Apply any configuration overrides
-                self._logger.debug("Loaded risk configuration state")
+                self._logger.info("Loaded risk configuration state")
 
         except StateError as e:
             self._logger.error(f"State service error while loading risk state: {e}")
@@ -1806,9 +1856,7 @@ class RiskService(BaseService):
                     portfolio_metrics_data = self._portfolio_metrics.model_dump(mode="json")
                 else:
                     # Fallback for objects without model_dump
-                    portfolio_metrics_data = self._serialize_with_decimals(
-                        self._portfolio_metrics.__dict__
-                    )
+                    portfolio_metrics_data = self._serialize_with_decimals(self._portfolio_metrics.__dict__)
 
             risk_state = {
                 "current_risk_level": self._current_risk_level.value,
@@ -1830,14 +1878,28 @@ class RiskService(BaseService):
         except StateError as e:
             self._logger.error(f"State service error while saving risk state: {e}")
             # Monitor state persistence failures
-            if self.metrics_collector:
-                self.metrics_collector.record_counter("tbot_risk_state_persistence_failures_total")
+            if self.metrics_service:
+                await self.metrics_service.increment_counter(
+                    "risk.state_persistence_failures_total",
+                    labels={
+                        "component": "RiskService",
+                        "operation": "save_risk_state",
+                        "error_type": "StateError",
+                    },
+                )
             # Re-raise for critical state updates
             raise RiskManagementError(f"Failed to persist risk state: {e}") from e
         except Exception as e:
             self._logger.error(f"Failed to save risk state: {e}")
-            if self.metrics_collector:
-                self.metrics_collector.record_counter("tbot_risk_state_persistence_failures_total")
+            if self.metrics_service:
+                await self.metrics_service.increment_counter(
+                    "risk.state_persistence_failures_total",
+                    labels={
+                        "component": "RiskService",
+                        "operation": "save_risk_state",
+                        "error_type": "GeneralError",
+                    },
+                )
             raise RiskManagementError(f"Failed to save risk state: {e}") from e
 
     async def _save_risk_metrics(self, risk_metrics: RiskMetrics) -> None:
@@ -1861,19 +1923,36 @@ class RiskService(BaseService):
             )
 
             # Track successful saves
-            if self.metrics_collector:
-                self.metrics_collector.record_counter("tbot_risk_metrics_saved_total")
+            if self.metrics_service:
+                await self.metrics_service.increment_counter(
+                    "risk.metrics_saved_total",
+                    labels={"component": "RiskService", "operation": "save_risk_metrics"},
+                )
 
         except StateError as e:
             self._logger.error(f"State service error while saving risk metrics: {e}")
-            if self.metrics_collector:
-                self.metrics_collector.record_counter("tbot_risk_metrics_save_failures_total")
+            if self.metrics_service:
+                await self.metrics_service.increment_counter(
+                    "risk.metrics_save_failures_total",
+                    labels={
+                        "component": "RiskService",
+                        "operation": "save_risk_metrics",
+                        "error_type": "StateError",
+                    },
+                )
             # Re-raise as risk metrics are important for system operation
             raise RiskManagementError(f"Failed to persist risk metrics: {e}") from e
         except Exception as e:
             self._logger.error(f"Failed to save risk metrics: {e}")
-            if self.metrics_collector:
-                self.metrics_collector.record_counter("tbot_risk_metrics_save_failures_total")
+            if self.metrics_service:
+                await self.metrics_service.increment_counter(
+                    "risk.metrics_save_failures_total",
+                    labels={
+                        "component": "RiskService",
+                        "operation": "save_risk_metrics",
+                        "error_type": "GeneralError",
+                    },
+                )
             raise RiskManagementError(f"Failed to save risk metrics: {e}") from e
 
     async def _save_emergency_state(self, reason: str) -> None:
@@ -1884,9 +1963,7 @@ class RiskService(BaseService):
                 "reason": reason,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "risk_level": self._current_risk_level.value,
-                "portfolio_metrics": (
-                    self._portfolio_metrics.model_dump() if self._portfolio_metrics else None
-                ),
+                "portfolio_metrics": (self._portfolio_metrics.model_dump() if self._portfolio_metrics else None),
             }
 
             await self.state_service.set_state(
@@ -1996,9 +2073,6 @@ class RiskService(BaseService):
 
     def is_emergency_stop_active(self) -> bool:
         """Check if emergency stop is currently active."""
-        # Note: This is a simple read operation, and since Python's GIL ensures
-        # atomic reads of boolean values, we don't need a lock here.
-        # Direct access is safe for boolean reads.
         return self._emergency_stop_triggered
 
     async def get_risk_summary(self) -> dict[str, Any]:
@@ -2024,50 +2098,64 @@ class RiskService(BaseService):
 
     async def _cleanup_resources(self) -> None:
         """Clean up all resources used by the risk service."""
+        history_lock = None
+        state_lock = None
         try:
             # Clean up memory structures with size limits
-            max_cleanup_items = 1000
+            max_cleanup_items = POSITION_SIZING_LIMITS.get("max_cleanup_items", 1000)
 
-            async with self._history_lock:
-                # Clear history data with logging for monitoring
-                price_symbols = len(self._price_history)
-                return_symbols = len(self._return_history)
-                portfolio_history_len = len(self._portfolio_value_history)
+            try:
+                history_lock = self._history_lock
+                async with history_lock:
+                    # Clear history data with logging for monitoring
+                    price_symbols = len(self._price_history)
+                    return_symbols = len(self._return_history)
+                    portfolio_history_len = len(self._portfolio_value_history)
 
-                # Clear collections
-                self._price_history.clear()
-                self._return_history.clear()
-                self._portfolio_value_history.clear()
+                    # Clear collections
+                    self._price_history.clear()
+                    self._return_history.clear()
+                    self._portfolio_value_history.clear()
 
-                self._logger.info(
-                    "Memory structures cleaned up",
-                    price_symbols=price_symbols,
-                    return_symbols=return_symbols,
-                    portfolio_history_len=portfolio_history_len,
-                )
+                    self._logger.info(
+                        "Memory structures cleaned up",
+                        price_symbols=price_symbols,
+                        return_symbols=return_symbols,
+                        portfolio_history_len=portfolio_history_len,
+                    )
+            finally:
+                history_lock = None
 
             # Clean up alerts with limit to prevent excessive memory usage
-            async with self._state_lock:
-                alerts_count = len(self._risk_alerts)
-                if alerts_count > max_cleanup_items:
-                    # Keep only the most recent alerts
-                    self._risk_alerts = self._risk_alerts[-100:]
-                    self._logger.info(f"Cleaned up {alerts_count - 100} old alerts")
-                else:
-                    self._risk_alerts.clear()
+            try:
+                state_lock = self._state_lock
+                async with state_lock:
+                    alerts_count = len(self._risk_alerts)
+                    alerts_to_keep = POSITION_SIZING_LIMITS.get("max_alerts_to_keep", 100)
+                    if alerts_count > max_cleanup_items:
+                        # Keep only the most recent alerts
+                        self._risk_alerts = self._risk_alerts[-alerts_to_keep:]
+                        self._logger.info(f"Cleaned up {alerts_count - alerts_to_keep} old alerts")
+                    else:
+                        self._risk_alerts.clear()
+            finally:
+                state_lock = None
 
-            # Cancel any remaining cleanup tasks
+            # Cancel any remaining cleanup tasks with timeout
             cleanup_tasks = list(self._cleanup_tasks)
             if cleanup_tasks:
                 for task in cleanup_tasks:
                     if not task.done():
                         task.cancel()
                         try:
-                            await task
-                        except asyncio.CancelledError:
+                            await asyncio.wait_for(task, timeout=5.0)
+                        except (asyncio.CancelledError, asyncio.TimeoutError):
                             pass
                         except Exception as e:
                             self._logger.warning(f"Error cancelling cleanup task: {e}")
+                        finally:
+                            # Ensure task reference is cleared
+                            task = None
 
                 self._cleanup_tasks.clear()
                 self._logger.info(f"Cancelled {len(cleanup_tasks)} cleanup tasks")
@@ -2085,6 +2173,10 @@ class RiskService(BaseService):
         except Exception as e:
             self._logger.error(f"Error during resource cleanup: {e}")
             # Don't re-raise to prevent shutdown failures
+        finally:
+            # Ensure all lock references are cleared
+            history_lock = None
+            state_lock = None
 
     async def _cleanup_stale_symbols(self) -> None:
         """Clean up symbols with no recent data to prevent memory leaks."""
@@ -2092,7 +2184,8 @@ class RiskService(BaseService):
             stale_symbols = []
             for symbol in list(self._price_history.keys()):
                 # If no data or very little data, consider it stale
-                if len(self._price_history[symbol]) == 0 or len(self._price_history[symbol]) < 10:
+                min_data_threshold = POSITION_SIZING_LIMITS.get("min_data_for_symbol", 10)
+                if len(self._price_history[symbol]) == 0 or len(self._price_history[symbol]) < min_data_threshold:
                     stale_symbols.append(symbol)
 
             # Remove stale symbols
@@ -2122,8 +2215,8 @@ class RiskService(BaseService):
         self._logger.info("Risk service metrics reset")
 
     @with_error_context(component="risk_management", operation="should_exit_position")
-    @with_circuit_breaker(failure_threshold=5, recovery_timeout=30.0)
-    @with_retry(max_attempts=3, base_delay=1.0)
+    @with_circuit_breaker(failure_threshold=5, recovery_timeout=30)
+    @with_retry(max_attempts=3, base_delay=Decimal("1.0"))
     @time_execution
     async def should_exit_position(self, position: Position, market_data: MarketData) -> bool:
         """
@@ -2173,12 +2266,10 @@ class RiskService(BaseService):
 
             # Check if position loss exceeds risk limits
             if position.unrealized_pnl:
-                position_loss_pct = safe_divide(
-                    abs(position.unrealized_pnl), position.quantity * position.entry_price
-                )
+                position_loss_pct = safe_divide(abs(position.unrealized_pnl), position.quantity * position.entry_price)
 
                 # Use configured max position loss or default to 10%
-                max_position_loss = to_decimal("0.10")  # Default 10%
+                max_position_loss = to_decimal(POSITION_SIZING_LIMITS["drawdown_high_threshold"])
                 if (
                     self.app_config
                     and hasattr(self.app_config, "risk")
@@ -2196,9 +2287,9 @@ class RiskService(BaseService):
                     return True
 
             # Check trailing stop conditions
-            trailing_stop_price = getattr(
-                position, "trailing_stop_price", None
-            ) or position.metadata.get("trailing_stop_price")
+            trailing_stop_price = getattr(position, "trailing_stop_price", None) or position.metadata.get(
+                "trailing_stop_price"
+            )
             if self.risk_config.trailing_stop_enabled and trailing_stop_price is not None:
                 trailing_stop_decimal = to_decimal(trailing_stop_price)
                 if position.side.value == "BUY" and market_data.close <= trailing_stop_decimal:
@@ -2229,9 +2320,7 @@ class RiskService(BaseService):
 
             # Check if drawdown exceeds emergency threshold
             if self._portfolio_metrics and self._portfolio_metrics.total_value > ZERO:
-                current_drawdown = await self._calculate_current_drawdown(
-                    self._portfolio_metrics.total_value
-                )
+                current_drawdown = await self._calculate_current_drawdown(self._portfolio_metrics.total_value)
                 if current_drawdown > self.risk_config.emergency_stop_threshold:
                     self._logger.warning(
                         "Emergency drawdown threshold exceeded - position should be closed",
@@ -2253,7 +2342,7 @@ class RiskService(BaseService):
             return False
 
     @asynccontextmanager
-    async def risk_monitoring_context(self, operation: str):
+    async def risk_monitoring_context(self, operation: str) -> Any:
         """
         Async context manager for risk monitoring operations.
 
@@ -2269,9 +2358,7 @@ class RiskService(BaseService):
         operation_id = f"{operation}_{id(self)}_{start_time.timestamp()}"
 
         try:
-            self._logger.info(
-                "Starting risk operation", operation=operation, operation_id=operation_id
-            )
+            self._logger.info("Starting risk operation", operation=operation, operation_id=operation_id)
 
             # Initialize monitoring context
             if self._metrics_collector and hasattr(self._metrics_collector, "start_operation"):
@@ -2307,9 +2394,7 @@ class RiskService(BaseService):
 
             if self._metrics_collector:
                 if hasattr(self._metrics_collector, "record_operation_error"):
-                    await self._metrics_collector.record_operation_error(
-                        operation, str(e), error_type=type(e).__name__
-                    )
+                    await self._metrics_collector.record_operation_error(operation, str(e), error_type=type(e).__name__)
                 else:
                     # Use standard metrics if operation-specific methods not available
                     self._metrics_collector.increment_counter(

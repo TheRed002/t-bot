@@ -54,7 +54,7 @@ class TestKellyCriterionPrecision:
     def sample_signal(self):
         """Create a sample trading signal."""
         return Signal(
-            symbol="BTCUSDT",
+            symbol="BTC/USDT",
             direction=SignalDirection.BUY,
             strength=0.8,
             timestamp=datetime.now(timezone.utc),
@@ -86,7 +86,7 @@ class TestKellyCriterionPrecision:
             -0.01,
             0.015,
         ] * 3  # 30 returns
-        position_sizer.return_history["BTCUSDT"] = returns
+        position_sizer.return_history["BTC/USDT"] = returns
 
         # Calculate expected Kelly fraction using the actual formula: f = (p*b - q) / b
         returns_array = np.array(returns)
@@ -110,9 +110,9 @@ class TestKellyCriterionPrecision:
 
         # Should be capped at max_kelly_fraction (0.25)
         expected_kelly_capped = min(kelly_fraction, 0.25)
-        # Apply confidence
-        expected_kelly_final = expected_kelly_capped * sample_signal.strength
-        expected_position_size = portfolio_value * Decimal(str(expected_kelly_final))
+        # Apply confidence (convert both to Decimal)
+        expected_kelly_final = Decimal(str(expected_kelly_capped)) * Decimal(str(sample_signal.strength))
+        expected_position_size = portfolio_value * expected_kelly_final
 
         # Calculate actual Kelly
         actual_size = await position_sizer._kelly_criterion_sizing(sample_signal, portfolio_value)
@@ -128,7 +128,7 @@ class TestKellyCriterionPrecision:
 
         # All positive returns
         returns = [0.01, 0.02, 0.015, 0.025, 0.01] * 6  # 30 positive returns
-        position_sizer.return_history["BTCUSDT"] = returns
+        position_sizer.return_history["BTC/USDT"] = returns
 
         position_size = await position_sizer._kelly_criterion_sizing(sample_signal, portfolio_value)
 
@@ -146,7 +146,7 @@ class TestKellyCriterionPrecision:
 
         # All negative returns
         returns = [-0.01, -0.02, -0.015, -0.005, -0.01] * 6  # 30 negative returns
-        position_sizer.return_history["BTCUSDT"] = returns
+        position_sizer.return_history["BTC/USDT"] = returns
 
         # Kelly with all negative returns should fallback to fixed percentage
         position_size = await position_sizer._kelly_criterion_sizing(sample_signal, portfolio_value)
@@ -162,7 +162,7 @@ class TestKellyCriterionPrecision:
 
         # All identical returns (zero variance)
         returns = [0.01] * 30
-        position_sizer.return_history["BTCUSDT"] = returns
+        position_sizer.return_history["BTC/USDT"] = returns
 
         position_size = await position_sizer._kelly_criterion_sizing(sample_signal, portfolio_value)
 
@@ -185,7 +185,7 @@ class TestKellyCriterionPrecision:
         ]
 
         for returns, scenario_name in test_scenarios:
-            position_sizer.return_history["BTCUSDT"] = returns
+            position_sizer.return_history["BTC/USDT"] = returns
 
             position_size = await position_sizer._kelly_criterion_sizing(
                 sample_signal, portfolio_value
@@ -203,7 +203,7 @@ class TestKellyCriterionPrecision:
 
         # Fixed returns for consistent Kelly calculation
         returns = [0.02, 0.01, 0.03, -0.01, 0.02] * 6
-        position_sizer.return_history["BTCUSDT"] = returns
+        position_sizer.return_history["BTC/USDT"] = returns
 
         # Test different confidence levels
         confidence_levels = [0.1, 0.3, 0.5, 0.7, 0.9, 1.0]
@@ -211,7 +211,7 @@ class TestKellyCriterionPrecision:
 
         for confidence in confidence_levels:
             signal = Signal(
-                symbol="BTCUSDT",
+                symbol="BTC/USDT",
                 direction=SignalDirection.BUY,
                 strength=confidence,
                 timestamp=datetime.now(timezone.utc),
@@ -250,7 +250,7 @@ class TestKellyCriterionPrecision:
             position_sizer.risk_config.kelly_lookback_days = window_size
 
             # Use appropriate data window
-            position_sizer.return_history["BTCUSDT"] = full_returns[-window_size:]
+            position_sizer.return_history["BTC/USDT"] = full_returns[-window_size:]
 
             size = await position_sizer._kelly_criterion_sizing(sample_signal, portfolio_value)
             results.append((window_size, size, window_name))
@@ -277,7 +277,7 @@ class TestKellyCriterionPrecision:
         }
 
         for scenario_name, returns in market_scenarios.items():
-            position_sizer.return_history["BTCUSDT"] = returns
+            position_sizer.return_history["BTC/USDT"] = returns
 
             size = await position_sizer._kelly_criterion_sizing(sample_signal, portfolio_value)
 
@@ -304,7 +304,7 @@ class TestKellyCriterionPrecision:
 
         # Fixed return series
         returns = [0.02, 0.01, 0.03, -0.01, 0.015, 0.025, -0.005, 0.02] * 4
-        position_sizer.return_history["BTCUSDT"] = returns
+        position_sizer.return_history["BTC/USDT"] = returns
 
         # Calculate Kelly multiple times
         sizes = []
@@ -332,7 +332,7 @@ class TestKellyCriterionPrecision:
         ]
 
         for returns, scenario in extreme_scenarios:
-            position_sizer.return_history["BTCUSDT"] = returns
+            position_sizer.return_history["BTC/USDT"] = returns
 
             # Should not crash or produce invalid results
             try:
@@ -352,7 +352,7 @@ class TestKellyCriterionPrecision:
 
         # Add sufficient return history
         returns = [0.02, 0.01, 0.03, -0.01, 0.015] * 6  # 30 returns
-        position_sizer.return_history["BTCUSDT"] = returns
+        position_sizer.return_history["BTC/USDT"] = returns
 
         # Calculate using main method (fix enum value)
         size = await position_sizer.calculate_position_size(
@@ -385,7 +385,7 @@ class TestKellyCriterionPrecision:
 
         # Normal distribution with positive mean
         returns = np.random.normal(0.01, 0.02, 30).tolist()  # Mean=1%, Std=2%
-        position_sizer.return_history["BTCUSDT"] = returns
+        position_sizer.return_history["BTC/USDT"] = returns
 
         size = await position_sizer._kelly_criterion_sizing(sample_signal, portfolio_value)
 
@@ -394,9 +394,9 @@ class TestKellyCriterionPrecision:
         variance = np.var(returns)
         theoretical_kelly = mean_return / variance if variance > 0 else 0
 
-        # Apply caps and confidence
-        capped_kelly = min(theoretical_kelly, 0.25) * sample_signal.strength
-        expected_size = portfolio_value * Decimal(str(capped_kelly))
+        # Apply caps and confidence (convert to Decimal)
+        capped_kelly = Decimal(str(min(theoretical_kelly, 0.25))) * Decimal(str(sample_signal.strength))
+        expected_size = portfolio_value * capped_kelly
 
         # Should be reasonably close to theoretical value
         if variance > 0 and mean_return > 0:
@@ -419,10 +419,10 @@ class TestKellyCriterionPrecision:
 
         for returns, scenario in fallback_scenarios:
             if scenario != "nan_data":
-                position_sizer.return_history["BTCUSDT"] = returns
+                position_sizer.return_history["BTC/USDT"] = returns
             else:
                 # Handle NaN scenario carefully
-                position_sizer.return_history["BTCUSDT"] = [0.01] * 30
+                position_sizer.return_history["BTC/USDT"] = [0.01] * 30
                 with patch("numpy.var", return_value=float("nan")):
                     pass  # Will test in the calculation
 
@@ -441,7 +441,7 @@ class TestKellyCriterionPrecision:
 
         portfolio_value = Decimal("10000")
         returns = [0.02, 0.01, 0.03, -0.01, 0.015] * 6
-        position_sizer.return_history["BTCUSDT"] = returns
+        position_sizer.return_history["BTC/USDT"] = returns
 
         # Benchmark multiple calculations
         num_calculations = 1000
@@ -487,7 +487,7 @@ class TestKellyCriterionPrecision:
         for returns, dist_name in distribution_tests:
             # Scale returns to reasonable range
             returns = [r * 0.01 for r in returns]  # Scale to 1% magnitude
-            position_sizer.return_history["BTCUSDT"] = returns
+            position_sizer.return_history["BTC/USDT"] = returns
 
             size = await position_sizer._kelly_criterion_sizing(sample_signal, portfolio_value)
 

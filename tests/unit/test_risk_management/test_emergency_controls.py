@@ -27,6 +27,8 @@ from src.core.types.trading import (
     OrderRequest,
     OrderSide,
     OrderType,
+    PositionSide,
+    PositionStatus,
 )
 
 # Import from P-003+
@@ -141,7 +143,7 @@ class TestEmergencyControls:
         emergency_controls.register_exchange("binance", mock_exchange)
 
         # Mock pending orders
-        mock_orders = [Mock(id="order1", symbol="BTCUSDT"), Mock(id="order2", symbol="ETHUSDT")]
+        mock_orders = [Mock(id="order1", symbol="BTC/USDT"), Mock(id="order2", symbol="ETH/USDT")]
         mock_exchange.get_pending_orders.return_value = mock_orders
 
         await emergency_controls._cancel_all_pending_orders()
@@ -163,8 +165,8 @@ class TestEmergencyControls:
 
         # Mock positions
         mock_positions = [
-            Mock(symbol="BTCUSDT", quantity=Decimal("1.0"), side=OrderSide.BUY),
-            Mock(symbol="ETHUSDT", quantity=Decimal("10.0"), side=OrderSide.SELL),
+            Mock(symbol="BTC/USDT", quantity=Decimal("1.0"), side=OrderSide.BUY),
+            Mock(symbol="ETH/USDT", quantity=Decimal("10.0"), side=OrderSide.SELL),
         ]
         mock_exchange.get_positions.return_value = mock_positions
 
@@ -192,7 +194,7 @@ class TestEmergencyControls:
     async def test_validate_order_during_emergency_normal_state(self, emergency_controls):
         """Test order validation during normal state."""
         order = OrderRequest(
-            symbol="BTCUSDT",
+            symbol="BTC/USDT",
             side=OrderSide.BUY,
             order_type=OrderType.MARKET,
             quantity=Decimal("1.0"),
@@ -207,7 +209,7 @@ class TestEmergencyControls:
         emergency_controls.state = EmergencyState.EMERGENCY
 
         order = OrderRequest(
-            symbol="BTCUSDT",
+            symbol="BTC/USDT",
             side=OrderSide.BUY,
             order_type=OrderType.MARKET,
             quantity=Decimal("1.0"),
@@ -222,7 +224,7 @@ class TestEmergencyControls:
         emergency_controls.state = EmergencyState.MANUAL_OVERRIDE
 
         order = OrderRequest(
-            symbol="BTCUSDT",
+            symbol="BTC/USDT",
             side=OrderSide.BUY,
             order_type=OrderType.MARKET,
             quantity=Decimal("1.0"),
@@ -241,7 +243,7 @@ class TestEmergencyControls:
 
         # Test order within recovery limits
         order = OrderRequest(
-            symbol="BTCUSDT",
+            symbol="BTC/USDT",
             side=OrderSide.BUY,
             order_type=OrderType.MARKET,
             quantity=Decimal("0.01"),
@@ -254,7 +256,7 @@ class TestEmergencyControls:
 
         # Test order exceeding recovery limits
         order = OrderRequest(
-            symbol="BTCUSDT",
+            symbol="BTC/USDT",
             side=OrderSide.BUY,
             order_type=OrderType.MARKET,
             quantity=Decimal("10.0"),  # Large order
@@ -266,7 +268,7 @@ class TestEmergencyControls:
 
         # Test non-allowed order type
         order = OrderRequest(
-            symbol="BTCUSDT",
+            symbol="BTC/USDT",
             side=OrderSide.BUY,
             order_type=OrderType.STOP_LOSS,  # Not allowed during recovery
             quantity=Decimal("0.1"),
@@ -496,7 +498,7 @@ class TestEmergencyControlsIntegration:
             exchange1 = Mock(spec=BaseExchange)
             exchange1.get_pending_orders = AsyncMock(return_value=[Mock(id="order1")])
             exchange1.get_positions = AsyncMock(
-                return_value=[Mock(symbol="BTCUSDT", quantity=Decimal("1.0"), side=OrderSide.BUY)]
+                return_value=[Mock(symbol="BTC/USDT", quantity=Decimal("1.0"), side=OrderSide.BUY)]
             )
             exchange1.cancel_order = AsyncMock(return_value=True)
             exchange1.place_order = AsyncMock(return_value=Mock(status="filled"))

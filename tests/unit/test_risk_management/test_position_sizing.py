@@ -38,7 +38,7 @@ class TestPositionSizer:
 
         # Create a mock signal with both strength and confidence for compatibility
         signal = Mock()
-        signal.symbol = "BTCUSDT"
+        signal.symbol = "BTC/USDT"
         signal.direction = SignalDirection.BUY
         signal.strength = 0.8
         signal.confidence = 0.8  # For position sizer compatibility
@@ -74,7 +74,7 @@ class TestPositionSizer:
         portfolio_value = Decimal("10000")
 
         # Add some return history for Kelly calculation
-        position_sizer.return_history["BTCUSDT"] = [0.01, -0.005, 0.02, -0.01, 0.015] * 6  # 30 days
+        position_sizer.return_history["BTC/USDT"] = [0.01, -0.005, 0.02, -0.01, 0.015] * 6  # 30 days
 
         position_size = await position_sizer.calculate_position_size(
             sample_signal, portfolio_value, PositionSizeMethod.KELLY_CRITERION
@@ -105,7 +105,7 @@ class TestPositionSizer:
         portfolio_value = Decimal("10000")
 
         # Add price history for volatility calculation
-        position_sizer.price_history["BTCUSDT"] = [50000 + i * 100 for i in range(20)]
+        position_sizer.price_history["BTC/USDT"] = [50000 + i * 100 for i in range(20)]
 
         position_size = await position_sizer.calculate_position_size(
             sample_signal, portfolio_value, PositionSizeMethod.VOLATILITY_ADJUSTED
@@ -229,7 +229,7 @@ class TestPositionSizer:
 
         # Add return history
         returns = [0.01, -0.005, 0.02, -0.01, 0.015] * 6
-        position_sizer.return_history["BTCUSDT"] = returns
+        position_sizer.return_history["BTC/USDT"] = returns
 
         position_size = await position_sizer._kelly_criterion_sizing(sample_signal, portfolio_value)
 
@@ -242,7 +242,7 @@ class TestPositionSizer:
         portfolio_value = Decimal("10000")
 
         # Add return history with zero variance
-        position_sizer.return_history["BTCUSDT"] = [0.01] * 30
+        position_sizer.return_history["BTC/USDT"] = [0.01] * 30
 
         position_size = await position_sizer.calculate_position_size(
             sample_signal, portfolio_value, PositionSizeMethod.KELLY_CRITERION
@@ -261,7 +261,7 @@ class TestPositionSizer:
 
         # Add price history
         prices = [50000 + i * 100 for i in range(20)]
-        position_sizer.price_history["BTCUSDT"] = prices
+        position_sizer.price_history["BTC/USDT"] = prices
 
         position_size = await position_sizer._volatility_adjusted_sizing(
             sample_signal, portfolio_value
@@ -285,7 +285,7 @@ class TestPositionSizer:
     @pytest.mark.asyncio
     async def test_update_price_history(self, position_sizer):
         """Test price history update."""
-        symbol = "BTCUSDT"
+        symbol = "BTC/USDT"
         price = 50000.0
 
         await position_sizer.update_price_history(symbol, price)
@@ -296,7 +296,7 @@ class TestPositionSizer:
     @pytest.mark.asyncio
     async def test_update_price_history_return_calculation(self, position_sizer):
         """Test return calculation in price history update."""
-        symbol = "BTCUSDT"
+        symbol = "BTC/USDT"
 
         # Add first price
         await position_sizer.update_price_history(symbol, 50000.0)
@@ -312,7 +312,7 @@ class TestPositionSizer:
     @pytest.mark.asyncio
     async def test_update_price_history_max_history(self, position_sizer):
         """Test price history maximum size limit."""
-        symbol = "BTCUSDT"
+        symbol = "BTC/USDT"
 
         # Add more prices than max history
         for i in range(300):  # More than max_history
@@ -386,7 +386,7 @@ class TestPositionSizer:
 
         # Create returns with known mean and variance
         returns = [0.02, -0.01, 0.03, -0.005, 0.015] * 6  # 30 returns
-        position_sizer.return_history["BTCUSDT"] = returns
+        position_sizer.return_history["BTC/USDT"] = returns
 
         # Calculate expected Kelly fraction
         returns_array = np.array(returns)
@@ -412,7 +412,7 @@ class TestPositionSizer:
         # Create price history with known volatility
         base_price = 50000
         prices = [base_price + i * 100 + np.random.normal(0, 50) for i in range(20)]
-        position_sizer.price_history["BTCUSDT"] = prices
+        position_sizer.price_history["BTC/USDT"] = prices
 
         # Calculate expected volatility
         prices_array = np.array(prices)

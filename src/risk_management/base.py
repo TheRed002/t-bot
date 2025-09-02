@@ -36,7 +36,7 @@ from src.error_handling import ErrorHandler
 
 # Monitoring integration
 from src.monitoring.metrics import MetricsCollector
-from src.utils.decimal_utils import ZERO
+from src.utils.decimal_utils import ZERO, format_decimal
 
 # MANDATORY: Import from P-003+
 # MANDATORY: Import from P-007A
@@ -148,9 +148,7 @@ class BaseRiskManager(BaseComponent, ABC):
 
     @abstractmethod
     @time_execution
-    async def calculate_risk_metrics(
-        self, positions: list[Position], market_data: list[MarketData]
-    ) -> RiskMetrics:
+    async def calculate_risk_metrics(self, positions: list[Position], market_data: list[MarketData]) -> RiskMetrics:
         """
         Calculate comprehensive risk metrics for the portfolio.
 
@@ -200,9 +198,7 @@ class BaseRiskManager(BaseComponent, ABC):
 
     # Standard methods that can be overridden
     @time_execution
-    async def update_portfolio_state(
-        self, positions: list[Position], portfolio_value: Decimal
-    ) -> None:
+    async def update_portfolio_state(self, positions: list[Position], portfolio_value: Decimal) -> None:
         """
         Update internal portfolio state for risk calculations.
 
@@ -219,10 +215,10 @@ class BaseRiskManager(BaseComponent, ABC):
             if self.current_drawdown > self.max_drawdown:
                 self.max_drawdown = self.current_drawdown
 
-        self.logger.debug(
+        self.logger.info(
             "Portfolio state updated",
             position_count=len(positions),
-            portfolio_value=float(portfolio_value),
+            portfolio_value=format_decimal(portfolio_value),
         )
 
     @time_execution
@@ -236,9 +232,9 @@ class BaseRiskManager(BaseComponent, ABC):
         summary = {
             "risk_level": self.current_risk_level.value,
             "total_positions": len(self.positions),
-            "portfolio_value": float(self.total_portfolio_value),
-            "current_drawdown": float(self.current_drawdown),
-            "max_drawdown": float(self.max_drawdown),
+            "portfolio_value": format_decimal(self.total_portfolio_value),
+            "current_drawdown": format_decimal(self.current_drawdown),
+            "max_drawdown": format_decimal(self.max_drawdown),
             "last_calculation": self.last_risk_calculation.isoformat(),
             "position_limits": self.position_limits.model_dump() if self.position_limits else None,
             "risk_metrics": self.risk_metrics.model_dump() if self.risk_metrics else None,
@@ -317,16 +313,14 @@ class BaseRiskManager(BaseComponent, ABC):
                 return Decimal("0")
 
             total_exposure = sum(
-                abs(pos.quantity * pos.current_price)
-                if pos.quantity and pos.current_price
-                else ZERO
+                abs(pos.quantity * pos.current_price) if pos.quantity and pos.current_price else ZERO
                 for pos in positions
             )
 
             return total_exposure / self.total_portfolio_value
         except Exception as e:
             self.logger.error(f"Portfolio exposure calculation failed: {e}")
-            return Decimal("0")
+            raise
 
     def _check_drawdown_limit(self, current_drawdown: Decimal) -> bool:
         """
@@ -384,8 +378,7 @@ class BaseRiskManager(BaseComponent, ABC):
             except Exception as e:
                 self.logger.warning(f"Failed to update violation metric: {e}")
 
-        # TODO: Remove in production - Debug logging
-        self.logger.debug("Risk violation details", violation_type=violation_type, details=details)
+        self.logger.info("Risk violation details", violation_type=violation_type, details=details)
 
     def _determine_violation_severity(self, violation_type: str, details: dict[str, Any]) -> str:
         """
@@ -411,13 +404,28 @@ class BaseRiskManager(BaseComponent, ABC):
         else:
             return "low"
 
-    def cleanup(self) -> None:
+    async def cleanup(self) -> None:
         """Cleanup risk manager resources."""
         try:
-            # Clear portfolio state
-            self.positions.clear()
+            # Clear portfolio state with proper resource management
+            if hasattr(self, "positions") and self.positions:
+                self.positions.clear()
+
+            # Clear metrics and limits references
             self.risk_metrics = None
             self.position_limits = None
+
+            # Clear metrics collector reference to prevent memory leaks
+            if hasattr(self, "metrics_collector") and self.metrics_collector:
+                try:
+                    if hasattr(self.metrics_collector, "close"):
+                        await self.metrics_collector.close()
+                    elif hasattr(self.metrics_collector, "cleanup"):
+                        await self.metrics_collector.cleanup()
+                except Exception as e:
+                    self.logger.warning(f"Error cleaning up metrics collector: {e}")
+                finally:
+                    self.metrics_collector = None
 
             self.logger.info("Risk manager cleanup completed")
         except Exception as e:
@@ -425,4 +433,7 @@ class BaseRiskManager(BaseComponent, ABC):
         finally:
             # Call parent cleanup if it exists
             if hasattr(super(), "cleanup"):
-                super().cleanup()
+                try:
+                    await super().cleanup()
+                except Exception as e:
+                    self.logger.warning(f"Error in parent cleanup: {e}")

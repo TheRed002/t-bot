@@ -6,7 +6,7 @@ This module tests the abstract base class for risk management implementations.
 
 from datetime import datetime, timezone
 from decimal import Decimal
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -19,6 +19,8 @@ from src.core.types.trading import (
     OrderSide,
     OrderType,
     Position,
+    PositionSide,
+    PositionStatus,
     Signal,
     SignalDirection,
 )
@@ -75,7 +77,7 @@ class TestBaseRiskManager:
     def sample_signal(self):
         """Create a sample trading signal."""
         return Signal(
-            symbol="BTCUSDT",
+            symbol="BTC/USDT",
             direction=SignalDirection.BUY,
             strength=0.8,
             timestamp=datetime.now(timezone.utc),
@@ -87,12 +89,13 @@ class TestBaseRiskManager:
     def sample_position(self):
         """Create a sample position."""
         return Position(
-            symbol="BTCUSDT",
+            symbol="BTC/USDT",
             quantity=Decimal("0.1"),
             entry_price=Decimal("50000"),
             current_price=Decimal("51000"),
             unrealized_pnl=Decimal("100"),
-            side=OrderSide.BUY,
+            side=PositionSide.LONG,
+            status=PositionStatus.OPEN,
             opened_at=datetime.now(timezone.utc),
             exchange="binance",
             metadata={},
@@ -102,7 +105,7 @@ class TestBaseRiskManager:
     def sample_market_data(self):
         """Create sample market data."""
         return MarketData(
-            symbol="BTCUSDT",
+            symbol="BTC/USDT",
             timestamp=datetime.now(timezone.utc),
             open=Decimal("50000"),
             high=Decimal("52000"),
@@ -116,7 +119,7 @@ class TestBaseRiskManager:
     def sample_order(self):
         """Create a sample order request."""
         return OrderRequest(
-            symbol="BTCUSDT",
+            symbol="BTC/USDT",
             side=OrderSide.BUY,
             order_type=OrderType.MARKET,
             quantity=Decimal("0.1"),
@@ -215,11 +218,15 @@ class TestBaseRiskManager:
     @pytest.mark.asyncio
     async def test_emergency_stop(self, risk_manager):
         """Test emergency stop functionality."""
-        reason = "Test emergency stop"
+        # Mock the error handler to avoid SecurityRateLimiter dependency
+        with patch.object(risk_manager, 'error_handler') as mock_error_handler:
+            mock_error_handler.handle_error = AsyncMock()
+            
+            reason = "Test emergency stop"
 
-        await risk_manager.emergency_stop(reason)
+            await risk_manager.emergency_stop(reason)
 
-        assert risk_manager.current_risk_level == RiskLevel.CRITICAL
+            assert risk_manager.current_risk_level == RiskLevel.CRITICAL
 
     @pytest.mark.asyncio
     async def test_validate_risk_parameters(self, risk_manager):

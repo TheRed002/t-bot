@@ -18,7 +18,7 @@ from src.core.config import Config
 from src.core.exceptions import CircuitBreakerTriggeredError
 from src.core.types.market import MarketData
 from src.core.types.risk import CircuitBreakerStatus, CircuitBreakerType
-from src.core.types.trading import OrderSide, Position
+from src.core.types.trading import OrderSide, Position, PositionSide, PositionStatus
 from src.risk_management.base import BaseRiskManager
 from src.risk_management.circuit_breakers import CircuitBreakerManager, CorrelationSpikeBreaker
 
@@ -60,7 +60,8 @@ def sample_positions():
             entry_price=Decimal("50000.00"),
             current_price=Decimal("50100.00"),
             unrealized_pnl=Decimal("100.00"),
-            side=OrderSide.BUY,
+            side=PositionSide.LONG,
+            status=PositionStatus.OPEN,
             opened_at=timestamp,
             exchange="binance",
             metadata={},
@@ -71,7 +72,8 @@ def sample_positions():
             entry_price=Decimal("3000.00"),
             current_price=Decimal("3030.00"),
             unrealized_pnl=Decimal("300.00"),
-            side=OrderSide.BUY,
+            side=PositionSide.LONG,
+            status=PositionStatus.OPEN,
             opened_at=timestamp,
             exchange="binance",
             metadata={},
@@ -82,7 +84,8 @@ def sample_positions():
             entry_price=Decimal("1.00"),
             current_price=Decimal("1.05"),
             unrealized_pnl=Decimal("50.00"),
-            side=OrderSide.BUY,
+            side=PositionSide.LONG,
+            status=PositionStatus.OPEN,
             opened_at=timestamp,
             exchange="binance",
             metadata={},

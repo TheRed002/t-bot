@@ -15,6 +15,7 @@ Circuit Breaker Types:
 - System error rate monitoring
 """
 
+import asyncio
 from abc import ABC, abstractmethod
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -156,10 +157,7 @@ class BaseCircuitBreaker(ABC):
         try:
             if self.state == CircuitBreakerStatus.TRIGGERED:
                 # Check if recovery timeout has passed
-                if (
-                    self.trigger_time
-                    and datetime.now(timezone.utc) - self.trigger_time > self.recovery_timeout
-                ):
+                if self.trigger_time and datetime.now(timezone.utc) - self.trigger_time > self.recovery_timeout:
                     self.state = CircuitBreakerStatus.COOLDOWN
                     self.logger.info(
                         "Circuit breaker transitioning to cooldown state",
@@ -222,8 +220,8 @@ class BaseCircuitBreaker(ABC):
                 breaker_type=breaker_type,
                 status=CircuitBreakerStatus.TRIGGERED,
                 triggered_at=datetime.now(timezone.utc),
-                trigger_value=float(current_value),
-                threshold_value=float(threshold_value),
+                trigger_value=current_value,
+                threshold_value=threshold_value,
                 cooldown_period=int(self.recovery_timeout.total_seconds()),
                 reason=f"Circuit breaker triggered: {current_value} > {threshold_value}",
                 metadata={"trigger_count": self.trigger_count},
@@ -297,8 +295,15 @@ class DailyLossLimitBreaker(BaseCircuitBreaker):
 
     def __init__(self, config: Config, risk_manager: BaseRiskManager):
         super().__init__(config, risk_manager)
-        # Use percentage of capital as threshold (default to 5%)
-        self.threshold_pct = Decimal("0.05")  # Default 5% daily loss limit
+        threshold_value = getattr(config.risk, 'daily_loss_limit_pct', 0.05) or 0.05
+        # Handle both real values and mock values safely
+        try:
+            if isinstance(threshold_value, Decimal):
+                self.threshold_pct = threshold_value  # Daily loss limit
+            else:
+                self.threshold_pct = Decimal(str(threshold_value))  # Daily loss limit
+        except (TypeError, ValueError):
+            self.threshold_pct = Decimal("0.05")  # Default fallback
         self.logger = logger.bind(breaker_type="daily_loss_limit")
 
     async def get_threshold_value(self) -> Decimal:
@@ -352,8 +357,6 @@ class DrawdownLimitBreaker(BaseCircuitBreaker):
         if peak_value <= 0:
             return Decimal("0")
 
-        # Calculate drawdown: (peak - current) / peak
-        # If current > peak, drawdown should be 0 (no drawdown)
         if current_value >= peak_value:
             return Decimal("0")
 
@@ -381,8 +384,16 @@ class VolatilitySpikeBreaker(BaseCircuitBreaker):
 
     def __init__(self, config: Config, risk_manager: BaseRiskManager):
         super().__init__(config, risk_manager)
-        self.volatility_threshold = Decimal("0.05")  # 5% daily volatility
-        self.lookback_period = 20  # 20 days for volatility calculation
+        volatility_value = getattr(config.risk, 'volatility_spike_threshold', 0.05) or 0.05
+        # Handle both real values and mock values safely
+        try:
+            if isinstance(volatility_value, Decimal):
+                self.volatility_threshold = volatility_value  # Daily volatility threshold
+            else:
+                self.volatility_threshold = Decimal(str(volatility_value))  # Daily volatility threshold
+        except (TypeError, ValueError):
+            self.volatility_threshold = Decimal("0.05")  # Default fallback
+        self.lookback_period = config.risk.volatility_lookback_period or 20  # Days for volatility calculation
         self.logger = logger.bind(breaker_type="volatility_spike")
 
     async def get_threshold_value(self) -> Decimal:
@@ -409,36 +420,22 @@ class VolatilitySpikeBreaker(BaseCircuitBreaker):
         if not returns:
             return Decimal("0")
 
-        # Calculate volatility (standard deviation of returns)
         try:
-            # Convert returns to float list with error handling
-            float_returns = []
-            for r in returns:
-                try:
-                    float_returns.append(float(r))
-                except (TypeError, ValueError) as e:
-                    self.logger.warning(
-                        "Invalid return value in volatility calculation",
-                        return_value=r,
-                        error=str(e),
-                    )
-                    continue
-
-            if not float_returns:
+            # Keep returns as Decimals for the math_utils calculate_volatility function
+            if not returns:
                 self.logger.warning("No valid returns for volatility calculation")
                 return Decimal("0")
 
-            vol_float = calculate_volatility(float_returns)
+            vol_decimal = calculate_volatility(returns)
 
             # Validate the calculated volatility
-            if vol_float is None or vol_float < 0 or not isinstance(vol_float, int | float):
-                self.logger.warning("Invalid volatility calculated", volatility=vol_float)
+            if vol_decimal is None or vol_decimal < 0:
+                self.logger.warning("Invalid volatility calculated", volatility=vol_decimal)
                 return Decimal("0")
 
-            # Apply reasonable bounds (max 100% daily volatility)
-            vol_float = min(vol_float, 1.0)
+            vol_bounded = min(vol_decimal, Decimal("1.0"))
 
-            return Decimal(str(vol_float))
+            return vol_bounded
         except ImportError as e:
             self.logger.error("Missing dependency for volatility calculation", error=str(e))
             return Decimal("0")
@@ -576,9 +573,7 @@ class SystemErrorRateBreaker(BaseCircuitBreaker):
             )
             return Decimal("0")
         except Exception as e:
-            self.logger.error(
-                "Unexpected error calculating error rate", error=str(e), error_type=type(e).__name__
-            )
+            self.logger.error("Unexpected error calculating error rate", error=str(e), error_type=type(e).__name__)
             return Decimal("0")
 
     @time_execution
@@ -641,9 +636,7 @@ class CorrelationSpikeBreaker(BaseCircuitBreaker):
         # Calculate current correlation metrics
         if positions:
             try:
-                correlation_metrics = (
-                    await self.correlation_monitor.calculate_portfolio_correlation(positions)
-                )
+                correlation_metrics = await self.correlation_monitor.calculate_portfolio_correlation(positions)
                 self.last_correlation_metrics = correlation_metrics
                 return correlation_metrics.max_pairwise_correlation
             except Exception as e:
@@ -674,7 +667,6 @@ class CorrelationSpikeBreaker(BaseCircuitBreaker):
             self.consecutive_high_correlation_periods = 0
             return False
 
-        # Critical level - immediate trigger (use absolute value for comparison)
         if abs(current_correlation) >= threshold:
             self.correlation_spike_count += 1
             self.consecutive_high_correlation_periods += 1
@@ -724,10 +716,7 @@ class CorrelationSpikeBreaker(BaseCircuitBreaker):
                 )
                 # Don't trigger immediately but increase sensitivity
                 # Reduce the consecutive period requirement
-                if (
-                    abs(current_correlation) >= warning_threshold
-                    and self.consecutive_high_correlation_periods >= 2
-                ):
+                if abs(current_correlation) >= warning_threshold and self.consecutive_high_correlation_periods >= 2:
                     return True
 
         return False
@@ -742,9 +731,7 @@ class CorrelationSpikeBreaker(BaseCircuitBreaker):
             "max_pairwise_correlation": str(self.last_correlation_metrics.max_pairwise_correlation),
             "correlation_spike": self.last_correlation_metrics.correlation_spike,
             "correlated_pairs_count": self.last_correlation_metrics.correlated_pairs_count,
-            "portfolio_concentration_risk": str(
-                self.last_correlation_metrics.portfolio_concentration_risk
-            ),
+            "portfolio_concentration_risk": str(self.last_correlation_metrics.portfolio_concentration_risk),
             "timestamp": self.last_correlation_metrics.timestamp.isoformat(),
         }
 
@@ -754,9 +741,7 @@ class CorrelationSpikeBreaker(BaseCircuitBreaker):
             return {"max_positions": None, "reduction_factor": Decimal("1.0")}
 
         # Use the correlation monitor's position limit calculation
-        limits = await self.correlation_monitor.get_position_limits_for_correlation(
-            self.last_correlation_metrics
-        )
+        limits = await self.correlation_monitor.get_position_limits_for_correlation(self.last_correlation_metrics)
         return limits
 
     async def cleanup_old_data(self, cutoff_time) -> None:
@@ -828,14 +813,37 @@ class CircuitBreakerManager:
         results = {}
         triggered_breakers = []
 
-        for name, breaker in self.circuit_breakers.items():
+        # Use asyncio.gather for concurrent evaluation with timeout
+        async def evaluate_breaker(name: str, breaker):
             try:
-                triggered = await breaker.evaluate(data)
+                triggered = await asyncio.wait_for(breaker.evaluate(data), timeout=self.config.risk.breaker_evaluation_timeout or 30.0)
+                return name, triggered, None
+            except (CircuitBreakerTriggeredError, asyncio.TimeoutError) as e:
+                return name, True, e
+            except Exception as e:
+                return name, False, e
+
+        try:
+            # Run all circuit breaker evaluations concurrently
+            evaluation_tasks = [evaluate_breaker(name, breaker) for name, breaker in self.circuit_breakers.items()]
+
+            evaluation_results = await asyncio.gather(*evaluation_tasks, return_exceptions=True)
+
+            # Process results
+            for result in evaluation_results:
+                if isinstance(result, Exception):
+                    self.logger.error(f"Circuit breaker evaluation exception: {result}")
+                    continue
+
+                name, triggered, error = result
                 results[name] = triggered
 
                 if triggered:
                     triggered_breakers.append(name)
-                    self.logger.warning("Circuit breaker triggered", breaker_name=name)
+                    if error:
+                        self.logger.error("Circuit breaker triggered", breaker_name=name, error=str(error))
+                    else:
+                        self.logger.warning("Circuit breaker triggered", breaker_name=name)
 
                     # Update monitoring metrics
                     if self.metrics_collector:
@@ -850,37 +858,17 @@ class CircuitBreakerManager:
                         except Exception as e:
                             self.logger.warning(f"Failed to update circuit breaker metric: {e}")
 
-            except CircuitBreakerTriggeredError as e:
-                # Circuit breaker was triggered, record it and continue
-                triggered_breakers.append(name)
-                results[name] = True
-                self.logger.error("Circuit breaker triggered", breaker_name=name, error=str(e))
+                elif error and not triggered:
+                    self.logger.error("Circuit breaker evaluation failed", breaker_name=name, error=str(error))
 
-                # Update monitoring metrics
-                if self.metrics_collector:
-                    try:
-                        self.metrics_collector.increment_counter(
-                            "risk_circuit_breaker_triggers_total",
-                            labels={
-                                "trigger_type": name,
-                                "exchange": data.get("exchange", "unknown"),
-                            },
-                        )
-                    except Exception as metric_error:
-                        self.logger.warning(
-                            f"Failed to update circuit breaker metric: {metric_error}"
-                        )
-            except Exception as e:
-                self.logger.error(
-                    "Circuit breaker evaluation failed", breaker_name=name, error=str(e)
-                )
-                results[name] = False
+        except Exception as e:
+            self.logger.error(f"Circuit breaker concurrent evaluation failed: {e}")
+            # Fall back to empty results to prevent system failure
+            results = {name: False for name in self.circuit_breakers.keys()}
 
         # If any circuit breakers were triggered, raise an exception
         if triggered_breakers:
-            raise CircuitBreakerTriggeredError(
-                f"Circuit breakers triggered: {', '.join(triggered_breakers)}"
-            )
+            raise CircuitBreakerTriggeredError(f"Circuit breakers triggered: {', '.join(triggered_breakers)}")
 
         return results
 

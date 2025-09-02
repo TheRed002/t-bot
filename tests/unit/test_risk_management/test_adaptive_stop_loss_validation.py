@@ -66,7 +66,7 @@ class TestAdaptiveStopLossValidation:
     def buy_signal(self):
         """Create a buy signal for testing."""
         return Signal(
-            symbol="BTCUSDT",
+            symbol="BTC/USDT",
             direction=SignalDirection.BUY,
             strength=0.8,
             timestamp=datetime.now(timezone.utc),
@@ -78,7 +78,7 @@ class TestAdaptiveStopLossValidation:
     def sell_signal(self):
         """Create a sell signal for testing."""
         return Signal(
-            symbol="BTCUSDT",
+            symbol="BTC/USDT",
             direction=SignalDirection.SELL,
             strength=0.8,
             timestamp=datetime.now(timezone.utc),
@@ -382,37 +382,33 @@ class TestAdaptiveStopLossValidation:
         entry_price = Decimal("50000")
 
         # Test invalid signal scenarios
-        invalid_scenarios = [
-            (None, "null_signal"),
-            (
-                Signal(
-                    symbol="",
-                    direction=SignalDirection.BUY,
-                    strength=0.8,
-                    timestamp=datetime.now(timezone.utc),
-                    source="test",
-                    metadata={},
-                ),
-                "empty_symbol",
-            ),
-            (
-                Signal(
-                    symbol="   ",
-                    direction=SignalDirection.BUY,
-                    strength=0.8,
-                    timestamp=datetime.now(timezone.utc),
-                    source="test",
-                    metadata={},
-                ),
-                "whitespace_symbol",
-            ),
-        ]
+        # First test null signal case
+        with pytest.raises((RiskManagementError, ValidationError, AttributeError)):
+            await adaptive_risk_manager.calculate_adaptive_stop_loss(
+                None, MarketRegime.MEDIUM_VOLATILITY, entry_price
+            )
 
-        for invalid_signal, scenario in invalid_scenarios:
-            with pytest.raises((RiskManagementError, ValidationError, AttributeError)):
-                await adaptive_risk_manager.calculate_adaptive_stop_loss(
-                    invalid_signal, MarketRegime.MEDIUM_VOLATILITY, entry_price
-                )
+        # Test empty symbol - should fail at Signal construction
+        with pytest.raises(ValidationError):
+            Signal(
+                symbol="",
+                direction=SignalDirection.BUY,
+                strength=0.8,
+                timestamp=datetime.now(timezone.utc),
+                source="test",
+                metadata={},
+            )
+
+        # Test whitespace symbol - should also fail at Signal construction
+        with pytest.raises(ValidationError):
+            Signal(
+                symbol="   ",
+                direction=SignalDirection.BUY,
+                strength=0.8,
+                timestamp=datetime.now(timezone.utc),
+                source="test",
+                metadata={},
+            )
 
         # Test invalid entry price scenarios
         invalid_prices = [
@@ -538,7 +534,8 @@ class TestAdaptiveStopLossValidation:
                 f"Stop distance out of range in {scenario}: {stop_distance}"
             )
 
-    def test_stop_loss_configuration_validation(self, adaptive_risk_manager):
+    @pytest.mark.asyncio
+    async def test_stop_loss_configuration_validation(self, adaptive_risk_manager):
         """Test stop-loss configuration validation and bounds checking."""
         # Test configuration parameter bounds
         test_configs = [
@@ -561,7 +558,7 @@ class TestAdaptiveStopLossValidation:
                 # Test calculation with modified config
                 entry_price = Decimal("50000")
                 buy_signal = Signal(
-                    symbol="BTCUSDT",
+                    symbol="BTC/USDT",
                     direction=SignalDirection.BUY,
                     strength=0.8,
                     timestamp=datetime.now(timezone.utc),
@@ -571,7 +568,7 @@ class TestAdaptiveStopLossValidation:
 
                 if is_valid:
                     # Should not raise exception
-                    result = adaptive_risk_manager.calculate_adaptive_stop_loss(
+                    result = await adaptive_risk_manager.calculate_adaptive_stop_loss(
                         buy_signal, MarketRegime.MEDIUM_VOLATILITY, entry_price
                     )
                     # Verify reasonable result
