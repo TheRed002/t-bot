@@ -16,7 +16,7 @@ from typing import Any
 
 import numpy as np
 
-from src.base import BaseComponent
+from src.core.base import BaseComponent
 from src.core.config import Config
 from src.core.exceptions import ExecutionError, ValidationError
 
@@ -123,9 +123,9 @@ class SlippageModel(BaseComponent):
             self.logger.debug(
                 "Predicting slippage",
                 symbol=order.symbol,
-                quantity=float(order.quantity),
+                quantity=order.quantity,
                 side=order.side.value,
-                market_price=float(market_data.price),
+                market_price=market_data.price,
             )
 
             # Calculate market impact slippage
@@ -157,28 +157,47 @@ class SlippageModel(BaseComponent):
             )
 
             # Determine order size to volume ratio
-            daily_volume = float(market_data.volume) * 24  # Estimate daily volume
-            volume_ratio = float(order.quantity) / max(daily_volume, 1.0)
+            daily_volume = market_data.volume * 24  # Estimate daily volume
+            volume_ratio = order.quantity / max(daily_volume, Decimal("1.0"))
 
             # Calculate execution price
             execution_price = await self._calculate_expected_execution_price(
                 order, market_data, total_slippage_bps
             )
 
-            # Create slippage metrics
+            # Create slippage metrics with all required fields
+            now = datetime.now(timezone.utc)
             slippage_metrics = SlippageMetrics(
                 symbol=order.symbol,
-                order_size=order.quantity,
-                market_price=market_data.price,
-                execution_price=execution_price,
-                price_slippage_bps=total_slippage_bps,
+                timeframe="1h",
+                total_trades=1,
+                total_volume=order.quantity,
                 market_impact_bps=adjusted_market_impact,
                 timing_cost_bps=adjusted_timing_cost,
-                total_cost_bps=total_slippage_bps + adjusted_spread_cost,
-                spread_bps=adjusted_spread_cost,
-                volume_ratio=volume_ratio,
-                volatility=volatility_adjustment,
-                timestamp=datetime.now(timezone.utc),
+                spread_cost_bps=adjusted_spread_cost,
+                total_slippage_bps=total_slippage_bps,
+                small_order_slippage=total_slippage_bps if order.quantity < 10 else Decimal("0"),
+                medium_order_slippage=total_slippage_bps if 10 <= order.quantity < 100 else Decimal("0"),
+                large_order_slippage=total_slippage_bps if order.quantity >= 100 else Decimal("0"),
+                market_open_slippage=Decimal("0.05"),
+                market_close_slippage=Decimal("0.05"),
+                intraday_slippage=total_slippage_bps,
+                high_volatility_slippage=total_slippage_bps * volatility_adjustment,
+                low_volatility_slippage=total_slippage_bps / volatility_adjustment,
+                trending_slippage=total_slippage_bps,
+                ranging_slippage=total_slippage_bps,
+                total_slippage_cost=total_slippage_bps * order.quantity * market_data.close / 10000,
+                avg_slippage_per_trade=total_slippage_bps,
+                price_improvement_count=0,
+                price_improvement_amount=Decimal("0"),
+                period_start=now,
+                period_end=now,
+                updated_at=now,
+                metadata={
+                    "volume_ratio": volume_ratio,
+                    "volatility_adjustment": float(volatility_adjustment),
+                    "execution_price": float(execution_price),
+                }
             )
 
             self.logger.info(
@@ -217,10 +236,10 @@ class SlippageModel(BaseComponent):
         """
         try:
             # Estimate daily volume if not provided
-            daily_volume = float(market_data.volume) * 24  # Rough daily volume estimate
+            daily_volume = market_data.volume * 24  # Rough daily volume estimate
 
             # Calculate order size as fraction of daily volume
-            order_size_fraction = float(order.quantity) / max(daily_volume, 1.0)
+            order_size_fraction = order.quantity / max(daily_volume, Decimal("1.0"))
 
             # Apply square root market impact law
             # Market Impact = coefficient * sqrt(order_size / daily_volume)
@@ -271,7 +290,7 @@ class SlippageModel(BaseComponent):
             if market_data.high_price and market_data.low_price and market_data.price:
                 # Use high-low range as volatility proxy
                 daily_range = float(market_data.high_price - market_data.low_price)
-                daily_volatility = daily_range / float(market_data.price)
+                daily_volatility = daily_range / market_data.price
             else:
                 # Default volatility assumption
                 daily_volatility = 0.02  # 2% daily volatility
@@ -431,18 +450,18 @@ class SlippageModel(BaseComponent):
             # Add new data point
             self.historical_slippage[symbol].append(
                 {
-                    "timestamp": actual_slippage.timestamp,
-                    "slippage_bps": float(actual_slippage.total_cost_bps),
+                    "timestamp": actual_slippage.updated_at,
+                    "slippage_bps": float(actual_slippage.total_slippage_bps),
                     "market_impact_bps": float(actual_slippage.market_impact_bps),
                     "timing_cost_bps": float(actual_slippage.timing_cost_bps),
-                    "order_size": float(actual_slippage.order_size),
-                    "volume_ratio": actual_slippage.volume_ratio,
-                    "volatility": actual_slippage.volatility,
+                    "order_size": float(actual_slippage.total_volume),
+                    "volume_ratio": 0.1,  # Default value since not in schema
+                    "volatility": 0.02,  # Default value since not in schema
                 }
             )
 
             self.market_conditions_history[symbol].append(
-                {"timestamp": actual_slippage.timestamp, "conditions": market_conditions}
+                {"timestamp": actual_slippage.updated_at, "conditions": market_conditions}
             )
 
             # Limit history size
@@ -550,7 +569,7 @@ class SlippageModel(BaseComponent):
         """
         try:
             # Base prediction
-            base_slippage = predicted_slippage.total_cost_bps
+            base_slippage = predicted_slippage.total_slippage_bps
 
             # Use historical data to estimate prediction uncertainty if available
             symbol = predicted_slippage.symbol
@@ -600,7 +619,7 @@ class SlippageModel(BaseComponent):
         except Exception as e:
             self.logger.warning(f"Confidence interval calculation failed: {e}")
             # Return wide interval as fallback
-            base = predicted_slippage.total_cost_bps
+            base = predicted_slippage.total_slippage_bps
             return base * Decimal("0.5"), base * Decimal("1.5")
 
     async def get_model_summary(self, symbol: str | None = None) -> dict[str, Any]:

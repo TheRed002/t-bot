@@ -44,6 +44,12 @@ from src.core.types import (
     OrderRequest,
 )
 from src.execution.adapters import ExecutionResultAdapter
+from src.utils.execution_utils import (
+    calculate_order_value,
+    calculate_trade_risk_ratio,
+    is_order_within_price_bounds,
+    safe_decimal_conversion,
+)
 
 
 @dataclass
@@ -261,13 +267,27 @@ class HighPerformanceExecutor:
         if not valid_orders:
             return []
 
-        # Parallel execution
+        # Parallel execution with proper error handling and resource management
         execution_tasks = [
             self._execute_single_order_fast(order, market_data.get(order.symbol))
             for order in valid_orders
         ]
 
-        execution_results = await asyncio.gather(*execution_tasks, return_exceptions=True)
+        # Use asyncio.gather with proper exception handling and timeout
+        try:
+            execution_results = await asyncio.wait_for(
+                asyncio.gather(*execution_tasks, return_exceptions=True),
+                timeout=30.0  # 30 second timeout for batch execution
+            )
+        except asyncio.TimeoutError:
+            self.logger.error("Batch execution timeout - cancelling remaining tasks")
+            # Cancel any running tasks
+            for task in execution_tasks:
+                if not task.done():
+                    task.cancel()
+            # Wait a brief moment for cancellation to complete
+            await asyncio.sleep(0.1)
+            execution_results = []
 
         # Filter successful executions
         successful_results = []
@@ -306,9 +326,12 @@ class HighPerformanceExecutor:
             # All checks must pass
             return bool(np.all(risk_checks))
 
-        except Exception as e:
+        except (ValueError, AttributeError, KeyError, TypeError) as e:
             self.logger.error("Fast validation failed", order_id=order.id, error=str(e))
             return False
+        except Exception as e:
+            self.logger.error("Unexpected error during fast validation", order_id=order.id, error=str(e))
+            raise
 
     def _check_position_limits(self, order: Order) -> bool:
         """Check position limits using cached data."""
@@ -318,32 +341,21 @@ class HighPerformanceExecutor:
         )
 
         if order.side.value == "BUY":
-            new_position = current_position + float(order.quantity)
+            new_position = current_position + order.quantity
         else:
-            new_position = current_position - float(order.quantity)
+            new_position = current_position - order.quantity
 
         return abs(new_position) <= symbol_limit
 
     def _check_account_balance(self, order: Order) -> bool:
         """Check account balance using cached data."""
-        required_balance = float(order.quantity) * float(order.price or 0)
+        required_balance = calculate_order_value(order.quantity, order.price)
         available_balance = float(self.validation_cache.account_balances.get("USD", 0))
         return available_balance >= required_balance
 
     def _check_price_bounds(self, order: Order, market_data: MarketData) -> bool:
         """Check if order price is within reasonable bounds."""
-        if not order.price:
-            return True  # Market order
-
-        current_price = float(market_data.price)
-        order_price = float(order.price)
-
-        # Allow 10% deviation from current price
-        max_deviation = 0.10
-        lower_bound = current_price * (1 - max_deviation)
-        upper_bound = current_price * (1 + max_deviation)
-
-        return lower_bound <= order_price <= upper_bound
+        return is_order_within_price_bounds(order, market_data, max_deviation_percent=0.10)
 
     def _check_quantity_bounds(self, order: Order) -> bool:
         """Check quantity bounds."""
@@ -352,15 +364,17 @@ class HighPerformanceExecutor:
             "max_quantity", float("inf")
         )
 
-        return min_qty <= float(order.quantity) <= max_qty
+        return min_qty <= order.quantity <= max_qty
 
     def _check_risk_per_trade(self, order: Order) -> bool:
         """Check risk per trade limits."""
         risk_limit = self.validation_cache.risk_limits.get("max_risk_per_trade", 0.02)  # 2%
-        account_value = float(self.validation_cache.account_balances.get("total_value", 100000))
+        account_value = safe_decimal_conversion(
+            self.validation_cache.account_balances.get("total_value", 100000)
+        )
 
-        trade_value = float(order.quantity) * float(order.price or 0)
-        risk_ratio = trade_value / account_value
+        trade_value = calculate_order_value(order.quantity, order.price)
+        risk_ratio = calculate_trade_risk_ratio(trade_value, account_value)
 
         return risk_ratio <= risk_limit
 
@@ -381,7 +395,7 @@ class HighPerformanceExecutor:
                     "symbol": order.symbol,
                     "side": order.side.value,
                     "quantity": str(order.quantity),
-                    "price": float(order.price) if order.price else None,
+                    "price": str(order.price) if order.price else None,
                     "type": order.type.value,
                     "timestamp": time.time(),
                 }
@@ -429,18 +443,21 @@ class HighPerformanceExecutor:
             if market_data:
                 self.market_data_buffer.append(
                     timestamp=time.time(),
-                    open_price=float(market_data.price),
-                    high=float(market_data.price),
-                    low=float(market_data.price),
-                    close=float(market_data.price),
+                    open_price=market_data.price,
+                    high=market_data.price,
+                    low=market_data.price,
+                    close=market_data.price,
                     volume=float(market_data.volume or 0),
                 )
 
             return result
 
-        except Exception as e:
+        except (AttributeError, ValueError, KeyError, TypeError) as e:
             self.logger.error("Fast order execution failed", order_id=order.id, error=str(e))
             return None
+        except Exception as e:
+            self.logger.error("Unexpected error during fast order execution", order_id=order.id, error=str(e))
+            raise ExecutionError(f"Fast order execution failed: {e}") from e
 
     async def _ensure_cache_warm(self) -> None:
         """Ensure validation cache is warmed up."""
@@ -480,6 +497,7 @@ class HighPerformanceExecutor:
 
         except Exception as e:
             self.logger.error("Cache refresh failed", error=str(e))
+            raise
 
     def _update_metrics(
         self, total_orders: int, successful_orders: int, execution_time_ms: float
@@ -520,48 +538,84 @@ class HighPerformanceExecutor:
         }
 
     async def cleanup(self) -> None:
-        """Cleanup resources."""
+        """Cleanup resources with proper async handling."""
+        thread_pool = None
         try:
-            # Shutdown thread pool
-            if hasattr(self, "thread_pool"):
-                self.thread_pool.shutdown(wait=True)
+            # Shutdown thread pool with async handling
+            if hasattr(self, "thread_pool") and self.thread_pool:
+                thread_pool = self.thread_pool
+
+                # Use asyncio to run thread pool shutdown in executor to avoid blocking
+                loop = asyncio.get_event_loop()
+                try:
+                    await asyncio.wait_for(
+                        loop.run_in_executor(None, lambda: thread_pool.shutdown(wait=True)),
+                        timeout=10.0
+                    )
+                except asyncio.TimeoutError:
+                    self.logger.warning("Thread pool shutdown timeout - forcing shutdown")
+                    thread_pool.shutdown(wait=False)
+
                 self.thread_pool = None
 
-            # Clear caches
+            # Clear caches with proper async handling
             self.validation_cache.invalidate()
             self.order_pool._pool.clear()
             self.order_pool._in_use.clear()
 
-            # Force garbage collection
-            gc.collect()
+            # Force garbage collection in executor to avoid blocking
+            try:
+                await asyncio.wait_for(
+                    loop.run_in_executor(None, gc.collect),
+                    timeout=5.0
+                )
+            except asyncio.TimeoutError:
+                self.logger.warning("Garbage collection timeout")
 
             self.logger.info("High-performance executor cleaned up")
 
-        except Exception as e:
+        except (AttributeError, RuntimeError, OSError) as e:
             self.logger.error("Cleanup failed", error=str(e))
+        except asyncio.TimeoutError:
+            self.logger.error("Cleanup timeout")
+        except Exception as e:
+            self.logger.error("Unexpected error during cleanup", error=str(e))
         finally:
             # Ensure thread pool is closed even if error occurs
-            if hasattr(self, "thread_pool") and self.thread_pool:
+            if thread_pool:
                 try:
-                    self.thread_pool.shutdown(wait=False)
-                except Exception as e:
+                    # Final attempt to shutdown without waiting
+                    thread_pool.shutdown(wait=False)
+                except (AttributeError, RuntimeError, OSError) as e:
                     self.logger.warning("Failed to shutdown thread pool cleanly", error=str(e))
+            # Clear reference even if shutdown fails
+            if hasattr(self, "thread_pool"):
+                self.thread_pool = None
 
     async def warm_up_system(self) -> None:
-        """Warm up the system for optimal performance."""
+        """Warm up the system for optimal performance with proper async handling."""
         try:
-            # Pre-warm caches
+            # Pre-warm caches asynchronously
             await self._refresh_validation_cache()
 
-            # Pre-allocate order objects
-            for _ in range(100):
-                order_obj = {}
-                self.order_pool._pool.append(order_obj)
+            # Pre-allocate order objects in executor to avoid blocking event loop
+            loop = asyncio.get_event_loop()
+            await asyncio.wait_for(
+                loop.run_in_executor(
+                    None,
+                    lambda: [self.order_pool._pool.append({}) for _ in range(100)]
+                ),
+                timeout=5.0
+            )
 
-            # Pre-compile patterns and calculations
+            # Pre-compile patterns and calculations (non-blocking)
             self._symbol_pattern = r"^[A-Z]{3,6}USD$"
 
             self.logger.info("System warmed up for high-performance trading")
 
+        except asyncio.TimeoutError:
+            self.logger.error("System warm-up timeout")
+            raise
         except Exception as e:
             self.logger.error("System warm-up failed", error=str(e))
+            raise

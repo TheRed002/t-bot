@@ -58,14 +58,16 @@ def sample_market_data():
     """Create sample market data."""
     return MarketData(
         symbol="BTCUSDT",
-        price=Decimal("50000.0"),
-        bid=Decimal("49995.0"),
-        ask=Decimal("50005.0"),
-        volume=Decimal("1000.0"),
         timestamp=datetime.now(timezone.utc),
-        high_price=Decimal("51000.0"),
-        low_price=Decimal("49000.0"),
-        change_24h=Decimal("500.0")
+        open=Decimal("49500.0"),
+        high=Decimal("51000.0"),
+        low=Decimal("49000.0"),
+        close=Decimal("50000.0"),
+        volume=Decimal("1000.0"),
+        quote_volume=Decimal("50000000.0"),
+        exchange="binance",
+        bid_price=Decimal("49995.0"),
+        ask_price=Decimal("50005.0")
     )
 
 
@@ -84,16 +86,22 @@ def mock_exchange():
         price=Decimal("50000.0"),
         filled_quantity=Decimal("0"),
         status=OrderStatus.PENDING,
-        timestamp=datetime.now(timezone.utc)
+        created_at=datetime.now(timezone.utc),
+        exchange="binance"
     )
     exchange.get_order_status.return_value = OrderStatus.PENDING
     exchange.get_market_data.return_value = MarketData(
         symbol="BTCUSDT",
-        price=Decimal("50000.0"),
-        bid=Decimal("49995.0"),
-        ask=Decimal("50005.0"),
+        timestamp=datetime.now(timezone.utc),
+        open=Decimal("49500.0"),
+        high=Decimal("51000.0"),
+        low=Decimal("49000.0"),
+        close=Decimal("50000.0"),
         volume=Decimal("1000.0"),
-        timestamp=datetime.now(timezone.utc)
+        quote_volume=Decimal("50000000.0"),
+        exchange="binance",
+        bid_price=Decimal("49995.0"),
+        ask_price=Decimal("50005.0")
     )
     return exchange
 
@@ -149,7 +157,8 @@ class TestOrderManagerP020:
             price=Decimal("50000.0"),
             filled_quantity=Decimal("0"),
             status=OrderStatus.PENDING,
-            timestamp=datetime.now(timezone.utc)
+            created_at=datetime.now(timezone.utc),
+            exchange="binance"
         )
         mock_exchange_factory.get_exchange.return_value = mock_exchange
         
@@ -513,7 +522,12 @@ class TestOrderManagerP020:
         assert stats["exchange_distribution"]["coinbase"] == 1
         assert stats["routing_reasons"]["large_order_routing"] == 1
         assert stats["routing_reasons"]["default_routing"] == 1
-        assert stats["average_expected_cost_bps"] == 17.5  # (15 + 20) / 2
+        # Check if the value is string or numeric
+        avg_cost = stats["average_expected_cost_bps"]
+        if isinstance(avg_cost, str):
+            assert float(avg_cost) == 17.5  # (15 + 20) / 2
+        else:
+            assert avg_cost == 17.5  # (15 + 20) / 2
 
     @pytest.mark.asyncio
     async def test_export_order_history(self, order_manager):

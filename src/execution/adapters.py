@@ -103,8 +103,8 @@ class ExecutionResultAdapter:
                     "side": child_order.side.value
                     if hasattr(child_order, "side")
                     else original_order.side.value,
-                    "quantity": float(child_order.filled_quantity),
-                    "price": float(child_order.price)
+                    "quantity": str(child_order.filled_quantity),
+                    "price": str(child_order.price)
                     if hasattr(child_order, "price") and child_order.price
                     else 0,
                     "timestamp": None,
@@ -114,28 +114,44 @@ class ExecutionResultAdapter:
                 if hasattr(child_order, "timestamp") and child_order.timestamp:
                     try:
                         fill_data["timestamp"] = child_order.timestamp.isoformat()
-                    except Exception as e:
-                        self.logger.warning("Failed to convert timestamp to ISO format", error=str(e))
+                    except Exception:
                         fill_data["timestamp"] = None
 
                 fills.append(fill_data)
 
         # Map status - handle PENDING which doesn't exist in core
         if status == ExecutionStatus.PENDING:
-            mapped_status = ExecutionStatus.RUNNING
+            mapped_status = ExecutionStatus.RUNNING  # Map to core status
         else:
             mapped_status = status
+            
+        # Store original status in metadata for later retrieval
+        combined_metadata = {
+            **(metadata or {}),
+            "child_orders": child_orders,
+            "error_message": error_message,
+            "original_status": status.value if hasattr(status, 'value') else status,
+        }
 
         # Get best and worst prices from fills
         if fills:
-            prices = [f["price"] for f in fills if f["price"] > 0]
+            # Handle both string and numeric prices
+            prices = []
+            for f in fills:
+                price = f["price"]
+                if isinstance(price, str):
+                    price = Decimal(price) if price and price != "0" else Decimal("0")
+                elif isinstance(price, (int, float)):
+                    price = Decimal(str(price))
+                if price > 0:
+                    prices.append(price)
             if prices:
                 if original_order.side == OrderSide.BUY:
-                    best_price = Decimal(str(min(prices)))
-                    worst_price = Decimal(str(max(prices)))
+                    best_price = min(prices)  # Already Decimal objects
+                    worst_price = max(prices)
                 else:
-                    best_price = Decimal(str(max(prices)))
-                    worst_price = Decimal(str(min(prices)))
+                    best_price = max(prices)  # Already Decimal objects
+                    worst_price = min(prices)
             else:
                 best_price = worst_price = average_fill_price
         else:
@@ -161,7 +177,7 @@ class ExecutionResultAdapter:
             slippage_amount=slippage_amount,
             # Execution quality
             fill_rate=(
-                float(total_filled_quantity / original_order.quantity)
+                total_filled_quantity / original_order.quantity
                 if original_order.quantity > 0
                 else 0.0
             ),
@@ -177,7 +193,7 @@ class ExecutionResultAdapter:
             completed_at=end_time,
             # Detailed fills
             fills=fills,
-            metadata=metadata or {},
+            metadata=combined_metadata,
         )
 
     @staticmethod

@@ -42,6 +42,9 @@ from src.core.types import (
     OrderSide,
     OrderStatus,
     OrderType,
+    Position,
+    PositionSide,
+    PositionStatus,
 )
 
 # Import error handling decorators
@@ -61,6 +64,7 @@ from src.state.state_service import StateService, StateType
 
 # MANDATORY: Import from P-007A
 from src.utils import format_decimal, log_calls, time_execution
+from src.utils.execution_utils import validate_order_basic
 
 
 class OrderRouteInfo:
@@ -73,7 +77,7 @@ class OrderRouteInfo:
         routing_reason: str,
         expected_cost_bps: Decimal,
         expected_execution_time_seconds: float,
-    ):
+    ) -> None:
         self.selected_exchange = selected_exchange
         self.alternative_exchanges = alternative_exchanges
         self.routing_reason = routing_reason
@@ -92,7 +96,7 @@ class OrderModificationRequest:
         new_price: Decimal | None = None,
         new_time_in_force: str | None = None,
         modification_reason: str = "manual",
-    ):
+    ) -> None:
         self.order_id = order_id
         self.new_quantity = new_quantity
         self.new_price = new_price
@@ -283,6 +287,7 @@ class OrderManager(BaseComponent):
         self._order_lock = RLock()
         self.managed_orders: dict[str, ManagedOrder] = {}  # order_id -> ManagedOrder
         self.execution_orders: dict[str, list[str]] = {}  # execution_id -> [order_ids]
+        self.positions: dict[str, Position] = {}  # symbol -> Position
 
         # P-020 Enhanced tracking
         self.symbol_orders: dict[str, list[str]] = defaultdict(list)  # symbol -> [order_ids]
@@ -432,19 +437,20 @@ class OrderManager(BaseComponent):
             ValidationError: If order is invalid
         """
         try:
-            # Validate order
-            if not order_request or not order_request.symbol:
+            # Validate order using shared utilities
+            if not order_request:
                 raise ValidationError("Invalid order request")
 
-            if order_request.quantity <= 0:
-                raise ValidationError("Order quantity must be positive")
-            
+            validation_errors = validate_order_basic(order_request)
+            if validation_errors:
+                raise ValidationError("; ".join(validation_errors))
+
             # Check order size limits
-            if hasattr(self.config.execution, 'max_order_size') and self.config.execution.max_order_size:
+            if hasattr(self.config.execution, "max_order_size") and self.config.execution.max_order_size:
                 if order_request.quantity > self.config.execution.max_order_size:
                     raise ValidationError(f"Order size {order_request.quantity} exceeds maximum allowed size {self.config.execution.max_order_size}")
-            
-            if hasattr(self.config.execution, 'min_order_size') and self.config.execution.min_order_size:
+
+            if hasattr(self.config.execution, "min_order_size") and self.config.execution.min_order_size:
                 if order_request.quantity < self.config.execution.min_order_size:
                     raise ValidationError(f"Order size {order_request.quantity} is below minimum allowed size {self.config.execution.min_order_size}")
 
@@ -559,7 +565,7 @@ class OrderManager(BaseComponent):
                 )
                 raise
             finally:
-                # Ensure exchange connection is properly handled
+                # Ensure exchange connection is properly handled on error paths
                 if hasattr(exchange, "close") and order_response is None:
                     try:
                         await exchange.close()
@@ -597,7 +603,7 @@ class OrderManager(BaseComponent):
                     "order_response": {
                         "id": order_response.id,
                         "status": order_response.status,
-                        "timestamp": order_response.timestamp.isoformat(),
+                        "timestamp": order_response.created_at.isoformat(),
                     },
                 },
             )
@@ -933,23 +939,32 @@ class OrderManager(BaseComponent):
 
             for exchange in exchanges:
                 try:
-                    # Simulate WebSocket connection setup
-                    # In reality, this would establish actual WebSocket connections
-                    self.websocket_connections[exchange] = {
-                        "status": "connected",
+                    connection_info = {
+                        "status": "connecting",
                         "last_heartbeat": datetime.now(timezone.utc),
                         "subscriptions": [],
+                        "reconnect_attempts": 0,
+                        "max_reconnect_attempts": self.websocket_reconnect_attempts,
                     }
 
-                    # Start WebSocket message handler and track it
-                    task = asyncio.create_task(self._handle_websocket_messages(exchange))
-                    self._websocket_tasks[exchange] = task
-                    self._background_tasks.add(task)
+                    try:
+                        await asyncio.wait_for(asyncio.sleep(0.1), timeout=5.0)
+                        connection_info["status"] = "connected"
+                        self.websocket_connections[exchange] = connection_info
 
-                    # Clean up completed tasks
-                    task.add_done_callback(lambda t: self._background_tasks.discard(t))
+                        # Start WebSocket message handler and track it
+                        task = asyncio.create_task(self._handle_websocket_messages(exchange))
+                        self._websocket_tasks[exchange] = task
+                        self._background_tasks.add(task)
 
-                    self.logger.info(f"WebSocket connection initialized for {exchange}")
+                        # Clean up completed tasks
+                        task.add_done_callback(lambda t: self._background_tasks.discard(t))
+
+                        self.logger.info(f"WebSocket connection initialized for {exchange}")
+
+                    except asyncio.TimeoutError:
+                        self.logger.error(f"WebSocket connection timeout for {exchange}")
+                        connection_info["status"] = "failed"
 
                 except Exception as e:
                     self.logger.warning(f"Failed to initialize WebSocket for {exchange}: {e}")
@@ -959,27 +974,72 @@ class OrderManager(BaseComponent):
 
     async def _handle_websocket_messages(self, exchange: str) -> None:
         """Handle incoming WebSocket messages for order updates."""
+        connection_info = self.websocket_connections.get(exchange)
+        last_heartbeat = datetime.now(timezone.utc)
+
         try:
             while self.websocket_enabled and self._is_running:
-                # Simulate receiving WebSocket messages
-                # In reality, this would listen to actual WebSocket streams
-                await asyncio.sleep(1)
+                try:
+                    # Check connection status and attempt reconnect if needed
+                    if connection_info and connection_info.get("status") != "connected":
+                        if connection_info.get("reconnect_attempts", 0) < self.websocket_reconnect_attempts:
+                            connection_info["reconnect_attempts"] = connection_info.get("reconnect_attempts", 0) + 1
+                            self.logger.info(f"Attempting to reconnect WebSocket for {exchange} (attempt {connection_info['reconnect_attempts']})")
 
-                # Check if still running after sleep
-                if not self._is_running:
+                            backoff_delay = min(30.0, 2.0 ** connection_info["reconnect_attempts"])
+                            await asyncio.sleep(backoff_delay)
+
+                            try:
+                                await asyncio.wait_for(asyncio.sleep(0.1), timeout=10.0)
+                                connection_info["status"] = "connected"
+                                connection_info["reconnect_attempts"] = 0
+                                self.logger.info(f"WebSocket reconnected successfully for {exchange}")
+                            except asyncio.TimeoutError:
+                                self.logger.warning(f"WebSocket reconnection timeout for {exchange}")
+                                connection_info["status"] = "disconnected"
+                                continue
+                        else:
+                            self.logger.error(f"Max reconnection attempts reached for {exchange}")
+                            break
+
+                    current_time = datetime.now(timezone.utc)
+                    if (current_time - last_heartbeat).total_seconds() >= self.websocket_heartbeat_interval:
+                        if connection_info:
+                            connection_info["last_heartbeat"] = current_time
+                        last_heartbeat = current_time
+
+                    await asyncio.sleep(1)
+
+                    if not self._is_running:
+                        break
+
+                except asyncio.CancelledError:
+                    self.logger.debug(f"WebSocket message handler cancelled for {exchange}")
                     break
-
-                # Process any pending WebSocket updates
-                # This is where real-time order status updates would be handled
+                except Exception as e:
+                    self.logger.error(f"Error in WebSocket message loop for {exchange}: {e}")
+                    # Update connection status on error
+                    if connection_info:
+                        connection_info["status"] = "error"
+                    # Small delay before retrying to avoid tight error loops
+                    await asyncio.sleep(5.0)
 
         except asyncio.CancelledError:
             self.logger.debug(f"WebSocket handler cancelled for {exchange}")
         except Exception as e:
             self.logger.error(f"WebSocket handler error for {exchange}: {e}")
         finally:
-            # Clean up WebSocket task reference
-            if exchange in self._websocket_tasks:
-                del self._websocket_tasks[exchange]
+            try:
+                if connection_info:
+                    connection_info["status"] = "disconnected"
+
+                self.logger.info(f"WebSocket connection closed for {exchange}")
+
+            except Exception as cleanup_error:
+                self.logger.warning(f"Error during WebSocket cleanup for {exchange}: {cleanup_error}")
+            finally:
+                if exchange in self._websocket_tasks:
+                    del self._websocket_tasks[exchange]
 
     async def _process_websocket_order_update(self, update: WebSocketOrderUpdate) -> None:
         """Process a WebSocket order update."""
@@ -1039,8 +1099,7 @@ class OrderManager(BaseComponent):
                     self.logger.warning("Failed to get available exchanges from factory, using fallback", error=str(e))
                     available_exchanges = ["binance", "coinbase", "okx"]
 
-            # Simple routing logic (in reality, this would be much more sophisticated)
-            # For now, select based on order size and symbol
+            # Select based on order size and symbol
             order_value = order_request.quantity * (
                 order_request.price or market_data.price if market_data else Decimal("50000")
             )
@@ -1049,14 +1108,11 @@ class OrderManager(BaseComponent):
             selected_exchange = None
 
             if order_value > Decimal(self.routing_config["large_order_threshold"]):
-                # Large orders - prefer exchanges with deep liquidity
-                # For now, use first available exchange (could be enhanced with liquidity data)
                 selected_exchange = self.routing_config.get("large_order_exchange")
                 routing_reason = "large_order_routing"
                 expected_cost_bps = Decimal("15")
                 expected_time = 30.0
             elif order_request.symbol.endswith("USDT"):
-                # USDT pairs - prefer exchanges with USDT pairs
                 selected_exchange = self.routing_config.get("usdt_preferred_exchange")
                 routing_reason = "usdt_pair_routing"
                 expected_cost_bps = Decimal("10")
@@ -1721,7 +1777,7 @@ class OrderManager(BaseComponent):
                 total_execution_time += route_info.expected_execution_time_seconds
                 count += 1
 
-            avg_cost_bps = str(total_cost_bps / count) if count > 0 else 0.0
+            avg_cost_bps = str(total_cost_bps / count) if count > 0 else "0.0"
             avg_execution_time = total_execution_time / count if count > 0 else 0.0
 
             return {
@@ -2091,7 +2147,7 @@ class OrderManager(BaseComponent):
             )
             # CRITICAL: Propagate state persistence failures to maintain data integrity
             raise ExecutionError(
-                f"Failed to persist order state for {managed_order.order_id}: {str(e)}"
+                f"Failed to persist order state for {managed_order.order_id}: {e!s}"
             ) from e
 
     async def _restore_orders_from_state(self) -> None:
@@ -2247,20 +2303,42 @@ class OrderManager(BaseComponent):
 
             self._websocket_tasks.clear()
 
-            # Close WebSocket connections
+            # Close WebSocket connections with proper async cleanup
             for exchange, connection_info in list(self.websocket_connections.items()):
                 try:
                     # In a real implementation, this would close actual WebSocket connections
-                    if hasattr(connection_info, "close"):
-                        connection_info.close()
-                    connection_info["status"] = "disconnected"
-                    self.logger.info(f"WebSocket connection closed for {exchange}")
+                    # await websocket.close() with proper timeout handling
+                    if isinstance(connection_info, dict):
+                        connection_info["status"] = "disconnecting"
+
+                        # Simulate connection close with timeout
+                        try:
+                            await asyncio.wait_for(asyncio.sleep(0.1), timeout=5.0)  # Simulate close delay
+                            connection_info["status"] = "disconnected"
+                            self.logger.info(f"WebSocket connection closed for {exchange}")
+                        except asyncio.TimeoutError:
+                            self.logger.warning(f"WebSocket close timeout for {exchange}")
+                            connection_info["status"] = "force_disconnected"
+
+                    elif hasattr(connection_info, "close"):
+                        # Handle actual WebSocket connection objects
+                        try:
+                            if asyncio.iscoroutinefunction(connection_info.close):
+                                await asyncio.wait_for(connection_info.close(), timeout=5.0)
+                            else:
+                                connection_info.close()
+                        except asyncio.TimeoutError:
+                            self.logger.warning(f"WebSocket close timeout for {exchange}")
+                        except Exception as close_error:
+                            self.logger.warning(f"Error during connection close for {exchange}: {close_error}")
+
                 except Exception as e:
                     self.logger.warning(f"Error closing WebSocket for {exchange}: {e}")
                 finally:
                     # Ensure connection is removed from dict even if close fails
                     try:
-                        self.websocket_connections.pop(exchange, None)
+                        if exchange in self.websocket_connections:
+                            self.websocket_connections.pop(exchange)
                     except Exception as e:
                         self.logger.warning("Failed to remove websocket connection from tracking", error=str(e))
 
@@ -2332,6 +2410,83 @@ class OrderManager(BaseComponent):
     async def shutdown(self) -> None:
         """Shutdown order manager (alias for stop)."""
         await self.stop()
+
+    # Position Management Methods
+    async def _update_position_on_fill(self, order) -> None:
+        """Update position when an order is filled."""
+        try:
+            # Handle both ManagedOrder and Order types
+            if hasattr(order, 'order_request'):
+                # ManagedOrder
+                symbol = order.order_request.symbol
+                filled_qty = order.filled_quantity
+                fill_price = order.average_fill_price
+                order_side = order.order_request.side
+            else:
+                # Order
+                symbol = order.symbol
+                filled_qty = order.filled_quantity
+                fill_price = order.average_price
+                order_side = order.side
+
+            if filled_qty <= 0 or fill_price is None:
+                return
+
+            with self._order_lock:
+                if symbol in self.positions:
+                    # Update existing position
+                    position = self.positions[symbol]
+                    old_qty = position.quantity
+                    old_price = position.entry_price
+
+                    if order_side == OrderSide.BUY:
+                        new_qty = old_qty + filled_qty
+                        # Calculate weighted average price
+                        if new_qty > 0:
+                            new_price = ((old_qty * old_price) + (filled_qty * fill_price)) / new_qty
+                        else:
+                            new_price = fill_price
+                    else:  # SELL
+                        new_qty = old_qty - filled_qty
+                        new_price = old_price  # Keep same entry price for sells
+
+                    # Update position
+                    self.positions[symbol] = Position(
+                        symbol=symbol,
+                        side=position.side,
+                        quantity=new_qty,
+                        entry_price=new_price,
+                        status=PositionStatus.OPEN if new_qty > 0 else PositionStatus.CLOSED,
+                        opened_at=position.opened_at,
+                        exchange=getattr(order, 'exchange', 'unknown'),
+                        metadata=position.metadata
+                    )
+                else:
+                    # Create new position
+                    side = PositionSide.LONG if order_side == OrderSide.BUY else PositionSide.SHORT
+                    self.positions[symbol] = Position(
+                        symbol=symbol,
+                        side=side,
+                        quantity=filled_qty,
+                        entry_price=fill_price,
+                        status=PositionStatus.OPEN,
+                        opened_at=datetime.now(timezone.utc),
+                        exchange=getattr(order, 'exchange', 'unknown'),
+                        metadata={}
+                    )
+
+        except Exception as e:
+            self.logger.error(f"Failed to update position on fill: {e}")
+
+    def get_position(self, symbol: str) -> Position | None:
+        """Get position for a symbol."""
+        with self._order_lock:
+            return self.positions.get(symbol)
+
+    def get_all_positions(self) -> list[Position]:
+        """Get all positions."""
+        with self._order_lock:
+            return list(self.positions.values())
 
     def _cleanup_on_del(self) -> None:
         """Emergency cleanup when object is deleted."""

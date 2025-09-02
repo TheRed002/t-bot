@@ -17,7 +17,7 @@ Version: 2.0.0 - Refactored for service layer
 """
 
 from datetime import datetime, timezone
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from src.core.base.component import BaseComponent
 from src.core.config import Config
@@ -28,10 +28,13 @@ from src.core.types import (
     ExecutionResult,
     MarketData,
 )
-from src.execution.service import ExecutionService
 
 # MANDATORY: Import from P-007A
 from src.utils import log_calls, time_execution
+
+# TYPE_CHECKING imports to prevent circular dependencies
+if TYPE_CHECKING:
+    from src.execution.service import ExecutionService
 
 
 class CostAnalyzer(BaseComponent):
@@ -49,7 +52,7 @@ class CostAnalyzer(BaseComponent):
     - Performance tracking through service layer
     """
 
-    def __init__(self, execution_service: ExecutionService, config: Config):
+    def __init__(self, execution_service: "ExecutionService", config: Config):
         """
         Initialize transaction cost analyzer with ExecutionService dependency injection.
 
@@ -163,8 +166,8 @@ class CostAnalyzer(BaseComponent):
                     cost_analysis, benchmark_analysis
                 ),
                 "market_context": {
-                    "price": float(market_data.price),
-                    "volume": float(market_data.volume) if market_data.volume else 0,
+                    "price": str(market_data.price),
+                    "volume": str(market_data.volume) if market_data.volume else "0",
                     "volatility_regime": self._assess_volatility_regime(market_data),
                 },
                 "execution_context": {
@@ -301,9 +304,9 @@ class CostAnalyzer(BaseComponent):
         self.tca_statistics["cost_breakdowns"] += 1
 
         # Calculate basic execution metrics
-        filled_quantity = float(execution_result.total_filled_quantity)
-        executed_price = float(execution_result.average_fill_price or market_data.price)
-        reference_price = float(market_data.price)
+        filled_quantity = execution_result.total_filled_quantity
+        executed_price = execution_result.average_fill_price or market_data.price
+        reference_price = market_data.price
 
         # Calculate slippage
         price_diff = executed_price - reference_price
@@ -315,7 +318,7 @@ class CostAnalyzer(BaseComponent):
         # Calculate spread cost
         spread_cost_bps = 0.0
         if market_data.bid and market_data.ask:
-            spread = float(market_data.ask - market_data.bid)
+            spread = market_data.ask - market_data.bid
             spread_cost_bps = (spread / 2) / reference_price * 10000
 
         # Calculate timing cost (simplified)
@@ -325,7 +328,7 @@ class CostAnalyzer(BaseComponent):
         fee_rate_bps = 0.0
         if execution_result.total_fees and filled_quantity > 0:
             trade_value = filled_quantity * executed_price
-            fee_rate_bps = float(execution_result.total_fees) / trade_value * 10000
+            fee_rate_bps = (execution_result.total_fees / trade_value) * 10000
 
         # Total cost
         total_cost_bps = slippage_bps + fee_rate_bps
@@ -369,8 +372,8 @@ class CostAnalyzer(BaseComponent):
         """Calculate benchmark comparisons."""
         self.tca_statistics["benchmark_calculations"] += 1
 
-        executed_price = float(execution_result.average_fill_price or market_data.price)
-        reference_price = float(market_data.price)
+        executed_price = execution_result.average_fill_price or market_data.price
+        reference_price = market_data.price
 
         # Arrival price benchmark (reference price)
         arrival_price_diff_bps = abs(executed_price - reference_price) / reference_price * 10000
@@ -533,14 +536,14 @@ class CostAnalyzer(BaseComponent):
         if not market_data.volume or market_data.volume == 0:
             return 0.0
 
-        return filled_quantity / float(market_data.volume)
+        return filled_quantity / market_data.volume
 
     def _assess_volatility_regime(self, market_data: MarketData) -> str:
         """Assess current volatility regime."""
         # Simplified volatility assessment
         # In production, would use historical volatility calculations
         if market_data.bid and market_data.ask:
-            spread_pct = float((market_data.ask - market_data.bid) / market_data.price) * 100
+            spread_pct = ((market_data.ask - market_data.bid) / market_data.price) * 100
             if spread_pct > 0.5:
                 return "High"
             elif spread_pct > 0.1:

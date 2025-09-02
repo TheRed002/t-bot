@@ -58,7 +58,7 @@ class BaseAlgorithm(BaseComponent, ABC):
     5. Log all operations using get_logger
     """
 
-    def __init__(self, config: Config):
+    def __init__(self, config: Config) -> None:
         """
         Initialize the base execution algorithm.
 
@@ -71,6 +71,7 @@ class BaseAlgorithm(BaseComponent, ABC):
         # Algorithm state
         # is_running is managed by BaseComponent
         self.current_executions: dict[str, ExecutionState] = {}
+        self.result_wrappers: dict[str, ExecutionResultWrapper] = {}  # Track wrappers
 
         # Performance tracking
         self.total_executions = 0
@@ -287,7 +288,10 @@ class BaseAlgorithm(BaseComponent, ABC):
             metadata=state.metadata,
         )
         # Always wrap the result for backward compatibility
-        return ExecutionResultWrapper(core_result, state.original_order, state.algorithm)
+        wrapper = ExecutionResultWrapper(core_result, state.original_order, state.algorithm)
+        # Track the wrapper for future updates
+        self.result_wrappers[state.execution_id] = wrapper
+        return wrapper
 
     async def _update_execution_state(
         self,
@@ -376,8 +380,30 @@ class BaseAlgorithm(BaseComponent, ABC):
         # Update the state
         await self._update_execution_state(state, status, child_order, error_message)
 
-        # _state_to_result already returns wrapped result
-        return self._state_to_result(state)
+        # Update the existing wrapper or create a new one
+        existing_wrapper = self.result_wrappers.get(execution_id)
+        if existing_wrapper:
+            # Update the existing wrapper with new core result
+            new_core = ExecutionResultAdapter.to_core_result(
+                execution_id=state.execution_id,
+                original_order=state.original_order,
+                algorithm=state.algorithm,
+                status=state.status,
+                start_time=state.start_time,
+                child_orders=state.child_orders,
+                total_filled_quantity=state.total_filled_quantity,
+                average_fill_price=state.average_fill_price,
+                total_fees=state.total_fees,
+                end_time=state.end_time,
+                execution_duration=state.execution_duration,
+                error_message=state.error_message,
+                metadata=state.metadata,
+            )
+            existing_wrapper._update_core(new_core)
+            return existing_wrapper
+        else:
+            # _state_to_result already returns wrapped result
+            return self._state_to_result(state)
 
     async def _calculate_slippage_metrics(
         self, execution_state: ExecutionState, expected_price: Decimal | None = None

@@ -39,6 +39,7 @@ from src.execution.exchange_interface import ExchangeFactoryInterface
 # MANDATORY: Import from P-002A
 # MANDATORY: Import from P-007A
 from src.utils import log_calls, time_execution
+from src.utils.execution_utils import calculate_order_value
 
 from .base_algorithm import BaseAlgorithm
 
@@ -284,7 +285,9 @@ class SmartOrderRouter(BaseAlgorithm):
             )
 
             # Determine routing strategy
-            order_value = instruction.order.quantity * (instruction.order.price or Decimal("50000"))
+            order_value = calculate_order_value(
+                instruction.order.quantity, instruction.order.price, None, Decimal("50000")
+            )
 
             if (
                 order_value >= self.min_order_value_for_splitting

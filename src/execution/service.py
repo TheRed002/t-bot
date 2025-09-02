@@ -51,12 +51,18 @@ from src.error_handling.decorators import with_circuit_breaker, with_retry
 
 # Import risk adapter for proper API usage
 # Import monitoring components
-from src.monitoring import MetricsCollector, get_tracer
 from src.monitoring.financial_precision import safe_decimal_to_float
+from src.monitoring.interfaces import MetricsServiceInterface
 
 # Import risk management for integration
 from src.risk_management.service import RiskService
-from src.utils import ValidationFramework, cache_result, format_currency, time_execution
+from src.utils import cache_result, format_currency, time_execution
+from src.utils.execution_utils import (
+    calculate_order_value,
+    calculate_slippage_bps,
+    safe_decimal_conversion,
+)
+from src.utils.interfaces import ValidationServiceInterface
 
 
 class ExecutionService(TransactionalService):
@@ -79,18 +85,25 @@ class ExecutionService(TransactionalService):
 
     def __init__(
         self,
-        database_service=None,
+        db_service: Any = None,  # For backward compatibility
+        database_service: Any = None,  # New parameter name
+        redis_client: Any = None,
+        config: Any = None,
         risk_service: RiskService | None = None,
-        metrics_collector: MetricsCollector | None = None,
+        metrics_service: MetricsServiceInterface | None = None,
+        validation_service: ValidationServiceInterface | None = None,
+        analytics_service: Any = None,
         correlation_id: str | None = None,
-    ):
+    ) -> None:
         """
         Initialize execution service.
 
         Args:
             database_service: Database service instance (injected)
             risk_service: Risk service instance (injected)
-            metrics_collector: Metrics collector instance (injected)
+            metrics_service: Metrics service instance (injected)
+            validation_service: Validation service instance (injected)
+            analytics_service: Analytics service instance (injected)
             correlation_id: Request correlation ID for tracing
         """
         super().__init__(
@@ -98,16 +111,25 @@ class ExecutionService(TransactionalService):
             correlation_id=correlation_id,
         )
 
-        self.database_service = database_service
-        self.risk_service = risk_service
-        self.metrics_collector = metrics_collector
+        # Dependencies will be injected via constructor or resolved during start
 
-        # Initialize tracer for distributed tracing with safety check
-        try:
-            self._tracer = get_tracer("execution.service")
-        except Exception as e:
-            self._logger.warning(f"Failed to initialize tracer: {e}")
-            self._tracer = None
+        # Use new parameter name or fall back to old one for compatibility
+        self.database_service = database_service or db_service
+        self.risk_service = risk_service
+        self.metrics_service = metrics_service
+        self.validation_service = validation_service
+        self.analytics_service = analytics_service
+
+        # Initialize tracer for distributed tracing through monitoring service
+        self._tracer = None
+        if metrics_service:
+            try:
+                # Get tracer through monitoring service if available
+                from src.monitoring import get_tracer
+                self._tracer = get_tracer("execution.service")
+            except (ImportError, AttributeError, RuntimeError) as e:
+                self._logger.warning(f"Failed to initialize tracer: {e}")
+                self._tracer = None
 
         # Execution configuration
         self.max_order_value = Decimal("100000")  # Max order value
@@ -120,7 +142,7 @@ class ExecutionService(TransactionalService):
             "successful_executions": 0,
             "failed_executions": 0,
             "cancelled_executions": 0,
-            "total_volume": 0.0,
+            "total_volume": Decimal("0.0"),
             "average_execution_time_ms": 0.0,
             "average_slippage_bps": 0.0,
             "average_cost_bps": 0.0,
@@ -152,18 +174,22 @@ class ExecutionService(TransactionalService):
     async def _do_start(self) -> None:
         """Start the execution service."""
         try:
-            # Resolve database service if not injected
+            # Validate required dependencies are injected
             if not self.database_service:
-                self.database_service = self.resolve_dependency("DatabaseService")
+                self._logger.error("DatabaseService is required but not injected")
+                raise ServiceError("DatabaseService dependency missing")
 
-            # Resolve risk service if not injected
+            # Risk service is optional
             if not self.risk_service:
-                try:
-                    self.risk_service = self.resolve_dependency("RiskService")
-                    self._logger.info("RiskService resolved successfully")
-                except Exception as e:
-                    self._logger.warning(f"RiskService not available: {e}")
-                    # Continue without RiskService - fallback to basic validation
+                self._logger.warning("RiskService not available - using basic validation")
+            else:
+                self._logger.info("RiskService available")
+
+            # Validation service is optional for this implementation
+            if not self.validation_service:
+                self._logger.warning("ValidationService not available - using basic validation")
+            else:
+                self._logger.info("ValidationService available")
 
             # Ensure database service is running
             if (
@@ -207,7 +233,7 @@ class ExecutionService(TransactionalService):
             self._logger.info(
                 "Execution metrics initialized",
                 recent_trades=len(recent_trades),
-                total_volume=format_currency(self._performance_metrics["total_volume"]),
+                total_volume=format_currency(Decimal(str(self._performance_metrics["total_volume"]))),
             )
 
         except Exception as e:
@@ -367,9 +393,9 @@ class ExecutionService(TransactionalService):
                     "side": saved_order.side,
                     "type": saved_order.type,
                     "status": saved_order.status,
-                    "quantity": float(saved_order.quantity),
-                    "filled_quantity": float(saved_order.filled_quantity),
-                    "average_fill_price": float(saved_order.average_fill_price)
+                    "quantity": str(saved_order.quantity),
+                    "filled_quantity": str(saved_order.filled_quantity),
+                    "average_fill_price": str(saved_order.average_fill_price)
                     if saved_order.average_fill_price
                     else None,
                 }
@@ -393,6 +419,37 @@ class ExecutionService(TransactionalService):
                 await self._update_execution_metrics(
                     execution_result, execution_metrics, operation_start
                 )
+
+                # Send trade data to analytics service
+                if self.analytics_service:
+                    try:
+                        # Create trade object for analytics
+                        from src.core.types import Trade
+
+                        trade = Trade(
+                            trade_id=execution_result.execution_id,
+                            symbol=execution_result.original_order.symbol,
+                            exchange=execution_result.original_order.exchange or "binance",
+                            side=execution_result.original_order.side,
+                            quantity=execution_result.total_filled_quantity,
+                            price=execution_result.average_fill_price or market_data.price,
+                            timestamp=datetime.now(timezone.utc),
+                            fee=execution_result.total_fees or Decimal("0")
+                        )
+
+                        # Update analytics with trade data
+                        self.analytics_service.update_trade(trade)
+
+                        self._logger.debug(
+                            "Trade data sent to analytics",
+                            trade_id=execution_result.execution_id
+                        )
+
+                    except Exception as analytics_error:
+                        # Log but don't fail execution due to analytics errors
+                        self._logger.warning(
+                            f"Failed to send trade data to analytics: {analytics_error}"
+                        )
 
                 self._logger.info(
                     "Order execution recorded successfully",
@@ -653,10 +710,9 @@ class ExecutionService(TransactionalService):
                 filters = {}
             filters["timestamp"] = {"gte": start_time}
 
-            # For now, get all orders and filter in memory
-            # TODO: Enhance DatabaseService to support complex filters
+            # Get all orders and filter in memory
             all_orders = await self.database_service.list_entities(
-                model_class=Order,  # Query Orders, not Trades
+                model_class=Order,
                 filters=filters,
                 order_by="created_at",  # Use created_at for Order model
                 order_desc=True,
@@ -697,7 +753,7 @@ class ExecutionService(TransactionalService):
                     total_fees += order_fees
 
             if total_volume > 0:
-                avg_fee_rate = float((total_fees / total_volume) * 10000)
+                avg_fee_rate = (total_fees / total_volume) * 10000
 
             metrics = {
                 "time_range_hours": time_range_hours,
@@ -705,7 +761,7 @@ class ExecutionService(TransactionalService):
                 "successful_orders": len(successful_orders),
                 "failed_orders": len(failed_orders),
                 "success_rate": success_rate,
-                "total_volume": float(total_volume),
+                "total_volume": str(total_volume),
                 "average_fee_rate_bps": avg_fee_rate,
                 "symbols_traded": len(set(order.symbol for order in filtered_orders)),
                 "exchanges_used": len(set(order.exchange for order in filtered_orders)),
@@ -732,16 +788,7 @@ class ExecutionService(TransactionalService):
 
     def _convert_to_decimal_safe(self, value: Any, precision: int = 8) -> Decimal:
         """Safely convert value to Decimal with proper precision."""
-        if value is None:
-            return Decimal("0")
-
-        if isinstance(value, Decimal):
-            # Quantize to required precision
-            return value.quantize(Decimal(f"0.{'0' * precision}"))
-
-        # Convert to string first to avoid float precision issues
-        decimal_value = Decimal(str(value))
-        return decimal_value.quantize(Decimal(f"0.{'0' * precision}"))
+        return safe_decimal_conversion(value, precision)
 
     def _validate_execution_result(self, execution_result: ExecutionResult) -> None:
         """Validate execution result parameters."""
@@ -779,10 +826,11 @@ class ExecutionService(TransactionalService):
             "quality_score": 0.0,
         }
 
-        # Calculate slippage
+        # Calculate slippage using shared utility
         if execution_result.average_fill_price and market_data.price:
-            price_diff = execution_result.average_fill_price - market_data.price
-            slippage_bps = abs(price_diff / market_data.price) * 10000
+            slippage_bps = calculate_slippage_bps(
+                execution_result.average_fill_price, market_data.price
+            )
             metrics["slippage_bps"] = slippage_bps
 
         # Calculate quality score
@@ -863,7 +911,24 @@ class ExecutionService(TransactionalService):
             )
         else:
             try:
-                ValidationFramework.validate_quantity(str(order.quantity))
+                # Use ValidationService with proper validation
+                if self.validation_service:
+                    # Use the validation service if available
+                    if hasattr(self.validation_service, "validate_quantity"):
+                        # Use async method if available
+                        await self.validation_service.validate_quantity(order.quantity)
+                    elif hasattr(self.validation_service, "validate_quantity_sync"):
+                        # Use sync method as fallback
+                        self.validation_service.validate_quantity_sync(order.quantity)
+                    else:
+                        # Basic validation if no specific method
+                        if order.quantity <= 0:
+                            raise ValidationError("Quantity must be positive")
+                else:
+                    # Fallback to basic validation
+                    if order.quantity <= 0:
+                        raise ValidationError("Quantity must be positive")
+
                 checks.append(
                     {
                         "check": "quantity_validation",
@@ -871,7 +936,7 @@ class ExecutionService(TransactionalService):
                         "message": "Quantity is valid",
                     }
                 )
-            except ValidationError as e:
+            except (ValidationError, ValueError) as e:
                 errors.append(str(e))
                 checks.append(
                     {
@@ -882,7 +947,7 @@ class ExecutionService(TransactionalService):
                 )
 
         # Validate order value
-        order_value = order.quantity * (order.price or market_data.price)
+        order_value = calculate_order_value(order.quantity, order.price, market_data)
         if order_value > self.max_order_value:
             errors.append(f"Order value {order_value} exceeds maximum {self.max_order_value}")
             checks.append(
@@ -991,8 +1056,9 @@ class ExecutionService(TransactionalService):
 
         # Simple fallback validation if RiskService not available
         else:
-            # Basic position size check
-            if (order.quantity * (order.price or Decimal("1"))) > self.max_order_value:
+            # Basic position size check using shared utility
+            order_value = calculate_order_value(order.quantity, order.price, None, Decimal("1"))
+            if order_value > self.max_order_value:
                 warnings.append(f"Order value exceeds maximum {self.max_order_value}")
                 checks.append(
                     {
@@ -1327,19 +1393,24 @@ class ExecutionService(TransactionalService):
             self._logger.error(f"Failed to create execution audit log: {e}")
             # CRITICAL: Audit log failures must not be silent
             # Store to fallback file for compliance
-            fallback_file = None
+            fallback_file_handle = None
             try:
                 import json
 
                 fallback_file = "/tmp/audit_log_fallback.jsonl"
-                with open(fallback_file, "a") as f:
-                    f.write(json.dumps(audit_log_data) + "\n")
+                fallback_file_handle = open(fallback_file, "a")
+                fallback_file_handle.write(json.dumps(audit_log_data) + "\n")
+                fallback_file_handle.flush()
                 self._logger.warning(f"Audit log saved to fallback file: {fallback_file}")
             except Exception as fallback_error:
                 self._logger.critical(f"Failed to save audit log to fallback: {fallback_error}")
             finally:
-                # File handle is automatically closed by 'with' statement
-                pass
+                # Ensure file handle is closed
+                if fallback_file_handle:
+                    try:
+                        fallback_file_handle.close()
+                    except Exception as close_error:
+                        self._logger.warning(f"Failed to close audit log fallback file: {close_error}")
 
     async def _create_risk_audit_log(
         self,
@@ -1357,7 +1428,7 @@ class ExecutionService(TransactionalService):
                 "event_type": event_type,
                 "bot_id": bot_id,
                 "risk_level": validation_results["risk_level"],
-                "risk_score": float(validation_results["risk_score"]),
+                "risk_score": validation_results["risk_score"],
                 "threshold_breached": validation_results["overall_result"] == "failed",
                 "risk_description": f"Pre-trade validation for {event_type}",
                 "risk_calculation": validation_results["validation_checks"],
@@ -1379,18 +1450,23 @@ class ExecutionService(TransactionalService):
         except Exception as e:
             self._logger.error(f"Failed to create risk audit log: {e}")
             # Store to fallback for compliance
-            fallback_file = None
+            fallback_file_handle = None
             try:
                 import json
 
                 fallback_file = "/tmp/risk_audit_fallback.jsonl"
-                with open(fallback_file, "a") as f:
-                    f.write(json.dumps(risk_audit_data) + "\n")
-            except Exception as e:
-                self.logger.warning("Failed to write risk audit fallback data", error=str(e))
+                fallback_file_handle = open(fallback_file, "a")
+                fallback_file_handle.write(json.dumps(risk_audit_data) + "\n")
+                fallback_file_handle.flush()
+            except Exception as fallback_error:
+                self._logger.warning("Failed to write risk audit fallback data", error=str(fallback_error))
             finally:
-                # File handle is automatically closed by 'with' statement
-                pass
+                # Ensure file handle is closed
+                if fallback_file_handle:
+                    try:
+                        fallback_file_handle.close()
+                    except Exception as close_error:
+                        self._logger.warning(f"Failed to close risk audit fallback file: {close_error}")
 
     async def _update_execution_metrics(
         self,
@@ -1438,49 +1514,65 @@ class ExecutionService(TransactionalService):
         ) / total_executions
 
         # Export metrics to Prometheus if collector is available
-        if self.metrics_collector:
+        if self.metrics_service:
             try:
-                # Validate metrics collector is properly initialized
-                if not hasattr(self.metrics_collector, "trading_metrics"):
-                    self._logger.warning("MetricsCollector missing trading_metrics attribute")
-                    return
-
-                # Record order metrics with validation
+                # Record order execution metrics using service interface
                 try:
-                    self.metrics_collector.trading_metrics.record_order(
-                        exchange=execution_result.original_order.exchange or "unknown",
-                        status=self._map_execution_status_to_order_status(execution_result.status),
-                        order_type=execution_result.original_order.order_type,
-                        symbol=execution_result.original_order.symbol,
-                        execution_time=execution_time_ms / 1000.0,  # Convert to seconds
-                        slippage_bps=slippage_bps,
+                    from src.monitoring.services import MetricRequest
+
+                    # Record order count metric
+                    order_metric = MetricRequest(
+                        name="trading.orders.total",
+                        value=1,
+                        labels={
+                            "exchange": execution_result.original_order.exchange or "unknown",
+                            "status": self._map_execution_status_to_order_status(execution_result.status).value,
+                            "order_type": execution_result.original_order.order_type.value,
+                            "symbol": execution_result.original_order.symbol,
+                        }
                     )
-                except AttributeError as e:
-                    self._logger.warning(f"MetricsCollector API error recording order: {e}")
-                except ValueError as e:
-                    self._logger.warning(f"Invalid metric value for order recording: {e}")
+                    self.metrics_service.record_counter(order_metric)
+
+                    # Record volume metrics
+                    volume_metric = MetricRequest(
+                        name="trading.volume.usd",
+                        value=trade_value,
+                        labels={
+                            "exchange": execution_result.original_order.exchange or "unknown",
+                            "symbol": execution_result.original_order.symbol,
+                        }
+                    )
+                    self.metrics_service.record_counter(volume_metric)
+
+                    # Record execution time metrics
+                    execution_time_metric = MetricRequest(
+                        name="trading.execution.time.ms",
+                        value=execution_time_ms,
+                        labels={
+                            "exchange": execution_result.original_order.exchange or "unknown",
+                            "symbol": execution_result.original_order.symbol,
+                        }
+                    )
+                    self.metrics_service.record_histogram(execution_time_metric)
+
                 except Exception as e:
-                    self._logger.warning(f"Unexpected error recording order metrics: {e}")
+                    self._logger.warning(f"Error recording order metrics: {e}")
 
                 # Record trade metrics if execution was successful
                 if execution_result.status == ExecutionStatus.COMPLETED:
                     try:
-                        # TODO: Implement actual P&L calculation based on position tracking
-                        # Currently hardcoded to 0.0 as it requires position history and entry prices
-                        pnl_usd = 0.0
-                        self.metrics_collector.trading_metrics.record_trade(
-                            exchange=execution_result.original_order.exchange or "unknown",
-                            strategy="unknown",  # Would need to be passed in
-                            symbol=execution_result.original_order.symbol,
-                            pnl_usd=pnl_usd,
-                            volume_usd=trade_value,
+                        trade_metric = MetricRequest(
+                            name="trading.trades.total",
+                            value=1,
+                            labels={
+                                "exchange": execution_result.original_order.exchange or "unknown",
+                                "symbol": execution_result.original_order.symbol,
+                            }
                         )
-                    except AttributeError as e:
-                        self._logger.warning(f"MetricsCollector API error recording trade: {e}")
-                    except ValueError as e:
-                        self._logger.warning(f"Invalid metric value for trade recording: {e}")
+                        self.metrics_service.record_counter(trade_metric)
+
                     except Exception as e:
-                        self._logger.warning(f"Unexpected error recording trade metrics: {e}")
+                        self._logger.warning(f"Error recording trade metrics: {e}")
             except Exception as e:
                 self._logger.error(f"Critical error in metrics export: {e}", exc_info=True)
 
@@ -1491,7 +1583,7 @@ class ExecutionService(TransactionalService):
             "successful_orders": 0,
             "failed_orders": 0,
             "success_rate": 0.0,
-            "total_volume": 0.0,
+            "total_volume": Decimal("0.0"),
             "average_fee_rate_bps": 0.0,
             "symbols_traded": 0,
             "exchanges_used": 0,
@@ -1553,7 +1645,7 @@ class ExecutionService(TransactionalService):
             "successful_executions": 0,
             "failed_executions": 0,
             "cancelled_executions": 0,
-            "total_volume": 0.0,
+            "total_volume": Decimal("0.0"),
             "average_execution_time_ms": 0.0,
             "average_slippage_bps": 0.0,
             "average_cost_bps": 0.0,

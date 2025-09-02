@@ -89,9 +89,9 @@ class RiskManagerAdapter:
                     source="execution_algorithm",
                     metadata={
                         "quantity": str(order.quantity),
-                        "price": float(order.price) if order.price else 0.0,
+                        "price": str(order.price) if order.price else "0",
                         "order_type": order.order_type.value,
-                        "portfolio_value": float(portfolio_value),
+                        "portfolio_value": str(portfolio_value),
                     },
                 )
 
