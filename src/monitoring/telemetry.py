@@ -16,11 +16,13 @@ Key Features:
 - Custom trading operation spans
 """
 
+import asyncio
 from collections.abc import Callable
 from contextlib import asynccontextmanager, contextmanager
 from dataclasses import dataclass
+from decimal import Decimal
 from functools import wraps
-from typing import Any
+from typing import Any, Union
 
 # Try to import OpenTelemetry components, fall back gracefully if not available
 try:
@@ -48,100 +50,121 @@ except ImportError:
     OPENTELEMETRY_AVAILABLE = False
 
     class MockTracer:
-        def start_as_current_span(self, name, **kwargs):
+        def start_as_current_span(self, name: str, **kwargs: Any) -> "MockSpan":
             return MockSpan()
 
     class MockSpan:
-        def __enter__(self):
+        def __enter__(self) -> "MockSpan":
             return self
 
-        def __exit__(self, *args):
+        def __exit__(self, *args: Any) -> None:
             pass
 
-        def set_attribute(self, key, value):
+        def set_attribute(self, key: str, value: Any) -> None:
             pass
 
-        def add_event(self, name, attributes=None):
+        def add_event(self, name: str, attributes: Union[dict[str, Any], None] = None) -> None:
             pass
 
-        def set_status(self, status):
+        def set_status(self, status: Any) -> None:
             pass
 
-        def record_exception(self, exception):
+        def record_exception(self, exception: Exception) -> None:
             pass
 
     class MockTrace:
         Tracer = MockTracer
 
-        def get_tracer(self, *args):
+        def get_tracer(self, *args: Any) -> MockTracer:
             return MockTracer()
 
-        def set_tracer_provider(self, provider):
+        def set_tracer_provider(self, provider: Any) -> None:
             pass
 
-        def get_tracer_provider(self):
+        def get_tracer_provider(self) -> None:
             return None
 
-    trace: Any = MockTrace()
-    metrics: Any = None
-    Status: Any = type("MockStatus", (), {})()
-    StatusCode: Any = type("MockStatusCode", (), {"OK": "ok", "ERROR": "error"})()
+    class MockStatus:
+        def __init__(self, status_code: str, description: str = ""):
+            self.status_code = status_code
+            self.description = description
+
+    class MockStatusCode:
+        OK = "ok"
+        ERROR = "error"
+
+    # Create mock instances without redefining imports
+    _mock_trace = MockTrace()
+    _mock_metrics = None
+
+    # Assign to variables that won't conflict with imports
+    trace = _mock_trace  # type: ignore[assignment]
+    metrics = _mock_metrics  # type: ignore[assignment]
+    Status = MockStatus  # type: ignore[assignment,misc]
+    StatusCode = MockStatusCode  # type: ignore[assignment,misc]
 
     # Mock other classes
-    TracerProvider: Any = None
-    Span: Any = None
-    BatchSpanProcessor: Any = None
-    ConsoleSpanExporter: Any = None
-    MeterProvider: Any = None
-    Resource: Any = None
-    JaegerExporter: Any = None
-    OTLPSpanExporter: Any = None
-    FastAPIInstrumentor: Any = None
-    RequestsInstrumentor: Any = None
-    AioHttpClientInstrumentor: Any = None
-    AsyncPGInstrumentor: Any = None
-    RedisInstrumentor: Any = None
-    SQLAlchemyInstrumentor: Any = None
-    get_excluded_urls: Any = None
-    SpanAttributes: Any = None
+    TracerProvider = None  # type: ignore[assignment,misc]
+    Span = None  # type: ignore[assignment,misc]
+    BatchSpanProcessor = None  # type: ignore[assignment,misc]
+    ConsoleSpanExporter = None  # type: ignore[assignment,misc]
+    MeterProvider = None  # type: ignore[assignment,misc]
+    Resource = None  # type: ignore[assignment,misc]
+    JaegerExporter = None  # type: ignore[assignment,misc]
+    OTLPSpanExporter = None  # type: ignore[assignment,misc]
+    FastAPIInstrumentor = None  # type: ignore[assignment,misc]
+    RequestsInstrumentor = None  # type: ignore[assignment,misc]
+    AioHttpClientInstrumentor = None  # type: ignore[assignment,misc]
+    AsyncPGInstrumentor = None  # type: ignore[assignment,misc]
+    RedisInstrumentor = None  # type: ignore[assignment,misc]
+    SQLAlchemyInstrumentor = None  # type: ignore[assignment,misc]
+    get_excluded_urls = None  # type: ignore[assignment,misc]
+    SpanAttributes = None  # type: ignore[assignment,misc]
 
-from src.core import MonitoringError, get_logger
+from src.core.exceptions import MonitoringError
 
-# Import error handling with fallback
-try:
-    from src.error_handling import (
-        get_global_error_handler,
-        with_error_context,
-        with_retry,
-    )
-except ImportError:
-    # Fallback implementations
-    def get_global_error_handler():
-        return None
 
-    def with_error_context(context_name):
+# Local fallback for error handling to avoid circular dependencies
+def get_error_handler_fallback():
+    """Get fallback error handling functions."""
+    def with_error_context(func):
+        async def wrapper(*args, **kwargs):
+            return await func(*args, **kwargs)
+        return wrapper
+
+    def with_retry(max_attempts: int = 3, backoff_factor = None, exceptions = None):
         def decorator(func):
-            return func
-
+            async def wrapper(*args, **kwargs):
+                last_exception = None
+                for attempt in range(max_attempts):
+                    try:
+                        return await func(*args, **kwargs)
+                    except Exception as e:
+                        if exceptions and not isinstance(e, exceptions):
+                            raise  # Don't retry if exception type doesn't match
+                        last_exception = e
+                        if attempt < max_attempts - 1:
+                            import asyncio
+                            backoff = float(backoff_factor or 2.0) if backoff_factor else 2.0
+                            await asyncio.sleep(0.5 * (backoff ** attempt))
+                        continue
+                raise last_exception
+            return wrapper
         return decorator
 
-    def with_retry(max_attempts=3, backoff_factor=2.0, exceptions=(Exception,)):
-        def decorator(func):
-            return func
+    return with_error_context, with_retry
 
-        return decorator
+# Get error handling functions with proper fallback
+with_error_context, with_retry = get_error_handler_fallback()
 
 
-# Initialize logger with error handling
-try:
-    logger = get_logger(__name__)
-except Exception as e:
-    # Fallback to basic logging if get_logger fails
+# Initialize logger with proper error handling
+def get_monitoring_logger(name: str):
+    """Get monitoring logger - local implementation to avoid circular dependencies."""
     import logging
+    return logging.getLogger(name)
 
-    logger = logging.getLogger(__name__)
-    logger.warning(f"Failed to get logger from get_logger: {e}")
-    raise
+logger = get_monitoring_logger(__name__)
 
 
 @dataclass
@@ -156,7 +179,7 @@ class OpenTelemetryConfig:
 
     # Tracing configuration
     tracing_enabled: bool = True
-    sampling_rate: float = 1.0  # 100% for development, reduce for production
+    sampling_rate: float = 1.0  # 100% for development, reduce to 0.1 for production
 
     # Exporters
     jaeger_enabled: bool = False  # Disabled by default - requires Jaeger server
@@ -179,9 +202,9 @@ class OpenTelemetryConfig:
     max_attributes_per_event: int = 100
 
     # Custom attributes
-    custom_resource_attributes: dict[str, str] | None = None
+    custom_resource_attributes: Union[dict[str, str], None] = None
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         """Post-initialization setup."""
         if self.custom_resource_attributes is None:
             self.custom_resource_attributes = {}
@@ -195,7 +218,7 @@ class TradingTracer:
     attributes and metrics for financial analysis.
     """
 
-    def __init__(self, tracer):
+    def __init__(self, tracer: Any) -> None:
         """
         Initialize trading tracer.
 
@@ -204,6 +227,9 @@ class TradingTracer:
         """
         self._tracer = tracer
         self._active_spans: dict[str, Any] = {}
+        self._span_processors: list[Any] = []
+        self._tracer_provider: Any = None
+        self._meter_provider: Any = None
 
     @contextmanager
     def trace_order_execution(
@@ -213,9 +239,9 @@ class TradingTracer:
         symbol: str,
         order_type: str,
         side: str,
-        quantity: float,
-        price: float | None = None,
-    ):
+        quantity: Decimal,
+        price: Union[Decimal, None] = None,
+    ) -> Any:
         """
         Trace order execution with trading-specific attributes.
 
@@ -236,8 +262,8 @@ class TradingTracer:
                 "trading.symbol": symbol,
                 "trading.order.type": order_type,
                 "trading.order.side": side,
-                "trading.order.quantity": quantity,
-                "trading.order.price": price or 0.0,
+                "trading.order.quantity": float(quantity),
+                "trading.order.price": float(price) if price else 0.0,
             },
         ) as span:
             span.set_attribute("operation.type", "order_execution")
@@ -245,8 +271,8 @@ class TradingTracer:
 
     @contextmanager
     def trace_strategy_execution(
-        self, strategy_name: str, symbol: str, action: str, confidence: float | None = None
-    ):
+        self, strategy_name: str, symbol: str, action: str, confidence: Union[Decimal, None] = None
+    ) -> Any:
         """
         Trace strategy execution.
 
@@ -262,7 +288,7 @@ class TradingTracer:
                 "trading.strategy.name": strategy_name,
                 "trading.symbol": symbol,
                 "trading.strategy.action": action,
-                "trading.strategy.confidence": confidence or 0.0,
+                "trading.strategy.confidence": float(confidence) if confidence else 0.0,
             },
         ) as span:
             span.set_attribute("operation.type", "strategy_execution")
@@ -270,8 +296,8 @@ class TradingTracer:
 
     @contextmanager
     def trace_risk_check(
-        self, check_type: str, symbol: str, position_size: float, portfolio_value: float
-    ):
+        self, check_type: str, symbol: str, position_size: Decimal, portfolio_value: Decimal
+    ) -> Any:
         """
         Trace risk management checks.
 
@@ -286,8 +312,8 @@ class TradingTracer:
             attributes={
                 "trading.risk.check_type": check_type,
                 "trading.symbol": symbol,
-                "trading.position.size": position_size,
-                "trading.portfolio.value": portfolio_value,
+                "trading.position.size": float(position_size),
+                "trading.portfolio.value": float(portfolio_value),
             },
         ) as span:
             span.set_attribute("operation.type", "risk_check")
@@ -295,8 +321,8 @@ class TradingTracer:
 
     @contextmanager
     def trace_market_data_processing(
-        self, exchange: str, symbol: str, data_type: str, latency_ms: float | None = None
-    ):
+        self, exchange: str, symbol: str, data_type: str, latency_ms: Union[Decimal, None] = None
+    ) -> Any:
         """
         Trace market data processing.
 
@@ -312,13 +338,15 @@ class TradingTracer:
                 "trading.exchange": exchange,
                 "trading.symbol": symbol,
                 "trading.data.type": data_type,
-                "trading.data.latency_ms": latency_ms or 0.0,
+                "trading.data.latency_ms": float(latency_ms) if latency_ms else 0.0,
             },
         ) as span:
             span.set_attribute("operation.type", "market_data_processing")
             yield span
 
-    def add_trading_event(self, span, event_type: str, attributes: dict[str, Any] | None = None):
+    def add_trading_event(
+        self, span: Any, event_type: str, attributes: Union[dict[str, Any], None] = None
+    ) -> None:
         """
         Add a trading-specific event to a span.
 
@@ -331,9 +359,81 @@ class TradingTracer:
         event_attributes["trading.event.type"] = event_type
         span.add_event(f"trading.{event_type}", event_attributes)
 
+    def cleanup(self) -> None:
+        """Clean up telemetry resources to prevent resource leaks."""
+        try:
+            # Clear active spans
+            self._active_spans.clear()
 
-@with_retry(max_attempts=3, backoff_factor=2.0, exceptions=(MonitoringError,))
-@with_error_context("telemetry_setup")
+            # Shutdown span processors with proper async handling
+            for processor in self._span_processors:
+                try:
+                    if hasattr(processor, "shutdown"):
+                        if asyncio.iscoroutinefunction(processor.shutdown):
+                            # Can't await in sync method, so run in event loop
+                            try:
+                                loop = asyncio.get_event_loop()
+                                if loop.is_running():
+                                    # If loop is running, schedule for later
+                                    asyncio.create_task(processor.shutdown())
+                                else:
+                                    loop.run_until_complete(processor.shutdown())
+                            except RuntimeError:
+                                # No event loop, skip async shutdown
+                                pass
+                        else:
+                            processor.shutdown()
+                except Exception:
+                    # Log but don't raise to allow other cleanup to continue
+                    pass
+            self._span_processors.clear()
+
+            # Shutdown tracer provider with proper async handling
+            if self._tracer_provider and hasattr(self._tracer_provider, "shutdown"):
+                try:
+                    if asyncio.iscoroutinefunction(self._tracer_provider.shutdown):
+                        # Can't await in sync method, so run in event loop
+                        try:
+                            loop = asyncio.get_event_loop()
+                            if loop.is_running():
+                                # If loop is running, schedule for later
+                                asyncio.create_task(self._tracer_provider.shutdown())
+                            else:
+                                loop.run_until_complete(self._tracer_provider.shutdown())
+                        except RuntimeError:
+                            # No event loop, skip async shutdown
+                            pass
+                    else:
+                        self._tracer_provider.shutdown()
+                except Exception:
+                    pass
+
+            # Shutdown meter provider with proper async handling
+            if self._meter_provider and hasattr(self._meter_provider, "shutdown"):
+                try:
+                    if asyncio.iscoroutinefunction(self._meter_provider.shutdown):
+                        # Can't await in sync method, so run in event loop
+                        try:
+                            loop = asyncio.get_event_loop()
+                            if loop.is_running():
+                                # If loop is running, schedule for later
+                                asyncio.create_task(self._meter_provider.shutdown())
+                            else:
+                                loop.run_until_complete(self._meter_provider.shutdown())
+                        except RuntimeError:
+                            # No event loop, skip async shutdown
+                            pass
+                    else:
+                        self._meter_provider.shutdown()
+                except Exception:
+                    pass
+
+        except Exception:
+            # Log cleanup errors but don't raise to prevent masking original errors
+            pass
+
+
+@with_retry(max_attempts=3, backoff_factor=Decimal("2.0"), exceptions=(MonitoringError,))
 def setup_telemetry(config: OpenTelemetryConfig) -> TradingTracer:
     """
     Setup OpenTelemetry instrumentation for the trading system.
@@ -359,11 +459,16 @@ def setup_telemetry(config: OpenTelemetryConfig) -> TradingTracer:
         }
 
         # Add custom resource attributes
-        resource_attributes.update(config.custom_resource_attributes)
+        if config.custom_resource_attributes:
+            resource_attributes.update(config.custom_resource_attributes)
 
         resource = Resource.create(resource_attributes)
 
         # Setup tracing
+        tracer_provider = None
+        meter_provider = None
+        span_processors = []
+
         if config.tracing_enabled:
             tracer_provider = TracerProvider(
                 resource=resource, sampler=TraceIdRatioBased(config.sampling_rate)
@@ -405,6 +510,7 @@ def setup_telemetry(config: OpenTelemetryConfig) -> TradingTracer:
             # Add exporters to tracer provider
             for exporter in exporters:
                 span_processor = BatchSpanProcessor(exporter)
+                span_processors.append(span_processor)
                 tracer_provider.add_span_processor(span_processor)
 
             # Set global tracer provider
@@ -412,7 +518,7 @@ def setup_telemetry(config: OpenTelemetryConfig) -> TradingTracer:
 
             logger.info(f"OpenTelemetry tracing configured with {len(exporters)} exporters")
 
-        # Setup metrics (placeholder for future implementation)
+        # Setup metrics provider
         meter_provider = MeterProvider(resource=resource)
         metrics.set_meter_provider(meter_provider)
 
@@ -422,13 +528,43 @@ def setup_telemetry(config: OpenTelemetryConfig) -> TradingTracer:
         # Setup automatic instrumentation
         _setup_auto_instrumentation(config)
 
-        # Create trading tracer
+        # Create trading tracer with cleanup resources
         trading_tracer = TradingTracer(tracer)
+        trading_tracer._span_processors = span_processors
+        trading_tracer._tracer_provider = tracer_provider
+        trading_tracer._meter_provider = meter_provider
 
         logger.info("OpenTelemetry setup completed successfully")
         return trading_tracer
 
     except Exception as e:
+        # Cleanup resources on failure to prevent leaks with async handling
+        try:
+            for processor in span_processors:
+                try:
+                    if hasattr(processor, "shutdown"):
+                        if asyncio.iscoroutinefunction(processor.shutdown):
+                            # Can't await here since we're in except block, use sync version
+                            pass  # Skip async shutdown in exception handler
+                        else:
+                            processor.shutdown()
+                except Exception as e:
+                    logger.warning(f"Failed to shutdown span processor: {e}")
+            if tracer_provider and hasattr(tracer_provider, "shutdown"):
+                try:
+                    if not asyncio.iscoroutinefunction(tracer_provider.shutdown):
+                        tracer_provider.shutdown()
+                except Exception as e:
+                    logger.warning(f"Failed to shutdown tracer provider: {e}")
+            if meter_provider and hasattr(meter_provider, "shutdown"):
+                try:
+                    if not asyncio.iscoroutinefunction(meter_provider.shutdown):
+                        meter_provider.shutdown()
+                except Exception as e:
+                    logger.warning(f"Failed to shutdown meter provider: {e}")
+        except Exception as e:
+            logger.warning(f"Failed to cleanup OpenTelemetry resources: {e}")
+
         logger.error(f"Failed to setup OpenTelemetry: {e}")
         raise MonitoringError(f"Failed to setup OpenTelemetry: {e}", error_code="MON_1005") from e
 
@@ -468,44 +604,44 @@ def _setup_auto_instrumentation(config: OpenTelemetryConfig) -> None:
                             )
 
             except Exception as e:
-                logger.debug(f"FastAPI instrumentation configuration failed: {e}")
+                logger.info(f"FastAPI instrumentation using fallback: {e}")
                 # Try basic instrumentation without excluded URLs
                 try:
                     FastAPIInstrumentor().instrument()
                 except Exception as basic_error:
-                    logger.warning(f"Basic FastAPI instrumentation failed: {basic_error}")
-            logger.debug("FastAPI instrumentation enabled")
+                    logger.warning(f"FastAPI instrumentation failed: {basic_error}")
+            logger.info("FastAPI instrumentation configured")
 
         # HTTP client instrumentation
         if config.instrument_requests:
             RequestsInstrumentor().instrument()
-            logger.debug("Requests instrumentation enabled")
+            logger.info("Requests instrumentation configured")
 
         if config.instrument_aiohttp:
             AioHttpClientInstrumentor().instrument()
-            logger.debug("AioHTTP client instrumentation enabled")
+            logger.info("AioHTTP client instrumentation configured")
 
         # Database instrumentation
         if config.instrument_database:
             try:
                 AsyncPGInstrumentor().instrument()
-                logger.debug("AsyncPG instrumentation enabled")
+                logger.info("AsyncPG instrumentation configured")
             except Exception as e:
-                logger.warning(f"Failed to instrument AsyncPG: {e}")
+                logger.warning(f"AsyncPG instrumentation failed: {e}")
 
             try:
                 SQLAlchemyInstrumentor().instrument()
-                logger.debug("SQLAlchemy instrumentation enabled")
+                logger.info("SQLAlchemy instrumentation configured")
             except Exception as e:
-                logger.warning(f"Failed to instrument SQLAlchemy: {e}")
+                logger.warning(f"SQLAlchemy instrumentation failed: {e}")
 
         # Redis instrumentation
         if config.instrument_redis:
             try:
                 RedisInstrumentor().instrument()
-                logger.debug("Redis instrumentation enabled")
+                logger.info("Redis instrumentation configured")
             except Exception as e:
-                logger.warning(f"Failed to instrument Redis: {e}")
+                logger.warning(f"Redis instrumentation failed: {e}")
 
     except Exception as e:
         logger.error(f"Error setting up auto instrumentation: {e}")
@@ -524,7 +660,7 @@ def get_tracer(name: str = "tbot-trading") -> trace.Tracer:
     return trace.get_tracer(name)
 
 
-def instrument_fastapi(app, config: OpenTelemetryConfig):
+def instrument_fastapi(app: Any, config: OpenTelemetryConfig) -> None:
     """
     Instrument a FastAPI application with OpenTelemetry.
 
@@ -546,17 +682,30 @@ def instrument_fastapi(app, config: OpenTelemetryConfig):
                 logger.warning(f"Failed to process excluded URLs: {e}")
                 excluded_urls_param = ""
 
-            FastAPIInstrumentor.instrument_app(
-                app,
-                excluded_urls=excluded_urls_param,
-                tracer_provider=trace.get_tracer_provider(),
-            )
+            # Try different parameter formats for different OpenTelemetry versions
+            try:
+                FastAPIInstrumentor.instrument_app(
+                    app,
+                    excluded_urls=excluded_urls_param,
+                    tracer_provider=trace.get_tracer_provider(),
+                )
+            except TypeError:
+                # Fallback for versions that don't accept excluded_urls as string
+                try:
+                    FastAPIInstrumentor.instrument_app(
+                        app,
+                        tracer_provider=trace.get_tracer_provider(),
+                    )
+                except Exception as fallback_error:
+                    logger.warning(f"FastAPI instrumentation failed with fallback: {fallback_error}")
+                    raise
             logger.info("FastAPI application instrumented with OpenTelemetry")
     except Exception as e:
         logger.error(f"Failed to instrument FastAPI app: {e}")
+        raise
 
 
-def trace_async_function(operation_name: str, attributes: dict[str, Any] | None = None):
+def trace_async_function(operation_name: str, attributes: Union[dict[str, Any], None] = None) -> Callable:
     """
     Decorator to trace async functions.
 
@@ -597,7 +746,7 @@ def trace_async_function(operation_name: str, attributes: dict[str, Any] | None 
     return decorator
 
 
-def trace_function(operation_name: str, attributes: dict[str, Any] | None = None):
+def trace_function(operation_name: str, attributes: Union[dict[str, Any], None] = None) -> Callable:
     """
     Decorator to trace synchronous functions.
 
@@ -639,7 +788,7 @@ def trace_function(operation_name: str, attributes: dict[str, Any] | None = None
 
 
 @asynccontextmanager
-async def trace_async_context(operation_name: str, attributes: dict[str, Any] | None = None):
+async def trace_async_context(operation_name: str, attributes: Union[dict[str, Any], None] = None) -> Any:
     """
     Async context manager for tracing operations.
 
@@ -662,10 +811,10 @@ async def trace_async_context(operation_name: str, attributes: dict[str, Any] | 
 
 
 # Global trading tracer instance
-_global_trading_tracer: TradingTracer | None = None
+_global_trading_tracer: Union[TradingTracer, None] = None
 
 
-def get_trading_tracer() -> TradingTracer | None:
+def get_trading_tracer() -> Union[TradingTracer, None]:
     """
     Get the global trading tracer instance.
 

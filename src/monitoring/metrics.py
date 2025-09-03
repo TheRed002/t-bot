@@ -14,74 +14,104 @@ Key Features:
 
 import asyncio
 import logging
+import math
 import threading
 import time
 import uuid
 from dataclasses import dataclass, field
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation, localcontext
 from enum import Enum
-from typing import Any
-
-import psutil
+from typing import TYPE_CHECKING, Any, Union
 
 from src.core.base.component import BaseComponent
-from src.core.exceptions import MonitoringError
+from src.core.exceptions import MonitoringError, ServiceError
+from src.core.logging import get_logger
 from src.core.types import OrderStatus, OrderType
 
-# Import error handling with fallback
-try:
-    from src.error_handling.context import ErrorContext, ErrorSeverity
-except ImportError:
-    # Fallback if error handling module not available
-    from dataclasses import dataclass
-    from enum import Enum
+# Production-ready imports - only required dependencies
+logger = get_logger(__name__)
 
-    class ErrorSeverity(Enum):
-        LOW = "low"
-        MEDIUM = "medium"
-        HIGH = "high"
-        CRITICAL = "critical"
+# Import error handling with service injection pattern - use TYPE_CHECKING to avoid circular imports
+if TYPE_CHECKING:
+    from src.core.exceptions import ErrorSeverity
+    from src.error_handling.context import ErrorContext
+else:
+    # Use runtime imports to avoid circular dependencies
+    try:
+        from src.core.exceptions import ErrorSeverity
+    except ImportError:
+        # Fallback if error handling module not available
+        class _MockErrorSeverity:
+            LOW = "low"
+            MEDIUM = "medium"
+            HIGH = "high"
+            CRITICAL = "critical"
+        ErrorSeverity = _MockErrorSeverity  # type: ignore[assignment,misc]
 
-    @dataclass
-    class ErrorContext:
-        error: Exception | None = None
-        component: str = ""
-        operation: str = ""
-        details: dict = None
-        severity: ErrorSeverity = ErrorSeverity.MEDIUM
-        correlation_id: str = ""
+    try:
+        from src.error_handling.context import ErrorContext
+    except ImportError:
+        # Fallback error context
+        class _MockErrorContext:
+            def __init__(self, component: str = "", operation: str = "", error: Exception | None = None, details: dict[str, Any] | None = None, severity=None, correlation_id: str = ""):
+                self.component = component
+                self.operation = operation
+                self.error = error
+                self.details = details
+                self.severity = severity or "medium"
+                self.correlation_id = correlation_id
+
+            @classmethod
+            def from_exception(cls, error: Exception, component: str, operation: str, severity=None, correlation_id: str = "", details: dict[str, Any] | None = None):
+                return cls(component=component, operation=operation, error=error, details=details, severity=severity, correlation_id=correlation_id)
+        ErrorContext = _MockErrorContext  # type: ignore[assignment,misc]
 
 
-from src.monitoring.financial_precision import safe_decimal_to_float, validate_financial_range
-from src.utils.decorators import cache_result, logged, monitored, retry
-from src.utils.validators import (
-    validate_null_handling,
-    validate_type_conversion,
+from src.monitoring.config import (
+    METRICS_DEFAULT_PROMETHEUS_PORT,
+    METRICS_FALLBACK_STORAGE_LIMIT,
 )
+from src.monitoring.financial_precision import (
+    FINANCIAL_CONTEXT,
+    safe_decimal_to_float,
+    validate_financial_range,
+)
+from src.utils.decorators import cache_result, logged, monitored, retry
 
 # Try to import Prometheus client, fall back gracefully if not available
-try:
-    from prometheus_client import (
-        CONTENT_TYPE_LATEST,
-        CollectorRegistry,
-        Counter,
-        Gauge,
-        Histogram,
-        Summary,
-        generate_latest,
-        start_http_server,
-    )
+import os
 
-    PROMETHEUS_AVAILABLE = True
-except ImportError:
-    # Mock Prometheus classes when not available
+# Skip prometheus imports during testing to avoid potential blocking
+if os.environ.get("TESTING"):
+    # Use mocks during testing
     PROMETHEUS_AVAILABLE = False
+else:
+    try:
+        from prometheus_client import (
+            CONTENT_TYPE_LATEST,
+            CollectorRegistry,
+            Counter,
+            Gauge,
+            Histogram,
+            Summary,
+            generate_latest,
+            start_http_server,
+        )
 
+        PROMETHEUS_AVAILABLE = True
+    except ImportError:
+        # Mock Prometheus classes when not available
+        PROMETHEUS_AVAILABLE = False
+
+if not PROMETHEUS_AVAILABLE:
+    # Mock Prometheus classes when not available or during testing
     class MockMetric:
         def __init__(self, *args: Any, **kwargs: Any) -> None:
             self._name = args[0] if args else "unknown"
             self._description = args[1] if len(args) > 1 else "Mock metric"
-            self._fallback_storage = []  # Store metrics when Prometheus unavailable
+            self._fallback_storage: list[dict[str, Any]] = (
+                []
+            )  # Store metrics when Prometheus unavailable
             self._logger = logging.getLogger(__name__)
 
         def inc(self, value: float = 1) -> None:
@@ -119,11 +149,14 @@ except ImportError:
                 )
 
             # Limit fallback storage to prevent memory issues
-            if len(self._fallback_storage) > 10000:
-                self._fallback_storage = self._fallback_storage[-5000:]  # Keep last 5000
+            if len(self._fallback_storage) > METRICS_FALLBACK_STORAGE_LIMIT:
+                self._fallback_storage = self._fallback_storage[
+                    -(METRICS_FALLBACK_STORAGE_LIMIT // 2) :
+                ]
                 self._logger.error(
                     f"Fallback metric storage limit reached for {self._name}. "
-                    "Truncated to last 5000 entries. Correlation: {metric_data['correlation_id']}"
+                    f"Truncated to last {METRICS_FALLBACK_STORAGE_LIMIT // 2} entries. "
+                    f"Correlation: {metric_data['correlation_id']}"
                 )
 
         def _is_critical_metric(self) -> bool:
@@ -158,6 +191,63 @@ except ImportError:
         pass
 
 
+# Local utility functions to avoid import dependencies
+def validate_null_handling(value: Any, allow_null: bool = False, field_name: str = "value") -> Any:
+    """Comprehensive null/None value handling with explicit policies."""
+    if value is None:
+        if allow_null:
+            return None
+        else:
+            from src.core.exceptions import ValidationError
+            raise ValidationError(f"{field_name} cannot be None")
+
+    # Check for other null-like values
+    if isinstance(value, str) and value.strip() == "":
+        if allow_null:
+            return None
+        else:
+            from src.core.exceptions import ValidationError
+            raise ValidationError(f"{field_name} cannot be empty string")
+
+    # Check for NaN values
+    if isinstance(value, float) and math.isnan(value):
+        if allow_null:
+            return None
+        else:
+            from src.core.exceptions import ValidationError
+            raise ValidationError(f"{field_name} cannot be NaN")
+
+    return value
+
+
+def validate_type_conversion(value: Any, target_type: type, field_name: str = "value", strict: bool = True) -> Any:
+    """Validate type conversion with comprehensive error handling."""
+    if value is None:
+        from src.core.exceptions import ValidationError
+        raise ValidationError(f"Cannot convert None {field_name} to {target_type.__name__}")
+
+    try:
+        if target_type == Decimal:
+            if isinstance(value, Decimal):
+                return value
+            elif isinstance(value, int | float):
+                if isinstance(value, float):
+                    if not math.isfinite(value):
+                        from src.core.exceptions import ValidationError
+                        raise ValidationError(f"Cannot convert non-finite float {field_name} to Decimal")
+                return Decimal(str(value))
+            elif isinstance(value, str):
+                return Decimal(value)
+            else:
+                from src.core.exceptions import ValidationError
+                raise ValidationError(f"Cannot convert {type(value).__name__} {field_name} to Decimal")
+        else:
+            return target_type(value)
+    except (ValueError, InvalidOperation, TypeError) as e:
+        from src.core.exceptions import ValidationError
+        raise ValidationError(f"Type conversion failed for {field_name}: {e}")
+
+
 class MetricType(Enum):
     """Metric types for different components."""
 
@@ -189,7 +279,7 @@ class MetricsCollector(BaseComponent):
     and comprehensive coverage of all system components.
     """
 
-    def __init__(self, registry: CollectorRegistry | None = None):
+    def __init__(self, registry: Union[CollectorRegistry, None] = None):
         """
         Initialize metrics collector.
 
@@ -247,15 +337,16 @@ class MetricsCollector(BaseComponent):
                     return
 
                 # Create metric based on type
+                new_metric: Any
                 if definition.metric_type == "counter":
-                    new_metric: Any = Counter(
+                    new_metric = Counter(
                         full_name,
                         definition.description,
                         labelnames=definition.labels,
                         registry=self.registry,
                     )
                 elif definition.metric_type == "gauge":
-                    new_metric: Any = Gauge(
+                    new_metric = Gauge(
                         full_name,
                         definition.description,
                         labelnames=definition.labels,
@@ -276,7 +367,7 @@ class MetricsCollector(BaseComponent):
                         5.0,
                         10.0,
                     ]
-                    new_metric: Any = Histogram(
+                    new_metric = Histogram(
                         full_name,
                         definition.description,
                         labelnames=definition.labels,
@@ -284,7 +375,7 @@ class MetricsCollector(BaseComponent):
                         registry=self.registry,
                     )
                 elif definition.metric_type == "summary":
-                    new_metric: Any = Summary(
+                    new_metric = Summary(
                         full_name,
                         definition.description,
                         labelnames=definition.labels,
@@ -333,7 +424,7 @@ class MetricsCollector(BaseComponent):
             labels: Label values
             value: Increment value
             namespace: Metric namespace
-            
+
         Raises:
             ValidationError: If parameters are invalid
             MonitoringError: If metric operation fails
@@ -387,6 +478,7 @@ class MetricsCollector(BaseComponent):
             else:
                 correlation_id = str(uuid.uuid4())[:8]
                 from src.core.exceptions import MonitoringError
+
                 raise MonitoringError(
                     f"Counter metric '{namespace}_{name}' not found or invalid",
                     component_name="MetricsCollector",
@@ -421,7 +513,7 @@ class MetricsCollector(BaseComponent):
 
             raise ComponentError(
                 f"Failed to increment counter '{namespace}_{name}': {e}",
-                component="MetricsCollector", 
+                component="MetricsCollector",
                 operation="increment_counter",
                 context={
                     "metric_name": name,
@@ -485,7 +577,6 @@ class MetricsCollector(BaseComponent):
                         error_metric.labels(**error_labels).inc(1)
                 except Exception as fallback_error:
                     self.logger.debug(f"Failed to record metrics error: {fallback_error}")
-                    pass
 
     def observe_histogram(
         self,
@@ -539,7 +630,6 @@ class MetricsCollector(BaseComponent):
                         error_metric.labels(**error_labels).inc(1)
                 except Exception as fallback_error:
                     self.logger.debug(f"Failed to record metrics error: {fallback_error}")
-                    pass
 
     def time_operation(
         self, name: str, labels: dict[str, str] | None = None, namespace: str = "tbot"
@@ -669,48 +759,50 @@ class MetricsCollector(BaseComponent):
 
     async def _collect_system_metrics(self) -> None:
         """
-        Collect system-level metrics using async-safe operations.
-        
-        Uses streaming pattern consistent with analytics module for real-time processing.
+        Collect system-level metrics using shared utilities.
         """
-        correlation_id = str(uuid.uuid4())[:8]
+        from src.utils.monitoring_helpers import SystemMetricsCollector, generate_correlation_id
+
+        correlation_id = generate_correlation_id()
 
         try:
-            # Run psutil operations in thread pool to avoid blocking event loop
-            loop = asyncio.get_event_loop()
+            # Use shared system metrics collector to eliminate duplication
+            metrics = await SystemMetricsCollector.collect_system_metrics()
 
-            # Use consistent async task creation pattern from analytics
-            tasks = []
-            
-            # CPU metrics - run in thread pool (stream processing approach)
-            tasks.append(loop.run_in_executor(None, psutil.cpu_percent, None))
-            
-            # Memory metrics - run in thread pool  
-            tasks.append(loop.run_in_executor(None, psutil.virtual_memory))
-            
-            # Disk metrics - run in thread pool
-            tasks.append(loop.run_in_executor(None, psutil.disk_usage, "/"))
-            
-            # Network metrics - run in thread pool
-            tasks.append(loop.run_in_executor(None, psutil.net_io_counters))
-            
-            # Process all metrics concurrently (stream processing pattern)
-            cpu_percent, memory, disk, network = await asyncio.gather(*tasks)
-            
-            # Update metrics with stream-like processing
-            self.set_gauge("system_cpu_usage_percent", cpu_percent)
-            self.set_gauge("system_memory_usage_bytes", memory.used)
-            self.set_gauge("system_memory_total_bytes", memory.total)
-            self.set_gauge("system_memory_usage_percent", memory.percent)
-            self.set_gauge("system_disk_usage_bytes", disk.used)
-            self.set_gauge("system_disk_total_bytes", disk.total)
-            self.set_gauge("system_disk_usage_percent", disk.percent)
-            self.increment_counter("system_network_bytes_sent_total", value=network.bytes_sent)
-            self.increment_counter("system_network_bytes_recv_total", value=network.bytes_recv)
+            if not metrics:
+                self.logger.warning(f"No system metrics collected [correlation: {correlation_id}]")
+                return
+
+            # Update metrics using shared utilities for consistent precision handling
+            from decimal import Decimal
+
+            from src.monitoring.financial_precision import safe_decimal_to_float
+
+            # Set metrics with proper precision handling
+            self.set_gauge("system_cpu_usage_percent",
+                          safe_decimal_to_float(Decimal(str(metrics.get("cpu_percent", 0))),
+                                               "system_cpu_usage_percent", precision_digits=2))
+
+            if "memory_used" in metrics:
+                self.set_gauge("system_memory_usage_bytes",
+                              safe_decimal_to_float(Decimal(str(metrics["memory_used"])),
+                                                   "system_memory_usage_bytes", precision_digits=0))
+                self.set_gauge("system_memory_total_bytes",
+                              safe_decimal_to_float(Decimal(str(metrics["memory_total"])),
+                                                   "system_memory_total_bytes", precision_digits=0))
+                self.set_gauge("system_memory_usage_percent",
+                              safe_decimal_to_float(Decimal(str(metrics["memory_percent"])),
+                                                   "system_memory_usage_percent", precision_digits=2))
+
+            if "network_bytes_sent" in metrics:
+                self.increment_counter("system_network_bytes_sent_total", value=metrics["network_bytes_sent"])
+                self.increment_counter("system_network_bytes_recv_total", value=metrics["network_bytes_recv"])
+
+            self.logger.debug(f"System metrics collected successfully [correlation: {correlation_id}]")
 
         except Exception as e:
             # Create enhanced error context with correlation ID
-            context = ErrorContext(
+            context = ErrorContext.from_exception(
                 error=e,
                 component="MetricsCollector",
                 operation="collect_system_metrics",
@@ -729,24 +821,31 @@ class MetricsCollector(BaseComponent):
                 labels={"error_type": type(e).__name__, "correlation_id": correlation_id},
             )
 
-            # Enhanced error handling with proper propagation
+            # Enhanced error handling with consistent patterns across modules
             handler_success = False
             handler_error = None
 
             if self._error_handler:
                 try:
+                    # Use consistent async error handling pattern
                     if hasattr(self._error_handler, "handle_error"):
                         await self._error_handler.handle_error(e, context)
                         handler_success = True
                     elif hasattr(self._error_handler, "handle_error_sync"):
+                        # Don't await sync methods
                         self._error_handler.handle_error_sync(e, context)
                         handler_success = True
                     else:
-                        error_msg = (
-                            f"Error handler has no valid methods. Correlation: {correlation_id}"
-                        )
+                        # Use core exception types for consistent error propagation
+                        from src.core.exceptions import ComponentError
+                        error_msg = f"Error handler has no valid methods. Correlation: {correlation_id}"
                         self.logger.error(error_msg)
-                        raise MonitoringError(error_msg, error_code="MON_1003")
+                        raise ComponentError(
+                            error_msg,
+                            component_name="MetricsCollector",
+                            operation="collect_system_metrics",
+                            details={"correlation_id": correlation_id, "error_handler_type": type(self._error_handler).__name__}
+                        )
 
                 except Exception as he:
                     handler_error = he
@@ -761,13 +860,22 @@ class MetricsCollector(BaseComponent):
 
             # Critical: Don't silently continue if system metrics collection fails repeatedly
             if not handler_success:
-                # For critical system monitoring failures, we need to escalate
+                # For critical system monitoring failures, escalate using consistent patterns
                 if isinstance(e, (MemoryError, OSError)) or "disk" in str(e).lower():
-                    critical_error = MonitoringError(
-                        f"Critical system metrics collection failure: {e}. Correlation: {correlation_id}",
-                        error_code="MON_1004",
+                    from src.core.exceptions import ComponentError
+                    critical_error = ComponentError(
+                        f"Critical system metrics collection failure: {e}",
+                        component_name="MetricsCollector",
+                        operation="collect_system_metrics",
+                        details={
+                            "correlation_id": correlation_id,
+                            "error_type": type(e).__name__,
+                            "is_critical": True,
+                            "handler_available": self._error_handler is not None,
+                            "handler_success": handler_success
+                        }
                     )
-                    # Chain original exception and handler error
+                    # Chain original exception and handler error for full context
                     critical_error.__cause__ = e
                     if handler_error:
                         critical_error.__context__ = handler_error
@@ -1326,9 +1434,15 @@ class TradingMetrics(BaseComponent):
                 f"Extremely large portfolio value: ${value_float:,.2f} on {exchange}"
             )
 
-        # Calculate P&L percentage for additional validation
+        # Calculate P&L percentage for additional validation using Decimal arithmetic
         if value_float > 0:
-            pnl_percentage = (pnl_float / value_float) * 100
+            # Use Decimal arithmetic for financial calculations to maintain precision
+            with localcontext(FINANCIAL_CONTEXT):
+                value_decimal = Decimal(str(value_float))
+                pnl_decimal_calc = Decimal(str(pnl_float))
+                pnl_percentage_decimal = (pnl_decimal_calc / value_decimal) * Decimal("100")
+                pnl_percentage = float(pnl_percentage_decimal)
+
             if abs(pnl_percentage) > 50:  # > 50% P&L change in timeframe
                 self.collector.logger.warning(
                     f"Large P&L change: {pnl_percentage:.2f}% over {timeframe} on {exchange}"
@@ -1341,8 +1455,14 @@ class TradingMetrics(BaseComponent):
 
         # Also record P&L percentage if portfolio has value
         if value_float > 0:
+            # Use Decimal arithmetic for precise percentage calculation
+            with localcontext(FINANCIAL_CONTEXT):
+                value_decimal = Decimal(str(value_float))
+                pnl_decimal_calc = Decimal(str(pnl_float))
+                pnl_percentage_decimal = (pnl_decimal_calc / value_decimal) * Decimal("100")
+
             pnl_pct = safe_decimal_to_float(
-                (pnl_float / value_float) * 100, "portfolio_pnl_percent", precision_digits=4
+                pnl_percentage_decimal, "portfolio_pnl_percent", precision_digits=4
             )
             self.collector.set_gauge(
                 "portfolio_pnl_percent",
@@ -1377,8 +1497,13 @@ class TradingMetrics(BaseComponent):
         if order_type:
             labels["order_type"] = order_type
 
-        # Convert milliseconds to seconds for consistency with Prometheus best practices
-        latency_seconds = latency / 1000.0
+        # Convert milliseconds to seconds using Decimal precision
+        with localcontext(FINANCIAL_CONTEXT):
+            latency_decimal = Decimal(str(latency))
+            latency_seconds_decimal = latency_decimal / Decimal("1000")
+            latency_seconds = safe_decimal_to_float(
+                latency_seconds_decimal, "order_execution_latency", precision_digits=6
+            )
 
         self.collector.observe_histogram(
             "order_execution_duration_seconds", latency_seconds, labels
@@ -1477,7 +1602,7 @@ class ExchangeMetrics(BaseComponent):
                 "gauge",
                 ["exchange", "limit_type"],
             ),
-            # WebSocket metrics
+            # WebSocket metrics with enhanced monitoring
             MetricDefinition(
                 "exchange_websocket_connections",
                 "Active WebSocket connections",
@@ -1496,6 +1621,31 @@ class ExchangeMetrics(BaseComponent):
                 "histogram",
                 ["exchange"],
                 [0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5],
+            ),
+            MetricDefinition(
+                "exchange_websocket_connection_errors_total",
+                "WebSocket connection errors",
+                "counter",
+                ["exchange", "error_type"],
+            ),
+            MetricDefinition(
+                "exchange_websocket_reconnections_total",
+                "WebSocket reconnection attempts",
+                "counter",
+                ["exchange", "reason"],
+            ),
+            MetricDefinition(
+                "exchange_websocket_heartbeat_latency_seconds",
+                "WebSocket heartbeat response latency",
+                "histogram",
+                ["exchange"],
+                [0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0],
+            ),
+            MetricDefinition(
+                "exchange_websocket_backpressure_events_total",
+                "WebSocket backpressure events",
+                "counter",
+                ["exchange", "severity"],
             ),
             # Health metrics
             MetricDefinition(
@@ -1689,10 +1839,138 @@ class ExchangeMetrics(BaseComponent):
         if order_type:
             labels["order_type"] = order_type
 
-        # Convert milliseconds to seconds for consistency with Prometheus best practices
-        latency_seconds = latency / 1000.0
+        # Convert milliseconds to seconds using Decimal precision
+        with localcontext(FINANCIAL_CONTEXT):
+            latency_decimal = Decimal(str(latency))
+            latency_seconds_decimal = latency_decimal / Decimal("1000")
+            latency_seconds = safe_decimal_to_float(
+                latency_seconds_decimal, "exchange_order_latency", precision_digits=6
+            )
 
         self.collector.observe_histogram("exchange_order_latency_seconds", latency_seconds, labels)
+
+    async def record_websocket_connection(
+        self, exchange: str, connected: bool, error_type: str | None = None
+    ) -> None:
+        """
+        Record WebSocket connection events with async-safe operations.
+
+        Args:
+            exchange: Exchange name
+            connected: True if connection successful, False if failed
+            error_type: Type of error if connection failed
+        """
+        if connected:
+            self.collector.increment_counter(
+                "exchange_websocket_connections", {"exchange": exchange}, 1
+            )
+        else:
+            # Record connection error
+            error_labels = {"exchange": exchange, "error_type": error_type or "unknown"}
+            self.collector.increment_counter(
+                "exchange_websocket_connection_errors_total", error_labels
+            )
+
+            # Update connection gauge to 0
+            self.collector.set_gauge("exchange_websocket_connections", 0, {"exchange": exchange})
+
+    async def record_websocket_message(
+        self, exchange: str, message_type: str, direction: str, latency_seconds: float | None = None
+    ) -> None:
+        """
+        Record WebSocket message with backpressure handling.
+
+        Args:
+            exchange: Exchange name
+            message_type: Type of message (e.g., 'orderbook', 'trade', 'heartbeat')
+            direction: Message direction ('incoming' or 'outgoing')
+            latency_seconds: Optional latency in seconds
+        """
+        labels = {"exchange": exchange, "message_type": message_type, "direction": direction}
+
+        # Increment message counter with timeout protection
+        try:
+            await asyncio.wait_for(
+                self._safe_increment_counter("exchange_websocket_messages_total", labels),
+                timeout=0.1,
+            )
+        except asyncio.TimeoutError:
+            # Record backpressure event if metric recording is slow
+            backpressure_labels = {"exchange": exchange, "severity": "warning"}
+            self.collector.increment_counter(
+                "exchange_websocket_backpressure_events_total", backpressure_labels
+            )
+
+        # Record latency if provided
+        if latency_seconds is not None:
+            latency_labels = {"exchange": exchange}
+            try:
+                await asyncio.wait_for(
+                    self._safe_observe_histogram(
+                        "exchange_websocket_latency_seconds", latency_seconds, latency_labels
+                    ),
+                    timeout=0.1,
+                )
+            except asyncio.TimeoutError:
+                # Record severe backpressure for latency metrics
+                backpressure_labels = {"exchange": exchange, "severity": "critical"}
+                self.collector.increment_counter(
+                    "exchange_websocket_backpressure_events_total", backpressure_labels
+                )
+
+    async def record_websocket_heartbeat(self, exchange: str, latency_seconds: float) -> None:
+        """
+        Record WebSocket heartbeat latency for connection health monitoring.
+
+        Args:
+            exchange: Exchange name
+            latency_seconds: Heartbeat round-trip time in seconds
+        """
+        labels = {"exchange": exchange}
+
+        # Record heartbeat latency with timeout protection
+        try:
+            await asyncio.wait_for(
+                self._safe_observe_histogram(
+                    "exchange_websocket_heartbeat_latency_seconds", latency_seconds, labels
+                ),
+                timeout=0.1,
+            )
+
+            # Update connection health based on heartbeat
+            health_score = 1.0 if latency_seconds < 0.1 else max(0.1, 1.0 - (latency_seconds / 1.0))
+            self.collector.set_gauge("exchange_health_score", health_score, labels)
+
+        except asyncio.TimeoutError:
+            # Heartbeat timeout indicates connection issues
+            self.collector.set_gauge("exchange_health_score", 0.1, labels)
+            backpressure_labels = {"exchange": exchange, "severity": "critical"}
+            self.collector.increment_counter(
+                "exchange_websocket_backpressure_events_total", backpressure_labels
+            )
+
+    async def record_websocket_reconnection(self, exchange: str, reason: str) -> None:
+        """
+        Record WebSocket reconnection attempt.
+
+        Args:
+            exchange: Exchange name
+            reason: Reason for reconnection (e.g., 'timeout', 'error', 'disconnect')
+        """
+        labels = {"exchange": exchange, "reason": reason}
+        self.collector.increment_counter("exchange_websocket_reconnections_total", labels)
+
+    async def _safe_increment_counter(self, metric_name: str, labels: dict) -> None:
+        """Safely increment counter in thread pool to prevent blocking."""
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, self.collector.increment_counter, metric_name, labels)
+
+    async def _safe_observe_histogram(self, metric_name: str, value: float, labels: dict) -> None:
+        """Safely observe histogram in thread pool to prevent blocking."""
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(
+            None, self.collector.observe_histogram, metric_name, value, labels
+        )
 
 
 class RiskMetrics(BaseComponent):
@@ -1862,26 +2140,48 @@ class RiskMetrics(BaseComponent):
             self.collector.register_metric(metric_def)
 
 
-# Global metrics collector instance
-_global_collector: MetricsCollector | None = None
+# Global metrics collector instance with thread-safe singleton
+import threading
+from typing import TYPE_CHECKING, Union
+if TYPE_CHECKING:
+    from typing import Optional
+    _global_collector: Optional['MetricsCollector'] = None
+else:
+    _global_collector = None
+
+# Thread lock for thread-safe singleton creation
+_collector_lock = threading.Lock()
 
 
 def get_metrics_collector() -> MetricsCollector:
     """
-    Get the global metrics collector instance.
+    Get metrics collector instance using factory pattern with thread-safe singleton fallback.
 
     Returns:
-        Global MetricsCollector instance
+        MetricsCollector instance from factory or singleton
     """
-    global _global_collector
-    if _global_collector is None:
-        _global_collector = MetricsCollector()
-    return _global_collector
+    try:
+        from src.monitoring.dependency_injection import get_monitoring_container
+
+        container = get_monitoring_container()
+        return container.resolve(MetricsCollector)
+    except (ServiceError, MonitoringError, ImportError, KeyError, ValueError) as e:
+        logger.warning(f"Failed to resolve metrics collector from DI container: {e}")
+        # Thread-safe fallback to global singleton instance
+        global _global_collector
+        if _global_collector is None:
+            with _collector_lock:
+                # Double-check locking pattern to ensure singleton
+                if _global_collector is None:
+                    _global_collector = MetricsCollector()
+        return _global_collector
 
 
 def set_metrics_collector(collector: MetricsCollector) -> None:
     """
     Set the global metrics collector instance.
+
+    Note: This is for backward compatibility. Prefer using dependency injection.
 
     Args:
         collector: MetricsCollector instance to set globally
@@ -1890,13 +2190,18 @@ def set_metrics_collector(collector: MetricsCollector) -> None:
     _global_collector = collector
 
 
-def setup_prometheus_server(port: int = 8001, host: str = "0.0.0.0") -> None:
+def setup_prometheus_server(
+    port: int = METRICS_DEFAULT_PROMETHEUS_PORT, host: str = "0.0.0.0"
+) -> None:
     """
-    Setup Prometheus metrics HTTP server.
+    Setup Prometheus metrics HTTP server using factory pattern.
 
     Args:
         port: Server port
         host: Server host
+
+    Raises:
+        MonitoringError: If server setup fails
     """
     try:
         start_http_server(port, host)

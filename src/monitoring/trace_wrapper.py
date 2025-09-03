@@ -5,6 +5,8 @@ This module provides a clean abstraction layer for tracing functionality,
 ensuring that the rest of the codebase doesn't directly import from opentelemetry.
 """
 
+import functools
+
 
 # Define fallback classes first
 class MockStatus:
@@ -33,17 +35,34 @@ class MockTrace:
 
 # Try to import from OpenTelemetry
 try:
-    from opentelemetry import trace as otel_trace
+    from opentelemetry import trace as otel_trace_module
     from opentelemetry.trace.status import Status as OtelStatus, StatusCode as OtelStatusCode
 
-    # Use the real implementations
-    trace = otel_trace
+    def trace(operation_name: str, *args, **kwargs):
+        """Trace decorator using OpenTelemetry."""
+        def decorator(func):
+            @functools.wraps(func)
+            def wrapper(*func_args, **func_kwargs):
+                tracer = otel_trace_module.get_tracer(__name__)
+                with tracer.start_as_current_span(operation_name):
+                    return func(*func_args, **func_kwargs)
+            return wrapper
+        return decorator
+
     Status = OtelStatus
     StatusCode = OtelStatusCode
 
 except ImportError:
     # Use mock implementations
-    trace = MockTrace()  # type: ignore[assignment]
+    def trace(operation_name: str, *args, **kwargs):
+        """Mock trace decorator."""
+        def decorator(func):
+            @functools.wraps(func)
+            def wrapper(*func_args, **func_kwargs):
+                return func(*func_args, **func_kwargs)
+            return wrapper
+        return decorator
+
     Status = MockStatus  # type: ignore[misc,assignment]
     StatusCode = MockStatusCode()  # type: ignore[misc,assignment]
 

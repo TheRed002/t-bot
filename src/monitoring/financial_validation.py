@@ -8,6 +8,10 @@ used throughout the T-Bot trading system monitoring components.
 import logging
 from decimal import Decimal, InvalidOperation
 
+from src.monitoring.financial_precision import FINANCIAL_CONTEXT
+
+# Unused imports removed for production cleanup
+
 logger = logging.getLogger(__name__)
 
 # Financial precision constants
@@ -90,7 +94,7 @@ def validate_quantity(quantity: float | int | Decimal, symbol: str = "UNKNOWN") 
     return quantity_decimal.quantize(Decimal("0.00000001"))
 
 
-def validate_pnl_usd(pnl_usd: float | int, context: str = "") -> float:
+def validate_pnl_usd(pnl_usd: float | int | Decimal, context: str = "") -> Decimal:
     """
     Validate P&L in USD.
 
@@ -104,16 +108,19 @@ def validate_pnl_usd(pnl_usd: float | int, context: str = "") -> float:
     Raises:
         ValueError: If P&L value is invalid
     """
-    if not isinstance(pnl_usd, int | float):
+    if not isinstance(pnl_usd, (int, float, Decimal)):
         raise ValueError(f"P&L must be numeric {context}")
 
-    if abs(pnl_usd) > MAX_TRADE_VALUE_USD:
-        logger.warning(f"Large P&L value {context}: ${pnl_usd:,.2f}")
+    # Convert to Decimal for precise calculations
+    pnl_decimal = Decimal(str(pnl_usd))
 
-    return round(pnl_usd, FIAT_DECIMAL_PLACES)
+    if abs(pnl_decimal) > Decimal(str(MAX_TRADE_VALUE_USD)):
+        logger.warning(f"Large P&L value {context}: ${pnl_decimal}")
+
+    return pnl_decimal.quantize(Decimal("0.01"))  # FIAT precision
 
 
-def validate_volume_usd(volume_usd: float | int, context: str = "") -> float:
+def validate_volume_usd(volume_usd: float | int | Decimal, context: str = "") -> Decimal:
     """
     Validate trading volume in USD.
 
@@ -127,19 +134,22 @@ def validate_volume_usd(volume_usd: float | int, context: str = "") -> float:
     Raises:
         ValueError: If volume is invalid
     """
-    if not isinstance(volume_usd, int | float):
+    if not isinstance(volume_usd, (int, float, Decimal)):
         raise ValueError(f"Volume must be numeric {context}")
 
-    if volume_usd < 0:
+    # Convert to Decimal for precise calculations
+    volume_decimal = Decimal(str(volume_usd))
+
+    if volume_decimal < 0:
         raise ValueError(f"Volume cannot be negative {context}")
 
-    if volume_usd > MAX_TRADE_VALUE_USD:
-        logger.warning(f"Large volume {context}: ${volume_usd:,.2f}")
+    if volume_decimal > Decimal(str(MAX_TRADE_VALUE_USD)):
+        logger.warning(f"Large volume {context}: ${volume_decimal}")
 
-    return round(volume_usd, FIAT_DECIMAL_PLACES)
+    return volume_decimal.quantize(Decimal("0.01"))  # FIAT precision
 
 
-def validate_slippage_bps(slippage_bps: float | int, context: str = "") -> float:
+def validate_slippage_bps(slippage_bps: float | int | Decimal, context: str = "") -> Decimal:
     """
     Validate slippage in basis points.
 
@@ -153,19 +163,22 @@ def validate_slippage_bps(slippage_bps: float | int, context: str = "") -> float
     Raises:
         ValueError: If slippage is invalid
     """
-    if not isinstance(slippage_bps, int | float):
+    if not isinstance(slippage_bps, (int, float, Decimal)):
         raise ValueError(f"Slippage must be numeric {context}")
 
-    if abs(slippage_bps) > MAX_SLIPPAGE_BPS:
-        raise ValueError(f"Invalid slippage {context}: {slippage_bps} bps (exceeds 100%)")
+    # Convert to Decimal for precise calculations
+    slippage_decimal = Decimal(str(slippage_bps))
 
-    if abs(slippage_bps) > 1000:  # > 10% slippage is unusual
-        logger.warning(f"High slippage {context}: {slippage_bps:.2f} bps")
+    if abs(slippage_decimal) > Decimal(str(MAX_SLIPPAGE_BPS)):
+        raise ValueError(f"Invalid slippage {context}: {slippage_decimal} bps (exceeds 100%)")
 
-    return round(slippage_bps, BPS_DECIMAL_PLACES)
+    if abs(slippage_decimal) > 1000:  # > 10% slippage is unusual
+        logger.warning(f"High slippage {context}: {slippage_decimal} bps")
+
+    return slippage_decimal.quantize(Decimal("0.01"))  # BPS precision
 
 
-def validate_execution_time(execution_time: float | int, context: str = "") -> float:
+def validate_execution_time(execution_time: float | int | Decimal, context: str = "") -> Decimal:
     """
     Validate order execution time.
 
@@ -179,19 +192,22 @@ def validate_execution_time(execution_time: float | int, context: str = "") -> f
     Raises:
         ValueError: If execution time is invalid
     """
-    if not isinstance(execution_time, int | float):
+    if not isinstance(execution_time, (int, float, Decimal)):
         raise ValueError(f"Execution time must be numeric {context}")
 
-    if execution_time < 0:
+    # Convert to Decimal for precise calculations
+    time_decimal = Decimal(str(execution_time))
+
+    if time_decimal < 0:
         raise ValueError(f"Execution time cannot be negative {context}")
 
-    if execution_time > MAX_EXECUTION_TIME_SECONDS:
-        logger.warning(f"Long execution time {context}: {execution_time:.2f}s")
+    if time_decimal > Decimal(str(MAX_EXECUTION_TIME_SECONDS)):
+        logger.warning(f"Long execution time {context}: {time_decimal}s")
 
-    return round(execution_time, 6)  # Microsecond precision
+    return time_decimal.quantize(Decimal("0.000001"))  # Microsecond precision
 
 
-def validate_var(var_value: float | int, confidence_level: float, context: str = "") -> float:
+def validate_var(var_value: float | int | Decimal, confidence_level: float | Decimal, context: str = "") -> Decimal:
     """
     Validate Value at Risk.
 
@@ -206,22 +222,26 @@ def validate_var(var_value: float | int, confidence_level: float, context: str =
     Raises:
         ValueError: If VaR parameters are invalid
     """
-    if not isinstance(var_value, int | float):
+    if not isinstance(var_value, (int, float, Decimal)):
         raise ValueError(f"VaR value must be numeric {context}")
 
-    if not 0.5 <= confidence_level <= 0.999:
-        raise ValueError(f"Invalid VaR confidence level {context}: {confidence_level}")
+    # Convert to Decimal for precise calculations
+    var_decimal = Decimal(str(var_value))
+    confidence_decimal = Decimal(str(confidence_level))
 
-    if var_value < 0:
-        logger.warning(f"Negative VaR {context}: ${var_value:,.2f}")
+    if not (Decimal("0.5") <= confidence_decimal <= Decimal("0.999")):
+        raise ValueError(f"Invalid VaR confidence level {context}: {confidence_decimal}")
 
-    if var_value > MAX_VAR_USD:
-        logger.warning(f"Extremely high VaR {context}: ${var_value:,.2f}")
+    if var_decimal < 0:
+        logger.warning(f"Negative VaR {context}: ${var_decimal}")
 
-    return round(var_value, FIAT_DECIMAL_PLACES)
+    if var_decimal > Decimal(str(MAX_VAR_USD)):
+        logger.warning(f"Extremely high VaR {context}: ${var_decimal}")
+
+    return var_decimal.quantize(Decimal("0.01"))  # FIAT precision
 
 
-def validate_drawdown_percent(drawdown_pct: float | int, context: str = "") -> float:
+def validate_drawdown_percent(drawdown_pct: float | int | Decimal, context: str = "") -> Decimal:
     """
     Validate drawdown percentage.
 
@@ -235,22 +255,25 @@ def validate_drawdown_percent(drawdown_pct: float | int, context: str = "") -> f
     Raises:
         ValueError: If drawdown is invalid
     """
-    if not isinstance(drawdown_pct, int | float):
+    if not isinstance(drawdown_pct, (int, float, Decimal)):
         raise ValueError(f"Drawdown must be numeric {context}")
 
-    if drawdown_pct < 0:
+    # Convert to Decimal for precise calculations
+    drawdown_decimal = Decimal(str(drawdown_pct))
+
+    if drawdown_decimal < 0:
         raise ValueError(f"Drawdown must be positive (represents loss) {context}")
 
-    if drawdown_pct > MAX_DRAWDOWN_PERCENT:
-        raise ValueError(f"Invalid drawdown {context}: {drawdown_pct}%")
+    if drawdown_decimal > Decimal(str(MAX_DRAWDOWN_PERCENT)):
+        raise ValueError(f"Invalid drawdown {context}: {drawdown_decimal}%")
 
-    if drawdown_pct > 20:  # > 20% drawdown is concerning
-        logger.warning(f"High drawdown {context}: {drawdown_pct:.2f}%")
+    if drawdown_decimal > 20:  # > 20% drawdown is concerning
+        logger.warning(f"High drawdown {context}: {drawdown_decimal}%")
 
-    return round(drawdown_pct, PERCENTAGE_DECIMAL_PLACES)
+    return drawdown_decimal.quantize(Decimal("0.0001"))  # PERCENTAGE precision
 
 
-def validate_sharpe_ratio(sharpe_ratio: float | int, context: str = "") -> float:
+def validate_sharpe_ratio(sharpe_ratio: float | int | Decimal, context: str = "") -> Decimal:
     """
     Validate Sharpe ratio.
 
@@ -264,21 +287,24 @@ def validate_sharpe_ratio(sharpe_ratio: float | int, context: str = "") -> float
     Raises:
         ValueError: If Sharpe ratio is invalid
     """
-    if not isinstance(sharpe_ratio, int | float):
+    if not isinstance(sharpe_ratio, (int, float, Decimal)):
         raise ValueError(f"Sharpe ratio must be numeric {context}")
 
-    if abs(sharpe_ratio) > MAX_SHARPE_RATIO:
-        raise ValueError(f"Unrealistic Sharpe ratio {context}: {sharpe_ratio}")
+    # Convert to Decimal for precise calculations
+    sharpe_decimal = Decimal(str(sharpe_ratio))
 
-    if sharpe_ratio > 2:
-        logger.info(f"Excellent Sharpe ratio {context}: {sharpe_ratio:.3f}")
-    elif sharpe_ratio < -1:
-        logger.warning(f"Poor Sharpe ratio {context}: {sharpe_ratio:.3f}")
+    if abs(sharpe_decimal) > Decimal(str(MAX_SHARPE_RATIO)):
+        raise ValueError(f"Unrealistic Sharpe ratio {context}: {sharpe_decimal}")
 
-    return round(sharpe_ratio, PERCENTAGE_DECIMAL_PLACES)
+    if sharpe_decimal > 2:
+        logger.info(f"Excellent Sharpe ratio {context}: {sharpe_decimal}")
+    elif sharpe_decimal < -1:
+        logger.warning(f"Poor Sharpe ratio {context}: {sharpe_decimal}")
+
+    return sharpe_decimal.quantize(Decimal("0.0001"))  # PERCENTAGE precision
 
 
-def validate_portfolio_value(value_usd: float | int, context: str = "") -> float:
+def validate_portfolio_value(value_usd: float | int | Decimal, context: str = "") -> Decimal:
     """
     Validate portfolio value.
 
@@ -292,16 +318,19 @@ def validate_portfolio_value(value_usd: float | int, context: str = "") -> float
     Raises:
         ValueError: If portfolio value is invalid
     """
-    if not isinstance(value_usd, int | float):
+    if not isinstance(value_usd, (int, float, Decimal)):
         raise ValueError(f"Portfolio value must be numeric {context}")
 
-    if value_usd < 0:
+    # Convert to Decimal for precise calculations
+    value_decimal = Decimal(str(value_usd))
+
+    if value_decimal < 0:
         raise ValueError(f"Portfolio value cannot be negative {context}")
 
-    if value_usd > MAX_PORTFOLIO_VALUE_USD:
-        logger.warning(f"Large portfolio value {context}: ${value_usd:,.2f}")
+    if value_decimal > Decimal(str(MAX_PORTFOLIO_VALUE_USD)):
+        logger.warning(f"Large portfolio value {context}: ${value_decimal}")
 
-    return round(value_usd, FIAT_DECIMAL_PLACES)
+    return value_decimal.quantize(Decimal("0.01"))  # FIAT precision
 
 
 def validate_timeframe(timeframe: str) -> str:
@@ -344,7 +373,7 @@ def validate_timeframe(timeframe: str) -> str:
     return timeframe
 
 
-def calculate_pnl_percentage(pnl_usd: float, portfolio_value: float) -> float:
+def calculate_pnl_percentage(pnl_usd: float | Decimal, portfolio_value: float | Decimal) -> Decimal:
     """
     Calculate P&L percentage with validation.
 
@@ -358,18 +387,26 @@ def calculate_pnl_percentage(pnl_usd: float, portfolio_value: float) -> float:
     Raises:
         ValueError: If calculation is invalid
     """
-    if portfolio_value <= 0:
+    # Convert inputs to Decimal for precise calculations
+    pnl_decimal = Decimal(str(pnl_usd))
+    portfolio_decimal = Decimal(str(portfolio_value))
+
+    if portfolio_decimal <= 0:
         raise ValueError("Cannot calculate P&L percentage with zero or negative portfolio value")
 
-    pnl_percentage = (pnl_usd / portfolio_value) * 100
+    # Use Decimal arithmetic for financial precision
+    from decimal import localcontext
 
-    if abs(pnl_percentage) > 100:
-        logger.warning(f"Extreme P&L percentage: {pnl_percentage:.2f}%")
+    with localcontext(FINANCIAL_CONTEXT):
+        pnl_percentage_decimal = (pnl_decimal / portfolio_decimal) * Decimal("100")
 
-    return round(pnl_percentage, PERCENTAGE_DECIMAL_PLACES)
+    if abs(pnl_percentage_decimal) > 100:
+        logger.warning(f"Extreme P&L percentage: {pnl_percentage_decimal}%")
+
+    return pnl_percentage_decimal.quantize(Decimal("0.0001"))  # PERCENTAGE precision
 
 
-def validate_position_size_usd(size_usd: float | int, context: str = "") -> float:
+def validate_position_size_usd(size_usd: float | int | Decimal, context: str = "") -> Decimal:
     """
     Validate position size in USD.
 
@@ -383,13 +420,16 @@ def validate_position_size_usd(size_usd: float | int, context: str = "") -> floa
     Raises:
         ValueError: If position size is invalid
     """
-    if not isinstance(size_usd, int | float):
+    if not isinstance(size_usd, (int, float, Decimal)):
         raise ValueError(f"Position size must be numeric {context}")
 
-    if size_usd < 0:
+    # Convert to Decimal for precise calculations
+    size_decimal = Decimal(str(size_usd))
+
+    if size_decimal < 0:
         raise ValueError(f"Position size cannot be negative {context}")
 
-    if size_usd > MAX_TRADE_VALUE_USD:
-        logger.warning(f"Large position size {context}: ${size_usd:,.2f}")
+    if size_decimal > Decimal(str(MAX_TRADE_VALUE_USD)):
+        logger.warning(f"Large position size {context}: ${size_decimal}")
 
-    return round(size_usd, FIAT_DECIMAL_PLACES)
+    return size_decimal.quantize(Decimal("0.01"))  # FIAT precision

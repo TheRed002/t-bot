@@ -15,25 +15,58 @@ Key Features:
 
 import json
 from dataclasses import dataclass, field
+from decimal import Decimal
 from typing import Any
 
 import aiohttp
 
-try:
-    from src.core import get_logger
-except ImportError:
+
+# Use local utilities to avoid circular dependencies through utils.monitoring_helpers
+def get_logger(name: str):
+    """Get logger instance."""
     import logging
+    return logging.getLogger(name)
 
-    def get_logger(name: str):
-        """Fallback logger."""
-        return logging.getLogger(name)
+def with_retry(max_attempts: int = 3, backoff_factor = None):
+    """Simple retry decorator."""
+    def decorator(func):
+        async def wrapper(*args, **kwargs):
+            last_exception = None
+            for attempt in range(max_attempts):
+                try:
+                    return await func(*args, **kwargs)
+                except Exception as e:
+                    last_exception = e
+                    if attempt < max_attempts - 1:
+                        import asyncio
+                        await asyncio.sleep(0.5 * (2 ** attempt))
+                    continue
+            raise last_exception
+        return wrapper
+    return decorator
+
+class ErrorContext:
+    """Local error context to avoid circular dependencies."""
+    def __init__(self, component: str, operation: str, details: dict = None, error: Exception = None):
+        self.component = component
+        self.operation = operation
+        self.details = details or {}
+        self.error = error
+
+async def create_http_session(timeout: int = 30, connector_limit: int = 10, connector_limit_per_host: int = 5):
+    """Create HTTP session."""
+    return aiohttp.ClientSession(
+        timeout=aiohttp.ClientTimeout(total=timeout),
+        connector=aiohttp.TCPConnector(limit=connector_limit, limit_per_host=connector_limit_per_host)
+    )
+
+async def safe_session_close(session):
+    """Safely close HTTP session."""
+    if session and not session.closed:
+        await session.close()
 
 
-from src.error_handling import (
-    ErrorContext,
-    get_global_error_handler,
-    with_retry,
-)
+# Unused imports removed for production cleanup
 
 logger = get_logger(__name__)
 
@@ -664,12 +697,21 @@ class GrafanaDashboardManager:
         Args:
             grafana_url: Grafana server URL
             api_key: Grafana API key
-            error_handler: Error handler instance
+            error_handler: Error handler instance (injected dependency)
+        
+        Raises:
+            ValueError: If required parameters are missing
         """
+        if not grafana_url:
+            raise ValueError("grafana_url is required")
+        if not api_key:
+            raise ValueError("api_key is required")
+
         self.grafana_url = grafana_url.rstrip("/")
         self.api_key = api_key
         self.builder = DashboardBuilder()
-        self._error_handler = error_handler or get_global_error_handler()
+        # Use injected error handler - no global access
+        self._error_handler = error_handler
 
     async def deploy_all_dashboards(self) -> dict[str, bool]:
         """
@@ -701,7 +743,7 @@ class GrafanaDashboardManager:
 
         return results
 
-    @with_retry(max_attempts=3, backoff_factor=2.0)
+    @with_retry(max_attempts=3, backoff_factor=Decimal("2.0"))
     async def deploy_dashboard(self, dashboard: Dashboard) -> bool:
         """
         Deploy a single dashboard to Grafana.
@@ -718,10 +760,7 @@ class GrafanaDashboardManager:
 
         session = None
         try:
-            session = aiohttp.ClientSession(
-                timeout=aiohttp.ClientTimeout(total=30),
-                connector=aiohttp.TCPConnector(limit=10, limit_per_host=5),
-            )
+            session = await create_http_session(timeout=30, connector_limit=10, connector_limit_per_host=5)
             async with session.post(
                 url,
                 json=dashboard.to_dict(),
@@ -733,50 +772,56 @@ class GrafanaDashboardManager:
                     error_text = await response.text()
                     logger.error(f"Grafana API error {response.status}: {error_text}")
 
-                    # Track deployment failures
+                    # Track deployment failures using proper service layer error handling
                     if self._error_handler:
                         error_msg = f"Grafana API error {response.status}: {error_text}"
-                        if hasattr(self._error_handler, "handle_error"):
-                            await self._error_handler.handle_error(
-                                Exception(error_msg),
-                                ErrorContext(
-                                    error=Exception(error_msg),
-                                    component="GrafanaDashboardManager",
-                                    operation="deploy_dashboard",
-                                    details={
-                                        "dashboard_title": dashboard.title,
-                                        "status_code": response.status,
-                                        "error_text": error_text,
-                                    },
-                                ),
-                            )
-                        else:
-                            logger.error(f"Error handler has no handle_error method: {error_msg}")
-                    return False
-
-        except Exception as e:
-            # Track deployment errors
-            if self._error_handler:
-                if hasattr(self._error_handler, "handle_error"):
-                    await self._error_handler.handle_error(
-                        e,
-                        ErrorContext(
-                            error=e,
+                        error_context = ErrorContext(
                             component="GrafanaDashboardManager",
                             operation="deploy_dashboard",
                             details={
                                 "dashboard_title": dashboard.title,
-                                "grafana_url": self.grafana_url,
+                                "status_code": response.status,
+                                "error_text": error_text,
                             },
-                        ),
+                            error=Exception(error_msg)
+                        )
+                        if hasattr(self._error_handler, "handle_error"):
+                            await self._error_handler.handle_error(Exception(error_msg), error_context)
+                        elif hasattr(self._error_handler, "handle_error_sync"):
+                            self._error_handler.handle_error_sync(
+                                Exception(error_msg),
+                                error_context.component,
+                                error_context.operation
+                            )
+                        else:
+                            logger.error(f"Error handler has no suitable method: {error_msg}")
+                    return False
+        except Exception as e:
+            # Track deployment errors using proper service layer error handling
+            if self._error_handler:
+                error_context = ErrorContext(
+                    component="GrafanaDashboardManager",
+                    operation="deploy_dashboard",
+                    details={
+                        "dashboard_title": dashboard.title,
+                        "grafana_url": self.grafana_url,
+                    },
+                    error=e
+                )
+                if hasattr(self._error_handler, "handle_error"):
+                    await self._error_handler.handle_error(e, error_context)
+                elif hasattr(self._error_handler, "handle_error_sync"):
+                    self._error_handler.handle_error_sync(
+                        e,
+                        error_context.component,
+                        error_context.operation
                     )
                 else:
-                    logger.error(f"Error handler has no handle_error method for {e}")
+                    logger.error(f"Error handler has no suitable method for {e}")
             logger.error(f"Error deploying dashboard to Grafana: {e}")
             raise  # Let retry decorator handle it
         finally:
-            if session and not session.closed:
-                await session.close()
+            await safe_session_close(session)
 
     def export_dashboards_to_files(self, output_dir: str) -> None:
         """
@@ -810,7 +855,7 @@ class GrafanaDashboardManager:
 
 def create_default_dashboards() -> list[Dashboard]:
     """
-    Create all default T-Bot dashboards.
+    Create all default T-Bot dashboards using factory pattern.
 
     Returns:
         List of default dashboard configurations

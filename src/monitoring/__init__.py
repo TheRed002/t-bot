@@ -26,6 +26,9 @@ Infrastructure Layer:
     telemetry: OpenTelemetry instrumentation and tracing
 """
 
+# Core monitoring components
+from typing import Union
+
 from .alerting import (
     Alert,
     AlertManager,
@@ -34,12 +37,15 @@ from .alerting import (
     AlertStatus,
     NotificationChannel,
     NotificationConfig,
+    get_alert_manager,
+    set_global_alert_manager,
 )
 from .dependency_injection import (
     DIContainer,
-    get_container,
+    get_monitoring_container,
     setup_monitoring_dependencies,
 )
+from .di_registration import register_monitoring_services
 from .metrics import (
     ExchangeMetrics,
     MetricDefinition,
@@ -47,37 +53,59 @@ from .metrics import (
     RiskMetrics,
     SystemMetrics,
     TradingMetrics,
+    get_metrics_collector,
+    set_metrics_collector,
     setup_prometheus_server,
 )
 from .performance import (
     PerformanceProfiler,
+    get_performance_profiler,
     profile_async,
     profile_sync,
+    set_global_profiler,
+)
+from .interfaces import (
+    AlertServiceInterface,
+    DashboardServiceInterface,
+    MetricsServiceInterface,
+    MonitoringServiceInterface,
+    PerformanceServiceInterface,
 )
 from .services import (
     AlertRequest,
-    AlertService,
     DefaultAlertService,
     DefaultMetricsService,
     DefaultPerformanceService,
     MetricRequest,
-    MetricsService,
     MonitoringService,
-    PerformanceService,
 )
+
+# Service aliases for backwards compatibility
+AlertService = DefaultAlertService
+MetricsService = DefaultMetricsService
+PerformanceService = DefaultPerformanceService
+
 from .telemetry import (
     OpenTelemetryConfig,
     TradingTracer,
     get_tracer,
     get_trading_tracer,
     instrument_fastapi,
+    set_global_trading_tracer,
     setup_telemetry,
     trace_async_function,
     trace_function,
 )
 
 try:
-    from .trace_wrapper import Status, StatusCode, trace
+    from .trace_wrapper import (
+        Status as StatusImport,
+        StatusCode as StatusCodeImport,
+        trace as TraceImport,
+    )
+    Status = StatusImport
+    StatusCode = StatusCodeImport
+    trace = TraceImport
 except ImportError:
     # Mock implementations if trace_wrapper is not available
     class Status:
@@ -95,63 +123,76 @@ except ImportError:
 
 
 __all__ = [
-    # Service Layer
-    "MonitoringService",
-    "AlertService",
-    "MetricsService",
-    "PerformanceService",
-    "DefaultAlertService",
-    "DefaultMetricsService",
-    "DefaultPerformanceService",
-    "AlertRequest",
-    "MetricRequest",
     # Core Infrastructure
     "Alert",
     "AlertManager",
+    "AlertRequest",
     "AlertRule",
     "AlertSeverity",
+    "AlertService",
+    "AlertServiceInterface",
     "AlertStatus",
+    "DashboardServiceInterface",
+    "DIContainer",
+    "DefaultAlertService",
+    "DefaultMetricsService",
+    "DefaultPerformanceService",
     "ExchangeMetrics",
     "MetricDefinition",
+    "MetricRequest",
     "MetricsCollector",
+    "MetricsService",
+    "MetricsServiceInterface",
+    "MonitoringServiceInterface",
     "NotificationChannel",
     "NotificationConfig",
     "OpenTelemetryConfig",
     "PerformanceProfiler",
+    "PerformanceService",
+    "PerformanceServiceInterface",
     "RiskMetrics",
     "Status",
     "StatusCode",
     "SystemMetrics",
     "TradingMetrics",
     "TradingTracer",
-    # Dependency Injection
-    "DIContainer",
-    "get_container",
-    "setup_monitoring_dependencies",
-    # Utilities
+    # Service Layer
+    "MonitoringService",
+    # Functions
+    "get_alert_manager",
+    "get_monitoring_container",
+    "get_metrics_collector",
+    "get_performance_profiler",
     "get_tracer",
     "get_trading_tracer",
+    "initialize_monitoring_service",
     "instrument_fastapi",
     "profile_async",
     "profile_sync",
+    "register_monitoring_services",
+    "set_global_alert_manager",
+    "set_global_profiler",
+    "set_global_trading_tracer",
+    "set_metrics_collector",
+    "setup_monitoring_dependencies",
     "setup_prometheus_server",
     "setup_telemetry",
     "trace",
     "trace_async_function",
     "trace_function",
-    # Main initialization function
-    "initialize_monitoring_service",
 ]
 
 
 def initialize_monitoring_service(
-    notification_config: NotificationConfig | None = None,
+    notification_config: Union[NotificationConfig, None] = None,
     metrics_registry=None,
-    telemetry_config: OpenTelemetryConfig | None = None,
-    prometheus_port: int = 8001,
+    telemetry_config: Union[OpenTelemetryConfig, None] = None,
+    prometheus_port: int = 8001,  # Use METRICS_DEFAULT_PROMETHEUS_PORT from config
+    use_dependency_injection: bool = True,
+    injector=None,
 ) -> MonitoringService:
     """
-    Initialize comprehensive monitoring service using proper service layer.
+    Initialize comprehensive monitoring service using proper dependency injection.
 
     This function sets up the complete monitoring infrastructure following
     clean architecture principles with proper dependency injection.
@@ -161,11 +202,78 @@ def initialize_monitoring_service(
         metrics_registry: Prometheus metrics registry
         telemetry_config: OpenTelemetry configuration
         prometheus_port: Port for Prometheus metrics server
+        use_dependency_injection: Whether to use DI container (recommended)
+        injector: Dependency injector instance (optional)
 
     Returns:
         Initialized MonitoringService instance with all dependencies injected
     """
-    # Initialize infrastructure components with dependency injection
+    if use_dependency_injection and injector is not None:
+        try:
+            # Use core dependency injection system
+            from src.monitoring.di_registration import register_monitoring_services
+
+            # Register monitoring services with injector
+            register_monitoring_services(injector)
+
+            # Initialize telemetry if configured
+            if telemetry_config:
+                setup_telemetry(telemetry_config)
+
+            # Setup Prometheus server (skip during tests to avoid blocking)
+            import os
+            if not os.environ.get("TESTING"):
+                try:
+                    setup_prometheus_server(prometheus_port)
+                except Exception as e:
+                    # Log warning but don't fail initialization
+                    import logging
+                    logger = logging.getLogger(__name__)
+                    logger.warning(f"Failed to setup Prometheus server on port {prometheus_port}: {e}")
+
+            # Get monitoring service from DI container
+            return injector.resolve("MonitoringServiceInterface")
+
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f"Core DI initialization failed, trying monitoring DI: {e}")
+
+    if use_dependency_injection:
+        try:
+            # Use monitoring-specific dependency injection
+            from src.monitoring.dependency_injection import (
+                create_monitoring_service,
+                setup_monitoring_dependencies,
+            )
+
+            # Set up DI container
+            setup_monitoring_dependencies()
+
+            # Initialize telemetry if configured
+            if telemetry_config:
+                setup_telemetry(telemetry_config)
+
+            # Setup Prometheus server (skip during tests to avoid blocking)
+            import os
+            if not os.environ.get("TESTING"):
+                try:
+                    setup_prometheus_server(prometheus_port)
+                except Exception as e:
+                    # Log warning but don't fail initialization
+                    import logging
+                    logger = logging.getLogger(__name__)
+                    logger.warning(f"Failed to setup Prometheus server on port {prometheus_port}: {e}")
+
+            # Get monitoring service from DI container
+            return create_monitoring_service()
+
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f"DI initialization failed, falling back to manual wiring: {e}")
+
+    # Fallback: Manual dependency wiring for backward compatibility
     metrics_collector = MetricsCollector(metrics_registry)
 
     if notification_config is None:
@@ -187,7 +295,6 @@ def initialize_monitoring_service(
     except Exception as e:
         # Log warning but don't fail initialization
         import logging
-
         logger = logging.getLogger(__name__)
         logger.warning(f"Failed to setup Prometheus server on port {prometheus_port}: {e}")
 

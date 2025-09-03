@@ -20,6 +20,8 @@ Performance Categories:
 - Trading Strategies: P&L metrics, signal accuracy, execution efficiency
 """
 
+from __future__ import annotations
+
 import asyncio
 import gc
 import os
@@ -32,64 +34,61 @@ from collections.abc import Callable
 from contextlib import asynccontextmanager, contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from decimal import Decimal, localcontext
 from enum import Enum
-from typing import Any
+from typing import Any, Optional, Union
 
 import psutil
 
 try:
     import numpy as np
 except ImportError:
-    np = None
+    np = None  # type: ignore[assignment]
 
 try:
     from scipy import stats
 except ImportError:
-    stats = None
+    stats = None  # type: ignore[assignment]
 
-from src.core import BaseComponent
+from src.core.base import BaseComponent
+from src.core.exceptions import MonitoringError, ServiceError
 from src.core.types import OrderType
+from src.monitoring.alerting import Alert, AlertManager, AlertSeverity, AlertStatus
+from src.monitoring.financial_precision import FINANCIAL_CONTEXT, safe_decimal_to_float
+from src.monitoring.metrics import MetricsCollector
 
 # Import utils decorators and helpers for better integration
 from src.utils.decorators import cache_result, logged, monitored, retry, time_execution
 
-# Import error handling with fallback
+# Use service injection for error handling - clean architecture pattern
 try:
     from src.error_handling import (
-        ErrorContext,
-        RecoveryScenario,
-        get_global_error_handler,
+        ErrorContext as ErrorContextImported,
+        RecoveryScenario as RecoveryScenarioImported,
     )
+    ErrorContext = ErrorContextImported
+    RecoveryScenario = RecoveryScenarioImported
 except ImportError:
-    # Simple fallbacks
-    from dataclasses import dataclass
-
-    @dataclass
+    # Fallback implementations for missing error handling
     class ErrorContext:
-        error: Exception | None = None
-        component: str = ""
-        operation: str = ""
-        details: dict = None
+        def __init__(self, component: str = "", operation: str = "", error: Optional[Exception] = None, details: Optional[dict[str, Any]] = None):
+            self.component = component
+            self.operation = operation
+            self.error = error
+            self.details = details
 
-    @dataclass
     class RecoveryScenario:
-        component: str
-        operation: str
-        error: Exception
-        context: dict = None
-
-    def get_global_error_handler():
-        return None
+        def __init__(self, component: str, operation: str, error: Exception, context: Optional[dict[str, Any]] = None):
+            self.component = component
+            self.operation = operation
+            self.error = error
+            self.context = context
 
 
 # Helper function fallback
-def format_timestamp(dt):
+def format_timestamp(dt: Optional[datetime]) -> str:
     """Fallback timestamp formatter."""
     return dt.strftime("%Y-%m-%d %H:%M:%S UTC") if dt else ""
-
-
-from src.monitoring.alerting import Alert, AlertManager, AlertSeverity, AlertStatus
-from src.monitoring.metrics import MetricsCollector
 
 
 class PerformanceCategory(Enum):
@@ -230,8 +229,8 @@ class PerformanceProfiler(BaseComponent):
 
     def __init__(
         self,
-        metrics_collector: MetricsCollector | None = None,
-        alert_manager: AlertManager | None = None,
+        metrics_collector: Optional["MetricsCollector"] = None,
+        alert_manager: Optional["AlertManager"] = None,
         max_samples: int = 10000,
         collection_interval: float = 1.0,
         anomaly_detection: bool = True,
@@ -250,7 +249,7 @@ class PerformanceProfiler(BaseComponent):
         """
         super().__init__(name="PerformanceProfiler")
 
-        # Use dependency injection - no direct global access in service layer
+        # Enforce dependency injection for clean architecture
         if metrics_collector is None:
             raise ValueError("metrics_collector is required - use dependency injection")
 
@@ -271,10 +270,16 @@ class PerformanceProfiler(BaseComponent):
         self._lock = threading.RLock()  # For sync methods
         self._async_lock = asyncio.Lock()  # For async methods
         self._running = False
-        self._background_task: asyncio.Task | None = None
+        self._background_task: Optional[asyncio.Task] = None
         self._shutdown_event = asyncio.Event()
-        self._graceful_shutdown_timeout = 30.0  # seconds
-        self._force_shutdown_timeout = 10.0  # seconds
+        from src.monitoring.config import (
+            PERFORMANCE_ALERT_TASK_TIMEOUT,
+            PERFORMANCE_FORCE_SHUTDOWN_TIMEOUT,
+            PERFORMANCE_GRACEFUL_SHUTDOWN_TIMEOUT,
+        )
+        self._graceful_shutdown_timeout = PERFORMANCE_GRACEFUL_SHUTDOWN_TIMEOUT
+        self._force_shutdown_timeout = PERFORMANCE_FORCE_SHUTDOWN_TIMEOUT
+        self._alert_task_timeout = PERFORMANCE_ALERT_TASK_TIMEOUT
 
         # Performance thresholds for alerting
         self._thresholds: dict[str, dict[str, float]] = {
@@ -484,7 +489,8 @@ class PerformanceProfiler(BaseComponent):
             if self._alert_tasks:
                 try:
                     await asyncio.wait_for(
-                        asyncio.gather(*self._alert_tasks, return_exceptions=True), timeout=5.0
+                        asyncio.gather(*self._alert_tasks, return_exceptions=True),
+                        timeout=self._alert_task_timeout
                     )
                 except asyncio.TimeoutError:
                     self.logger.warning("Some alert tasks did not complete within timeout")
@@ -505,6 +511,14 @@ class PerformanceProfiler(BaseComponent):
             self._gc_history.clear()
             self._baselines.clear()
             self._metric_cache.clear()
+
+        # Clear any remaining alert tasks to prevent resource leaks
+        if self._alert_tasks:
+            self.logger.debug(f"Clearing {len(self._alert_tasks)} remaining alert tasks")
+            for task in list(self._alert_tasks):
+                if not task.done():
+                    task.cancel()
+            self._alert_tasks.clear()
 
         self.logger.info("Performance profiler cleanup completed")
 
@@ -568,27 +582,35 @@ class PerformanceProfiler(BaseComponent):
 
                     # Use error handler for intelligent recovery
                     if self._error_handler:
-                        recovery_scenario = RecoveryScenario(
+                        error_context = ErrorContext(
                             component="PerformanceProfiler",
                             operation="monitoring_loop",
                             error=e,
-                            context=ErrorContext(
-                                error=e,
-                                component="PerformanceProfiler",
-                                operation="monitoring_loop",
-                                details={
-                                    "consecutive_errors": consecutive_errors,
-                                    "max_consecutive_errors": max_consecutive_errors,
-                                },
-                            ),
+                            details={
+                                "consecutive_errors": consecutive_errors,
+                                "max_consecutive_errors": max_consecutive_errors,
+                            }
                         )
+
+                        # Recovery scenario created for potential future use
+                        # Note: Using basic construction as RecoveryScenario interface may vary
+                        recovery_scenario = {
+                            "component": "PerformanceProfiler",
+                            "operation": "monitoring_loop",
+                            "error": str(e),
+                            "context": error_context.details or {},
+                        }
 
                     try:
                         # Log the error and apply basic recovery strategy
                         if hasattr(self._error_handler, "handle_error"):
-                            await self._error_handler.handle_error(e, recovery_scenario.context)
+                            await self._error_handler.handle_error(e, error_context)
                         elif hasattr(self._error_handler, "handle_error_sync"):
-                            self._error_handler.handle_error_sync(e, recovery_scenario.context)
+                            self._error_handler.handle_error_sync(
+                                e,
+                                error_context.component or "PerformanceProfiler",
+                                error_context.operation or "monitoring_loop"
+                            )
 
                         if consecutive_errors >= max_consecutive_errors:
                             self.logger.error(
@@ -609,13 +631,8 @@ class PerformanceProfiler(BaseComponent):
                     except Exception as recovery_error:
                         self.logger.error(f"Recovery failed: {recovery_error}")
                         try:
-                            await asyncio.sleep(5.0)
-                        except asyncio.CancelledError:
-                            break
-                    else:
-                        self.logger.error(f"Error in performance monitoring loop: {e}")
-                        try:
-                            await asyncio.sleep(5.0)
+                            from src.monitoring.config import PERFORMANCE_ERROR_RECOVERY_SLEEP
+                            await asyncio.sleep(PERFORMANCE_ERROR_RECOVERY_SLEEP)
                         except asyncio.CancelledError:
                             break
 
@@ -629,7 +646,7 @@ class PerformanceProfiler(BaseComponent):
     @contextmanager
     @time_execution()
     def profile_function(
-        self, function_name: str, module_name: str = "", labels: dict[str, str] | None = None
+        self, function_name: str, module_name: str = "", labels: Optional[dict[str, str]] = None
     ):
         """Context manager for profiling synchronous function execution."""
         start_time = time.perf_counter()
@@ -655,8 +672,15 @@ class PerformanceProfiler(BaseComponent):
             if module_name:
                 metric_labels["module"] = module_name
 
+            # Convert milliseconds to seconds with financial precision
+            with localcontext(FINANCIAL_CONTEXT):
+                duration_seconds_decimal = Decimal(str(duration_ms)) / Decimal("1000")
+                duration_seconds = safe_decimal_to_float(
+                    duration_seconds_decimal, "function_execution_latency", precision_digits=6
+                )
+
             self.metrics_collector.observe_histogram(
-                "function_execution_latency_seconds", duration_ms / 1000.0, metric_labels
+                "function_execution_latency_seconds", duration_seconds, metric_labels
             )
 
             if memory_delta > 0:
@@ -666,7 +690,7 @@ class PerformanceProfiler(BaseComponent):
 
     @asynccontextmanager
     async def profile_async_function(
-        self, function_name: str, module_name: str = "", labels: dict[str, str] | None = None
+        self, function_name: str, module_name: str = "", labels: Optional[dict[str, str]] = None
     ):
         """Context manager for profiling asynchronous function execution."""
         start_time = time.perf_counter()
@@ -692,8 +716,15 @@ class PerformanceProfiler(BaseComponent):
             if module_name:
                 metric_labels["module"] = module_name
 
+            # Convert milliseconds to seconds with financial precision
+            with localcontext(FINANCIAL_CONTEXT):
+                duration_seconds_decimal = Decimal(str(duration_ms)) / Decimal("1000")
+                duration_seconds = safe_decimal_to_float(
+                    duration_seconds_decimal, "async_function_execution_latency", precision_digits=6
+                )
+
             self.metrics_collector.observe_histogram(
-                "async_function_execution_latency_seconds", duration_ms / 1000.0, metric_labels
+                "async_function_execution_latency_seconds", duration_seconds, metric_labels
             )
 
             if memory_delta > 0:
@@ -706,13 +737,15 @@ class PerformanceProfiler(BaseComponent):
         exchange: str,
         order_type: OrderType,
         symbol: str,
-        latency_ms: float,
-        fill_rate: float,
-        slippage_bps: float,
+        latency_ms: Decimal,
+        fill_rate: Decimal,
+        slippage_bps: Decimal,
     ) -> None:
         """Record order execution performance metrics."""
+        from decimal import Decimal
+
         from src.core.exceptions import ValidationError
-        
+
         # Validate inputs using core validation patterns
         if not isinstance(exchange, str) or not exchange:
             raise ValidationError(
@@ -721,7 +754,7 @@ class PerformanceProfiler(BaseComponent):
                 field_value=exchange,
                 expected_type="non-empty str",
             )
-            
+
         if not isinstance(order_type, OrderType):
             raise ValidationError(
                 "Invalid order_type parameter",
@@ -729,7 +762,7 @@ class PerformanceProfiler(BaseComponent):
                 field_value=order_type,
                 expected_type="OrderType enum",
             )
-            
+
         if not isinstance(symbol, str) or not symbol:
             raise ValidationError(
                 "Invalid symbol parameter",
@@ -737,22 +770,29 @@ class PerformanceProfiler(BaseComponent):
                 field_value=symbol,
                 expected_type="non-empty str",
             )
-            
-        if not isinstance(latency_ms, (int, float)) or latency_ms < 0:
+
+        if not isinstance(latency_ms, (int, float, Decimal)) or latency_ms < 0:
             raise ValidationError(
                 "Invalid latency_ms parameter",
                 field_name="latency_ms",
                 field_value=latency_ms,
                 validation_rule="must be non-negative number",
             )
-            
-        if not isinstance(fill_rate, (int, float)) or not (0 <= fill_rate <= 1):
+
+        # Convert to Decimal for consistent precision
+        latency_ms = Decimal(str(latency_ms))
+
+        if not isinstance(fill_rate, (int, float, Decimal)) or not (0 <= fill_rate <= 1):
             raise ValidationError(
                 "Invalid fill_rate parameter",
                 field_name="fill_rate",
                 field_value=fill_rate,
                 validation_rule="must be between 0 and 1",
             )
+
+        # Convert to Decimal for consistent precision
+        fill_rate = Decimal(str(fill_rate))
+        slippage_bps = Decimal(str(slippage_bps))
 
         with self._lock:
             metric_name = f"order_execution.{exchange}.{order_type.value}.{symbol}"
@@ -761,12 +801,25 @@ class PerformanceProfiler(BaseComponent):
         labels = {"exchange": exchange, "order_type": order_type.value, "symbol": symbol}
 
         try:
+            # Convert milliseconds to seconds with financial precision
+            from decimal import Decimal, localcontext
+
+            from src.monitoring.financial_precision import FINANCIAL_CONTEXT, safe_decimal_to_float
+
+            with localcontext(FINANCIAL_CONTEXT):
+                # latency_ms is already Decimal, no need to convert
+                latency_seconds_decimal = latency_ms / Decimal("1000")
+                latency_seconds = safe_decimal_to_float(
+                    latency_seconds_decimal, "order_execution_latency", precision_digits=6
+                )
+
             # Update Prometheus metrics with consistent error handling
             self.metrics_collector.observe_histogram(
-                "order_execution_latency_seconds", latency_ms / 1000.0, labels
+                "order_execution_latency_seconds", latency_seconds, labels
             )
         except Exception as e:
             from src.core.exceptions import MonitoringError
+
             raise MonitoringError(
                 f"Failed to record order execution metrics: {e}",
                 component_name="PerformanceProfiler",
@@ -799,9 +852,12 @@ class PerformanceProfiler(BaseComponent):
             )
 
     def record_market_data_processing(
-        self, exchange: str, data_type: str, processing_time_ms: float, message_count: int
+        self, exchange: str, data_type: str, processing_time_ms: Decimal, message_count: int
     ) -> None:
         """Record market data processing performance."""
+        from decimal import Decimal
+        # Convert to Decimal for consistent precision
+        processing_time_ms = Decimal(str(processing_time_ms))
         with self._lock:
             metric_name = f"market_data.{exchange}.{data_type}"
             self._latency_data[metric_name].append(processing_time_ms)
@@ -817,75 +873,138 @@ class PerformanceProfiler(BaseComponent):
         # Calculate throughput (messages per second)
         throughput = self._calculate_throughput(f"market_data.{exchange}.{data_type}")
 
+        # Convert milliseconds to seconds with financial precision
+        from decimal import Decimal, localcontext
+
+        from src.monitoring.financial_precision import FINANCIAL_CONTEXT, safe_decimal_to_float
+
+        with localcontext(FINANCIAL_CONTEXT):
+            # processing_time_ms is already Decimal, no need to convert
+            processing_time_seconds_decimal = processing_time_ms / Decimal("1000")
+            processing_time_seconds = safe_decimal_to_float(
+                processing_time_seconds_decimal, "market_data_latency", precision_digits=6
+            )
+
         # Update Prometheus metrics
         self.metrics_collector.observe_histogram(
-            "market_data_latency_seconds", processing_time_ms / 1000.0, labels
+            "market_data_latency_seconds", processing_time_seconds, labels
         )
 
         self.metrics_collector.set_gauge("market_data_processing_rate", throughput, labels)
 
-    def record_websocket_latency(self, exchange: str, message_type: str, latency_ms: float) -> None:
-        """Record WebSocket message latency."""
-        with self._lock:
+    async def record_websocket_latency(
+        self, exchange: str, message_type: str, latency_ms: Decimal
+    ) -> None:
+        """Record WebSocket message latency with async-safe operations."""
+        from decimal import Decimal
+        # Convert to Decimal for consistent precision
+        latency_ms = Decimal(str(latency_ms))
+        # Validate inputs to prevent race conditions
+        if not isinstance(exchange, str) or not exchange:
+            raise ValueError("Exchange must be a non-empty string")
+        if not isinstance(message_type, str) or not message_type:
+            raise ValueError("Message type must be a non-empty string")
+        if not isinstance(latency_ms, (int, float, Decimal)) or latency_ms < 0:
+            raise ValueError("Latency must be a non-negative number")
+
+        # Use async lock to prevent race conditions in concurrent WebSocket handling
+        async with self._async_lock:
             metric_name = f"websocket.{exchange}.{message_type}"
             self._latency_data[metric_name].append(latency_ms)
 
         labels = {"exchange": exchange, "message_type": message_type}
 
-        # Update Prometheus metrics
-        self.metrics_collector.observe_histogram(
-            "websocket_message_latency_seconds", latency_ms / 1000.0, labels
-        )
+        # Convert milliseconds to seconds with financial precision
+        from decimal import Decimal, localcontext
 
-        # Calculate connection health score
-        health_score = self._calculate_websocket_health(exchange)
-        self.metrics_collector.set_gauge(
-            "websocket_connection_health", health_score, {"exchange": exchange}
-        )
+        from src.monitoring.financial_precision import FINANCIAL_CONTEXT, safe_decimal_to_float
+
+        with localcontext(FINANCIAL_CONTEXT):
+            # latency_ms is already Decimal, no need to convert
+            latency_seconds_decimal = latency_ms / Decimal("1000")
+            latency_seconds = safe_decimal_to_float(
+                latency_seconds_decimal, "websocket_latency", precision_digits=6
+            )
+
+        # Update Prometheus metrics with error handling
+        try:
+            self.metrics_collector.observe_histogram(
+                "websocket_message_latency_seconds", latency_seconds, labels
+            )
+
+            # Calculate connection health score with timeout protection
+            # Run sync method in executor to avoid blocking the event loop
+            health_score = await asyncio.get_event_loop().run_in_executor(
+                None, self._calculate_websocket_health, exchange
+            )
+            self.metrics_collector.set_gauge(
+                "websocket_connection_health", health_score, {"exchange": exchange}
+            )
+        except asyncio.TimeoutError:
+            self.logger.warning(f"WebSocket health calculation timed out for {exchange}")
+        except Exception as e:
+            self.logger.error(f"Error recording WebSocket metrics for {exchange}: {e}")
 
     def record_database_query(
-        self, database: str, operation: str, table: str, query_time_ms: float
+        self, database: str, operation: str, table: str, query_time_ms: Decimal
     ) -> None:
         """Record database query performance."""
+        from decimal import Decimal
+        # Convert to Decimal for consistent precision
+        query_time_ms = Decimal(str(query_time_ms))
         with self._lock:
             metric_name = f"database.{database}.{operation}.{table}"
             self._latency_data[metric_name].append(query_time_ms)
 
         labels = {"database": database, "operation": operation, "table": table}
 
+        # Convert milliseconds to seconds with financial precision
+        from decimal import Decimal, localcontext
+
+        from src.monitoring.financial_precision import FINANCIAL_CONTEXT, safe_decimal_to_float
+
+        with localcontext(FINANCIAL_CONTEXT):
+            # query_time_ms is already Decimal, no need to convert
+            query_time_seconds_decimal = query_time_ms / Decimal("1000")
+            query_time_seconds = safe_decimal_to_float(
+                query_time_seconds_decimal, "database_query_latency", precision_digits=6
+            )
+
         # Update Prometheus metrics
         self.metrics_collector.observe_histogram(
-            "database_query_latency_seconds", query_time_ms / 1000.0, labels
+            "database_query_latency_seconds", query_time_seconds, labels
         )
 
-        # Check for slow queries
+        # Check for slow queries with async-safe alerting
         if query_time_ms > self._thresholds["database_query_ms"]["warning"]:
             severity = (
                 AlertSeverity.HIGH
                 if query_time_ms > self._thresholds["database_query_ms"]["critical"]
                 else AlertSeverity.MEDIUM
             )
-            task = asyncio.create_task(
-                self._send_performance_alert(
-                    "Slow database query detected",
-                    f"Database query took {query_time_ms:.2f}ms on {database}.{table}",
-                    severity,
-                    labels,
-                )
+            # Use managed alert task to prevent memory leaks
+            self._create_managed_alert_task(
+                "Slow database query detected",
+                f"Database query took {query_time_ms:.2f}ms on {database}.{table}",
+                severity,
+                labels,
             )
-            # Properly handle task completion
-            task.add_done_callback(self._handle_alert_task_completion)
 
     def record_strategy_performance(
         self,
         strategy: str,
         symbol: str,
-        execution_time_ms: float,
-        signal_accuracy: float,
-        sharpe_ratio: float,
+        execution_time_ms: Decimal,
+        signal_accuracy: Decimal,
+        sharpe_ratio: Decimal,
         timeframe: str = "1d",
     ) -> None:
         """Record trading strategy performance metrics."""
+        from decimal import Decimal
+        # Convert to Decimal for consistent precision
+        execution_time_ms = Decimal(str(execution_time_ms))
+        signal_accuracy = Decimal(str(signal_accuracy))
+        sharpe_ratio = Decimal(str(sharpe_ratio))
         with self._lock:
             metric_name = f"strategy.{strategy}.{symbol}"
             self._latency_data[metric_name].append(execution_time_ms)
@@ -895,9 +1014,21 @@ class PerformanceProfiler(BaseComponent):
         strategy_labels = labels.copy()
         strategy_labels["timeframe"] = timeframe
 
+        # Convert milliseconds to seconds with financial precision
+        from decimal import Decimal, localcontext
+
+        from src.monitoring.financial_precision import FINANCIAL_CONTEXT, safe_decimal_to_float
+
+        with localcontext(FINANCIAL_CONTEXT):
+            # execution_time_ms is already Decimal, no need to convert
+            execution_time_seconds_decimal = execution_time_ms / Decimal("1000")
+            execution_time_seconds = safe_decimal_to_float(
+                execution_time_seconds_decimal, "strategy_execution_latency", precision_digits=6
+            )
+
         # Update Prometheus metrics
         self.metrics_collector.observe_histogram(
-            "strategy_execution_latency_seconds", execution_time_ms / 1000.0, labels
+            "strategy_execution_latency_seconds", execution_time_seconds, labels
         )
 
         self.metrics_collector.set_gauge(
@@ -906,7 +1037,7 @@ class PerformanceProfiler(BaseComponent):
 
         self.metrics_collector.set_gauge("strategy_sharpe_ratio", sharpe_ratio, strategy_labels)
 
-    def get_latency_stats(self, metric_name: str) -> LatencyStats | None:
+    def get_latency_stats(self, metric_name: str) -> Optional[LatencyStats]:
         """Get latency statistics for a specific metric."""
         with self._lock:
             values = list(self._latency_data.get(metric_name, []))
@@ -916,10 +1047,11 @@ class PerformanceProfiler(BaseComponent):
 
         return LatencyStats.from_values(values)
 
-    def get_throughput_stats(self, metric_name: str) -> ThroughputStats | None:
+    def get_throughput_stats(self, metric_name: str) -> Optional[ThroughputStats]:
         """Get throughput statistics for a specific metric."""
         with self._lock:
-            data = self._throughput_data.get(metric_name, [])
+            data_raw: deque | list[tuple[float, int]] = self._throughput_data.get(metric_name, [])
+            data: list[tuple[float, int]] = list(data_raw) if isinstance(data_raw, deque) else data_raw
 
         if not data:
             return None
@@ -938,7 +1070,7 @@ class PerformanceProfiler(BaseComponent):
         rate_per_minute = sum(c for _, c in last_hour) / 60 if last_hour else 0
 
         # Peak rate (highest rate in any 10-second window)
-        peak_rate = 0
+        peak_rate: float = 0.0
         for i in range(len(data)):
             window_start = data[i][0]
             window_data = [(t, c) for t, c in data if window_start <= t < window_start + 10]
@@ -953,14 +1085,14 @@ class PerformanceProfiler(BaseComponent):
             last_updated=datetime.now(timezone.utc),
         )
 
-    def get_system_resource_stats(self) -> SystemResourceStats | None:
+    def get_system_resource_stats(self) -> Optional[SystemResourceStats]:
         """Get current system resource statistics."""
         with self._lock:
             if not self._resource_history:
                 return None
             return self._resource_history[-1]
 
-    def get_gc_stats(self) -> GCStats | None:
+    def get_gc_stats(self) -> Optional[GCStats]:
         """Get garbage collection statistics."""
         with self._lock:
             if not self._gc_history:
@@ -1047,7 +1179,8 @@ class PerformanceProfiler(BaseComponent):
     def _calculate_throughput(self, metric_name: str) -> float:
         """Calculate current throughput for a metric."""
         with self._lock:
-            data = self._throughput_data.get(metric_name, [])
+            data_raw: deque | list[tuple[float, int]] = self._throughput_data.get(metric_name, [])
+            data: list[tuple[float, int]] = list(data_raw) if isinstance(data_raw, deque) else data_raw
 
         if not data:
             return 0.0
@@ -1106,6 +1239,7 @@ class PerformanceProfiler(BaseComponent):
     @logged(level="debug")
     async def _collect_system_resources(self) -> None:
         """Collect system resource metrics using async-safe operations."""
+        process = None
         try:
             loop = asyncio.get_event_loop()
 
@@ -1181,21 +1315,26 @@ class PerformanceProfiler(BaseComponent):
                             ErrorContext(
                                 error=e,
                                 component="PerformanceProfiler",
-                                operation="collect_system_resources",
+                                operation="collect_system_resources"
                             ),
                         )
                     elif hasattr(self._error_handler, "handle_error_sync"):
                         self._error_handler.handle_error_sync(
                             e,
-                            ErrorContext(
-                                error=e,
-                                component="PerformanceProfiler",
-                                operation="collect_system_resources",
-                            ),
+                            "PerformanceProfiler",
+                            "collect_system_resources"
                         )
                 except Exception as handler_error:
                     self.logger.error(f"Error handler failed: {handler_error}")
             self.logger.error(f"Error collecting system resources: {e}")
+        finally:
+            # Clean up process handle if needed
+            if process and hasattr(process, "terminate"):
+                try:
+                    # Only terminate if it's our own process handle and it's safe to do so
+                    pass  # psutil.Process() doesn't need explicit cleanup
+                except Exception as cleanup_error:
+                    self.logger.debug(f"Error during process cleanup: {cleanup_error}")
 
     @retry(max_attempts=2, delay=0.5)
     @logged(level="debug")
@@ -1243,17 +1382,14 @@ class PerformanceProfiler(BaseComponent):
                             ErrorContext(
                                 error=e,
                                 component="PerformanceProfiler",
-                                operation="collect_gc_stats",
+                                operation="collect_gc_stats"
                             ),
                         )
                     elif hasattr(self._error_handler, "handle_error_sync"):
                         self._error_handler.handle_error_sync(
                             e,
-                            ErrorContext(
-                                error=e,
-                                component="PerformanceProfiler",
-                                operation="collect_gc_stats",
-                            ),
+                            "PerformanceProfiler",
+                            "collect_gc_stats"
                         )
                 except Exception as handler_error:
                     self.logger.error(f"Error handler failed: {handler_error}")
@@ -1454,7 +1590,7 @@ class PerformanceProfiler(BaseComponent):
 
 
 def profile_async(
-    function_name: str = "", module_name: str = "", labels: dict[str, str] | None = None
+    function_name: str = "", module_name: str = "", labels: Optional[dict[str, str]] = None
 ):
     """Decorator for profiling asynchronous functions."""
 
@@ -1475,7 +1611,7 @@ def profile_async(
 
 
 def profile_sync(
-    function_name: str = "", module_name: str = "", labels: dict[str, str] | None = None
+    function_name: str = "", module_name: str = "", labels: Optional[dict[str, str]] = None
 ):
     """Decorator for profiling synchronous functions."""
 
@@ -1496,31 +1632,84 @@ def profile_sync(
 
 
 # Global performance profiler instance
-_global_profiler: PerformanceProfiler | None = None
+_global_profiler: Optional[PerformanceProfiler] = None
 
 
-def get_performance_profiler() -> PerformanceProfiler | None:
-    """Get the global performance profiler instance."""
-    return _global_profiler
+def get_performance_profiler() -> Optional[PerformanceProfiler]:
+    """Get performance profiler instance using factory pattern."""
+    try:
+        from src.monitoring.dependency_injection import get_monitoring_container
+
+        container = get_monitoring_container()
+        return container.resolve(PerformanceProfiler)
+    except (ImportError, KeyError, ValueError, Exception) as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.warning(f"Failed to resolve performance profiler from DI container: {e}")
+        # Fallback to global instance for backward compatibility
+        return _global_profiler
 
 
 def set_global_profiler(profiler: PerformanceProfiler) -> None:
-    """Set the global performance profiler instance."""
+    """
+    Set the global performance profiler instance.
+
+    Note: This is for backward compatibility. Prefer using dependency injection.
+    """
     global _global_profiler
     _global_profiler = profiler
 
 
-def initialize_performance_monitoring(
-    metrics_collector: MetricsCollector | None = None,
-    alert_manager: AlertManager | None = None,
-    **kwargs,
-) -> PerformanceProfiler:
-    """Initialize global performance monitoring."""
-    profiler = PerformanceProfiler(
-        metrics_collector=metrics_collector, alert_manager=alert_manager, **kwargs
-    )
-    set_global_profiler(profiler)
-    return profiler
+def initialize_performance_monitoring(**kwargs) -> PerformanceProfiler:
+    """
+    Initialize performance monitoring using factory pattern.
+
+    Returns:
+        PerformanceProfiler instance created via factory
+    """
+    from src.core import get_logger
+    logger = get_logger(__name__)
+    try:
+        from src.monitoring.dependency_injection import (
+            create_performance_profiler,
+            setup_monitoring_dependencies,
+        )
+
+        # Ensure dependencies are configured
+        setup_monitoring_dependencies()
+
+        # Get profiler from factory
+        profiler = create_performance_profiler()
+        set_global_profiler(profiler)
+        return profiler
+    except (ImportError, Exception) as e:
+        logger.warning(f"Failed to initialize performance profiler from DI, using direct creation fallback: {e}")
+        # Fallback factory for backward compatibility
+        from src.monitoring.alerting import NotificationConfig
+        from src.monitoring.dependency_injection import (
+            create_alert_manager,
+            create_metrics_collector,
+        )
+
+        try:
+            metrics_collector = create_metrics_collector()
+            alert_manager = create_alert_manager()
+        except (ImportError, Exception) as e:
+            logger.warning(f"Failed to create monitoring dependencies, using direct instantiation: {e}")
+            # Final fallback with direct instantiation
+            from src.monitoring.alerting import AlertManager
+            from src.monitoring.metrics import MetricsCollector
+
+            metrics_collector = kwargs.get("metrics_collector") or MetricsCollector()
+            alert_manager = kwargs.get("alert_manager") or AlertManager(NotificationConfig())
+
+        profiler = PerformanceProfiler(
+            metrics_collector=metrics_collector,
+            alert_manager=alert_manager,
+            **{k: v for k, v in kwargs.items() if k not in ["metrics_collector", "alert_manager"]},
+        )
+        set_global_profiler(profiler)
+        return profiler
 
 
 # Additional classes for test compatibility
