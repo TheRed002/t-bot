@@ -17,171 +17,42 @@ from uuid import uuid4
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from sqlalchemy.exc import IntegrityError, OperationalError, TimeoutError as SQLTimeoutError
+
 from src.core.exceptions import StateError
-from src.database import IntegrityError, OperationalError, SQLTimeoutError
+from src.utils.error_recovery_utilities import (
+    BaseErrorRecovery,
+    ErrorContext,
+    RecoveryCheckpoint,
+    RecoveryStrategy,
+)
+from src.utils.validation_utilities import ErrorType, classify_error_type
 
 
-class ErrorType(Enum):
-    """Error type classification."""
-
-    DATABASE_CONNECTION = "database_connection"
-    DATABASE_INTEGRITY = "database_integrity"
-    DATABASE_TIMEOUT = "database_timeout"
-    REDIS_CONNECTION = "redis_connection"
-    REDIS_TIMEOUT = "redis_timeout"
-    DATA_CORRUPTION = "data_corruption"
-    DISK_SPACE = "disk_space"
-    PERMISSION = "permission"
-    VALIDATION = "validation"
-    CONCURRENCY = "concurrency"
-    UNKNOWN = "unknown"
+# Note: ErrorType and RecoveryStrategy moved to src.utils.validation_utilities and error_recovery_utilities
 
 
-class RecoveryStrategy(Enum):
-    """Recovery strategy options."""
+# Note: StateErrorContext and RecoveryCheckpoint moved to src.utils.error_recovery_utilities
+# Use ErrorContext and RecoveryCheckpoint from centralized utilities
 
-    RETRY = "retry"
-    ROLLBACK = "rollback"
-    FALLBACK = "fallback"
-    SKIP = "skip"
-    MANUAL = "manual"
-    ABORT = "abort"
+# Type aliases for backward compatibility
+StateErrorContext = ErrorContext
 
 
-@dataclass
-class StateErrorContext:
-    """Context information for state-specific error handling."""
-
-    error_id: str = field(default_factory=lambda: str(uuid4()))
-    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-    operation: str = ""
-    state_type: str = ""
-    state_id: str = ""
-
-    # Error details
-    error_type: ErrorType = ErrorType.UNKNOWN
-    error_message: str = ""
-    exception: Exception | None = None
-
-    # Operation context
-    session_id: str = ""
-    transaction_id: str = ""
-    savepoint_name: str = ""
-
-    # Retry information
-    retry_count: int = 0
-    max_retries: int = 3
-    retry_delay: float = 1.0
-
-    # Recovery state
-    recovery_strategy: RecoveryStrategy = RecoveryStrategy.RETRY
-    rollback_data: dict[str, Any] = field(default_factory=dict)
-    fallback_executed: bool = False
-
-    # Monitoring
-    resolved: bool = False
-    resolution_time: datetime | None = None
-    resolution_method: str = ""
-
-
-@dataclass
-class RecoveryCheckpoint:
-    """Recovery checkpoint for rollback operations."""
-
-    checkpoint_id: str = field(default_factory=lambda: str(uuid4()))
-    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-
-    # State snapshot
-    state_before: dict[str, Any] = field(default_factory=dict)
-    metadata_before: dict[str, Any] = field(default_factory=dict)
-
-    # Database state
-    database_state: dict[str, Any] = field(default_factory=dict)
-    redis_state: dict[str, Any] = field(default_factory=dict)
-
-    # Transaction info
-    transaction_id: str = ""
-    savepoint_name: str = ""
-
-    # Recovery info
-    can_rollback: bool = True
-    rollback_instructions: list[str] = field(default_factory=list)
-
-
-class StateErrorRecovery:
+class StateErrorRecovery(BaseErrorRecovery):
     """
-    Comprehensive error recovery system for state persistence operations.
+    State-specific error recovery system extending base recovery functionality.
 
-    Provides automatic error detection, classification, recovery strategies,
-    and rollback capabilities to ensure data integrity.
+    Provides state persistence operations with comprehensive error recovery,
+    building upon the centralized error recovery utilities.
     """
 
     def __init__(self, logger: logging.Logger | None = None):
-        """Initialize error recovery system."""
+        """Initialize state-specific error recovery system."""
+        super().__init__(component_name="StateErrorRecovery")
         self.logger = logger or logging.getLogger(__name__)
 
-        # Error tracking
-        self._active_errors: dict[str, StateErrorContext] = {}
-        self._recovery_checkpoints: dict[str, RecoveryCheckpoint] = {}
-        self._error_history: list[StateErrorContext] = []
-
-        # Configuration
-        self.max_history_size = 1000
-        self.default_retry_count = 3
-        self.default_retry_delay = 1.0
-        self.exponential_backoff = True
-
-        # Recovery handlers
-        self._error_handlers: dict[ErrorType, Callable] = {
-            ErrorType.DATABASE_CONNECTION: self._handle_database_connection_error,
-            ErrorType.DATABASE_INTEGRITY: self._handle_database_integrity_error,
-            ErrorType.DATABASE_TIMEOUT: self._handle_database_timeout_error,
-            ErrorType.REDIS_CONNECTION: self._handle_redis_connection_error,
-            ErrorType.REDIS_TIMEOUT: self._handle_redis_timeout_error,
-            ErrorType.DATA_CORRUPTION: self._handle_data_corruption_error,
-            ErrorType.DISK_SPACE: self._handle_disk_space_error,
-            ErrorType.PERMISSION: self._handle_permission_error,
-            ErrorType.VALIDATION: self._handle_validation_error,
-            ErrorType.CONCURRENCY: self._handle_concurrency_error,
-            ErrorType.UNKNOWN: self._handle_unknown_error,
-        }
-
-        # Metrics
-        self.error_counts = {error_type: 0 for error_type in ErrorType}
-        self.recovery_success_count = 0
-        self.recovery_failure_count = 0
-
-    def classify_error(self, exception: Exception) -> ErrorType:
-        """Classify exception into error type."""
-        if isinstance(exception, ConnectionError | OSError):
-            if "redis" in str(exception).lower():
-                return ErrorType.REDIS_CONNECTION
-            return ErrorType.DATABASE_CONNECTION
-
-        elif isinstance(exception, IntegrityError):
-            return ErrorType.DATABASE_INTEGRITY
-
-        elif isinstance(exception, SQLTimeoutError | asyncio.TimeoutError):
-            return ErrorType.DATABASE_TIMEOUT
-
-        elif isinstance(exception, OperationalError):
-            error_msg = str(exception).lower()
-            if "disk" in error_msg or "space" in error_msg:
-                return ErrorType.DISK_SPACE
-            elif "permission" in error_msg or "access" in error_msg:
-                return ErrorType.PERMISSION
-            return ErrorType.DATABASE_CONNECTION
-
-        elif isinstance(exception, ValueError | TypeError | json.JSONDecodeError):
-            return ErrorType.VALIDATION
-
-        elif isinstance(exception, StateError):
-            if "corruption" in str(exception).lower():
-                return ErrorType.DATA_CORRUPTION
-            elif "concurrent" in str(exception).lower():
-                return ErrorType.CONCURRENCY
-
-        return ErrorType.UNKNOWN
+    # Note: classify_error() method now inherited from BaseErrorRecovery
 
     async def create_recovery_checkpoint(
         self,
@@ -219,7 +90,6 @@ class StateErrorRecovery:
                 # Could capture current transaction state, locks, etc.
                 checkpoint.database_state = {
                     "transaction_active": session.in_transaction(),
-                    "autocommit": session.autocommit,
                 }
             except Exception as e:
                 self.logger.warning(f"Failed to capture database state: {e}")
@@ -268,14 +138,11 @@ class StateErrorRecovery:
         error_context = StateErrorContext(
             timestamp=datetime.now(timezone.utc),
             operation=operation,
-            state_type=state_type,
-            state_id=state_id,
             error_type=self.classify_error(exception),
             error_message=str(exception),
             exception=exception,
             session_id=context.get("session_id", ""),
             transaction_id=context.get("transaction_id", ""),
-            savepoint_name=context.get("savepoint_name", ""),
             retry_count=context.get("retry_count", 0),
             max_retries=context.get("max_retries", self.default_retry_count),
             retry_delay=context.get("retry_delay", self.default_retry_delay),
@@ -399,15 +266,6 @@ class StateErrorRecovery:
                 except Exception as e:
                     self.logger.error(f"Database rollback failed: {e}")
                     return False
-                finally:
-                    # Session should be closed by caller, but ensure it's not left hanging
-                    if hasattr(session, "is_active") and session.is_active:
-                        try:
-                            await session.close()
-                        except Exception as close_error:
-                            self.logger.warning(
-                                f"Session close error during rollback: {close_error}"
-                            )
 
             # Execute rollback instructions
             for instruction in checkpoint.rollback_instructions:

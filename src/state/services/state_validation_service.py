@@ -7,10 +7,28 @@ implementation details.
 """
 
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol, Union
 
 from src.core.base.service import BaseService
 from src.core.validator_registry import ValidatorRegistry, validate
+from src.utils.state_validation_utils import (
+    validate_required_fields_with_details,
+    validate_string_field_with_details,
+    validate_decimal_field_with_details,
+    validate_positive_value_with_details,
+    validate_non_negative_value_with_details,
+    validate_bot_id_format,
+    validate_bot_status,
+    validate_order_side,
+    validate_order_type,
+    validate_symbol_format,
+    validate_capital_allocation,
+    validate_order_price_logic,
+    validate_cash_balance,
+    validate_var_limits,
+    validate_trade_execution,
+    validate_strategy_params
+)
 
 if TYPE_CHECKING:
     from ..state_service import StateType
@@ -48,12 +66,20 @@ class StateValidationService(BaseService):
     business rules, data integrity, and state transition validation.
     """
 
-    def __init__(self):
-        """Initialize the state validation service."""
+    def __init__(self, validation_service: Any = None):
+        """
+        Initialize the state validation service.
+        
+        Args:
+            validation_service: Injected validation service dependency
+        """
         super().__init__(name="StateValidationService")
 
-        # Use centralized validator registry for consistency
-        self.validator_registry = ValidatorRegistry()
+        # Injected dependency - fallback to registry if not provided
+        self.validation_service = validation_service
+        if not validation_service:
+            self.validator_registry = ValidatorRegistry()
+            self.logger.info("StateValidationService using ValidatorRegistry fallback")
         
         # Validation configuration
         self.strict_validation = True
@@ -69,7 +95,7 @@ class StateValidationService(BaseService):
         self._validation_failures = 0
         self._cache_hits = 0
 
-        self.logger.info("StateValidationService initialized")
+        self.logger.info(f"StateValidationService initialized with validation_service: {type(validation_service).__name__ if validation_service else 'ValidatorRegistry'}")
 
     async def validate_state_data(
         self,
@@ -102,10 +128,12 @@ class StateValidationService(BaseService):
                     return cached_result
 
             # Initialize validation result
+            errors: list[str] = []
+            warnings: list[str] = []
             result = {
                 "is_valid": True,
-                "errors": [],
-                "warnings": [],
+                "errors": errors,
+                "warnings": warnings,
                 "validation_level": validation_level,
                 "state_type": state_type.value,
                 "validated_at": start_time.isoformat(),
@@ -113,24 +141,24 @@ class StateValidationService(BaseService):
 
             # Perform basic data validation
             basic_errors = await self._validate_basic_data_structure(state_type, state_data)
-            result["errors"].extend(basic_errors)
+            errors.extend(basic_errors)
 
             # Perform type-specific validation
             type_errors = await self._validate_state_type_specific(state_type, state_data)
-            result["errors"].extend(type_errors)
+            errors.extend(type_errors)
 
             # Perform business rule validation if enabled
             if self.enable_business_rules:
                 business_errors = await self.validate_business_rules(state_type, state_data)
-                result["errors"].extend(business_errors)
+                errors.extend(business_errors)
 
             # Perform strict validation if required
             if validation_level == "strict" or self.strict_validation:
                 strict_errors = await self._validate_strict_requirements(state_type, state_data)
-                result["errors"].extend(strict_errors)
+                errors.extend(strict_errors)
 
             # Update validation result
-            result["is_valid"] = len(result["errors"]) == 0
+            result["is_valid"] = len(errors) == 0
 
             # Calculate validation time
             end_time = datetime.now(timezone.utc)
@@ -372,7 +400,7 @@ class StateValidationService(BaseService):
 
         try:
             # Define expected field types for each state type
-            type_specs = {
+            type_specs: dict[str, dict[str, Union[type, tuple[type, ...]]]] = {
                 "bot_state": {
                     "bot_id": str,
                     "status": str,

@@ -13,9 +13,7 @@ in case of system failures or crashes.
 """
 
 import asyncio
-import gzip
 import hashlib
-import pickle
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -29,10 +27,15 @@ from src.core.base.component import BaseComponent
 from src.core.config.main import Config
 from src.core.exceptions import StateCorruptionError, StateError
 from src.core.types import BotPriority, BotState, BotStatus
-from src.error_handling import ErrorContext, ErrorHandler, ErrorSeverity, with_retry
+from src.core.exceptions import ErrorSeverity
+from src.error_handling import ErrorContext, ErrorHandler, with_retry
+from src.utils.checksum_utilities import calculate_state_checksum
+from src.utils.serialization_utilities import serialize_state_data, deserialize_state_data
 
 # Import utilities through centralized import handler
 from .utils_imports import ensure_directory_exists
+
+
 
 
 @dataclass
@@ -92,19 +95,23 @@ class CheckpointManager(BaseComponent):
     - Recovery planning and execution
     - Checkpoint lifecycle management (creation, validation, archival, cleanup)
     - Performance optimization for large state objects
+    
+    This acts as a controller that delegates to business services for actual operations.
     """
 
-    def __init__(self, config: Config):
+    def __init__(self, config: Config, checkpoint_service=None):
         """
         Initialize the checkpoint manager.
 
         Args:
             config: Application configuration
+            checkpoint_service: Checkpoint business service (injected)
         """
         super().__init__(
             name="CheckpointManager", config=config.__dict__ if hasattr(config, "__dict__") else {}
         )
         self.config = config
+        self._checkpoint_service = checkpoint_service  # Business service injection
 
         # Configuration - safely get state_management config
         state_management_config = getattr(config, "state_management", {})
@@ -189,39 +196,43 @@ class CheckpointManager(BaseComponent):
         try:
             self.logger.info("Starting CheckpointManager stop")
 
-            # Cancel and await background tasks
-            tasks_to_cancel = []
+            # Cancel and await background tasks with proper cleanup
+            background_tasks = []
+            cleanup_tasks = self._cleanup_tasks.copy()
 
-            if self._scheduler_task and not self._scheduler_task.done():
-                tasks_to_cancel.append(self._scheduler_task)
+            # Clear task references immediately
+            scheduler_task = self._scheduler_task
+            cleanup_task = self._cleanup_task
+            self._scheduler_task = None
+            self._cleanup_task = None
+            self._cleanup_tasks.clear()
 
-            if self._cleanup_task and not self._cleanup_task.done():
-                tasks_to_cancel.append(self._cleanup_task)
+            # Add main background tasks
+            if scheduler_task and not scheduler_task.done():
+                background_tasks.append(scheduler_task)
+
+            if cleanup_task and not cleanup_task.done():
+                background_tasks.append(cleanup_task)
 
             # Add all background cleanup tasks
-            for task in self._cleanup_tasks:
+            for task in cleanup_tasks:
                 if task and not task.done():
-                    tasks_to_cancel.append(task)
+                    background_tasks.append(task)
 
             # Cancel all tasks
-            for task in tasks_to_cancel:
+            for task in background_tasks:
                 task.cancel()
 
             # Wait for all tasks to complete with timeout
-            if tasks_to_cancel:
+            if background_tasks:
                 try:
                     await asyncio.wait_for(
-                        asyncio.gather(*tasks_to_cancel, return_exceptions=True), timeout=5.0
+                        asyncio.gather(*background_tasks, return_exceptions=True), timeout=5.0
                     )
                 except asyncio.TimeoutError:
                     self.logger.warning("Background tasks stop timeout")
                 except Exception as e:
                     self.logger.warning(f"Background tasks stop error: {e}")
-
-            # Clear task references
-            self._scheduler_task = None
-            self._cleanup_task = None
-            self._cleanup_tasks.clear()
 
             self.logger.info("CheckpointManager stop completed")
 
@@ -230,9 +241,8 @@ class CheckpointManager(BaseComponent):
             raise
         finally:
             # Ensure references are cleared even if stop fails
-            self._scheduler_task = None
-            self._cleanup_task = None
-            self._cleanup_tasks.clear()
+            # Task references already cleared above to prevent resource leaks
+            pass
 
     @with_retry(max_attempts=3, base_delay=0.1, backoff_factor=2.0, exceptions=(StateError,))
     async def create_checkpoint(
@@ -271,29 +281,31 @@ class CheckpointManager(BaseComponent):
             checkpoint_data = {
                 "bot_id": bot_id,
                 "timestamp": start_time.isoformat(),
-                "bot_state": bot_state.model_dump(),
+                "bot_state": bot_state.model_dump(mode='json'),
                 "checkpoint_type": checkpoint_type,
                 "version": "1.0",
             }
 
-            # Serialize data
-            serialized_data = pickle.dumps(checkpoint_data)
-            original_size = len(serialized_data)
-
-            # Determine compression
+            # Serialize and optionally compress data
             should_compress = (
                 compress
                 if compress is not None
-                else (self.compression_enabled and original_size > self.compression_threshold)
+                else self.compression_enabled
             )
-
-            # Compress if needed
-            final_data = serialized_data
-            if should_compress:
-                final_data = gzip.compress(serialized_data)
-
+            
+            import json
+            # Calculate original size before compression
+            original_data = json.dumps(checkpoint_data, sort_keys=True, default=str).encode('utf-8')
+            original_size = len(original_data)
+            
+            final_data = serialize_state_data(
+                checkpoint_data, 
+                compress=should_compress,
+                compression_threshold=self.compression_threshold
+            )
+            
             # Calculate integrity hash
-            integrity_hash = hashlib.sha256(final_data).hexdigest()
+            integrity_hash = calculate_state_checksum(checkpoint_data)
 
             # Create metadata
             metadata = CheckpointMetadata(
@@ -312,15 +324,15 @@ class CheckpointManager(BaseComponent):
                 time_diff = start_time - last_checkpoint.created_at
                 metadata.rpo_seconds = int(time_diff.total_seconds())
 
-            # Save to disk
+            # Save to disk with proper resource management
             checkpoint_path = self.checkpoint_dir / f"{checkpoint_id}.checkpoint"
-            f = None
+            file_handle = None
             try:
-                f = await aiofiles.open(checkpoint_path, "wb")
-                await f.write(final_data)
+                file_handle = await aiofiles.open(checkpoint_path, "wb")
+                await file_handle.write(final_data)
             finally:
-                if f:
-                    await f.close()
+                if file_handle:
+                    await file_handle.close()
 
             # Validate if enabled
             if self.integrity_check_enabled:
@@ -347,7 +359,7 @@ class CheckpointManager(BaseComponent):
                     asyncio.create_task(self._cleanup_old_checkpoints(bot_id))
                 )
 
-            # Update checkpoints dict for test compatibility
+            # Store checkpoint data for retrieval operations
             self._test_checkpoints[checkpoint_id] = checkpoint_data
 
             self.logger.info(
@@ -489,8 +501,8 @@ class CheckpointManager(BaseComponent):
             bot_id = state_dict["bot_id"]
             bot_state_data = {k: v for k, v in state_dict.items() if k != "bot_id"}
         else:
-            # For test compatibility - generate a bot_id
-            bot_id = "test-bot-" + str(uuid4())[:8]
+            # Generate a default bot_id if not provided
+            bot_id = "bot-" + str(uuid4())[:8]
             bot_state_data = state_dict
 
         # Create a BotState object from the data
@@ -537,18 +549,18 @@ class CheckpointManager(BaseComponent):
             if not metadata:
                 raise StateError(f"Checkpoint {checkpoint_id} not found")
 
-            # Read checkpoint file
+            # Read checkpoint file with proper resource management
             checkpoint_path = self.checkpoint_dir / f"{checkpoint_id}.checkpoint"
             if not checkpoint_path.exists():
                 raise StateError(f"Checkpoint file not found: {checkpoint_path}")
 
-            f = None
+            file_handle = None
             try:
-                f = await aiofiles.open(checkpoint_path, "rb")
-                file_data = await f.read()
+                file_handle = await aiofiles.open(checkpoint_path, "rb")
+                file_data = await file_handle.read()
             finally:
-                if f:
-                    await f.close()
+                if file_handle:
+                    await file_handle.close()
 
             # Verify integrity
             if self.integrity_check_enabled:
@@ -558,18 +570,9 @@ class CheckpointManager(BaseComponent):
                         f"Checkpoint integrity check failed for {checkpoint_id}"
                     )
 
-            # Decompress if needed
-            if metadata.compressed:
-                try:
-                    file_data = gzip.decompress(file_data)
-                except Exception as e:
-                    raise StateCorruptionError(
-                        f"Failed to decompress checkpoint {checkpoint_id}: {e}"
-                    ) from e
-
-            # Deserialize data
+            # Deserialize data (handles decompression automatically)
             try:
-                checkpoint_data = pickle.loads(file_data)
+                checkpoint_data = deserialize_state_data(file_data, metadata.compressed)
             except Exception as e:
                 raise StateCorruptionError(
                     f"Failed to deserialize checkpoint {checkpoint_id}: {e}"
@@ -614,11 +617,11 @@ class CheckpointManager(BaseComponent):
 
             bot_id, bot_state = result
 
-            # Convert to dict format expected by tests
+            # Convert to standard dictionary format
             return {
                 "bot_id": bot_id,
                 "portfolio": (
-                    bot_state.model_dump()
+                    bot_state.model_dump(mode='json')
                     if hasattr(bot_state, "model_dump")
                     else bot_state.__dict__
                 ),
@@ -877,14 +880,14 @@ class CheckpointManager(BaseComponent):
             if actual_size != metadata.size_bytes:
                 errors.append(f"Size mismatch: expected {metadata.size_bytes}, got {actual_size}")
 
-            # Check integrity hash
-            f = None
+            # Check integrity hash with proper resource management
+            file_handle = None
             try:
-                f = await aiofiles.open(checkpoint_path, "rb")
-                file_data = await f.read()
+                file_handle = await aiofiles.open(checkpoint_path, "rb")
+                file_data = await file_handle.read()
             finally:
-                if f:
-                    await f.close()
+                if file_handle:
+                    await file_handle.close()
 
             file_hash = hashlib.sha256(file_data).hexdigest()
             if file_hash != metadata.integrity_hash:
@@ -892,9 +895,7 @@ class CheckpointManager(BaseComponent):
 
             # Try to deserialize
             try:
-                if metadata.compressed:
-                    file_data = gzip.decompress(file_data)
-                checkpoint_data = pickle.loads(file_data)
+                checkpoint_data = deserialize_state_data(file_data, metadata.compressed)
 
                 # Validate structure
                 required_keys = ["bot_id", "timestamp", "bot_state"]
@@ -931,11 +932,12 @@ class CheckpointManager(BaseComponent):
                     checkpoint_path.unlink()
 
                 # Remove from memory
-                if checkpoint.checkpoint_id in self.checkpoints:
-                    if checkpoint.checkpoint_id in self._checkpoints_list:
-                        self._checkpoints_list.remove(checkpoint.checkpoint_id)
+                if checkpoint.checkpoint_id in self._checkpoints_list:
+                    self._checkpoints_list.remove(checkpoint.checkpoint_id)
                 if checkpoint.checkpoint_id in self.checkpoint_metadata:
                     del self.checkpoint_metadata[checkpoint.checkpoint_id]
+                if checkpoint.checkpoint_id in self._test_checkpoints:
+                    del self._test_checkpoints[checkpoint.checkpoint_id]
 
             except Exception as e:
                 self.logger.warning(f"Failed to remove checkpoint {checkpoint.checkpoint_id}: {e}")

@@ -6,6 +6,7 @@ decoupled from infrastructure and presentation concerns.
 """
 
 from datetime import datetime, timezone
+from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Protocol
 from uuid import uuid4
 
@@ -61,13 +62,24 @@ class StateBusinessService(BaseService):
     logic independent of infrastructure concerns.
     """
 
-    def __init__(self):
-        """Initialize the state business service."""
+    def __init__(self, config: Any = None):
+        """
+        Initialize the state business service.
+        
+        Args:
+            config: Optional configuration object for business rules
+        """
         super().__init__(name="StateBusinessService")
 
-        # Business rule configurations
-        self.max_state_versions = 10
-        self.state_retention_days = 90
+        # Business rule configurations - use injected config or defaults
+        if config and hasattr(config, 'state_management'):
+            state_config = config.state_management
+            self.max_state_versions = getattr(state_config, 'max_state_versions', 10)
+            self.state_retention_days = getattr(state_config, 'state_retention_days', 90)
+        else:
+            self.max_state_versions = 10
+            self.state_retention_days = 90
+            
         self.critical_state_types = {"bot_state", "risk_state", "position_state"}
 
         self.logger.info("StateBusinessService initialized")
@@ -97,8 +109,8 @@ class StateBusinessService(BaseService):
             BusinessRuleViolationError: If business rules are violated
         """
         try:
-            issues = []
-            warnings = []
+            issues: list[str] = []
+            warnings: list[str] = []
 
             # Check state transition validity
             if current_state:
@@ -366,7 +378,7 @@ class StateBusinessService(BaseService):
             elif state_type.value == "risk_state":
                 # Critical risk state constraints
                 exposure = state_data.get("exposure", 0)
-                max_exposure = state_data.get("max_exposure", float("inf"))
+                max_exposure = Decimal(str(state_data.get("max_exposure", "inf")))
 
                 if exposure > max_exposure:
                     issues.append(f"Exposure {exposure} exceeds maximum {max_exposure}")
@@ -570,7 +582,7 @@ class StateBusinessService(BaseService):
 
             # Exposure limits
             exposure = state_data.get("exposure", 0)
-            max_exposure = state_data.get("max_exposure", float("inf"))
+            max_exposure = state_data.get("max_exposure", Decimal("999999999999999999.99999999"))  # Large but finite limit
             if exposure > max_exposure:
                 issues.append(f"Exposure {exposure} exceeds maximum {max_exposure}")
 
@@ -678,9 +690,9 @@ class StateBusinessService(BaseService):
                     "current_price" in state_change.new_value
                     and "entry_price" in state_change.new_value
                 ):
-                    current_price = float(state_change.new_value["current_price"])
-                    entry_price = float(state_change.new_value["entry_price"])
-                    quantity = float(state_change.new_value.get("quantity", 0))
+                    current_price = Decimal(str(state_change.new_value["current_price"]))
+                    entry_price = Decimal(str(state_change.new_value["entry_price"]))
+                    quantity = Decimal(str(state_change.new_value.get("quantity", 0)))
                     side = state_change.new_value.get("side", "buy")
 
                     if side.lower() == "buy":

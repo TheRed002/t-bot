@@ -6,12 +6,15 @@ to maintain compatibility with existing tests while the codebase
 transitions to the new StateService architecture.
 """
 
-from typing import Any
+import logging
+from typing import TYPE_CHECKING, Any, Optional
 
+from src.core.base.component import BaseComponent
 from src.core.config.main import Config
 from src.core.types import BotState
 
-from .state_service import StatePriority, StateService, StateType
+if TYPE_CHECKING:
+    from .state_service import StatePriority, StateService, StateType
 
 
 def get_cache_manager():
@@ -21,7 +24,7 @@ def get_cache_manager():
     return CacheManager.get_instance()
 
 
-class StateManager:
+class StateManager(BaseComponent):
     """
     Backward compatibility wrapper for StateService.
 
@@ -31,24 +34,45 @@ class StateManager:
 
     def __init__(self, config: Config):
         """Initialize StateManager with StateService delegation."""
+        super().__init__()
         self.config = config
-        # Initialize state service without database service (will use default)
-        self.state_service = StateService(config, None)
+        # State service will be created using factory in initialize()
+        self.state_service: Optional[StateService] = None
 
     async def initialize(self) -> None:
-        """Initialize the state manager."""
-        # Initialize state service
-        await self.state_service.initialize()
+        """Initialize the state manager using factory pattern with dependency injection."""
+        # Use dependency injection container to get factory
+        from src.core.dependency_injection import get_container
+        from src.core.exceptions import DependencyError, ServiceError
+        from .factory import StateServiceFactory
+        
+        container = get_container()
+        try:
+            # Use dependency injection to get factory
+            factory = container.get("StateServiceFactory")
+        except (DependencyError, ServiceError):
+            # Fallback to direct factory creation
+            factory = StateServiceFactory()
+        
+        self.state_service = await factory.create_state_service(
+            config=self.config, 
+            auto_start=True
+        )
 
     async def shutdown(self) -> None:
         """Shutdown the state manager."""
-        await self.state_service.cleanup()
+        if self.state_service:
+            await self.state_service.cleanup()
 
     async def save_bot_state(
         self, bot_id: str, state: dict[str, Any], create_snapshot: bool = False
     ) -> str:
         """Save bot state and optionally create a snapshot."""
-        # Save the state
+        if not self.state_service:
+            raise RuntimeError("StateManager not initialized. Call initialize() first.")
+            
+        # Save the state - late import to avoid circular dependency
+        from .state_service import StatePriority, StateType
         success = await self.state_service.set_state(
             StateType.BOT_STATE, bot_id, state, priority=StatePriority.HIGH
         )
@@ -71,6 +95,11 @@ class StateManager:
 
     async def load_bot_state(self, bot_id: str) -> BotState | None:
         """Load bot state."""
+        if not self.state_service:
+            raise RuntimeError("StateManager not initialized. Call initialize() first.")
+            
+        # Late import to avoid circular dependency
+        from .state_service import StateType
         result = await self.state_service.get_state(StateType.BOT_STATE, bot_id)
 
         if result is None:
@@ -92,38 +121,48 @@ class StateManager:
             # Try to create BotState from dict
             try:
                 return BotState(**data)
-            except Exception:
-                # If BotState construction fails, return the dict wrapped in a simple object
-                class StateWrapper:
-                    def __init__(self, data):
-                        self.__dict__.update(data)
+            except Exception as e:
+                self.logger.warning(f"BotState construction failed: {e}")
+                # If BotState construction fails, return None for consistency
+                return None
 
-                return StateWrapper(data)
-
-        # For any other type, try to extract data
+        # For any other type, try to convert or return None
         if hasattr(result, "data"):
-            return self.load_bot_state(bot_id)  # Recursive call with extracted data
+            return await self.load_bot_state(bot_id)  # Recursive call with extracted data
 
-        return result
+        # If we can't convert to BotState, return None
+        if isinstance(result, BotState):
+            return result
+        
+        return None
 
     async def create_checkpoint(
         self, bot_id: str, checkpoint_data: dict[str, Any] | None = None
     ) -> str:
         """Create a checkpoint."""
+        if not self.state_service:
+            raise RuntimeError("StateManager not initialized. Call initialize() first.")
+            
         checkpoint_id = await self.state_service.create_snapshot(bot_id)
         return checkpoint_id
 
     async def restore_from_checkpoint(self, bot_id: str, checkpoint_id: str) -> bool:
         """Restore from checkpoint."""
+        if not self.state_service:
+            raise RuntimeError("StateManager not initialized. Call initialize() first.")
+            
         # StateService.restore_snapshot only expects snapshot_id parameter
         return await self.state_service.restore_snapshot(checkpoint_id)
 
     async def get_state_metrics(self, bot_id: str | None = None, hours: int = 24) -> dict[str, Any]:
         """Get state metrics."""
-        metrics = await self.state_service.get_metrics()
+        if not self.state_service:
+            raise RuntimeError("StateManager not initialized. Call initialize() first.")
+            
+        metrics = self.state_service.get_metrics()
 
         # Base result with bot_id and period_hours
-        result = {
+        result: dict[str, Any] = {
             "bot_id": bot_id,
             "period_hours": hours,
         }
@@ -171,5 +210,18 @@ class StateManager:
         return result
 
     def __getattr__(self, name: str) -> Any:
-        """Delegate unknown attributes to state_service."""
+        """
+        Delegate unknown attributes to state_service.
+        
+        Args:
+            name: Attribute name to retrieve
+            
+        Returns:
+            The requested attribute from the state service
+            
+        Raises:
+            AttributeError: If the attribute doesn't exist on the state service
+        """
+        if self.state_service is None:
+            raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{name}' and no state service is available")
         return getattr(self.state_service, name)

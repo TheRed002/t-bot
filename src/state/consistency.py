@@ -12,6 +12,9 @@ from datetime import datetime, timezone
 from src.core.base.events import BaseEventEmitter, EventPriority
 from src.core.exceptions import StateConsistencyError, ValidationError
 from src.core.validator_registry import ValidatorRegistry
+from src.core.logging import get_logger
+
+logger = get_logger(__name__)
 
 T = TypeVar("T")
 
@@ -159,6 +162,25 @@ class ConsistentProcessingPattern:
         except Exception as e:
             raise StateConsistencyError(f"Processing failed for {self.name}: {e}") from e
 
+    async def _process_batch(self, batch: list[Any]) -> None:
+        """Process a batch of items (override in subclasses)."""
+        # Default implementation - process items sequentially with timeout
+        for item in batch:
+            try:
+                await asyncio.wait_for(
+                    self._process_single_item(item),
+                    timeout=5.0  # Timeout per item
+                )
+            except asyncio.TimeoutError:
+                logger.warning(f"Item processing timeout in {self.name}")
+            except Exception as e:
+                logger.error(f"Item processing error in {self.name}: {e}")
+                
+    async def _process_single_item(self, item: Any) -> None:
+        """Process a single item (override in subclasses)."""
+        # Default no-op implementation
+        pass
+
     async def _process_loop(self) -> None:
         """Consistent processing loop."""
         while self._running:
@@ -166,15 +188,13 @@ class ConsistentProcessingPattern:
                 # Process items from queue with timeout
                 try:
                     item = await asyncio.wait_for(self._batch_queue.get(), timeout=1.0)
-                    # Process item here
                     self._batch_queue.task_done()
                 except asyncio.TimeoutError:
-                    # Continue loop, no items to process
                     continue
 
             except Exception as e:
                 # Log error but continue processing
-                print(f"Processing error in {self.name}: {e}")
+                logger.error(f"Processing error in {self.name}: {e}")
                 await asyncio.sleep(0.1)
 
 

@@ -15,8 +15,9 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from enum import Enum
-from typing import Any
+from typing import Any, Optional
 from uuid import uuid4
 
 from src.core.base.component import BaseComponent
@@ -35,16 +36,28 @@ class HealthStatus(Enum):
     UNKNOWN = "unknown"
 
 
-# Use AlertSeverity from monitoring module to ensure compatibility
-# This maintains state-specific naming while using monitoring's actual implementation
-class AlertSeverity(Enum):
-    """Alert severity levels."""
-
-    # Map to monitoring module's severity levels
-    INFO = "low"  # Maps to monitoring LOW
-    WARNING = "medium"  # Maps to monitoring MEDIUM
-    ERROR = "high"  # Maps to monitoring HIGH
-    CRITICAL = "critical"  # Maps to monitoring CRITICAL
+# Import consistent AlertSeverity from core types
+from src.core.types import AlertSeverity
+# Import constants through centralized utils import to avoid circular dependencies
+try:
+    from src.utils.state_constants import (
+        DEFAULT_CACHE_TTL,
+        HEALTH_CHECK_INTERVAL,
+        METRICS_COLLECTION_INTERVAL,
+        ALERT_COOLDOWN_MINUTES,
+        METRICS_RETENTION_HOURS,
+        MEMORY_WARNING_THRESHOLD,
+        MEMORY_CRITICAL_THRESHOLD
+    )
+except ImportError:
+    # Fallback constants in case of circular import
+    DEFAULT_CACHE_TTL = 300
+    HEALTH_CHECK_INTERVAL = 30
+    METRICS_COLLECTION_INTERVAL = 60
+    ALERT_COOLDOWN_MINUTES = 10
+    METRICS_RETENTION_HOURS = 24
+    MEMORY_WARNING_THRESHOLD = 0.8
+    MEMORY_CRITICAL_THRESHOLD = 0.9
 
 
 class MetricType(Enum):
@@ -63,7 +76,7 @@ class HealthCheck:
     check_id: str = field(default_factory=lambda: str(uuid4()))
     name: str = ""
     description: str = ""
-    check_function: Callable = None
+    check_function: Optional[Callable[[], Any]] = None
 
     # Configuration
     enabled: bool = True
@@ -105,7 +118,7 @@ class Alert:
 
     alert_id: str = field(default_factory=lambda: str(uuid4()))
     timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-    severity: AlertSeverity = AlertSeverity.WARNING
+    severity: AlertSeverity = AlertSeverity.MEDIUM
 
     # Alert details
     title: str = ""
@@ -201,19 +214,19 @@ class StateMonitoringService(BaseComponent):
         # Alerting
         self._alerts: list[Alert] = []
         self._alert_handlers: list[Callable] = []
-        self._alert_thresholds: dict[str, dict[str, float]] = {}
+        self._alert_thresholds: dict[str, dict[str, float | str]] = {}
 
         # Performance tracking
         self._operation_timers: dict[str, list[float]] = {}
         self._resource_usage: dict[str, list[float]] = {}
 
         # Configuration
-        self.metrics_retention_hours = 24
-        self.health_check_interval_seconds = 30
-        self.metrics_collection_interval_seconds = 60
-        self.alert_cooldown_minutes = 15
-        self.sla_availability_target = 99.9  # 99.9% uptime
-        self.sla_response_time_target_ms = 100.0
+        self.metrics_retention_hours = METRICS_RETENTION_HOURS
+        self.health_check_interval_seconds = HEALTH_CHECK_INTERVAL
+        self.metrics_collection_interval_seconds = METRICS_COLLECTION_INTERVAL
+        self.alert_cooldown_minutes = ALERT_COOLDOWN_MINUTES
+        self.sla_availability_target = 99.9  # 99.9% uptime SLA target
+        self.sla_response_time_target_ms = 100.0  # 100ms response time SLA
 
         # Background tasks
         self._health_check_task: asyncio.Task | None = None
@@ -244,7 +257,7 @@ class StateMonitoringService(BaseComponent):
             # Initial health check
             await self._run_all_health_checks()
 
-            super().initialize()
+            await super().initialize()
             self.logger.info("StateMonitoringService initialization completed")
 
         except Exception as e:
@@ -256,24 +269,48 @@ class StateMonitoringService(BaseComponent):
         try:
             self._running = False
 
-            # Cancel background tasks
-            for task in [
+            # Cancel and cleanup background tasks
+            background_tasks = [
                 self._health_check_task,
                 self._metrics_collection_task,
                 self._alert_processing_task,
                 self._cleanup_task,
-            ]:
+            ]
+            
+            # Clear task references immediately  
+            self._health_check_task = None
+            self._metrics_collection_task = None
+            self._alert_processing_task = None
+            self._cleanup_task = None
+            
+            for task in background_tasks:
                 if task and not task.done():
                     task.cancel()
                     try:
                         await task
                     except asyncio.CancelledError:
                         pass
+                    except Exception as e:
+                        self.logger.error(f"Error waiting for background task cleanup: {e}")
+                        
+            # Cleanup alert tasks
+            alert_tasks = self._alert_tasks.copy()
+            self._alert_tasks.clear()
+            
+            for task in alert_tasks:
+                if task and not task.done():
+                    task.cancel()
+                    try:
+                        await task
+                    except asyncio.CancelledError:
+                        pass
+                    except Exception as e:
+                        self.logger.error(f"Error waiting for alert task cleanup: {e}")
 
             # Generate final performance report
             await self.generate_performance_report()
 
-            super().cleanup()
+            await super().cleanup()
             self.logger.info("StateMonitoringService cleanup completed")
 
         except Exception as e:
@@ -344,7 +381,7 @@ class StateMonitoringService(BaseComponent):
             self._overall_health = overall_status
 
             # Build detailed status
-            status = {
+            status: dict[str, Any] = {
                 "overall_status": overall_status.value,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "checks": {},
@@ -417,8 +454,15 @@ class StateMonitoringService(BaseComponent):
             # Update aggregates
             self._update_metric_aggregates(name, value)
 
-            # Check for alerts
-            self._alert_tasks.append(asyncio.create_task(self._check_metric_alerts(name, value)))
+            # Check for alerts (schedule task but don't wait for it)
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    task = asyncio.create_task(self._check_metric_alerts(name, value))
+                    self._alert_tasks.append(task)
+            except RuntimeError:
+                # No event loop running, skip alert checking
+                pass
 
         except Exception as e:
             self.logger.error(f"Failed to record metric {name}: {e}")
@@ -439,7 +483,11 @@ class StateMonitoringService(BaseComponent):
             f"operation_time_{operation_name}", duration_ms, MetricType.TIMER, unit="ms"
         )
 
-    async def get_metrics(
+    def get_metrics(self) -> dict[str, Any]:
+        """Get current component metrics (override of BaseComponent method)."""
+        return super().get_metrics()
+    
+    async def get_filtered_metrics(
         self,
         metric_names: list[str] | None = None,
         start_time: datetime | None = None,
@@ -637,7 +685,7 @@ class StateMonitoringService(BaseComponent):
         """Initialize built-in metrics and thresholds."""
 
         # Set default alert thresholds
-        self.set_alert_threshold("memory_usage_mb", warning_threshold=1000, critical_threshold=2000)
+        self.set_alert_threshold("memory_usage_mb", warning_threshold=MEMORY_WARNING_THRESHOLD, critical_threshold=MEMORY_CRITICAL_THRESHOLD)
         self.set_alert_threshold(
             "error_rate_percentage", warning_threshold=5.0, critical_threshold=10.0
         )
@@ -652,13 +700,18 @@ class StateMonitoringService(BaseComponent):
     async def _check_state_service_connectivity(self) -> dict[str, Any]:
         """Check state service connectivity."""
         try:
-            # Try to get health status from state service
+            # Try to get health status from state service with timeout
             if hasattr(self.state_service, "get_health_status"):
-                status = await self.state_service.get_health_status()
+                status = await asyncio.wait_for(
+                    self.state_service.get_health_status(),
+                    timeout=10.0
+                )
                 return {"status": "healthy", "response": status}
             else:
                 return {"status": "healthy", "message": "State service accessible"}
 
+        except asyncio.TimeoutError:
+            return {"status": "unhealthy", "error": "State service health check timeout"}
         except Exception as e:
             return {"status": "unhealthy", "error": str(e)}
 
@@ -666,22 +719,42 @@ class StateMonitoringService(BaseComponent):
         """Check database connectivity."""
         try:
             if self.state_service.database_service:
-                health_status = await self.state_service.database_service._service_health_check()
+                # Add timeout to prevent hanging on database health check
+                health_status = await asyncio.wait_for(
+                    self.state_service.database_service._service_health_check(),
+                    timeout=15.0
+                )
                 return {"status": "healthy" if health_status.value == "healthy" else "degraded"}
             else:
                 return {"status": "degraded", "message": "Database service not available"}
 
+        except asyncio.TimeoutError:
+            return {"status": "unhealthy", "error": "Database health check timeout"}
         except Exception as e:
             return {"status": "unhealthy", "error": str(e)}
 
     async def _check_cache_connectivity(self) -> dict[str, Any]:
         """Check Redis cache connectivity."""
+        redis_client = None
         try:
-            await self.state_service.redis_client.ping()
+            redis_client = self.state_service.redis_client
+            if not redis_client:
+                return {"status": "unhealthy", "error": "Redis client not available"}
+            
+            # Use timeout to prevent hanging on Redis ping
+            await asyncio.wait_for(
+                redis_client.ping(),
+                timeout=5.0
+            )
             return {"status": "healthy"}
 
+        except asyncio.TimeoutError:
+            return {"status": "unhealthy", "error": "Redis ping timeout"}
         except Exception as e:
             return {"status": "unhealthy", "error": str(e)}
+        finally:
+            # Redis client cleanup is handled by the StateService
+            pass
 
     async def _check_memory_usage(self) -> dict[str, Any]:
         """Check memory usage levels."""
@@ -694,9 +767,9 @@ class StateMonitoringService(BaseComponent):
 
             self.record_metric("memory_usage_mb", memory_mb, unit="MB")
 
-            if memory_mb > 2000:
+            if memory_mb > MEMORY_CRITICAL_THRESHOLD:
                 return {"status": "critical", "memory_mb": memory_mb}
-            elif memory_mb > 1000:
+            elif memory_mb > MEMORY_WARNING_THRESHOLD:
                 return {"status": "degraded", "memory_mb": memory_mb}
             else:
                 return {"status": "healthy", "memory_mb": memory_mb}
@@ -752,6 +825,11 @@ class StateMonitoringService(BaseComponent):
 
             # Execute check with timeout
             try:
+                if check.check_function is None:
+                    check.status = HealthStatus.UNKNOWN
+                    check.last_error = "No check function configured"
+                    return
+                    
                 result = await asyncio.wait_for(
                     check.check_function(), timeout=check.timeout_seconds
                 )
@@ -834,12 +912,12 @@ class StateMonitoringService(BaseComponent):
                 return
 
             thresholds = self._alert_thresholds[metric_name]
-            comparison = thresholds.get("comparison", "greater_than")
+            comparison = str(thresholds.get("comparison", "greater_than"))
 
             # Check critical threshold
             critical_threshold = thresholds.get("critical")
-            if critical_threshold is not None:
-                triggered = self._evaluate_threshold(value, critical_threshold, comparison)
+            if critical_threshold is not None and isinstance(critical_threshold, (int, float)):
+                triggered = self._evaluate_threshold(value, float(critical_threshold), comparison)
                 if triggered:
                     await self._create_alert(
                         AlertSeverity.CRITICAL,
@@ -854,11 +932,11 @@ class StateMonitoringService(BaseComponent):
 
             # Check warning threshold
             warning_threshold = thresholds.get("warning")
-            if warning_threshold is not None:
-                triggered = self._evaluate_threshold(value, warning_threshold, comparison)
+            if warning_threshold is not None and isinstance(warning_threshold, (int, float)):
+                triggered = self._evaluate_threshold(value, float(warning_threshold), comparison)
                 if triggered:
                     await self._create_alert(
-                        AlertSeverity.WARNING,
+                        AlertSeverity.MEDIUM,
                         f"Warning threshold exceeded for {metric_name}",
                         f"Metric {metric_name} value {value} exceeded warning "
                         f"threshold {warning_threshold}",
@@ -962,7 +1040,8 @@ class StateMonitoringService(BaseComponent):
                         "cache_hit_rate": getattr(state_metrics, "cache_hit_rate", 0.0),
                         "error_rate": getattr(state_metrics, "error_rate", 0.0),
                     }
-            except Exception:
+            except Exception as e:
+                self.logger.error(f"Failed to get state service metrics: {e}")
                 pass
 
             return key_metrics
@@ -988,7 +1067,8 @@ class StateMonitoringService(BaseComponent):
             uptime_seconds = max(0, total_seconds - unhealthy_seconds)
             return (uptime_seconds / total_seconds) * 100 if total_seconds > 0 else 100.0
 
-        except Exception:
+        except Exception as e:
+            self.logger.error(f"Failed to calculate uptime: {e}")
             return 100.0
 
     async def _calculate_performance_metrics(
@@ -1073,7 +1153,7 @@ class StateMonitoringService(BaseComponent):
             resolved_alerts = [a for a in period_alerts if a.resolved and a.resolved_at]
             if resolved_alerts:
                 resolution_times = [
-                    (a.resolved_at - a.timestamp).total_seconds() / 60 for a in resolved_alerts
+                    (a.resolved_at - a.timestamp).total_seconds() / 60 for a in resolved_alerts if a.resolved_at is not None
                 ]
                 report.alert_resolution_time_minutes = sum(resolution_times) / len(resolution_times)
 
@@ -1188,17 +1268,17 @@ class StateMonitoringService(BaseComponent):
                         # If current value is now within acceptable range, resolve alert
                         if alert.metric_name in self._alert_thresholds:
                             thresholds = self._alert_thresholds[alert.metric_name]
-                            comparison = thresholds.get("comparison", "greater_than")
+                            comparison = str(thresholds.get("comparison", "greater_than"))
 
                             threshold = None
                             if alert.severity == AlertSeverity.CRITICAL:
                                 threshold = thresholds.get("critical")
-                            elif alert.severity == AlertSeverity.WARNING:
+                            elif alert.severity == AlertSeverity.MEDIUM:
                                 threshold = thresholds.get("warning")
 
-                            if threshold is not None:
+                            if threshold is not None and isinstance(threshold, (int, float)):
                                 triggered = self._evaluate_threshold(
-                                    current_value, threshold, comparison
+                                    current_value, float(threshold), comparison
                                 )
                                 if not triggered:
                                     alert.resolved = True
@@ -1217,7 +1297,7 @@ class StateMonitoringService(BaseComponent):
             self._alerts = [
                 alert
                 for alert in self._alerts
-                if not alert.resolved or alert.resolved_at > cutoff_time
+                if not alert.resolved or (alert.resolved_at is not None and alert.resolved_at > cutoff_time)
             ]
 
         except Exception as e:
@@ -1252,9 +1332,7 @@ class StateMonitoringService(BaseComponent):
             # Clean up resource usage - keep only last 1000 entries
             for resource_name in list(self._resource_usage.keys()):
                 if len(self._resource_usage[resource_name]) > 1000:
-                    self._resource_usage[resource_name] = self._resource_usage[resource_name][
-                        -1000:
-                    ]
+                    self._resource_usage[resource_name] = self._resource_usage[resource_name][-1000:]
 
         except Exception as e:
             self.logger.error(f"Metrics cleanup failed: {e}")

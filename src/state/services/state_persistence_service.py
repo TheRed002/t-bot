@@ -11,6 +11,14 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 from src.core.base.service import BaseService
 from src.core.exceptions import DataError, ServiceError, StateError
+from src.utils.checksum_utilities import calculate_state_checksum
+from src.utils.serialization_utilities import serialize_state_data, deserialize_state_data
+from src.utils.state_utils import (
+    create_state_metadata,
+    format_cache_key,
+    store_in_redis_with_timeout,
+    get_from_redis_with_timeout
+)
 
 if TYPE_CHECKING:
     from ..state_service import StateMetadata, StateSnapshot, StateType
@@ -56,10 +64,15 @@ class StatePersistenceService(BaseService):
         Initialize the state persistence service.
 
         Args:
-            database_service: Database service for data operations
+            database_service: Database service for data operations (injected dependency)
         """
         super().__init__(name="StatePersistenceService")
+        
+        # Injected dependency - use protocol to avoid tight coupling
         self.database_service = database_service
+        
+        if database_service is None:
+            self.logger.warning("StatePersistenceService initialized without database_service - some operations may fail")
 
         # Use consistent async pattern with event-driven processing
         # Maintain queues for backward compatibility but prefer event-driven patterns
@@ -70,7 +83,7 @@ class StatePersistenceService(BaseService):
         self._processing_task: asyncio.Task | None = None
         self._is_running = False
 
-        self.logger.info("StatePersistenceService initialized")
+        self.logger.info(f"StatePersistenceService initialized with database_service: {type(database_service).__name__ if database_service else 'None'}")
 
     async def start(self) -> None:
         """Start the persistence service."""
@@ -95,13 +108,18 @@ class StatePersistenceService(BaseService):
             # Process remaining operations
             await self._flush_queues()
 
-            # Cancel background task
-            if self._processing_task and not self._processing_task.done():
-                self._processing_task.cancel()
+            # Cancel and cleanup background task
+            processing_task = self._processing_task
+            self._processing_task = None
+            
+            if processing_task and not processing_task.done():
+                processing_task.cancel()
                 try:
-                    await self._processing_task
+                    await processing_task
                 except asyncio.CancelledError:
                     pass
+                except Exception as e:
+                    self.logger.error(f"Error waiting for processing task cleanup: {e}")
 
             await super().stop()
             self.logger.info("StatePersistenceService stopped")
@@ -141,47 +159,39 @@ class StatePersistenceService(BaseService):
             if not state_id or not state_data:
                 raise StateError("Invalid state data provided")
 
-            # Use database service through proper abstraction
-            async with self.database_service.transaction() as session:
-                # Import repository here to avoid circular imports
-                from src.database.repository.state import StateSnapshotRepository
+            # Use database service with generic operations to avoid direct model access
+            import json
+            
+            # Check for existing state using service layer generic operations
+            search_criteria = {
+                "entity_type": state_type.value,
+                "entity_id": state_id
+            }
+            
+            # Use generic database operations instead of model-specific calls
+            existing_records = await self._search_state_records(search_criteria, limit=1)
 
-                snapshot_repo = StateSnapshotRepository(session)
+            # Prepare state data for storage
+            snapshot_data = json.dumps(state_data, default=str)
 
-                # Check for existing state
-                existing = await snapshot_repo.get_by(
-                    entity_type=state_type.value, entity_id=state_id
-                )
+            state_record = {
+                "snapshot_id": f"{state_id}_{state_type.value}_{metadata.version}",
+                "entity_type": state_type.value,
+                "entity_id": state_id,
+                "snapshot_data": snapshot_data,
+                "state_version": metadata.version,
+                "checksum": metadata.checksum,
+                "created_at": metadata.created_at,
+                "updated_at": datetime.now(timezone.utc),
+            }
 
-                # Prepare state data for storage
-                import json
-
-                snapshot_data = json.dumps(state_data, default=str)
-
-                if existing:
-                    # Update existing state
-                    existing.snapshot_data = snapshot_data
-                    existing.state_version = metadata.version
-                    existing.checksum = metadata.checksum
-                    existing.updated_at = datetime.now(timezone.utc)
-                    await snapshot_repo.update(existing)
-                else:
-                    # Create new state record
-                    from src.database.models.state import StateSnapshot as DBStateSnapshot
-
-                    new_snapshot = DBStateSnapshot(
-                        snapshot_id=f"{state_id}_{state_type.value}_{metadata.version}",
-                        entity_type=state_type.value,
-                        entity_id=state_id,
-                        snapshot_data=snapshot_data,
-                        state_version=metadata.version,
-                        checksum=metadata.checksum,
-                        created_at=metadata.created_at,
-                        updated_at=datetime.now(timezone.utc),
-                    )
-                    await snapshot_repo.create(new_snapshot)
-
-                await session.commit()
+            if existing_records:
+                # Update existing state using generic service operations
+                record_id = existing_records[0].get("id") or existing_records[0].get("record_id")
+                await self._update_state_record(record_id, state_record)
+            else:
+                # Create new state record using generic service operations  
+                await self._create_state_record(state_record)
 
             self.logger.debug(f"State saved successfully: {state_type.value}:{state_id}")
             return True
@@ -212,22 +222,19 @@ class StatePersistenceService(BaseService):
                 self.logger.warning("No database service available")
                 return None
 
-            async with self.database_service.transaction() as session:
-                from src.database.repository.state import StateSnapshotRepository
+            # Use generic database operations to avoid direct model access
+            import json
+            
+            search_criteria = {
+                "entity_type": state_type.value,
+                "entity_id": state_id
+            }
+            
+            # Get the latest snapshot for this state using generic service operations
+            records = await self._search_state_records(search_criteria, limit=1)
 
-                snapshot_repo = StateSnapshotRepository(session)
-
-                # Get the latest snapshot for this state
-                snapshots = await snapshot_repo.get_all(
-                    filters={"entity_type": state_type.value, "entity_id": state_id},
-                    order_by="-state_version",
-                    limit=1,
-                )
-
-                if snapshots and snapshots[0].snapshot_data:
-                    import json
-
-                    return json.loads(snapshots[0].snapshot_data)
+            if records and records[0].get("snapshot_data"):
+                return json.loads(records[0]["snapshot_data"])
 
             return None
 
@@ -257,20 +264,20 @@ class StatePersistenceService(BaseService):
                 self.logger.warning("No database service available")
                 return False
 
-            async with self.database_service.transaction() as session:
-                from src.database.repository.state import StateSnapshotRepository
+            # Use generic database operations to avoid direct model access
+            search_criteria = {
+                "entity_type": state_type.value,
+                "entity_id": state_id
+            }
+            
+            # Find all snapshots for this state using generic service operations
+            records = await self._search_state_records(search_criteria)
 
-                snapshot_repo = StateSnapshotRepository(session)
-
-                # Find and delete all snapshots for this state
-                snapshots = await snapshot_repo.get_all(
-                    filters={"entity_type": state_type.value, "entity_id": state_id}
-                )
-
-                for snapshot in snapshots:
-                    await snapshot_repo.delete(snapshot.id)
-
-                await session.commit()
+            # Delete each record using generic service operations
+            for record in records:
+                record_id = record.get("id") or record.get("record_id")
+                if record_id:
+                    await self._delete_state_record(record_id)
 
             self.logger.debug(f"State deleted successfully: {state_type.value}:{state_id}")
             return True
@@ -304,37 +311,36 @@ class StatePersistenceService(BaseService):
                 self.logger.warning("No database service available")
                 return []
 
-            async with self.database_service.transaction() as session:
-                from src.database.repository.state import StateSnapshotRepository
+            # Use database service properly without bypassing to repositories
+            # Use database service interface instead of direct model access
+            import json
+            
+            # Use generic database service operations to avoid direct model access
+            query_data = {
+                "table": "state_snapshots",
+                "filters": {"entity_type": state_type.value},
+                "order_by": "updated_at",
+                "order_desc": True,
+                "limit": limit,
+                "offset": offset
+            }
+            
+            snapshots = await self.database_service.query(query_data)
 
-                snapshot_repo = StateSnapshotRepository(session)
+            states = []
+            for snapshot in snapshots:
+                if snapshot.get("snapshot_data"):
+                    state_data = json.loads(snapshot["snapshot_data"])
+                    states.append(
+                        {
+                            "state_id": snapshot.get("entity_id"),
+                            "data": state_data,
+                            "version": snapshot.get("state_version", 1),
+                            "updated_at": snapshot.get("updated_at"),
+                        }
+                    )
 
-                # Get snapshots for this state type
-                snapshots = await snapshot_repo.get_all(
-                    filters={"entity_type": state_type.value},
-                    order_by="-updated_at",
-                    limit=limit,
-                    offset=offset,
-                )
-
-                states = []
-                import json
-
-                for snapshot in snapshots:
-                    if snapshot.snapshot_data:
-                        state_data = json.loads(snapshot.snapshot_data)
-                        states.append(
-                            {
-                                "state_id": snapshot.entity_id,
-                                "data": state_data,
-                                "version": snapshot.state_version,
-                                "updated_at": (
-                                    snapshot.updated_at.isoformat() if snapshot.updated_at else None
-                                ),
-                            }
-                        )
-
-                return states
+            return states
 
         except (DataError, ServiceError) as e:
             self.logger.error(f"Database service error listing states: {e}")
@@ -358,27 +364,21 @@ class StatePersistenceService(BaseService):
                 self.logger.warning("No database service available")
                 return False
 
-            async with self.database_service.transaction() as session:
-                from src.database.models.state import StateSnapshot as DBStateSnapshot
-                from src.database.repository.state import StateSnapshotRepository
+            # Use database service interface instead of direct model access
+            import json
+            
+            # Create snapshot data dictionary
+            snapshot_data = {
+                "snapshot_id": snapshot.snapshot_id,
+                "entity_type": "system_snapshot",
+                "entity_id": snapshot.snapshot_id,
+                "snapshot_data": json.dumps(snapshot.__dict__, default=str),
+                "description": snapshot.description,
+                "created_at": snapshot.timestamp,
+                "updated_at": datetime.now(timezone.utc),
+            }
 
-                snapshot_repo = StateSnapshotRepository(session)
-
-                # Convert snapshot to database model
-                import json
-
-                db_snapshot = DBStateSnapshot(
-                    snapshot_id=snapshot.snapshot_id,
-                    entity_type="system_snapshot",
-                    entity_id=snapshot.snapshot_id,
-                    snapshot_data=json.dumps(snapshot.__dict__, default=str),
-                    description=snapshot.description,
-                    created_at=snapshot.timestamp,
-                    updated_at=datetime.now(timezone.utc),
-                )
-
-                await snapshot_repo.create(db_snapshot)
-                await session.commit()
+            await self.database_service.create("state_snapshots", snapshot_data)
 
             self.logger.debug(f"Snapshot saved successfully: {snapshot.snapshot_id}")
             return True
@@ -405,20 +405,23 @@ class StatePersistenceService(BaseService):
                 self.logger.warning("No database service available")
                 return None
 
-            async with self.database_service.transaction() as session:
-                from src.database.repository.state import StateSnapshotRepository
+            # Use database service interface instead of direct model access
+            import json
+            
+            # Query snapshot by snapshot_id using service layer
+            query_data = {
+                "table": "state_snapshots",
+                "filters": {"snapshot_id": snapshot_id},
+                "limit": 1
+            }
+            
+            snapshots = await self.database_service.query(query_data)
 
-                snapshot_repo = StateSnapshotRepository(session)
-
-                db_snapshot = await snapshot_repo.get_by(snapshot_id=snapshot_id)
-
-                if db_snapshot and db_snapshot.snapshot_data:
-                    import json
-
-                    from ..state_service import StateSnapshot
-
-                    snapshot_data = json.loads(db_snapshot.snapshot_data)
-                    return StateSnapshot(**snapshot_data)
+            if snapshots and snapshots[0].get("snapshot_data"):
+                from ..state_service import StateSnapshot
+                
+                snapshot_data = json.loads(snapshots[0]["snapshot_data"])
+                return StateSnapshot(**snapshot_data)
 
             return None
 
@@ -565,3 +568,124 @@ class StatePersistenceService(BaseService):
     def is_available(self) -> bool:
         """Check if persistence service is available."""
         return self.database_service is not None and self._is_running
+
+    # Private helper methods for generic database operations
+
+    async def _search_state_records(
+        self, criteria: dict[str, Any], limit: int | None = None
+    ) -> list[dict[str, Any]]:
+        """Search state records using generic database operations."""
+        connection = None
+        try:
+            if not self.database_service:
+                return []
+
+            # Use database service generic search capabilities
+            # This avoids direct model imports by using service layer patterns
+            return await self.database_service.search_records(
+                table_name="state_snapshots",  # Generic table reference
+                filters=criteria,
+                limit=limit or 100
+            )
+
+        except AttributeError:
+            # Fallback using generic query interface instead of direct model access
+            query_data = {
+                "table": "state_snapshots",
+                "filters": criteria,
+                "limit": limit or 100
+            }
+            
+            try:
+                snapshots = await self.database_service.query(query_data)
+                
+                # Return consistent dict format
+                return [
+                    {
+                        "id": s.get("id"),
+                        "snapshot_id": s.get("snapshot_id"),
+                        "entity_type": s.get("entity_type"),
+                        "entity_id": s.get("entity_id"),
+                        "snapshot_data": s.get("snapshot_data"),
+                        "state_version": s.get("state_version"),
+                        "checksum": s.get("checksum"),
+                    }
+                    for s in snapshots
+                ]
+            finally:
+                # Connection cleanup handled by database service
+                pass
+
+        except Exception as e:
+            self.logger.error(f"Failed to search state records: {e}")
+            return []
+        finally:
+            if connection:
+                try:
+                    await connection.close()
+                except (ServiceError, DataError) as e:
+                    pass
+
+    async def _create_state_record(self, record_data: dict[str, Any]) -> bool:
+        """Create a new state record using generic database operations."""
+        try:
+            if not self.database_service:
+                return False
+
+            # Try generic record creation first
+            try:
+                return await self.database_service.create_record(
+                    table_name="state_snapshots",
+                    data=record_data
+                )
+            except AttributeError:
+                # Fallback using generic create interface instead of direct model access
+                await self.database_service.create("state_snapshots", record_data)
+                return True
+
+        except Exception as e:
+            self.logger.error(f"Failed to create state record: {e}")
+            return False
+
+    async def _update_state_record(self, record_id: Any, record_data: dict[str, Any]) -> bool:
+        """Update an existing state record using generic database operations."""
+        try:
+            if not self.database_service:
+                return False
+
+            # Try generic record update first
+            try:
+                return await self.database_service.update_record(
+                    table_name="state_snapshots",
+                    record_id=record_id,
+                    data=record_data
+                )
+            except AttributeError:
+                # Fallback using generic update interface instead of direct model access
+                await self.database_service.update("state_snapshots", record_id, record_data)
+                return True
+
+        except Exception as e:
+            self.logger.error(f"Failed to update state record: {e}")
+            return False
+
+    async def _delete_state_record(self, record_id: Any) -> bool:
+        """Delete a state record using generic database operations."""
+        try:
+            if not self.database_service:
+                return False
+
+            # Try generic record deletion first
+            try:
+                return await self.database_service.delete_record(
+                    table_name="state_snapshots",
+                    record_id=record_id
+                )
+            except AttributeError:
+                # Fallback using generic delete interface
+                await self.database_service.delete("state_snapshots", record_id)
+                return True
+
+        except Exception as e:
+            self.logger.error(f"Failed to delete state record: {e}")
+            return False

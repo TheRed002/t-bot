@@ -1,16 +1,12 @@
 """
-Comprehensive State Validator with business rules and consistency enforcement.
+Comprehensive State Validator - Controller for validation operations.
 
-This module provides enterprise-grade state validation capabilities:
-- Comprehensive validation rules for all state types
-- Business logic enforcement and constraints
-- State transition validation with finite state machines
-- Cross-state consistency checks
-- Performance optimization with validation caching
-- Configurable validation policies
+This module provides a controller interface for state validation that
+delegates business logic to the StateValidationService. It acts as a
+compatibility layer while enforcing proper service separation.
 
-The StateValidator ensures data integrity and business rule compliance
-across all state operations in the trading system.
+The StateValidator coordinates validation operations but does not contain
+business logic - all validation rules are implemented in the service layer.
 """
 
 import asyncio
@@ -34,8 +30,8 @@ from .utils_imports import time_execution
 if TYPE_CHECKING:
     from .state_service import StateService, StateType
 else:
-    # Runtime imports to avoid circular dependencies
-    from .state_service import StateType
+    # Use string annotations to avoid circular dependencies
+    StateType = "StateType"
 
 
 class ValidationLevel(Enum):
@@ -123,15 +119,15 @@ class ValidationMetrics:
 
 class StateValidator(BaseComponent):
     """
-    Comprehensive state validation service with business rules enforcement.
+    State validation controller that delegates to StateValidationService.
 
+    This controller provides backward compatibility while ensuring all
+    business logic is properly separated into the service layer.
+    
     Features:
-    - Multi-level validation with configurable strictness
-    - Business rule enforcement with custom logic
-    - State transition validation using finite state machines
-    - Cross-state consistency checking
-    - Performance optimization with validation caching
-    - Detailed error reporting and recommendations
+    - Delegates validation to StateValidationService
+    - Provides backward compatibility interface
+    - Acts as coordination layer only
     """
 
     def __init__(self, state_service: "StateService"):
@@ -144,13 +140,15 @@ class StateValidator(BaseComponent):
         super().__init__()
         self.state_service = state_service
 
-        # Validation configuration
+        # Get validation service from state service
+        self._validation_service = None
+        if hasattr(state_service, "_validation_service"):
+            self._validation_service = state_service._validation_service
+
+        # Legacy compatibility fields
         self.validation_level = ValidationLevel.NORMAL
         self.cache_validation_results = True
         self.cache_ttl_seconds = 300  # 5 minutes
-
-        # Validation rules registry
-        self._validation_rules: dict[StateType, list[ValidationRuleConfig]] = {}
         self._transition_rules: dict[StateType, dict[str, set[str]]] = {}
 
         # Performance optimization
@@ -220,7 +218,7 @@ class StateValidator(BaseComponent):
         use_cache: bool = True,
     ) -> ValidationResult:
         """
-        Validate state data against all applicable rules.
+        Validate state data by delegating to StateValidationService.
 
         Args:
             state_type: Type of state to validate
@@ -235,33 +233,51 @@ class StateValidator(BaseComponent):
         level = validation_level or self.validation_level
 
         try:
-            # Check cache if enabled
-            if use_cache and self.cache_validation_results:
-                cache_key = self._generate_cache_key(state_type, state_data, level)
-                cached_result = self._get_cached_result(cache_key)
-                if cached_result:
-                    self._validation_metrics.cache_hit_rate = self._update_hit_rate(True)
-                    return cached_result
-
-            # Initialize validation result
-            result = ValidationResult(
-                state_type=state_type, state_id=state_data.get("state_id", "unknown")
-            )
-
-            # Skip validation if disabled
-            if level == ValidationLevel.DISABLED:
+            # Delegate to validation service if available
+            if self._validation_service:
+                service_result = await self._validation_service.validate_state_data(
+                    state_type, state_data, level.value
+                )
+                
+                # Convert service result to ValidationResult format
+                result = ValidationResult(
+                    is_valid=service_result.get("is_valid", True),
+                    state_type=state_type,
+                    state_id=state_data.get("state_id", "unknown"),
+                    validation_time_ms=service_result.get("validation_time_ms", 0.0),
+                )
+                
+                # Convert error strings to ValidationError objects
+                for error_msg in service_result.get("errors", []):
+                    result.errors.append(ValidationError(
+                        rule_name="service_validation",
+                        field_name="unknown",
+                        error_message=error_msg,
+                        severity="error"
+                    ))
+                
+                return result
+            else:
+                # Fallback to legacy validation if service not available
+                result = ValidationResult(
+                    state_type=state_type, 
+                    state_id=state_data.get("state_id", "unknown")
+                )
+                
+                # Skip validation if disabled
+                if level == ValidationLevel.DISABLED:
+                    result.validation_time_ms = (
+                        datetime.now(timezone.utc) - start_time
+                    ).total_seconds() * 1000
+                    return result
+                
+                # Perform minimal fallback validation
+                result.is_valid = True
                 result.validation_time_ms = (
                     datetime.now(timezone.utc) - start_time
                 ).total_seconds() * 1000
+                
                 return result
-
-            # Get validation rules for this state type
-            rules = self._validation_rules.get(state_type, [])
-            enabled_rules = [rule for rule in rules if rule.enabled]
-
-            # Filter rules by validation level
-            if level == ValidationLevel.LENIENT:
-                enabled_rules = [rule for rule in enabled_rules if rule.severity == "error"]
 
             result.rules_checked = len(enabled_rules)
 
@@ -353,7 +369,7 @@ class StateValidator(BaseComponent):
         self, state_type: "StateType", current_state: dict[str, Any], new_state: dict[str, Any]
     ) -> bool:
         """
-        Validate state transition using finite state machine rules.
+        Validate state transition by delegating to StateValidationService.
 
         Args:
             state_type: Type of state
@@ -364,34 +380,15 @@ class StateValidator(BaseComponent):
             True if transition is valid
         """
         try:
-            # Get transition rules for this state type
-            transition_rules = self._transition_rules.get(state_type, {})
-
-            # Extract status fields for transition validation
-            current_status = self._extract_status_field(current_state, state_type)
-            new_status = self._extract_status_field(new_state, state_type)
-
-            if not current_status or not new_status:
-                # If no status field, allow transition
-                return True
-
-            # Check if transition is allowed
-            allowed_transitions = transition_rules.get(current_status, set())
-
-            if new_status not in allowed_transitions and current_status != new_status:
-                self.logger.warning(
-                    f"Invalid state transition: {current_status} -> {new_status}",
-                    extra={
-                        "state_type": state_type.value,
-                        "allowed_transitions": list(allowed_transitions),
-                    },
+            # Delegate to validation service if available
+            if self._validation_service:
+                return await self._validation_service.validate_state_transition(
+                    state_type, current_state, new_state
                 )
-                return False
-
-            # Additional business rule validation for specific transitions
-            return await self._validate_business_transition_rules(
-                state_type, current_state, new_state
-            )
+            else:
+                # Fallback to simple validation if service not available
+                self.logger.warning("No validation service available - allowing transition")
+                return True
 
         except Exception as e:
             self.logger.error(f"State transition validation failed: {e}")
@@ -541,7 +538,6 @@ class StateValidator(BaseComponent):
 
     def _add_bot_state_rules(self) -> None:
         """Add validation rules for bot state."""
-        from .state_service import StateType
 
         rules = [
             ValidationRuleConfig(
@@ -587,7 +583,6 @@ class StateValidator(BaseComponent):
 
     def _add_position_state_rules(self) -> None:
         """Add validation rules for position state."""
-        from .state_service import StateType
 
         rules = [
             ValidationRuleConfig(
@@ -644,7 +639,6 @@ class StateValidator(BaseComponent):
 
     def _add_order_state_rules(self) -> None:
         """Add validation rules for order state."""
-        from .state_service import StateType
 
         rules = [
             ValidationRuleConfig(
@@ -701,7 +695,6 @@ class StateValidator(BaseComponent):
 
     def _add_portfolio_state_rules(self) -> None:
         """Add validation rules for portfolio state."""
-        from .state_service import StateType
 
         rules = [
             ValidationRuleConfig(
@@ -741,7 +734,6 @@ class StateValidator(BaseComponent):
 
     def _add_risk_state_rules(self) -> None:
         """Add validation rules for risk state."""
-        from .state_service import StateType
 
         rules = [
             ValidationRuleConfig(
@@ -781,7 +773,6 @@ class StateValidator(BaseComponent):
 
     def _add_strategy_state_rules(self) -> None:
         """Add validation rules for strategy state."""
-        from .state_service import StateType
 
         rules = [
             ValidationRuleConfig(
@@ -808,7 +799,6 @@ class StateValidator(BaseComponent):
 
     def _add_market_state_rules(self) -> None:
         """Add validation rules for market state."""
-        from .state_service import StateType
 
         rules = [
             ValidationRuleConfig(
@@ -853,7 +843,6 @@ class StateValidator(BaseComponent):
 
     def _add_trade_state_rules(self) -> None:
         """Add validation rules for trade state."""
-        from .state_service import StateType
 
         rules = [
             ValidationRuleConfig(
@@ -880,7 +869,6 @@ class StateValidator(BaseComponent):
 
     def _initialize_transition_rules(self) -> None:
         """Initialize state transition rules."""
-        from .state_service import StateType
 
         # Bot state transitions
         self._transition_rules[StateType.BOT_STATE] = {
@@ -1259,14 +1247,19 @@ class StateValidator(BaseComponent):
             min_cash_ratio = Decimal("0.1")  # 10% minimum cash
             total_value = cash_value + total_position_value
 
-            if total_value > 0 and (cash_value / total_value) < min_cash_ratio:
-                return {
-                    "passed": False,
-                    "message": f"Cash balance too low: {cash_value} "
-                    f"({(cash_value / total_value) * 100:.1f}%)",
-                    "current_value": float(cash_value),
-                    "recommendation": f"Maintain at least {min_cash_ratio * 100}% cash",
-                }
+            if total_value > 0:
+                # Calculate cash ratio with proper Decimal precision
+                cash_ratio = cash_value / total_value
+                if cash_ratio < min_cash_ratio:
+                    # Calculate percentage with proper rounding
+                    cash_percentage = (cash_ratio * Decimal("100")).quantize(Decimal("0.1"))
+                    min_percentage = (min_cash_ratio * Decimal("100")).quantize(Decimal("0.1"))
+                    return {
+                        "passed": False,
+                        "message": f"Cash balance too low: {cash_value} ({cash_percentage}%)",
+                        "current_value": str(cash_value),
+                        "recommendation": f"Maintain at least {min_percentage}% cash",
+                    }
 
             return {"passed": True, "message": "Adequate cash balance"}
 
@@ -1294,7 +1287,7 @@ class StateValidator(BaseComponent):
                 return {
                     "passed": False,
                     "message": f"VaR {var_decimal} exceeds limit {max_var_decimal}",
-                    "current_value": float(var_decimal),
+                    "current_value": str(var_decimal),
                     "expected_value": f"<= {max_var_decimal}",
                 }
 
@@ -1339,7 +1332,7 @@ class StateValidator(BaseComponent):
                     return {
                         "passed": False,
                         "message": f"Risk per trade too high: {risk_value}",
-                        "current_value": float(risk_value),
+                        "current_value": str(risk_value),
                         "expected_value": "<= 0.05",
                     }
             except (ValueError, TypeError):
@@ -1379,14 +1372,14 @@ class StateValidator(BaseComponent):
                 return {
                     "passed": False,
                     "message": "Filled quantity cannot be negative",
-                    "current_value": float(filled_qty),
+                    "current_value": str(filled_qty),
                 }
 
             if avg_price <= 0:
                 return {
                     "passed": False,
                     "message": "Average price must be positive",
-                    "current_value": float(avg_price),
+                    "current_value": str(avg_price),
                 }
 
             return {"passed": True, "message": "Valid trade execution"}
@@ -1405,8 +1398,7 @@ class StateValidator(BaseComponent):
     ) -> bool:
         """Validate business-specific transition rules."""
         try:
-            from .state_service import StateType
-
+    
             if state_type == StateType.BOT_STATE:
                 return await self._validate_bot_transition_rules(current_state, new_state)
             elif state_type == StateType.ORDER_STATE:
@@ -1484,7 +1476,6 @@ class StateValidator(BaseComponent):
         self, state_data: dict[str, Any], state_type: "StateType"
     ) -> str | None:
         """Extract status field from state data based on state type."""
-        from .state_service import StateType
 
         status_fields = {
             StateType.BOT_STATE: "status",

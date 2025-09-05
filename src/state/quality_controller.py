@@ -218,6 +218,36 @@ class InfluxDBMetricsStorage(MetricsStorage):
                 # InfluxDB client not available - gracefully degrade
                 self._available = False
 
+    async def close(self) -> None:
+        """Close InfluxDB client connection."""
+        if self._influx_client and self._available:
+            try:
+                if hasattr(self._influx_client, 'close'):
+                    # Use asyncio.wait_for with timeout for safe cleanup
+                    await asyncio.wait_for(
+                        self._influx_client.close(),
+                        timeout=5.0
+                    )
+                elif hasattr(self._influx_client, 'disconnect'):
+                    # Use asyncio.wait_for with timeout for safe cleanup
+                    await asyncio.wait_for(
+                        self._influx_client.disconnect(),
+                        timeout=5.0
+                    )
+                self._available = False
+            except asyncio.TimeoutError:
+                # Log timeout but don't raise to avoid interfering with cleanup
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.warning("InfluxDB client close timeout")
+            except Exception as e:
+                # Log error but don't raise to avoid interfering with cleanup
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.warning(f"Error closing InfluxDB client: {e}")
+            finally:
+                self._influx_client = None
+
     async def store_validation_metrics(self, validation_data: dict[str, Any]) -> bool:
         """Store validation metrics to InfluxDB."""
         if not self._available or not self._influx_client:
@@ -236,7 +266,7 @@ class InfluxDBMetricsStorage(MetricsStorage):
             # Add fields
             for key in ["overall_score", "risk_score", "validation_time_ms", "checks_count"]:
                 if key in validation_data:
-                    point.field(key, float(validation_data[key]))
+                    point.field(key, validation_data[key] if isinstance(validation_data[key], (int, float)) else float(validation_data[key]))
 
             # Set timestamp
             if "timestamp" in validation_data:
@@ -244,7 +274,8 @@ class InfluxDBMetricsStorage(MetricsStorage):
 
             return await self._influx_client.write_point(point)
 
-        except Exception:
+        except Exception as e:
+            self.logger.error(f"Failed to store validation metrics: {e}")
             return False
 
     async def store_analysis_metrics(self, analysis_data: dict[str, Any]) -> bool:
@@ -276,7 +307,7 @@ class InfluxDBMetricsStorage(MetricsStorage):
 
             for key in metric_fields:
                 if key in analysis_data:
-                    point.field(key, float(analysis_data[key]))
+                    point.field(key, analysis_data[key] if isinstance(analysis_data[key], (int, float)) else float(analysis_data[key]))
 
             # Set timestamp
             if "timestamp" in analysis_data:
@@ -284,7 +315,8 @@ class InfluxDBMetricsStorage(MetricsStorage):
 
             return await self._influx_client.write_point(point)
 
-        except Exception:
+        except Exception as e:
+            self.logger.error(f"Failed to store analysis metrics: {e}")
             return False
 
     async def get_historical_metrics(
@@ -298,7 +330,8 @@ class InfluxDBMetricsStorage(MetricsStorage):
             # This would implement actual InfluxDB querying
             # For now, return empty list as placeholder
             return []
-        except Exception:
+        except Exception as e:
+            self.logger.error(f"Failed to get historical metrics: {e}")
             return []
 
 
@@ -340,7 +373,6 @@ class QualityController(BaseComponent):
     def __init__(
         self,
         config: Config,
-        database_service: DatabaseService | None = None,
         metrics_storage: MetricsStorage | None = None,
     ):
         """
@@ -348,7 +380,6 @@ class QualityController(BaseComponent):
 
         Args:
             config: Application configuration
-            database_service: Optional database service for data operations
             metrics_storage: Optional metrics storage service for logging metrics
         """
         super().__init__(
@@ -358,7 +389,6 @@ class QualityController(BaseComponent):
         # Logger is already provided by BaseComponent
 
         # Injected dependencies - use service abstractions
-        self.database_service = database_service
         self.metrics_storage = metrics_storage or NullMetricsStorage()
 
         # Ensure we have a metrics storage implementation
@@ -366,7 +396,8 @@ class QualityController(BaseComponent):
             # Try to create InfluxDB storage if config is available
             try:
                 self.metrics_storage = InfluxDBMetricsStorage(config)
-            except Exception:
+            except Exception as e:
+                self.logger.warning(f"Failed to create InfluxDB metrics storage: {e}")
                 # Fall back to null storage if InfluxDB is not available
                 self.metrics_storage = NullMetricsStorage()
 
@@ -433,7 +464,7 @@ class QualityController(BaseComponent):
     async def initialize(self) -> None:
         """Initialize the quality controller."""
         try:
-            # Load historical benchmarks (now uses database service if available)
+            # Load historical benchmarks (using default values)
             await self._load_benchmarks()
 
             # Start monitoring tasks
@@ -443,10 +474,9 @@ class QualityController(BaseComponent):
             self.logger.info("QualityController initialization completed")
 
             # Log service availability
-            db_status = "available" if self.database_service else "not available"
             metrics_status = type(self.metrics_storage).__name__
             self.logger.info(
-                f"Quality controller services - Database: {db_status}, Metrics: {metrics_status}"
+                f"Quality controller services - Metrics: {metrics_status}"
             )
 
         except Exception as e:
@@ -712,12 +742,12 @@ class QualityController(BaseComponent):
                 time_period=f"{days}d",
                 current_value=values[-1] if values else 0.0,
                 previous_value=values[0] if values else 0.0,
-                mean=float(np.mean(values_array)),
-                std_dev=float(np.std(values_array)),
-                min_value=float(np.min(values_array)),
-                max_value=float(np.max(values_array)),
-                percentile_95=float(np.percentile(values_array, 95)),
-                percentile_5=float(np.percentile(values_array, 5)),
+                mean=np.mean(values_array),
+                std_dev=np.std(values_array),
+                min_value=np.min(values_array),
+                max_value=np.max(values_array),
+                percentile_95=np.percentile(values_array, 95),
+                percentile_5=np.percentile(values_array, 5),
             )
 
             # Calculate change percentage
@@ -845,7 +875,7 @@ class QualityController(BaseComponent):
             check.message = "; ".join(issues) if issues else "Market conditions acceptable"
             check.details = {
                 "spread_pct": spread_pct if "spread_pct" in locals() else None,
-                "volume": float(market_data.volume) if market_data.volume else None,
+                "volume": str(market_data.volume) if market_data.volume else None,
             }
 
         except Exception as e:
@@ -870,32 +900,32 @@ class QualityController(BaseComponent):
             issues = []
 
             # Check position size limits
-            portfolio_value = portfolio_context.get("total_value", 0)
-            order_value = float(order_request.quantity * (order_request.price or 0))
+            portfolio_value = Decimal(str(portfolio_context.get("total_value", 0)))
+            order_value = order_request.quantity * (order_request.price or Decimal("0"))
 
             if portfolio_value > 0:
-                position_pct = (order_value / portfolio_value) * 100
-                max_position_pct = self.validation_rules["position_size"]["max_percentage"]
+                position_pct = (order_value / portfolio_value) * Decimal("100")
+                max_position_pct = Decimal(str(self.validation_rules["position_size"]["max_percentage"]))
 
                 if position_pct > max_position_pct:
                     score -= 50.0
                     issues.append(
                         f"Position size {position_pct:.1f}% exceeds limit {max_position_pct}%"
                     )
-                elif position_pct > max_position_pct * 0.8:
+                elif position_pct > max_position_pct * Decimal("0.8"):
                     score -= 20.0
                     issues.append(f"Position size {position_pct:.1f}% near limit")
 
             # Check concentration risk
             symbol_exposure = portfolio_context.get("symbol_exposure", {})
-            current_exposure = symbol_exposure.get(order_request.symbol, 0)
+            current_exposure = Decimal(str(symbol_exposure.get(order_request.symbol, 0)))
             new_exposure_pct = (
-                ((current_exposure + order_value) / portfolio_value) * 100
+                ((current_exposure + order_value) / portfolio_value) * Decimal("100")
                 if portfolio_value > 0
-                else 0
+                else Decimal("0")
             )
 
-            if new_exposure_pct > 20.0:  # 20% concentration limit
+            if new_exposure_pct > Decimal("20.0"):  # 20% concentration limit
                 score -= 30.0
                 issues.append(f"Symbol concentration {new_exposure_pct:.1f}% too high")
 
@@ -940,13 +970,13 @@ class QualityController(BaseComponent):
 
             # Placeholder liquidity check - would need real market data
             # This is simplified for demonstration
-            estimated_volume = 1000000  # Would get from market data
-            order_value = float(order_request.quantity * (order_request.price or 100))
+            estimated_volume = Decimal("1000000")  # Would get from market data
+            order_value = order_request.quantity * (order_request.price or Decimal("100"))
 
-            if order_value > estimated_volume * 0.1:  # Order > 10% of recent volume
+            if order_value > estimated_volume * Decimal("0.1"):  # Order > 10% of recent volume
                 score -= 40.0
                 issues.append("Order size large relative to market volume")
-            elif order_value > estimated_volume * 0.05:  # Order > 5% of recent volume
+            elif order_value > estimated_volume * Decimal("0.05"):  # Order > 5% of recent volume
                 score -= 20.0
                 issues.append("Order size moderate relative to market volume")
 
@@ -954,7 +984,7 @@ class QualityController(BaseComponent):
             check.result = ValidationResult.PASSED if score >= 70 else ValidationResult.WARNING
             check.score = score
             check.message = "; ".join(issues) if issues else "Liquidity adequate"
-            check.details = {"estimated_market_impact_pct": (order_value / estimated_volume) * 100}
+            check.details = {"estimated_market_impact_pct": str((order_value / estimated_volume) * Decimal("100"))}
 
         except Exception as e:
             check.result = ValidationResult.FAILED
@@ -1170,11 +1200,11 @@ class QualityController(BaseComponent):
             execution_price = execution_result.average_price
 
             if reference_price and execution_price:
-                price_diff_pct = abs(execution_price - reference_price) / reference_price * 100
+                price_diff_pct = abs(execution_price - reference_price) / reference_price * Decimal("100")
 
-                if price_diff_pct > 0.5:  # More than 0.5% slippage
+                if price_diff_pct > Decimal("0.5"):  # More than 0.5% slippage
                     score -= 40.0
-                elif price_diff_pct > 0.2:  # More than 0.2% slippage
+                elif price_diff_pct > Decimal("0.2"):  # More than 0.2% slippage
                     score -= 20.0
 
             return max(score, 0.0)
@@ -1196,7 +1226,7 @@ class QualityController(BaseComponent):
 
             if reference_price and execution_price:
                 slippage = (execution_price - reference_price) / reference_price
-                return float(slippage * 10000)  # Convert to basis points
+                return slippage * 10000  # Convert to basis points
 
             return 0.0
 
@@ -1209,33 +1239,33 @@ class QualityController(BaseComponent):
         execution_result: ExecutionResult,
         market_data_before: MarketData,
         market_data_after: MarketData,
-    ) -> dict[str, float]:
+    ) -> dict[str, Decimal]:
         """Analyze market impact of the trade."""
         try:
             # This is a simplified market impact analysis
             # Real implementation would require tick-by-tick data and sophisticated models
 
-            price_before = market_data_before.close
-            price_after = market_data_after.close
+            price_before = Decimal(str(market_data_before.close)) if market_data_before.close else None
+            price_after = Decimal(str(market_data_after.close)) if market_data_after.close else None
 
             if not price_before or not price_after:
-                return {"total_impact": 0.0, "temporary_impact": 0.0, "permanent_impact": 0.0}
+                return {"total_impact": Decimal("0"), "temporary_impact": Decimal("0"), "permanent_impact": Decimal("0")}
 
-            total_impact = ((price_after - price_before) / price_before) * 10000  # basis points
+            total_impact = ((price_after - price_before) / price_before) * Decimal("10000")  # basis points
 
             # For simplification, assume half is temporary, half is permanent
-            temporary_impact = total_impact * 0.5
-            permanent_impact = total_impact * 0.5
+            temporary_impact = total_impact * Decimal("0.5")
+            permanent_impact = total_impact * Decimal("0.5")
 
             return {
-                "total_impact": float(abs(total_impact)),
-                "temporary_impact": float(abs(temporary_impact)),
-                "permanent_impact": float(abs(permanent_impact)),
+                "total_impact": abs(total_impact),
+                "temporary_impact": abs(temporary_impact),
+                "permanent_impact": abs(permanent_impact),
             }
 
         except Exception as e:
             self.logger.warning(f"Market impact analysis error: {e}")
-            return {"total_impact": 0.0, "temporary_impact": 0.0, "permanent_impact": 0.0}
+            return {"total_impact": Decimal("0"), "temporary_impact": Decimal("0"), "permanent_impact": Decimal("0")}
 
     async def _compare_to_benchmarks(self, analysis: PostTradeAnalysis) -> dict[str, float]:
         """Compare analysis results to benchmarks."""
@@ -1507,19 +1537,11 @@ class QualityController(BaseComponent):
         return alert_triggered, alert_level
 
     async def _load_benchmarks(self) -> None:
-        """Load historical benchmarks from database service if available."""
+        """Load historical benchmarks (using default values)."""
         try:
-            if self.database_service:
-                # In a full implementation, this would use database service to load benchmarks
-                # For now, we just acknowledge database service availability
-                self.logger.info("Loading quality benchmarks using database service")
-                # benchmark_data = await self.database_service.get_benchmarks()
-                # if benchmark_data:
-                #     self.benchmarks.update(benchmark_data)
-            else:
-                self.logger.info("Loading default quality benchmarks (no database service)")
+            self.logger.info("Loading default quality benchmarks")
 
-            # Use default values for now
+            # Use default values configured in __init__
             self.logger.info("Quality benchmarks loaded successfully")
 
         except Exception as e:
@@ -1611,15 +1633,13 @@ class QualityController(BaseComponent):
             "total_validations": self.quality_metrics.get("total_validations", 0),
             "passed_validations": self.quality_metrics.get("passed_validations", 0),
             "failed_validations": self.quality_metrics.get("failed_validations", 0),
-            "average_quality_score": float(self.quality_metrics.get("average_quality_score", 0.0)),
+            "average_quality_score": self.quality_metrics.get("average_quality_score", 0.0),
             "total_analyses": self.quality_metrics.get("total_analyses", 0),
-            "average_execution_quality": float(
-                self.quality_metrics.get("average_execution_quality", 0.0)
-            ),
+            "average_execution_quality": self.quality_metrics.get("average_execution_quality", 0.0),
             "slippage_incidents": self.quality_metrics.get("slippage_incidents", 0),
             "execution_time_violations": self.quality_metrics.get("execution_time_violations", 0),
-            "avg_validation_time_ms": float(self._calculate_avg_validation_time()),
-            "avg_analysis_time_ms": float(self._calculate_avg_analysis_time()),
+            "avg_validation_time_ms": self._calculate_avg_validation_time(),
+            "avg_analysis_time_ms": self._calculate_avg_analysis_time(),
         }
 
     async def get_summary_statistics(
@@ -1887,6 +1907,22 @@ class QualityController(BaseComponent):
                     "suggested_action": "Check state data integrity",
                 }
             ]
+
+    async def cleanup(self) -> None:
+        """Clean up resources used by the quality controller."""
+        try:
+            # Close metrics storage connection with timeout
+            if hasattr(self.metrics_storage, 'close'):
+                await asyncio.wait_for(
+                    self.metrics_storage.close(),
+                    timeout=5.0
+                )
+            
+            self.logger.info("QualityController cleanup completed")
+        except asyncio.TimeoutError:
+            self.logger.warning("QualityController cleanup timeout")
+        except Exception as e:
+            self.logger.error(f"Error during QualityController cleanup: {e}")
 
     def add_validation_rule(self, name: str, rule: callable) -> None:
         """

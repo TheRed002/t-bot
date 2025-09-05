@@ -31,6 +31,12 @@ from src.database.service import DatabaseService
 
 # Service layer imports instead of direct database access
 from .services import StatePersistenceServiceProtocol
+from .services.trade_lifecycle_service import (
+    TradeLifecycleServiceProtocol, 
+    TradeContext, 
+    TradeHistoryRecord, 
+    TradeLifecycleState
+)
 
 # Backward compatibility imports for tests
 try:
@@ -44,21 +50,6 @@ except ImportError:
     RedisClient = None  # type: ignore
 
 from .utils_imports import time_execution
-
-
-class TradeLifecycleState(Enum):
-    """Trade lifecycle state enumeration."""
-
-    SIGNAL_GENERATED = "signal_generated"
-    PRE_TRADE_VALIDATION = "pre_trade_validation"
-    ORDER_CREATED = "order_created"
-    ORDER_SUBMITTED = "order_submitted"
-    PARTIALLY_FILLED = "partially_filled"
-    FULLY_FILLED = "fully_filled"
-    CANCELLED = "cancelled"
-    REJECTED = "rejected"
-    SETTLED = "settled"
-    ATTRIBUTED = "attributed"
 
 
 class TradeEvent(str, Enum):
@@ -76,93 +67,6 @@ class TradeEvent(str, Enum):
     ORDER_EXPIRED = "order_expired"  # Added to match interface
     SETTLEMENT_COMPLETE = "settlement_complete"
     ATTRIBUTION_COMPLETE = "attribution_complete"
-
-
-@dataclass
-class TradeContext:
-    """Complete context for a trade throughout its lifecycle."""
-
-    trade_id: str = field(default_factory=lambda: str(uuid4()))
-    bot_id: str = ""
-    strategy_name: str = ""
-
-    # Trade identification
-    symbol: str = ""
-    side: OrderSide = OrderSide.BUY
-    order_type: OrderType = OrderType.MARKET
-
-    # State tracking
-    current_state: TradeLifecycleState = TradeLifecycleState.SIGNAL_GENERATED
-    previous_state: TradeLifecycleState | None = None
-
-    # Order details
-    original_quantity: Decimal = Decimal("0")
-    filled_quantity: Decimal = Decimal("0")
-    remaining_quantity: Decimal = Decimal("0")
-
-    # Pricing
-    requested_price: Decimal | None = None
-    average_fill_price: Decimal = Decimal("0")
-
-    # Execution tracking
-    order_id: str | None = None
-    exchange_order_id: str | None = None
-    execution_results: list[ExecutionResult] = field(default_factory=list)
-
-    # Timing
-    signal_timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-    order_submission_timestamp: datetime | None = None
-    first_fill_timestamp: datetime | None = None
-    final_fill_timestamp: datetime | None = None
-    settlement_timestamp: datetime | None = None
-
-    # Performance metrics
-    realized_pnl: Decimal = Decimal("0")
-    unrealized_pnl: Decimal = Decimal("0")
-    fees_paid: Decimal = Decimal("0")
-    slippage: Decimal = Decimal("0")
-
-    # Quality metrics
-    quality_score: float | None = None
-    execution_quality: dict[str, float] = field(default_factory=dict)
-
-    # Error tracking
-    errors: list[str] = field(default_factory=list)
-    warnings: list[str] = field(default_factory=list)
-
-    # Metadata
-    metadata: dict[str, Any] = field(default_factory=dict)
-
-
-@dataclass
-class TradeHistoryRecord:
-    """Historical trade record for analysis."""
-
-    trade_id: str = ""
-    bot_id: str = ""
-    strategy_name: str = ""
-
-    # Trade summary
-    symbol: str = ""
-    side: OrderSide = OrderSide.BUY
-    quantity: Decimal = Decimal("0")
-    average_price: Decimal = Decimal("0")
-
-    # Performance
-    pnl: Decimal = Decimal("0")
-    return_percentage: Decimal = Decimal("0")
-    fees: Decimal = Decimal("0")
-    net_pnl: Decimal = Decimal("0")
-
-    # Quality metrics
-    quality_score: float = 0.0
-    execution_time_seconds: float = 0.0
-    slippage_bps: float = 0.0
-
-    # Timestamps
-    signal_time: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-    execution_time: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-    settlement_time: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 @dataclass
@@ -208,18 +112,18 @@ class TradeLifecycleManager(BaseComponent):
     def __init__(
         self,
         config: Config,
-        database_service: DatabaseService | None = None,
+        persistence_service: StatePersistenceServiceProtocol,
+        lifecycle_service: TradeLifecycleServiceProtocol,
         cache_service: Any | None = None,
-        persistence_service: StatePersistenceServiceProtocol | None = None,
     ):
         """
         Initialize the trade lifecycle manager.
 
         Args:
             config: Application configuration
-            database_service: Database service for data persistence (legacy)
+            persistence_service: Service layer for persistence operations (required)
+            lifecycle_service: Service layer for trade lifecycle business logic (required)
             cache_service: Cache service for performance optimization
-            persistence_service: Service layer for persistence operations
         """
         super().__init__(
             name="TradeLifecycleManager",
@@ -227,11 +131,11 @@ class TradeLifecycleManager(BaseComponent):
         )
         self.config = config
 
-        # Service layer components (preferred)
+        # Service layer components (required - no fallback to direct DB access)
         self._persistence_service = persistence_service
+        self._lifecycle_service = lifecycle_service
 
-        # Legacy services (with fallback handling)
-        self.database_service = database_service
+        # Optional services
         self.cache_service = cache_service
 
         # Active trades tracking
@@ -283,24 +187,10 @@ class TradeLifecycleManager(BaseComponent):
     async def initialize(self) -> None:
         """Initialize the trade lifecycle manager with service dependencies."""
         try:
-            # Initialize persistence service if available
-            if not self._persistence_service and self.database_service:
-                # Create persistence service wrapper for legacy database service
-                from .services import StatePersistenceService
-
-                self._persistence_service = StatePersistenceService(self.database_service)
-                if hasattr(self._persistence_service, "start"):
-                    await self._persistence_service.start()
-                self.logger.info("Persistence service initialized")
-            elif not self._persistence_service:
-                self.logger.warning(
-                    "No persistence service available - persistence operations will be limited"
-                )
-
-            # Initialize legacy database service if needed
-            if self.database_service and not getattr(self.database_service, "is_running", False):
-                await self.database_service.start()
-                self.logger.info("Legacy database service initialized")
+            # Initialize persistence service (required)
+            if hasattr(self._persistence_service, "start"):
+                await self._persistence_service.start()
+            self.logger.info("Persistence service initialized")
 
             # Initialize cache service if available
             if not self.cache_service:
@@ -357,14 +247,6 @@ class TradeLifecycleManager(BaseComponent):
                 except Exception as e:
                     self.logger.warning(f"Persistence service stop error: {e}")
 
-            # Cleanup legacy database service if we started it
-            if self.database_service and getattr(self.database_service, "is_running", False):
-                try:
-                    await self.database_service.stop()
-                    self.logger.info("Legacy database service stopped")
-                except Exception as e:
-                    self.logger.warning(f"Database service stop error: {e}")
-
             self.logger.info("TradeLifecycleManager cleanup completed")
 
         except Exception as e:
@@ -395,16 +277,15 @@ class TradeLifecycleManager(BaseComponent):
             StateError: If lifecycle start fails
         """
         try:
-            # Create trade context
-            trade_context = TradeContext(
+            # Create trade context through service layer
+            trade_context = await self._lifecycle_service.create_trade_context(
                 bot_id=bot_id,
                 strategy_name=strategy_name,
                 symbol=order_request.symbol,
                 side=order_request.side,
                 order_type=order_request.order_type,
-                original_quantity=order_request.quantity,
-                remaining_quantity=order_request.quantity,
-                requested_price=order_request.price,
+                quantity=order_request.quantity,
+                price=order_request.price,
             )
 
             # Store in active trades
@@ -460,9 +341,12 @@ class TradeLifecycleManager(BaseComponent):
             if not trade_context:
                 raise StateError(f"Trade {trade_id} not found")
 
-            # Validate transition
+            # Validate transition through service layer
             current_state = trade_context.current_state
-            if new_state not in self.valid_transitions.get(current_state, []):
+            transition_valid = await self._lifecycle_service.validate_trade_transition(
+                current_state, new_state
+            )
+            if not transition_valid:
                 raise StateError(
                     f"Invalid transition from {current_state.value} to {new_state.value}"
                 )
@@ -574,8 +458,8 @@ class TradeLifecycleManager(BaseComponent):
             self.logger.info(
                 "Trade execution updated",
                 trade_id=trade_id,
-                filled_quantity=float(execution_result.filled_quantity),
-                total_filled=float(trade_context.filled_quantity),
+                filled_quantity=str(execution_result.filled_quantity),
+                total_filled=str(trade_context.filled_quantity),
             )
 
         except Exception as e:
@@ -675,12 +559,12 @@ class TradeLifecycleManager(BaseComponent):
                 "trade_id": trade_id,
                 "symbol": trade_context.symbol,
                 "side": trade_context.side.value,
-                "filled_quantity": float(trade_context.filled_quantity),
-                "average_fill_price": float(trade_context.average_fill_price),
-                "fees_paid": float(trade_context.fees_paid),
-                "realized_pnl": float(trade_context.realized_pnl),
-                "unrealized_pnl": float(trade_context.unrealized_pnl),
-                "net_pnl": float(trade_context.realized_pnl - trade_context.fees_paid),
+                "filled_quantity": str(trade_context.filled_quantity),
+                "average_fill_price": str(trade_context.average_fill_price),
+                "fees_paid": str(trade_context.fees_paid),
+                "realized_pnl": str(trade_context.realized_pnl),
+                "unrealized_pnl": str(trade_context.unrealized_pnl),
+                "net_pnl": str(trade_context.realized_pnl - trade_context.fees_paid),
                 "quality_score": trade_context.quality_score,
                 "execution_quality": trade_context.execution_quality.copy(),
             }
@@ -713,8 +597,8 @@ class TradeLifecycleManager(BaseComponent):
                         trade_context.requested_price - trade_context.average_fill_price
                     ) / trade_context.requested_price
 
-                performance["slippage_percentage"] = float(slippage * 100)
-                performance["slippage_bps"] = float(slippage * 10000)
+                performance["slippage_percentage"] = str(slippage * Decimal("100"))
+                performance["slippage_bps"] = str(slippage * Decimal("10000"))
 
             return performance
 
@@ -777,11 +661,11 @@ class TradeLifecycleManager(BaseComponent):
                         "strategy_name": record.strategy_name,
                         "symbol": record.symbol,
                         "side": record.side.value,
-                        "quantity": float(record.quantity),
-                        "average_price": float(record.average_price),
-                        "pnl": float(record.pnl),
-                        "net_pnl": float(record.net_pnl),
-                        "fees": float(record.fees),
+                        "quantity": str(record.quantity),
+                        "average_price": str(record.average_price),
+                        "pnl": str(record.pnl),
+                        "net_pnl": str(record.net_pnl),
+                        "fees": str(record.fees),
                         "quality_score": record.quality_score,
                         "execution_time_seconds": record.execution_time_seconds,
                         "slippage_bps": record.slippage_bps,
@@ -836,13 +720,13 @@ class TradeLifecycleManager(BaseComponent):
 
             # Simplified attribution (can be enhanced)
             attribution = {
-                "total_pnl": float(total_pnl),
-                "gross_pnl": float(total_pnl),
-                "fees_impact": float(-total_fees),
-                "net_pnl": float(net_pnl),
+                "total_pnl": str(total_pnl),
+                "gross_pnl": str(total_pnl),
+                "fees_impact": str(-total_fees),
+                "net_pnl": str(net_pnl),
                 "trade_count": len(trades),
-                "win_rate": len([t for t in trades if t["pnl"] > 0]) / len(trades),
-                "average_trade_pnl": float(total_pnl / len(trades)),
+                "win_rate": len([t for t in trades if Decimal(str(t["pnl"])) > 0]) / len(trades),
+                "average_trade_pnl": str(total_pnl / len(trades)),
                 "average_quality_score": sum(t["quality_score"] for t in trades) / len(trades),
             }
 
@@ -983,30 +867,10 @@ class TradeLifecycleManager(BaseComponent):
             if not trade_context:
                 return
 
-            # Create history record
-            history_record = TradeHistoryRecord(
-                trade_id=trade_id,
-                bot_id=trade_context.bot_id,
-                strategy_name=trade_context.strategy_name,
-                symbol=trade_context.symbol,
-                side=trade_context.side,
-                quantity=trade_context.filled_quantity,
-                average_price=trade_context.average_fill_price,
-                pnl=trade_context.realized_pnl,
-                fees=trade_context.fees_paid,
-                net_pnl=trade_context.realized_pnl - trade_context.fees_paid,
-                quality_score=trade_context.quality_score or 0.0,
-                signal_time=trade_context.signal_timestamp,
-                execution_time=trade_context.final_fill_timestamp or trade_context.signal_timestamp,
-                settlement_time=trade_context.settlement_timestamp or datetime.now(timezone.utc),
-            )
+            # Create history record through service layer
+            history_record = await self._lifecycle_service.create_history_record(trade_context)
 
-            # Calculate execution time
-            if trade_context.final_fill_timestamp and trade_context.order_submission_timestamp:
-                execution_duration = (
-                    trade_context.final_fill_timestamp - trade_context.order_submission_timestamp
-                ).total_seconds()
-                history_record.execution_time_seconds = execution_duration
+            # Execution time calculation is now handled by the service layer
 
             # Persist history record through service layer
             if self._persistence_service:
@@ -1088,11 +952,11 @@ class TradeLifecycleManager(BaseComponent):
             "trade_id": record.trade_id,
             "symbol": record.symbol,
             "side": record.side.value,
-            "filled_quantity": float(record.quantity),
-            "average_fill_price": float(record.average_price),
-            "fees_paid": float(record.fees),
-            "realized_pnl": float(record.pnl),
-            "net_pnl": float(record.net_pnl),
+            "filled_quantity": str(record.quantity),
+            "average_fill_price": str(record.average_price),
+            "fees_paid": str(record.fees),
+            "realized_pnl": str(record.pnl),
+            "net_pnl": str(record.net_pnl),
             "quality_score": record.quality_score,
             "execution_duration_seconds": record.execution_time_seconds,
             "slippage_bps": record.slippage_bps,
@@ -1101,59 +965,48 @@ class TradeLifecycleManager(BaseComponent):
     async def _load_active_trades(self) -> None:
         """Load active trades from persistence layer."""
         try:
-            # Try persistence service first
-            if self._persistence_service:
-                from .state_service import StateType
+            from .state_service import StateType
 
-                # Load all trade states from persistence
-                states = await self._persistence_service.list_states(
-                    StateType.TRADE_STATE,
-                    limit=1000,  # Reasonable limit for active trades
-                )
+            # Load all trade states from persistence
+            states = await self._persistence_service.list_states(
+                StateType.TRADE_STATE,
+                limit=1000,  # Reasonable limit for active trades
+            )
 
-                # Reconstruct trade contexts from persisted data
-                loaded_count = 0
-                for state_info in states:
-                    try:
-                        trade_data = state_info.get("data", {})
-                        trade_id = trade_data.get("trade_id")
+            # Reconstruct trade contexts from persisted data
+            loaded_count = 0
+            for state_info in states:
+                try:
+                    trade_data = state_info.get("data", {})
+                    trade_id = trade_data.get("trade_id")
 
-                        if trade_id and trade_data.get("current_state") not in [
-                            "cancelled",
-                            "rejected",
-                            "attributed",
-                        ]:
-                            # Reconstruct trade context (simplified)
-                            context = TradeContext(
-                                trade_id=trade_id,
-                                bot_id=trade_data.get("bot_id", ""),
-                                strategy_name=trade_data.get("strategy_name", ""),
-                                symbol=trade_data.get("symbol", ""),
-                                side=OrderSide(trade_data.get("side", "BUY")),
-                                original_quantity=Decimal(
-                                    str(trade_data.get("original_quantity", "0"))
-                                ),
-                                filled_quantity=Decimal(
-                                    str(trade_data.get("filled_quantity", "0"))
-                                ),
-                            )
+                    if trade_id and trade_data.get("current_state") not in [
+                        "cancelled",
+                        "rejected",
+                        "attributed",
+                    ]:
+                        # Reconstruct trade context (simplified)
+                        context = TradeContext(
+                            trade_id=trade_id,
+                            bot_id=trade_data.get("bot_id", ""),
+                            strategy_name=trade_data.get("strategy_name", ""),
+                            symbol=trade_data.get("symbol", ""),
+                            side=OrderSide(trade_data.get("side", "BUY")),
+                            original_quantity=Decimal(
+                                str(trade_data.get("original_quantity", "0"))
+                            ),
+                            filled_quantity=Decimal(
+                                str(trade_data.get("filled_quantity", "0"))
+                            ),
+                        )
 
-                            self.active_trades[trade_id] = context
-                            loaded_count += 1
+                        self.active_trades[trade_id] = context
+                        loaded_count += 1
 
-                    except Exception as e:
-                        self.logger.warning(f"Failed to reconstruct trade context: {e}")
+                except Exception as e:
+                    self.logger.warning(f"Failed to reconstruct trade context: {e}")
 
-                self.logger.info(f"Loaded {loaded_count} active trades from persistence")
-
-            # Fall back to cache service
-            elif self.cache_service:
-                if hasattr(self.cache_service, "invalidate_pattern"):
-                    self.logger.info("Cache service available for trade context persistence")
-                else:
-                    self.logger.info("Cache service available but limited pattern support")
-            else:
-                self.logger.info("No persistence available - starting with empty active trades")
+            self.logger.info(f"Loaded {loaded_count} active trades from persistence")
 
         except Exception as e:
             self.logger.warning(f"Failed to load active trades: {e}")

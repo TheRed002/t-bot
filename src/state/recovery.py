@@ -26,6 +26,7 @@ from src.error_handling import (
     with_circuit_breaker,
     with_retry,
 )
+from src.utils.checksum_utilities import calculate_state_checksum
 
 from .utils_imports import time_execution
 
@@ -239,7 +240,7 @@ class StateRecoveryManager(BaseComponent):
             # Create initial recovery point
             await self.create_recovery_point("System initialization")
 
-            super().initialize()
+            await super().initialize()
             self.logger.info("StateRecoveryManager initialization completed")
 
         except Exception as e:
@@ -259,18 +260,41 @@ class StateRecoveryManager(BaseComponent):
         try:
             self._running = False
 
-            # Cancel background tasks
-            for task in [
+            # Cancel and cleanup background tasks
+            background_tasks = [
                 self._audit_cleanup_task,
                 self._auto_recovery_task,
                 self._corruption_monitor_task,
-            ]:
+            ]
+            
+            # Clear task references immediately
+            self._audit_cleanup_task = None
+            self._auto_recovery_task = None
+            self._corruption_monitor_task = None
+            
+            for task in background_tasks:
                 if task and not task.done():
                     task.cancel()
                     try:
                         await task
                     except asyncio.CancelledError:
                         pass
+                    except Exception as e:
+                        self.logger.error(f"Error waiting for background task cleanup: {e}")
+            
+            # Cleanup recovery tasks
+            recovery_tasks = self._recovery_tasks.copy()
+            self._recovery_tasks.clear()
+            
+            for task in recovery_tasks:
+                if task and not task.done():
+                    task.cancel()
+                    try:
+                        await task
+                    except asyncio.CancelledError:
+                        pass
+                    except Exception as e:
+                        self.logger.error(f"Error waiting for recovery task cleanup: {e}")
 
             # Create final recovery point
             await self.create_recovery_point("System shutdown")
@@ -280,7 +304,7 @@ class StateRecoveryManager(BaseComponent):
             self._recovery_points.clear()
             self._active_operations.clear()
 
-            super().cleanup()
+            await super().cleanup()
             self.logger.info("StateRecoveryManager cleanup completed")
 
         except Exception as e:
@@ -320,8 +344,8 @@ class StateRecoveryManager(BaseComponent):
             changed_fields = self._detect_changed_fields(old_value, new_value)
 
             # Calculate checksums
-            checksum_before = self._calculate_checksum(old_value) if old_value else ""
-            checksum_after = self._calculate_checksum(new_value) if new_value else ""
+            checksum_before = calculate_state_checksum(old_value) if old_value else ""
+            checksum_after = calculate_state_checksum(new_value) if new_value else ""
 
             # Create audit entry
             audit_entry = AuditEntry(
@@ -685,15 +709,6 @@ class StateRecoveryManager(BaseComponent):
 
         return changed
 
-    def _calculate_checksum(self, data: dict[str, Any] | None) -> str:
-        """Calculate checksum for data integrity."""
-        if not data:
-            return ""
-
-        import hashlib
-
-        data_str = json.dumps(data, sort_keys=True, default=str)
-        return hashlib.sha256(data_str.encode()).hexdigest()
 
     async def _capture_state_snapshot(self, recovery_point: RecoveryPoint) -> None:
         """Capture current state for recovery point."""
@@ -736,9 +751,10 @@ class StateRecoveryManager(BaseComponent):
                 "size_bytes": recovery_point.total_size_bytes,
             }
 
-            return self._calculate_checksum(hash_data)
+            return calculate_state_checksum(hash_data)
 
-        except Exception:
+        except Exception as e:
+            self.logger.error(f"Failed to compute metadata hash: {e}")
             return ""
 
     async def _validate_recovery_point(self, recovery_point: RecoveryPoint) -> bool:
@@ -758,7 +774,8 @@ class StateRecoveryManager(BaseComponent):
 
             return True
 
-        except Exception:
+        except Exception as e:
+            self.logger.error(f"Failed to validate recovery point: {e}")
             return False
 
     async def _execute_recovery(
@@ -863,7 +880,7 @@ class StateRecoveryManager(BaseComponent):
                 return None
 
             # Verify checksum
-            calculated_checksum = self._calculate_checksum(state_data)
+            calculated_checksum = calculate_state_checksum(state_data)
             if calculated_checksum != metadata.checksum:
                 return CorruptionReport(
                     state_type=state_type,

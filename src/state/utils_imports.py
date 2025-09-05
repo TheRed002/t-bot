@@ -20,21 +20,15 @@ try:
 except ImportError as e:
     logger.error(f"Failed to import time_execution decorator: {e}")
 
-    # Provide a fallback decorator that logs a warning
+    # Provide a fallback no-op decorator
     def time_execution(func: Callable) -> Callable:
-        """Fallback time_execution decorator that warns about missing functionality."""
-
+        """Fallback time_execution decorator."""
         @functools.wraps(func)
         def wrapper(*args: Any, **kwargs: Any) -> Any:
-            # Log warning on first use only
             if not hasattr(wrapper, "_warned"):
-                logger.warning(
-                    f"Performance monitoring disabled for {func.__name__} - "
-                    "time_execution decorator not available"
-                )
+                logger.debug(f"Performance monitoring not available for {func.__name__}")
                 wrapper._warned = True
             return func(*args, **kwargs)
-
         return wrapper
 
 
@@ -50,12 +44,12 @@ except ImportError as e:
     ) from e
 
 
-# Import file utilities
+# Import utilities from centralized modules
 try:
-    from src.utils.file_utils import ensure_directory_exists
+    from src.utils.state_utils import ensure_directory_exists
 except ImportError as e:
-    logger.error(f"Failed to import file utilities: {e}")
-
+    logger.error(f"Failed to import state utilities: {e}")
+    
     # Provide a fallback implementation that uses standard library
     def ensure_directory_exists(directory_path: str) -> None:
         """Fallback ensure_directory_exists using standard library."""
@@ -67,6 +61,30 @@ except ImportError as e:
             logger.error(f"Failed to create directory {directory_path}: {mkdir_error}")
             raise
 
+# Import state constants
+try:
+    from src.utils.state_constants import (
+        DEFAULT_CACHE_TTL,
+        DEFAULT_COMPRESSION_THRESHOLD,
+        DEFAULT_MAX_CHECKPOINTS,
+        CHECKPOINT_FILE_EXTENSION
+    )
+except ImportError as e:
+    logger.warning(f"Failed to import state constants: {e}")
+    # Set fallback values
+    DEFAULT_CACHE_TTL = 300
+    DEFAULT_COMPRESSION_THRESHOLD = 1024
+    DEFAULT_MAX_CHECKPOINTS = 50
+    CHECKPOINT_FILE_EXTENSION = ".checkpoint"
+
 
 # Export all imported utilities
-__all__ = ["ValidationService", "ensure_directory_exists", "time_execution"]
+__all__ = [
+    "ValidationService", 
+    "ensure_directory_exists", 
+    "time_execution",
+    "DEFAULT_CACHE_TTL",
+    "DEFAULT_COMPRESSION_THRESHOLD", 
+    "DEFAULT_MAX_CHECKPOINTS",
+    "CHECKPOINT_FILE_EXTENSION"
+]

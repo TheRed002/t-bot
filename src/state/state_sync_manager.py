@@ -8,8 +8,9 @@ transitions to the new architecture.
 
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any
+from typing import Any, Union
 
+from src.core.base.component import BaseComponent
 from src.core.config.main import Config
 from src.database.service import DatabaseService
 
@@ -29,7 +30,7 @@ class SyncEventType(Enum):
     CONFLICT_DETECTED = "conflict_detected"
 
 
-class StateSyncManager:
+class StateSyncManager(BaseComponent):
     """
     Backward compatibility wrapper for StateSynchronizer.
 
@@ -37,14 +38,15 @@ class StateSyncManager:
     while delegating most operations to the new StateSynchronizer implementation.
     """
 
-    def __init__(self, config: Config, database_service: DatabaseService | None = None):
+    def __init__(self, config: Config, database_service: Union[DatabaseService, None] = None):
         """Initialize StateSyncManager with StateSynchronizer delegation."""
+        super().__init__()
         self.config = config
         self.database_service = database_service
         self.db_manager = database_service  # Alias for backward compatibility
         self.redis_client = None
 
-        # Don't create StateService/Synchronizer for now - tests mock everything anyway
+        # StateService and Synchronizer are injected or mocked during testing
         self.state_service = None
         self.synchronizer = None
 
@@ -53,7 +55,7 @@ class StateSyncManager:
         self._event_subscriptions: dict[str, Any] = {}
         self._conflict_resolvers: dict[str, Any] = {}
 
-        # Mock sync metrics for testing
+        # Initialize sync metrics with default structure
         self.sync_metrics = type(
             "SyncMetrics",
             (),
@@ -83,12 +85,15 @@ class StateSyncManager:
             # Custom JSON encoder to handle enums and other complex objects
             def custom_encoder(obj):
                 from decimal import Decimal
+                from datetime import datetime, date
 
                 if isinstance(obj, Enum):
                     return obj.value
                 elif isinstance(obj, Decimal):
                     # Preserve precision by converting to string
                     return str(obj)
+                elif isinstance(obj, (datetime, date)):
+                    return obj.isoformat()
                 elif hasattr(obj, "model_dump"):
                     return obj.model_dump()
                 elif hasattr(obj, "__dict__"):

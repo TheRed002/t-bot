@@ -15,11 +15,8 @@ from uuid import uuid4
 
 from packaging import version
 
-try:
-    from packaging.version import LegacyVersion
-except (ImportError, AttributeError):
-    # Fallback for older packaging versions or when LegacyVersion doesn't exist
-    LegacyVersion = None
+# LegacyVersion is deprecated in newer packaging versions
+LegacyVersion = None
 
 from src.core.exceptions import StateError
 

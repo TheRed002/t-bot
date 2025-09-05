@@ -27,6 +27,8 @@ Key Features:
 ✅ Complete validation framework with business rules
 """
 
+from typing import TYPE_CHECKING
+
 # Core state management services
 # Legacy components (backward compatibility)
 from .checkpoint_manager import CheckpointManager
@@ -63,13 +65,34 @@ from .recovery import (
 # Backward compatibility
 from .state_manager import StateManager
 
-# Core consolidated state management
-from .state_service import StatePriority, StateService, StateType
+# Core consolidated state management - use late import to avoid circular deps
 from .state_sync_manager import StateSyncManager, SyncEventType
-from .state_validator import StateValidator
+
+if TYPE_CHECKING:
+    from .state_service import StatePriority, StateService, StateType
+    from .state_validator import StateValidator
 
 # Trading-specific components
 from .trade_lifecycle_manager import TradeEvent, TradeLifecycleManager
+
+# Dependency injection registration
+from .di_registration import register_state_services
+
+# Runtime imports for backward compatibility
+def __getattr__(name: str):
+    """Lazy import for circular dependency resolution."""
+    if name in ("StatePriority", "StateService", "StateType"):
+        from .state_service import StatePriority, StateService, StateType
+        if name == "StatePriority":
+            return StatePriority
+        elif name == "StateService":
+            return StateService
+        elif name == "StateType":
+            return StateType
+    elif name == "StateValidator":
+        from .state_validator import StateValidator
+        return StateValidator
+    raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
 
 # Public API exports
 __all__ = [
@@ -93,7 +116,7 @@ __all__ = [
     "StatePriority",
     "StateRecoveryManager",
     "StateService",
-    "StateServiceFactory",
+    "StateServiceFactory", 
     "StateServiceRegistry",
     "StateSyncManager",
     "StateType",
@@ -104,6 +127,7 @@ __all__ = [
     "create_default_state_service",
     "create_test_state_service",
     "get_state_service",
+    "register_state_services",
 ]
 
 # Version information

@@ -21,6 +21,10 @@ from .state_validation_service import (
     StateValidationService,
     StateValidationServiceProtocol,
 )
+from .trade_lifecycle_service import (
+    TradeLifecycleService,
+    TradeLifecycleServiceProtocol,
+)
 
 __all__ = [
     "StateBusinessService",
@@ -31,4 +35,6 @@ __all__ = [
     "StateSynchronizationServiceProtocol",
     "StateValidationService",
     "StateValidationServiceProtocol",
+    "TradeLifecycleService",
+    "TradeLifecycleServiceProtocol",
 ]

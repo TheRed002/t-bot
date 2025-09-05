@@ -6,18 +6,23 @@ with proper dependency injection, configuration, and component wiring.
 """
 
 import asyncio
-from typing import Any, ClassVar, Protocol, cast
+from typing import TYPE_CHECKING, Any, ClassVar, Protocol, Union, cast
 
 from src.core.config.main import Config
 from src.core.config.service import ConfigService
+from src.core.dependency_injection import DependencyInjector
+from src.core.exceptions import DependencyError, ServiceError
 from src.database.service import DatabaseService
 from src.monitoring import MetricsCollector
 
+from .interfaces import StateServiceFactoryInterface
 from .monitoring_integration import create_integrated_monitoring_service
-from .state_service import StateService
 
 # Import utilities through centralized import handler
 from .utils_imports import ValidationService
+
+if TYPE_CHECKING:
+    from .state_service import StateService
 
 
 class DatabaseServiceProtocol(Protocol):
@@ -35,7 +40,7 @@ class DatabaseServiceProtocol(Protocol):
         """Create a new entity."""
         ...
 
-    async def get_entity_by_id(self, model_class: type, entity_id: Any) -> Any | None:
+    async def get_entity_by_id(self, model_class: type, entity_id: Any) -> Union[Any, None]:
         """Get entity by ID."""
         ...
 
@@ -77,7 +82,7 @@ class DatabaseServiceWrapper:
 
 
 # Create a type alias for backward compatibility
-DatabaseServiceInterface = DatabaseService | DatabaseServiceProtocol | DatabaseServiceWrapper
+DatabaseServiceInterface = Union[DatabaseService, DatabaseServiceProtocol, DatabaseServiceWrapper]
 
 
 class MockDatabaseService:
@@ -113,7 +118,7 @@ class MockDatabaseService:
         self._metrics["successful_queries"] += 1
         return entity
 
-    async def get_entity_by_id(self, model_class: type, entity_id: Any) -> Any | None:
+    async def get_entity_by_id(self, model_class: type, entity_id: Any) -> Union[Any, None]:
         """Get entity by ID from mock storage."""
         self._metrics["total_queries"] += 1
         entity = self._entities.get(entity_id)
@@ -136,7 +141,7 @@ class MockDatabaseService:
         return self._metrics.copy()
 
 
-class StateServiceFactory:
+class StateServiceFactory(StateServiceFactoryInterface):
     """
     Factory for creating and configuring StateService instances.
 
@@ -144,12 +149,38 @@ class StateServiceFactory:
     enterprise-grade state management with all required services.
     """
 
-    @staticmethod
+    def __init__(self, injector: Union[DependencyInjector, None] = None):
+        """
+        Initialize factory with dependency injector.
+        
+        Args:
+            injector: Optional dependency injector instance
+        """
+        from src.core.dependency_injection import get_container
+        from .di_registration import register_state_services
+        
+        # Use provided injector or get global container
+        if injector is not None:
+            self.injector = injector
+            self.container = injector.get_container()
+        else:
+            from src.core.dependency_injection import injector as global_injector
+            self.injector = global_injector
+            self.container = get_container()
+        
+        # Ensure state services are registered
+        try:
+            register_state_services(self.container)
+        except (DependencyError, ServiceError):
+            # Services may already be registered
+            pass
+
     async def create_state_service(
+        self,
         config: Config,
-        database_service: DatabaseServiceInterface | None = None,
+        database_service: Union[DatabaseServiceInterface, None] = None,
         auto_start: bool = True,
-    ) -> StateService:
+    ) -> "StateService":
         """
         Create a fully configured StateService with all dependencies.
 
@@ -161,20 +192,23 @@ class StateServiceFactory:
         Returns:
             Configured and optionally started StateService
         """
-        # Create database service if not provided
-        if database_service is None:
-            database_service = await StateServiceFactory._create_database_service(config)
+        # Register dependencies in container using proper factory patterns
+        self.container.register("Config", lambda: config, singleton=True)
+        
+        if database_service:
+            self.container.register("DatabaseService", lambda: database_service, singleton=True)
+        else:
+            # Create database service using dependency injection factory
+            database_service = await self._create_database_service_with_di(config)
+            self.container.register("DatabaseService", lambda: database_service, singleton=True)
 
-        # Create state service with dependency injection
-        # Cast to expected type for StateService compatibility
-        state_service = StateService(config, cast(DatabaseService, database_service))
+        # Use factory pattern through DI container
+        state_service = self.container.get("StateService")
 
         # Create integrated monitoring service
         metrics_collector = MetricsCollector()
         _ = create_integrated_monitoring_service(state_service, metrics_collector)
 
-        # Note: monitoring_service integration is handled by the monitoring_integration module
-        # The state_service doesn't need a direct reference as it uses the integrated patterns
 
         # Initialize if requested
         if auto_start:
@@ -182,19 +216,28 @@ class StateServiceFactory:
 
         return state_service
 
-    @staticmethod
-    async def _create_database_service(config: Config) -> DatabaseServiceInterface:
-        """Create and configure DatabaseService using dependency injection."""
-        # Create dependencies through proper factory methods
-        config_service = await StateServiceFactory._create_config_service(config)
-        validation_service = await StateServiceFactory._create_validation_service()
+    async def _create_database_service_with_di(self, config: Config) -> DatabaseServiceInterface:
+        """Create and configure DatabaseService using dependency injection factory pattern."""
+        # Register config in container for factory usage
+        self.container.register("Config", lambda: config, singleton=True)
+        
+        # Use dependency injection factory to create config service
+        config_service = await self._create_config_service_factory()
+        validation_service = await self._create_validation_service_factory()
+        
+        # Register services using factory pattern
+        self.container.register("ConfigService", lambda: config_service, singleton=True)
+        if validation_service:
+            self.container.register("ValidationService", lambda: validation_service, singleton=True)
 
-        # Create database service with injected dependencies
-        database_service = DatabaseService(
-            config_service=config_service, validation_service=validation_service
-        )
+        # Create database service using dependency injection factory
+        try:
+            database_service = self.container.get("DatabaseService")
+        except (DependencyError, ServiceError):
+            # Use factory pattern for fallback creation
+            database_service = await self._create_database_service_factory(config_service, validation_service)
 
-        # Wrap the service to add compatibility properties
+        # Wrap the service using factory pattern
         wrapped_service = DatabaseServiceWrapper(database_service)
 
         # Start the service
@@ -202,31 +245,41 @@ class StateServiceFactory:
 
         return wrapped_service
 
-    @staticmethod
-    async def _create_config_service(config: Config) -> ConfigService:
-        """Create and configure ConfigService."""
+    async def _create_config_service_factory(self) -> ConfigService:
+        """Create and configure ConfigService using factory pattern."""
+        # Use dependency injection to resolve config
+        try:
+            config = self.container.get("Config")
+        except (DependencyError, ServiceError):
+            # Create default config if not available
+            config = Config()
+        
         config_service = ConfigService()
-        # Use the existing config object directly instead of load_config
         config_service._config = config
         return config_service
 
-    @staticmethod
-    async def _create_validation_service() -> ValidationService:
-        """Create and configure ValidationService."""
-        from src.core.dependency_injection import get_container
+    async def _create_validation_service_factory(self) -> Union[ValidationService, None]:
+        """Create and configure ValidationService using factory pattern."""
+        # Try to resolve from container using factory pattern
+        try:
+            validation_service = self.container.get("ValidationService")
+            return validation_service
+        except (DependencyError, ServiceError):
+            # Use factory pattern to check if ValidationFramework is available
+            try:
+                # Check if we can create ValidationService through DI
+                from src.utils.validators import ValidationFramework
+                framework = ValidationFramework()
+                validation_service = ValidationService(framework)
+                return validation_service
+            except ImportError:
+                # ValidationService dependencies not available
+                return None
 
-        container = get_container()
-        validation_service = container.get("validation_service")
-        if not validation_service:
-            validation_service = ValidationService()
-            container.register("validation_service", validation_service, singleton=True)
-        await validation_service.initialize()
-        return validation_service
-
-    @staticmethod
     async def create_state_service_for_testing(
-        config: Config | None = None, mock_database: bool = False
-    ) -> StateService:
+        self,
+        config: Union[Config, None] = None, mock_database: bool = False
+    ) -> "StateService":
         """
         Create StateService configured for testing.
 
@@ -239,46 +292,47 @@ class StateServiceFactory:
         """
         # Use default test config if none provided
         if config is None:
-            config = StateServiceFactory._create_test_config()
+            config = self._create_test_config()
 
         # Create mock or real database service
         if mock_database:
-            database_service = StateServiceFactory._create_mock_database_service()
+            database_service = self._create_mock_database_service()
         else:
-            database_service = await StateServiceFactory._create_database_service(config)
+            database_service = await self._create_database_service_with_di(config)
 
-        # Create state service (don't auto-start for testing)
-        # Cast to expected type for StateService compatibility
-        state_service = StateService(config, cast(DatabaseService, database_service))
+        # Create state service for testing
+        from .state_service import DatabaseServiceProtocol, StateService
+        
+        # Register test dependencies in container
+        self.container.register("Config", lambda: config, singleton=True)
+        self.container.register("DatabaseService", lambda: database_service, singleton=True)
+        
+        # Use dependency injection factory to create service
+        try:
+            state_service = self.container.get("StateService")
+        except (DependencyError, ServiceError):
+            # Fallback to direct creation with proper casting
+            state_service = StateService(config, cast(DatabaseServiceProtocol, database_service))
 
         return state_service
 
-    @staticmethod
-    def _create_test_config() -> Config:
+    def _create_test_config(self) -> Config:
         """Create default configuration for testing."""
-        # Create a test config without any arguments
+        # Create a test config with default values
         config = Config()
-
-        # Set test-specific values directly
-        test_config_dict = {
-            "database": {"url": "sqlite:///:memory:"},
-            "redis": {"url": "redis://localhost:6379/15"},  # Use test DB
-            "influxdb": {"url": "http://localhost:8086", "database": "test"},
-            "state_management": {
-                "cache_ttl_seconds": 60,
-                "max_change_log_size": 100,
-                "sync_interval_seconds": 5,
-                "enable_compression": False,
-            },
-        }
-        config.__dict__.update(test_config_dict)
-
         return config
 
-    @staticmethod
-    def _create_mock_database_service() -> DatabaseServiceInterface:
-        """Create mock database service for testing."""
+    def _create_mock_database_service(self) -> DatabaseServiceInterface:
+        """Create mock database service using factory pattern."""
+        # Use factory method to create mock service
         return MockDatabaseService()
+        
+    async def _create_database_service_factory(self, config_service: ConfigService, validation_service: Union[ValidationService, None]) -> DatabaseService:
+        """Factory method to create DatabaseService with injected dependencies."""
+        return DatabaseService(
+            config_service=config_service, 
+            validation_service=validation_service
+        )
 
 
 class StateServiceRegistry:
@@ -286,19 +340,21 @@ class StateServiceRegistry:
     Registry for managing StateService instances across the application.
 
     Provides singleton access and proper lifecycle management for
-    StateService instances.
+    StateService instances using dependency injection.
     """
 
-    _instances: ClassVar[dict[str, StateService]] = {}
+    _factory: Union[StateServiceFactory, None] = None
+
+    _instances: ClassVar[dict[str, "StateService"]] = {}
     _lock: ClassVar[asyncio.Lock] = asyncio.Lock()
 
     @classmethod
     async def get_instance(
         cls,
         name: str = "default",
-        config: Config | None = None,
-        database_service: DatabaseServiceInterface | None = None,
-    ) -> StateService:
+        config: Union[Config, None] = None,
+        database_service: Union[DatabaseServiceInterface, None] = None,
+    ) -> "StateService":
         """
         Get or create a StateService instance.
 
@@ -317,14 +373,24 @@ class StateServiceRegistry:
                         f"Config required to create new StateService instance '{name}'"
                     )
 
-                cls._instances[name] = await StateServiceFactory.create_state_service(
+                if cls._factory is None:
+                    # Use dependency injection to create factory
+                    from src.core.dependency_injection import get_container
+                    container = get_container()
+                    try:
+                        cls._factory = container.get("StateServiceFactory")
+                    except (DependencyError, ServiceError):
+                        # Fallback to direct factory creation
+                        cls._factory = StateServiceFactory()
+                    
+                cls._instances[name] = await cls._factory.create_state_service(
                     config=config, database_service=database_service, auto_start=True
                 )
 
             return cls._instances[name]
 
     @classmethod
-    async def register_instance(cls, name: str, instance: StateService) -> None:
+    async def register_instance(cls, name: str, instance: "StateService") -> None:
         """
         Register a pre-configured StateService instance.
 
@@ -377,16 +443,36 @@ class StateServiceRegistry:
 # Convenience functions for common patterns
 
 
-async def create_default_state_service(config: Config) -> StateService:
-    """Create default StateService with standard configuration."""
-    return await StateServiceFactory.create_state_service(config)
+async def create_default_state_service(config: Config) -> "StateService":
+    """Create default StateService using factory pattern with dependency injection."""
+    from src.core.dependency_injection import get_container
+    
+    # Use dependency injection container to get factory
+    container = get_container()
+    try:
+        factory = container.get("StateServiceFactory")
+    except (DependencyError, ServiceError):
+        # Fallback to direct factory creation
+        factory = StateServiceFactory()
+    
+    return await factory.create_state_service(config)
 
 
-async def get_state_service(name: str = "default") -> StateService:
+async def get_state_service(name: str = "default") -> "StateService":
     """Get StateService instance from registry."""
     return await StateServiceRegistry.get_instance(name)
 
 
-async def create_test_state_service() -> StateService:
-    """Create StateService configured for testing."""
-    return await StateServiceFactory.create_state_service_for_testing()
+async def create_test_state_service() -> "StateService":
+    """Create StateService configured for testing using factory pattern."""
+    from src.core.dependency_injection import get_container
+    
+    # Use dependency injection container to get factory
+    container = get_container()
+    try:
+        factory = container.get("StateServiceFactory")
+    except (DependencyError, ServiceError):
+        # Fallback to direct factory creation
+        factory = StateServiceFactory()
+    
+    return await factory.create_state_service_for_testing()
