@@ -6,14 +6,19 @@ for robust strategy evaluation and parameter optimization.
 """
 
 from datetime import datetime
-from typing import Any
+from decimal import Decimal
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import pandas as pd
 
-from src.backtesting.engine import BacktestConfig, BacktestEngine
 from src.core.base.component import BaseComponent
+
+if TYPE_CHECKING:
+    pass
 from src.core.exceptions import TradingBotError
+from src.utils.config_conversion import convert_config_to_dict
+from src.utils.decimal_utils import to_decimal
 from src.utils.decorators import time_execution
 
 
@@ -34,6 +39,7 @@ class MonteCarloAnalyzer(BaseComponent):
         num_simulations: int = 1000,
         confidence_level: float = 0.95,
         seed: int | None = None,
+        engine_factory: Any = None,
     ):
         """
         Initialize Monte Carlo analyzer.
@@ -43,24 +49,16 @@ class MonteCarloAnalyzer(BaseComponent):
             num_simulations: Number of simulation runs
             confidence_level: Confidence level for intervals (e.g., 0.95 for 95%)
             seed: Random seed for reproducibility
+            engine_factory: Factory for creating BacktestEngine instances
         """
-        # Convert config to dict if needed
-        config_dict = None
-        if config:
-            if hasattr(config, "model_dump"):
-                config_dict = config.model_dump()
-            elif hasattr(config, "dict"):
-                config_dict = config.dict()
-            elif isinstance(config, dict):
-                config_dict = config
-            else:
-                config_dict = {}
-
+        # Convert config to dict using shared utility
+        config_dict = convert_config_to_dict(config)
         super().__init__(name="MonteCarloAnalyzer", config=config_dict)
         self.config = config
         self.num_simulations = num_simulations
         self.confidence_level = confidence_level
         self.seed = seed
+        self.engine_factory = engine_factory
 
         if seed:
             np.random.seed(seed)
@@ -72,9 +70,7 @@ class MonteCarloAnalyzer(BaseComponent):
         )
 
     @time_execution
-    async def analyze_trades(
-        self, trades: list[dict[str, Any]], initial_capital: float
-    ) -> dict[str, Any]:
+    async def analyze_trades(self, trades: list[dict[str, Any]], initial_capital: Decimal) -> dict[str, Any]:
         """
         Perform Monte Carlo analysis on trade sequences.
 
@@ -91,28 +87,44 @@ class MonteCarloAnalyzer(BaseComponent):
         self.logger.info("Starting Monte Carlo analysis", num_trades=len(trades))
 
         # Extract trade returns
-        trade_returns = [t["pnl"] / initial_capital for t in trades]
+        try:
+            trade_returns = [to_decimal(t["pnl"]) / initial_capital for t in trades]
+        except (KeyError, ZeroDivisionError, TypeError) as e:
+            self.logger.error(f"Failed to extract trade returns: {e}")
+            raise TradingBotError(f"Invalid trade data or zero initial capital: {e}", "BACKTEST_002") from e
 
         # Run simulations
         simulation_results = []
 
         for _i in range(self.num_simulations):
-            # Resample trades with replacement
-            resampled_indices = np.random.choice(
-                len(trade_returns), size=len(trade_returns), replace=True
-            )
-            resampled_returns = [trade_returns[idx] for idx in resampled_indices]
+            try:
+                # Resample trades with replacement
+                resampled_indices = np.random.choice(len(trade_returns), size=len(trade_returns), replace=True)
+                resampled_returns = [trade_returns[idx] for idx in resampled_indices]
 
-            # Calculate cumulative return
-            cumulative_return = np.prod([1 + r for r in resampled_returns]) - 1
+                # Calculate cumulative return
+                cumulative_return = float(np.prod([1 + float(r) for r in resampled_returns]) - 1)
 
-            # Calculate metrics for this simulation
-            sim_metrics = self._calculate_simulation_metrics(resampled_returns, initial_capital)
-            sim_metrics["cumulative_return"] = cumulative_return
-            simulation_results.append(sim_metrics)
+                # Calculate metrics for this simulation
+                sim_metrics = self._calculate_simulation_metrics(resampled_returns, initial_capital)
+                sim_metrics["cumulative_return"] = cumulative_return
+                simulation_results.append(sim_metrics)
+            except (ValueError, IndexError, FloatingPointError) as e:
+                self.logger.warning(f"Simulation iteration {_i} failed: {e}")
+                # Continue with other simulations
+                continue
+            except Exception as e:
+                self.logger.error(f"Unexpected error in simulation iteration {_i}: {e}")
+                raise
 
         # Analyze results
-        analysis = self._analyze_simulation_results(simulation_results)
+        try:
+            if not simulation_results:
+                raise TradingBotError("No successful simulations completed", "BACKTEST_003")
+            analysis = self._analyze_simulation_results(simulation_results)
+        except Exception as e:
+            self.logger.error(f"Failed to analyze simulation results: {e}")
+            raise TradingBotError(f"Simulation analysis failed: {e}", "BACKTEST_004") from e
 
         self.logger.info("Monte Carlo analysis completed", simulations_run=len(simulation_results))
         return analysis
@@ -142,7 +154,8 @@ class MonteCarloAnalyzer(BaseComponent):
         try:
             trades = simulation_result.get("trades", [])
             daily_returns = simulation_result.get("daily_returns", [])
-            initial_capital = 10000.0  # Default, could be extracted from simulation_result
+            # Extract initial capital from simulation result or use configuration default
+            initial_capital = simulation_result.get("initial_capital") or to_decimal("10000")
 
             # Run trade-based analysis if we have trades
             if trades:
@@ -172,9 +185,7 @@ class MonteCarloAnalyzer(BaseComponent):
                 self.num_simulations = original_num_sims
 
     @time_execution
-    async def analyze_returns(
-        self, daily_returns: list[float], num_days: int = 252
-    ) -> dict[str, Any]:
+    async def analyze_returns(self, daily_returns: list[float], num_days: int = 252) -> dict[str, Any]:
         """
         Perform Monte Carlo simulation on return paths.
 
@@ -239,9 +250,7 @@ class MonteCarloAnalyzer(BaseComponent):
 
         return results
 
-    def _calculate_simulation_metrics(
-        self, returns: list[float], initial_capital: float
-    ) -> dict[str, Any]:
+    def _calculate_simulation_metrics(self, returns: list[Decimal], initial_capital: Decimal) -> dict[str, Any]:
         """Calculate metrics for a single simulation."""
         if not returns:
             return {}
@@ -251,12 +260,12 @@ class MonteCarloAnalyzer(BaseComponent):
         equity_curve = [equity]
 
         for ret in returns:
-            equity *= 1 + ret
+            equity *= to_decimal("1") + ret
             equity_curve.append(equity)
 
         # Calculate drawdown
         peak = initial_capital
-        max_dd: float = 0.0
+        max_dd: Decimal = to_decimal("0")
 
         for value in equity_curve:
             if value > peak:
@@ -265,17 +274,17 @@ class MonteCarloAnalyzer(BaseComponent):
             max_dd = max(max_dd, dd)
 
         # Calculate Sharpe ratio
-        returns_array = np.array(returns)
+        returns_array = np.array([float(r) for r in returns])
         if len(returns_array) > 1:
             sharpe = np.mean(returns_array) / np.std(returns_array) * np.sqrt(252)
         else:
             sharpe = 0
 
         return {
-            "final_equity": equity,
-            "max_drawdown": max_dd,
-            "sharpe_ratio": sharpe,
-            "volatility": np.std(returns_array) if len(returns_array) > 1 else 0,
+            "final_equity": float(equity),
+            "max_drawdown": float(max_dd),
+            "sharpe_ratio": float(sharpe),
+            "volatility": float(np.std(returns_array)) if len(returns_array) > 1 else 0.0,
         }
 
     def _analyze_simulation_results(self, results: list[dict[str, Any]]) -> dict[str, Any]:
@@ -318,13 +327,9 @@ class MonteCarloAnalyzer(BaseComponent):
             },
             "risk_metrics": {
                 "probability_loss": float(np.mean([r < 0 for r in returns])),
-                "expected_shortfall": float(
-                    np.mean([r for r in returns if r < np.percentile(returns, 5)])
-                ),
+                "expected_shortfall": float(np.mean([r for r in returns if r < np.percentile(returns, 5)])),
                 "tail_ratio": float(
-                    np.percentile(returns, 95) / abs(np.percentile(returns, 5))
-                    if np.percentile(returns, 5) != 0
-                    else 0
+                    np.percentile(returns, 95) / abs(np.percentile(returns, 5)) if np.percentile(returns, 5) != 0 else 0
                 ),
             },
         }
@@ -349,6 +354,7 @@ class WalkForwardAnalyzer(BaseComponent):
         optimization_window: int = 252,  # Trading days
         test_window: int = 63,  # Trading days
         step_size: int | None = None,  # If None, equals test_window
+        engine_factory: Any = None,
     ):
         """
         Initialize walk-forward analyzer.
@@ -358,24 +364,16 @@ class WalkForwardAnalyzer(BaseComponent):
             optimization_window: Days for in-sample optimization
             test_window: Days for out-of-sample testing
             step_size: Days to step forward (if None, non-overlapping windows)
+            engine_factory: Factory for creating BacktestEngine instances
         """
-        # Convert config to dict if needed
-        config_dict = None
-        if config:
-            if hasattr(config, "model_dump"):
-                config_dict = config.model_dump()
-            elif hasattr(config, "dict"):
-                config_dict = config.dict()
-            elif isinstance(config, dict):
-                config_dict = config
-            else:
-                config_dict = {}
-
+        # Convert config to dict using shared utility
+        config_dict = convert_config_to_dict(config)
         super().__init__(name="WalkForwardAnalyzer", config=config_dict)
         self.config = config
         self.optimization_window = optimization_window
         self.test_window = test_window
         self.step_size = step_size or test_window
+        self.engine_factory = engine_factory
 
         self.logger.info(
             "WalkForwardAnalyzer initialized",
@@ -489,9 +487,7 @@ class WalkForwardAnalyzer(BaseComponent):
             "performance_degradation": 0.0,
         }
 
-    def _generate_windows(
-        self, data: pd.DataFrame
-    ) -> list[tuple[datetime, datetime, datetime, datetime]]:
+    def _generate_windows(self, data: pd.DataFrame) -> list[tuple[datetime, datetime, datetime, datetime]]:
         """Generate optimization and test windows."""
         windows: list[tuple[datetime, datetime, datetime, datetime]] = []
 
@@ -536,13 +532,19 @@ class WalkForwardAnalyzer(BaseComponent):
 
             # Run backtest with these parameters
             strategy = strategy_class(**params)
+
+            from src.backtesting.engine import BacktestConfig, BacktestEngine
+
             config = BacktestConfig(
                 start_date=data.index[0],
                 end_date=data.index[-1],
                 symbols=["TEST"],  # Placeholder
             )
 
-            engine = BacktestEngine(config, strategy)
+            if self.engine_factory:
+                engine = self.engine_factory(config, strategy)
+            else:
+                engine = BacktestEngine(config, strategy)
             result = await engine.run()
 
             # Get optimization metric
@@ -568,13 +570,18 @@ class WalkForwardAnalyzer(BaseComponent):
 
         # Run backtest
         strategy = strategy_class(**params)
+        from src.backtesting.engine import BacktestConfig, BacktestEngine
+
         config = BacktestConfig(
             start_date=data.index[0],
             end_date=data.index[-1],
             symbols=["TEST"],
         )
 
-        engine = BacktestEngine(config, strategy)
+        if self.engine_factory:
+            engine = self.engine_factory(config, strategy)
+        else:
+            engine = BacktestEngine(config, strategy)
         result = await engine.run()
 
         return {
@@ -584,14 +591,10 @@ class WalkForwardAnalyzer(BaseComponent):
             "win_rate": result.win_rate,
         }
 
-    def _analyze_results(
-        self, window_results: list[dict[str, Any]], optimization_metric: str
-    ) -> dict[str, Any]:
+    def _analyze_results(self, window_results: list[dict[str, Any]], optimization_metric: str) -> dict[str, Any]:
         """Analyze walk-forward results."""
         # Extract performance metrics
-        in_sample_scores = [
-            w["in_sample_performance"].get(optimization_metric, 0) for w in window_results
-        ]
+        in_sample_scores = [w["in_sample_performance"].get(optimization_metric, 0) for w in window_results]
         out_sample_scores = [
             w["out_of_sample_performance"].get(
                 optimization_metric.replace("_", " ").title().replace(" ", "_").lower(), 0
@@ -615,9 +618,7 @@ class WalkForwardAnalyzer(BaseComponent):
                 "avg_out_sample_performance": float(np.mean(out_sample_scores)),
                 "efficiency_ratio": float(efficiency_ratio),
                 "performance_degradation": float(
-                    (np.mean(in_sample_scores) - np.mean(out_sample_scores))
-                    / np.mean(in_sample_scores)
-                    * 100
+                    (np.mean(in_sample_scores) - np.mean(out_sample_scores)) / np.mean(in_sample_scores) * 100
                     if np.mean(in_sample_scores) > 0
                     else 0
                 ),
@@ -642,11 +643,7 @@ class WalkForwardAnalyzer(BaseComponent):
         stability = {}
 
         for param in all_params:
-            values = [
-                w["best_parameters"].get(param)
-                for w in window_results
-                if param in w.get("best_parameters", {})
-            ]
+            values = [w["best_parameters"].get(param) for w in window_results if param in w.get("best_parameters", {})]
 
             if values:
                 # Calculate stability metrics
@@ -656,9 +653,7 @@ class WalkForwardAnalyzer(BaseComponent):
                     stability[param] = {
                         "mean": float(np.mean(values)),
                         "std": float(np.std(values)),
-                        "cv": (
-                            float(np.std(values) / np.mean(values)) if np.mean(values) != 0 else 0
-                        ),
+                        "cv": (float(np.std(values) / np.mean(values)) if np.mean(values) != 0 else 0),
                     }
                 else:
                     # For non-numeric parameters

@@ -17,7 +17,9 @@ from src.core.base.component import BaseComponent
 from src.core.config import Config
 from src.core.exceptions import DataError
 from src.error_handling.decorators import with_circuit_breaker, with_error_context
+from src.utils.config_conversion import convert_config_to_dict
 from src.utils.decorators import time_execution
+from src.utils.synthetic_data_generator import generate_synthetic_ohlcv_data, validate_ohlcv_data
 
 
 class ReplayMode(Enum):
@@ -52,18 +54,8 @@ class DataReplayManager(BaseComponent):
             config: Configuration object
             cache_size: Maximum number of records to cache in memory
         """
-        # Convert Config to dict if needed
-        config_dict = None
-        if config:
-            if hasattr(config, "model_dump"):
-                config_dict = config.model_dump()
-            elif hasattr(config, "dict"):
-                config_dict = config.dict()
-            elif isinstance(config, dict):
-                config_dict = config
-            else:
-                config_dict = {}
-
+        # Convert config to dict using shared utility
+        config_dict = convert_config_to_dict(config)
         super().__init__(name="DataReplayManager", config=config_dict)
         self.config = config
         self.cache_size = cache_size
@@ -73,9 +65,7 @@ class DataReplayManager(BaseComponent):
         # Use self._config from BaseComponent, with proper fallback
         if self._config and isinstance(self._config, dict):
             max_cache_size_value = self._config.get("max_cache_size", 1000)
-            self._max_cache_size = (
-                int(max_cache_size_value) if isinstance(max_cache_size_value, int | str) else 1000
-            )
+            self._max_cache_size = int(max_cache_size_value) if isinstance(max_cache_size_value, int | str) else 1000
         else:
             self._max_cache_size = 1000  # Max dataframes in cache
         self._current_index: dict[str, int] = {}
@@ -123,9 +113,7 @@ class DataReplayManager(BaseComponent):
                     data = await self._load_from_csv(symbol, start_date, end_date)
                 else:
                     # Generate synthetic data as default
-                    data = await self._generate_synthetic_data(
-                        symbol, start_date, end_date, timeframe
-                    )
+                    data = await self._generate_synthetic_data(symbol, start_date, end_date, timeframe)
 
                 # Validate and clean data
                 data = self._validate_data(data)
@@ -151,9 +139,7 @@ class DataReplayManager(BaseComponent):
                 self.logger.error(f"Failed to load data for {symbol}", error=str(e))
                 raise DataError(f"Failed to load data for {symbol}: {e!s}") from e
 
-    async def _load_from_csv(
-        self, symbol: str, start_date: datetime, end_date: datetime
-    ) -> pd.DataFrame:
+    async def _load_from_csv(self, symbol: str, start_date: datetime, end_date: datetime) -> pd.DataFrame:
         """Load data from CSV file."""
         import os
 
@@ -162,9 +148,10 @@ class DataReplayManager(BaseComponent):
         if not os.path.exists(file_path):
             raise DataError(f"CSV file not found: {file_path}")
 
-        df = None
+        file_handle = None
         try:
-            df = pd.read_csv(file_path, parse_dates=["timestamp"], index_col="timestamp")
+            file_handle = open(file_path)
+            df = pd.read_csv(file_handle, parse_dates=["timestamp"], index_col="timestamp")
 
             # Filter by date range
             df = df[(df.index >= start_date) & (df.index <= end_date)]
@@ -175,9 +162,12 @@ class DataReplayManager(BaseComponent):
         except Exception as e:
             raise DataError(f"Failed to load CSV file {file_path}: {e}") from e
         finally:
-            # pandas handles file closing automatically, but ensure proper cleanup
-            if df is not None:
-                pass  # DataFrame cleanup is handled by pandas/garbage collector
+            # Ensure file handle is properly closed
+            if file_handle is not None:
+                try:
+                    file_handle.close()
+                except Exception as close_error:
+                    self.logger.warning(f"Failed to close file handle for {file_path}: {close_error}")
 
     async def _generate_synthetic_data(
         self,
@@ -187,45 +177,24 @@ class DataReplayManager(BaseComponent):
         timeframe: str,
     ) -> pd.DataFrame:
         """Generate synthetic data for testing."""
-        import numpy as np
-
-        # Parse timeframe
-        freq_map = {
-            "1m": "1min",
-            "5m": "5min",
-            "15m": "15min",
-            "1h": "1h",
-            "4h": "4h",
-            "1d": "1D",
-        }
-
-        freq = freq_map.get(timeframe, "1h")
-        dates = pd.date_range(start=start_date, end=end_date, freq=freq)
-
-        # Generate price data using geometric Brownian motion
-        np.random.seed(hash(symbol) % 2**32)  # Consistent per symbol
-
-        n = len(dates)
-        dt = 1 / 252  # Daily time step
-        mu = 0.1  # Annual drift
-        sigma = 0.2  # Annual volatility
-
-        # Generate returns
-        returns = np.random.normal(mu * dt, sigma * np.sqrt(dt), n)
-        prices = 100 * np.exp(np.cumsum(returns))
-
-        # Generate OHLC from prices
-        df = pd.DataFrame(index=dates)
-        df["close"] = prices
-        df["open"] = prices * (1 + np.random.normal(0, 0.001, n))
-        df["high"] = prices * (1 + np.abs(np.random.normal(0, 0.005, n)))
-        df["low"] = prices * (1 - np.abs(np.random.normal(0, 0.005, n)))
-        df["volume"] = np.random.uniform(1000, 10000, n)
-
-        return df
+        # Use shared synthetic data generator
+        return generate_synthetic_ohlcv_data(
+            symbol=symbol,
+            start_date=start_date,
+            end_date=end_date,
+            timeframe=timeframe,
+        )
 
     def _validate_data(self, data: pd.DataFrame) -> pd.DataFrame:
         """Validate and clean market data."""
+        # Use shared validation utility
+        is_valid, errors = validate_ohlcv_data(data)
+
+        if not is_valid:
+            for error in errors:
+                self.logger.warning(f"Data validation error: {error}")
+
+        # Clean data by removing invalid rows
         # Check required columns
         required_columns = ["open", "high", "low", "close", "volume"]
         missing = set(required_columns) - set(data.columns)
@@ -496,7 +465,7 @@ class DataReplayManager(BaseComponent):
 
         return stats
 
-    def cleanup(self) -> None:
+    async def cleanup(self) -> None:
         """Cleanup data replay manager resources."""
         try:
             # Clear all cached data

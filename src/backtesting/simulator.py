@@ -23,8 +23,9 @@ from src.core.types import (
     OrderType,
 )
 from src.error_handling.decorators import with_error_context
-from src.utils.decimal_utils import safe_decimal
+from src.utils.decimal_utils import to_decimal
 from src.utils.decorators import time_execution
+from src.utils.timezone_utils import ensure_utc_timezone
 
 logger = get_logger(__name__)
 
@@ -33,28 +34,26 @@ class SimulationConfig(BaseModel):
     """Configuration for trade simulation."""
 
     # Core simulation parameters
-    initial_capital: float = Field(default=10000.0, description="Initial capital")
-    commission_rate: float = Field(default=0.001, description="Commission rate")
-    slippage_rate: float = Field(default=0.0005, description="Slippage rate")
+    initial_capital: Decimal = Field(default_factory=lambda: to_decimal("10000"), description="Initial capital")
+    commission_rate: Decimal = Field(default_factory=lambda: to_decimal("0.001"), description="Commission rate")
+    slippage_rate: Decimal = Field(default_factory=lambda: to_decimal("0.0005"), description="Slippage rate")
     enable_shorting: bool = Field(default=False, description="Enable short selling")
     max_positions: int = Field(default=5, description="Maximum open positions")
 
     # Advanced simulation features
     enable_partial_fills: bool = Field(default=True, description="Enable partial order fills")
-    enable_market_impact: bool = Field(
-        default=True, description="Model market impact of large orders"
+    enable_market_impact: bool = Field(default=True, description="Model market impact of large orders")
+    enable_latency: bool = Field(default=True, description="Simulate network and processing latency")
+    latency_ms: tuple[int, int] = Field(default=(10, 100), description="Min and max latency in milliseconds")
+    market_impact_factor: Decimal = Field(
+        default_factory=lambda: to_decimal("0.0001"), description="Market impact per unit volume"
     )
-    enable_latency: bool = Field(
-        default=True, description="Simulate network and processing latency"
+    liquidity_factor: Decimal = Field(
+        default_factory=lambda: to_decimal("0.1"), description="Available liquidity as fraction of volume"
     )
-    latency_ms: tuple[int, int] = Field(
-        default=(10, 100), description="Min and max latency in milliseconds"
+    rejection_probability: Decimal = Field(
+        default_factory=lambda: to_decimal("0.01"), description="Probability of order rejection"
     )
-    market_impact_factor: float = Field(default=0.0001, description="Market impact per unit volume")
-    liquidity_factor: float = Field(
-        default=0.1, description="Available liquidity as fraction of volume"
-    )
-    rejection_probability: float = Field(default=0.01, description="Probability of order rejection")
 
 
 class SimulatedOrder(BaseModel):
@@ -63,11 +62,11 @@ class SimulatedOrder(BaseModel):
     request: OrderRequest
     order_id: str
     timestamp: datetime
-    filled_quantity: Decimal = Field(default_factory=lambda: safe_decimal("0"))
+    filled_quantity: Decimal = Field(default_factory=lambda: to_decimal("0"))
     status: OrderStatus = OrderStatus.PENDING
     average_fill_price: Decimal | None = None
     fill_time: datetime | None = None
-    execution_fees: Decimal = Field(default_factory=lambda: safe_decimal("0"))
+    execution_fees: Decimal = Field(default_factory=lambda: to_decimal("0"))
     execution_algorithm: ExecutionAlgorithm = ExecutionAlgorithm.MARKET
     algorithm_params: dict[str, Any] = Field(default_factory=dict)
 
@@ -144,19 +143,13 @@ class TradeSimulator:
 
         # Apply execution algorithm modifications
         if execution_algorithm != ExecutionAlgorithm.MARKET:
-            result = await self._execute_with_algorithm(
-                simulated_order, market_data, order_book_depth
-            )
+            result = await self._execute_with_algorithm(simulated_order, market_data, order_book_depth)
         else:
             # Determine execution based on order type
             if order_request.order_type == OrderType.MARKET:
-                result = await self._execute_market_order(
-                    simulated_order, market_data, order_book_depth
-                )
+                result = await self._execute_market_order(simulated_order, market_data, order_book_depth)
             elif order_request.order_type == OrderType.LIMIT:
-                result = await self._execute_limit_order(
-                    simulated_order, market_data, order_book_depth
-                )
+                result = await self._execute_limit_order(simulated_order, market_data, order_book_depth)
             else:
                 result = await self._execute_stop_order(simulated_order, market_data)
 
@@ -184,7 +177,7 @@ class TradeSimulator:
             "status": "rejected",
             "reason": reason,
             "timestamp": datetime.now(timezone.utc),
-            "filled_size": safe_decimal("0"),
+            "filled_size": to_decimal("0"),
             "average_price": None,
         }
 
@@ -197,25 +190,23 @@ class TradeSimulator:
         """Execute market order with slippage and market impact."""
         # Base execution price
         if order.request.side == OrderSide.BUY:
-            base_price = safe_decimal(market_data["high"])  # Worse price for buyer
+            base_price = to_decimal(market_data["high"])  # Worse price for buyer
         else:
-            base_price = safe_decimal(market_data["low"])  # Worse price for seller
+            base_price = to_decimal(market_data["low"])  # Worse price for seller
 
         # Apply market impact
         if self.config.enable_market_impact:
-            impact = self._calculate_market_impact(order.request.quantity, market_data["volume"])
+            impact = self._calculate_market_impact(order.request.quantity, to_decimal(market_data["volume"]))
             if order.request.side == OrderSide.BUY:
-                execution_price = base_price * (safe_decimal("1") + impact)
+                execution_price = base_price * (to_decimal("1") + impact)
             else:
-                execution_price = base_price * (safe_decimal("1") - impact)
+                execution_price = base_price * (to_decimal("1") - impact)
         else:
             execution_price = base_price
 
         # Determine fill size (considering liquidity)
         if self.config.enable_partial_fills:
-            available_liquidity = safe_decimal(market_data["volume"]) * safe_decimal(
-                self.config.liquidity_factor
-            )
+            available_liquidity = to_decimal(market_data["volume"]) * to_decimal(self.config.liquidity_factor)
             filled_size = min(order.request.quantity, available_liquidity)
             status = "filled" if filled_size == order.request.quantity else "partial"
         else:
@@ -242,7 +233,7 @@ class TradeSimulator:
         order_book: pd.DataFrame | None = None,
     ) -> dict[str, Any]:
         """Execute limit order checking price conditions."""
-        current_price = safe_decimal(market_data["close"])
+        current_price = to_decimal(market_data["close"])
 
         # Check if limit price is met
         can_execute = False
@@ -274,9 +265,7 @@ class TradeSimulator:
 
         # Execute the order
         if self.config.enable_partial_fills:
-            available_liquidity = safe_decimal(market_data["volume"]) * safe_decimal(
-                self.config.liquidity_factor
-            )
+            available_liquidity = to_decimal(market_data["volume"]) * to_decimal(self.config.liquidity_factor)
             filled_size = min(order.request.quantity, available_liquidity)
             status = "filled" if filled_size == order.request.quantity else "partial"
         else:
@@ -296,11 +285,9 @@ class TradeSimulator:
             "timestamp": datetime.now(timezone.utc),
         }
 
-    async def _execute_stop_order(
-        self, order: SimulatedOrder, market_data: pd.Series
-    ) -> dict[str, Any]:
+    async def _execute_stop_order(self, order: SimulatedOrder, market_data: pd.Series) -> dict[str, Any]:
         """Execute stop-loss or take-profit order."""
-        current_price = safe_decimal(market_data["close"])
+        current_price = to_decimal(market_data["close"])
 
         # Check if stop is triggered
         triggered = False
@@ -380,29 +367,28 @@ class TradeSimulator:
     ) -> dict[str, Any]:
         """Simulate TWAP execution with multiple child orders."""
         # Extract parameters
-        # time_horizon = params.get("time_horizon_minutes", 10)  # Unused for now
         num_slices = params.get("max_slices", 5)
 
         # Calculate slice size
-        slice_size = order.request.quantity / safe_decimal(num_slices)
+        slice_size = order.request.quantity / to_decimal(num_slices)
 
         # Simulate execution across time slices with varying prices
-        total_filled = safe_decimal("0")
-        total_cost = safe_decimal("0")
+        total_filled = to_decimal("0")
+        total_cost = to_decimal("0")
 
-        base_price = safe_decimal(market_data["close"])
+        base_price = to_decimal(market_data["close"])
 
         for _ in range(num_slices):
             # Simulate price movement during execution
-            price_variation = safe_decimal(random.uniform(-0.001, 0.001))  # 0.1% variation
-            slice_price = base_price * (safe_decimal("1") + price_variation)
+            price_variation = to_decimal(random.uniform(-0.001, 0.001))  # 0.1% variation
+            slice_price = base_price * (to_decimal("1") + price_variation)
 
             # Apply market impact for this slice
-            impact = self._calculate_market_impact(slice_size, market_data["volume"])
+            impact = self._calculate_market_impact(slice_size, to_decimal(market_data["volume"]))
             if order.request.side == OrderSide.BUY:
-                execution_price = slice_price * (safe_decimal("1") + impact)
+                execution_price = slice_price * (to_decimal("1") + impact)
             else:
-                execution_price = slice_price * (safe_decimal("1") - impact)
+                execution_price = slice_price * (to_decimal("1") - impact)
 
             total_filled += slice_size
             total_cost += slice_size * execution_price
@@ -429,21 +415,19 @@ class TradeSimulator:
     ) -> dict[str, Any]:
         """Simulate VWAP execution based on volume profile."""
         # For simplicity, simulate with volume-based execution
-        base_price = safe_decimal(market_data["close"])
-        volume = safe_decimal(market_data["volume"])
+        base_price = to_decimal(market_data["close"])
+        volume = to_decimal(market_data["volume"])
 
         # Calculate execution price based on VWAP
         # In real VWAP, we'd use volume profile, but here we simulate
-        vwap_price = (
-            safe_decimal(market_data["high"]) + safe_decimal(market_data["low"]) + base_price
-        ) / safe_decimal("3")
+        vwap_price = (to_decimal(market_data["high"]) + to_decimal(market_data["low"]) + base_price) / to_decimal("3")
 
         # Apply market impact
-        impact = self._calculate_market_impact(order.request.quantity, float(volume))
+        impact = self._calculate_market_impact(order.request.quantity, volume)
         if order.request.side == OrderSide.BUY:
-            execution_price = vwap_price * (safe_decimal("1") + impact)
+            execution_price = vwap_price * (to_decimal("1") + impact)
         else:
-            execution_price = vwap_price * (safe_decimal("1") - impact)
+            execution_price = vwap_price * (to_decimal("1") - impact)
 
         return {
             "order_id": order.order_id,
@@ -468,7 +452,7 @@ class TradeSimulator:
         visible_percentage = params.get("visible_percentage", 0.1)  # 10% visible by default
 
         # Calculate visible and hidden quantities
-        visible_qty = order.request.quantity * safe_decimal(visible_percentage)
+        visible_qty = order.request.quantity * to_decimal(visible_percentage)
         hidden_qty = order.request.quantity - visible_qty
 
         # Execute visible portion first
@@ -504,17 +488,11 @@ class TradeSimulator:
         )
 
         # Combine results
-        total_filled = safe_decimal(visible_result["filled_size"]) + safe_decimal(
-            hidden_result["filled_size"]
-        )
-        total_cost = safe_decimal(visible_result["filled_size"]) * safe_decimal(
+        total_filled = to_decimal(visible_result["filled_size"]) + to_decimal(hidden_result["filled_size"])
+        total_cost = to_decimal(visible_result["filled_size"]) * to_decimal(
             visible_result["average_price"]
-        ) + safe_decimal(hidden_result["filled_size"]) * safe_decimal(
-            hidden_result["average_price"]
-        )
-        average_price = (
-            total_cost / total_filled if total_filled > 0 else safe_decimal(market_data["close"])
-        )
+        ) + to_decimal(hidden_result["filled_size"]) * to_decimal(hidden_result["average_price"])
+        average_price = total_cost / total_filled if total_filled > 0 else to_decimal(market_data["close"])
 
         return {
             "order_id": order.order_id,
@@ -529,13 +507,10 @@ class TradeSimulator:
             "visible_size": float(visible_qty),
             "hidden_size": float(hidden_qty),
             "timestamp": datetime.now(timezone.utc),
-            "slippage": float(
-                abs(average_price - safe_decimal(market_data["close"]))
-                / safe_decimal(market_data["close"])
-            ),
+            "slippage": float(abs(average_price - to_decimal(market_data["close"])) / to_decimal(market_data["close"])),
         }
 
-    def _calculate_market_impact(self, order_size: Decimal, volume: float) -> Decimal:
+    def _calculate_market_impact(self, order_size: Decimal, volume: Decimal) -> Decimal:
         """Calculate market impact based on order size."""
         if self.slippage_model:
             # Use sophisticated slippage model from execution module
@@ -545,11 +520,11 @@ class TradeSimulator:
             mock_market_data = CoreMarketData(
                 symbol="",  # Not needed for impact calculation
                 timestamp=datetime.now(timezone.utc),
-                close=safe_decimal("1"),  # Normalized
-                volume=safe_decimal(volume),
-                high=safe_decimal("1.01"),
-                low=safe_decimal("0.99"),
-                open=safe_decimal("1"),
+                close=to_decimal("1"),  # Normalized
+                volume=to_decimal(volume),
+                high=to_decimal("1.01"),
+                low=to_decimal("0.99"),
+                open=to_decimal("1"),
                 exchange="mock",
             )
 
@@ -560,28 +535,26 @@ class TradeSimulator:
                     market_data=mock_market_data,
                     order_side=OrderSide.BUY,  # Doesn't matter for impact
                 )
-                return slippage_result.market_impact_pct / safe_decimal("100")
+                return slippage_result.market_impact_pct / to_decimal("100")
             else:
                 # Model doesn't have expected interface, fall back
                 logger.warning("Slippage model doesn't have calculate_slippage method")
-                return safe_decimal(self.config.market_impact_factor)
+                return self.config.market_impact_factor
         else:
             # Fallback to simple square-root model
-            if volume == 0:
-                return safe_decimal(self.config.market_impact_factor) * safe_decimal(
-                    "10"
-                )  # High impact
+            if volume == to_decimal("0"):
+                return self.config.market_impact_factor * to_decimal("10")  # High impact
 
             # Square-root market impact model: impact = k * sqrt(order_size / volume)
-            relative_size = order_size / safe_decimal(volume)
+            relative_size = order_size / volume
             # Use square root for more realistic impact
             import math
 
-            sqrt_relative_size = safe_decimal(math.sqrt(float(relative_size)))
-            impact = safe_decimal(self.config.market_impact_factor) * sqrt_relative_size
+            sqrt_relative_size = to_decimal(str(math.sqrt(float(relative_size))))
+            impact = self.config.market_impact_factor * sqrt_relative_size
 
             # Cap maximum impact
-            return min(impact, safe_decimal("0.05"))  # Max 5% impact
+            return min(impact, to_decimal("0.05"))  # Max 5% impact
 
     async def check_pending_orders(self, market_data: dict[str, pd.Series]) -> list[dict[str, Any]]:
         """
@@ -599,13 +572,9 @@ class TradeSimulator:
             if order.request.symbol in market_data:
                 # Re-check order conditions
                 if order.request.order_type == OrderType.LIMIT:
-                    result = await self._execute_limit_order(
-                        order, market_data[order.request.symbol]
-                    )
+                    result = await self._execute_limit_order(order, market_data[order.request.symbol])
                 else:
-                    result = await self._execute_stop_order(
-                        order, market_data[order.request.symbol]
-                    )
+                    result = await self._execute_stop_order(order, market_data[order.request.symbol])
 
                 # Remove from pending if executed
                 if result["status"] in ["filled", "partial", "rejected"]:
@@ -624,23 +593,23 @@ class TradeSimulator:
         Returns:
             Dictionary with cost breakdown
         """
-        total_slippage = safe_decimal("0")
-        total_impact = safe_decimal("0")
-        total_volume = safe_decimal("0")
+        total_slippage = to_decimal("0")
+        total_impact = to_decimal("0")
+        total_volume = to_decimal("0")
 
         for trade in trades:
             if trade.get("status") in ["filled", "partial"]:
-                filled_size = safe_decimal(trade.get("filled_size", 0))
-                slippage = safe_decimal(trade.get("slippage", 0))
+                filled_size = to_decimal(trade.get("filled_size", 0))
+                slippage = to_decimal(trade.get("slippage", 0))
 
                 total_volume += filled_size
                 total_slippage += slippage * filled_size
 
                 # Estimate market impact from slippage
                 if self.config.enable_market_impact:
-                    total_impact += slippage * filled_size * safe_decimal("0.5")  # Rough estimate
+                    total_impact += slippage * filled_size * to_decimal("0.5")  # Rough estimate
 
-        avg_slippage = total_slippage / total_volume if total_volume > 0 else safe_decimal("0")
+        avg_slippage = total_slippage / total_volume if total_volume > 0 else to_decimal("0")
 
         return {
             "total_volume": total_volume,
@@ -699,49 +668,136 @@ class TradeSimulator:
         start_date: datetime,
         end_date: datetime,
     ) -> dict[str, Any]:
-        """Run complete backtest simulation."""
-        from src.backtesting.engine import BacktestConfig, BacktestEngine
+        """Run complete backtest simulation using internal simulation logic."""
         from src.strategies.interfaces import BaseStrategyInterface
 
         # Validate strategy type
         if not isinstance(strategy, BaseStrategyInterface):
             raise TypeError(f"Expected BaseStrategyInterface, got {type(strategy).__name__}")
 
-        # Convert SimulationConfig to BacktestConfig for engine
-        backtest_config = BacktestConfig(
-            start_date=start_date,
-            end_date=end_date,
-            initial_capital=safe_decimal(config.initial_capital),
-            symbols=list(market_data.keys()),
-            commission=safe_decimal(config.commission_rate),
-            slippage=safe_decimal(config.slippage_rate),
-            enable_shorting=config.enable_shorting,
-            max_open_positions=config.max_positions,
-        )
+        # Initialize simulation state
+        capital = to_decimal(config.initial_capital)
+        positions: dict[str, dict[str, Any]] = {}
+        trades: list[dict[str, Any]] = []
+        equity_curve: list[dict[str, Any]] = []
 
-        # Create and run backtest engine
-        engine = BacktestEngine(
-            config=backtest_config,
-            strategy=strategy,
-            risk_manager=risk_manager,
-            data_service=None,  # Engine will use provided market data
-        )
+        # Get all timestamps from market data
+        all_timestamps = set()
+        for data in market_data.values():
+            all_timestamps.update(data.index)
+        timestamps = sorted(all_timestamps)
 
-        # Override market data
-        engine._market_data = market_data
+        # Initialize strategy if it has initialization method
+        if hasattr(strategy, "start") and callable(strategy.start):
+            try:
+                await strategy.start()
+            except Exception as e:
+                logger.warning(f"Strategy start() failed: {e}")
 
-        # Initialize strategy
-        await engine._initialize_strategy()
+        # Run simulation loop
+        for timestamp in timestamps:
+            # Get current market data for all symbols
+            current_data = {}
+            for symbol, data in market_data.items():
+                if timestamp in data.index:
+                    current_data[symbol] = data.loc[timestamp]
 
-        # Run simulation
-        await engine._run_simulation()
+            if not current_data:
+                continue
+
+            # Generate signals for all symbols
+            all_signals = {}
+            for symbol, data_row in current_data.items():
+                try:
+                    # Create market data object for strategy
+                    from src.core.types import MarketData as CoreMarketData
+
+                    # Ensure timestamp has timezone using shared utility
+                    current_time_with_tz = ensure_utc_timezone(timestamp)
+
+                    market_data_obj = CoreMarketData(
+                        symbol=symbol,
+                        timestamp=current_time_with_tz,
+                        close=to_decimal(data_row["close"]),
+                        volume=to_decimal(data_row["volume"]),
+                        high=to_decimal(data_row["high"]),
+                        low=to_decimal(data_row["low"]),
+                        open=to_decimal(data_row["open"]),
+                        exchange="backtest",
+                    )
+
+                    # Generate signals
+                    signals = await strategy.generate_signals(market_data_obj)
+                    if signals:
+                        all_signals[symbol] = signals[0]
+                except Exception as e:
+                    logger.error(f"Signal generation failed for {symbol}: {e}")
+
+            # Execute trades based on signals
+            for symbol, signal in all_signals.items():
+                if symbol not in current_data:
+                    continue
+
+                price = float(current_data[symbol]["close"])
+
+                # Simple execution logic
+                if signal.direction.name == "BUY":
+                    if len(positions) < config.max_positions:
+                        # Open new position
+                        position_size = capital / to_decimal(config.max_positions)
+                        execution_price = to_decimal(price) * (to_decimal("1") + config.slippage_rate)
+
+                        positions[symbol] = {
+                            "entry_time": timestamp,
+                            "entry_price": float(execution_price),
+                            "size": float(position_size),
+                            "side": "BUY",
+                        }
+                        capital -= position_size
+
+                elif signal.direction.name == "SELL" and symbol in positions:
+                    # Close position
+                    position = positions[symbol]
+                    execution_price = to_decimal(price) * (to_decimal("1") - config.slippage_rate)
+                    pnl = (execution_price - to_decimal(position["entry_price"])) * to_decimal(position["size"])
+
+                    # Apply commission
+                    commission = to_decimal(position["size"]) * config.commission_rate
+                    pnl_after_commission = pnl - commission
+
+                    # Record trade
+                    trades.append(
+                        {
+                            "symbol": symbol,
+                            "entry_time": position["entry_time"],
+                            "exit_time": timestamp,
+                            "entry_price": position["entry_price"],
+                            "exit_price": execution_price,
+                            "size": position["size"],
+                            "pnl": pnl_after_commission,
+                            "side": position["side"],
+                        }
+                    )
+
+                    capital += to_decimal(position["size"]) + to_decimal(pnl_after_commission)
+                    del positions[symbol]
+
+            # Record equity
+            total_equity = float(capital)
+            for symbol, position in positions.items():
+                if symbol in current_data:
+                    current_price = float(current_data[symbol]["close"])
+                    unrealized_pnl = (current_price - position["entry_price"]) * position["size"]
+                    total_equity += unrealized_pnl
+
+            equity_curve.append({"timestamp": timestamp, "equity": total_equity})
 
         # Return results in expected format
         return {
-            "equity_curve": engine._equity_curve,
-            "trades": engine._trades,
-            "daily_returns": self._calculate_daily_returns(engine._equity_curve),
-            "positions": engine._positions,
+            "equity_curve": equity_curve,
+            "trades": trades,
+            "daily_returns": self._calculate_daily_returns(equity_curve),
+            "positions": positions,
             "execution_stats": self.get_execution_statistics(),
         }
 

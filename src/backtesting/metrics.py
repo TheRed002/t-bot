@@ -12,8 +12,13 @@ import pandas as pd
 from scipy import stats
 
 from src.core.base.component import BaseComponent
-from src.utils.decimal_utils import safe_decimal
+from src.utils.decimal_utils import to_decimal
 from src.utils.decorators import time_execution
+from src.utils.financial_constants import (
+    DEFAULT_RISK_FREE_RATE,
+    TRADING_DAYS_PER_YEAR,
+    VAR_PERCENTILE,
+)
 
 
 class BacktestMetrics(BaseComponent):
@@ -48,12 +53,7 @@ class MetricsCalculator:
     - Risk metrics (VaR, CVaR)
     """
 
-    # Constants
-    TRADING_DAYS_PER_YEAR = 252
-    DEFAULT_RISK_FREE_RATE = 0.02
-    BOOTSTRAP_SAMPLES = 1000
-    CONFIDENCE_LEVEL = 0.95
-    VAR_PERCENTILE = 5  # For 95% VaR
+    # Use constants from shared financial constants module
 
     def __init__(self, risk_free_rate: float | None = None) -> None:
         """
@@ -62,9 +62,7 @@ class MetricsCalculator:
         Args:
             risk_free_rate: Annual risk-free rate for Sharpe ratio calculation
         """
-        self.risk_free_rate = (
-            risk_free_rate if risk_free_rate is not None else self.DEFAULT_RISK_FREE_RATE
-        )
+        self.risk_free_rate = risk_free_rate if risk_free_rate is not None else DEFAULT_RISK_FREE_RATE
         from src.core.logging import get_logger
 
         self.logger = get_logger(__name__)
@@ -115,9 +113,7 @@ class MetricsCalculator:
         self.logger.info("Metrics calculated", num_metrics=len(metrics))
         return metrics
 
-    def _calculate_return_metrics(
-        self, equity_curve: list[dict[str, Any]], initial_capital: float
-    ) -> dict[str, Any]:
+    def _calculate_return_metrics(self, equity_curve: list[dict[str, Any]], initial_capital: float) -> dict[str, Any]:
         """Calculate return-based metrics."""
         if not equity_curve:
             return {}
@@ -137,9 +133,9 @@ class MetricsCalculator:
             annual_return = 0
 
         return {
-            "total_return": safe_decimal(total_return * 100),
-            "annual_return": safe_decimal(annual_return * 100),
-            "final_equity": safe_decimal(final_equity),
+            "total_return": to_decimal(total_return * 100),
+            "annual_return": to_decimal(annual_return * 100),
+            "final_equity": to_decimal(final_equity),
         }
 
     def _calculate_risk_adjusted_metrics(self, daily_returns: list[float]) -> dict[str, Any]:
@@ -156,13 +152,13 @@ class MetricsCalculator:
             return {}
 
         # Annualize metrics
-        annual_factor = np.sqrt(self.TRADING_DAYS_PER_YEAR)  # Trading days per year
+        annual_factor = np.sqrt(TRADING_DAYS_PER_YEAR)  # Trading days per year
 
         # Calculate volatility
         volatility = np.std(returns_array) * annual_factor
 
         # Sharpe Ratio
-        mean_return = np.mean(returns_array) * self.TRADING_DAYS_PER_YEAR
+        mean_return = np.mean(returns_array) * TRADING_DAYS_PER_YEAR
         excess_return = mean_return - self.risk_free_rate
         sharpe_ratio = excess_return / volatility if volatility > 0 else 0
 
@@ -221,20 +217,16 @@ class MetricsCalculator:
 
         # Recovery factor (total return / max drawdown)
         if len(equity_curve) > 1:
-            total_return = (equity_curve[-1]["equity"] - equity_curve[0]["equity"]) / equity_curve[
-                0
-            ]["equity"]
+            total_return = (equity_curve[-1]["equity"] - equity_curve[0]["equity"]) / equity_curve[0]["equity"]
             recovery_factor = total_return / max_drawdown if max_drawdown > 0 else 0
         else:
             recovery_factor = 0
 
         return {
-            "max_drawdown": safe_decimal(max_drawdown * 100),
+            "max_drawdown": to_decimal(max_drawdown * 100),
             "max_drawdown_duration_days": max_duration,
             "recovery_factor": float(recovery_factor),
-            "current_drawdown": safe_decimal(
-                abs(drawdown.iloc[-1] * 100) if not drawdown.empty else 0
-            ),
+            "current_drawdown": to_decimal(abs(drawdown.iloc[-1] * 100) if not drawdown.empty else 0),
         }
 
     def _calculate_trade_statistics(self, trades: list[dict[str, Any]]) -> dict[str, Any]:
@@ -291,24 +283,18 @@ class MetricsCalculator:
 
         return {
             "win_rate": float(win_rate * 100),
-            "avg_win": safe_decimal(avg_win),
-            "avg_loss": safe_decimal(avg_loss),
+            "avg_win": to_decimal(avg_win),
+            "avg_loss": to_decimal(avg_loss),
             "profit_factor": float(profit_factor) if profit_factor != float("inf") else 999.99,
             "payoff_ratio": float(payoff_ratio) if payoff_ratio != float("inf") else 999.99,
             "avg_trade_duration_hours": float(avg_duration),
             "max_consecutive_wins": max_consecutive_wins,
             "max_consecutive_losses": max_consecutive_losses,
-            "largest_win": (
-                safe_decimal(max([t["pnl"] for t in trades])) if trades else safe_decimal("0")
-            ),
-            "largest_loss": (
-                safe_decimal(abs(min([t["pnl"] for t in trades]))) if trades else safe_decimal("0")
-            ),
+            "largest_win": (to_decimal(max([t["pnl"] for t in trades])) if trades else to_decimal("0")),
+            "largest_loss": (to_decimal(abs(min([t["pnl"] for t in trades]))) if trades else to_decimal("0")),
         }
 
-    def _calculate_risk_metrics(
-        self, daily_returns: list[float], initial_capital: float
-    ) -> dict[str, Any]:
+    def _calculate_risk_metrics(self, daily_returns: list[float], initial_capital: float) -> dict[str, Any]:
         """Calculate risk metrics (VaR, CVaR, etc.)."""
         if not daily_returns:
             return {}
@@ -322,10 +308,10 @@ class MetricsCalculator:
             return {}
 
         # Value at Risk (95% confidence)
-        var_95 = np.percentile(returns_array, 5) * initial_capital
+        var_95 = np.percentile(returns_array, VAR_PERCENTILE) * initial_capital
 
         # Conditional Value at Risk (Expected Shortfall)
-        threshold = np.percentile(returns_array, 5)
+        threshold = np.percentile(returns_array, VAR_PERCENTILE)
         cvar_95 = np.mean(returns_array[returns_array <= threshold]) * initial_capital
 
         # Maximum daily loss
@@ -346,9 +332,9 @@ class MetricsCalculator:
             omega_ratio = float("inf") if len(gains) > 0 else 0
 
         return {
-            "var_95": safe_decimal(abs(var_95)),
-            "cvar_95": safe_decimal(abs(cvar_95)),
-            "max_daily_loss": safe_decimal(abs(max_daily_loss)),
+            "var_95": to_decimal(abs(var_95)),
+            "cvar_95": to_decimal(abs(cvar_95)),
+            "max_daily_loss": to_decimal(abs(max_daily_loss)),
             "skewness": float(skewness),
             "kurtosis": float(kurtosis),
             "omega_ratio": float(omega_ratio) if omega_ratio != float("inf") else 999.99,
@@ -382,9 +368,7 @@ class MetricsCalculator:
         # Rolling metrics
         df["rolling_return"] = df["returns"].rolling(window).mean() * 252
         df["rolling_volatility"] = df["returns"].rolling(window).std() * np.sqrt(252)
-        df["rolling_sharpe"] = (df["rolling_return"] - self.risk_free_rate) / df[
-            "rolling_volatility"
-        ]
+        df["rolling_sharpe"] = (df["rolling_return"] - self.risk_free_rate) / df["rolling_volatility"]
 
         # Rolling drawdown
         rolling_max = df["equity"].rolling(window, min_periods=1).max()

@@ -19,19 +19,21 @@ import json
 import uuid
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pandas as pd
 import redis.asyncio as redis
 from pydantic import BaseModel, Field, field_validator
 
-from src.backtesting.analysis import MonteCarloAnalyzer, WalkForwardAnalyzer
-from src.backtesting.attribution import PerformanceAttributor
-from src.backtesting.data_replay import DataReplayManager
-from src.backtesting.engine import BacktestResult
-from src.backtesting.metrics import MetricsCalculator
-from src.backtesting.simulator import TradeSimulator
 from src.backtesting.utils import convert_market_records_to_dataframe
+
+if TYPE_CHECKING:
+    from src.backtesting.analysis import MonteCarloAnalyzer, WalkForwardAnalyzer
+    from src.backtesting.attribution import PerformanceAttributor
+    from src.backtesting.data_replay import DataReplayManager
+    from src.backtesting.engine import BacktestResult
+    from src.backtesting.metrics import MetricsCalculator
+    from src.backtesting.simulator import TradeSimulator
 from src.core.base.component import BaseComponent
 from src.core.base.interfaces import HealthCheckResult, HealthStatus
 from src.core.config import Config
@@ -42,7 +44,8 @@ from src.error_handling.decorators import (
     with_error_context,
     with_retry,
 )
-from src.utils.decimal_utils import safe_decimal
+from src.utils.config_conversion import convert_config_to_dict
+from src.utils.decimal_utils import to_decimal
 from src.utils.decorators import time_execution
 from src.utils.validators import ValidationFramework
 
@@ -56,27 +59,20 @@ class BacktestRequest(BaseModel):
     start_date: datetime = Field(..., description="Backtest start date")
     end_date: datetime = Field(..., description="Backtest end date")
     initial_capital: Decimal = Field(
-        default_factory=lambda: safe_decimal("10000"),
-        ge=safe_decimal("100"),
+        default_factory=lambda: to_decimal("10000"),
         description="Initial capital",
     )
     timeframe: str = Field(default="1h", description="Data timeframe")
 
     # Trading parameters
-    commission_rate: Decimal = Field(
-        default_factory=lambda: safe_decimal("0.001"), description="Commission rate"
-    )
-    slippage_rate: Decimal = Field(
-        default_factory=lambda: safe_decimal("0.0005"), description="Slippage rate"
-    )
+    commission_rate: Decimal = Field(default_factory=lambda: to_decimal("0.001"), description="Commission rate")
+    slippage_rate: Decimal = Field(default_factory=lambda: to_decimal("0.0005"), description="Slippage rate")
     enable_shorting: bool = Field(default=False, description="Enable short selling")
     max_open_positions: int = Field(default=5, ge=1, le=20, description="Max open positions")
 
     # Risk management
     risk_config: dict[str, Any] = Field(default_factory=dict, description="Risk management config")
-    position_sizing_method: str = Field(
-        default="equal_weight", description="Position sizing method"
-    )
+    position_sizing_method: str = Field(default="equal_weight", description="Position sizing method")
 
     # Analysis options
     enable_monte_carlo: bool = Field(default=True, description="Enable Monte Carlo analysis")
@@ -111,7 +107,7 @@ class BacktestCacheEntry(BaseModel):
     """Cache entry for backtest results."""
 
     request_hash: str = Field(..., description="Request hash for cache key")
-    result: BacktestResult = Field(..., description="Backtest result")
+    result: Any = Field(..., description="Backtest result")  # Use Any to avoid circular dependency
     metadata: dict[str, Any] = Field(default_factory=dict, description="Cache metadata")
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     ttl_hours: int = Field(default=24, description="TTL in hours")
@@ -136,22 +132,12 @@ class BacktestService(BaseComponent):
 
     def __init__(self, config: Config, **services):
         """Initialize BacktestService with dependency injection."""
-        # Convert config to dict if needed
-        config_dict = None
-        if config:
-            if hasattr(config, "model_dump"):
-                config_dict = config.model_dump()
-            elif hasattr(config, "dict"):
-                config_dict = config.dict()
-            elif isinstance(config, dict):
-                config_dict = config
-            else:
-                config_dict = {}
-
+        # Convert config to dict using shared utility
+        config_dict = convert_config_to_dict(config)
         super().__init__(name="BacktestService", config=config_dict)
         self.config = config
 
-        # Service dependencies (injected)
+        # Service dependencies (injected) - use interfaces to decouple from concrete implementations
         self.data_service = services.get("DataService")
         self.execution_service = services.get("ExecutionService")
         self.risk_service = services.get("RiskService")
@@ -159,18 +145,32 @@ class BacktestService(BaseComponent):
         self.capital_service = services.get("CapitalService")
         self.ml_service = services.get("MLService")
 
-        # Validate critical service dependencies
-        if self.data_service and not hasattr(self.data_service, "get_market_data"):
-            self.logger.warning("DataService instance missing get_market_data method")
-            self.data_service = None
+        # Log service availability
+        available_services = [
+            name
+            for name, service in [
+                ("DataService", self.data_service),
+                ("ExecutionService", self.execution_service),
+                ("RiskService", self.risk_service),
+                ("StrategyService", self.strategy_service),
+                ("CapitalService", self.capital_service),
+                ("MLService", self.ml_service),
+            ]
+            if service is not None
+        ]
 
-        # Backtesting components
-        self.metrics_calculator = MetricsCalculator()
+        self.logger.info("BacktestService initialized with services", available_services=available_services)
+
+        # Backtesting components - will be injected during initialization
+        self.metrics_calculator: MetricsCalculator | None = None
         self.monte_carlo_analyzer: MonteCarloAnalyzer | None = None
         self.walk_forward_analyzer: WalkForwardAnalyzer | None = None
         self.performance_attributor: PerformanceAttributor | None = None
         self.data_replay_manager: DataReplayManager | None = None
         self.trade_simulator: TradeSimulator | None = None
+
+        # Injector for creating components
+        self._injector = services.get("injector")
 
         # Caching
         self._redis_client: redis.Redis | None = None
@@ -249,22 +249,23 @@ class BacktestService(BaseComponent):
         self.logger.info("Service dependencies initialized")
 
     async def _initialize_backtesting_components(self) -> None:
-        """Initialize backtesting-specific components."""
-        # Initialize analyzers
-        self.monte_carlo_analyzer = MonteCarloAnalyzer(self.config)
-        self.walk_forward_analyzer = WalkForwardAnalyzer(self.config)
-        self.performance_attributor = PerformanceAttributor(self.config)
+        """Initialize backtesting-specific components using dependency injection."""
+        if not self._injector:
+            raise ServiceError("Dependency injector not available - cannot initialize backtesting components")
 
-        # Initialize data replay and simulation
-        self.data_replay_manager = DataReplayManager(self.config)
+        try:
+            # Use dependency injection to create components
+            self.metrics_calculator = self._injector.resolve("MetricsCalculator")
+            self.monte_carlo_analyzer = self._injector.resolve("MonteCarloAnalyzer")
+            self.walk_forward_analyzer = self._injector.resolve("WalkForwardAnalyzer")
+            self.performance_attributor = self._injector.resolve("PerformanceAttributor")
+            self.data_replay_manager = self._injector.resolve("DataReplayManager")
+            self.trade_simulator = self._injector.resolve("TradeSimulator")
 
-        # Create SimulationConfig from Config for TradeSimulator
-        from src.backtesting.simulator import SimulationConfig
-
-        sim_config = SimulationConfig()  # Use defaults, can be enhanced later
-        self.trade_simulator = TradeSimulator(sim_config)
-
-        self.logger.info("Backtesting components initialized")
+            self.logger.info("Backtesting components initialized via dependency injection")
+        except Exception as e:
+            self.logger.error(f"Failed to initialize backtesting components: {e}")
+            raise ServiceError(f"Component initialization failed: {e}") from e
 
     async def _initialize_caching(self) -> None:
         """Initialize Redis caching for results."""
@@ -291,8 +292,10 @@ class BacktestService(BaseComponent):
             if redis_client:
                 try:
                     await redis_client.close()
-                except Exception as e:
-                    self.logger.warning(f"Failed to close Redis connection during init: {e}")
+                except Exception as redis_close_error:
+                    self.logger.warning(f"Failed to close Redis connection during init: {redis_close_error}")
+                finally:
+                    redis_client = None
             self._redis_client = None
             self._cache_available = False
 
@@ -300,7 +303,7 @@ class BacktestService(BaseComponent):
     @with_error_context(component="backtesting", operation="service_run_backtest")
     @with_circuit_breaker(failure_threshold=3, recovery_timeout=60)
     @with_retry(max_attempts=3)
-    async def run_backtest(self, request: BacktestRequest) -> BacktestResult:
+    async def run_backtest(self, request: BacktestRequest) -> "BacktestResult":
         """
         Run comprehensive backtest with all service integrations.
 
@@ -345,9 +348,7 @@ class BacktestService(BaseComponent):
         self.logger.info(f"Backtest {backtest_id} completed successfully")
         return result
 
-    async def _execute_backtest_pipeline(
-        self, backtest_id: str, request: BacktestRequest
-    ) -> BacktestResult:
+    async def _execute_backtest_pipeline(self, backtest_id: str, request: BacktestRequest) -> "BacktestResult":
         """Execute the complete backtest pipeline."""
         # Stage 1: Data preparation
         await self._update_backtest_stage(backtest_id, "data_preparation", 10)
@@ -363,15 +364,11 @@ class BacktestService(BaseComponent):
 
         # Stage 4: Core simulation
         await self._update_backtest_stage(backtest_id, "simulation", 40)
-        simulation_result = await self._run_core_simulation(
-            request, strategy, risk_manager, market_data
-        )
+        simulation_result = await self._run_core_simulation(request, strategy, risk_manager, market_data)
 
         # Stage 5: Advanced analysis
         await self._update_backtest_stage(backtest_id, "advanced_analysis", 70)
-        advanced_metrics = await self._run_advanced_analysis(
-            request, simulation_result, market_data
-        )
+        advanced_metrics = await self._run_advanced_analysis(request, simulation_result, market_data)
 
         # Stage 6: Results consolidation
         await self._update_backtest_stage(backtest_id, "results_consolidation", 90)
@@ -394,7 +391,7 @@ class BacktestService(BaseComponent):
                 exchange=request.exchange,
                 start_time=request.start_date,
                 end_time=request.end_date,
-                limit=None,
+                limit=10000,  # Large limit for historical data
                 cache_ttl=3600,
                 use_cache=True,
             )
@@ -410,7 +407,7 @@ class BacktestService(BaseComponent):
                 df = convert_market_records_to_dataframe(records)
                 market_data[symbol] = df
 
-                self.logger.debug(f"Prepared {len(df)} data points for {symbol}")
+                self.logger.info("Market data prepared", symbol=symbol, data_points=len(df))
             else:
                 self.logger.warning(f"No data available for {symbol}")
 
@@ -434,9 +431,7 @@ class BacktestService(BaseComponent):
 
         # Validate created strategy
         if not strategy:
-            raise BacktestError(
-                f"Failed to create strategy of type: {strategy_config.get('strategy_type')}"
-            )
+            raise BacktestError(f"Failed to create strategy of type: {strategy_config.get('strategy_type')}")
 
         if not isinstance(strategy, BaseStrategyInterface):
             raise BacktestError(f"Invalid strategy type returned: {type(strategy).__name__}")
@@ -444,7 +439,7 @@ class BacktestService(BaseComponent):
         return strategy
 
     async def _setup_risk_management(self, risk_config: dict[str, Any]) -> Any:
-        """Setup risk management using RiskManagementService."""
+        """Setup risk management using RiskService."""
         if self.risk_service is None:
             return None  # Risk management is optional
         return await self.risk_service.create_risk_manager(risk_config)
@@ -460,9 +455,9 @@ class BacktestService(BaseComponent):
         from src.backtesting.simulator import SimulationConfig
 
         sim_config = SimulationConfig(
-            initial_capital=float(request.initial_capital),
-            commission_rate=float(request.commission_rate),
-            slippage_rate=float(request.slippage_rate),
+            initial_capital=request.initial_capital,
+            commission_rate=request.commission_rate,
+            slippage_rate=request.slippage_rate,
             enable_shorting=request.enable_shorting,
             max_positions=request.max_open_positions,
         )
@@ -517,9 +512,7 @@ class BacktestService(BaseComponent):
         # Performance attribution
         if self.performance_attributor:
             try:
-                attribution = await self.performance_attributor.analyze(
-                    simulation_result, market_data
-                )
+                attribution = await self.performance_attributor.analyze(simulation_result, market_data)
                 advanced_metrics["attribution"] = attribution
             except Exception as e:
                 self.logger.error(f"Performance attribution failed: {e}")
@@ -532,21 +525,38 @@ class BacktestService(BaseComponent):
         simulation_result: dict[str, Any],
         advanced_metrics: dict[str, Any],
         request: BacktestRequest,
-    ) -> BacktestResult:
+    ) -> "BacktestResult":
         """Consolidate all results into final BacktestResult."""
         # Calculate comprehensive metrics
         equity_curve = simulation_result.get("equity_curve", [])
         trades = simulation_result.get("trades", [])
         daily_returns = simulation_result.get("daily_returns", [])
-        initial_capital = float(request.initial_capital)
+        initial_capital = request.initial_capital
 
         # Base metrics from MetricsCalculator
-        base_metrics = self.metrics_calculator.calculate_all(
-            equity_curve=equity_curve,
-            trades=trades,
-            daily_returns=daily_returns,
-            initial_capital=initial_capital,
-        )
+        if self.metrics_calculator:
+            base_metrics = self.metrics_calculator.calculate_all(
+                equity_curve=equity_curve,
+                trades=trades,
+                daily_returns=daily_returns,
+                initial_capital=float(initial_capital),
+            )
+        else:
+            # Fallback basic metrics
+            base_metrics = {
+                "total_return": to_decimal("0"),
+                "annual_return": to_decimal("0"),
+                "sharpe_ratio": 0.0,
+                "sortino_ratio": 0.0,
+                "max_drawdown": to_decimal("0"),
+                "win_rate": 0.0,
+                "avg_win": to_decimal("0"),
+                "avg_loss": to_decimal("0"),
+                "profit_factor": 0.0,
+                "volatility": 0.0,
+                "var_95": to_decimal("0"),
+                "cvar_95": to_decimal("0"),
+            }
 
         # Combine with advanced metrics
         all_metrics = {**base_metrics, **advanced_metrics}
@@ -555,22 +565,24 @@ class BacktestService(BaseComponent):
         winning_trades = [t for t in trades if t.get("pnl", 0) > 0]
         losing_trades = [t for t in trades if t.get("pnl", 0) <= 0]
 
+        from src.backtesting.engine import BacktestResult
+
         return BacktestResult(
-            total_return=all_metrics.get("total_return", safe_decimal("0")),
-            annual_return=all_metrics.get("annual_return", safe_decimal("0")),
+            total_return=all_metrics.get("total_return", to_decimal("0")),
+            annual_return=all_metrics.get("annual_return", to_decimal("0")),
             sharpe_ratio=all_metrics.get("sharpe_ratio", 0.0),
             sortino_ratio=all_metrics.get("sortino_ratio", 0.0),
-            max_drawdown=all_metrics.get("max_drawdown", safe_decimal("0")),
+            max_drawdown=all_metrics.get("max_drawdown", to_decimal("0")),
             win_rate=all_metrics.get("win_rate", 0.0),
             total_trades=len(trades),
             winning_trades=len(winning_trades),
             losing_trades=len(losing_trades),
-            avg_win=all_metrics.get("avg_win", safe_decimal("0")),
-            avg_loss=all_metrics.get("avg_loss", safe_decimal("0")),
+            avg_win=all_metrics.get("avg_win", to_decimal("0")),
+            avg_loss=all_metrics.get("avg_loss", to_decimal("0")),
             profit_factor=all_metrics.get("profit_factor", 0.0),
             volatility=all_metrics.get("volatility", 0.0),
-            var_95=all_metrics.get("var_95", safe_decimal("0")),
-            cvar_95=all_metrics.get("cvar_95", safe_decimal("0")),
+            var_95=all_metrics.get("var_95", to_decimal("0")),
+            cvar_95=all_metrics.get("cvar_95", to_decimal("0")),
             equity_curve=equity_curve,
             trades=trades,
             daily_returns=daily_returns,
@@ -588,7 +600,7 @@ class BacktestService(BaseComponent):
         if backtest_id in self._active_backtests:
             self._active_backtests[backtest_id]["stage"] = stage
             self._active_backtests[backtest_id]["progress"] = progress
-            self.logger.debug(f"Backtest {backtest_id} stage: {stage} ({progress}%)")
+            self.logger.info("Backtest progress", backtest_id=backtest_id, stage=stage, progress=progress)
 
     def _generate_request_hash(self, request: BacktestRequest) -> str:
         """Generate hash for cache key from request."""
@@ -613,7 +625,7 @@ class BacktestService(BaseComponent):
         cache_string = json.dumps(cache_data, sort_keys=True, default=str)
         return hashlib.sha256(cache_string.encode()).hexdigest()
 
-    async def _get_cached_result(self, request: BacktestRequest) -> BacktestResult | None:
+    async def _get_cached_result(self, request: BacktestRequest) -> "BacktestResult | None":
         """Get cached backtest result if available."""
         request_hash = self._generate_request_hash(request)
 
@@ -648,7 +660,7 @@ class BacktestService(BaseComponent):
 
         return None
 
-    async def _cache_result(self, request: BacktestRequest, result: BacktestResult) -> None:
+    async def _cache_result(self, request: BacktestRequest, result: "BacktestResult") -> None:
         """Cache backtest result."""
         request_hash = self._generate_request_hash(request)
 
@@ -732,9 +744,7 @@ class BacktestService(BaseComponent):
         if self._redis_client:
             try:
                 redis_info = await self._redis_client.info("memory")
-                stats["redis_cache"]["memory_usage"] = redis_info.get(
-                    "used_memory_human", "unknown"
-                )
+                stats["redis_cache"]["memory_usage"] = redis_info.get("used_memory_human", "unknown")
 
                 # Count backtest result keys
                 keys = await self._redis_client.keys("backtest_result:*")
@@ -807,8 +817,8 @@ class BacktestService(BaseComponent):
             if self._redis_client:
                 try:
                     await self._redis_client.close()
-                except Exception as e:
-                    self.logger.warning(f"Failed to close Redis connection during cleanup: {e}")
+                except Exception as redis_close_error:
+                    self.logger.warning(f"Failed to close Redis connection during cleanup: {redis_close_error}")
                 finally:
                     self._redis_client = None
 
@@ -820,7 +830,7 @@ class BacktestService(BaseComponent):
                 self.trade_simulator.cleanup()
 
             if self.data_replay_manager and hasattr(self.data_replay_manager, "cleanup"):
-                self.data_replay_manager.cleanup()
+                await self.data_replay_manager.cleanup()
 
             # Cleanup service dependencies
             services_to_cleanup = [
@@ -836,11 +846,12 @@ class BacktestService(BaseComponent):
                 if service and hasattr(service, "cleanup"):
                     try:
                         await service.cleanup()
-                    except Exception as e:
-                        self.logger.warning(f"Service cleanup error: {e}")
+                    except Exception as service_cleanup_error:
+                        self.logger.warning(f"Service cleanup error: {service_cleanup_error}")
 
             self._initialized = False
             self.logger.info("BacktestService cleanup completed")
 
         except Exception as e:
             self.logger.error(f"BacktestService cleanup error: {e}")
+            # Don't re-raise cleanup errors to avoid masking original issues
