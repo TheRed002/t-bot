@@ -23,6 +23,8 @@ from decimal import Decimal
 # Use service protocols for time series and caching
 from typing import Any, Protocol
 
+# Import service interfaces
+from src.capital_management.interfaces import AbstractFundFlowManagementService
 from src.core.base.service import TransactionalService
 from src.core.exceptions import ServiceError, ValidationError
 
@@ -32,12 +34,19 @@ from src.core.types.capital import (
     ExtendedCapitalProtection as CapitalProtection,
     ExtendedWithdrawalRule as WithdrawalRule,
 )
+from src.utils.capital_config import (
+    load_capital_config,
+    resolve_config_service,
+    validate_config_values,
+)
+from src.utils.capital_resources import get_resource_manager
+from src.utils.capital_validation import (
+    validate_capital_amount,
+    validate_withdrawal_request,
+)
 from src.utils.decorators import time_execution
 from src.utils.formatters import format_currency
-from src.utils.validators import ValidationFramework
-
-# Import service interfaces
-from .interfaces import AbstractFundFlowManagementService
+from src.utils.interfaces import ValidationServiceInterface
 
 
 class TimeSeriesServiceProtocol(Protocol):
@@ -75,6 +84,7 @@ class FundFlowManager(AbstractFundFlowManagementService, TransactionalService):
         self,
         cache_service: CacheServiceProtocol | None = None,
         time_series_service: TimeSeriesServiceProtocol | None = None,
+        validation_service: ValidationServiceInterface | None = None,
         correlation_id: str | None = None,
     ) -> None:
         """
@@ -91,6 +101,7 @@ class FundFlowManager(AbstractFundFlowManagementService, TransactionalService):
         # Inject service dependencies
         self._cache_service = cache_service
         self._time_series_service = time_series_service
+        self.validation_service = validation_service
 
         # Configuration will be loaded in _do_start
         self.config: dict[str, Any] = {}
@@ -100,23 +111,21 @@ class FundFlowManager(AbstractFundFlowManagementService, TransactionalService):
         self.withdrawal_rules: dict[str, WithdrawalRule] = {}
         self.capital_protection: CapitalProtection | None = None  # Will be initialized in _do_start
 
+        # Resource management
+        self._max_flow_history = 1000  # Configurable via capital_config
+
         # Performance tracking
-        self.strategy_performance: dict[str, dict[str, float]] = {}
+        self.strategy_performance: dict[str, dict[str, Decimal]] = {}
         self.total_profit = Decimal("0")
         self.locked_profit = Decimal("0")
 
         # Capital management integration
-        self.capital_allocator = None  # Will be set by CapitalAllocator integration
-        # Total capital will be updated from actual account balances
+        self.capital_allocator = None
         self.total_capital = Decimal("0")
 
         # Auto-compounding tracking
         self.last_compound_date = datetime.now(timezone.utc)
         self.compound_schedule: dict[str, Any] = {}  # Will be initialized in _do_start
-
-        # Service dependencies - injected, not directly imported
-        self._cache_service: CacheServiceProtocol | None = None
-        self._time_series_service: TimeSeriesServiceProtocol | None = None
 
         # Cache keys
         self.cache_keys = {
@@ -125,8 +134,8 @@ class FundFlowManager(AbstractFundFlowManagementService, TransactionalService):
             "withdrawal_rules": "fund:withdrawal_rules",
         }
 
-        # Cache TTL (seconds)
-        self.cache_ttl = 300  # 5 minutes
+        # Cache TTL (seconds) - configurable via capital_config
+        self.cache_ttl = 300
 
     async def _do_start(self) -> None:
         """Start the fund flow manager service."""
@@ -153,13 +162,17 @@ class FundFlowManager(AbstractFundFlowManagementService, TransactionalService):
             # Initialize capital protection
             self._initialize_capital_protection()
 
-            # Initialize compound schedule
+            # Initialize compound schedule and load resource limits from config
             self.compound_schedule = self._calculate_compound_schedule()
+            self._max_flow_history = self.config.get("max_flow_history", 1000)
+            self.cache_ttl = self.config.get("cache_ttl_seconds", 300)
 
             self._logger.info(
                 "Fund flow manager service started",
                 auto_compound_enabled=self.config.get("auto_compound_enabled", True),
-                profit_threshold=format_currency(float(self.config.get("profit_threshold", 1000))),
+                profit_threshold=format_currency(
+                    Decimal(str(self.config.get("profit_threshold", 1000)))
+                ),
             )
         except Exception as e:
             self._logger.error(f"Failed to start FundFlowManager service: {e}")
@@ -167,13 +180,18 @@ class FundFlowManager(AbstractFundFlowManagementService, TransactionalService):
 
     async def _load_configuration(self) -> None:
         """Load configuration from ConfigService."""
+        resolved_config_service = resolve_config_service(self)
+        self.config = load_capital_config(resolved_config_service)
+        self.config = validate_config_values(self.config)
+
+    async def _do_stop(self) -> None:
+        """Stop the fund flow manager service and clean up resources."""
         try:
-            config_service = self.resolve_dependency("ConfigService")
-            self.config = config_service.get_config_value("capital_management", {})
+            await self.cleanup_resources()
+            self._logger.info("FundFlowManager service stopped and resources cleaned up")
         except Exception as e:
-            self._logger.warning(f"Failed to load configuration: {e}, using defaults")
-            # Use defaults
-            self._validate_config()
+            self._logger.error(f"Error during FundFlowManager shutdown: {e}")
+            raise ServiceError(f"FundFlowManager shutdown failed: {e}") from e
 
     def _initialize_capital_protection(self) -> None:
         """Initialize capital protection with current config."""
@@ -207,17 +225,25 @@ class FundFlowManager(AbstractFundFlowManagementService, TransactionalService):
         """Cache fund flows via cache service."""
         if not self._cache_service:
             return
+        cache_data = None
         try:
             # Convert FundFlow objects to dict for caching
-            cache_data = [flow.model_dump() for flow in flows]
+            cache_data = [
+                flow.model_dump() if hasattr(flow, "model_dump") else flow.__dict__
+                for flow in flows
+            ]
             await self._cache_service.set(self.cache_keys["fund_flows"], cache_data, self.cache_ttl)
         except Exception as e:
             self._logger.warning("Failed to cache fund flows", error=str(e))
+        finally:
+            cache_data = None
 
     async def _get_cached_fund_flows(self) -> list[FundFlow] | None:
         """Get cached fund flows via cache service."""
         if not self._cache_service:
             return None
+        cached_data = None
+        flows = None
         try:
             cached_data = await self._cache_service.get(self.cache_keys["fund_flows"])
             if cached_data:
@@ -226,6 +252,10 @@ class FundFlowManager(AbstractFundFlowManagementService, TransactionalService):
                 return flows
         except Exception as e:
             self._logger.warning("Failed to get cached fund flows", error=str(e))
+        finally:
+            cached_data = None
+            if flows and len(flows) == 0:
+                flows = None
         return None
 
     async def _store_fund_flow_time_series(self, flow: FundFlow) -> None:
@@ -266,14 +296,9 @@ class FundFlowManager(AbstractFundFlowManagementService, TransactionalService):
             FundFlow: Deposit flow record
         """
         try:
-            # Validate inputs
-            if not ValidationFramework.validate_quantity(float(amount)):
-                raise ValidationError(f"Invalid deposit amount: {amount}")
-
-            if amount < Decimal(str(self.config.get("min_deposit_amount", 100))):
-                raise ValidationError(
-                    f"Deposit amount {amount} below minimum {self.config.get('min_deposit_amount', 100)}"
-                )
+            # Validate inputs using utilities
+            min_deposit = Decimal(str(self.config.get("min_deposit_amount", 100)))
+            validate_capital_amount(amount, "deposit amount", min_deposit, "FundFlowManager")
 
             # Create fund flow record
             flow = FundFlow(
@@ -287,48 +312,37 @@ class FundFlowManager(AbstractFundFlowManagementService, TransactionalService):
                 timestamp=datetime.now(timezone.utc),
             )
 
-            # Add to flow history
+            # Add to flow history with size management
             self.fund_flows.append(flow)
 
-            # Cache fund flows
-            await self._cache_fund_flows(self.fund_flows)
+            if len(self.fund_flows) > self._max_flow_history:
+                self.fund_flows = self.fund_flows[-self._max_flow_history :]
 
-            # Store fund flow in time series
-            await self._store_fund_flow_time_series(flow)
+            # Cache fund flows with proper resource management
+            try:
+                await self._cache_fund_flows(self.fund_flows)
+            except Exception as cache_error:
+                self._logger.warning(f"Cache operation failed: {cache_error}")
+
+            # Store fund flow in time series with proper resource management
+            try:
+                await self._store_fund_flow_time_series(flow)
+            except Exception as ts_error:
+                self._logger.warning(f"Time series operation failed: {ts_error}")
 
             self._logger.info(
                 "Deposit processed successfully",
-                amount=format_currency(float(amount), currency),
+                amount=format_currency(amount, currency),
                 exchange=exchange,
             )
 
             return flow
 
         except Exception as e:
-            # Create comprehensive error context
-            from src.error_handling.context import ErrorContext
-
-            context = ErrorContext.from_exception(
-                error=e,
-                component="capital_management",
-                operation="process_deposit",
-                details={
-                    "amount": float(amount),
-                    "currency": currency,
-                    "exchange": exchange,
-                    "total_capital": float(self.total_capital),
-                },
-            )
-
-            # Handle error with recovery strategy
-            await self.error_handler.handle_error(e, context, self.partial_fill_recovery)
-
-            # Log detailed error information
+            # Log error information
             self._logger.error(
                 "Deposit processing failed",
-                error_id=context.error_id,
-                severity=context.severity.value,
-                amount=format_currency(float(amount), currency),
+                amount=format_currency(amount, currency),
                 exchange=exchange,
                 error=str(e),
             )
@@ -358,15 +372,11 @@ class FundFlowManager(AbstractFundFlowManagementService, TransactionalService):
             ValidationError: If withdrawal violates rules
         """
         try:
-            # Validate inputs
-            if not ValidationFramework.validate_quantity(float(amount)):
-                raise ValidationError(f"Invalid withdrawal amount: {amount}")
-
-            # Check minimum withdrawal amount
-            if amount < Decimal(str(self.config.get("min_withdrawal_amount", 100))):
-                raise ValidationError(
-                    f"Withdrawal amount {amount} below minimum {self.config.get('min_withdrawal_amount', 100)}"
-                )
+            # Validate inputs using utilities
+            min_withdrawal = Decimal(str(self.config.get("min_withdrawal_amount", 100)))
+            validate_withdrawal_request(
+                amount, currency, exchange, min_withdrawal, "FundFlowManager"
+            )
 
             # Validate withdrawal rules
             await self._validate_withdrawal_rules(amount, currency)
@@ -400,12 +410,16 @@ class FundFlowManager(AbstractFundFlowManagementService, TransactionalService):
                 timestamp=datetime.now(timezone.utc),
             )
 
-            # Add to flow history
+            # Add to flow history with size management
             self.fund_flows.append(flow)
+
+            # Maintain flow history size limit to prevent memory leaks
+            if len(self.fund_flows) > self._max_flow_history:
+                self.fund_flows = self.fund_flows[-self._max_flow_history :]
 
             self._logger.info(
                 "Withdrawal processed successfully",
-                amount=format_currency(float(amount), currency),
+                amount=format_currency(amount, currency),
                 exchange=exchange,
                 reason=reason,
             )
@@ -413,31 +427,10 @@ class FundFlowManager(AbstractFundFlowManagementService, TransactionalService):
             return flow
 
         except Exception as e:
-            # Create comprehensive error context
-            from src.error_handling.context import ErrorContext
-
-            context = ErrorContext.from_exception(
-                error=e,
-                component="capital_management",
-                operation="process_withdrawal",
-                details={
-                    "amount": float(amount),
-                    "currency": currency,
-                    "exchange": exchange,
-                    "reason": reason,
-                    "total_capital": float(self.total_capital),
-                },
-            )
-
-            # Handle error with recovery strategy
-            await self.error_handler.handle_error(e, context, self.partial_fill_recovery)
-
-            # Log detailed error information
+            # Log error information
             self._logger.error(
                 "Withdrawal processing failed",
-                error_id=context.error_id,
-                severity=context.severity.value,
-                amount=format_currency(float(amount), currency),
+                amount=format_currency(amount, currency),
                 exchange=exchange,
                 error=str(e),
             )
@@ -461,7 +454,7 @@ class FundFlowManager(AbstractFundFlowManagementService, TransactionalService):
         """
         try:
             # Validate inputs
-            if not ValidationFramework.validate_quantity(float(amount)):
+            if amount <= 0:
                 raise ValidationError(f"Invalid reallocation amount: {amount}")
 
             # Check maximum daily reallocation
@@ -492,14 +485,18 @@ class FundFlowManager(AbstractFundFlowManagementService, TransactionalService):
                 timestamp=datetime.now(timezone.utc),
             )
 
-            # Add to flow history
+            # Add to flow history with size management
             self.fund_flows.append(flow)
+
+            # Maintain flow history size limit to prevent memory leaks
+            if len(self.fund_flows) > self._max_flow_history:
+                self.fund_flows = self.fund_flows[-self._max_flow_history :]
 
             self._logger.info(
                 "Strategy reallocation processed",
                 from_strategy=from_strategy,
                 to_strategy=to_strategy,
-                amount=format_currency(float(amount)),
+                amount=format_currency(amount),
                 reason=reason,
             )
 
@@ -510,7 +507,7 @@ class FundFlowManager(AbstractFundFlowManagementService, TransactionalService):
                 "Strategy reallocation failed",
                 from_strategy=from_strategy,
                 to_strategy=to_strategy,
-                amount=format_currency(float(amount)),
+                amount=format_currency(amount),
                 error=str(e),
             )
             raise ServiceError(f"Strategy reallocation failed: {e}") from e
@@ -548,8 +545,12 @@ class FundFlowManager(AbstractFundFlowManagementService, TransactionalService):
                 timestamp=datetime.now(timezone.utc),
             )
 
-            # Add to flow history
+            # Add to flow history with size management
             self.fund_flows.append(flow)
+
+            # Maintain flow history size limit to prevent memory leaks
+            if len(self.fund_flows) > self._max_flow_history:
+                self.fund_flows = self.fund_flows[-self._max_flow_history :]
 
             # Update tracking
             self.last_compound_date = datetime.now(timezone.utc)
@@ -557,8 +558,8 @@ class FundFlowManager(AbstractFundFlowManagementService, TransactionalService):
 
             self._logger.info(
                 "Auto-compound processed",
-                compound_amount=format_currency(float(compound_amount)),
-                total_locked_profit=format_currency(float(self.locked_profit)),
+                compound_amount=format_currency(compound_amount),
+                total_locked_profit=format_currency(self.locked_profit),
             )
 
             return flow
@@ -588,7 +589,7 @@ class FundFlowManager(AbstractFundFlowManagementService, TransactionalService):
             self._logger.debug(
                 "Performance updated",
                 strategy_id=strategy_id,
-                total_profit=format_currency(float(self.total_profit)),
+                total_profit=format_currency(self.total_profit),
             )
 
         except Exception as e:
@@ -662,14 +663,13 @@ class FundFlowManager(AbstractFundFlowManagementService, TransactionalService):
             summary = {
                 "period_days": days,
                 "total_flows": len(flows),
-                "total_deposits": float(total_deposits),
-                "total_withdrawals": float(total_withdrawals),
-                "total_reallocations": float(total_reallocations),
-                "total_compounds": float(total_compounds),
-                "net_flow": float(total_deposits - total_withdrawals),
+                "total_deposits": total_deposits,
+                "total_withdrawals": total_withdrawals,
+                "total_reallocations": total_reallocations,
+                "total_compounds": total_compounds,
+                "net_flow": total_deposits - total_withdrawals,
                 "currency_flows": {
-                    curr: {k: float(v) for k, v in stats.items()}
-                    for curr, stats in currency_flows.items()
+                    curr: {k: v for k, v in stats.items()} for curr, stats in currency_flows.items()
                 },
             }
 
@@ -682,7 +682,7 @@ class FundFlowManager(AbstractFundFlowManagementService, TransactionalService):
     def _initialize_withdrawal_rules(self) -> None:
         """Initialize withdrawal rules from configuration."""
         # Check if withdrawal_rules is a dict
-        withdrawal_rules_config = self.config.withdrawal_rules
+        withdrawal_rules_config = self.config.get("withdrawal_rules", {})
         if not isinstance(withdrawal_rules_config, dict):
             self._logger.warning("No withdrawal rules configured")
             return
@@ -800,7 +800,7 @@ class FundFlowManager(AbstractFundFlowManagementService, TransactionalService):
         try:
             total_minimum = Decimal("0")
 
-            per_strategy_minimum = getattr(self.config, "per_strategy_minimum", {})
+            per_strategy_minimum = self.config.get("per_strategy_minimum", {})
             if not isinstance(per_strategy_minimum, dict):
                 return Decimal("1000")  # Default minimum
 
@@ -867,7 +867,7 @@ class FundFlowManager(AbstractFundFlowManagementService, TransactionalService):
                 if flow.reason == "reallocation" and flow.timestamp.date() == today
             ]
 
-            return sum(flow.amount for flow in today_flows)
+            return sum(flow.amount for flow in today_flows) or Decimal("0")
 
         except Exception as e:
             self._logger.error("Failed to get daily reallocation amount", error=str(e))
@@ -939,9 +939,7 @@ class FundFlowManager(AbstractFundFlowManagementService, TransactionalService):
         """
         try:
             self.total_capital = total_capital
-            self._logger.info(
-                "Total capital updated", total_capital=format_currency(float(total_capital))
-            )
+            self._logger.info("Total capital updated", total_capital=format_currency(total_capital))
         except Exception as e:
             self._logger.error("Failed to update total capital", error=str(e))
             raise ServiceError(f"Failed to update total capital: {e}") from e
@@ -953,6 +951,9 @@ class FundFlowManager(AbstractFundFlowManagementService, TransactionalService):
     async def get_capital_protection_status(self) -> dict[str, Any]:
         """Get current capital protection status."""
         try:
+            if not self.capital_protection:
+                return {}
+
             status = {
                 "emergency_reserve_pct": self.capital_protection.emergency_reserve_pct,
                 "max_daily_loss_pct": self.capital_protection.max_daily_loss_pct,
@@ -978,40 +979,56 @@ class FundFlowManager(AbstractFundFlowManagementService, TransactionalService):
     async def get_performance_summary(self) -> dict[str, Any]:
         """Get performance summary for all strategies."""
         try:
-            total_pnl = 0.0
+            total_pnl = Decimal("0.0")
 
             # Calculate total PnL from strategy performance
-            for strategy_id, metrics in self.strategy_performance.items():
+            for _strategy_id, metrics in self.strategy_performance.items():
                 if isinstance(metrics, dict):
-                    total_pnl += metrics.get("pnl", 0.0)
+                    pnl_value = metrics.get("pnl", Decimal("0.0"))
+                    if isinstance(pnl_value, int | float):
+                        total_pnl += Decimal(str(pnl_value))
+                    elif isinstance(pnl_value, Decimal):
+                        total_pnl += pnl_value
                 else:
-                    # Handle case where metrics might be a single value
-                    total_pnl += (
-                        float(metrics) if isinstance(metrics, int | float | Decimal) else 0.0
-                    )
+                    if isinstance(metrics, int | float):
+                        total_pnl += Decimal(str(metrics))
+                    elif isinstance(metrics, Decimal):
+                        total_pnl += metrics
 
-            summary = {
+            summary: dict[str, Any] = {
                 "total_pnl": total_pnl,
-                "total_profit": float(self.total_profit),
-                "locked_profit": float(self.locked_profit),
+                "total_profit": self.total_profit,
+                "locked_profit": self.locked_profit,
                 "strategy_count": len(self.strategy_performance),
                 "strategies": {},
             }
 
             for strategy_id, metrics in self.strategy_performance.items():
                 if isinstance(metrics, dict):
+                    pnl_value = metrics.get("pnl", Decimal("0.0"))
+                    if isinstance(pnl_value, int | float):
+                        pnl_value = Decimal(str(pnl_value))
+                    performance_score = metrics.get("performance_score", Decimal("0.0"))
+                    if isinstance(performance_score, int | float):
+                        performance_score = Decimal(str(performance_score))
+
                     summary["strategies"][strategy_id] = {
-                        "pnl": metrics.get("pnl", 0.0),
-                        "performance_score": metrics.get("performance_score", 0.0),
+                        "pnl": pnl_value,
+                        "performance_score": performance_score,
                         "last_updated": metrics.get("last_updated", datetime.now(timezone.utc)),
                     }
                 else:
                     # Handle case where metrics might be a single value
+                    if isinstance(metrics, int | float):
+                        pnl_value = Decimal(str(metrics))
+                    elif isinstance(metrics, Decimal):
+                        pnl_value = metrics
+                    else:
+                        pnl_value = Decimal("0.0")
+
                     summary["strategies"][strategy_id] = {
-                        "pnl": (
-                            float(metrics) if isinstance(metrics, int | float | Decimal) else 0.0
-                        ),
-                        "performance_score": 0.0,
+                        "pnl": pnl_value,
+                        "performance_score": Decimal("0.0"),
                         "last_updated": datetime.now(timezone.utc),
                     }
 
@@ -1049,13 +1066,31 @@ class FundFlowManager(AbstractFundFlowManagementService, TransactionalService):
             "max_withdrawal_pct": 0.2,
             "max_daily_reallocation_pct": 0.1,
             "fund_flow_cooldown_minutes": 60,
+            "max_flow_history": 1000,
+            "cache_ttl_seconds": 300,
             "withdrawal_rules": {},
             "per_strategy_minimum": {},
         }
 
         for key, default_value in config_defaults.items():
-            if not hasattr(self.config, key):
-                setattr(self.config, key, default_value)
-                self._logger.warning(
-                    f"Config missing {key}, using default: {default_value}"
-                ) if hasattr(self, "_logger") else None
+            if key not in self.config:
+                self.config[key] = default_value
+                if hasattr(self, "_logger"):
+                    self._logger.warning(f"Config missing {key}, using default: {default_value}")
+
+    async def cleanup_resources(self) -> None:
+        """Clean up resources to prevent memory leaks."""
+        try:
+            resource_manager = get_resource_manager()
+
+            # Clean fund flows using resource manager
+            self.fund_flows = resource_manager.clean_fund_flows(self.fund_flows, max_age_days=30)
+
+            # Clean performance data using resource manager
+            self.strategy_performance = resource_manager.clean_performance_data(
+                self.strategy_performance, max_age_days=30
+            )
+
+            self._logger.debug("Fund flow manager resource cleanup completed")
+        except Exception as e:
+            self._logger.warning(f"Resource cleanup failed: {e}")

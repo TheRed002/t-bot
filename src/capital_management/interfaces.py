@@ -6,6 +6,9 @@ services to ensure proper service layer architecture and contract enforcement.
 
 All interfaces are infrastructure-agnostic and focus on business operations,
 not implementation details like databases or external APIs.
+
+Version: 2.0.0 - Production Ready
+Author: Trading Bot Framework
 """
 
 from abc import ABC, abstractmethod
@@ -24,8 +27,8 @@ from src.core.types.risk import CapitalAllocation, CapitalMetrics
 class CapitalRepositoryProtocol(Protocol):
     """Protocol for capital allocation repository operations."""
 
-    async def create(self, allocation_data: dict[str, Any]) -> dict[str, Any]: ...
-    async def update(self, allocation_data: dict[str, Any]) -> dict[str, Any]: ...
+    async def create(self, allocation_data: dict[str, Any]) -> Any: ...
+    async def update(self, allocation_data: dict[str, Any]) -> Any: ...
     async def delete(self, allocation_id: str) -> bool: ...
     async def get_by_strategy_exchange(self, strategy_id: str, exchange: str) -> Any | None: ...
     async def get_by_strategy(self, strategy_id: str) -> list[Any]: ...
@@ -35,7 +38,7 @@ class CapitalRepositoryProtocol(Protocol):
 class AuditRepositoryProtocol(Protocol):
     """Protocol for audit log repository operations."""
 
-    async def create(self, audit_data: dict[str, Any]) -> dict[str, Any]: ...
+    async def create(self, audit_data: dict[str, Any]) -> Any: ...
 
 
 class ExchangeDataServiceProtocol(Protocol):

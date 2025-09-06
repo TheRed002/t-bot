@@ -22,20 +22,29 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 
+# Import service interfaces
+from src.capital_management.interfaces import AbstractExchangeDistributionService
 from src.core.base.service import TransactionalService
 
 # Exchange-specific exceptions
-from src.core.exceptions import ExchangeConnectionError, NetworkError, ServiceError, ValidationError
+from src.core.exceptions import ExchangeConnectionError, NetworkError, ServiceError
 
 # MANDATORY: Import from P-001
 from src.core.types.capital import CapitalExchangeAllocation as ExchangeAllocation
-from src.exchanges.base import BaseExchange
+
+# Use interface instead of direct BaseExchange import
+from src.exchanges.interfaces import IExchange
+from src.utils.capital_config import (
+    load_capital_config,
+    resolve_config_service,
+)
+from src.utils.capital_resources import get_resource_manager
+from src.utils.capital_validation import (
+    validate_capital_amount,
+)
 from src.utils.decorators import time_execution
 from src.utils.formatters import format_currency
-from src.utils.validators import ValidationFramework
-
-# Import service interfaces
-from .interfaces import AbstractExchangeDistributionService
+from src.utils.interfaces import ValidationServiceInterface
 
 # MANDATORY: Use structured logging from src.core.logging for all capital
 # management operations
@@ -58,7 +67,8 @@ class ExchangeDistributor(AbstractExchangeDistributionService, TransactionalServ
 
     def __init__(
         self,
-        exchanges: dict[str, BaseExchange] | None = None,
+        exchanges: dict[str, IExchange] | None = None,
+        validation_service: ValidationServiceInterface | None = None,
         correlation_id: str | None = None,
     ) -> None:
         """
@@ -66,6 +76,7 @@ class ExchangeDistributor(AbstractExchangeDistributionService, TransactionalServ
 
         Args:
             exchanges: Dictionary of exchange instances (injected)
+            validation_service: Validation service instance (injected)
             correlation_id: Request correlation ID for tracing
         """
         super().__init__(
@@ -73,6 +84,7 @@ class ExchangeDistributor(AbstractExchangeDistributionService, TransactionalServ
             correlation_id=correlation_id,
         )
         self.exchanges = exchanges or {}
+        self.validation_service = validation_service
 
         # Configuration will be loaded in _do_start
         self.capital_config: dict[str, Any] = {}
@@ -86,6 +98,12 @@ class ExchangeDistributor(AbstractExchangeDistributionService, TransactionalServ
         self.fee_efficiencies: dict[str, float] = {}
         self.reliability_scores: dict[str, float] = {}
         self.historical_slippage: dict[str, list[float]] = {}
+
+        # Resource management (configurable via capital_config)
+        self._max_slippage_history = 100
+
+        # Service dependencies (injected via DI)
+        self._exchange_info_service = None
 
     async def _do_start(self) -> None:
         """Start the exchange distributor service."""
@@ -102,6 +120,9 @@ class ExchangeDistributor(AbstractExchangeDistributionService, TransactionalServ
             # Load configuration from ConfigService
             await self._load_configuration()
 
+            # Configure resource limits from config
+            self._max_slippage_history = self.capital_config.get("max_slippage_history", 100)
+
             # Initialize exchange allocations
             await self._initialize_exchange_allocations()
 
@@ -114,20 +135,19 @@ class ExchangeDistributor(AbstractExchangeDistributionService, TransactionalServ
             self._logger.error(f"Failed to start ExchangeDistributor service: {e}")
             raise ServiceError(f"ExchangeDistributor startup failed: {e}") from e
 
+    async def _do_stop(self) -> None:
+        """Stop the exchange distributor service and clean up resources."""
+        try:
+            await self.cleanup_resources()
+            self._logger.info("ExchangeDistributor service stopped and resources cleaned up")
+        except Exception as e:
+            self._logger.error(f"Error during ExchangeDistributor shutdown: {e}")
+            raise ServiceError(f"ExchangeDistributor shutdown failed: {e}") from e
+
     async def _load_configuration(self) -> None:
         """Load configuration from ConfigService."""
-        try:
-            config_service = self.resolve_dependency("ConfigService")
-            self.capital_config = config_service.get_config_value("capital_management", {})
-        except Exception as e:
-            self._logger.warning(f"Failed to load configuration: {e}, using defaults")
-            # Use defaults
-            self.capital_config = {
-                "exchange_allocation_weights": "dynamic",
-                "max_allocation_pct": 0.3,
-                "min_deposit_amount": 1000,
-                "max_daily_reallocation_pct": 0.1,
-            }
+        resolved_config_service = resolve_config_service(self)
+        self.capital_config = load_capital_config(resolved_config_service)
 
     @time_execution
     async def distribute_capital(self, total_amount: Decimal) -> dict[str, ExchangeAllocation]:
@@ -141,11 +161,10 @@ class ExchangeDistributor(AbstractExchangeDistributionService, TransactionalServ
             Dict[str, ExchangeAllocation]: Distribution across exchanges
         """
         try:
-            # Validate input
-            try:
-                ValidationFramework.validate_quantity(float(total_amount))
-            except ValidationError:
-                raise ValidationError(f"Invalid capital distribution amount: {total_amount}")
+            # Validate input using utility
+            validate_capital_amount(
+                total_amount, "distribution amount", component="ExchangeDistributor"
+            )
 
             # Calculate exchange scores
             await self._update_exchange_metrics()
@@ -168,7 +187,7 @@ class ExchangeDistributor(AbstractExchangeDistributionService, TransactionalServ
 
             self._logger.info(
                 "Capital distributed across exchanges",
-                total_amount=format_currency(float(total_amount)),
+                total_amount=format_currency(total_amount),
                 allocations_count=len(allocations),
             )
 
@@ -177,7 +196,7 @@ class ExchangeDistributor(AbstractExchangeDistributionService, TransactionalServ
         except Exception as e:
             self._logger.error(
                 "Capital distribution failed",
-                total_amount=format_currency(float(total_amount)),
+                total_amount=format_currency(total_amount),
                 error=str(e),
             )
             raise ServiceError(f"Capital distribution failed: {e}") from e
@@ -199,7 +218,7 @@ class ExchangeDistributor(AbstractExchangeDistributionService, TransactionalServ
             # Calculate total allocated capital
             total_allocated = sum(
                 alloc.allocated_amount for alloc in self.exchange_allocations.values()
-            )
+            ) or Decimal("0")
 
             # Determine new distribution
             new_allocations = await self._calculate_optimal_distribution(total_allocated)
@@ -251,15 +270,13 @@ class ExchangeDistributor(AbstractExchangeDistributionService, TransactionalServ
 
                 # Update utilization rate
                 if allocation.allocated_amount > 0:
-                    allocation.utilization_rate = float(
-                        utilized_amount / allocation.allocated_amount
-                    )
+                    allocation.utilization_rate = utilized_amount / allocation.allocated_amount
 
                 self._logger.debug(
                     "Exchange utilization updated",
                     exchange=exchange,
-                    utilized=format_currency(float(utilized_amount)),
-                    available=format_currency(float(allocation.available_amount)),
+                    utilized=format_currency(utilized_amount),
+                    available=format_currency(allocation.available_amount),
                     utilization_rate=f"{allocation.utilization_rate:.2%}",
                 )
 
@@ -285,15 +302,23 @@ class ExchangeDistributor(AbstractExchangeDistributionService, TransactionalServ
 
             # Calculate composite scores
             composite_scores = {}
-            total_score = 0
+            total_score = 0.0
 
             for exchange in self.supported_exchanges:
                 liquidity = self.liquidity_scores.get(exchange, 0.5)
                 fee_efficiency = self.fee_efficiencies.get(exchange, 0.5)
                 reliability = self.reliability_scores.get(exchange, 0.5)
 
-                # Calculate composite score (weighted average)
-                composite_score = liquidity * 0.4 + fee_efficiency * 0.3 + reliability * 0.3
+                # Calculate composite score using configurable weights
+                liquidity_weight = self.capital_config.get("liquidity_weight", 0.4)
+                fee_weight = self.capital_config.get("fee_weight", 0.3)
+                reliability_weight = self.capital_config.get("reliability_weight", 0.3)
+
+                composite_score = (
+                    liquidity * liquidity_weight
+                    + fee_efficiency * fee_weight
+                    + reliability * reliability_weight
+                )
 
                 composite_scores[exchange] = composite_score
                 total_score += composite_score
@@ -325,10 +350,10 @@ class ExchangeDistributor(AbstractExchangeDistributionService, TransactionalServ
                 exchange=exchange_name,
                 allocated_amount=Decimal("0"),
                 available_amount=Decimal("0"),
-                utilization_rate=0.0,
-                liquidity_score=0.5,  # Default score
-                fee_efficiency=0.5,  # Default score
-                reliability_score=0.5,  # Default score
+                utilization_rate=Decimal("0.0"),
+                liquidity_score=Decimal("0.5"),  # Default score
+                fee_efficiency=Decimal("0.5"),  # Default score
+                reliability_score=Decimal("0.5"),  # Default score
                 last_rebalance=datetime.now(timezone.utc),
             )
             self.exchange_allocations[exchange_name] = allocation
@@ -336,20 +361,20 @@ class ExchangeDistributor(AbstractExchangeDistributionService, TransactionalServ
     async def _update_exchange_metrics(self) -> None:
         """Update exchange metrics (liquidity, fees, reliability)."""
         try:
-            for exchange_name, exchange in self.exchanges.items():
+            for exchange_name, _exchange in self.exchanges.items():
                 # Update liquidity score
                 self.liquidity_scores[exchange_name] = await self._calculate_liquidity_score(
-                    exchange
+                    exchange_name
                 )
 
                 # Update fee efficiency
                 self.fee_efficiencies[exchange_name] = await self._calculate_fee_efficiency(
-                    exchange
+                    exchange_name
                 )
 
                 # Update reliability score
                 self.reliability_scores[exchange_name] = await self._calculate_reliability_score(
-                    exchange
+                    exchange_name
                 )
 
                 # Update historical slippage
@@ -368,6 +393,7 @@ class ExchangeDistributor(AbstractExchangeDistributionService, TransactionalServ
         Returns:
             float: Liquidity score (0-1)
         """
+        orderbook = None
         try:
             # Try to calculate based on real market data if available via service
             if self._exchange_info_service:
@@ -383,29 +409,31 @@ class ExchangeDistributor(AbstractExchangeDistributionService, TransactionalServ
                                     exchange_name, pair, limit=50
                                 )
                             else:
-                                # Skip if service doesn't support order book data
                                 continue
 
                             # Calculate liquidity based on order book depth
-                            bid_volume = sum(
-                                Decimal(str(bid[1])) * Decimal(str(bid[0]))
-                                for bid in orderbook.get("bids", [])[:20]
-                            )
-                            ask_volume = sum(
-                                Decimal(str(ask[1])) * Decimal(str(ask[0]))
-                                for ask in orderbook.get("asks", [])[:20]
-                            )
+                            if orderbook:
+                                bid_volume = sum(
+                                    Decimal(str(bid[1])) * Decimal(str(bid[0]))
+                                    for bid in orderbook.get("bids", [])[:20]
+                                )
+                                ask_volume = sum(
+                                    Decimal(str(ask[1])) * Decimal(str(ask[0]))
+                                    for ask in orderbook.get("asks", [])[:20]
+                                )
 
-                            # Normalize score (higher volume = better liquidity)
-                            # Using 1M USD as reference for max score
-                            depth_score = min(
-                                float((bid_volume + ask_volume) / Decimal("2000000")), 1.0
-                            )
-                            depth_scores.append(depth_score)
+                                # Normalize score (higher volume = better liquidity)
+                                # Using 1M USD as reference for max score
+                                depth_score = min(
+                                    float((bid_volume + ask_volume) / Decimal("2000000")), 1.0
+                                )
+                                depth_scores.append(depth_score)
                         except Exception as pair_error:
                             self._logger.debug(
                                 f"Could not fetch {pair} data for {exchange_name}: {pair_error}"
                             )
+                        finally:
+                            orderbook = None
 
                     if depth_scores:
                         return sum(depth_scores) / len(depth_scores)
@@ -425,7 +453,9 @@ class ExchangeDistributor(AbstractExchangeDistributionService, TransactionalServ
             return fallback_scores.get(exchange_name, 0.5)
 
         except Exception as e:
-            self._logger.error(f"Failed to calculate liquidity score for {exchange}", error=str(e))
+            self._logger.error(
+                f"Failed to calculate liquidity score for {exchange_name}", error=str(e)
+            )
             return 0.5  # Default score
 
     async def _calculate_fee_efficiency(self, exchange_name: str) -> float:
@@ -438,12 +468,13 @@ class ExchangeDistributor(AbstractExchangeDistributionService, TransactionalServ
         Returns:
             float: Fee efficiency score (0-1)
         """
+        fees_data = None
         try:
             # Try to get real fee structure if available via service
             if self._exchange_info_service and hasattr(self._exchange_info_service, "get_fees"):
                 try:
                     fees_data = await self._exchange_info_service.get_fees(exchange_name)
-                    trading_fees = fees_data.get("trading", {})
+                    trading_fees = fees_data.get("trading", {}) if fees_data else {}
 
                     # Get taker fee (usually higher than maker)
                     taker_fee = trading_fees.get("taker", 0.001)  # Default 0.1%
@@ -456,6 +487,9 @@ class ExchangeDistributor(AbstractExchangeDistributionService, TransactionalServ
 
                 except Exception as e:
                     self._logger.debug(f"Could not fetch real fee data for {exchange_name}: {e}")
+                finally:
+                    # Clear fees_data reference to prevent memory leaks
+                    fees_data = None
 
             # Fallback to known exchange fee structures
             fallback_efficiencies = {
@@ -467,7 +501,9 @@ class ExchangeDistributor(AbstractExchangeDistributionService, TransactionalServ
             return fallback_efficiencies.get(exchange_name, 0.5)
 
         except Exception as e:
-            self._logger.error(f"Failed to calculate fee efficiency for {exchange}", error=str(e))
+            self._logger.error(
+                f"Failed to calculate fee efficiency for {exchange_name}", error=str(e)
+            )
             return 0.5  # Default score
 
     async def _calculate_reliability_score(self, exchange_name: str) -> float:
@@ -526,7 +562,7 @@ class ExchangeDistributor(AbstractExchangeDistributionService, TransactionalServ
 
         except Exception as e:
             self._logger.error(
-                f"Failed to calculate reliability score for {exchange}", error=str(e)
+                f"Failed to calculate reliability score for {exchange_name}", error=str(e)
             )
             return 0.5  # Default score
 
@@ -558,13 +594,23 @@ class ExchangeDistributor(AbstractExchangeDistributionService, TransactionalServ
             self.historical_slippage[exchange_name].append(slippage)
 
             # Keep only last 100 data points
-            if len(self.historical_slippage[exchange_name]) > 100:
+            if len(self.historical_slippage[exchange_name]) > self._max_slippage_history:
                 self.historical_slippage[exchange_name] = self.historical_slippage[exchange_name][
-                    -100:
+                    -self._max_slippage_history :
                 ]
 
         except Exception as e:
             self._logger.error(f"Failed to update slippage data for {exchange_name}", error=str(e))
+        finally:
+            # Cleanup if slippage history is getting too large
+            if (
+                exchange_name in self.historical_slippage
+                and len(self.historical_slippage[exchange_name]) > self._max_slippage_history * 1.5
+            ):
+                try:
+                    await self.cleanup_resources()
+                except Exception as cleanup_error:
+                    self._logger.warning(f"Slippage cleanup failed: {cleanup_error}")
 
     async def _dynamic_distribution(self, total_amount: Decimal) -> dict[str, ExchangeAllocation]:
         """Dynamic distribution based on real-time metrics."""
@@ -578,7 +624,7 @@ class ExchangeDistributor(AbstractExchangeDistributionService, TransactionalServ
                 exchange=exchange,
                 allocated_amount=amount,
                 available_amount=amount,
-                utilization_rate=0.0,
+                utilization_rate=Decimal("0.0"),
                 liquidity_score=self.liquidity_scores.get(exchange, 0.5),
                 fee_efficiency=self.fee_efficiencies.get(exchange, 0.5),
                 reliability_score=self.reliability_scores.get(exchange, 0.5),
@@ -601,7 +647,7 @@ class ExchangeDistributor(AbstractExchangeDistributionService, TransactionalServ
                     exchange=exchange,
                     allocated_amount=amount,
                     available_amount=amount,
-                    utilization_rate=0.0,
+                    utilization_rate=Decimal("0.0"),
                     liquidity_score=self.liquidity_scores.get(exchange, 0.5),
                     fee_efficiency=self.fee_efficiencies.get(exchange, 0.5),
                     reliability_score=self.reliability_scores.get(exchange, 0.5),
@@ -625,7 +671,7 @@ class ExchangeDistributor(AbstractExchangeDistributionService, TransactionalServ
                 self._logger.warning(
                     "Applied minimum balance requirement",
                     exchange=exchange,
-                    min_balance=format_currency(float(min_balance)),
+                    min_balance=format_currency(min_balance),
                 )
 
         return allocations
@@ -644,7 +690,9 @@ class ExchangeDistributor(AbstractExchangeDistributionService, TransactionalServ
                 exchange=exchange,
                 allocated_amount=amount,
                 available_amount=amount,
-                utilization_rate=current_allocation.utilization_rate if current_allocation else 0.0,
+                utilization_rate=current_allocation.utilization_rate
+                if current_allocation
+                else Decimal("0.0"),
                 liquidity_score=self.liquidity_scores.get(exchange, 0.5),
                 fee_efficiency=self.fee_efficiencies.get(exchange, 0.5),
                 reliability_score=self.reliability_scores.get(exchange, 0.5),
@@ -687,16 +735,23 @@ class ExchangeDistributor(AbstractExchangeDistributionService, TransactionalServ
                     self._logger.warning(
                         "Exchange allocation change limited",
                         exchange=exchange,
-                        original_change=format_currency(float(change_amount)),
-                        limited_change=format_currency(float(max_daily_change)),
+                        original_change=format_currency(change_amount),
+                        limited_change=format_currency(max_daily_change),
                     )
 
         return new_allocations
 
     @property
+    def supported_exchanges(self) -> list[str]:
+        """Get list of supported exchange names."""
+        return list(self.exchanges.keys())
+
+    @property
     def total_capital(self) -> Decimal:
         """Get total allocated capital across all exchanges."""
-        return sum(alloc.allocated_amount for alloc in self.exchange_allocations.values())
+        return sum(
+            alloc.allocated_amount for alloc in self.exchange_allocations.values()
+        ) or Decimal("0")
 
     async def get_exchange_metrics(self) -> dict[str, dict[str, float]]:
         """Get current metrics for all exchanges."""
@@ -707,8 +762,8 @@ class ExchangeDistributor(AbstractExchangeDistributionService, TransactionalServ
                 "liquidity_score": self.liquidity_scores.get(exchange_name, 0.5),
                 "fee_efficiency": self.fee_efficiencies.get(exchange_name, 0.5),
                 "reliability_score": self.reliability_scores.get(exchange_name, 0.5),
-                "avg_slippage": statistics.mean(
-                    self.historical_slippage.get(exchange_name, [0.001])
+                "avg_slippage": Decimal(
+                    str(statistics.mean(self.historical_slippage.get(exchange_name, [0.001])))
                 ),
             }
 
@@ -721,7 +776,7 @@ class ExchangeDistributor(AbstractExchangeDistributionService, TransactionalServ
         )
         total_exchanges = len(self.exchange_allocations)
 
-        summary = {
+        summary: dict[str, Any] = {
             "total_allocated": total_allocated,
             "total_exchanges": total_exchanges,
             "exchanges": {},
@@ -738,3 +793,28 @@ class ExchangeDistributor(AbstractExchangeDistributionService, TransactionalServ
             }
 
         return summary
+
+    async def cleanup_resources(self) -> None:
+        """Clean up resources to prevent memory leaks."""
+        try:
+            resource_manager = get_resource_manager()
+
+            # Clean up historical slippage data using resource manager
+            for exchange_name in list(self.historical_slippage.keys()):
+                slippage_history = self.historical_slippage[exchange_name]
+                self.historical_slippage[exchange_name] = resource_manager.limit_list_size(
+                    slippage_history, self._max_slippage_history
+                )
+
+            # Remove exchanges that are no longer in use
+            active_exchanges = set(self.exchanges.keys())
+            inactive_exchanges = set(self.historical_slippage.keys()) - active_exchanges
+            for exchange_name in inactive_exchanges:
+                del self.historical_slippage[exchange_name]
+                self.liquidity_scores.pop(exchange_name, None)
+                self.fee_efficiencies.pop(exchange_name, None)
+                self.reliability_scores.pop(exchange_name, None)
+
+            self._logger.debug("Exchange distributor resource cleanup completed")
+        except Exception as e:
+            self._logger.warning(f"Resource cleanup failed: {e}")

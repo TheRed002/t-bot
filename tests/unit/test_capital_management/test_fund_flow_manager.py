@@ -10,10 +10,14 @@ This module tests the deposit/withdrawal management including:
 - Capital protection rules
 """
 
+import logging
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 import pytest
+
+# Disable logging during tests to improve performance
+logging.getLogger().setLevel(logging.CRITICAL)
 
 from src.capital_management.fund_flow_manager import FundFlowManager
 from src.core.config import Config
@@ -24,7 +28,7 @@ from src.core.types.capital import CapitalFundFlow as FundFlow
 class TestFundFlowManager:
     """Test cases for FundFlowManager class."""
 
-    @pytest.fixture
+    @pytest.fixture(scope="session")
     def config(self):
         """Create test configuration with capital management settings."""
         config = Config()
@@ -62,14 +66,20 @@ class TestFundFlowManager:
     @pytest.fixture
     def fund_flow_manager(self, config):
         """Create fund flow manager instance."""
-        # Create mock error handler to avoid dependency injection issues
         from unittest.mock import Mock
-        from src.error_handling.error_handler import ErrorHandler
-        
-        error_handler = Mock(spec=ErrorHandler)
-        return FundFlowManager(config, error_handler=error_handler)
 
-    @pytest.fixture
+        # Create mock services
+        cache_service = Mock()
+        time_series_service = Mock()
+        validation_service = Mock()
+
+        return FundFlowManager(
+            cache_service=cache_service,
+            time_series_service=time_series_service,
+            validation_service=validation_service,
+        )
+
+    @pytest.fixture(scope="session")
     def sample_fund_flows(self):
         """Create sample fund flows."""
         return [
@@ -113,14 +123,21 @@ class TestFundFlowManager:
 
     def test_initialization(self, fund_flow_manager, config):
         """Test fund flow manager initialization."""
-        assert fund_flow_manager.config == config.capital_management
+        # Check that service is properly initialized
+        assert fund_flow_manager._name == "FundFlowManagerService"
         assert fund_flow_manager.fund_flows == []
         assert fund_flow_manager.strategy_performance == {}
         # Check if last_compound_date is within the last 60 seconds
-        assert (datetime.now(timezone.utc) - fund_flow_manager.last_compound_date).total_seconds() < 60
+        time_diff = (
+            datetime.now(timezone.utc) - fund_flow_manager.last_compound_date
+        ).total_seconds()
+        assert time_diff < 60
         assert fund_flow_manager.total_profit == Decimal("0")
         assert fund_flow_manager.locked_profit == Decimal("0")
         assert fund_flow_manager.total_capital == Decimal("0")  # Initially 0 until set
+
+        # Check that service is not yet started (configuration not loaded)
+        assert not fund_flow_manager.is_running
 
     @pytest.mark.asyncio
     async def test_update_total_capital(self, fund_flow_manager):
@@ -162,7 +179,7 @@ class TestFundFlowManager:
     @pytest.mark.asyncio
     async def test_process_deposit_below_minimum(self, fund_flow_manager):
         """Test deposit processing below minimum amount."""
-        amount = Decimal("500")  # Below minimum
+        amount = Decimal("50")  # Below default minimum of 100
         currency = "USDT"
         exchange = "binance"
 
@@ -319,6 +336,8 @@ class TestFundFlowManager:
         assert result is None
         assert strategy_name in fund_flow_manager.strategy_performance
         assert fund_flow_manager.strategy_performance[strategy_name]["total_pnl"] == 1000.0
+        # Verify total_profit uses Decimal internally
+        assert fund_flow_manager.total_profit == Decimal("1000")
 
     @pytest.mark.asyncio
     async def test_update_performance_negative_pnl(self, fund_flow_manager):
@@ -329,7 +348,9 @@ class TestFundFlowManager:
         result = await fund_flow_manager.update_performance(strategy_name, performance_metrics)
 
         assert result is None
+        # Verify negative PnL is correctly handled with Decimal precision
         assert fund_flow_manager.total_profit == Decimal("-500")
+        assert strategy_name in fund_flow_manager.strategy_performance
 
     @pytest.mark.asyncio
     async def test_get_flow_history(self, fund_flow_manager):
@@ -413,13 +434,20 @@ class TestFundFlowManager:
         assert "total_withdrawals" in summary
         assert "total_reallocations" in summary
         assert "net_flow" in summary
-        assert summary["total_deposits"] == 10000.0
-        assert summary["total_withdrawals"] == 2000.0
-        assert summary["net_flow"] == 8000.0
+        # Financial values should be Decimal, but might be converted to float for JSON serialization
+        assert summary["total_deposits"] == Decimal("10000") or summary["total_deposits"] == 10000.0
+        assert (
+            summary["total_withdrawals"] == Decimal("2000")
+            or summary["total_withdrawals"] == 2000.0
+        )
+        assert summary["net_flow"] == Decimal("8000") or summary["net_flow"] == 8000.0
 
     @pytest.mark.asyncio
     async def test_get_capital_protection_status(self, fund_flow_manager):
         """Test getting capital protection status."""
+        # Start the service to initialize capital protection
+        await fund_flow_manager.start()
+
         status = await fund_flow_manager.get_capital_protection_status()
 
         assert isinstance(status, dict)
@@ -432,3 +460,40 @@ class TestFundFlowManager:
         assert "locked_profit" in status
         assert "auto_compound_enabled" in status
         assert "next_compound_date" in status
+
+        # Clean up
+        await fund_flow_manager.stop()
+
+    @pytest.mark.asyncio
+    async def test_process_deposit_zero_amount(self, fund_flow_manager):
+        """Test deposit processing with zero amount."""
+        with pytest.raises(ValidationError):
+            await fund_flow_manager.process_deposit(Decimal("0"), "USDT", "binance")
+
+    @pytest.mark.asyncio
+    async def test_process_withdrawal_zero_amount(self, fund_flow_manager):
+        """Test withdrawal processing with zero amount."""
+        with pytest.raises(ValidationError):
+            await fund_flow_manager.process_withdrawal(Decimal("0"), "USDT", "binance")
+
+    @pytest.mark.asyncio
+    async def test_process_strategy_reallocation_zero_amount(self, fund_flow_manager):
+        """Test strategy reallocation with zero amount."""
+        from src.core.exceptions import ServiceError
+
+        with pytest.raises(ServiceError):
+            await fund_flow_manager.process_strategy_reallocation(
+                "strategy_1", "strategy_2", Decimal("0"), "test"
+            )
+
+    @pytest.mark.asyncio
+    async def test_get_flow_summary_empty_flows(self, fund_flow_manager):
+        """Test getting flow summary with empty flows."""
+        fund_flow_manager.fund_flows = []
+
+        summary = await fund_flow_manager.get_flow_summary()
+
+        assert isinstance(summary, dict)
+        assert summary["total_deposits"] == Decimal("0") or summary["total_deposits"] == 0
+        assert summary["total_withdrawals"] == Decimal("0") or summary["total_withdrawals"] == 0
+        assert summary["net_flow"] == Decimal("0") or summary["net_flow"] == 0

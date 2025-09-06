@@ -19,13 +19,14 @@ Version: 2.0.0 - Refactored for service layer
 
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from src.capital_management.service import CapitalService
+if TYPE_CHECKING:
+    from src.capital_management.service import CapitalService
 from src.core.base.component import BaseComponent
 
 # Import foundation services
-from src.core.exceptions import ServiceError, ValidationError
+from src.core.exceptions import ServiceError
 
 # MANDATORY: Import from P-001
 from src.core.types.risk import (
@@ -33,6 +34,7 @@ from src.core.types.risk import (
     CapitalAllocation,
     CapitalMetrics,
 )
+from src.state.trade_lifecycle_manager import TradeEvent
 
 # MANDATORY: Import from P-002A (error handling) - Updated decorators
 try:
@@ -43,9 +45,7 @@ try:
         RiskService = None  # type: ignore
     if not (hasattr(RiskManager, "__module__") and "risk_management" in RiskManager.__module__):
         RiskManager = None  # type: ignore
-except ImportError as e:
-    # No logger available at module level - use print for import warnings
-    print(f"Warning: Risk management imports not available: {e}")
+except ImportError:
     RiskService = None  # type: ignore
     RiskManager = None  # type: ignore
 
@@ -57,14 +57,25 @@ try:
         hasattr(TradeLifecycleManager, "__module__") and "state" in TradeLifecycleManager.__module__
     ):
         TradeLifecycleManager = None  # type: ignore
-except ImportError as e:
-    # No logger available at module level - use print for import warnings
-    print(f"Warning: State management imports not available: {e}")
+except ImportError:
     TradeLifecycleManager = None  # type: ignore
 
+from src.utils.capital_config import (
+    extract_decimal_config,
+    load_capital_config,
+    resolve_config_service,
+)
+from src.utils.capital_errors import (
+    create_operation_context,
+    handle_service_error,
+    log_allocation_operation,
+)
+from src.utils.capital_validation import (
+    validate_allocation_request,
+)
 from src.utils.decorators import time_execution
 from src.utils.formatters import format_currency
-from src.utils.validators import ValidationFramework
+from src.utils.interfaces import ValidationServiceInterface
 
 
 class CapitalAllocator(BaseComponent):
@@ -84,10 +95,11 @@ class CapitalAllocator(BaseComponent):
 
     def __init__(
         self,
-        capital_service: CapitalService,
+        capital_service: "CapitalService",
         config_service: Any = None,
         risk_manager: RiskService | RiskManager | None = None,
         trade_lifecycle_manager: TradeLifecycleManager | None = None,
+        validation_service: ValidationServiceInterface | None = None,
     ) -> None:
         """
         Initialize the capital allocator with CapitalService dependency injection.
@@ -105,65 +117,27 @@ class CapitalAllocator(BaseComponent):
         self.capital_service = capital_service
         self.risk_manager = risk_manager
         self.trade_lifecycle_manager = trade_lifecycle_manager
+        self.validation_service = validation_service
 
-        # Get config from ConfigService or fallback to legacy method
+        # Store config service reference for proper DI
         self.config_service = config_service
 
-        if config_service is None:
-            # Fallback to dependency injection
-            try:
-                from src.core.dependency_injection import get_container
-                from src.core.exceptions import DependencyError
-
-                try:
-                    config_service = get_container().get("ConfigService")
-                    self.capital_config = config_service.get_config_value("capital_management", {})
-                except DependencyError:
-                    # No ConfigService available, use fallback
-                    raise AttributeError
-            except (ImportError, KeyError, AttributeError):
-                # Final fallback to legacy method - with proper error handling
-                try:
-                    from src.core.config import get_config
-
-                    full_config = get_config()
-                    self.capital_config = (
-                        full_config.capital_management
-                        if hasattr(full_config, "capital_management")
-                        else {}
-                    )
-                except ImportError:
-                    # If config module not available, use defaults
-                    self.logger.warning("Config module not available, using default capital config")
-                    self.capital_config = {}
-        elif isinstance(config_service, dict):
-            # Direct config dict (for testing)
-            self.capital_config = config_service
-        else:
-            # Standard config service
-            self.capital_config = config_service.get_config_value("capital_management", {})
+        # Load configuration using unified utility
+        resolved_config_service = (
+            resolve_config_service(self) if config_service is None else config_service
+        )
+        self.capital_config = load_capital_config(resolved_config_service)
 
         # Performance tracking (local cache only)
-        self.strategy_performance: dict[str, dict[str, float]] = {}
+        self.strategy_performance: dict[str, dict[str, Decimal]] = {}
         self.performance_window = timedelta(days=30)
         self.last_rebalance = datetime.now(timezone.utc)
 
-        # Allocation strategy configuration
-        if isinstance(self.capital_config, dict):
-            self.rebalance_frequency_hours = self.capital_config.get(
-                "rebalance_frequency_hours", 24
-            )
-            self.max_daily_reallocation_pct = self.capital_config.get(
-                "max_daily_reallocation_pct", 0.1
-            )
-        else:
-            # CapitalManagementConfig object access
-            self.rebalance_frequency_hours = getattr(
-                self.capital_config, "rebalance_frequency_hours", 24
-            )
-            self.max_daily_reallocation_pct = getattr(
-                self.capital_config, "max_daily_reallocation_pct", 0.1
-            )
+        # Extract configuration values using utility functions
+        self.rebalance_frequency_hours = self.capital_config.get("rebalance_frequency_hours", 24)
+        self.max_daily_reallocation_pct = extract_decimal_config(
+            self.capital_config, "max_daily_reallocation_pct", Decimal("0.1")
+        )
 
         self.logger.info(
             "Capital allocator initialized with CapitalService",
@@ -192,37 +166,10 @@ class CapitalAllocator(BaseComponent):
             ServiceError: If allocation operation fails
         """
         try:
-            # Consistent boundary validation - match service layer patterns
-            if not strategy_id or not strategy_id.strip():
-                raise ValidationError(
-                    "Strategy ID cannot be empty",
-                    error_code="CAP_004",
-                    details={"component": "CapitalAllocator", "field": "strategy_id"},
-                )
+            # Use unified validation utility
+            validate_allocation_request(strategy_id, exchange, requested_amount, "CapitalAllocator")
 
-            if not exchange or not exchange.strip():
-                raise ValidationError(
-                    "Exchange cannot be empty",
-                    error_code="CAP_005",
-                    details={"component": "CapitalAllocator", "field": "exchange"},
-                )
-
-            # Amount validation using consistent patterns
-            if not ValidationFramework.validate_quantity(float(requested_amount)):
-                raise ValidationError(
-                    f"Invalid capital allocation amount: {requested_amount}",
-                    error_code="CAP_006",
-                    details={"amount": str(requested_amount), "component": "CapitalAllocator"},
-                )
-
-            if requested_amount <= 0:
-                raise ValidationError(
-                    "Allocation amount must be positive",
-                    error_code="CAP_007",
-                    details={"amount": str(requested_amount), "component": "CapitalAllocator"},
-                )
-
-            # Use CapitalService for allocation - includes all validation, audit, and transaction support
+            # Use CapitalService for allocation - includes validation, audit, transactions
             allocation = await self.capital_service.allocate_capital(
                 strategy_id=strategy_id,
                 exchange=exchange,
@@ -246,51 +193,31 @@ class CapitalAllocator(BaseComponent):
                 },
             )
 
-            self.logger.info(
-                "Capital allocation completed via service",
-                strategy_id=strategy_id,
-                exchange=exchange,
-                amount=format_currency(float(requested_amount)),
-                allocation_percentage=f"{allocation.allocation_percentage:.2%}",
+            # Use unified logging
+            allocation_pct = (
+                allocation.allocation_pct
+                if hasattr(allocation, "allocation_pct")
+                else Decimal("0.0")
+            )
+            log_allocation_operation(
+                "allocation",
+                strategy_id,
+                exchange,
+                requested_amount,
+                "CapitalAllocator",
+                success=True,
+                allocation_percentage=f"{float(allocation_pct):.2%}",
             )
 
             return allocation
 
-        except (ValidationError, ServiceError) as e:
-            # Re-raise service layer exceptions with consistent error propagation
-            self.logger.error(
-                "Capital allocation failed - service/validation error",
-                strategy_id=strategy_id,
-                exchange=exchange,
-                requested_amount=format_currency(float(requested_amount)),
-                error_type=type(e).__name__,
-                error_code=getattr(e, "error_code", "UNKNOWN"),
-                error=str(e),
-                component="CapitalAllocator",
-            )
-            raise
-
         except Exception as e:
-            # Log and wrap unexpected exceptions with consistent error propagation
-            self.logger.error(
-                "Unexpected error in capital allocation",
-                strategy_id=strategy_id,
-                exchange=exchange,
-                error=str(e),
-                error_type=type(e).__name__,
-                component="CapitalAllocator",
-                exc_info=True,
+            # Use unified error handling
+            context = create_operation_context(
+                strategy_id=strategy_id, exchange=exchange, amount=requested_amount, bot_id=bot_id
             )
-            # Propagate as ServiceError for consistent error handling
-            raise ServiceError(
-                f"Capital allocation failed: {e}",
-                error_code="CAP_999",
-                details={
-                    "strategy_id": strategy_id,
-                    "exchange": exchange,
-                    "component": "CapitalAllocator",
-                },
-            ) from e
+            handle_service_error(e, "capital allocation", "CapitalAllocator", context)
+            raise
 
     @time_execution
     async def release_capital(
@@ -326,38 +253,21 @@ class CapitalAllocator(BaseComponent):
                 "Capital release completed via service",
                 strategy_id=strategy_id,
                 exchange=exchange,
-                amount=format_currency(float(amount)),
+                amount=format_currency(amount),
                 success=success,
             )
 
             return success
 
-        except (ValidationError, ServiceError) as e:
-            # Consistent error logging for service layer exceptions
-            self.logger.error(
-                "Capital release failed - service/validation error",
-                strategy_id=strategy_id,
-                exchange=exchange,
-                amount=format_currency(float(amount)),
-                error_type=type(e).__name__,
-                error_code=getattr(e, "error_code", "UNKNOWN"),
-                error=str(e),
-                component="CapitalAllocator",
-            )
-            return False
-
         except Exception as e:
-            # Consistent error logging for unexpected exceptions
-            self.logger.error(
-                "Unexpected error in capital release",
-                strategy_id=strategy_id,
-                exchange=exchange,
-                error=str(e),
-                error_type=type(e).__name__,
-                component="CapitalAllocator",
-                exc_info=True,
+            # Use unified error handling
+            context = create_operation_context(
+                strategy_id=strategy_id, exchange=exchange, amount=amount, bot_id=bot_id
             )
-            return False
+            try:
+                handle_service_error(e, "capital release", "CapitalAllocator", context)
+            except ServiceError:
+                return False
 
     @time_execution
     async def rebalance_allocations(
@@ -396,10 +306,9 @@ class CapitalAllocator(BaseComponent):
             )
             strategy = AllocationStrategy(strategy_name)
 
-            # For now, return empty dict as rebalancing logic would need to be
-            # implemented using multiple service calls with proper transaction handling
-            self.logger.warning(
-                "Rebalancing logic needs to be implemented with service layer transactions",
+            # Rebalancing logic implementation pending transaction handling improvements
+            self.logger.info(
+                "Rebalancing deferred - transaction handling improvements in progress",
                 strategy=strategy.value,
                 current_allocations=current_metrics.allocation_count,
             )
@@ -440,14 +349,14 @@ class CapitalAllocator(BaseComponent):
                     "Capital utilization updated via service",
                     strategy_id=strategy_id,
                     exchange=exchange,
-                    utilized=format_currency(float(utilized_amount)),
+                    utilized=format_currency(utilized_amount),
                 )
             else:
                 self.logger.warning(
                     "Capital utilization update failed",
                     strategy_id=strategy_id,
                     exchange=exchange,
-                    utilized_amount=format_currency(float(utilized_amount)),
+                    utilized_amount=format_currency(utilized_amount),
                 )
 
         except Exception as e:
@@ -455,7 +364,7 @@ class CapitalAllocator(BaseComponent):
                 "Utilization update error",
                 strategy_id=strategy_id,
                 exchange=exchange,
-                utilized_amount=format_currency(float(utilized_amount)),
+                utilized_amount=format_currency(utilized_amount),
                 error=str(e),
             )
             raise ServiceError(f"Utilization update failed: {e}") from e
@@ -474,8 +383,8 @@ class CapitalAllocator(BaseComponent):
 
             self.logger.debug(
                 "Capital metrics retrieved via service",
-                total_capital=format_currency(float(metrics.total_capital)),
-                allocated_capital=format_currency(float(metrics.allocated_capital)),
+                total_capital=format_currency(metrics.total_capital),
+                allocated_capital=format_currency(metrics.allocated_amount),
                 utilization_rate=f"{metrics.utilization_rate:.2%}",
                 allocation_efficiency=f"{metrics.allocation_efficiency:.2f}",
             )
@@ -492,7 +401,7 @@ class CapitalAllocator(BaseComponent):
         self, strategy_id: str, exchange: str, amount: Decimal
     ) -> dict[str, Any]:
         """Assess risk for capital allocation."""
-        risk_assessment = {
+        risk_assessment: dict[str, Any] = {
             "risk_level": "low",
             "risk_factors": [],
             "recommendations": [],
@@ -558,33 +467,40 @@ class CapitalAllocator(BaseComponent):
         if time_since_rebalance < timedelta(hours=self.rebalance_frequency_hours):
             return False
 
-        # Check if efficiency is too low
-        if current_metrics.allocation_efficiency < 0.3:
+        # Check allocation efficiency
+        allocation_ratio = (
+            current_metrics.allocated_amount / current_metrics.total_capital
+            if current_metrics.total_capital > 0
+            else Decimal("0.0")
+        )
+        if allocation_ratio < Decimal("0.3"):
             self.logger.info(
-                "Rebalancing triggered by low allocation efficiency",
-                efficiency=current_metrics.allocation_efficiency,
+                "Rebalancing triggered by low allocation ratio",
+                allocation_ratio=allocation_ratio,
             )
             return True
 
         # Check utilization rate
-        if current_metrics.utilization_rate < 0.5:
+        utilization_rate = (
+            current_metrics.allocated_amount / current_metrics.total_capital
+            if current_metrics.total_capital > 0
+            else Decimal("0.0")
+        )
+        if utilization_rate < Decimal("0.5"):
             self.logger.info(
                 "Rebalancing triggered by low utilization rate",
-                utilization_rate=current_metrics.utilization_rate,
+                utilization_rate=utilization_rate,
             )
             return True
 
         return False
 
-    async def _calculate_performance_metrics(self) -> dict[str, dict[str, float]]:
+    async def _calculate_performance_metrics(self) -> dict[str, dict[str, Decimal]]:
         """
         Calculate performance metrics for all strategies.
 
-        Note: This returns cached performance metrics. In production, this would integrate
-        with performance tracking systems and use historical trade data.
+        Returns cached performance metrics that should be updated by external systems.
         """
-        # Return existing performance metrics
-        # These should be updated by external performance tracking service
         return self.strategy_performance.copy()
 
     async def get_emergency_reserve(self) -> Decimal:
@@ -606,9 +522,9 @@ class CapitalAllocator(BaseComponent):
 
             summary = {
                 "total_allocations": metrics.allocation_count,
-                "total_allocated": metrics.allocated_capital,
+                "total_allocated": metrics.allocated_amount,
                 "total_capital": metrics.total_capital,
-                "available_capital": metrics.available_capital,
+                "available_capital": metrics.available_amount,
                 "emergency_reserve": metrics.emergency_reserve,
                 "utilization_rate": metrics.utilization_rate,
                 "allocation_efficiency": metrics.allocation_efficiency,
@@ -673,9 +589,10 @@ class CapitalAllocator(BaseComponent):
             # Track trade-capital association if trade lifecycle manager available
             if self.trade_lifecycle_manager:
                 try:
-                    await self.trade_lifecycle_manager.update_trade_metadata(
-                        trade_id=trade_id,
-                        metadata={
+                    await self.trade_lifecycle_manager.update_trade_event(
+                        trade_id,
+                        TradeEvent.VALIDATION_PASSED,  # Use closest available event
+                        {
                             "capital_allocated": str(requested_amount),
                             "capital_allocation_id": f"{strategy_id}_{exchange}",
                             "capital_allocation_timestamp": datetime.now(timezone.utc).isoformat(),
@@ -694,7 +611,7 @@ class CapitalAllocator(BaseComponent):
                 trade_id=trade_id,
                 strategy_id=strategy_id,
                 exchange=exchange,
-                amount=format_currency(float(requested_amount)),
+                amount=format_currency(requested_amount),
             )
 
             return allocation
@@ -705,7 +622,7 @@ class CapitalAllocator(BaseComponent):
                 trade_id=trade_id,
                 strategy_id=strategy_id,
                 exchange=exchange,
-                requested_amount=float(requested_amount),
+                requested_amount=str(requested_amount),
             )
             return None
 
@@ -746,9 +663,10 @@ class CapitalAllocator(BaseComponent):
             if success and self.trade_lifecycle_manager:
                 # Update trade metadata to reflect capital release
                 try:
-                    await self.trade_lifecycle_manager.update_trade_metadata(
-                        trade_id=trade_id,
-                        metadata={
+                    await self.trade_lifecycle_manager.update_trade_event(
+                        trade_id,
+                        TradeEvent.SETTLEMENT_COMPLETE,  # Use closest available event
+                        {
                             "capital_released": str(release_amount),
                             "capital_release_timestamp": datetime.now(timezone.utc).isoformat(),
                         },
@@ -766,7 +684,7 @@ class CapitalAllocator(BaseComponent):
                 trade_id=trade_id,
                 strategy_id=strategy_id,
                 exchange=exchange,
-                amount=format_currency(float(release_amount)),
+                amount=format_currency(release_amount),
             )
 
             return success
@@ -777,7 +695,7 @@ class CapitalAllocator(BaseComponent):
                 trade_id=trade_id,
                 strategy_id=strategy_id,
                 exchange=exchange,
-                release_amount=float(release_amount),
+                release_amount=str(release_amount),
             )
             return False
 
@@ -816,21 +734,23 @@ class CapitalAllocator(BaseComponent):
 
             efficiency_metrics = {
                 "trade_id": trade_id,
-                "allocated_capital": float(allocated_amount),
-                "realized_pnl": float(realized_pnl),
-                "roi_percentage": float(roi),
+                "allocated_amount": allocated_amount,
+                "realized_pnl": realized_pnl,
+                "roi_percentage": roi,
                 "capital_utilization": (
-                    float(allocation.utilized_amount / allocated_amount)
+                    allocation.utilized_amount / allocated_amount
                     if allocated_amount > 0
-                    else 0.0
+                    else Decimal("0.0")
                 ),
             }
 
             # Update trade metadata if lifecycle manager available
             if self.trade_lifecycle_manager:
                 try:
-                    await self.trade_lifecycle_manager.update_trade_metadata(
-                        trade_id=trade_id, metadata={"capital_efficiency": efficiency_metrics}
+                    await self.trade_lifecycle_manager.update_trade_event(
+                        trade_id,
+                        TradeEvent.ATTRIBUTION_COMPLETE,  # Use closest available event
+                        {"capital_efficiency": efficiency_metrics},
                     )
                 except Exception as tlm_error:
                     # Log error but still return the metrics

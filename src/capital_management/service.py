@@ -16,12 +16,15 @@ CRITICAL: This service MUST be used instead of direct database access.
 
 import uuid
 from datetime import datetime, timezone
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
+from typing import Any
 
-# Service layer should not import database models directly
-# Use dependency injection for all database operations
-from typing import Any, Protocol
-
+# Use repository protocols from interfaces module
+from src.capital_management.interfaces import (
+    AbstractCapitalService,
+    AuditRepositoryProtocol,
+    CapitalRepositoryProtocol,
+)
 from src.core.base.interfaces import HealthStatus
 from src.core.base.service import TransactionalService
 from src.core.exceptions import (
@@ -34,26 +37,6 @@ from src.core.types.risk import (
     CapitalAllocation,
     CapitalMetrics,
 )
-
-
-# Define repository interfaces for dependency injection
-class CapitalRepositoryProtocol(Protocol):
-    """Protocol for capital allocation repository."""
-
-    async def create(self, allocation: dict[str, Any]) -> Any: ...
-    async def update(self, allocation: Any) -> Any: ...
-    async def delete(self, allocation_id: str) -> bool: ...
-    async def get_by_strategy_exchange(self, strategy_id: str, exchange: str) -> Any | None: ...
-    async def get_by_strategy(self, strategy_id: str) -> list[Any]: ...
-    async def get_all(self, limit: int | None = None) -> list[Any]: ...
-
-
-class AuditRepositoryProtocol(Protocol):
-    """Protocol for audit log repository."""
-
-    async def create(self, audit_log: dict[str, Any]) -> Any: ...
-
-
 from src.error_handling.decorators import with_circuit_breaker, with_retry
 
 # State management imports
@@ -65,11 +48,20 @@ from src.state.consistency import (
     emit_state_event,
     validate_state_data,
 )
+from src.utils.capital_config import (
+    extract_decimal_config,
+    extract_percentage_config,
+    load_capital_config,
+)
+from src.utils.capital_resources import get_resource_manager
+from src.utils.capital_validation import (
+    safe_decimal_conversion,
+)
 from src.utils.decorators import cache_result, time_execution
 from src.utils.formatters import format_currency
 
 
-class CapitalService(TransactionalService):
+class CapitalService(AbstractCapitalService, TransactionalService):
     """
     Enterprise-grade capital management service.
 
@@ -107,20 +99,17 @@ class CapitalService(TransactionalService):
             correlation_id=correlation_id,
         )
 
-        # Repository dependencies - injected, not created
         self._capital_repository = capital_repository
         self._audit_repository = audit_repository
         self.state_service = state_service
 
-        # Capital configuration - load from config if available
         self._load_configuration()
-
-        # Default values if config not available
-        self.total_capital = getattr(self, "total_capital", Decimal("100000"))
-        self.emergency_reserve_pct = getattr(self, "emergency_reserve_pct", Decimal("0.1"))
-        self.max_allocation_pct = getattr(self, "max_allocation_pct", Decimal("0.2"))
-        self.max_daily_reallocation_pct = getattr(
-            self, "max_daily_reallocation_pct", Decimal("0.1")
+        config = getattr(self, "_capital_config", {})
+        self.total_capital = extract_decimal_config(config, "total_capital", Decimal("100000"))
+        self.emergency_reserve_pct = extract_percentage_config(config, "emergency_reserve_pct", 0.1)
+        self.max_allocation_pct = extract_percentage_config(config, "max_allocation_pct", 0.2)
+        self.max_daily_reallocation_pct = extract_percentage_config(
+            config, "max_daily_reallocation_pct", 0.1
         )
 
         # Performance tracking
@@ -131,20 +120,19 @@ class CapitalService(TransactionalService):
             "total_releases": 0,
             "total_rebalances": 0,
             "average_allocation_time_ms": 0.0,
-            "total_capital_managed": float(self.total_capital),
+            "total_capital_managed": self.total_capital,
             "emergency_reserve_maintained": True,
             "risk_limit_violations": 0,
         }
 
-        # Cache configuration
+        # Cache configuration (configurable via capital_config)
         self._cache_enabled = True
-        self._cache_ttl = 300  # 5 minutes
+        self._cache_ttl = 300  # 5 minutes, configurable
 
         # Configure service patterns
         self.configure_circuit_breaker(enabled=True, threshold=5, timeout=60)
         self.configure_retry(enabled=True, max_retries=3, delay=1.0, backoff=2.0)
 
-        # Initialize consistent patterns for aligned data flow
         self._event_pattern = ConsistentEventPattern("CapitalService")
         self._validation_pattern = ConsistentValidationPattern()
         self._processing_pattern = ConsistentProcessingPattern("CapitalService")
@@ -165,7 +153,8 @@ class CapitalService(TransactionalService):
                     self._capital_repository = self.resolve_dependency("CapitalRepository")
                 except DependencyError as e:
                     self._logger.warning(
-                        f"CapitalRepository not available via DI: {e}, service will operate in degraded mode"
+                        f"CapitalRepository not available via DI: {e}, "
+                        "service will operate in degraded mode"
                     )
 
             if not self._audit_repository:
@@ -182,22 +171,38 @@ class CapitalService(TransactionalService):
                     self.state_service = self.resolve_dependency("StateService")
                 except DependencyError as e:
                     self._logger.info(
-                        f"StateService not available via DI: {e}, operating without state management integration"
+                        f"StateService not available via DI: {e}, "
+                        "operating without state management integration"
                     )
                 except Exception as e:
                     self._logger.warning(
-                        f"Unexpected error resolving StateService: {e}, operating without state management"
+                        f"Unexpected error resolving StateService: {e}, "
+                        "operating without state management"
                     )
 
             # Initialize capital metrics if repository available
             if self._capital_repository:
                 await self._initialize_capital_state()
 
+            # Configure cache settings from config
+            capital_config = getattr(self, "_capital_config", {})
+            self._cache_enabled = capital_config.get("cache_enabled", True)
+            self._cache_ttl = capital_config.get("cache_ttl_seconds", 300)
+
             self._logger.info("CapitalService started successfully")
 
         except Exception as e:
             self._logger.error(f"Failed to start CapitalService: {e}")
             raise ServiceError(f"CapitalService startup failed: {e}") from e
+
+    async def _do_stop(self) -> None:
+        """Stop the capital service and clean up resources."""
+        try:
+            await self.cleanup_resources()
+            self._logger.info("CapitalService stopped and resources cleaned up")
+        except Exception as e:
+            self._logger.error(f"Error during CapitalService shutdown: {e}")
+            raise ServiceError(f"CapitalService shutdown failed: {e}") from e
 
     async def _initialize_capital_state(self) -> None:
         """Initialize capital state from repository."""
@@ -222,8 +227,8 @@ class CapitalService(TransactionalService):
 
             self._logger.info(
                 "Capital state initialized",
-                total_capital=format_currency(float(self.total_capital)),
-                total_allocated=format_currency(float(total_allocated)),
+                total_capital=format_currency(self.total_capital),
+                total_allocated=format_currency(total_allocated),
                 active_allocations=len(allocations),
             )
 
@@ -234,8 +239,6 @@ class CapitalService(TransactionalService):
 
     # Core Capital Management Operations
 
-    @with_circuit_breaker(failure_threshold=5, recovery_timeout=60.0)
-    @with_retry(max_attempts=3, base_delay=1.0)
     @time_execution
     async def allocate_capital(
         self,
@@ -298,7 +301,8 @@ class CapitalService(TransactionalService):
             available_capital = await self._get_available_capital()
             if requested_amount > available_capital:
                 raise ValidationError(
-                    f"Insufficient capital: requested {requested_amount}, available {available_capital}",
+                    f"Insufficient capital: requested {requested_amount}, "
+                    f"available {available_capital}",
                     error_code="CAP_002",
                     details={
                         "requested_amount": str(requested_amount),
@@ -316,7 +320,7 @@ class CapitalService(TransactionalService):
             existing_allocation = await self._get_existing_allocation(strategy_id, exchange)
 
             # Calculate allocation percentage
-            allocation_percentage = float(requested_amount / self.total_capital)
+            allocation_percentage = requested_amount / self.total_capital
 
             # Create or update allocation record
             if existing_allocation:
@@ -333,7 +337,7 @@ class CapitalService(TransactionalService):
                     "allocated_amount": str(new_allocated),
                     "utilized_amount": getattr(existing_allocation, "utilized_amount", "0"),
                     "available_amount": str(new_allocated),
-                    "allocation_percentage": float(new_allocated / self.total_capital),
+                    "allocation_percentage": new_allocated / self.total_capital,
                     "last_rebalance": start_time.isoformat(),
                     "updated_at": start_time.isoformat(),
                 }
@@ -350,7 +354,7 @@ class CapitalService(TransactionalService):
                     "allocated_amount": str(requested_amount),
                     "utilized_amount": "0",
                     "available_amount": str(requested_amount),
-                    "allocation_percentage": allocation_percentage,
+                    "allocation_percentage": float(allocation_percentage),
                     "last_rebalance": start_time.isoformat(),
                     "created_at": start_time.isoformat(),
                     "updated_at": start_time.isoformat(),
@@ -372,7 +376,7 @@ class CapitalService(TransactionalService):
                 operation_context={
                     "requested_amount": str(requested_amount),
                     "available_capital_before": str(available_capital),
-                    "allocation_percentage": allocation_percentage,
+                    "allocation_percentage": float(allocation_percentage),
                     "risk_context": risk_context or {},
                 },
                 authorized_by=authorized_by,
@@ -388,24 +392,28 @@ class CapitalService(TransactionalService):
             allocation = CapitalAllocation(
                 allocation_id=str(db_allocation.get("id", str(uuid.uuid4()))),
                 strategy_id=db_allocation.get("strategy_id", strategy_id),
-                allocated_capital=self._safe_decimal_conversion(
+                allocated_amount=self._safe_decimal_conversion(
                     db_allocation.get("allocated_amount", "0")
                 ),
-                used_capital=self._safe_decimal_conversion(
+                utilized_amount=self._safe_decimal_conversion(
                     db_allocation.get("utilized_amount", "0")
                 ),
-                available_capital=self._safe_decimal_conversion(
+                available_amount=self._safe_decimal_conversion(
                     db_allocation.get("available_amount", "0")
                 ),
-                allocation_pct=db_allocation.get("allocation_percentage", 0.0),
-                target_allocation_pct=db_allocation.get("allocation_percentage", 0.0),
+                allocation_percentage=Decimal(str(db_allocation.get("allocation_percentage", 0.0))),
+                target_allocation_pct=Decimal(str(db_allocation.get("allocation_percentage", 0.0))),
                 min_allocation=Decimal("0"),
                 max_allocation=self._safe_decimal_conversion(
                     db_allocation.get("allocated_amount", "0")
                 )
                 * Decimal("2"),
                 last_rebalance=(
-                    datetime.fromisoformat(db_allocation.get("last_rebalance"))
+                    (
+                        datetime.fromisoformat(db_allocation.get("last_rebalance"))
+                        if isinstance(db_allocation.get("last_rebalance"), str)
+                        else db_allocation.get("last_rebalance")
+                    )
                     if db_allocation.get("last_rebalance")
                     else start_time
                 ),
@@ -416,11 +424,10 @@ class CapitalService(TransactionalService):
                 operation_id=operation_id,
                 strategy_id=strategy_id,
                 exchange=exchange,
-                amount=format_currency(float(requested_amount)),
-                allocation_percentage=f"{allocation_percentage:.2%}",
+                amount=format_currency(requested_amount),
+                allocation_percentage=f"{float(allocation_percentage):.2%}",
             )
 
-            # Emit capital allocation event using consistent event pattern
             allocation_event_data = {
                 "allocation_id": str(db_allocation.get("id", str(uuid.uuid4()))),
                 "strategy_id": strategy_id,
@@ -430,34 +437,25 @@ class CapitalService(TransactionalService):
                 "timestamp": start_time.isoformat(),
             }
             await self._event_pattern.emit_consistent("capital.allocated", allocation_event_data)
-
-            # Save state snapshot after successful allocation
             await self._save_capital_state_snapshot(reason="allocation_change")
 
             return allocation
 
-        except Exception as db_error:
-            # Repository errors
-            if "repository" in str(db_error).lower() or "database" in str(db_error).lower():
-                self._performance_metrics["failed_allocations"] += 1
-                self._logger.error(
-                    "Repository error during capital allocation",
-                    operation_id=operation_id,
-                    error_type=type(db_error).__name__,
-                    error=str(db_error),
-                )
-                raise ServiceError(f"Repository error during allocation: {db_error}") from db_error
-            else:
-                # Re-raise non-repository errors
-                raise
+        except ServiceError as e:
+            self._performance_metrics["failed_allocations"] += 1
+            self._logger.error(
+                "Service error during capital allocation",
+                operation_id=operation_id,
+                error_type=type(e).__name__,
+                error=str(e),
+            )
+            raise
 
         except ValidationError:
-            # Re-raise validation errors
             self._performance_metrics["failed_allocations"] += 1
             raise
 
         except Exception as e:
-            # Other unexpected errors
             self._performance_metrics["failed_allocations"] += 1
 
             # Create failure audit log
@@ -481,14 +479,14 @@ class CapitalService(TransactionalService):
                 operation_id=operation_id,
                 strategy_id=strategy_id,
                 exchange=exchange,
-                requested_amount=format_currency(float(requested_amount)),
+                requested_amount=format_currency(requested_amount),
                 error=str(e),
             )
 
             raise ServiceError(f"Capital allocation failed: {e}") from e
 
-    @with_circuit_breaker(failure_threshold=5, recovery_timeout=60.0)
-    @with_retry(max_attempts=3, base_delay=1.0)
+    @with_circuit_breaker(failure_threshold=5, recovery_timeout=60)
+    @with_retry(max_attempts=3, base_delay=Decimal("1.0"))
     @time_execution
     async def release_capital(
         self,
@@ -538,6 +536,28 @@ class CapitalService(TransactionalService):
         start_time = datetime.now(timezone.utc)
 
         try:
+            # Validate inputs
+            if not strategy_id or not strategy_id.strip():
+                raise ValidationError(
+                    "Strategy ID cannot be empty",
+                    error_code="CAP_004",
+                    details={"component": "CapitalService", "field": "strategy_id"},
+                )
+
+            if not exchange or not exchange.strip():
+                raise ValidationError(
+                    "Exchange cannot be empty",
+                    error_code="CAP_005",
+                    details={"component": "CapitalService", "field": "exchange"},
+                )
+
+            if release_amount <= 0:
+                raise ValidationError(
+                    "Release amount must be positive",
+                    error_code="CAP_007",
+                    details={"amount": str(release_amount), "component": "CapitalService"},
+                )
+
             # Find existing allocation
             allocation = await self._get_existing_allocation(strategy_id, exchange)
             if not allocation:
@@ -567,15 +587,22 @@ class CapitalService(TransactionalService):
 
             if new_allocated_amount == Decimal("0"):
                 # Delete allocation if zero
-                await self._delete_allocation(allocation.id)
+                await self._delete_allocation(allocation.allocation_id)
             else:
-                # Update allocation
-                allocation.allocated_amount = str(new_allocated_amount)
-                allocation.available_amount = str(new_available_amount)
-                allocation.allocation_percentage = float(new_allocated_amount / self.total_capital)
-                allocation.updated_at = datetime.now(timezone.utc)
+                # Update allocation using dictionary format
+                allocation_data = {
+                    "id": allocation.allocation_id,
+                    "strategy_id": allocation.strategy_id,
+                    "exchange": exchange,
+                    "allocated_amount": str(new_allocated_amount),
+                    "utilized_amount": allocation.utilized_amount,
+                    "available_amount": str(new_available_amount),
+                    "allocation_percentage": new_allocated_amount / self.total_capital,
+                    "last_rebalance": allocation.last_rebalance,
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                }
 
-                await self._update_allocation(allocation)
+                await self._update_allocation(allocation_data)
 
             # Create audit log
             await self._create_audit_log(
@@ -605,11 +632,10 @@ class CapitalService(TransactionalService):
                 operation_id=operation_id,
                 strategy_id=strategy_id,
                 exchange=exchange,
-                amount=format_currency(float(release_amount)),
-                remaining_allocation=format_currency(float(new_allocated_amount)),
+                amount=format_currency(release_amount),
+                remaining_allocation=format_currency(new_allocated_amount),
             )
 
-            # Emit capital release event using consistent event pattern
             release_event_data = {
                 "strategy_id": strategy_id,
                 "exchange": exchange,
@@ -618,28 +644,20 @@ class CapitalService(TransactionalService):
                 "timestamp": start_time.isoformat(),
             }
             await self._event_pattern.emit_consistent("capital.released", release_event_data)
-
-            # Save state snapshot after successful release
             await self._save_capital_state_snapshot(reason="release_capital")
 
             return True
 
-        except Exception as repo_error:
-            # Repository errors
-            if "repository" in str(repo_error).lower() or "database" in str(repo_error).lower():
-                self._logger.error(
-                    "Repository error during capital release",
-                    operation_id=operation_id,
-                    error_type=type(repo_error).__name__,
-                    error=str(repo_error),
-                )
-                return False
-            else:
-                # Re-raise non-repository errors
-                raise
+        except ServiceError as e:
+            self._logger.error(
+                "Service error during capital release",
+                operation_id=operation_id,
+                error_type=type(e).__name__,
+                error=str(e),
+            )
+            return False
 
         except ValidationError:
-            # Re-raise validation errors
             raise
 
         except Exception as e:
@@ -664,14 +682,14 @@ class CapitalService(TransactionalService):
                 operation_id=operation_id,
                 strategy_id=strategy_id,
                 exchange=exchange,
-                release_amount=format_currency(float(release_amount)),
+                release_amount=format_currency(release_amount),
                 error=str(e),
             )
 
             return False
 
-    @with_circuit_breaker(failure_threshold=5, recovery_timeout=60.0)
-    @with_retry(max_attempts=3, base_delay=1.0)
+    @with_circuit_breaker(failure_threshold=5, recovery_timeout=60)
+    @with_retry(max_attempts=3, base_delay=Decimal("1.0"))
     @time_execution
     async def update_utilization(
         self,
@@ -727,43 +745,42 @@ class CapitalService(TransactionalService):
                     f"Utilization {utilized_amount} exceeds allocation {allocated_amount}"
                 )
 
-            # Update utilization
-            Decimal(allocation.utilized_amount)
-            allocation.utilized_amount = str(utilized_amount)
-            allocation.available_amount = str(allocated_amount - utilized_amount)
-            allocation.updated_at = datetime.now(timezone.utc)
+            # Update utilization using dictionary format
+            allocation_data = {
+                "id": allocation.allocation_id,
+                "strategy_id": allocation.strategy_id,
+                "exchange": exchange,
+                "allocated_amount": str(allocated_amount),
+                "utilized_amount": str(utilized_amount),
+                "available_amount": str(allocated_amount - utilized_amount),
+                "allocation_percentage": allocation.allocation_percentage,
+                "last_rebalance": allocation.last_rebalance,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }
 
-            await self._update_allocation(allocation)
+            await self._update_allocation(allocation_data)
 
             self._logger.debug(
                 "Capital utilization updated",
                 strategy_id=strategy_id,
                 exchange=exchange,
-                utilized=format_currency(float(utilized_amount)),
-                available=format_currency(float(allocated_amount - utilized_amount)),
+                utilized=format_currency(utilized_amount),
+                available=format_currency(allocated_amount - utilized_amount),
             )
 
             return True
 
-        except Exception as repo_error:
-            # Repository errors
-            if "repository" in str(repo_error).lower() or "database" in str(repo_error).lower():
-                self._logger.error(
-                    "Repository error during utilization update",
-                    strategy_id=strategy_id,
-                    exchange=exchange,
-                    error_type=type(repo_error).__name__,
-                    error=str(repo_error),
-                )
-                raise ServiceError(
-                    f"Repository error during utilization update: {repo_error}"
-                ) from repo_error
-            else:
-                # Re-raise non-repository errors
-                raise
+        except ServiceError as e:
+            self._logger.error(
+                "Service error during utilization update",
+                strategy_id=strategy_id,
+                exchange=exchange,
+                error_type=type(e).__name__,
+                error=str(e),
+            )
+            raise
 
         except ValidationError:
-            # Re-raise validation errors
             raise
 
         except Exception as e:
@@ -771,13 +788,13 @@ class CapitalService(TransactionalService):
                 "Utilization update failed",
                 strategy_id=strategy_id,
                 exchange=exchange,
-                utilized_amount=format_currency(float(utilized_amount)),
+                utilized_amount=format_currency(utilized_amount),
                 error=str(e),
             )
             return False
 
-    @with_circuit_breaker(failure_threshold=5, recovery_timeout=60.0)
-    @with_retry(max_attempts=3, base_delay=1.0)
+    @with_circuit_breaker(failure_threshold=5, recovery_timeout=60)
+    @with_retry(max_attempts=3, base_delay=Decimal("1.0"))
     @cache_result(ttl=60)
     @time_execution
     async def get_capital_metrics(self) -> CapitalMetrics:
@@ -792,8 +809,8 @@ class CapitalService(TransactionalService):
             self._get_capital_metrics_impl,
         )
 
-    @with_circuit_breaker(failure_threshold=5, recovery_timeout=60.0)
-    @with_retry(max_attempts=3, base_delay=1.0)
+    @with_circuit_breaker(failure_threshold=5, recovery_timeout=60)
+    @with_retry(max_attempts=3, base_delay=Decimal("1.0"))
     @cache_result(ttl=120)
     @time_execution
     async def get_allocations_by_strategy(self, strategy_id: str) -> list[CapitalAllocation]:
@@ -821,30 +838,36 @@ class CapitalService(TransactionalService):
             # Calculate metrics
             total_allocated = sum(
                 self._safe_decimal_conversion(alloc.allocated_amount) for alloc in allocations
-            )
-            total_utilized = sum(
-                self._safe_decimal_conversion(alloc.utilized_amount) for alloc in allocations
-            )
+            ) or Decimal("0")
+            # Total utilization calculation for future metrics features
             emergency_reserve = self.total_capital * self.emergency_reserve_pct
             available_capital = self.total_capital - total_allocated - emergency_reserve
 
-            utilization_rate = (
-                float(total_utilized / total_allocated) if total_allocated > 0 else 0.0
-            )
-
-            # Calculate allocation efficiency
-            efficiency_score = await self._calculate_allocation_efficiency(allocations)
+            # Calculate allocation efficiency (used for future features)
 
             metrics = CapitalMetrics(
                 total_capital=self.total_capital,
-                allocated_capital=total_allocated,
-                available_capital=available_capital,
-                utilization_rate=utilization_rate,
-                allocation_efficiency=efficiency_score,
-                rebalance_frequency_hours=24,  # Default
-                emergency_reserve=emergency_reserve,
-                last_updated=datetime.now(timezone.utc),
-                allocation_count=len(allocations),
+                allocated_amount=total_allocated,
+                available_amount=available_capital,
+                total_pnl=Decimal("0"),  # Default value
+                realized_pnl=Decimal("0"),  # Default value
+                unrealized_pnl=Decimal("0"),  # Default value
+                daily_return=Decimal("0.0"),  # Default value
+                weekly_return=Decimal("0.0"),  # Default value
+                monthly_return=Decimal("0.0"),  # Default value
+                yearly_return=Decimal("0.0"),  # Default value
+                total_return=Decimal("0.0"),  # Default value
+                sharpe_ratio=Decimal("0.0"),  # Default value
+                sortino_ratio=Decimal("0.0"),  # Default value
+                calmar_ratio=Decimal("0.0"),  # Default value
+                current_drawdown=Decimal("0.0"),  # Default value
+                max_drawdown=Decimal("0.0"),  # Default value
+                var_95=Decimal("0"),  # Default value
+                expected_shortfall=Decimal("0"),  # Default value
+                strategies_active=len(allocations),
+                positions_open=0,  # Default value
+                leverage_used=Decimal("0.0"),  # Default value
+                timestamp=datetime.now(timezone.utc),
             )
 
             return metrics
@@ -862,23 +885,24 @@ class CapitalService(TransactionalService):
             # Get allocations by strategy via repository
             db_allocations = await self._capital_repository.get_by_strategy(strategy_id)
 
-            # Convert to domain objects
             allocations = []
             for db_alloc in db_allocations:
                 allocation = CapitalAllocation(
                     allocation_id=str(getattr(db_alloc, "id", str(uuid.uuid4()))),
                     strategy_id=getattr(db_alloc, "strategy_id", strategy_id),
-                    allocated_capital=self._safe_decimal_conversion(
+                    allocated_amount=self._safe_decimal_conversion(
                         getattr(db_alloc, "allocated_amount", "0")
                     ),
-                    used_capital=self._safe_decimal_conversion(
+                    utilized_amount=self._safe_decimal_conversion(
                         getattr(db_alloc, "utilized_amount", "0")
                     ),
-                    available_capital=self._safe_decimal_conversion(
+                    available_amount=self._safe_decimal_conversion(
                         getattr(db_alloc, "available_amount", "0")
                     ),
-                    allocation_pct=getattr(db_alloc, "allocation_percentage", 0.0),
-                    target_allocation_pct=getattr(db_alloc, "allocation_percentage", 0.0),
+                    allocation_percentage=Decimal(str(getattr(db_alloc, "allocation_percentage", 0.0))),
+                    target_allocation_pct=Decimal(
+                        str(getattr(db_alloc, "allocation_percentage", 0.0))
+                    ),
                     min_allocation=Decimal("0"),
                     max_allocation=self._safe_decimal_conversion(
                         getattr(db_alloc, "allocated_amount", "0")
@@ -900,19 +924,14 @@ class CapitalService(TransactionalService):
         self, strategy_id: str, exchange: str, amount: Decimal
     ) -> None:
         """Validate allocation request using consistent validation pattern."""
-        # Use consistent validation pattern
         validation_data = {"strategy_id": strategy_id, "exchange": exchange, "amount": str(amount)}
-
         result = await validate_state_data("capital_allocation_request", validation_data)
-
         if not result["is_valid"]:
             raise ValidationError(
                 f"Capital allocation validation failed: {result['errors']}",
                 error_code="CAP_004",
                 details={"component": "CapitalService", "validation_errors": result["errors"]},
             )
-
-        # Additional boundary checks using consistent patterns
         if not strategy_id or not strategy_id.strip():
             raise ValidationError(
                 "Strategy ID cannot be empty",
@@ -938,24 +957,19 @@ class CapitalService(TransactionalService):
         self, strategy_id: str, exchange: str, amount: Decimal
     ) -> None:
         """Validate allocation limits using consistent boundary validation pattern."""
-        # Use consistent validation pattern for input boundary validation
         boundary_validation = {
             "strategy_id": strategy_id,
             "exchange": exchange,
             "amount": str(amount),
             "max_allocation_pct": str(self.max_allocation_pct),
         }
-
         result = await validate_state_data("capital_allocation_limits", boundary_validation)
-
         if not result["is_valid"]:
             raise ValidationError(
                 f"Allocation limits validation failed: {result['errors']}",
                 error_code="CAP_008",
                 details={"component": "CapitalService", "validation_errors": result["errors"]},
             )
-
-        # Consistent boundary checks using same pattern as state service
         if not strategy_id or not strategy_id.strip():
             raise ValidationError(
                 "Strategy ID cannot be empty",
@@ -977,10 +991,12 @@ class CapitalService(TransactionalService):
                 details={"amount": str(amount), "component": "CapitalService"},
             )
 
-        # Business rule validation using consistent processing pattern
+        async def calculate_max_allocation(data):
+            return data["total_capital"] * data["max_pct"]
+
         max_allocation = await self._processing_pattern.process_item_consistent(
             {"total_capital": self.total_capital, "max_pct": self.max_allocation_pct},
-            lambda data: data["total_capital"] * data["max_pct"],
+            calculate_max_allocation,
         )
 
         if amount > max_allocation:
@@ -997,16 +1013,16 @@ class CapitalService(TransactionalService):
     async def _get_available_capital(self) -> Decimal:
         """Calculate available capital for allocation."""
         if not self._capital_repository:
-            # Degraded mode - use conservative estimate
-            return self.total_capital * Decimal("0.5")
+            # Degraded mode - use conservative estimate from config
+            degraded_ratio = Decimal(str(self.capital_config.get("degraded_capital_ratio", "0.5")))
+            return self.total_capital * degraded_ratio
 
         try:
             # Get all allocations via repository
             allocations = await self._capital_repository.get_all()
 
-            # Return maximum available if no allocations available
             if not allocations:
-                return self.total_capital * Decimal("0.8")  # 80% as fallback
+                return self.total_capital * Decimal("0.8")
 
             total_allocated = sum(
                 self._safe_decimal_conversion(getattr(alloc, "allocated_amount", "0"))
@@ -1103,6 +1119,7 @@ class CapitalService(TransactionalService):
             self._logger.warning("No capital repository or data available for restoration")
             return
 
+        existing_allocations = None
         try:
             # Note: Transaction management should be handled at repository level
             # This service layer focuses on business logic, not transaction boundaries
@@ -1141,6 +1158,12 @@ class CapitalService(TransactionalService):
         except Exception as e:
             self._logger.error(f"Failed to restore allocations: {e}")
             raise ServiceError(f"State restoration failed: {e}") from e
+        finally:
+            existing_allocations = None
+            if allocations_data and len(allocations_data) > 100:
+                import gc
+
+                gc.collect()
 
     async def _calculate_allocation_efficiency(self, allocations: list[Any]) -> float:
         """Calculate allocation efficiency score."""
@@ -1156,14 +1179,16 @@ class CapitalService(TransactionalService):
         )
 
         if total_allocated == 0:
-            return 0.5
+            return Decimal("0.5")
 
-        utilization_efficiency = float(total_utilized / total_allocated)
+        utilization_efficiency = total_utilized / total_allocated
 
         # Apply performance multiplier (simplified for now)
-        performance_multiplier = 1.0  # Could integrate with performance metrics
+        performance_multiplier = Decimal("1.0")  # Could integrate with performance metrics
 
-        return max(0.0, min(2.0, utilization_efficiency * performance_multiplier))
+        return max(
+            Decimal("0.0"), min(Decimal("2.0"), utilization_efficiency * performance_multiplier)
+        )
 
     async def _create_audit_log(
         self,
@@ -1293,7 +1318,7 @@ class CapitalService(TransactionalService):
             "total_releases": 0,
             "total_rebalances": 0,
             "average_allocation_time_ms": 0.0,
-            "total_capital_managed": float(self.total_capital),
+            "total_capital_managed": self.total_capital,
             "emergency_reserve_maintained": True,
             "risk_limit_violations": 0,
         }
@@ -1304,44 +1329,16 @@ class CapitalService(TransactionalService):
         """Load configuration from ConfigService or environment."""
         try:
             # Try to get config from dependency injection
-            from src.core.dependency_injection import get_container
-
-            container = get_container()
-            config_service = container.get("ConfigService")
-
-            if config_service:
-                capital_config = config_service.get_config_value("capital_management", {})
-
-                # Load values from config
-                self.total_capital = Decimal(str(capital_config.get("total_capital", 100000)))
-                self.emergency_reserve_pct = Decimal(
-                    str(capital_config.get("emergency_reserve_pct", 0.1))
-                )
-                self.max_allocation_pct = Decimal(
-                    str(capital_config.get("max_allocation_pct", 0.2))
-                )
-                self.max_daily_reallocation_pct = Decimal(
-                    str(capital_config.get("max_daily_reallocation_pct", 0.1))
-                )
+            config_service = self.resolve_dependency("ConfigService")
+            self._capital_config = load_capital_config(config_service)
         except Exception as e:
             self._logger.warning(f"Failed to load configuration from ConfigService: {e}")
-            # Will use defaults
+            # Will use defaults from load_capital_config
+            self._capital_config = load_capital_config(None)
 
     def _safe_decimal_conversion(self, value: Any) -> Decimal:
         """Safely convert any value to Decimal."""
-        if isinstance(value, Decimal):
-            return value
-        elif isinstance(value, int | float):
-            return Decimal(str(value))
-        elif isinstance(value, str):
-            try:
-                return Decimal(value)
-            except (ValueError, InvalidOperation):
-                self._logger.warning(f"Invalid decimal value: {value}, using 0")
-                return Decimal("0")
-        else:
-            self._logger.warning(f"Unknown type for decimal conversion: {type(value)}, using 0")
-            return Decimal("0")
+        return safe_decimal_conversion(value)
 
     # State Management Integration Methods
 
@@ -1356,16 +1353,15 @@ class CapitalService(TransactionalService):
             return  # Skip if StateService not available
 
         try:
-            # Get current allocations using consistent processing
+
+            async def get_allocations(_):
+                return await self._get_all_allocations()
+
             allocations = await self._processing_pattern.process_item_consistent(
-                None,  # No input item needed
-                lambda _: self._get_all_allocations(),
+                None,
+                get_allocations,
             )
-
-            # Build state data using consistent transformation
             state_data = await self._build_consistent_state_data(allocations, reason)
-
-            # Save to StateService using consistent pattern
             await self.state_service.set_state(
                 state_type=StateType.SYSTEM_STATE,
                 state_id="capital_allocations",
@@ -1376,7 +1372,6 @@ class CapitalService(TransactionalService):
                 reason=reason,
             )
 
-            # Emit state save event using consistent pattern
             await emit_state_event(
                 "snapshot_saved",
                 {
@@ -1394,20 +1389,17 @@ class CapitalService(TransactionalService):
             )
 
         except StateError as e:
-            # Log state service specific errors
             self._logger.warning(f"State service error saving capital snapshot: {e}")
         except Exception as e:
-            # Log but don't fail the operation
             self._logger.warning(f"Failed to save capital state snapshot: {e}")
 
     async def _build_consistent_state_data(
         self, allocations: list[Any], reason: str
     ) -> dict[str, Any]:
         """Build state data using consistent transformation pattern."""
-        return {
-            "total_capital": str(self.total_capital),
-            "emergency_reserve_pct": str(self.emergency_reserve_pct),
-            "allocations": [
+        allocation_data = None
+        try:
+            allocation_data = [
                 {
                     "strategy_id": getattr(alloc, "strategy_id", ""),
                     "exchange": getattr(alloc, "exchange", ""),
@@ -1422,11 +1414,18 @@ class CapitalService(TransactionalService):
                     ),
                 }
                 for alloc in allocations
-            ],
-            "performance_metrics": self._performance_metrics.copy(),
-            "snapshot_reason": reason,
-            "snapshot_timestamp": datetime.now(timezone.utc).isoformat(),
-        }
+            ]
+
+            return {
+                "total_capital": str(self.total_capital),
+                "emergency_reserve_pct": str(self.emergency_reserve_pct),
+                "allocations": allocation_data,
+                "performance_metrics": self._performance_metrics.copy(),
+                "snapshot_reason": reason,
+                "snapshot_timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+        finally:
+            allocation_data = None
 
     async def restore_capital_state(self) -> bool:
         """
@@ -1452,19 +1451,29 @@ class CapitalService(TransactionalService):
                 return False
 
             # Extract state data from response
-            state_data = (
-                state_response.get("data") if isinstance(state_response, dict) else state_response
-            )
+            if isinstance(state_response, dict):
+                state_data = state_response.get("data", state_response)
+            else:
+                state_data = state_response
+
+            # Handle case where state_data might be None or not a dict
+            if not isinstance(state_data, dict):
+                self._logger.error("Invalid state data format for restoration")
+                return False
 
             # Restore configuration
-            self.total_capital = Decimal(state_data["total_capital"])
-            self.emergency_reserve_pct = Decimal(state_data["emergency_reserve_pct"])
+            self.total_capital = Decimal(str(state_data.get("total_capital", "100000")))
+            self.emergency_reserve_pct = Decimal(
+                str(state_data.get("emergency_reserve_pct", "0.1"))
+            )
 
             # Restore state within a transaction to ensure consistency
             await self._restore_allocations_in_transaction(state_data.get("allocations", []))
 
             # Restore performance metrics
-            self._performance_metrics.update(state_data.get("performance_metrics", {}))
+            performance_metrics = state_data.get("performance_metrics", {})
+            if isinstance(performance_metrics, dict):
+                self._performance_metrics.update(performance_metrics)
 
             self._logger.info(
                 "Capital state restored successfully",
@@ -1479,3 +1488,24 @@ class CapitalService(TransactionalService):
         except Exception as e:
             self._logger.error(f"Failed to restore capital state: {e}")
             return False
+
+    async def cleanup_resources(self) -> None:
+        """Clean up resources to prevent memory leaks."""
+        try:
+            resource_manager = get_resource_manager()
+
+            # Reset performance metrics to prevent accumulation
+            if (
+                self._performance_metrics["total_allocations"] > 10000
+                or self._performance_metrics["successful_allocations"] > 10000
+            ):
+                archived_metrics = self._performance_metrics.copy()
+                self._logger.info(
+                    "Archiving performance metrics", archived_metrics=archived_metrics
+                )
+                resource_manager.cleanup_allocations_data([archived_metrics])
+                self.reset_metrics()
+
+            self._logger.debug("Capital service resource cleanup completed")
+        except Exception as e:
+            self._logger.warning(f"Resource cleanup failed: {e}")

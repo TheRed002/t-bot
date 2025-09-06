@@ -25,21 +25,11 @@ Version: 1.0.0
 """
 
 # Export capital-specific types for convenience
-from src.core.types.capital import (
-    CapitalCurrencyExposure,
-    CapitalExchangeAllocation,
-    CapitalFundFlow,
-    ExtendedCapitalProtection,
-    ExtendedWithdrawalRule,
-)
+# Import DI registration function (no circular dependencies)
+from src.capital_management.di_registration import register_capital_management_services
 
-from .capital_allocator import CapitalAllocator
-from .currency_manager import CurrencyManager
-from .exchange_distributor import ExchangeDistributor
-from .fund_flow_manager import FundFlowManager
-
-# Export service interfaces
-from .interfaces import (
+# Import service interfaces first (no circular dependencies)
+from src.capital_management.interfaces import (
     AbstractCapitalService,
     AbstractCurrencyManagementService,
     AbstractExchangeDistributionService,
@@ -49,31 +39,69 @@ from .interfaces import (
     ExchangeDistributionServiceProtocol,
     FundFlowManagementServiceProtocol,
 )
-from .service import CapitalService
+from src.core.types.capital import (
+    CapitalCurrencyExposure,
+    CapitalExchangeAllocation,
+    CapitalFundFlow,
+    ExtendedCapitalProtection,
+    ExtendedWithdrawalRule,
+)
+
+
+# Use lazy imports for concrete implementations to avoid circular dependencies
+def __getattr__(name: str):
+    """Lazy import to avoid circular dependencies."""
+    imports = {
+        "CapitalAllocator": "src.capital_management.capital_allocator",
+        "CurrencyManager": "src.capital_management.currency_manager",
+        "ExchangeDistributor": "src.capital_management.exchange_distributor",
+        "FundFlowManager": "src.capital_management.fund_flow_manager",
+        "CapitalService": "src.capital_management.service",
+        "CapitalAllocatorFactory": "src.capital_management.factory",
+        "CapitalManagementFactory": "src.capital_management.factory",
+        "CapitalServiceFactory": "src.capital_management.factory",
+        "CurrencyManagerFactory": "src.capital_management.factory",
+        "ExchangeDistributorFactory": "src.capital_management.factory",
+        "FundFlowManagerFactory": "src.capital_management.factory",
+        "CapitalRepository": "src.capital_management.repository",
+        "AuditRepository": "src.capital_management.repository",
+    }
+
+    if name in imports:
+        module = __import__(imports[name], fromlist=[name])
+        return getattr(module, name)
+
+    raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
+
 
 __all__ = [
-    # Service interfaces - alphabetical
     "AbstractCapitalService",
     "AbstractCurrencyManagementService",
     "AbstractExchangeDistributionService",
     "AbstractFundFlowManagementService",
-    # Main service implementations - alphabetical  
+    "AuditRepository",
     "CapitalAllocator",
-    "CapitalService",
-    "CurrencyManager",
-    "ExchangeDistributor",
-    "FundFlowManager",
-    # Service protocols - alphabetical
-    "CapitalServiceProtocol",
-    "CurrencyManagementServiceProtocol",
-    "ExchangeDistributionServiceProtocol",
-    "FundFlowManagementServiceProtocol",
-    # Types - alphabetical
+    "CapitalAllocatorFactory",
     "CapitalCurrencyExposure",
     "CapitalExchangeAllocation",
     "CapitalFundFlow",
+    "CapitalManagementFactory",
+    "CapitalRepository",
+    "CapitalService",
+    "CapitalServiceFactory",
+    "CapitalServiceProtocol",
+    "CurrencyManagementServiceProtocol",
+    "CurrencyManager",
+    "CurrencyManagerFactory",
+    "ExchangeDistributionServiceProtocol",
+    "ExchangeDistributor",
+    "ExchangeDistributorFactory",
     "ExtendedCapitalProtection",
     "ExtendedWithdrawalRule",
+    "FundFlowManagementServiceProtocol",
+    "FundFlowManager",
+    "FundFlowManagerFactory",
+    "register_capital_management_services",
 ]
 
 __version__ = "1.0.0"
