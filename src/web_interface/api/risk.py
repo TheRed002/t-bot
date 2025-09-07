@@ -33,16 +33,16 @@ class RiskMetricsResponse(BaseModel):
 
     portfolio_value: Decimal
     total_exposure: Decimal
-    leverage: float
+    leverage: Decimal
     var_1d: Decimal  # Value at Risk 1 day
     var_5d: Decimal  # Value at Risk 5 days
     expected_shortfall: Decimal
     max_drawdown: Decimal
-    max_drawdown_percentage: float
-    volatility: float
-    beta: float | None = None
-    correlation_btc: float | None = None
-    risk_score: float
+    max_drawdown_percentage: Decimal
+    volatility: Decimal
+    beta: Decimal | None = None
+    correlation_btc: Decimal | None = None
+    risk_score: Decimal
     risk_level: str
     last_updated: datetime
 
@@ -50,30 +50,30 @@ class RiskMetricsResponse(BaseModel):
 class RiskLimitsResponse(BaseModel):
     """Response model for risk limits."""
 
-    max_portfolio_risk: float
+    max_portfolio_risk: Decimal
     max_position_size: Decimal
-    max_leverage: float
+    max_leverage: Decimal
     max_daily_loss: Decimal
-    max_drawdown_limit: float
-    concentration_limit: float
-    correlation_limit: float
+    max_drawdown_limit: Decimal
+    concentration_limit: Decimal
+    correlation_limit: Decimal
     var_limit: Decimal
     stop_loss_required: bool
     position_sizing_method: str
-    risk_per_trade: float
+    risk_per_trade: Decimal
 
 
 class UpdateRiskLimitsRequest(BaseModel):
     """Request model for updating risk limits."""
 
-    max_portfolio_risk: float | None = Field(None, ge=0, le=1)
+    max_portfolio_risk: Decimal | None = Field(None, ge=0, le=1)
     max_position_size: Decimal | None = Field(None, gt=0)
-    max_leverage: float | None = Field(None, ge=1, le=10)
+    max_leverage: Decimal | None = Field(None, ge=1, le=10)
     max_daily_loss: Decimal | None = Field(None, gt=0)
-    max_drawdown_limit: float | None = Field(None, ge=0, le=1)
-    concentration_limit: float | None = Field(None, ge=0, le=1)
+    max_drawdown_limit: Decimal | None = Field(None, ge=0, le=1)
+    concentration_limit: Decimal | None = Field(None, ge=0, le=1)
     var_limit: Decimal | None = Field(None, gt=0)
-    risk_per_trade: float | None = Field(None, ge=0, le=0.1)
+    risk_per_trade: Decimal | None = Field(None, ge=0, le=0.1)
 
 
 class RiskAlertResponse(BaseModel):
@@ -84,8 +84,8 @@ class RiskAlertResponse(BaseModel):
     severity: str
     message: str
     triggered_at: datetime
-    current_value: float | None = None
-    threshold_value: float | None = None
+    current_value: Decimal | None = None
+    threshold_value: Decimal | None = None
     affected_positions: list[str] | None = None
     recommended_action: str
     is_resolved: bool
@@ -103,13 +103,13 @@ class PositionRiskResponse(BaseModel):
     market_value: Decimal
     unrealized_pnl: Decimal
     risk_amount: Decimal
-    risk_percentage: float
+    risk_percentage: Decimal
     var_contribution: Decimal
-    beta: float | None = None
-    correlation: float | None = None
-    concentration_risk: float
+    beta: Decimal | None = None
+    correlation: Decimal | None = None
+    concentration_risk: Decimal
     liquidity_risk: str
-    time_decay_risk: float | None = None
+    time_decay_risk: Decimal | None = None
 
 
 class StressTestRequest(BaseModel):
@@ -117,7 +117,7 @@ class StressTestRequest(BaseModel):
 
     test_name: str
     scenarios: list[dict[str, Any]]
-    confidence_levels: list[float] = Field(default=[0.95, 0.99])
+    confidence_levels: list[Decimal] = Field(default=[Decimal("0.95"), Decimal("0.99")])
     time_horizons: list[int] = Field(default=[1, 5, 10])  # days
 
 
@@ -131,7 +131,7 @@ class StressTestResponse(BaseModel):
     worst_case_scenario: str
     confidence_levels: dict[float, Decimal]
     time_horizons: dict[int, Decimal]
-    portfolio_resilience_score: float
+    portfolio_resilience_score: Decimal
     recommendations: list[str]
     completed_at: datetime
 
@@ -154,17 +154,17 @@ async def get_risk_metrics(current_user: User = Depends(get_current_user)):
         # Mock risk metrics (in production, calculate from actual portfolio)
         portfolio_value = Decimal("150000.00")
         total_exposure = Decimal("135000.00")
-        leverage = float(total_exposure / portfolio_value)
+        leverage = total_exposure / portfolio_value
 
         # Mock VaR calculations
         var_1d = portfolio_value * Decimal("0.025")  # 2.5% VaR
         var_5d = var_1d * Decimal("2.236")  # sqrt(5) scaling
 
         max_drawdown = Decimal("-12500.00")
-        max_drawdown_pct = float(abs(max_drawdown) / portfolio_value * 100)
+        max_drawdown_pct = abs(max_drawdown) / portfolio_value * 100
 
         # Risk scoring (0-100, where 100 is highest risk)
-        risk_score = min(100.0, leverage * 20 + max_drawdown_pct * 2)
+        risk_score = min(Decimal("100"), leverage * 20 + max_drawdown_pct * 2)
 
         if risk_score < 30:
             risk_level = "low"
@@ -263,13 +263,13 @@ async def update_risk_limits(
             updated_fields["max_portfolio_risk"] = limits_request.max_portfolio_risk
 
         if limits_request.max_position_size is not None:
-            updated_fields["max_position_size"] = float(limits_request.max_position_size)
+            updated_fields["max_position_size"] = limits_request.max_position_size
 
         if limits_request.max_leverage is not None:
             updated_fields["max_leverage"] = limits_request.max_leverage
 
         if limits_request.max_daily_loss is not None:
-            updated_fields["max_daily_loss"] = float(limits_request.max_daily_loss)
+            updated_fields["max_daily_loss"] = limits_request.max_daily_loss
 
         if limits_request.max_drawdown_limit is not None:
             updated_fields["max_drawdown_limit"] = limits_request.max_drawdown_limit

@@ -34,8 +34,8 @@ class APIVersion:
     release_date: datetime | None = None
     deprecation_date: datetime | None = None
     sunset_date: datetime | None = None
-    features: set[str] = None
-    breaking_changes: list[str] = None
+    features: set[str] | None = None
+    breaking_changes: list[str] | None = None
 
     def __post_init__(self):
         if self.features is None:
@@ -50,8 +50,10 @@ class APIVersion:
         """Compare versions for sorting."""
         return (self.major, self.minor, self.patch) < (other.major, other.minor, other.patch)
 
-    def __eq__(self, other: "APIVersion") -> bool:
+    def __eq__(self, other: object) -> bool:
         """Check version equality."""
+        if not isinstance(other, APIVersion):
+            return NotImplemented
         return (self.major, self.minor, self.patch) == (other.major, other.minor, other.patch)
 
     def is_compatible_with(self, other: "APIVersion") -> bool:
@@ -296,10 +298,14 @@ class VersionManager(BaseComponent):
             "from_version": from_version,
             "to_version": to_version,
             "compatibility": from_api.is_compatible_with(to_api),
-            "breaking_changes": to_api.breaking_changes if from_api < to_api else [],
-            "new_features": to_api.features - from_api.features if from_api < to_api else set(),
+            "breaking_changes": (to_api.breaking_changes or []) if from_api < to_api else [],
+            "new_features": (to_api.features or set()) - (from_api.features or set())
+            if from_api < to_api
+            else set(),
             "deprecated_features": (
-                from_api.features - to_api.features if from_api > to_api else set()
+                (from_api.features or set()) - (to_api.features or set())
+                if from_api > to_api
+                else set()
             ),
         }
 

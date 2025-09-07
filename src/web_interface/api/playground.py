@@ -58,7 +58,7 @@ class PlaygroundConfigurationRequest(BaseModel):
     # Bot Configuration
     bot_name: str = Field(..., description="Name for the playground bot")
     bot_type: BotType = Field(
-        default=BotType.STRATEGY, description="Bot type (strategy/arbitrage/market_maker)"
+        default=BotType.TRADING, description="Bot type (strategy/arbitrage/market_maker)"
     )
 
     # Symbol and Exchange Configuration
@@ -67,7 +67,7 @@ class PlaygroundConfigurationRequest(BaseModel):
 
     # Capital Management
     allocated_capital: Decimal = Field(..., gt=0, description="Capital allocated")
-    risk_percentage: float = Field(..., gt=0, le=1, description="Risk per trade")
+    risk_percentage: Decimal = Field(..., gt=0, le=1, description="Risk per trade")
 
     # Strategy Configuration
     strategy_name: str = Field(..., description="Strategy to use")
@@ -76,8 +76,12 @@ class PlaygroundConfigurationRequest(BaseModel):
     )
 
     # Risk Settings
-    stop_loss_percentage: float = Field(default=0.02, description="Stop loss percentage")
-    take_profit_percentage: float = Field(default=0.04, description="Take profit percentage")
+    stop_loss_percentage: Decimal = Field(
+        default=Decimal("0.02"), description="Stop loss percentage"
+    )
+    take_profit_percentage: Decimal = Field(
+        default=Decimal("0.04"), description="Take profit percentage"
+    )
     max_position_size: Decimal = Field(default=Decimal("0.1"), description="Maximum position size")
 
     # Model Selection
@@ -114,15 +118,15 @@ class PlaygroundStatusResponse(BaseModel):
     session_id: str
     bot_id: str
     status: str  # running, paused, completed, failed
-    progress: float  # 0.0 to 1.0
+    progress: Decimal  # 0.0 to 1.0
     current_step: str
     total_trades: int
     successful_trades: int
     current_pnl: Decimal
     start_time: datetime
-    runtime_minutes: float
-    memory_usage_mb: float
-    cpu_usage_percent: float
+    runtime_minutes: Decimal
+    memory_usage_mb: Decimal
+    cpu_usage_percent: Decimal
     last_update: datetime
 
 
@@ -132,19 +136,19 @@ class PlaygroundResultResponse(BaseModel):
     session_id: str
     bot_id: str
     final_pnl: Decimal
-    final_pnl_percentage: float
+    final_pnl_percentage: Decimal
     total_trades: int
     winning_trades: int
     losing_trades: int
-    win_rate: float
-    sharpe_ratio: float | None
+    win_rate: Decimal
+    sharpe_ratio: Decimal | None
     max_drawdown: Decimal
-    max_drawdown_percentage: float
+    max_drawdown_percentage: Decimal
     total_fees: Decimal
-    average_trade_duration: float  # minutes
-    profit_factor: float
+    average_trade_duration: Decimal  # minutes
+    profit_factor: Decimal
     completed_at: datetime
-    runtime_minutes: float
+    runtime_minutes: Decimal
 
 
 class PlaygroundLogEntry(BaseModel):
@@ -194,13 +198,13 @@ async def create_playground_session(
             "bot_type": request.bot_type,
             "symbols": request.symbols,
             "exchanges": request.exchanges,
-            "allocated_capital": float(request.allocated_capital),
+            "allocated_capital": request.allocated_capital,
             "risk_percentage": request.risk_percentage,
             "strategy_name": request.strategy_name,
             "strategy_parameters": request.strategy_parameters,
             "stop_loss_percentage": request.stop_loss_percentage,
             "take_profit_percentage": request.take_profit_percentage,
-            "max_position_size": float(request.max_position_size),
+            "max_position_size": request.max_position_size,
             "ml_model_id": request.ml_model_id,
             "enable_ai_features": request.enable_ai_features,
             "sandbox_mode": request.sandbox_mode,
@@ -730,7 +734,7 @@ async def _run_backtest_session(session_id: str, config: dict[str, Any]):
             "sharpe_ratio": 1.5 if current_pnl > 0 else -0.5,  # Mock value
             "max_drawdown": abs(current_pnl * 0.3),  # Mock 30% of PnL
             "max_drawdown_percentage": 15.0,  # Mock value
-            "total_fees": float(config["allocated_capital"]) * 0.001,  # 0.1% in fees
+            "total_fees": config["allocated_capital"] * Decimal("0.001"),  # 0.1% in fees
             "average_trade_duration": 1440.0,  # 1 day in minutes
             "profit_factor": 2.0 if current_pnl > 0 else 0.5,  # Mock value
             "runtime_minutes": (datetime.now(timezone.utc) - session["started_at"]).total_seconds()

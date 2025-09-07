@@ -6,6 +6,7 @@ functionality for AI-powered trading strategies.
 """
 
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -37,10 +38,10 @@ class ModelResponse(BaseModel):
     description: str | None = None
     status: str
     deployment_stage: str
-    accuracy: float | None = None
-    precision: float | None = None
-    recall: float | None = None
-    f1_score: float | None = None
+    accuracy: Decimal | None = None
+    precision: Decimal | None = None
+    recall: Decimal | None = None
+    f1_score: Decimal | None = None
     training_samples: int | None = None
     validation_samples: int | None = None
     features_count: int | None = None
@@ -74,10 +75,12 @@ class TrainModelRequest(BaseModel):
 
     start_date: datetime = Field(..., description="Training data start date")
     end_date: datetime = Field(..., description="Training data end date")
-    validation_split: float = Field(
+    validation_split: Decimal = Field(
         default=0.2, ge=0.1, le=0.5, description="Validation data split"
     )
-    test_split: float = Field(default=0.1, ge=0.1, le=0.3, description="Test data split")
+    test_split: Decimal = Field(
+        default=Decimal("0.1"), ge=Decimal("0.1"), le=Decimal("0.3"), description="Test data split"
+    )
     hyperparameters: dict[str, Any] = Field(
         default_factory=dict, description="Model hyperparameters"
     )
@@ -87,7 +90,7 @@ class PredictionRequest(BaseModel):
     """Request model for model predictions."""
 
     symbol: str = Field(..., description="Symbol to predict")
-    features: dict[str, float] = Field(..., description="Input features")
+    features: dict[str, Decimal] = Field(..., description="Input features")
     prediction_horizon: int | None = Field(
         default=1, description="Prediction horizon in time units"
     )
@@ -99,8 +102,8 @@ class PredictionResponse(BaseModel):
     model_id: str
     model_name: str
     symbol: str
-    prediction: float
-    confidence: float
+    prediction: Decimal
+    confidence: Decimal
     prediction_type: str
     prediction_horizon: int
     features_used: list[str]
@@ -115,7 +118,7 @@ class TrainingJobResponse(BaseModel):
     model_id: str
     model_name: str
     status: str
-    progress: float
+    progress: Decimal
     started_at: datetime
     estimated_completion: datetime | None = None
     completed_at: datetime | None = None
@@ -123,8 +126,8 @@ class TrainingJobResponse(BaseModel):
     validation_samples: int | None = None
     current_epoch: int | None = None
     total_epochs: int | None = None
-    current_loss: float | None = None
-    best_accuracy: float | None = None
+    current_loss: Decimal | None = None
+    best_accuracy: Decimal | None = None
     error_message: str | None = None
 
 
@@ -134,13 +137,13 @@ class ModelPerformanceResponse(BaseModel):
     model_id: str
     model_name: str
     evaluation_period: str
-    accuracy: float
-    precision: float
-    recall: float
-    f1_score: float
-    auc_score: float | None = None
+    accuracy: Decimal
+    precision: Decimal
+    recall: Decimal
+    f1_score: Decimal
+    auc_score: Decimal | None = None
     confusion_matrix: list[list[int]] | None = None
-    feature_importance: dict[str, float] | None = None
+    feature_importance: dict[str, Decimal] | None = None
     prediction_distribution: dict[str, int] | None = None
     error_analysis: dict[str, Any] | None = None
     drift_detected: bool
@@ -154,7 +157,7 @@ class DeploymentRequest(BaseModel):
         ..., description="Deployment stage: development, staging, production"
     )
     auto_fallback: bool = Field(default=True, description="Enable automatic fallback on errors")
-    performance_threshold: float | None = Field(None, description="Minimum performance threshold")
+    performance_threshold: Decimal | None = Field(None, description="Minimum performance threshold")
 
 
 @router.get("/", response_model=list[ModelResponse])

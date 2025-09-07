@@ -5,7 +5,6 @@ This module provides trading operations including order placement, cancellation,
 order history, and trade analysis functionality.
 """
 
-import random
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
@@ -16,17 +15,19 @@ from pydantic import BaseModel, Field
 
 from src.core.exceptions import NetworkError, ValidationError
 from src.core.logging import get_logger
-from src.core.types import ExecutionInstruction, OrderRequest, OrderSide, OrderType
+from src.core.types import OrderSide, OrderType
 from src.error_handling import (
     ErrorSeverity,
     get_global_error_handler,
     with_error_context,
     with_retry,
 )
-from src.error_handling.error_handler import ErrorContext
+from src.error_handling.context import ErrorContext
 from src.utils import (
     format_price,
     format_quantity,
+    handle_api_error,
+    safe_get_api_facade,
     validate_price,
     validate_quantity,
     validate_symbol,
@@ -36,16 +37,16 @@ from src.web_interface.security.auth import User, get_current_user, get_trading_
 logger = get_logger(__name__)
 router = APIRouter()
 
-# Global references (set by app startup)
-execution_engine = None
-bot_orchestrator = None
+
+def get_trading_service() -> Any:
+    """Get trading service through API facade."""
+    return safe_get_api_facade()
 
 
-def set_dependencies(engine, orchestrator):
-    """Set global dependencies."""
-    global execution_engine, bot_orchestrator
-    execution_engine = engine
-    bot_orchestrator = orchestrator
+# Deprecated function for backward compatibility
+def set_dependencies(engine: Any, orchestrator: Any) -> None:
+    """DEPRECATED: Use service registry instead."""
+    logger.warning("set_dependencies is deprecated. Use service registry instead.")
 
 
 class PlaceOrderRequest(BaseModel):
@@ -133,7 +134,7 @@ class MarketDataResponse(BaseModel):
     ask: Decimal | None
     volume_24h: Decimal
     change_24h: Decimal
-    change_24h_percentage: float
+    change_24h_percentage: Decimal
     high_24h: Decimal
     low_24h: Decimal
     timestamp: datetime
@@ -172,32 +173,25 @@ async def place_order(
         global_error_handler = None
 
     try:
-        if not execution_engine:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Execution engine not available",
-            )
+        trading_facade = get_trading_service()
 
         # Validate inputs using utils validators
-        try:
-            validate_symbol(order_request.symbol)
-        except ValidationError as e:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid symbol: {e!s}",
-            ) from e
+        for validator, value, field_name in [
+            (validate_symbol, order_request.symbol, "symbol"),
+            (validate_quantity, order_request.quantity, "quantity"),
+        ]:
+            try:
+                validator(value)
+            except ValidationError as e:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Invalid {field_name}: {e!s}",
+                ) from e
 
-        try:
-            validate_quantity(float(order_request.quantity))
-        except ValidationError as e:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid quantity: {e!s}",
-            ) from e
-
+        # Validate optional price fields
         if order_request.price:
             try:
-                validate_price(float(order_request.price))
+                validate_price(order_request.price)
             except ValidationError as e:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
@@ -206,86 +200,44 @@ async def place_order(
 
         if order_request.stop_price:
             try:
-                validate_price(float(order_request.stop_price))
+                validate_price(order_request.stop_price)
             except ValidationError as e:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=f"Invalid stop price: {e!s}",
                 ) from e
 
-        # Generate client order ID if not provided
-        client_order_id = order_request.client_order_id or f"web_{uuid4().hex[:8]}"
-
-        # Create order request
-        order = OrderRequest(
+        # Place order through service layer
+        order_id = await trading_facade.place_order(
             symbol=order_request.symbol,
             side=order_request.side,
             order_type=order_request.order_type,
-            quantity=order_request.quantity,
+            amount=order_request.quantity,
             price=order_request.price,
-            stop_price=order_request.stop_price,
-            time_in_force=order_request.time_in_force,
-            client_order_id=client_order_id,
-        )
-
-        # Create execution instruction
-        execution_instruction = ExecutionInstruction(
-            order=order,
-            preferred_exchanges=[order_request.exchange],
-            is_urgent=False,
-            allow_partial_fills=True,
-        )
-
-        # Get exchange factory (mock for now)
-        from src.exchanges.factory import ExchangeFactory
-
-        exchange_factory = ExchangeFactory()
-
-        # Execute order
-        execution_result = await execution_engine.execute_order(
-            execution_instruction, exchange_factory
         )
 
         logger.info(
             "Order placed successfully",
-            order_id=execution_result.execution_id,
+            order_id=order_id,
             symbol=order_request.symbol,
             side=order_request.side.value,
-            quantity=float(order_request.quantity),
+            quantity=order_request.quantity,
             exchange=order_request.exchange,
             user=current_user.username,
         )
 
-        # Format response with error handling
-        try:
-            formatted_quantity = format_quantity(float(execution_result.total_filled_quantity))
-        except Exception as e:
-            logger.warning(f"Error formatting quantity: {e}")
-            formatted_quantity = f"{float(execution_result.total_filled_quantity):.8f}"
-
-        try:
-            formatted_price = (
-                format_price(float(execution_result.average_fill_price))
-                if execution_result.average_fill_price
-                else None
-            )
-        except Exception as e:
-            logger.warning(f"Error formatting price: {e}")
-            formatted_price = (
-                f"{float(execution_result.average_fill_price):.2f}"
-                if execution_result.average_fill_price
-                else None
-            )
+        # Format response
+        formatted_quantity = format_quantity(order_request.quantity)
+        formatted_price = format_price(order_request.price) if order_request.price else None
 
         return {
             "success": True,
             "message": "Order placed successfully",
-            "execution_id": execution_result.execution_id,
-            "order_id": execution_result.execution_id,  # Simplified
-            "client_order_id": client_order_id,
-            "status": execution_result.status.value,
-            "filled_quantity": formatted_quantity,
-            "average_fill_price": formatted_price,
+            "order_id": order_id,
+            "client_order_id": order_request.client_order_id or f"web_{uuid4().hex[:8]}",
+            "status": "submitted",
+            "quantity": formatted_quantity,
+            "price": formatted_price,
         }
 
     except HTTPException:
@@ -314,11 +266,6 @@ async def place_order(
                     # Recovery was successful
                     logger.info(
                         "Order error recovered by global handler",
-                        order_id=(
-                            execution_result.execution_id
-                            if "execution_result" in locals()
-                            else None
-                        ),
                         recovery_method=error_context.details.get("recovery_method", "unknown"),
                     )
                     return {
@@ -350,7 +297,7 @@ async def place_order(
 @with_retry(
     max_attempts=2,
     exceptions=(NetworkError, TimeoutError),
-    backoff_factor=1.0,
+    backoff_factor=1.1,
 )
 async def cancel_order(
     order_id: str,
@@ -372,14 +319,10 @@ async def cancel_order(
         HTTPException: If cancellation fails
     """
     try:
-        if not execution_engine:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Execution engine not available",
-            )
+        trading_facade = get_trading_service()
 
-        # Cancel order through execution engine
-        success = await execution_engine.cancel_execution(order_id)
+        # Cancel order through service layer
+        success = await trading_facade.cancel_order(order_id)
 
         if success:
             logger.info(
@@ -501,10 +444,7 @@ async def get_orders(
         return mock_orders[:limit]
 
     except Exception as e:
-        logger.error(f"Orders retrieval failed: {e}", user=current_user.username)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get orders: {e!s}"
-        )
+        raise handle_api_error(e, "Orders retrieval", user=current_user.username)
 
 
 @router.get("/orders/{order_id}", response_model=OrderResponse)
@@ -563,9 +503,8 @@ async def get_order(
         return mock_order
 
     except Exception as e:
-        logger.error(f"Order retrieval failed: {e}", order_id=order_id, user=current_user.username)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get order: {e!s}"
+        raise handle_api_error(
+            e, "Order retrieval", user=current_user.username, context={"order_id": order_id}
         )
 
 
@@ -645,10 +584,7 @@ async def get_trades(
         return mock_trades[:limit]
 
     except Exception as e:
-        logger.error(f"Trades retrieval failed: {e}", user=current_user.username)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get trades: {e!s}"
-        )
+        raise handle_api_error(e, "Trades retrieval", user=current_user.username)
 
 
 @router.get("/market-data/{symbol}", response_model=MarketDataResponse)
@@ -676,9 +612,9 @@ async def get_market_data(
         base_price = Decimal("45000.00") if "BTC" in symbol else Decimal("3000.00")
 
         # Add some realistic variation
-        import random
+        from random import uniform
 
-        price_variation = Decimal(str(random.uniform(-0.02, 0.02)))  # ±2%
+        price_variation = Decimal(str(uniform(-0.02, 0.02)))  # ±2%
         current_price = base_price * (Decimal("1") + price_variation)
 
         bid = current_price * Decimal("0.9999")
@@ -692,7 +628,7 @@ async def get_market_data(
             ask=ask,
             volume_24h=Decimal("1234567.89"),
             change_24h=current_price - base_price,
-            change_24h_percentage=float((current_price - base_price) / base_price * 100),
+            change_24h_percentage=(current_price - base_price) / base_price * 100,
             high_24h=current_price * Decimal("1.05"),
             low_24h=current_price * Decimal("0.95"),
             timestamp=datetime.now(timezone.utc),
@@ -701,12 +637,8 @@ async def get_market_data(
         return mock_data
 
     except Exception as e:
-        logger.error(
-            f"Market data retrieval failed: {e}", symbol=symbol, user=current_user.username
-        )
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get market data: {e!s}",
+        raise handle_api_error(
+            e, "Market data retrieval", user=current_user.username, context={"symbol": symbol}
         )
 
 
@@ -738,16 +670,18 @@ async def get_order_book(
 
         # Generate mock bids (below current price)
         bids = []
+        from random import uniform
+
         for i in range(depth):
             price = base_price * (Decimal("1") - Decimal(str(0.0001 * (i + 1))))
-            quantity = Decimal(str(random.uniform(0.1, 5.0)))
+            quantity = Decimal(str(uniform(0.1, 5.0)))
             bids.append([price, quantity])
 
         # Generate mock asks (above current price)
         asks = []
         for i in range(depth):
             price = base_price * (Decimal("1") + Decimal(str(0.0001 * (i + 1))))
-            quantity = Decimal(str(random.uniform(0.1, 5.0)))
+            quantity = Decimal(str(uniform(0.1, 5.0)))
             asks.append([price, quantity])
 
         return OrderBookResponse(
@@ -759,10 +693,8 @@ async def get_order_book(
         )
 
     except Exception as e:
-        logger.error(f"Order book retrieval failed: {e}", symbol=symbol, user=current_user.username)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get order book: {e!s}",
+        raise handle_api_error(
+            e, "Order book retrieval", user=current_user.username, context={"symbol": symbol}
         )
 
 
@@ -778,15 +710,19 @@ async def get_execution_status(current_user: User = Depends(get_current_user)):
         Dict: Execution engine status
     """
     try:
-        if not execution_engine:
-            return {"status": "unavailable", "message": "Execution engine not available"}
+        trading_facade = get_trading_service()
 
-        engine_summary = await execution_engine.get_engine_summary()
-        return {"success": True, "status": engine_summary}
+        # Get service health status
+        health_status = trading_facade.health_check()
+
+        return {
+            "success": True,
+            "status": {
+                "service_health": health_status,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "message": "Trading service operational",
+            },
+        }
 
     except Exception as e:
-        logger.error(f"Execution status retrieval failed: {e}", user=current_user.username)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get execution status: {e!s}",
-        )
+        raise handle_api_error(e, "Execution status retrieval", user=current_user.username)

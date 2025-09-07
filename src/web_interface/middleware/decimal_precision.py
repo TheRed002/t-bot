@@ -176,10 +176,10 @@ class DecimalPrecisionMiddleware(BaseHTTPMiddleware):
                         converted_data = self._convert_to_decimal(data)
 
                         # Replace request body with converted data
-                        # DecimalEncoder is a static class, use default=encoder method
+                        # DecimalEncoder for JSON serialization of Decimal objects
                         def decimal_serializer(obj):
-                            if hasattr(obj, "__decimal__"):
-                                return float(obj)
+                            if isinstance(obj, Decimal):
+                                return str(obj)  # Keep as string to preserve precision
                             raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
 
                         new_body = json.dumps(converted_data, default=decimal_serializer).encode()

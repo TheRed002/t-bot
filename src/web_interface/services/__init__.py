@@ -9,7 +9,7 @@ from .service_implementations import (
     BotManagementServiceImpl,
     MarketDataServiceImpl,
     PortfolioServiceImpl,
-    RiskManagementServiceImpl,
+    RiskServiceImpl,
     StrategyServiceImpl,
     TradingServiceImpl,
 )
@@ -18,7 +18,7 @@ __all__ = [
     "BotManagementServiceImpl",
     "MarketDataServiceImpl",
     "PortfolioServiceImpl",
-    "RiskManagementServiceImpl",
+    "RiskServiceImpl",
     "StrategyServiceImpl",
     "TradingServiceImpl",
 ]

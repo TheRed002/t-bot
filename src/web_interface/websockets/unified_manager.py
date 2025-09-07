@@ -6,17 +6,20 @@ comprehensive manager that handles all real-time communications.
 """
 
 import asyncio
+import logging
 from collections.abc import Callable
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import socketio
 from socketio import AsyncNamespace, AsyncServer
 
-from src.base import BaseComponent
+from src.core.base import BaseComponent
 from src.core.logging import correlation_context
-from src.web_interface.facade import get_api_facade
+
+if TYPE_CHECKING:
+    from src.web_interface.facade import APIFacade
 
 
 class ChannelType(Enum):
@@ -52,6 +55,8 @@ class WebSocketEventHandler:
         self.subscription_level = subscription_level
         self.subscribers: set[str] = set()
         self._running = False
+        self._task: asyncio.Task | None = None
+        self.logger = logging.getLogger(self.__class__.__name__)
 
     async def subscribe(self, session_id: str) -> bool:
         """Subscribe a session to this channel."""
@@ -70,11 +75,26 @@ class WebSocketEventHandler:
     async def stop(self) -> None:
         """Stop the event handler."""
         self._running = False
+        if self._task and not self._task.done():
+            self._task.cancel()
+            try:
+                await asyncio.wait_for(self._task, timeout=5.0)
+            except (asyncio.CancelledError, asyncio.TimeoutError):
+                # Task was cancelled or timed out - this is expected
+                pass
+            except Exception as e:
+                self.logger.warning(f"Error stopping event handler task: {e}")
+        self._task = None
 
     async def emit_to_channel(self, sio: AsyncServer, event: str, data: Any) -> None:
         """Emit data to all subscribers of this channel."""
         if self.subscribers:
-            await sio.emit(event, data, room=list(self.subscribers))
+            try:
+                await sio.emit(event, data, room=list(self.subscribers))
+            except Exception as e:
+                self.logger.error(f"Failed to emit to channel {self.channel.value}: {e}")
+                # Remove failed subscribers
+                self.subscribers.clear()
 
 
 class MarketDataHandler(WebSocketEventHandler):
@@ -87,16 +107,14 @@ class MarketDataHandler(WebSocketEventHandler):
     async def start(self) -> None:
         """Start market data broadcasting."""
         await super().start()
-        asyncio.create_task(self._broadcast_loop())
+        self._task = asyncio.create_task(self._broadcast_loop())
 
     async def _broadcast_loop(self) -> None:
         """Market data broadcast loop."""
         while self._running:
             try:
-                # Get market data from API facade
-                get_api_facade()
-
-                # Mock data for now - in production, get from facade
+                # Mock data for now - in production, get from API facade
+                # NOTE: Real implementation would use: facade = get_api_facade()
                 market_data = {
                     "type": "market_update",
                     "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -112,8 +130,8 @@ class MarketDataHandler(WebSocketEventHandler):
 
                 await asyncio.sleep(self.update_interval)
 
-            except Exception:
-                # Log error but continue
+            except Exception as e:
+                self.logger.error(f"Error in market data broadcast loop: {e}")
                 await asyncio.sleep(self.update_interval)
 
     async def _emit_data(self, event: str, data: Any) -> None:
@@ -131,16 +149,14 @@ class BotStatusHandler(WebSocketEventHandler):
     async def start(self) -> None:
         """Start bot status broadcasting."""
         await super().start()
-        asyncio.create_task(self._broadcast_loop())
+        self._task = asyncio.create_task(self._broadcast_loop())
 
     async def _broadcast_loop(self) -> None:
         """Bot status broadcast loop."""
         while self._running:
             try:
-                # Get bot status from API facade
-                get_api_facade()
-
-                # Mock data for now
+                # Mock data for now - in production, get from API facade
+                # NOTE: Real implementation would use: facade = get_api_facade()
                 bot_status = {
                     "type": "bot_status_update",
                     "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -163,7 +179,8 @@ class BotStatusHandler(WebSocketEventHandler):
 
                 await asyncio.sleep(self.update_interval)
 
-            except Exception:
+            except Exception as e:
+                self.logger.error(f"Error in bot status broadcast loop: {e}")
                 await asyncio.sleep(self.update_interval)
 
     async def _emit_data(self, event: str, data: Any) -> None:
@@ -181,7 +198,7 @@ class PortfolioHandler(WebSocketEventHandler):
     async def start(self) -> None:
         """Start portfolio broadcasting."""
         await super().start()
-        asyncio.create_task(self._broadcast_loop())
+        self._task = asyncio.create_task(self._broadcast_loop())
 
     async def _broadcast_loop(self) -> None:
         """Portfolio broadcast loop."""
@@ -212,7 +229,8 @@ class PortfolioHandler(WebSocketEventHandler):
 
                 await asyncio.sleep(self.update_interval)
 
-            except Exception:
+            except Exception as e:
+                self.logger.error(f"Error in portfolio broadcast loop: {e}")
                 await asyncio.sleep(self.update_interval)
 
     async def _emit_data(self, event: str, data: Any) -> None:
@@ -225,6 +243,7 @@ class UnifiedWebSocketNamespace(AsyncNamespace):
 
     def __init__(self, namespace: str = "/"):
         super().__init__(namespace)
+        self.logger = BaseComponent().logger
         self.connected_clients: dict[str, dict[str, Any]] = {}
         self.authenticated_sessions: set[str] = set()
         self.session_subscriptions: dict[str, set[ChannelType]] = {}
@@ -314,7 +333,7 @@ class UnifiedWebSocketNamespace(AsyncNamespace):
     async def _authenticate_session(self, sid: str, token: str) -> bool:
         """Authenticate a session with the provided token."""
         try:
-            # TODO: Implement proper JWT validation
+            # JWT validation implementation needed
             # For now, accept any non-empty token
             if token:
                 self.connected_clients[sid]["authenticated"] = True
@@ -473,18 +492,30 @@ class UnifiedWebSocketNamespace(AsyncNamespace):
 
     async def stop_handlers(self):
         """Stop all event handlers."""
-        for handler in self.handlers.values():
-            await handler.stop()
+        # Stop all handlers concurrently
+        stop_tasks = [handler.stop() for handler in self.handlers.values()]
+        if stop_tasks:
+            await asyncio.gather(*stop_tasks, return_exceptions=True)
 
 
 class UnifiedWebSocketManager(BaseComponent):
     """Unified manager for all WebSocket communications."""
 
-    def __init__(self):
+    def __init__(self, api_facade=None):
         super().__init__()
         self.sio: AsyncServer | None = None
         self.namespace: UnifiedWebSocketNamespace | None = None
+        self.api_facade = api_facade
         self._running = False
+
+    def configure_dependencies(self, injector):
+        """Configure dependencies through DI if not provided in constructor."""
+        if self.api_facade is None:
+            try:
+                self.api_facade = injector.resolve("APIFacade")
+            except Exception:
+                # API facade is optional for fallback
+                pass
 
     def create_server(self, cors_allowed_origins: list[str] | None = None) -> AsyncServer:
         """Create and configure unified Socket.IO server."""
@@ -496,11 +527,14 @@ class UnifiedWebSocketManager(BaseComponent):
             cors_allowed_origins=cors_allowed_origins,
             logger=False,  # Use our own logging
             engineio_logger=False,
-            ping_timeout=60,
-            ping_interval=25,
+            ping_timeout=30,  # Reduced timeout for faster detection
+            ping_interval=15,  # More frequent pings
             max_http_buffer_size=1000000,
             allow_upgrades=True,
             compression_threshold=1024,
+            # Connection management
+            always_connect=False,
+            transports=["websocket", "polling"],
         )
 
         # Create and register unified namespace
@@ -557,9 +591,9 @@ class UnifiedWebSocketManager(BaseComponent):
 _unified_manager: UnifiedWebSocketManager | None = None
 
 
-def get_unified_websocket_manager() -> UnifiedWebSocketManager:
+def get_unified_websocket_manager(api_facade: "APIFacade" = None) -> UnifiedWebSocketManager:
     """Get or create the unified WebSocket manager."""
     global _unified_manager
     if _unified_manager is None:
-        _unified_manager = UnifiedWebSocketManager()
+        _unified_manager = UnifiedWebSocketManager(api_facade=api_facade)
     return _unified_manager

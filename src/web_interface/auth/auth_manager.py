@@ -7,9 +7,11 @@ different authentication providers and handles user sessions.
 
 import asyncio
 from datetime import datetime, timezone
+from decimal import Decimal
 from typing import Any
 
-from src.base import BaseComponent
+from src.core.base import BaseComponent
+from src.core.logging import get_logger
 
 from .models import AuthToken, User, UserStatus, create_system_roles
 from .providers import APIKeyAuthProvider, AuthProvider, JWTAuthProvider, SessionAuthProvider
@@ -18,9 +20,10 @@ from .providers import APIKeyAuthProvider, AuthProvider, JWTAuthProvider, Sessio
 class AuthManager(BaseComponent):
     """Unified authentication manager."""
 
-    def __init__(self, config: dict[str, Any]):
+    def __init__(self, jwt_handler=None, config: dict[str, Any] | None = None):
         super().__init__()
-        self.config = config
+        self.jwt_handler = jwt_handler
+        self.config = config or {}
         self.providers: dict[str, AuthProvider] = {}
         self.default_provider = "jwt"
 
@@ -36,21 +39,31 @@ class AuthManager(BaseComponent):
         # Start cleanup tasks
         self._start_cleanup_tasks()
 
+    def configure_dependencies(self, injector):
+        """Configure dependencies through DI if not provided in constructor."""
+        if self.jwt_handler is None:
+            try:
+                self.jwt_handler = injector.resolve("JWTHandler")
+            except Exception as e:
+                # JWT handler is optional for fallback
+                self.logger.debug(f"JWTHandler not available from DI: {e}")
+
     def _initialize_providers(self) -> None:
         """Initialize authentication providers."""
         # JWT Provider
+        import os
         jwt_config = self.config.get("jwt", {})
         self.providers["jwt"] = JWTAuthProvider(
-            secret_key=jwt_config.get("secret_key", "default-secret-key"),
-            algorithm=jwt_config.get("algorithm", "HS256"),
-            access_token_expire_minutes=jwt_config.get("access_token_expire_minutes", 30),
-            refresh_token_expire_days=jwt_config.get("refresh_token_expire_days", 7),
+            secret_key=jwt_config.get("secret_key", os.getenv("JWT_SECRET_KEY", "default-dev-secret-change-in-production")),
+            algorithm=jwt_config.get("algorithm", os.getenv("JWT_ALGORITHM", "HS256")),
+            access_token_expire_minutes=jwt_config.get("access_token_expire_minutes", int(os.getenv("JWT_EXPIRE_MINUTES", "30"))),
+            refresh_token_expire_days=jwt_config.get("refresh_token_expire_days", int(os.getenv("JWT_REFRESH_EXPIRE_DAYS", "7"))),
         )
 
         # Session Provider
         session_config = self.config.get("session", {})
         self.providers["session"] = SessionAuthProvider(
-            session_timeout_minutes=session_config.get("timeout_minutes", 60)
+            session_timeout_minutes=session_config.get("timeout_minutes", int(os.getenv("SESSION_TIMEOUT_MINUTES", "60")))
         )
 
         # API Key Provider
@@ -68,7 +81,7 @@ class AuthManager(BaseComponent):
             email="admin@tbot.com",
             full_name="System Administrator",
             status=UserStatus.ACTIVE,
-            allocated_capital=100000.0,
+            allocated_capital=Decimal("100000.0"),
             risk_level="high",
         )
         admin_user.add_role(system_roles["admin"])
@@ -80,7 +93,7 @@ class AuthManager(BaseComponent):
             email="trader@tbot.com",
             full_name="Demo Trader",
             status=UserStatus.ACTIVE,
-            allocated_capital=10000.0,
+            allocated_capital=Decimal("10000.0"),
             risk_level="medium",
         )
         trader_user.add_role(system_roles["trader"])
@@ -92,7 +105,7 @@ class AuthManager(BaseComponent):
             email="demo@tbot.com",
             full_name="Demo User",
             status=UserStatus.ACTIVE,
-            allocated_capital=1000.0,
+            allocated_capital=Decimal("1000.0"),
             risk_level="low",
         )
         demo_user.add_role(system_roles["user"])
@@ -284,7 +297,7 @@ class AuthManager(BaseComponent):
                 email=user_data.get("email", ""),
                 full_name=user_data.get("full_name", ""),
                 status=UserStatus.PENDING_VERIFICATION,
-                allocated_capital=user_data.get("allocated_capital", 0.0),
+                allocated_capital=Decimal(str(user_data.get("allocated_capital", "0.0"))),
                 risk_level=user_data.get("risk_level", "medium"),
             )
 
@@ -393,6 +406,9 @@ class AuthManager(BaseComponent):
                 # Sleep for 5 minutes before next cleanup
                 await asyncio.sleep(300)
 
+            except asyncio.CancelledError:
+                self.logger.info("Session cleanup task cancelled")
+                break
             except Exception as e:
                 self.logger.error(f"Session cleanup error: {e}")
                 await asyncio.sleep(60)  # Retry after 1 minute on error
@@ -402,21 +418,39 @@ class AuthManager(BaseComponent):
 _global_auth_manager: AuthManager | None = None
 
 
-def get_auth_manager() -> AuthManager:
-    """Get or create the global authentication manager."""
+def get_auth_manager(injector=None, config: dict[str, Any] | None = None) -> AuthManager:
+    """Get or create the global authentication manager using dependency injection."""
     global _global_auth_manager
     if _global_auth_manager is None:
-        # Default configuration
-        config = {
+        # Default configuration if none provided
+        import os
+        default_config = {
             "jwt": {
-                "secret_key": "tbot-secret-key-change-in-production",
-                "algorithm": "HS256",
-                "access_token_expire_minutes": 30,
-                "refresh_token_expire_days": 7,
+                "secret_key": os.getenv("JWT_SECRET_KEY", "default-dev-secret-change-in-production"),
+                "algorithm": os.getenv("JWT_ALGORITHM", "HS256"),
+                "access_token_expire_minutes": int(os.getenv("JWT_EXPIRE_MINUTES", "30")),
+                "refresh_token_expire_days": int(os.getenv("JWT_REFRESH_EXPIRE_DAYS", "7")),
             },
-            "session": {"timeout_minutes": 60},
+            "session": {"timeout_minutes": int(os.getenv("SESSION_TIMEOUT_MINUTES", "60"))},
         }
-        _global_auth_manager = AuthManager(config)
+
+        auth_config = config or default_config
+        jwt_handler = None
+
+        if injector:
+            try:
+                # Try to get JWT handler from injector
+                jwt_handler = injector.resolve("JWTHandler")
+            except Exception as e:
+                # JWT handler is optional, will be configured later
+                get_logger(__name__).debug(f"JWTHandler not available from injector: {e}")
+
+        _global_auth_manager = AuthManager(jwt_handler=jwt_handler, config=auth_config)
+
+        # Configure dependencies if injector is available
+        if injector and hasattr(_global_auth_manager, "configure_dependencies"):
+            _global_auth_manager.configure_dependencies(injector)
+
     return _global_auth_manager
 
 

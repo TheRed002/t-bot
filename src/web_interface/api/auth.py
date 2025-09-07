@@ -105,7 +105,7 @@ async def login(login_request: LoginRequest):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Login failed due to server error",
-        )
+        ) from e
 
 
 @router.post("/refresh", response_model=AuthResponse)
@@ -149,7 +149,7 @@ async def refresh_token(refresh_request: RefreshTokenRequest):
         logger.error(f"Token refresh error: {e}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token"
-        )
+        ) from e
 
 
 @router.post("/logout")

@@ -315,8 +315,9 @@ class ErrorHandlerMiddleware(BaseHTTPMiddleware):
                 body = request._body
                 if body and len(body) < 1000:  # Only log small bodies
                     log_data["request_body"] = body.decode("utf-8", errors="ignore")
-        except Exception:
-            pass  # Ignore errors when trying to log request body
+        except Exception as e:
+            # Ignore errors when trying to log request body
+            self.logger.debug(f"Failed to log request body: {e}")
 
         self.logger.error("Unexpected server error", **log_data)
 
@@ -434,15 +435,15 @@ class ErrorHandlerMiddleware(BaseHTTPMiddleware):
             try:
                 handler_stats = self.global_error_handler.get_handler_stats()
                 stats["global_handler_stats"] = handler_stats
-            except Exception:
-                stats["global_handler_stats"] = {"status": "unavailable"}
+            except Exception as e:
+                stats["global_handler_stats"] = {"status": "unavailable", "error": str(e)}
 
         # Add pattern analytics stats if available
         if self.pattern_analytics:
             try:
                 pattern_stats = self.pattern_analytics.get_analytics_stats()
                 stats["pattern_analytics_stats"] = pattern_stats
-            except Exception:
-                stats["pattern_analytics_stats"] = {"status": "unavailable"}
+            except Exception as e:
+                stats["pattern_analytics_stats"] = {"status": "unavailable", "error": str(e)}
 
         return stats

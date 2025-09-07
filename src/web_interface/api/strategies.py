@@ -12,20 +12,29 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
+from src.core.exceptions import ServiceError
 from src.core.logging import get_logger
+from src.web_interface.facade import get_api_facade
 from src.web_interface.security.auth import User, get_admin_user, get_current_user
 
 logger = get_logger(__name__)
 router = APIRouter()
 
-# Global references (set by app startup)
-strategy_factory = None
+
+def get_strategy_service():
+    """Get strategy service through API facade."""
+    try:
+        facade = get_api_facade()
+        return facade
+    except Exception as e:
+        logger.error(f"Error getting API facade: {e}")
+        raise ServiceError(f"Strategy service not available: {e}")
 
 
+# Deprecated function for backward compatibility
 def set_dependencies(factory):
-    """Set global dependencies."""
-    global strategy_factory
-    strategy_factory = factory
+    """DEPRECATED: Use service registry instead."""
+    logger.warning("set_dependencies is deprecated. Use service registry instead.")
 
 
 class StrategyResponse(BaseModel):
@@ -66,15 +75,15 @@ class StrategyPerformanceResponse(BaseModel):
     total_trades: int
     winning_trades: int
     losing_trades: int
-    win_rate: float
+    win_rate: Decimal
     total_pnl: Decimal
-    total_return_percentage: float
-    average_trade_duration: float | None = None
+    total_return_percentage: Decimal
+    average_trade_duration: Decimal | None = None
     max_drawdown: Decimal
-    max_drawdown_percentage: float
-    sharpe_ratio: float | None = None
-    sortino_ratio: float | None = None
-    profit_factor: float
+    max_drawdown_percentage: Decimal
+    sharpe_ratio: Decimal | None = None
+    sortino_ratio: Decimal | None = None
+    profit_factor: Decimal
     expectancy: Decimal
     largest_win: Decimal
     largest_loss: Decimal
@@ -102,15 +111,15 @@ class BacktestResponse(BaseModel):
     initial_capital: Decimal
     final_capital: Decimal
     total_return: Decimal
-    total_return_percentage: float
+    total_return_percentage: Decimal
     benchmark_return: Decimal | None = None
-    alpha: float | None = None
-    beta: float | None = None
+    alpha: Decimal | None = None
+    beta: Decimal | None = None
     max_drawdown: Decimal
     sharpe_ratio: float
     trades_count: int
-    win_rate: float
-    profit_factor: float
+    win_rate: Decimal
+    profit_factor: Decimal
     started_at: datetime
     completed_at: datetime | None = None
     status: str
@@ -139,7 +148,50 @@ async def list_strategies(
         HTTPException: If retrieval fails
     """
     try:
-        # Mock strategy data (in production, get from strategy factory/database)
+        strategy_facade = get_strategy_service()
+
+        # Get strategies through service layer
+        strategies = await strategy_facade.list_strategies()
+
+        # Filter strategies based on parameters
+        filtered_strategies = []
+        for strategy_data in strategies:
+            # Apply category filter
+            if category and strategy_data.get("category") != category:
+                continue
+
+            # Apply risk level filter
+            if risk_level and strategy_data.get("risk_level") != risk_level:
+                continue
+
+            # Apply exchange filter (check if strategy supports the exchange)
+            if exchange and exchange not in strategy_data.get("supported_exchanges", []):
+                continue
+
+            # Convert to response format
+            strategy_response = StrategyResponse(
+                strategy_name=strategy_data.get("name", ""),
+                strategy_type=strategy_data.get("display_name", ""),
+                description=strategy_data.get("description", ""),
+                category=strategy_data.get("category", "general"),
+                supported_exchanges=strategy_data.get("supported_exchanges", ["binance"]),
+                supported_symbols=strategy_data.get("supported_symbols", ["BTCUSDT"]),
+                risk_level=strategy_data.get("risk_level", "medium"),
+                minimum_capital=Decimal(str(strategy_data.get("minimum_capital", 10000))),
+                recommended_timeframes=strategy_data.get("recommended_timeframes", ["1h"]),
+                parameters=strategy_data.get("parameters", {}),
+                performance_metrics=strategy_data.get("performance_metrics"),
+                is_active=strategy_data.get("is_active", True),
+                created_at=strategy_data.get("created_at"),
+                updated_at=strategy_data.get("updated_at"),
+            )
+            filtered_strategies.append(strategy_response)
+
+        return filtered_strategies
+
+    except Exception as e:
+        logger.error(f"Strategy listing failed: {e}", user=current_user.username)
+        # Fallback to mock data if service fails
         mock_strategies = [
             {
                 "strategy_name": "trend_following",
@@ -271,8 +323,33 @@ async def get_strategy(strategy_name: str, current_user: User = Depends(get_curr
         HTTPException: If strategy not found
     """
     try:
-        # Mock strategy lookup (in production, get from strategy registry)
-        if strategy_name == "trend_following":
+        strategy_facade = get_strategy_service()
+
+        # Get strategy configuration through service layer
+        strategy_config = await strategy_facade.get_strategy_config(strategy_name)
+
+        if strategy_config:
+            # Convert service response to API response format
+            strategy_response = StrategyResponse(
+                strategy_name=strategy_name,
+                strategy_type=strategy_config.get("display_name", strategy_name),
+                description=strategy_config.get("description", f"Strategy: {strategy_name}"),
+                category=strategy_config.get("category", "general"),
+                supported_exchanges=strategy_config.get("supported_exchanges", ["binance"]),
+                supported_symbols=strategy_config.get("supported_symbols", ["BTCUSDT"]),
+                risk_level=strategy_config.get("risk_level", "medium"),
+                minimum_capital=Decimal(str(strategy_config.get("minimum_capital", 10000))),
+                recommended_timeframes=strategy_config.get("recommended_timeframes", ["1h"]),
+                parameters=strategy_config.get("parameters", {}),
+                performance_metrics=strategy_config.get("performance_metrics"),
+                is_active=strategy_config.get("is_active", True),
+                created_at=strategy_config.get("created_at"),
+                updated_at=strategy_config.get("updated_at"),
+            )
+            return strategy_response
+
+        # Fallback to mock data for known strategies
+        elif strategy_name == "trend_following":
             strategy_data = {
                 "strategy_name": "trend_following",
                 "strategy_type": "momentum",
@@ -351,7 +428,20 @@ async def configure_strategy(
         HTTPException: If configuration fails
     """
     try:
-        # Mock strategy configuration (in production, update strategy registry)
+        strategy_facade = get_strategy_service()
+
+        # Validate strategy configuration through service layer
+        is_valid = await strategy_facade.validate_strategy_config(
+            strategy_name, config_request.parameters
+        )
+
+        if not is_valid:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid configuration for strategy {strategy_name}",
+            )
+
+        # Note: Actual configuration update would need to be implemented in the service layer
         logger.info(
             "Strategy configured",
             strategy=strategy_name,

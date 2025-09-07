@@ -55,9 +55,9 @@ class PoolAsyncUnitOfWork:
         else:
             try:
                 await self.commit()
-            except Exception:
+            except Exception as e:
                 await self.rollback()
-                raise
+                raise e
 
         await self.close()
 
@@ -140,6 +140,7 @@ class ConnectionPoolManager:
 
     async def _initialize_database_pool(self):
         """Initialize async database connection pool."""
+        conn = None
         try:
             # Get async database URL from config with proper validation
             database_url = None
@@ -200,8 +201,12 @@ class ConnectionPoolManager:
                 self._uow_factory = create_async_uow
 
                 # Test the connection
-                async with self._async_engine.begin() as conn:
+                try:
+                    conn = await self._async_engine.begin()
                     await conn.execute(text("SELECT 1"))
+                finally:
+                    if conn:
+                        await conn.close()
 
                 logger.info(
                     f"Async database pool initialized: "
@@ -212,6 +217,11 @@ class ConnectionPoolManager:
                 logger.warning("No async database URL configured")
 
         except Exception as e:
+            if conn:
+                try:
+                    await conn.close()
+                except Exception:
+                    pass
             logger.error(f"Failed to initialize async database pool: {e}")
             # Don't raise, let the app continue without connection pool
             logger.warning("Continuing without database connection pool")
@@ -229,6 +239,12 @@ class ConnectionPoolManager:
             logger.info("Redis pool initialized using database module's RedisClient")
 
         except Exception as e:
+            if hasattr(self, "redis_client") and self.redis_client:
+                try:
+                    await self.redis_client.disconnect()
+                except Exception:
+                    pass
+                self.redis_client = None
             logger.error(f"Failed to initialize Redis pool: {e}")
             # Don't raise for Redis, it's not critical
             logger.warning("Continuing without Redis connection pool")
@@ -303,6 +319,7 @@ class ConnectionPoolManager:
         }
 
         # Check database pool
+        session = None
         try:
             async with self.get_db_connection() as session:
                 result = await session.execute(text("SELECT 1"))
@@ -336,6 +353,12 @@ class ConnectionPoolManager:
         except Exception as e:
             results["database"]["status"] = "unhealthy"
             results["database"]["details"] = {"error": str(e)}
+        finally:
+            if session:
+                try:
+                    await session.close()
+                except Exception:
+                    pass
 
         # Check Redis pool
         try:
@@ -440,6 +463,8 @@ class ConnectionPoolManager:
                 logger.info("Async database pool closed")
             except Exception as e:
                 logger.error(f"Error closing async database pool: {e}")
+            finally:
+                self._async_engine = None
 
         # Close Redis pool
         if self.redis_client:
@@ -448,6 +473,8 @@ class ConnectionPoolManager:
                 logger.info("Redis pool closed")
             except Exception as e:
                 logger.error(f"Error closing Redis pool: {e}")
+            finally:
+                self.redis_client = None
 
         self._initialized = False
         logger.info("All connection pools closed")
@@ -592,7 +619,7 @@ class ConnectionHealthMonitor:
 
         # Alert thresholds
         self.alert_thresholds = {
-            "db_connection_usage": 0.8,  # 80% pool utilization
+            "database_connection_usage": 0.8,  # 80% pool utilization
             "redis_connection_usage": 0.8,  # 80% pool utilization
             "connection_timeout_rate": 0.1,  # 10% timeout rate
             "health_check_failure_rate": 0.05,  # 5% failure rate
@@ -672,7 +699,7 @@ class ConnectionHealthMonitor:
                 checked_out = db_stats["checked_out"]
                 if size > 0:
                     usage = checked_out / size
-                    if usage > self.alert_thresholds["db_connection_usage"]:
+                    if usage > self.alert_thresholds["database_connection_usage"]:
                         await self._alert_high_utilization("database", usage)
 
             # Redis utilization is harder to measure with the abstracted client

@@ -17,6 +17,7 @@ Key Features:
 """
 
 from datetime import datetime, timezone
+from decimal import Decimal
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
@@ -37,6 +38,7 @@ from src.monitoring import (
     get_performance_profiler,
     get_trading_tracer,
 )
+from src.utils import handle_api_error
 from src.web_interface.security.auth import get_current_user, require_permissions
 
 logger = get_logger(__name__)
@@ -51,7 +53,7 @@ class HealthCheckResponse(BaseModel):
 
     status: str
     timestamp: datetime
-    uptime_seconds: float
+    uptime_seconds: Decimal
     version: str = "1.0.0"
     components: dict[str, str] = Field(default_factory=dict)
 
@@ -71,7 +73,7 @@ class AlertRuleRequest(BaseModel):
     description: str
     severity: AlertSeverity
     query: str
-    threshold: float
+    threshold: Decimal
     operator: str
     duration: str
     labels: dict[str, str] = Field(default_factory=dict)
@@ -130,8 +132,7 @@ async def get_metrics_collector_dep() -> MetricsCollector:
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to get metrics collector: {e}")
-        raise HTTPException(status_code=500, detail="Internal error accessing metrics collector")
+        raise handle_api_error(e, "Get metrics collector")
 
 
 async def get_alert_manager_dep() -> AlertManager:
@@ -148,8 +149,7 @@ async def get_alert_manager_dep() -> AlertManager:
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to get alert manager: {e}")
-        raise HTTPException(status_code=500, detail="Internal error accessing alert manager")
+        raise handle_api_error(e, "Get alert manager")
 
 
 async def get_profiler_dep() -> PerformanceProfiler:
@@ -166,8 +166,7 @@ async def get_profiler_dep() -> PerformanceProfiler:
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to get performance profiler: {e}")
-        raise HTTPException(status_code=500, detail="Internal error accessing performance profiler")
+        raise handle_api_error(e, "Get performance profiler")
 
 
 # Health and Status Endpoints
@@ -194,28 +193,32 @@ async def health_check():
         try:
             collector = get_metrics_collector()
             components["metrics_collector"] = "healthy" if collector else "unavailable"
-        except Exception:
+        except Exception as e:
+            logger.error(f"Failed to check metrics collector: {e}")
             components["metrics_collector"] = "error"
 
         # Check alert manager
         try:
             alert_manager = get_alert_manager()
             components["alert_manager"] = "healthy" if alert_manager else "unavailable"
-        except Exception:
+        except Exception as e:
+            logger.error(f"Failed to check alert manager: {e}")
             components["alert_manager"] = "error"
 
         # Check performance profiler
         try:
             profiler = get_performance_profiler()
             components["performance_profiler"] = "healthy" if profiler else "unavailable"
-        except Exception:
+        except Exception as e:
+            logger.error(f"Failed to check performance profiler: {e}")
             components["performance_profiler"] = "error"
 
         # Check trading tracer
         try:
             tracer = get_trading_tracer()
             components["trading_tracer"] = "healthy" if tracer else "unavailable"
-        except Exception:
+        except Exception as e:
+            logger.error(f"Failed to check trading tracer: {e}")
             components["trading_tracer"] = "error"
 
         # Determine overall status
@@ -233,8 +236,7 @@ async def health_check():
         )
 
     except Exception as e:
-        logger.error(f"Health check failed: {e}")
-        raise HTTPException(status_code=500, detail="Health check failed")
+        raise handle_api_error(e, "Health check")
 
 
 @router.get("/status")
@@ -276,8 +278,7 @@ async def system_status():
         }
 
     except Exception as e:
-        logger.error(f"Status check failed: {e}")
-        raise HTTPException(status_code=500, detail="Status check failed")
+        raise handle_api_error(e, "Status check")
 
 
 # Metrics Endpoints
@@ -292,8 +293,7 @@ async def prometheus_metrics(collector: MetricsCollector = Depends(get_metrics_c
         metrics_content = collector.export_metrics()
         return Response(content=metrics_content, media_type=collector.get_metrics_content_type())
     except Exception as e:
-        logger.error(f"Failed to export metrics: {e}")
-        raise HTTPException(status_code=500, detail="Failed to export metrics")
+        raise handle_api_error(e, "Export metrics")
 
 
 @router.get("/metrics/json", response_model=MetricsResponse)
@@ -316,8 +316,7 @@ async def metrics_json(
         )
 
     except Exception as e:
-        logger.error(f"Failed to get metrics: {e}")
-        raise HTTPException(status_code=500, detail="Failed to get metrics")
+        raise handle_api_error(e, "Get metrics")
 
 
 # Performance Endpoints
@@ -348,8 +347,7 @@ async def performance_stats(
         return PerformanceStatsResponse(**stats)
 
     except Exception as e:
-        logger.error(f"Failed to get performance stats: {e}")
-        raise HTTPException(status_code=500, detail="Failed to get performance stats")
+        raise handle_api_error(e, "Get performance stats")
 
 
 @router.get("/performance/memory")
@@ -398,8 +396,7 @@ async def memory_report(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to get memory report: {e}")
-        raise HTTPException(status_code=500, detail="Failed to get memory report")
+        raise handle_api_error(e, "Get memory report")
 
 
 @router.post("/performance/reset-metrics")
@@ -421,8 +418,7 @@ async def reset_performance_metrics(
         }
 
     except Exception as e:
-        logger.error(f"Failed to reset performance metrics: {e}")
-        raise HTTPException(status_code=500, detail="Failed to reset performance metrics")
+        raise handle_api_error(e, "Reset performance metrics")
 
 
 @router.get("/performance/database-queries")
@@ -449,8 +445,7 @@ async def database_query_stats(
         }
 
     except Exception as e:
-        logger.error(f"Failed to get database query stats: {e}")
-        raise HTTPException(status_code=500, detail="Failed to get database query stats")
+        raise handle_api_error(e, "Get database query stats")
 
 
 # Alert Management Endpoints
@@ -496,8 +491,7 @@ async def get_alerts(
         ]
 
     except Exception as e:
-        logger.error(f"Failed to get alerts: {e}")
-        raise HTTPException(status_code=500, detail="Failed to get alerts")
+        raise handle_api_error(e, "Get alerts")
 
 
 @router.post("/alerts/rules")
@@ -536,8 +530,7 @@ async def create_alert_rule(
         }
 
     except Exception as e:
-        logger.error(f"Failed to create alert rule: {e}")
-        raise HTTPException(status_code=500, detail="Failed to create alert rule")
+        raise handle_api_error(e, "Create alert rule")
 
 
 @router.delete("/alerts/rules/{rule_name}")
@@ -568,8 +561,7 @@ async def delete_alert_rule(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to delete alert rule: {e}")
-        raise HTTPException(status_code=500, detail="Failed to delete alert rule")
+        raise handle_api_error(e, "Delete alert rule")
 
 
 @router.post("/alerts/{fingerprint}/acknowledge")
@@ -599,8 +591,7 @@ async def acknowledge_alert(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to acknowledge alert: {e}")
-        raise HTTPException(status_code=500, detail="Failed to acknowledge alert")
+        raise handle_api_error(e, "Acknowledge alert")
 
 
 @router.get("/alerts/stats")
@@ -611,8 +602,7 @@ async def alert_stats(alert_manager: AlertManager = Depends(get_alert_manager_de
         return {"stats": stats, "timestamp": datetime.now(timezone.utc)}
 
     except Exception as e:
-        logger.error(f"Failed to get alert stats: {e}")
-        raise HTTPException(status_code=500, detail="Failed to get alert stats")
+        raise handle_api_error(e, "Get alert stats")
 
 
 # Configuration Endpoints
@@ -656,8 +646,7 @@ async def get_monitoring_config(user=Depends(require_permissions(["monitoring.re
         return config
 
     except Exception as e:
-        logger.error(f"Failed to get monitoring config: {e}")
-        raise HTTPException(status_code=500, detail="Failed to get monitoring config")
+        raise handle_api_error(e, "Get monitoring config")
 
 
 @router.post("/config/start-monitoring")
@@ -701,8 +690,7 @@ async def start_monitoring(user=Depends(require_permissions(["monitoring.write"]
         }
 
     except Exception as e:
-        logger.error(f"Failed to start monitoring: {e}")
-        raise HTTPException(status_code=500, detail="Failed to start monitoring")
+        raise handle_api_error(e, "Start monitoring")
 
 
 @router.post("/config/stop-monitoring")
@@ -746,5 +734,4 @@ async def stop_monitoring(user=Depends(require_permissions(["monitoring.write"])
         }
 
     except Exception as e:
-        logger.error(f"Failed to stop monitoring: {e}")
-        raise HTTPException(status_code=500, detail="Failed to stop monitoring")
+        raise handle_api_error(e, "Stop monitoring")

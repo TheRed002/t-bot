@@ -9,7 +9,7 @@ import inspect
 from abc import ABC, abstractmethod
 from typing import Any
 
-from src.base import BaseComponent
+from src.core.base import BaseComponent
 
 
 class ServiceInterface(ABC):
@@ -127,11 +127,31 @@ class ServiceRegistry(BaseComponent):
 _global_registry: ServiceRegistry | None = None
 
 
-def get_service_registry() -> ServiceRegistry:
-    """Get or create the global service registry."""
+def get_service_registry(injector=None) -> ServiceRegistry:
+    """Get or create the global service registry using dependency injection."""
     global _global_registry
     if _global_registry is None:
-        _global_registry = ServiceRegistry()
+        if injector:
+            try:
+                # Use provided injector
+                _global_registry = injector.resolve("WebServiceRegistry")
+            except Exception:
+                # Fallback to direct instantiation if resolution fails
+                _global_registry = ServiceRegistry()
+        else:
+            try:
+                # Try to get from DI container
+                from src.core.dependency_injection import get_global_injector
+
+                core_injector = get_global_injector()
+                if core_injector and core_injector.has_service("WebServiceRegistry"):
+                    _global_registry = core_injector.resolve("WebServiceRegistry")
+                else:
+                    # Fallback to direct instantiation
+                    _global_registry = ServiceRegistry()
+            except Exception:
+                # Fallback to direct instantiation
+                _global_registry = ServiceRegistry()
     return _global_registry
 
 

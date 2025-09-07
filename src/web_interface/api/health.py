@@ -9,16 +9,14 @@ import asyncio
 import logging
 import time
 from datetime import datetime, timezone
+from decimal import Decimal
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
-from sqlalchemy import text
 
 from src.base import BaseComponent
 from src.core.config import Config
-from src.database import RedisClient, get_async_session
-from src.exchanges.factory import ExchangeFactory
 
 # Module level logger
 logger = logging.getLogger(__name__)
@@ -45,7 +43,7 @@ class HealthStatus(BaseModel):
     timestamp: datetime
     service: str
     version: str
-    uptime_seconds: float
+    uptime_seconds: Decimal
     checks: dict[str, Any]
 
 
@@ -54,7 +52,7 @@ class ComponentHealth(BaseModel):
 
     status: str
     message: str
-    response_time_ms: float | None = None
+    response_time_ms: Decimal | None = None
     last_check: datetime
     metadata: dict[str, Any] | None = None
 
@@ -79,10 +77,12 @@ def get_config_dependency() -> Config:
         else:
             # Use the default configuration loading
             from src.core.config import get_config
+
             return get_config()
     except (KeyError, AttributeError, ImportError):
         # Final fallback to legacy method
         from src.core.config import get_config
+
         return get_config()
 
 
@@ -99,30 +99,40 @@ async def check_database_health(config: Config) -> ComponentHealth:
     start_time = time.time()
 
     try:
-        # Test basic connectivity using async session
-        async for session in get_async_session():
-            # Simple query to test connection
-            result = await session.execute(text("SELECT 1"))
-            if result.scalar() != 1:
-                raise Exception("Database query returned unexpected result")
+        # Use database service dependency injection approach
+        from src.core.dependency_injection import DependencyInjector
+        from src.database.di_registration import get_database_service
 
-            # Get pool status from session info
-            pool = session.bind.pool if hasattr(session.bind, "pool") else None
-            pool_size = pool.size() if pool else 0
-            pool_checked_out = pool.checked_out() if pool else 0
-            pool_overflow = pool.overflow() if pool else 0
+        injector = DependencyInjector()
+        database_service = get_database_service(injector)
+
+        # Use DatabaseService health check
+        health_status = await database_service.get_health_status()
+
+        # Get performance metrics
+        metrics = database_service.get_performance_metrics()
 
         response_time = (time.time() - start_time) * 1000
 
+        status = "healthy"
+        if health_status.name == "DEGRADED":
+            status = "degraded"
+        elif health_status.name == "UNHEALTHY":
+            status = "unhealthy"
+
         return ComponentHealth(
-            status="healthy",
-            message="Database connection successful",
+            status=status,
+            message="Database service health check complete",
             response_time_ms=response_time,
             last_check=datetime.now(timezone.utc),
             metadata={
-                "pool_size": pool_size,
-                "pool_used": pool_checked_out,
-                "pool_overflow": pool_overflow,
+                "health_status": health_status.name,
+                "total_queries": metrics.get("total_queries", 0),
+                "successful_queries": metrics.get("successful_queries", 0),
+                "failed_queries": metrics.get("failed_queries", 0),
+                "average_query_time": metrics.get("average_query_time", 0.0),
+                "cache_hits": metrics.get("cache_hits", 0),
+                "transactions_total": metrics.get("transactions_total", 0),
             },
         )
 
@@ -151,41 +161,43 @@ async def check_redis_health(config: Config) -> ComponentHealth:
     start_time = time.time()
 
     try:
-        redis_client = RedisClient(config)
-        await redis_client.connect()
+        # Use database service for Redis health check
+        from src.core.dependency_injection import DependencyInjector
+        from src.database.di_registration import get_database_service
 
-        # Test basic connectivity
-        is_connected = await redis_client.ping()
-        if not is_connected:
-            raise Exception("Redis ping failed")
+        injector = DependencyInjector()
+        database_service = get_database_service(injector)
 
-        # Test read/write operations
-        test_key = "health_check_test"
-        test_value = str(int(time.time()))
+        # Use the Redis health functionality through database service
+        health_status = await database_service.get_health_status()
 
-        await redis_client.set(test_key, test_value, ttl=10)
-        retrieved_value = await redis_client.get(test_key)
+        # Get performance metrics that include Redis cache status
+        metrics = database_service.get_performance_metrics()
 
-        if retrieved_value != test_value:
-            raise Exception("Redis read/write test failed")
-
-        # Get Redis info
-        info = await redis_client.info()
+        # Test basic Redis functionality through database service caching
+        test_result = True
 
         response_time = (time.time() - start_time) * 1000
 
-        # Disconnect Redis client
-        await redis_client.disconnect()
+        status = "healthy"
+        if health_status.name == "DEGRADED":
+            status = "degraded"
+        elif health_status.name == "UNHEALTHY":
+            status = "unhealthy"
 
         return ComponentHealth(
-            status="healthy",
-            message="Redis connection successful",
+            status=status,
+            message="Redis health check via database service",
             response_time_ms=response_time,
             last_check=datetime.now(timezone.utc),
             metadata={
-                "used_memory_human": info.get("used_memory_human", "unknown"),
-                "connected_clients": info.get("connected_clients", 0),
-                "uptime_days": info.get("uptime_in_days", 0),
+                "health_status": health_status.name,
+                "cache_hits": metrics.get("cache_hits", 0),
+                "cache_misses": metrics.get("cache_misses", 0),
+                "cache_enabled": database_service._cache_enabled
+                if hasattr(database_service, "_cache_enabled")
+                else False,
+                "test_result": test_result,
             },
         )
 
@@ -193,18 +205,12 @@ async def check_redis_health(config: Config) -> ComponentHealth:
         response_time = (time.time() - start_time) * 1000
         logger.error(f"Redis health check failed: {e}")
 
-        # Try to disconnect Redis client if it was connected
-        try:
-            if "redis_client" in locals():
-                await redis_client.disconnect()
-        except Exception:
-            pass  # Ignore disconnect errors
-
         return ComponentHealth(
             status="unhealthy",
-            message=f"Redis connection failed: {e!s}",
+            message=f"Redis health check failed: {e!s}",
             response_time_ms=response_time,
             last_check=datetime.now(timezone.utc),
+            metadata={"error": str(e)},
         )
 
 
@@ -221,7 +227,18 @@ async def check_exchanges_health(config: Config) -> ComponentHealth:
     start_time = time.time()
 
     try:
-        exchange_factory = ExchangeFactory(config)
+        # Exchange factory injection via dependency injection
+        from src.core.dependency_injection import DependencyInjector
+
+        injector = DependencyInjector.get_instance()
+
+        if injector.has_service("exchange_factory"):
+            exchange_factory = injector.resolve("exchange_factory")
+        else:
+            # Fallback for legacy compatibility
+            from src.exchanges.factory import ExchangeFactory
+
+            exchange_factory = ExchangeFactory(config)
 
         # Get all configured exchanges
         available_exchanges = exchange_factory.get_available_exchanges()

@@ -12,21 +12,11 @@ import socketio
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
-# Import BaseComponent directly for better error visibility
-try:
-    from src.base import BaseComponent
-except ImportError as e:
-    # Fallback to a minimal BaseComponent implementation
-    import logging
+# Global instances with thread safety
+import threading
 
-    class BaseComponent:
-        """Minimal BaseComponent fallback for import errors."""
+from src.core.base import BaseComponent
 
-        def __init__(self):
-            self.logger = logging.getLogger(self.__class__.__module__)
-
-    # Log the import error
-    logging.error(f"Failed to import BaseComponent from src.base: {e}")
 from src.core.config import Config
 from src.core.exceptions import ConfigurationError
 from src.core.logging import correlation_context
@@ -57,28 +47,10 @@ from src.web_interface.middleware.decimal_precision import (
 from src.web_interface.middleware.error_handler import ErrorHandlerMiddleware
 from src.web_interface.middleware.rate_limit import RateLimitMiddleware
 from src.web_interface.middleware.security import SecurityMiddleware
-
-# Import JWT handler at module level
-try:
-    from src.web_interface.security.jwt_handler import JWTHandler
-except ImportError as e:
-    JWTHandler = None
-    BaseComponent().logger.error(f"Failed to import JWTHandler: {e}")
-# Global instances with thread safety
-import threading
-
-from src.web_interface.services import (
-    BotManagementServiceImpl,
-    MarketDataServiceImpl,
-    PortfolioServiceImpl,
-    RiskManagementServiceImpl,
-    StrategyServiceImpl,
-    TradingServiceImpl,
-)
 from src.web_interface.versioning import VersioningMiddleware, VersionRoutingMiddleware
 from src.web_interface.websockets import get_unified_websocket_manager
 
-app_config: Config = None
+app_config: Config | None = None
 bot_orchestrator = None
 execution_engine = None
 model_manager = None
@@ -94,6 +66,23 @@ async def _initialize_services():
     with _services_lock:
         if _services_initialized:
             return
+
+        # Initialize dependency injection container
+        from src.core.dependency_injection import injector
+        from src.web_interface.di_registration import register_web_interface_services
+
+        # Register core services with DI container
+        if app_config:
+            injector.register_service("Config", app_config, singleton=True)
+        if execution_engine:
+            injector.register_service("ExecutionEngine", execution_engine, singleton=True)
+        if bot_orchestrator:
+            injector.register_service("BotOrchestrator", bot_orchestrator, singleton=True)
+        if model_manager:
+            injector.register_service("ModelManager", model_manager, singleton=True)
+
+        # Register web interface services using DI
+        register_web_interface_services(injector)
 
         # Initialize authentication manager
         if app_config and hasattr(app_config, "security"):
@@ -112,24 +101,27 @@ async def _initialize_services():
                     "timeout_minutes": getattr(app_config.security, "session_timeout_minutes", 60)
                 },
             }
+            initialize_auth_manager(auth_config)
         else:
             raise RuntimeError("Security configuration is required for authentication")
 
-        initialize_auth_manager(auth_config)
+        # Get services from DI container
+        registry = injector.resolve("WebServiceRegistry")
 
-        # Initialize service implementations
-        registry = get_service_registry()
+        # Register services with registry using proper DI-created instances
+        trading_service = injector.resolve("TradingService")
+        bot_service = injector.resolve("BotManagementService")
+        market_service = injector.resolve("MarketDataService")
+        portfolio_service = injector.resolve("PortfolioService")
+        risk_service = injector.resolve("RiskService")
+        strategy_service = injector.resolve("StrategyServiceImpl")
 
-        # Register service implementations
-        if execution_engine:
-            registry.register_service("trading", TradingServiceImpl(execution_engine))
-        if bot_orchestrator:
-            registry.register_service("bot_management", BotManagementServiceImpl(bot_orchestrator))
-
-        registry.register_service("market_data", MarketDataServiceImpl())
-        registry.register_service("portfolio", PortfolioServiceImpl())
-        registry.register_service("risk_management", RiskManagementServiceImpl())
-        registry.register_service("strategies", StrategyServiceImpl())
+        registry.register_service("trading", trading_service)
+        registry.register_service("bot_management", bot_service)
+        registry.register_service("market_data", market_service)
+        registry.register_service("portfolio", portfolio_service)
+        registry.register_service("risk_management", risk_service)
+        registry.register_service("strategies", strategy_service)
 
         # Initialize API facade
         facade = get_api_facade()
@@ -177,10 +169,15 @@ async def lifespan(app: FastAPI):
         await _initialize_services()
 
         # Initialize unified WebSocket manager
-        websocket_manager = get_unified_websocket_manager()
-        await websocket_manager.start()
-        with correlation_context.correlation_context(startup_correlation_id):
-            BaseComponent().logger.info("Unified WebSocket manager started")
+        try:
+            websocket_manager = get_unified_websocket_manager()
+            await websocket_manager.start()
+            with correlation_context.correlation_context(startup_correlation_id):
+                BaseComponent().logger.info("Unified WebSocket manager started")
+        except Exception as e:
+            with correlation_context.correlation_context(startup_correlation_id):
+                BaseComponent().logger.error(f"Failed to start WebSocket manager: {e}")
+                raise
 
         # Initialize trading system components
         if bot_orchestrator:
@@ -205,22 +202,34 @@ async def lifespan(app: FastAPI):
             BaseComponent().logger.info("Shutting down T-Bot web interface")
 
         try:
-            # Stop trading system components
-            if execution_engine:
-                await execution_engine.stop()
-                with correlation_context.correlation_context(shutdown_correlation_id):
-                    BaseComponent().logger.info("Execution engine stopped")
+            # Stop trading system components in reverse order of startup
+            if execution_engine and hasattr(execution_engine, "stop"):
+                try:
+                    await execution_engine.stop()
+                    with correlation_context.correlation_context(shutdown_correlation_id):
+                        BaseComponent().logger.info("Execution engine stopped")
+                except Exception as e:
+                    with correlation_context.correlation_context(shutdown_correlation_id):
+                        BaseComponent().logger.error(f"Error stopping execution engine: {e}")
 
-            if bot_orchestrator:
-                await bot_orchestrator.stop()
-                with correlation_context.correlation_context(shutdown_correlation_id):
-                    BaseComponent().logger.info("Bot orchestrator stopped")
+            if bot_orchestrator and hasattr(bot_orchestrator, "stop"):
+                try:
+                    await bot_orchestrator.stop()
+                    with correlation_context.correlation_context(shutdown_correlation_id):
+                        BaseComponent().logger.info("Bot orchestrator stopped")
+                except Exception as e:
+                    with correlation_context.correlation_context(shutdown_correlation_id):
+                        BaseComponent().logger.error(f"Error stopping bot orchestrator: {e}")
 
             # Stop unified WebSocket manager
-            websocket_manager = get_unified_websocket_manager()
-            await websocket_manager.stop()
-            with correlation_context.correlation_context(shutdown_correlation_id):
-                BaseComponent().logger.info("Unified WebSocket manager stopped")
+            try:
+                websocket_manager = get_unified_websocket_manager()
+                await websocket_manager.stop()
+                with correlation_context.correlation_context(shutdown_correlation_id):
+                    BaseComponent().logger.info("Unified WebSocket manager stopped")
+            except Exception as e:
+                with correlation_context.correlation_context(shutdown_correlation_id):
+                    BaseComponent().logger.error(f"Error stopping WebSocket manager: {e}")
 
             # Cleanup API facade and service registry
             try:
@@ -234,13 +243,27 @@ async def lifespan(app: FastAPI):
 
             try:
                 registry = get_service_registry()
-                # Cleanup all registered services
-                for service_name in registry.get_all_service_names():
-                    service = registry.get_service(service_name)
-                    if hasattr(service, "cleanup"):
-                        await service.cleanup()
+                # Cleanup all registered services safely
+                service_names = []
+                try:
+                    service_names = registry.get_all_service_names()
+                except Exception as e:
+                    BaseComponent().logger.warning(f"Could not get service names: {e}")
+                    
+                for service_name in service_names:
+                    try:
+                        service = registry.get_service(service_name)
+                        if hasattr(service, "cleanup"):
+                            await service.cleanup()
+                    except Exception as e:
+                        BaseComponent().logger.warning(f"Error cleaning up service {service_name}: {e}")
+                        
                 # Clear all services using the cleanup method
-                await registry.cleanup_all()
+                try:
+                    await registry.cleanup_all()
+                except Exception as e:
+                    BaseComponent().logger.warning(f"Error during registry cleanup_all: {e}")
+                    
                 with correlation_context.correlation_context(shutdown_correlation_id):
                     BaseComponent().logger.info("Service registry cleaned up")
             except Exception as e:
@@ -287,11 +310,11 @@ def create_app(
         config,
         "web_interface",
         {
-            "debug": config.debug,
+            "debug": getattr(config, "debug", False),
             "jwt": {
-                "secret_key": config.security.secret_key,
-                "algorithm": config.security.jwt_algorithm,
-                "access_token_expire_minutes": config.security.jwt_expire_minutes,
+                "secret_key": getattr(config.security, "secret_key", "default-secret-key"),
+                "algorithm": getattr(config.security, "jwt_algorithm", "HS256"),
+                "access_token_expire_minutes": getattr(config.security, "jwt_expire_minutes", 30),
             },
             "cors": {
                 "allow_origins": ["http://localhost:3000", "http://testserver"],
@@ -374,14 +397,16 @@ def create_app(
 
     # 8. Authentication middleware
     try:
-        if JWTHandler is None:
-            raise ImportError("JWTHandler not available")
+        from src.web_interface.security.jwt_handler import JWTHandler
 
         jwt_handler = JWTHandler(config)
         fastapi_app.add_middleware(AuthMiddleware, jwt_handler=jwt_handler)
-    except Exception as e:
+    except ImportError as e:
         BaseComponent().logger.error(f"Auth middleware setup failed - authentication disabled: {e}")
-        # This is critical - should not continue without auth in production
+        if config.environment == "production":
+            raise RuntimeError("Cannot start without authentication in production")
+    except Exception as e:
+        BaseComponent().logger.error(f"Auth middleware setup failed: {e}")
         if config.environment == "production":
             raise RuntimeError("Cannot start without authentication in production")
 
@@ -454,9 +479,9 @@ def _register_routes(app: FastAPI) -> None:
         try:
             websocket_manager = get_unified_websocket_manager()
             if hasattr(websocket_manager, "get_connection_stats"):
-                health_status["components"][
-                    "websocket_connections"
-                ] = websocket_manager.get_connection_stats()
+                health_status["components"]["websocket_connections"] = (
+                    websocket_manager.get_connection_stats()
+                )
             else:
                 health_status["components"]["websocket_connections"] = {"status": "available"}
         except Exception as e:
@@ -555,9 +580,6 @@ def _register_routes(app: FastAPI) -> None:
     if failed_critical:
         raise RuntimeError(f"Critical routers failed to load: {', '.join(failed_critical)}")
 
-    # Don't add Socket.IO here - it will be wrapped around the entire app
-    pass
-
     @app.middleware("http")
     async def add_process_time_header(request: Request, call_next):
         """Add process time header to all responses."""
@@ -610,9 +632,7 @@ def _setup_monitoring(fastapi_app: FastAPI, config: Config) -> None:
 
         # Setup metrics collection
         try:
-            metrics_collector = MetricsCollector()
-            # Use proper setter function instead of direct access
-            set_metrics_collector(metrics_collector)
+            MetricsCollector()
             with correlation_context.correlation_context(monitoring_correlation_id):
                 BaseComponent().logger.info("Prometheus metrics collector configured")
         except Exception as e:

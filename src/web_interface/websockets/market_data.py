@@ -30,10 +30,14 @@ class ConnectionManager:
 
     async def connect(self, websocket: WebSocket, user_id: str):
         """Accept WebSocket connection."""
-        await websocket.accept()
-        self.active_connections[user_id] = websocket
-        self.subscriptions[user_id] = set()
-        logger.info("WebSocket connected", user_id=user_id)
+        try:
+            await websocket.accept()
+            self.active_connections[user_id] = websocket
+            self.subscriptions[user_id] = set()
+            logger.info("WebSocket connected", user_id=user_id)
+        except Exception as e:
+            logger.error(f"Failed to accept market data WebSocket connection: {e}", user_id=user_id)
+            raise
 
     def disconnect(self, user_id: str):
         """Disconnect WebSocket and cleanup subscriptions."""
@@ -80,7 +84,11 @@ class ConnectionManager:
         if user_id in self.active_connections:
             try:
                 websocket = self.active_connections[user_id]
-                await websocket.send_text(json.dumps(message))
+                # Use asyncio timeout to prevent blocking
+                await asyncio.wait_for(websocket.send_text(json.dumps(message)), timeout=10.0)
+            except asyncio.TimeoutError:
+                logger.error("Timeout sending message to user", user_id=user_id)
+                self.disconnect(user_id)
             except Exception as e:
                 logger.error("Failed to send message to user", user_id=user_id, error=str(e))
                 # Remove broken connection
@@ -90,19 +98,33 @@ class ConnectionManager:
         """Broadcast message to all subscribers of a symbol."""
         if symbol in self.symbol_subscribers:
             disconnected_users = []
+            send_tasks = []
 
+            # Collect all send tasks
             for user_id in self.symbol_subscribers[symbol]:
-                try:
-                    websocket = self.active_connections.get(user_id)
-                    if websocket:
-                        await websocket.send_text(json.dumps(message))
-                except Exception as e:
-                    logger.error("Failed to broadcast to user", user_id=user_id, error=str(e))
-                    disconnected_users.append(user_id)
+                websocket = self.active_connections.get(user_id)
+                if websocket:
+                    send_tasks.append(self._send_with_timeout(websocket, message, user_id))
+
+            # Execute all sends concurrently
+            if send_tasks:
+                results = await asyncio.gather(*send_tasks, return_exceptions=True)
+                subscriber_list = list(self.symbol_subscribers[symbol])
+                for i, result in enumerate(results):
+                    if isinstance(result, Exception) and i < len(subscriber_list):
+                        disconnected_users.append(subscriber_list[i])
 
             # Clean up disconnected users
             for user_id in disconnected_users:
                 self.disconnect(user_id)
+
+    async def _send_with_timeout(self, websocket: WebSocket, message: dict, user_id: str):
+        """Send message with timeout handling."""
+        try:
+            await asyncio.wait_for(websocket.send_text(json.dumps(message)), timeout=5.0)
+        except Exception as e:
+            logger.error(f"Failed to send to user {user_id}: {e}")
+            raise
 
 
 # Global connection manager
@@ -148,17 +170,24 @@ async def authenticate_websocket(websocket: WebSocket) -> User | None:
         from src.web_interface.security.auth import jwt_handler
 
         if jwt_handler:
-            token_data = jwt_handler.validate_token(token)
+            # Check if validate_token is async
+            if callable(jwt_handler.validate_token) and asyncio.iscoroutinefunction(
+                jwt_handler.validate_token
+            ):
+                token_data = await jwt_handler.validate_token(token)
+            else:
+                token_data = jwt_handler.validate_token(token)
 
-            # Create user object
-            user = User(
-                user_id=token_data.user_id,
-                username=token_data.username,
-                email="user@example.com",  # Simplified
-                is_active=True,
-                scopes=token_data.scopes,
-            )
-            return user
+            if token_data:
+                # Create user object
+                user = User(
+                    user_id=token_data.user_id,
+                    username=token_data.username,
+                    email="user@example.com",  # Simplified
+                    is_active=True,
+                    scopes=token_data.scopes,
+                )
+                return user
 
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Authentication failed")
         return None
@@ -200,10 +229,13 @@ async def market_data_websocket(websocket: WebSocket):
         }
         await manager.send_to_user(user.user_id, welcome_message)
 
-        # Listen for subscription messages
+        # Listen for subscription messages with timeout
         while True:
             try:
-                data = await websocket.receive_text()
+                # Add timeout to prevent hanging on receive
+                data = await asyncio.wait_for(
+                    websocket.receive_text(), timeout=300.0
+                )  # 5 min timeout
                 message = json.loads(data)
 
                 if message.get("action") == "subscribe":
@@ -246,6 +278,14 @@ async def market_data_websocket(websocket: WebSocket):
                         "timestamp": datetime.now(timezone.utc).isoformat(),
                     }
                     await manager.send_to_user(user.user_id, pong_message)
+
+            except asyncio.TimeoutError:
+                # Send ping to check connection
+                ping_message = {
+                    "type": "ping",
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                }
+                await manager.send_to_user(user.user_id, ping_message)
 
             except json.JSONDecodeError:
                 error_message = {

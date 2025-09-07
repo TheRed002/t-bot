@@ -15,9 +15,8 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from src.core.config import Config
 from src.core.exceptions import AuthenticationError
 from src.core.logging import get_logger
-from src.database.connection import get_async_session
 from src.database.models.user import User as DBUser
-from src.database.repository.user import UserRepository
+from src.database.service import DatabaseService
 
 from .jwt_handler import JWTHandler
 
@@ -117,14 +116,26 @@ async def get_user(username: str) -> UserInDB | None:
         UserInDB: User data or None if not found
     """
     try:
-        async with get_async_session() as session:
-            user_repo = UserRepository(session)
-            db_user = await user_repo.get_by_username(username)
+        # Use DatabaseService instead of direct repository access
+        database_service = DatabaseService()
+        await database_service.start()
 
-            if not db_user or not db_user.is_active:
+        try:
+            # Query users by username filter
+            users = await database_service.list_entities(
+                model_class=DBUser, filters={"username": username}, limit=1
+            )
+
+            if not users:
+                return None
+
+            db_user = users[0]
+            if not db_user.is_active:
                 return None
 
             return _convert_db_user_to_user_in_db(db_user)
+        finally:
+            await database_service.stop()
 
     except Exception as e:
         logger.error(f"Database error getting user {username}: {e}")
@@ -143,13 +154,21 @@ async def authenticate_user(username: str, password: str) -> UserInDB | None:
         UserInDB: Authenticated user or None if authentication fails
     """
     try:
-        async with get_async_session() as session:
-            user_repo = UserRepository(session)
-            db_user = await user_repo.get_by_username(username)
+        # Use DatabaseService instead of direct repository access
+        database_service = DatabaseService()
+        await database_service.start()
 
-            if not db_user:
+        try:
+            # Query users by username filter
+            users = await database_service.list_entities(
+                model_class=DBUser, filters={"username": username}, limit=1
+            )
+
+            if not users:
                 logger.warning("Authentication failed: user not found", username=username)
                 return None
+
+            db_user = users[0]
 
             # Check if account is locked
             if db_user.locked_until and datetime.now(timezone.utc) < db_user.locked_until:
@@ -176,10 +195,8 @@ async def authenticate_user(username: str, password: str) -> UserInDB | None:
                         username=username,
                     )
 
-                # Update user
-                await user_repo.update(db_user)
-                await session.commit()
-
+                # Update user using service
+                await database_service.update_entity(db_user)
                 return None
 
             # Reset failed attempts on successful login
@@ -187,13 +204,14 @@ async def authenticate_user(username: str, password: str) -> UserInDB | None:
             db_user.locked_until = None
             db_user.last_login_at = datetime.now(timezone.utc)
 
-            # Update user
-            await user_repo.update(db_user)
-            await session.commit()
+            # Update user using service
+            await database_service.update_entity(db_user)
 
             user_in_db = _convert_db_user_to_user_in_db(db_user)
             logger.info("User authenticated successfully", username=username)
             return user_in_db
+        finally:
+            await database_service.stop()
 
     except Exception as e:
         logger.error(f"Authentication error: {e}", username=username)
@@ -391,12 +409,16 @@ async def create_user(
         if not jwt_handler:
             raise ValueError("Authentication system not initialized")
 
-        async with get_async_session() as session:
-            user_repo = UserRepository(session)
+        # Use DatabaseService instead of direct repository access
+        database_service = DatabaseService()
+        await database_service.start()
 
+        try:
             # Check if user exists
-            existing_user = await user_repo.get_by_username(username)
-            if existing_user:
+            existing_users = await database_service.list_entities(
+                model_class=DBUser, filters={"username": username}, limit=1
+            )
+            if existing_users:
                 raise ValueError(f"User {username} already exists")
 
             # Hash password
@@ -412,12 +434,13 @@ async def create_user(
                 is_verified=False,
             )
 
-            created_user = await user_repo.create(new_user)
-            await session.commit()
+            created_user = await database_service.create_entity(new_user)
 
             user_in_db = _convert_db_user_to_user_in_db(created_user)
             logger.info("User created successfully", username=username, scopes=user_in_db.scopes)
             return user_in_db
+        finally:
+            await database_service.stop()
 
     except Exception as e:
         logger.error(f"User creation failed: {e}", username=username)
@@ -435,11 +458,16 @@ async def get_auth_summary() -> dict:
         total_users = 0
         active_users = 0
 
-        async with get_async_session() as session:
-            user_repo = UserRepository(session)
-            all_users = await user_repo.get_all()
+        # Use DatabaseService instead of direct repository access
+        database_service = DatabaseService()
+        await database_service.start()
+
+        try:
+            all_users = await database_service.list_entities(model_class=DBUser)
             total_users = len(all_users)
             active_users = sum(1 for user in all_users if user.is_active)
+        finally:
+            await database_service.stop()
     except Exception as e:
         logger.error(f"Failed to get user stats: {e}")
 

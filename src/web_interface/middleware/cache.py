@@ -22,10 +22,11 @@ logger = get_logger(__name__)
 class CacheEntry:
     """Represents a cached response entry."""
 
-    def __init__(self, data: Any, headers: dict[str, str], expires_at: float):
+    def __init__(self, data: Any, headers: dict[str, str], expires_at: float, path: str = ""):
         self.data = data
         self.headers = headers
         self.expires_at = expires_at
+        self.path = path
         self.created_at = time.time()
         self.hit_count = 0
         self.last_access = time.time()
@@ -351,7 +352,7 @@ class CacheMiddleware(BaseHTTPMiddleware):
             expires_at = time.time() + ttl
             headers = dict(response.headers)
 
-            entry = CacheEntry(data=response_data, headers=headers, expires_at=expires_at)
+            entry = CacheEntry(data=response_data, headers=headers, expires_at=expires_at, path=request.url.path)
 
             # Evict old entries if cache is full
             if len(self.cache) >= self.max_cache_size:
@@ -370,18 +371,27 @@ class CacheMiddleware(BaseHTTPMiddleware):
         if not self.cache:
             return
 
-        # Calculate how many entries to evict (25% of cache size)
-        evict_count = max(1, self.max_cache_size // 4)
+        # Calculate how many entries to evict
+        # For small caches, evict fewer entries to avoid over-eviction
+        current_size = len(self.cache)
+        if current_size <= 10:
+            # For very small caches, evict only 1 entry at a time
+            evict_count = 1
+        else:
+            # For larger caches, evict 25% but cap at current size
+            evict_count = max(1, min(current_size, self.max_cache_size // 4))
 
         # Sort by last access time
         sorted_entries = sorted(self.cache.items(), key=lambda x: x[1].last_access)
 
         # Evict oldest entries
-        for i in range(min(evict_count, len(sorted_entries))):
+        evicted_count = 0
+        for i in range(evict_count):
             cache_key = sorted_entries[i][0]
             del self.cache[cache_key]
+            evicted_count += 1
 
-        logger.debug(f"Evicted {evict_count} LRU cache entries")
+        logger.debug(f"Evicted {evicted_count} LRU cache entries")
 
     def _handle_cache_invalidation(self, request: Request):
         """
@@ -420,11 +430,10 @@ class CacheMiddleware(BaseHTTPMiddleware):
         """
         keys_to_remove = []
 
-        for cache_key, _entry in self.cache.items():
-            # Reconstruct path from cache key (this is simplified)
-            # In a real implementation, we'd store the path in the cache entry
+        for cache_key, entry in self.cache.items():
+            # Use the stored path for pattern matching
             for pattern in patterns:
-                if pattern in cache_key:  # Simplified pattern matching
+                if pattern in entry.path:  # Match against the stored path
                     keys_to_remove.append(cache_key)
                     break
 

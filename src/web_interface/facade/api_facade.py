@@ -5,192 +5,34 @@ This module provides a unified interface to all trading system services,
 abstracting away the complexity of the underlying implementations.
 """
 
+from collections.abc import Callable
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 
-from src.base import BaseComponent
+from src.core.base import BaseComponent
+from src.core.base.interfaces import (
+    BotManagementServiceInterface,
+    MarketDataServiceInterface,
+    PortfolioServiceInterface,
+    RiskServiceInterface,
+    StrategyServiceInterface,
+    TradingServiceInterface,
+)
+from src.core.dependency_injection import DependencyInjector
 from src.core.types import BotConfiguration, MarketData, OrderSide, OrderType, Position
 
-from .service_registry import ServiceInterface, get_service_registry
+from .service_registry import ServiceRegistry, get_service_registry
 
+# Type aliases for backward compatibility
+TradingService = TradingServiceInterface
+BotManagementService = BotManagementServiceInterface
+MarketDataService = MarketDataServiceInterface
+PortfolioService = PortfolioServiceInterface
+RiskService = RiskServiceInterface
+StrategyService = StrategyServiceInterface
 
-class TradingService(ServiceInterface):
-    """Interface for trading operations."""
-
-    async def initialize(self) -> None:
-        """Initialize trading service."""
-        pass
-
-    async def cleanup(self) -> None:
-        """Cleanup trading service."""
-        pass
-
-    async def place_order(
-        self,
-        symbol: str,
-        side: OrderSide,
-        order_type: OrderType,
-        amount: Decimal,
-        price: Decimal | None = None,
-    ) -> str:
-        """Place a trading order."""
-        raise NotImplementedError
-
-    async def cancel_order(self, order_id: str) -> bool:
-        """Cancel an order."""
-        raise NotImplementedError
-
-    async def get_positions(self) -> list[Position]:
-        """Get current positions."""
-        raise NotImplementedError
-
-
-class BotManagementService(ServiceInterface):
-    """Interface for bot management operations."""
-
-    async def initialize(self) -> None:
-        """Initialize bot management service."""
-        pass
-
-    async def cleanup(self) -> None:
-        """Cleanup bot management service."""
-        pass
-
-    async def create_bot(self, config: BotConfiguration) -> str:
-        """Create a new trading bot."""
-        raise NotImplementedError
-
-    async def start_bot(self, bot_id: str) -> bool:
-        """Start a bot."""
-        raise NotImplementedError
-
-    async def stop_bot(self, bot_id: str) -> bool:
-        """Stop a bot."""
-        raise NotImplementedError
-
-    async def get_bot_status(self, bot_id: str) -> dict[str, Any]:
-        """Get bot status."""
-        raise NotImplementedError
-
-    async def list_bots(self) -> list[dict[str, Any]]:
-        """List all bots."""
-        raise NotImplementedError
-
-    async def get_all_bots_status(self) -> dict[str, Any]:
-        """Get status of all bots."""
-        raise NotImplementedError
-
-    async def delete_bot(self, bot_id: str, force: bool = False) -> bool:
-        """Delete a bot."""
-        raise NotImplementedError
-
-    async def _service_health_check(self) -> dict[str, Any]:
-        """Perform service health check."""
-        raise NotImplementedError
-
-    @property
-    def is_running(self) -> bool:
-        """Check if service is running."""
-        raise NotImplementedError
-
-
-class MarketDataService(ServiceInterface):
-    """Interface for market data operations."""
-
-    async def initialize(self) -> None:
-        """Initialize market data service."""
-        pass
-
-    async def cleanup(self) -> None:
-        """Cleanup market data service."""
-        pass
-
-    async def get_ticker(self, symbol: str) -> MarketData:
-        """Get current ticker data."""
-        raise NotImplementedError
-
-    async def subscribe_to_ticker(self, symbol: str, callback: callable) -> None:
-        """Subscribe to ticker updates."""
-        raise NotImplementedError
-
-    async def unsubscribe_from_ticker(self, symbol: str) -> None:
-        """Unsubscribe from ticker updates."""
-        raise NotImplementedError
-
-
-class PortfolioService(ServiceInterface):
-    """Interface for portfolio operations."""
-
-    async def initialize(self) -> None:
-        """Initialize portfolio service."""
-        pass
-
-    async def cleanup(self) -> None:
-        """Cleanup portfolio service."""
-        pass
-
-    async def get_balance(self) -> dict[str, Decimal]:
-        """Get account balances."""
-        raise NotImplementedError
-
-    async def get_portfolio_summary(self) -> dict[str, Any]:
-        """Get portfolio summary."""
-        raise NotImplementedError
-
-    async def get_pnl_report(self, start_date: datetime, end_date: datetime) -> dict[str, Any]:
-        """Get P&L report for date range."""
-        raise NotImplementedError
-
-
-class RiskManagementService(ServiceInterface):
-    """Interface for risk management operations."""
-
-    async def initialize(self) -> None:
-        """Initialize risk management service."""
-        pass
-
-    async def cleanup(self) -> None:
-        """Cleanup risk management service."""
-        pass
-
-    async def validate_order(
-        self, symbol: str, side: OrderSide, amount: Decimal, price: Decimal | None = None
-    ) -> dict[str, Any]:
-        """Validate an order against risk rules."""
-        raise NotImplementedError
-
-    async def get_risk_metrics(self) -> dict[str, Any]:
-        """Get current risk metrics."""
-        raise NotImplementedError
-
-    async def update_risk_limits(self, limits: dict[str, Any]) -> bool:
-        """Update risk limits."""
-        raise NotImplementedError
-
-
-class StrategyService(ServiceInterface):
-    """Interface for strategy operations."""
-
-    async def initialize(self) -> None:
-        """Initialize strategy service."""
-        pass
-
-    async def cleanup(self) -> None:
-        """Cleanup strategy service."""
-        pass
-
-    async def list_strategies(self) -> list[dict[str, Any]]:
-        """List available strategies."""
-        raise NotImplementedError
-
-    async def get_strategy_config(self, strategy_name: str) -> dict[str, Any]:
-        """Get strategy configuration."""
-        raise NotImplementedError
-
-    async def validate_strategy_config(self, strategy_name: str, config: dict[str, Any]) -> bool:
-        """Validate strategy configuration."""
-        raise NotImplementedError
+# Service interfaces are now imported from core.base.interfaces to avoid circular dependencies
 
 
 class APIFacade(BaseComponent):
@@ -201,9 +43,12 @@ class APIFacade(BaseComponent):
     abstracting away the complexity of the underlying services.
     """
 
-    def __init__(self):
+    def __init__(
+        self, service_registry: ServiceRegistry = None, injector: DependencyInjector = None
+    ):
         super().__init__()
-        self._registry = get_service_registry()
+        self._registry = service_registry or get_service_registry()
+        self._injector = injector
         self._initialized = False
 
     async def initialize(self) -> None:
@@ -280,7 +125,7 @@ class APIFacade(BaseComponent):
         market_service: MarketDataService = self._registry.get_service("market_data")
         return await market_service.get_ticker(symbol)
 
-    async def subscribe_to_ticker(self, symbol: str, callback: callable) -> None:
+    async def subscribe_to_ticker(self, symbol: str, callback: Callable) -> None:
         """Subscribe to ticker updates."""
         market_service: MarketDataService = self._registry.get_service("market_data")
         await market_service.subscribe_to_ticker(symbol, callback)
@@ -311,17 +156,17 @@ class APIFacade(BaseComponent):
         self, symbol: str, side: OrderSide, amount: Decimal, price: Decimal | None = None
     ) -> dict[str, Any]:
         """Validate an order against risk rules."""
-        risk_service: RiskManagementService = self._registry.get_service("risk_management")
+        risk_service: RiskService = self._registry.get_service("risk_management")
         return await risk_service.validate_order(symbol, side, amount, price)
 
     async def get_risk_metrics(self) -> dict[str, Any]:
         """Get current risk metrics."""
-        risk_service: RiskManagementService = self._registry.get_service("risk_management")
+        risk_service: RiskService = self._registry.get_service("risk_management")
         return await risk_service.get_risk_metrics()
 
     async def update_risk_limits(self, limits: dict[str, Any]) -> bool:
         """Update risk limits."""
-        risk_service: RiskManagementService = self._registry.get_service("risk_management")
+        risk_service: RiskService = self._registry.get_service("risk_management")
         return await risk_service.update_risk_limits(limits)
 
     # Strategy Operations
@@ -363,14 +208,43 @@ class APIFacade(BaseComponent):
         except KeyError:
             return {"name": service_name, "available": False, "error": "Service not found"}
 
+    async def delete_bot(self, bot_id: str, force: bool = False) -> bool:
+        """Delete a bot through the bot management service."""
+        bot_service: BotManagementService = self._registry.get_service("bot_management")
+        return await bot_service.delete_bot(bot_id, force)
+
 
 # Global facade instance
 _global_facade: APIFacade | None = None
 
 
-def get_api_facade() -> APIFacade:
-    """Get or create the global API facade."""
+def get_api_facade(injector=None) -> APIFacade:
+    """Get or create the global API facade using dependency injection."""
     global _global_facade
     if _global_facade is None:
-        _global_facade = APIFacade()
+        if injector:
+            try:
+                # Use provided injector
+                service_registry = injector.resolve("WebServiceRegistry")
+                _global_facade = APIFacade(service_registry=service_registry, injector=injector)
+            except Exception:
+                # Fallback without DI if resolution fails
+                _global_facade = APIFacade()
+        else:
+            try:
+                # Try to get injector from core DI
+                from src.core.dependency_injection import get_global_injector
+
+                core_injector = get_global_injector()
+                if core_injector and core_injector.has_service("WebServiceRegistry"):
+                    service_registry = core_injector.resolve("WebServiceRegistry")
+                    _global_facade = APIFacade(
+                        service_registry=service_registry, injector=core_injector
+                    )
+                else:
+                    # Fallback to direct instantiation
+                    _global_facade = APIFacade()
+            except Exception:
+                # Fallback to direct instantiation
+                _global_facade = APIFacade()
     return _global_facade

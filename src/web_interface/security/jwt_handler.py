@@ -114,6 +114,18 @@ class JWTHandler(BaseComponent):
                     loop.close()
                     asyncio.set_event_loop(None)
         except Exception as e:
+            if hasattr(self, "redis_client") and self.redis_client:
+                try:
+                    # Try to clean up connection on failure
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    try:
+                        loop.run_until_complete(self.redis_client.disconnect())
+                    finally:
+                        loop.close()
+                        asyncio.set_event_loop(None)
+                except Exception:
+                    pass
             self.logger.warning(f"Redis connection failed: {e}. Using in-memory blacklist.")
             self._redis_available = False
 

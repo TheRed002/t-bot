@@ -22,6 +22,7 @@ The web interface serves as the primary user interface for:
 
 # Import core refactored components
 from .auth import get_auth_manager
+from .di_registration import register_web_interface_services
 from .facade import get_api_facade, get_service_registry
 from .versioning import get_version_manager
 from .websockets.unified_manager import get_unified_websocket_manager
@@ -35,6 +36,7 @@ __all__ = [
     "get_service_registry",
     "get_unified_websocket_manager",
     "get_version_manager",
+    "register_web_interface_services",
 ]
 
 

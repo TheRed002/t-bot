@@ -8,6 +8,7 @@ including users, roles, permissions, and tokens.
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from enum import Enum
 from typing import Any
 
@@ -144,8 +145,8 @@ class User:
     metadata: dict[str, Any] = field(default_factory=dict)
 
     # Trading specific attributes
-    allocated_capital: float = 0.0
-    max_daily_loss: float = 0.0
+    allocated_capital: Decimal = Decimal("0.0")
+    max_daily_loss: Decimal = Decimal("0.0")
     risk_level: str = "medium"
 
     def add_role(self, role: Role) -> None:

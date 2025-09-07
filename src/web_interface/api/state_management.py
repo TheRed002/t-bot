@@ -12,6 +12,7 @@ All endpoints include proper authentication, validation, and error handling.
 """
 
 from datetime import datetime, timezone
+from decimal import Decimal
 from typing import Any
 from uuid import uuid4
 
@@ -99,9 +100,9 @@ class TradeValidationResponse(BaseModel):
 
     validation_id: str
     overall_result: str
-    overall_score: float
+    overall_score: Decimal
     risk_level: str
-    validation_time_ms: float
+    validation_time_ms: Decimal
     recommendations: list[str]
 
 
@@ -119,9 +120,9 @@ class PostTradeAnalysisResponse(BaseModel):
 
     analysis_id: str
     trade_id: str
-    overall_quality_score: float
-    slippage_bps: float
-    execution_time_seconds: float
+    overall_quality_score: Decimal
+    slippage_bps: Decimal
+    execution_time_seconds: Decimal
     quality_issues: list[str]
     recommendations: list[str]
 
@@ -569,8 +570,8 @@ async def get_trade_lifecycle(
     try:
         # Get trade from history or active trades
         trade_history = await lifecycle_manager.get_trade_history(
-            limit=10000  # Large limit to search all
-        )
+            limit=10000
+        )  # Large limit to search all
 
         # Find the specific trade
         trade_context = None
@@ -681,8 +682,8 @@ async def get_trade_performance(
     try:
         # Get trade from history
         trade_history = await lifecycle_manager.get_trade_history(
-            limit=10000  # Large limit to search all
-        )
+            limit=10000
+        )  # Large limit to search all
 
         # Find the specific trade
         trade_data = None
@@ -697,16 +698,16 @@ async def get_trade_performance(
             )
 
         # Calculate basic performance metrics from trade data
-        avg_price = trade_data.get("average_price", 0.0)
-        filled_qty = trade_data.get("filled_quantity", 0.0)
-        total_qty = trade_data.get("quantity", 1.0)  # Avoid division by zero
+        avg_price = trade_data.get("average_price", Decimal("0"))
+        filled_qty = trade_data.get("filled_quantity", Decimal("0"))
+        total_qty = trade_data.get("quantity", Decimal("1"))  # Avoid division by zero
 
         if avg_price and filled_qty:
-            total_value = float(avg_price * filled_qty)
-            fill_rate = float(filled_qty / total_qty) * 100
+            total_value = avg_price * filled_qty
+            fill_rate = (filled_qty / total_qty) * 100
         else:
-            total_value = 0.0
-            fill_rate = 0.0
+            total_value = Decimal("0")
+            fill_rate = Decimal("0")
 
         # Calculate execution time if timestamps available
         exec_time = None
@@ -719,7 +720,8 @@ async def get_trade_performance(
                     trade_data["signal_timestamp"].replace("Z", "+00:00")
                 )
                 exec_time = (completion - signal).total_seconds()
-            except:
+            except (ValueError, TypeError, KeyError):
+                # Failed to parse timestamp data, execution time unavailable
                 exec_time = None
 
         performance = {

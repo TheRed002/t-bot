@@ -6,6 +6,7 @@ input validation, and protection against common web vulnerabilities.
 """
 
 import re
+from typing import Any
 
 from fastapi import Request, Response
 from fastapi.responses import JSONResponse
@@ -211,7 +212,7 @@ class SecurityMiddleware(BaseHTTPMiddleware):
 
         return True
 
-    async def _validate_input(self, request: Request) -> dict[str, any]:
+    async def _validate_input(self, request: Request) -> dict[str, Any]:
         """
         Validate input for malicious patterns.
 
@@ -370,7 +371,7 @@ class SecurityMiddleware(BaseHTTPMiddleware):
                 "max-age=31536000; includeSubDomains; preload"
             )
 
-    def get_security_stats(self) -> dict[str, any]:
+    def get_security_stats(self) -> dict[str, Any]:
         """
         Get security middleware statistics.
 

@@ -42,9 +42,9 @@ class AuthMiddleware(BaseHTTPMiddleware, BaseComponent):
 
         # Try cookies if no bearer token
         if not user:
-            token = request.cookies.get("access_token")
-            if token:
-                user = await self.auth_manager.validate_token(token)
+            token_from_cookie = request.cookies.get("access_token")
+            if token_from_cookie:
+                user = await self.auth_manager.validate_token(token_from_cookie)
 
         # Store user in request state
         request.state.current_user = user

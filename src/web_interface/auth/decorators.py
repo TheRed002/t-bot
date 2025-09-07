@@ -25,9 +25,9 @@ async def get_current_user(request: Request) -> User | None:
         return user
 
     # Try to get token from cookies
-    token = request.cookies.get("access_token")
-    if token:
-        user = await auth_manager.validate_token(token)
+    token_from_cookie = request.cookies.get("access_token")
+    if token_from_cookie:
+        user = await auth_manager.validate_token(token_from_cookie)
         return user
 
     return None

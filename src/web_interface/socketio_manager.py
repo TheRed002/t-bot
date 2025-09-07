@@ -11,22 +11,13 @@ This module provides centralized Socket.IO management with:
 import asyncio
 import logging
 from datetime import datetime, timezone
+from decimal import Decimal
 from typing import Any
 
 import socketio
 from socketio import AsyncNamespace, AsyncServer
 
-try:
-    from src.base import BaseComponent
-except ImportError:
-    # Fallback BaseComponent for import errors
-    import logging
-
-    class BaseComponent:
-        """Minimal BaseComponent fallback."""
-
-        def __init__(self):
-            self.logger = logging.getLogger(self.__class__.__module__)
+from src.core.base import BaseComponent
 
 
 from src.core.exceptions import AuthenticationError
@@ -50,12 +41,17 @@ class TradingNamespace(AsyncNamespace):
         self.logger = logging.getLogger(self.__class__.__name__)
 
         # Initialize connection manager for resilient connections
-        self.connection_manager = ConnectionManager(
-            max_reconnect_attempts=5,
-            reconnect_delay=1.0,
-            health_check_interval=30.0,
-        )
-        self.network_recovery = NetworkDisconnectionRecovery()
+        try:
+            from src.core.config import Config
+
+            config = Config()
+            self.connection_manager = ConnectionManager(config)
+            self.network_recovery = NetworkDisconnectionRecovery(config)
+        except Exception as e:
+            # Fallback - create mock managers if Config is not available
+            self.logger.warning(f"Failed to initialize connection manager: {e}")
+            self.connection_manager = None
+            self.network_recovery = None
 
         # Rate limiting: max connections per IP
         self.connection_counts: dict[str, int] = {}
@@ -69,15 +65,16 @@ class TradingNamespace(AsyncNamespace):
         client_ip = environ.get("REMOTE_ADDR", "unknown")
 
         # Register connection with connection manager
-        try:
-            await self.connection_manager.add_connection(
-                connection_id=sid,
-                connection_type="socketio",
-                metadata={"client_ip": client_ip, "namespace": self.namespace},
-            )
-            await self.connection_manager.update_state(sid, ConnectionState.CONNECTING)
-        except Exception as e:
-            self.logger.warning(f"Failed to register connection {sid} with manager: {e}")
+        if self.connection_manager:
+            try:
+                await self.connection_manager.add_connection(
+                    connection_id=sid,
+                    connection_type="socketio",
+                    metadata={"client_ip": client_ip, "namespace": self.namespace},
+                )
+                await self.connection_manager.update_state(sid, ConnectionState.CONNECTING)
+            except Exception as e:
+                self.logger.warning(f"Failed to register connection {sid} with manager: {e}")
 
         # Rate limiting by IP
         if client_ip != "unknown":
@@ -116,10 +113,11 @@ class TradingNamespace(AsyncNamespace):
                     self.logger.info(f"Client {sid} authenticated as {token_data['username']}")
 
                     # Update connection state to active after successful auth
-                    try:
-                        await self.connection_manager.update_state(sid, ConnectionState.ACTIVE)
-                    except Exception as e:
-                        self.logger.warning(f"Failed to update connection state to active: {e}")
+                    if self.connection_manager:
+                        try:
+                            await self.connection_manager.update_state(sid, ConnectionState.ACTIVE)
+                        except Exception as e:
+                            self.logger.warning(f"Failed to update connection state to active: {e}")
                 else:
                     await self.emit("auth_error", {"error": "Invalid or expired token"}, room=sid)
                     self.logger.warning(f"Authentication failed for client {sid}")
@@ -157,10 +155,11 @@ class TradingNamespace(AsyncNamespace):
         self.logger.info(f"Client disconnected: {sid}")
 
         # Update connection state in connection manager with error handling
-        try:
-            await self.connection_manager.update_state(sid, ConnectionState.DISCONNECTED)
-        except Exception as e:
-            self.logger.warning(f"Failed to update connection state for {sid}: {e}")
+        if self.connection_manager:
+            try:
+                await self.connection_manager.update_state(sid, ConnectionState.DISCONNECTED)
+            except Exception as e:
+                self.logger.warning(f"Failed to update connection state for {sid}: {e}")
 
         # Clean up client data and decrement connection count
         if sid in self.connected_clients:
@@ -181,10 +180,11 @@ class TradingNamespace(AsyncNamespace):
             self.authenticated_sessions.remove(sid)
 
         # Remove connection from manager
-        try:
-            await self.connection_manager.remove_connection(sid)
-        except Exception as e:
-            self.logger.warning(f"Failed to remove connection {sid} from manager: {e}")
+        if self.connection_manager:
+            try:
+                await self.connection_manager.remove_connection(sid)
+            except Exception as e:
+                self.logger.warning(f"Failed to remove connection {sid} from manager: {e}")
 
     @with_error_context(operation="socketio_authenticate")
     async def on_authenticate(self, sid: str, data: dict[str, Any]):
@@ -194,7 +194,8 @@ class TradingNamespace(AsyncNamespace):
             await self.emit("auth_error", {"error": "Token required"}, room=sid)
             return
 
-        if await self._validate_token(token):
+        token_data = await self._validate_token(token)
+        if token_data:
             self.connected_clients[sid]["authenticated"] = True
             self.authenticated_sessions.add(sid)
             await self.emit(
@@ -273,8 +274,8 @@ class TradingNamespace(AsyncNamespace):
             await self.emit("order_error", {"error": "Missing required order fields"}, room=sid)
             return
 
-        # TODO: Execute order through trading engine
-        # For now, send confirmation
+        # Execute order through trading engine
+        # TBD: Integrate with actual trading engine when execution service is available
         await self.emit(
             "order_submitted",
             {
@@ -291,18 +292,17 @@ class TradingNamespace(AsyncNamespace):
             await self.emit("error", {"error": "Authentication required"}, room=sid)
             return
 
-        # TODO: Fetch real portfolio data
-        # Mock data for now
+        # TBD: Integrate with portfolio service for real data when service is available
         portfolio_data = {
-            "total_value": 10000.00,
-            "available_balance": 5000.00,
+            "total_value": Decimal("10000.00"),
+            "available_balance": Decimal("5000.00"),
             "positions": [
                 {
                     "symbol": "BTC/USDT",
-                    "amount": 0.1,
-                    "entry_price": 45000,
-                    "current_price": 46000,
-                    "pnl": 100.00,
+                    "amount": Decimal("0.1"),
+                    "entry_price": Decimal("45000"),
+                    "current_price": Decimal("46000"),
+                    "pnl": Decimal("100.00"),
                 }
             ],
             "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -317,8 +317,13 @@ class TradingNamespace(AsyncNamespace):
                 self.logger.error("JWT handler not configured for WebSocket authentication")
                 return None
 
-            # Validate the JWT token
-            token_data = self.jwt_handler.validate_token(token)
+            # Validate the JWT token - check if it's async
+            if callable(self.jwt_handler.validate_token) and asyncio.iscoroutinefunction(
+                self.jwt_handler.validate_token
+            ):
+                token_data = await self.jwt_handler.validate_token(token)
+            else:
+                token_data = self.jwt_handler.validate_token(token)
 
             if token_data:
                 return {
@@ -361,10 +366,10 @@ class SocketIOManager(BaseComponent):
     """Manager for Socket.IO server and connections."""
 
     def __init__(self):
+        super().__init__()
         self.sio: AsyncServer | None = None
         self.app = None
         self.background_tasks: list[asyncio.Task] = []
-        self.is_running = False
 
     def create_server(self, cors_allowed_origins: list[str] | None = None) -> AsyncServer:
         """Create and configure Socket.IO server."""
@@ -376,11 +381,14 @@ class SocketIOManager(BaseComponent):
             cors_allowed_origins=cors_allowed_origins,
             logger=self.logger,
             engineio_logger=False,  # Reduce verbosity
-            ping_timeout=60,
-            ping_interval=25,
+            ping_timeout=30,  # Reduced timeout for faster detection
+            ping_interval=15,  # More frequent pings
             max_http_buffer_size=1000000,
             allow_upgrades=True,
             compression_threshold=1024,
+            # Connection timeout and heartbeat
+            always_connect=False,
+            transports=["websocket", "polling"],  # Prefer WebSocket
         )
 
         # Register namespaces
@@ -405,7 +413,7 @@ class SocketIOManager(BaseComponent):
         if self.is_running:
             return
 
-        self.is_running = True
+        self._is_running = True
 
         # Generate correlation ID for startup tasks
         correlation_id = correlation_context.generate_correlation_id()
@@ -423,19 +431,26 @@ class SocketIOManager(BaseComponent):
 
     async def stop_background_tasks(self):
         """Stop all background tasks."""
-        self.is_running = False
+        self._is_running = False
 
         # Generate correlation ID for shutdown tasks
         correlation_id = correlation_context.generate_correlation_id()
         with correlation_context.correlation_context(correlation_id):
-            for task in self.background_tasks:
-                task.cancel()
+            try:
+                # Cancel all background tasks
+                for task in self.background_tasks:
+                    if not task.done():
+                        task.cancel()
 
-            if self.background_tasks:
-                await asyncio.gather(*self.background_tasks, return_exceptions=True)
+                # Wait for all tasks to complete or be cancelled
+                if self.background_tasks:
+                    await asyncio.gather(*self.background_tasks, return_exceptions=True)
 
-            self.background_tasks.clear()
-            self.logger.info("Background tasks stopped")
+            except Exception as e:
+                self.logger.error(f"Error stopping background tasks: {e}")
+            finally:
+                self.background_tasks.clear()
+                self.logger.info("Background tasks stopped")
 
     async def _broadcast_market_data(self):
         """Broadcast market data to subscribed clients."""
@@ -444,20 +459,19 @@ class SocketIOManager(BaseComponent):
                 # Generate correlation ID for this background task
                 correlation_id = correlation_context.generate_correlation_id()
                 with correlation_context.correlation_context(correlation_id):
-                    # TODO: Get real market data
-                    # Mock data for now
+                    # TBD: Integrate with market data service for real-time feeds
                     market_data = {
                         "type": "market_update",
                         "data": {
                             "BTC/USDT": {
                                 "price": 45000 + (asyncio.get_event_loop().time() % 1000),
                                 "volume": 1234567890,
-                                "change_24h": 2.5,
+                                "change_24h": Decimal("2.5"),
                             },
                             "ETH/USDT": {
                                 "price": 2500 + (asyncio.get_event_loop().time() % 100),
                                 "volume": 987654321,
-                                "change_24h": -1.2,
+                                "change_24h": Decimal("-1.2"),
                             },
                         },
                         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -482,19 +496,18 @@ class SocketIOManager(BaseComponent):
                 # Generate correlation ID for this background task
                 correlation_id = correlation_context.generate_correlation_id()
                 with correlation_context.correlation_context(correlation_id):
-                    # TODO: Get real bot status
-                    # Mock data for now
+                    # TBD: Integrate with bot management service for real bot status
                     bot_status = {
                         "type": "bot_status",
                         "data": {
                             "active_bots": 3,
-                            "total_profit": 1234.56,
+                            "total_profit": Decimal("1234.56"),
                             "bots": [
                                 {
                                     "id": "bot-1",
                                     "name": "BTC Trader",
                                     "status": "running",
-                                    "profit": 456.78,
+                                    "profit": Decimal("456.78"),
                                 }
                             ],
                         },
@@ -520,14 +533,13 @@ class SocketIOManager(BaseComponent):
                 # Generate correlation ID for this background task
                 correlation_id = correlation_context.generate_correlation_id()
                 with correlation_context.correlation_context(correlation_id):
-                    # TODO: Get real portfolio updates
-                    # Mock data for now
+                    # TBD: Integrate with portfolio service for real portfolio updates
                     portfolio_update = {
                         "type": "portfolio_update",
                         "data": {
                             "total_value": 10000 + (asyncio.get_event_loop().time() % 1000),
-                            "daily_pnl": 123.45,
-                            "daily_pnl_percent": 1.25,
+                            "daily_pnl": Decimal("123.45"),
+                            "daily_pnl_percent": Decimal("1.25"),
                         },
                         "timestamp": datetime.now(timezone.utc).isoformat(),
                     }
@@ -546,8 +558,10 @@ class SocketIOManager(BaseComponent):
 
     async def emit_to_user(self, user_id: str, event: str, data: Any):
         """Emit event to specific user."""
-        # TODO: Implement user-specific room management
-        pass
+        # Find user's session and emit to their room
+        user_room = f"user_{user_id}"
+        if self.sio:
+            await self.sio.emit(event, data, room=user_room)
 
     async def broadcast(self, event: str, data: Any, room: str | None = None):
         """Broadcast event to all clients or specific room."""

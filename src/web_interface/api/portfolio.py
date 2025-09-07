@@ -12,21 +12,22 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 
 from src.core.logging import get_logger
+from src.utils import safe_get_api_facade
 from src.web_interface.security.auth import User, get_current_user
 
 logger = get_logger(__name__)
 router = APIRouter()
 
-# Global references (set by app startup)
-bot_orchestrator = None
-execution_engine = None
+
+def get_portfolio_service():
+    """Get portfolio service through API facade."""
+    return safe_get_api_facade()
 
 
+# Deprecated function for backward compatibility
 def set_dependencies(orchestrator, engine):
-    """Set global dependencies."""
-    global bot_orchestrator, execution_engine
-    bot_orchestrator = orchestrator
-    execution_engine = engine
+    """DEPRECATED: Use service registry instead."""
+    logger.warning("set_dependencies is deprecated. Use service registry instead.")
 
 
 class PositionResponse(BaseModel):
@@ -40,7 +41,7 @@ class PositionResponse(BaseModel):
     current_price: Decimal
     market_value: Decimal
     unrealized_pnl: Decimal
-    unrealized_pnl_percentage: float
+    unrealized_pnl_percentage: Decimal
     cost_basis: Decimal
     created_at: datetime
     updated_at: datetime
@@ -66,17 +67,17 @@ class PnLResponse(BaseModel):
     total_pnl: Decimal
     realized_pnl: Decimal
     unrealized_pnl: Decimal
-    total_return_percentage: float
+    total_return_percentage: Decimal
     number_of_trades: int
     winning_trades: int
     losing_trades: int
-    win_rate: float
+    win_rate: Decimal
     average_win: Decimal
     average_loss: Decimal
-    profit_factor: float
-    sharpe_ratio: float | None = None
+    profit_factor: Decimal
+    sharpe_ratio: Decimal | None = None
     max_drawdown: Decimal
-    max_drawdown_percentage: float
+    max_drawdown_percentage: Decimal
 
 
 class PortfolioSummaryResponse(BaseModel):
@@ -84,7 +85,7 @@ class PortfolioSummaryResponse(BaseModel):
 
     total_value: Decimal
     total_pnl: Decimal
-    total_pnl_percentage: float
+    total_pnl_percentage: Decimal
     positions_count: int
     active_bots: int
     last_updated: datetime
@@ -98,7 +99,7 @@ class AssetAllocationResponse(BaseModel):
 
     asset: str
     value: Decimal
-    percentage: float
+    percentage: Decimal
     positions: int
 
 
@@ -117,28 +118,22 @@ async def get_portfolio_summary(current_user: User = Depends(get_current_user)):
         HTTPException: If retrieval fails
     """
     try:
-        if not bot_orchestrator:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Bot orchestrator not available",
-            )
+        portfolio_facade = get_portfolio_service()
 
-        # Get orchestrator status for portfolio metrics
-        orchestrator_status = await bot_orchestrator.get_orchestrator_status()
-        global_metrics = orchestrator_status.get("global_metrics", {})
+        # Get portfolio summary through service layer
+        portfolio_summary = await portfolio_facade.get_portfolio_summary()
+
+        # Extract metrics from service response
+        global_metrics = portfolio_summary
 
         # Calculate portfolio values
-        total_value = global_metrics.get("total_allocated_capital", Decimal("0"))
-        total_pnl = global_metrics.get("total_pnl", Decimal("0"))
-        total_pnl_percentage = float(total_pnl / total_value * 100) if total_value > 0 else 0.0
+        total_value = global_metrics.get("total_value", Decimal("0"))
+        total_pnl = global_metrics.get("unrealized_pnl", Decimal("0"))
+        total_pnl_percentage = (total_pnl / total_value * 100) if total_value > 0 else Decimal("0")
 
         # Get bot information
-        bot_summaries = orchestrator_status.get("bots", {})
-        positions_count = sum(
-            1
-            for bot in bot_summaries.values()
-            if bot.get("metrics", {}).get("active_positions", 0) > 0
-        )
+        bot_summaries = global_metrics.get("positions", [])
+        positions_count = len([pos for pos in bot_summaries if pos.get("symbol")])
         active_bots = global_metrics.get("running_bots", 0)
 
         # Mock P&L periods (in production, calculate from actual data)
@@ -147,7 +142,7 @@ async def get_portfolio_summary(current_user: User = Depends(get_current_user)):
             total_pnl=total_pnl * Decimal("0.1"),  # Mock daily portion
             realized_pnl=total_pnl * Decimal("0.08"),
             unrealized_pnl=total_pnl * Decimal("0.02"),
-            total_return_percentage=total_pnl_percentage * 0.1,
+            total_return_percentage=total_pnl_percentage * Decimal("0.1"),
             number_of_trades=global_metrics.get("total_trades", 0) // 7,
             winning_trades=int(global_metrics.get("total_trades", 0) * 0.6 // 7),
             losing_trades=int(global_metrics.get("total_trades", 0) * 0.4 // 7),
@@ -165,7 +160,7 @@ async def get_portfolio_summary(current_user: User = Depends(get_current_user)):
             total_pnl=total_pnl * Decimal("0.3"),
             realized_pnl=total_pnl * Decimal("0.25"),
             unrealized_pnl=total_pnl * Decimal("0.05"),
-            total_return_percentage=total_pnl_percentage * 0.3,
+            total_return_percentage=total_pnl_percentage * Decimal("0.3"),
             number_of_trades=global_metrics.get("total_trades", 0) // 4,
             winning_trades=int(global_metrics.get("total_trades", 0) * 0.6 // 4),
             losing_trades=int(global_metrics.get("total_trades", 0) * 0.4 // 4),
@@ -241,12 +236,14 @@ async def get_positions(
     try:
         positions = []
 
-        if not bot_orchestrator:
-            return positions
+        portfolio_facade = get_portfolio_service()
+        
+        # Get positions from all bots through the service layer
+        portfolio_summary = await portfolio_facade.get_portfolio_summary()
+        bot_positions_list = portfolio_summary.get("positions", [])
 
-        # Get positions from all bots
-        orchestrator_status = await bot_orchestrator.get_orchestrator_status()
-        bot_summaries = orchestrator_status.get("bots", {})
+        # Convert list to dict for compatibility
+        bot_summaries = {f"bot_{i:03d}": {"positions": [pos]} for i, pos in enumerate(bot_positions_list) if pos.get("symbol")}
 
         for current_bot_id, bot_data in bot_summaries.items():
             # Apply bot filter
@@ -296,7 +293,7 @@ async def get_positions(
                 cost_basis = quantity * entry_price
                 unrealized_pnl = market_value - cost_basis
                 unrealized_pnl_percentage = (
-                    float(unrealized_pnl / cost_basis * 100) if cost_basis > 0 else 0.0
+                    (unrealized_pnl / cost_basis * 100) if cost_basis > 0 else Decimal("0")
                 )
 
                 position_response = PositionResponse(
@@ -433,15 +430,11 @@ async def get_pnl(
         HTTPException: If retrieval fails
     """
     try:
-        if not bot_orchestrator:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Bot orchestrator not available",
-            )
-
-        # Get portfolio metrics
-        orchestrator_status = await bot_orchestrator.get_orchestrator_status()
-        global_metrics = orchestrator_status.get("global_metrics", {})
+        portfolio_facade = get_portfolio_service()
+        
+        # Get portfolio metrics through service layer
+        pnl_report = await portfolio_facade.get_pnl_report(start_date, end_date)
+        global_metrics = pnl_report
 
         # Calculate period-specific metrics (mock implementation)
         total_pnl = global_metrics.get("total_pnl", Decimal("0"))
@@ -465,16 +458,16 @@ async def get_pnl(
 
         allocated_capital = global_metrics.get("total_allocated_capital", Decimal("100000"))
         total_return_percentage = (
-            float(period_pnl / allocated_capital * 100) if allocated_capital > 0 else 0.0
+            (period_pnl / allocated_capital * 100) if allocated_capital > 0 else Decimal("0")
         )
 
         average_win = Decimal("200.00") * Decimal(str(multiplier))
         average_loss = Decimal("-100.00") * Decimal(str(multiplier))
-        profit_factor = abs(average_win / average_loss) if average_loss != 0 else 0.0
+        profit_factor = abs(average_win / average_loss) if average_loss != 0 else Decimal("0")
 
         max_drawdown = period_pnl * Decimal("-0.15")  # 15% of gains as max drawdown
         max_drawdown_percentage = (
-            float(max_drawdown / allocated_capital * 100) if allocated_capital > 0 else 0.0
+            (max_drawdown / allocated_capital * 100) if allocated_capital > 0 else Decimal("0")
         )
 
         return PnLResponse(
@@ -489,7 +482,7 @@ async def get_pnl(
             win_rate=win_rate,
             average_win=average_win,
             average_loss=average_loss,
-            profit_factor=float(profit_factor),
+            profit_factor=profit_factor,
             sharpe_ratio=1.2 + (multiplier * 0.1),  # Mock Sharpe ratio
             max_drawdown=max_drawdown,
             max_drawdown_percentage=max_drawdown_percentage,
@@ -524,25 +517,25 @@ async def get_asset_allocation(current_user: User = Depends(get_current_user)):
             AssetAllocationResponse(
                 asset="BTC",
                 value=Decimal("70500.00"),
-                percentage=float(Decimal("70500.00") / total_value * 100),
+                percentage=(Decimal("70500.00") / total_value * 100),
                 positions=2,
             ),
             AssetAllocationResponse(
                 asset="ETH",
                 value=Decimal("31000.00"),
-                percentage=float(Decimal("31000.00") / total_value * 100),
+                percentage=(Decimal("31000.00") / total_value * 100),
                 positions=3,
             ),
             AssetAllocationResponse(
                 asset="USDT",
                 value=Decimal("50000.00"),
-                percentage=float(Decimal("50000.00") / total_value * 100),
+                percentage=(Decimal("50000.00") / total_value * 100),
                 positions=1,
             ),
             AssetAllocationResponse(
                 asset="USD",
                 value=Decimal("25000.00"),
-                percentage=float(Decimal("25000.00") / total_value * 100),
+                percentage=(Decimal("25000.00") / total_value * 100),
                 positions=1,
             ),
         ]

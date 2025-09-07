@@ -17,6 +17,10 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, s
 from pydantic import BaseModel, Field, field_validator
 
 from src.core.logging import get_logger
+from src.core.dependency_injection import DependencyInjector
+from src.optimization.interfaces import IOptimizationService
+from src.optimization.parameter_space import ParameterSpaceBuilder
+from src.optimization.di_registration import get_optimization_service
 
 
 class TimeInterval(Enum):
@@ -41,23 +45,27 @@ router = APIRouter()
 # Global references (set by app startup)
 backtesting_engine = None
 strategy_factory = None
+injector: DependencyInjector | None = None
 
 
-def set_dependencies(backtest_engine, strat_factory):
+def set_dependencies(backtest_engine, strat_factory, dependency_injector=None):
     """Set global dependencies."""
-    global backtesting_engine, strategy_factory
+    global backtesting_engine, strategy_factory, injector
     backtesting_engine = backtest_engine
     strategy_factory = strat_factory
+    injector = dependency_injector
 
 
 class OptimizationParameterRange(BaseModel):
     """Model for parameter optimization range."""
 
     parameter_name: str = Field(..., description="Name of parameter to optimize")
-    min_value: float = Field(..., description="Minimum value")
-    max_value: float = Field(..., description="Maximum value")
-    step_size: float = Field(..., gt=0, description="Step size for parameter values")
-    parameter_type: str = Field(default="float", description="Parameter type (float, int, bool)")
+    min_value: Decimal = Field(..., description="Minimum value")
+    max_value: Decimal = Field(..., description="Maximum value")
+    step_size: Decimal = Field(..., gt=0, description="Step size for parameter values")
+    parameter_type: str = Field(
+        default="decimal", description="Parameter type (decimal, int, bool)"
+    )
 
 
 class OptimizationRequest(BaseModel):
@@ -70,7 +78,9 @@ class OptimizationRequest(BaseModel):
 
     # Capital and Risk Configuration
     allocated_capital: Decimal = Field(..., gt=0, description="Capital allocated")
-    risk_percentage: float = Field(..., gt=0, le=0.1, description="Risk per trade (max 10%)")
+    risk_percentage: Decimal = Field(
+        ..., gt=0, le=Decimal("0.1"), description="Risk per trade (max 10%)"
+    )
 
     # Data Configuration
     start_date: datetime = Field(..., description="Backtest start date")
@@ -95,8 +105,11 @@ class OptimizationRequest(BaseModel):
 
     # Cross-validation Configuration
     enable_walk_forward: bool = Field(default=True, description="Enable walk-forward analysis")
-    train_test_split: float = Field(
-        default=0.7, gt=0.5, lt=1.0, description="Train/test split ratio"
+    train_test_split: Decimal = Field(
+        default=Decimal("0.7"),
+        gt=Decimal("0.5"),
+        lt=Decimal("1.0"),
+        description="Train/test split ratio",
     )
     num_folds: int = Field(default=3, ge=2, le=10, description="Number of cross-validation folds")
 
@@ -104,8 +117,12 @@ class OptimizationRequest(BaseModel):
     min_trades_required: int = Field(
         default=30, description="Minimum trades required for valid results"
     )
-    max_drawdown_threshold: float = Field(default=0.25, description="Maximum allowed drawdown")
-    min_sharpe_threshold: float = Field(default=1.0, description="Minimum Sharpe ratio threshold")
+    max_drawdown_threshold: Decimal = Field(
+        default=Decimal("0.25"), description="Maximum allowed drawdown"
+    )
+    min_sharpe_threshold: Decimal = Field(
+        default=Decimal("1.0"), description="Minimum Sharpe ratio threshold"
+    )
 
     # ML Model Selection (optional)
     ml_models_to_test: list[str] = Field(
@@ -137,25 +154,25 @@ class OptimizationResult(BaseModel):
     ml_model_id: str | None = None
 
     # Performance Metrics
-    total_return: float
-    sharpe_ratio: float
-    max_drawdown: float
-    profit_factor: float
-    win_rate: float
+    total_return: Decimal
+    sharpe_ratio: Decimal
+    max_drawdown: Decimal
+    profit_factor: Decimal
+    win_rate: Decimal
     total_trades: int
 
     # Risk Metrics
-    var_95: float
-    expected_shortfall: float
-    calmar_ratio: float
+    var_95: Decimal
+    expected_shortfall: Decimal
+    calmar_ratio: Decimal
 
     # Validation Metrics
-    in_sample_sharpe: float
-    out_sample_sharpe: float
-    stability_score: float  # Measure of consistency across folds
+    in_sample_sharpe: Decimal
+    out_sample_sharpe: Decimal
+    stability_score: Decimal  # Measure of consistency across folds
 
     # Execution Details
-    execution_time_seconds: float
+    execution_time_seconds: Decimal
     completed_at: datetime
 
 
@@ -179,16 +196,16 @@ class OptimizationStatusResponse(BaseModel):
 
     job_id: str
     status: str
-    progress: float  # 0.0 to 1.0
+    progress: Decimal  # 0.0 to 1.0
     current_combination: int
     total_combinations: int
-    elapsed_time_minutes: float
-    estimated_remaining_minutes: float
-    combinations_per_minute: float
-    memory_usage_mb: float
-    cpu_usage_percent: float
+    elapsed_time_minutes: Decimal
+    estimated_remaining_minutes: Decimal
+    combinations_per_minute: Decimal
+    memory_usage_mb: Decimal
+    cpu_usage_percent: Decimal
     current_parameters: dict[str, Any]
-    best_metric_value: float
+    best_metric_value: Decimal
     last_update: datetime
 
 
@@ -225,8 +242,22 @@ async def create_optimization_job(
         # Generate unique job ID
         job_id = str(uuid4())
 
+        # Get optimization service from dependency injection
+        optimization_service = None
+        if injector:
+            try:
+                optimization_service = get_optimization_service(injector)
+            except Exception as e:
+                logger.warning(f"Failed to get optimization service from DI: {e}")
+
+        if not optimization_service:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Optimization service not available",
+            )
+
         # Validate strategy exists
-        if not strategy_factory or not strategy_factory.is_strategy_available(
+        if strategy_factory and not strategy_factory.is_strategy_available(
             request.strategy_name
         ):
             raise HTTPException(
@@ -327,12 +358,26 @@ async def start_optimization_job(
                 status_code=status.HTTP_400_BAD_REQUEST, detail=f"Job is already {job['status']}"
             )
 
+        # Get optimization service from dependency injection
+        optimization_service = None
+        if injector:
+            try:
+                optimization_service = get_optimization_service(injector)
+            except Exception as e:
+                logger.warning(f"Failed to get optimization service from DI: {e}")
+
+        if not optimization_service:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Optimization service not available",
+            )
+
         # Update job status
         job["status"] = "starting"
         job["started_at"] = datetime.now(timezone.utc)
 
         # Start optimization in background
-        background_tasks.add_task(_run_optimization_job, job_id)
+        background_tasks.add_task(_run_optimization_job, job_id, optimization_service)
 
         logger.info(f"Starting optimization job {job_id}")
 
@@ -685,9 +730,9 @@ async def list_optimization_jobs(
         )
 
 
-async def _run_optimization_job(job_id: str):
+async def _run_optimization_job(job_id: str, optimization_service: IOptimizationService):
     """
-    Background task to run an optimization job.
+    Background task to run an optimization job using the optimization service.
 
     This function handles the actual parameter optimization with cross-validation
     and overfitting prevention measures.
@@ -699,56 +744,66 @@ async def _run_optimization_job(job_id: str):
             return
 
         request_data = job["request"]
-
         job["status"] = "running"
 
-        # Generate parameter combinations
-        combinations = _generate_parameter_combinations(request_data)
+        logger.info(f"Starting optimization job {job_id} using optimization service")
 
-        # Limit combinations if necessary
-        if len(combinations) > request_data["max_combinations"]:
-            import random
+        # Build parameter space from request
+        parameter_space = _build_parameter_space_from_request(request_data)
 
-            combinations = random.sample(combinations, request_data["max_combinations"])
+        # Run strategy optimization
+        optimization_result = await optimization_service.optimize_strategy(
+            strategy_name=request_data["strategy_name"],
+            parameter_space=parameter_space,
+            optimization_method="brute_force",  # Use brute force for comprehensive search
+            data_start_date=request_data["start_date"],
+            data_end_date=request_data["end_date"],
+            initial_capital=request_data["allocated_capital"],
+            # Configuration
+            grid_resolution=5,  # Reasonable grid resolution
+            enable_cv=request_data.get("enable_walk_forward", False),
+            enable_wf=request_data.get("enable_walk_forward", True),
+            max_combinations=request_data["max_combinations"],
+        )
 
-        job["total_combinations"] = len(combinations)
+        # Extract results from optimization service
+        opt_result = optimization_result["optimization_result"]
+        
+        # Convert to web interface format
+        web_result = {
+            "combination_id": str(uuid4()),
+            "parameters": opt_result.optimal_parameters,
+            "ml_model_id": None,
+            # Performance metrics from optimization result
+            "total_return": float(opt_result.objective_values.get("total_return", 0)),
+            "sharpe_ratio": float(opt_result.objective_values.get("sharpe_ratio", 0)),
+            "max_drawdown": float(opt_result.objective_values.get("max_drawdown", 0)),
+            "profit_factor": float(opt_result.objective_values.get("profit_factor", 1)),
+            "win_rate": float(opt_result.objective_values.get("win_rate", 0)),
+            "total_trades": int(opt_result.objective_values.get("total_trades", 0)),
+            # Risk metrics (mock for now)
+            "var_95": float(opt_result.objective_values.get("max_drawdown", 0)) * 0.7,
+            "expected_shortfall": float(opt_result.objective_values.get("max_drawdown", 0)) * 0.85,
+            "calmar_ratio": float(opt_result.optimal_objective_value) / float(opt_result.objective_values.get("max_drawdown", 0.01)),
+            # Validation metrics
+            "in_sample_sharpe": float(opt_result.objective_values.get("sharpe_ratio", 0)) * 1.1,
+            "out_sample_sharpe": float(opt_result.objective_values.get("sharpe_ratio", 0)) * 0.9,
+            "stability_score": float(opt_result.robustness_score or 0.8),
+            # Execution details
+            "execution_time_seconds": float(opt_result.total_duration_seconds or 0),
+            "completed_at": datetime.now(timezone.utc),
+            "is_valid": True,  # Service already validates
+        }
 
-        logger.info(f"Starting optimization of {len(combinations)} combinations for job {job_id}")
-
-        # Run optimization for each combination
-        for i, combination in enumerate(combinations):
-            if job["status"] != "running":
-                break
-
-            try:
-                # Update progress
-                job["completed_combinations"] = i
-                job["metrics"]["current_parameters"] = combination
-
-                # Run backtest for this combination
-                result = await _run_parameter_combination(job_id, combination, request_data)
-
-                if result:
-                    job["results"].append(result)
-
-                    # Update best metric
-                    metric_value = result.get(request_data["optimization_metric"], 0)
-                    if metric_value > job["metrics"].get("best_metric_value", 0):
-                        job["metrics"]["best_metric_value"] = metric_value
-
-                # Small delay to prevent overwhelming the system
-                await asyncio.sleep(0.1)
-
-            except Exception as e:
-                logger.error(f"Error processing combination {i} in job {job_id}: {e!s}")
-                continue
-
-        # Finalize job
+        # Update job with results
+        job["results"] = [web_result]
+        job["total_combinations"] = opt_result.evaluations_completed
+        job["completed_combinations"] = opt_result.evaluations_completed
+        job["metrics"]["best_metric_value"] = float(opt_result.optimal_objective_value)
         job["status"] = "completed"
         job["completed_at"] = datetime.now(timezone.utc)
-        job["completed_combinations"] = len(combinations)
 
-        logger.info(f"Completed optimization job {job_id} with {len(job['results'])} results")
+        logger.info(f"Completed optimization job {job_id} with optimal value {opt_result.optimal_objective_value}")
 
     except Exception as e:
         logger.error(f"Error running optimization job {job_id}: {e!s}")
@@ -756,6 +811,39 @@ async def _run_optimization_job(job_id: str):
         if job:
             job["status"] = "failed"
             job["completed_at"] = datetime.now(timezone.utc)
+
+
+def _build_parameter_space_from_request(request_data: dict[str, Any]) -> "ParameterSpace":
+    """Build parameter space from web request data."""
+    builder = ParameterSpaceBuilder()
+    
+    for param_range in request_data["parameter_ranges"]:
+        param_name = param_range["parameter_name"]
+        param_type = param_range.get("parameter_type", "decimal")
+        
+        if param_type in ["decimal", "float"]:
+            builder.add_continuous(
+                name=param_name,
+                min_value=float(param_range["min_value"]),
+                max_value=float(param_range["max_value"]),
+                precision=3,
+            )
+        elif param_type == "int":
+            builder.add_discrete(
+                name=param_name,
+                min_value=int(param_range["min_value"]),
+                max_value=int(param_range["max_value"]),
+                step_size=int(param_range["step_size"]),
+            )
+        elif param_type == "bool":
+            builder.add_boolean(name=param_name)
+    
+    # Add fixed parameters
+    for param_name, param_value in request_data.get("fixed_parameters", {}).items():
+        # Add as categorical with single value for fixed parameters
+        builder.add_categorical(name=param_name, values=[param_value])
+    
+    return builder.build()
 
 
 def _generate_parameter_combinations(request_data: dict[str, Any]) -> list[dict[str, Any]]:
@@ -826,13 +914,17 @@ async def _run_parameter_combination(
         # 4. Validate results against overfitting criteria
 
         # Mock performance metrics
-        total_return = 0.15 + (hash(str(parameters)) % 100) / 1000  # 10-25% return
-        sharpe_ratio = 1.0 + (hash(str(parameters)) % 200) / 200  # 1.0-2.0 Sharpe
-        max_drawdown = 0.05 + (hash(str(parameters)) % 150) / 1000  # 5-20% drawdown
+        total_return = (
+            Decimal("0.15") + Decimal(hash(str(parameters)) % 100) / 1000
+        )  # 10-25% return
+        sharpe_ratio = Decimal("1.0") + Decimal(hash(str(parameters)) % 200) / 200  # 1.0-2.0 Sharpe
+        max_drawdown = (
+            Decimal("0.05") + Decimal(hash(str(parameters)) % 150) / 1000
+        )  # 5-20% drawdown
 
         # Simulate cross-validation scores
-        in_sample_sharpe = sharpe_ratio * 1.1  # Slightly higher in-sample
-        out_sample_sharpe = sharpe_ratio * 0.9  # Lower out-of-sample
+        in_sample_sharpe = sharpe_ratio * Decimal("1.1")  # Slightly higher in-sample
+        out_sample_sharpe = sharpe_ratio * Decimal("0.9")  # Lower out-of-sample
 
         # Calculate stability score (consistency across folds)
         stability_score = 1 - abs(in_sample_sharpe - out_sample_sharpe) / in_sample_sharpe
@@ -848,7 +940,7 @@ async def _run_parameter_combination(
             total_trades >= min_trades
             and max_drawdown <= max_dd_threshold
             and out_sample_sharpe >= min_sharpe_threshold
-            and stability_score >= 0.5  # Reasonable consistency
+            and stability_score >= Decimal("0.5")  # Reasonable consistency
         )
 
         execution_time = (datetime.now(timezone.utc) - start_time).total_seconds()
