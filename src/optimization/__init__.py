@@ -39,6 +39,7 @@ from .analysis import (
     SensitivityAnalysis,
     StabilityAnalysis,
 )
+from .backtesting_integration import BacktestIntegrationService
 from .bayesian import (
     AcquisitionFunction,
     BayesianConfig,
@@ -52,6 +53,7 @@ from .brute_force import (
     ParameterSpace,
     ValidationConfig as BruteForceValidationConfig,
 )
+from .controller import OptimizationController
 from .core import (
     ObjectiveDirection,
     OptimizationConfig,
@@ -59,6 +61,20 @@ from .core import (
     OptimizationEngine,
     OptimizationObjective,
     OptimizationStatus,
+)
+from .factory import (
+    OptimizationFactory,
+    create_optimization_controller,
+    create_optimization_service,
+    create_optimization_stack,
+)
+from .interfaces import (
+    BacktestIntegrationProtocol,
+    IBacktestIntegrationService,
+    IOptimizationService,
+    OptimizationAnalysisProtocol,
+    OptimizationRepositoryProtocol,
+    OptimizationServiceProtocol,
 )
 from .parameter_space import (
     CategoricalParameter,
@@ -69,6 +85,8 @@ from .parameter_space import (
     ParameterSpaceBuilder,
     ParameterType,
 )
+from .repository import OptimizationRepository
+from .service import OptimizationService
 from .validation import (
     OverfittingDetector,
     RobustnessAnalyzer,
@@ -82,27 +100,36 @@ from .validation import (
 
 __all__ = [
     "AcquisitionFunction",
+    "BacktestIntegrationProtocol",
+    "BacktestIntegrationService",
     "BayesianConfig",
-    # Bayesian optimization
     "BayesianOptimizer",
-    # Brute force optimization
     "BruteForceOptimizer",
+    "BruteForceValidationConfig",
     "CategoricalParameter",
     "ConditionalParameter",
     "ContinuousParameter",
     "DiscreteParameter",
     "GaussianProcessConfig",
     "GridSearchConfig",
+    "IBacktestIntegrationService",
+    "IOptimizationService",
     "ObjectiveDirection",
+    "OptimizationAnalysisProtocol",
     "OptimizationConfig",
     "OptimizationConstraint",
-    # Core optimization
+    "OptimizationController",
     "OptimizationEngine",
+    "OptimizationFactory",
     "OptimizationObjective",
+    "OptimizationRepository",
+    "OptimizationRepositoryProtocol",
     "OptimizationResult",
+    "OptimizationService",
+    "OptimizationServiceProtocol",
     "OptimizationStatus",
+    "OptimizationValidationConfig",
     "OverfittingDetector",
-    # Parameter space definition
     "ParameterDefinition",
     "ParameterImportanceAnalyzer",
     "ParameterSpace",
@@ -110,19 +137,18 @@ __all__ = [
     "ParameterType",
     "PerformanceAnalyzer",
     "PerformanceMetrics",
-    # Results analysis
     "ResultsAnalyzer",
     "RobustnessAnalyzer",
     "SensitivityAnalysis",
     "StabilityAnalysis",
     "StatisticalTester",
     "TimeSeriesValidator",
-    "BruteForceValidationConfig",
-    "OptimizationValidationConfig",
-    # Validation and overfitting prevention
     "ValidationEngine",
     "ValidationMetrics",
     "WalkForwardValidator",
+    "create_optimization_controller",
+    "create_optimization_service",
+    "create_optimization_stack",
 ]
 
 # Version info

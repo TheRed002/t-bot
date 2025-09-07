@@ -43,7 +43,12 @@ from src.core.exceptions import (
 from src.core.logging import get_logger
 from src.utils.decorators import time_execution
 
+# Removed external optimization_utils dependency - functions implemented locally
+
 logger = get_logger(__name__)
+
+# Configuration constants
+DEFAULT_OBJECTIVE_TIMEOUT_SECONDS = 60.0
 
 
 class ValidationMetrics(BaseModel):
@@ -115,7 +120,10 @@ class ValidationMetrics(BaseModel):
         stability_component = min(self.stability_score, Decimal("1")) * Decimal("0.2")
         scores.append(stability_component)
 
-        return sum(scores)
+        total = Decimal("0")
+        for score in scores:
+            total += score
+        return total
 
 
 class ValidationConfig(BaseModel):
@@ -148,8 +156,11 @@ class ValidationConfig(BaseModel):
     )
 
     # Out-of-sample testing
-    out_of_sample_ratio: float = Field(
-        default=0.25, gt=0, lt=0.5, description="Ratio of data reserved for out-of-sample testing"
+    out_of_sample_ratio: Decimal = Field(
+        default=Decimal("0.25"),
+        gt=0,
+        lt=Decimal("0.5"),
+        description="Ratio of data reserved for out-of-sample testing",
     )
     require_oos_significance: bool = Field(
         default=True, description="Require statistical significance on OOS data"
@@ -158,8 +169,8 @@ class ValidationConfig(BaseModel):
     # Statistical testing
     significance_level: Decimal = Field(
         default=Decimal("0.05"),
-        gt=Decimal("0"),
-        lt=Decimal("1"),
+        gt=0.0,
+        lt=1.0,
         description="Statistical significance level",
     )
     multiple_testing_correction: str = Field(
@@ -171,22 +182,25 @@ class ValidationConfig(BaseModel):
 
     # Overfitting detection
     overfitting_threshold: Decimal = Field(
-        default=Decimal("0.15"), gt=Decimal("0"), description="Threshold for overfitting detection"
+        default=Decimal("0.15"), gt=0.0, description="Threshold for overfitting detection"
     )
     degradation_threshold: Decimal = Field(
-        default=Decimal("0.10"), gt=Decimal("0"), description="Acceptable performance degradation"
+        default=Decimal("0.10"), gt=0.0, description="Acceptable performance degradation"
     )
     stability_threshold: Decimal = Field(
         default=Decimal("0.7"),
-        gt=Decimal("0"),
-        le=Decimal("1"),
+        gt=0.0,
+        le=1.0,
         description="Minimum stability score required",
     )
 
     # Robustness testing
     enable_robustness_testing: bool = Field(default=True, description="Enable robustness testing")
-    robustness_perturbation: float = Field(
-        default=0.05, gt=0, lt=0.5, description="Parameter perturbation for robustness testing"
+    robustness_perturbation: Decimal = Field(
+        default=Decimal("0.05"),
+        gt=0,
+        lt=Decimal("0.5"),
+        description="Parameter perturbation for robustness testing",
     )
     robustness_samples: int = Field(
         default=100, ge=10, description="Number of samples for robustness testing"
@@ -414,8 +428,12 @@ class WalkForwardValidator:
                         test_period=f"{test_start.date()} to {test_end.date()}",
                     )
 
+            except (ValueError, TypeError, KeyError) as e:
+                logger.warning(
+                    f"Walk-forward period {period + 1} failed due to parameter/data issue: {e!s}"
+                )
             except Exception as e:
-                logger.warning(f"Walk-forward period {period + 1} failed: {e!s}")
+                logger.warning(f"Walk-forward period {period + 1} failed unexpectedly: {e!s}")
 
             current_date += step_delta
 
@@ -450,11 +468,19 @@ class WalkForwardValidator:
                 }
             )
 
-            # Run objective function
+            # Run objective function with timeout
             if asyncio.iscoroutinefunction(objective_function):
-                result = await objective_function(period_params)
+                result = await asyncio.wait_for(
+                    objective_function(period_params),
+                    timeout=30.0  # 30 second timeout per period
+                )
             else:
-                result = objective_function(period_params)
+                # Run in executor with timeout for sync functions
+                loop = asyncio.get_event_loop()
+                result = await asyncio.wait_for(
+                    loop.run_in_executor(None, objective_function, period_params),
+                    timeout=30.0  # 30 second timeout per period
+                )
 
             if isinstance(result, dict):
                 # Extract primary metric
@@ -462,8 +488,14 @@ class WalkForwardValidator:
             else:
                 return Decimal(str(result))
 
+        except asyncio.TimeoutError:
+            logger.warning("Period evaluation timed out")
+            return None
+        except (ValueError, TypeError, KeyError) as e:
+            logger.warning(f"Period evaluation failed due to parameter/data issue: {e!s}")
+            return None
         except Exception as e:
-            logger.error(f"Period evaluation failed: {e!s}")
+            logger.error(f"Period evaluation failed unexpectedly: {e!s}")
             return None
 
 
@@ -738,96 +770,133 @@ class RobustnessAnalyzer:
             Tuple of (robustness_score, detailed_metrics)
         """
         perturbation_results = []
-        parameter_sensitivities = {}
+        parameter_sensitivities: dict[str, list[tuple[Any, Decimal]]] = {}
 
-        # Test parameter perturbations
-        for _sample in range(self.config.robustness_samples):
-            perturbed_params = self._perturb_parameters(optimal_parameters, parameter_space)
+        try:
+            # Test parameter perturbations
+            for _sample in range(self.config.robustness_samples):
+                perturbed_params = self._perturb_parameters(optimal_parameters, parameter_space)
 
-            try:
-                # Evaluate perturbed parameters
-                if asyncio.iscoroutinefunction(objective_function):
-                    result = await objective_function(perturbed_params)
+                try:
+                    # Evaluate perturbed parameters with timeout
+                    if asyncio.iscoroutinefunction(objective_function):
+                        result = await asyncio.wait_for(
+                            objective_function(perturbed_params),
+                            timeout=30.0  # 30 second timeout per perturbation
+                        )
+                    else:
+                        # Run in executor with timeout for sync functions
+                        loop = asyncio.get_event_loop()
+                        result = await asyncio.wait_for(
+                            loop.run_in_executor(None, objective_function, perturbed_params),
+                            timeout=30.0  # 30 second timeout per perturbation
+                        )
+
+                    if isinstance(result, dict):
+                        score = Decimal(str(result.get("total_return", 0)))
+                    else:
+                        score = Decimal(str(result))
+
+                    perturbation_results.append(score)
+
+                    # Track parameter-specific sensitivity
+                    for param_name, param_value in perturbed_params.items():
+                        if param_name not in parameter_sensitivities:
+                            parameter_sensitivities[param_name] = []
+                        parameter_sensitivities[param_name].append((param_value, score))
+
+                except asyncio.TimeoutError:
+                    logger.debug(f"Robustness evaluation timed out for sample {_sample}")
+                except (ValueError, TypeError, KeyError) as e:
+                    logger.debug(f"Robustness evaluation failed due to parameter/data issue: {e!s}")
+                except Exception as e:
+                    logger.warning(f"Robustness evaluation failed unexpectedly: {e!s}")
+                    # Continue with other samples
+
+            # Calculate robustness metrics
+            if perturbation_results:
+                mean_perturbed = sum(perturbation_results) / len(perturbation_results)
+                std_perturbed = self._calculate_std(perturbation_results)
+
+                # Get original performance with timeout
+                try:
+                    if asyncio.iscoroutinefunction(objective_function):
+                        original_result = await asyncio.wait_for(
+                            objective_function(optimal_parameters),
+                            timeout=30.0  # 30 second timeout
+                        )
+                    else:
+                        loop = asyncio.get_event_loop()
+                        original_result = await asyncio.wait_for(
+                            loop.run_in_executor(None, objective_function, optimal_parameters),
+                            timeout=30.0  # 30 second timeout
+                        )
+
+                    if isinstance(original_result, dict):
+                        original_score = Decimal(str(original_result.get("total_return", 0)))
+                    else:
+                        original_score = Decimal(str(original_result))
+                except asyncio.TimeoutError:
+                    logger.warning("Original score calculation timed out")
+                    original_score = Decimal("0")
+                except (ValueError, TypeError, KeyError) as e:
+                    logger.warning(
+                        f"Failed to calculate original score with optimal parameters: {e}"
+                    )
+                    original_score = Decimal("0")
+                except Exception as e:
+                    logger.error(
+                        f"Unexpected error in robustness validation objective function: {e}"
+                    )
+                    raise OptimizationError(
+                        "Critical error in robustness validation",
+                        optimization_stage="robustness_validation",
+                        parameters=optimal_parameters,
+                    ) from e
+
+                # Robustness score (higher is better)
+                if original_score != 0:
+                    robustness_score = mean_perturbed / original_score
                 else:
-                    result = objective_function(perturbed_params)
+                    robustness_score = Decimal("0")
 
-                if isinstance(result, dict):
-                    score = Decimal(str(result.get("total_return", 0)))
-                else:
-                    score = Decimal(str(result))
-
-                perturbation_results.append(score)
-
-                # Track parameter-specific sensitivity
-                for param_name, param_value in perturbed_params.items():
-                    if param_name not in parameter_sensitivities:
-                        parameter_sensitivities[param_name] = []
-                    parameter_sensitivities[param_name].append((param_value, score))
-
-            except Exception as e:
-                logger.warning(f"Robustness evaluation failed: {e!s}")
-
-        # Calculate robustness metrics
-        if perturbation_results:
-            mean_perturbed = sum(perturbation_results) / len(perturbation_results)
-            std_perturbed = self._calculate_std(perturbation_results)
-
-            # Get original performance
-            try:
-                if asyncio.iscoroutinefunction(objective_function):
-                    original_result = await objective_function(optimal_parameters)
-                else:
-                    original_result = objective_function(optimal_parameters)
-
-                if isinstance(original_result, dict):
-                    original_score = Decimal(str(original_result.get("total_return", 0)))
-                else:
-                    original_score = Decimal(str(original_result))
-            except (ValueError, TypeError, KeyError) as e:
-                logger.warning(f"Failed to calculate original score with optimal parameters: {e}")
-                original_score = Decimal("0")
-            except Exception as e:
-                logger.error(f"Unexpected error in robustness validation objective function: {e}")
-                raise OptimizationError(
-                    "Critical error in robustness validation",
-                    optimization_stage="robustness_validation",
-                    parameters=optimal_parameters,
-                ) from e
-
-            # Robustness score (higher is better)
-            if original_score != 0:
-                robustness_score = mean_perturbed / original_score
+                # Detailed metrics
+                detailed_metrics = {
+                    "original_score": original_score,
+                    "perturbed_mean": mean_perturbed,
+                    "perturbed_std": std_perturbed,
+                    "perturbation_results": perturbation_results,
+                    "parameter_sensitivities": self._calculate_parameter_sensitivities(
+                        parameter_sensitivities
+                    ),
+                    "worst_case_performance": min(perturbation_results),
+                    "best_case_performance": max(perturbation_results),
+                }
             else:
                 robustness_score = Decimal("0")
+                detailed_metrics = {}
 
-            # Detailed metrics
-            detailed_metrics = {
-                "original_score": original_score,
-                "perturbed_mean": mean_perturbed,
-                "perturbed_std": std_perturbed,
-                "perturbation_results": perturbation_results,
-                "parameter_sensitivities": self._calculate_parameter_sensitivities(
-                    parameter_sensitivities
-                ),
-                "worst_case_performance": min(perturbation_results),
-                "best_case_performance": max(perturbation_results),
-            }
-        else:
-            robustness_score = Decimal("0")
-            detailed_metrics = {}
+            logger.info(
+                "Robustness analysis completed",
+                robustness_score=float(robustness_score),
+                samples_evaluated=len(perturbation_results),
+            )
 
-        logger.info(
-            "Robustness analysis completed",
-            robustness_score=float(robustness_score),
-            samples_evaluated=len(perturbation_results),
-        )
+            return robustness_score, detailed_metrics
 
-        return robustness_score, detailed_metrics
+        finally:
+            # Clean up any temporary data structures
+            try:
+                perturbation_results.clear()
+                parameter_sensitivities.clear()
+            except Exception as e:
+                logger.debug(f"Error clearing robustness analysis data: {e}")
 
     def _perturb_parameters(
         self, parameters: dict[str, Any], parameter_space: Any
     ) -> dict[str, Any]:
         """Perturb parameters for robustness testing."""
+        noise_factor = float(self.config.robustness_perturbation)
         perturbed = parameters.copy()
 
         for param_name, value in parameters.items():
@@ -835,22 +904,23 @@ class RobustnessAnalyzer:
                 param_def = parameter_space.parameters[param_name]
 
                 if param_def.parameter_type.value == "continuous":
-                    # Add Gaussian noise
+                    # Add Gaussian noise for continuous parameters
                     min_val, max_val = param_def.get_bounds()
                     range_size = max_val - min_val
-                    noise = random.gauss(0, float(range_size) * self.config.robustness_perturbation)
+                    noise_std = float(range_size) * noise_factor
+                    noise = random.gauss(0, noise_std)
                     new_value = Decimal(str(value)) + Decimal(str(noise))
                     perturbed[param_name] = param_def.clip_value(new_value)
 
                 elif param_def.parameter_type.value == "discrete":
                     # Add discrete noise
-                    if random.random() < self.config.robustness_perturbation:
+                    if random.random() < noise_factor:
                         valid_values = param_def.get_valid_values()
                         perturbed[param_name] = random.choice(valid_values)
 
                 elif param_def.parameter_type.value == "categorical":
                     # Random category change
-                    if random.random() < self.config.robustness_perturbation:
+                    if random.random() < noise_factor:
                         choices = getattr(param_def, "choices", [])
                         perturbed[param_name] = random.choice(choices)
 
@@ -942,82 +1012,104 @@ class ValidationEngine:
         """
         logger.info("Starting comprehensive optimization validation")
 
-        # 1. In-sample vs Out-of-sample evaluation
-        in_sample_score, out_of_sample_score = await self._evaluate_in_out_sample(
-            objective_function, optimal_parameters, data_start_date, data_end_date
-        )
-
-        # 2. Cross-validation
-        validation_scores = await self._run_cross_validation(
-            objective_function, optimal_parameters, data_start_date, data_end_date
-        )
-        validation_score = (
-            sum(validation_scores) / len(validation_scores) if validation_scores else Decimal("0")
-        )
-
-        # 3. Walk-forward analysis
+        # Initialize variables for cleanup
+        validation_scores = []
         walk_forward_scores = []
-        if self.config.enable_walk_forward and data_start_date and data_end_date:
-            walk_forward_scores = await self.wf_validator.run_walk_forward_analysis(
+        optimization_scores = []
+        robustness_details = {}
+
+        try:
+            # 1. In-sample vs Out-of-sample evaluation
+            in_sample_score, out_of_sample_score = await self._evaluate_in_out_sample(
                 objective_function, optimal_parameters, data_start_date, data_end_date
             )
 
-        # 4. Overfitting detection
-        has_overfitting, overfitting_metrics = self.overfitting_detector.detect_overfitting(
-            in_sample_score, out_of_sample_score, validation_scores
-        )
+            # 2. Cross-validation
+            validation_scores = await self._run_cross_validation(
+                objective_function, optimal_parameters, data_start_date, data_end_date
+            )
+            validation_score = (
+                sum(validation_scores) / len(validation_scores)
+                if validation_scores
+                else Decimal("0")
+            )
 
-        # 5. Statistical significance testing
-        optimization_scores = [out_of_sample_score, *validation_scores, *walk_forward_scores]
-        (
-            p_value,
-            confidence_interval,
-            is_significant,
-        ) = await self.statistical_tester.test_significance(optimization_scores)
+            # 3. Walk-forward analysis
+            if self.config.enable_walk_forward and data_start_date and data_end_date:
+                walk_forward_scores = await self.wf_validator.run_walk_forward_analysis(
+                    objective_function, optimal_parameters, data_start_date, data_end_date
+                )
 
-        # 6. Robustness analysis
-        robustness_score, robustness_details = await self.robustness_analyzer.analyze_robustness(
-            objective_function, optimal_parameters, parameter_space
-        )
+            # 4. Overfitting detection
+            has_overfitting, overfitting_metrics = self.overfitting_detector.detect_overfitting(
+                in_sample_score, out_of_sample_score, validation_scores
+            )
 
-        # 7. Calculate stability score
-        stability_score = self._calculate_stability_score(
-            validation_scores, walk_forward_scores, robustness_details
-        )
+            # 5. Statistical significance testing
+            optimization_scores = [out_of_sample_score, *validation_scores, *walk_forward_scores]
+            (
+                p_value,
+                confidence_interval,
+                is_significant,
+            ) = await self.statistical_tester.test_significance(optimization_scores)
 
-        # 8. Determine worst-case performance
-        all_scores = optimization_scores
-        worst_case = min(all_scores) if all_scores else Decimal("0")
+            # 6. Robustness analysis
+            (
+                robustness_score,
+                robustness_details,
+            ) = await self.robustness_analyzer.analyze_robustness(
+                objective_function, optimal_parameters, parameter_space
+            )
 
-        # 9. Create comprehensive metrics
-        metrics = ValidationMetrics(
-            in_sample_score=in_sample_score,
-            out_of_sample_score=out_of_sample_score,
-            validation_score=validation_score,
-            overfitting_ratio=overfitting_metrics.get("overfitting_ratio", Decimal("1")),
-            performance_degradation=overfitting_metrics.get(
-                "performance_degradation", Decimal("0")
-            ),
-            p_value=p_value,
-            confidence_interval=confidence_interval,
-            stability_score=stability_score,
-            robustness_score=robustness_score,
-            worst_case_performance=worst_case,
-            walk_forward_scores=walk_forward_scores,
-            is_statistically_significant=is_significant,
-            is_robust=robustness_score >= Decimal("0.7"),  # Threshold for robustness
-            has_overfitting=has_overfitting,
-        )
+            # 7. Calculate stability score
+            stability_score = self._calculate_stability_score(
+                validation_scores, walk_forward_scores, robustness_details
+            )
 
-        logger.info(
-            "Comprehensive validation completed",
-            overall_quality=float(metrics.get_overall_quality_score()),
-            is_significant=is_significant,
-            has_overfitting=has_overfitting,
-            robustness_score=float(robustness_score),
-        )
+            # 8. Determine worst-case performance
+            all_scores = optimization_scores
+            worst_case = min(all_scores) if all_scores else Decimal("0")
 
-        return metrics
+            # 9. Create comprehensive metrics
+            metrics = ValidationMetrics(
+                in_sample_score=in_sample_score,
+                out_of_sample_score=out_of_sample_score,
+                validation_score=validation_score,
+                overfitting_ratio=overfitting_metrics.get("overfitting_ratio", Decimal("1")),
+                performance_degradation=overfitting_metrics.get(
+                    "performance_degradation", Decimal("0")
+                ),
+                p_value=p_value,
+                confidence_interval=confidence_interval,
+                stability_score=stability_score,
+                robustness_score=robustness_score,
+                worst_case_performance=worst_case,
+                walk_forward_scores=walk_forward_scores,
+                is_statistically_significant=is_significant,
+                is_robust=robustness_score >= Decimal("0.7"),  # Threshold for robustness
+                has_overfitting=has_overfitting,
+            )
+
+            logger.info(
+                "Comprehensive validation completed",
+                overall_quality=float(metrics.get_overall_quality_score()),
+                is_significant=is_significant,
+                has_overfitting=has_overfitting,
+                robustness_score=float(robustness_score),
+            )
+
+            return metrics
+
+        finally:
+            # Clean up temporary data structures and resources
+            try:
+                validation_scores.clear()
+                walk_forward_scores.clear()
+                optimization_scores.clear()
+                if robustness_details:
+                    robustness_details.clear()
+            except Exception as e:
+                logger.debug(f"Error cleaning up validation data: {e}")
 
     async def _evaluate_in_out_sample(
         self,
@@ -1031,9 +1123,16 @@ class ValidationEngine:
             # No date information, use full evaluation
             try:
                 if asyncio.iscoroutinefunction(objective_function):
-                    result = await objective_function(parameters)
+                    result = await asyncio.wait_for(
+                        objective_function(parameters),
+                        timeout=DEFAULT_OBJECTIVE_TIMEOUT_SECONDS
+                    )
                 else:
-                    result = objective_function(parameters)
+                    loop = asyncio.get_event_loop()
+                    result = await asyncio.wait_for(
+                        loop.run_in_executor(None, objective_function, parameters),
+                        timeout=DEFAULT_OBJECTIVE_TIMEOUT_SECONDS
+                    )
 
                 if isinstance(result, dict):
                     score = Decimal(str(result.get("total_return", 0)))
@@ -1041,6 +1140,9 @@ class ValidationEngine:
                     score = Decimal(str(result))
 
                 return score, score  # Same for both if no date split
+            except asyncio.TimeoutError:
+                logger.warning("In-out sample evaluation timed out")
+                return Decimal("0"), Decimal("0")
             except (ValueError, TypeError, KeyError) as e:
                 logger.warning(f"Failed to evaluate parameters in out-of-sample test: {e}")
                 return Decimal("0"), Decimal("0")
@@ -1054,7 +1156,7 @@ class ValidationEngine:
 
         # Calculate split point
         total_days = (end_date - start_date).days
-        oos_days = int(total_days * self.config.out_of_sample_ratio)
+        oos_days = int(float(Decimal(str(total_days)) * self.config.out_of_sample_ratio))
         split_date = end_date - timedelta(days=oos_days)
 
         # In-sample evaluation
@@ -1065,16 +1167,29 @@ class ValidationEngine:
             )
 
             if asyncio.iscoroutinefunction(objective_function):
-                in_result = await objective_function(in_sample_params)
+                in_result = await asyncio.wait_for(
+                    objective_function(in_sample_params),
+                    timeout=DEFAULT_OBJECTIVE_TIMEOUT_SECONDS
+                )
             else:
-                in_result = objective_function(in_sample_params)
+                loop = asyncio.get_event_loop()
+                in_result = await asyncio.wait_for(
+                    loop.run_in_executor(None, objective_function, in_sample_params),
+                    timeout=DEFAULT_OBJECTIVE_TIMEOUT_SECONDS
+                )
 
             if isinstance(in_result, dict):
                 in_sample_score = Decimal(str(in_result.get("total_return", 0)))
             else:
                 in_sample_score = Decimal(str(in_result))
+        except asyncio.TimeoutError:
+            logger.warning("In-sample evaluation timed out")
+            in_sample_score = Decimal("0")
+        except (ValueError, TypeError, KeyError) as e:
+            logger.warning(f"In-sample evaluation failed due to parameter/data issue: {e!s}")
+            in_sample_score = Decimal("0")
         except Exception as e:
-            logger.warning(f"In-sample evaluation failed: {e!s}")
+            logger.error(f"In-sample evaluation failed unexpectedly: {e!s}")
             in_sample_score = Decimal("0")
 
         # Out-of-sample evaluation
@@ -1085,16 +1200,29 @@ class ValidationEngine:
             )
 
             if asyncio.iscoroutinefunction(objective_function):
-                oos_result = await objective_function(oos_params)
+                oos_result = await asyncio.wait_for(
+                    objective_function(oos_params),
+                    timeout=DEFAULT_OBJECTIVE_TIMEOUT_SECONDS
+                )
             else:
-                oos_result = objective_function(oos_params)
+                loop = asyncio.get_event_loop()
+                oos_result = await asyncio.wait_for(
+                    loop.run_in_executor(None, objective_function, oos_params),
+                    timeout=DEFAULT_OBJECTIVE_TIMEOUT_SECONDS
+                )
 
             if isinstance(oos_result, dict):
                 out_of_sample_score = Decimal(str(oos_result.get("total_return", 0)))
             else:
                 out_of_sample_score = Decimal(str(oos_result))
+        except asyncio.TimeoutError:
+            logger.warning("Out-of-sample evaluation timed out")
+            out_of_sample_score = Decimal("0")
+        except (ValueError, TypeError, KeyError) as e:
+            logger.warning(f"Out-of-sample evaluation failed due to parameter/data issue: {e!s}")
+            out_of_sample_score = Decimal("0")
         except Exception as e:
-            logger.warning(f"Out-of-sample evaluation failed: {e!s}")
+            logger.error(f"Out-of-sample evaluation failed unexpectedly: {e!s}")
             out_of_sample_score = Decimal("0")
 
         return in_sample_score, out_of_sample_score
@@ -1141,9 +1269,16 @@ class ValidationEngine:
                 )
 
                 if asyncio.iscoroutinefunction(objective_function):
-                    result = await objective_function(fold_params)
+                    result = await asyncio.wait_for(
+                        objective_function(fold_params),
+                        timeout=DEFAULT_OBJECTIVE_TIMEOUT_SECONDS
+                    )
                 else:
-                    result = objective_function(fold_params)
+                    loop = asyncio.get_event_loop()
+                    result = await asyncio.wait_for(
+                        loop.run_in_executor(None, objective_function, fold_params),
+                        timeout=DEFAULT_OBJECTIVE_TIMEOUT_SECONDS
+                    )
 
                 if isinstance(result, dict):
                     score = Decimal(str(result.get("total_return", 0)))
@@ -1154,8 +1289,12 @@ class ValidationEngine:
 
                 logger.debug(f"CV fold {fold + 1} completed, score: {float(score)}")
 
+            except asyncio.TimeoutError:
+                logger.warning(f"CV fold {fold + 1} timed out")
+            except (ValueError, TypeError, KeyError) as e:
+                logger.warning(f"CV fold {fold + 1} failed due to parameter/data issue: {e!s}")
             except Exception as e:
-                logger.warning(f"CV fold {fold + 1} failed: {e!s}")
+                logger.warning(f"CV fold {fold + 1} failed unexpectedly: {e!s}")
 
         return cv_scores
 

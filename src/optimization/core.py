@@ -52,15 +52,6 @@ class ObjectiveDirection(Enum):
     MINIMIZE = "minimize"
 
 
-class ParameterType(Enum):
-    """Parameter type enumeration."""
-
-    CONTINUOUS = "continuous"
-    DISCRETE = "discrete"
-    CATEGORICAL = "categorical"
-    BOOLEAN = "boolean"
-
-
 class OptimizationObjective(BaseModel):
     """
     Optimization objective definition.
@@ -262,7 +253,8 @@ class OptimizationProgress(BaseModel):
     def add_warning(self, warning: str) -> None:
         """Add a warning to the progress tracker."""
         self.warnings.append(warning)
-        self.logger.warning(
+        logger = get_logger(self.__class__.__name__)
+        logger.warning(
             f"Optimization warning: {warning}", optimization_id=self.optimization_id
         )
 

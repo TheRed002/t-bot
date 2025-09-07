@@ -33,11 +33,10 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 
-import numpy as np
 from pydantic import BaseModel, Field, field_validator
 from scipy.stats import qmc  # For quasi-random sequences
 
-from src.core.exceptions import OptimizationError
+from src.core.exceptions import OptimizationError, ValidationError
 from src.core.logging import get_logger
 from src.optimization.core import (
     OptimizationConfig,
@@ -47,9 +46,14 @@ from src.optimization.core import (
     OptimizationStatus,
 )
 from src.optimization.parameter_space import ParameterSpace, SamplingStrategy
+from src.optimization.validation import ValidationConfig
 from src.utils.decorators import memory_usage, time_execution
 
 logger = get_logger(__name__)
+
+# Configuration constants
+DEFAULT_OBJECTIVE_TIMEOUT_SECONDS = 60.0
+DEFAULT_BATCH_TIMEOUT_SECONDS = 300.0
 
 
 class GridSearchConfig(BaseModel):
@@ -93,6 +97,9 @@ class GridSearchConfig(BaseModel):
     memory_limit_per_batch_mb: int = Field(
         default=1000, ge=100, description="Memory limit per batch in MB"
     )
+    use_process_executor: bool = Field(
+        default=True, description="Use ProcessPoolExecutor for parallel evaluations"
+    )
 
     # Early stopping
     early_stopping_enabled: bool = Field(
@@ -120,56 +127,6 @@ class GridSearchConfig(BaseModel):
         if v > 50:
             logger.warning(f"Large grid resolution {v} may result in very long optimization times")
         return v
-
-
-class ValidationConfig(BaseModel):
-    """
-    Configuration for validation during optimization.
-
-    Defines validation strategies to prevent overfitting and ensure
-    robust parameter selection.
-    """
-
-    # Cross-validation
-    enable_cross_validation: bool = Field(default=True, description="Enable cross-validation")
-    cv_folds: int = Field(default=5, ge=2, description="Number of cross-validation folds")
-    cv_strategy: str = Field(default="time_series", description="Cross-validation strategy")
-
-    # Walk-forward analysis
-    enable_walk_forward: bool = Field(default=True, description="Enable walk-forward analysis")
-    walk_forward_periods: int = Field(default=6, ge=2, description="Number of walk-forward periods")
-    walk_forward_step: int = Field(
-        default=30, ge=1, description="Step size for walk-forward analysis (in days)"
-    )
-
-    # Out-of-sample testing
-    out_of_sample_ratio: float = Field(
-        default=0.25, gt=0, lt=0.5, description="Ratio of data reserved for out-of-sample testing"
-    )
-    require_out_of_sample_significance: bool = Field(
-        default=True, description="Require statistical significance on out-of-sample data"
-    )
-
-    # Statistical testing
-    significance_level: Decimal = Field(
-        default=Decimal("0.05"),
-        gt=Decimal("0"),
-        lt=Decimal("1"),
-        description="Statistical significance level",
-    )
-    bootstrap_samples: int = Field(
-        default=1000, ge=100, description="Number of bootstrap samples for significance testing"
-    )
-
-    # Overfitting detection
-    overfitting_threshold: Decimal = Field(
-        default=Decimal("0.2"), gt=Decimal("0"), description="Threshold for overfitting detection"
-    )
-    performance_degradation_threshold: Decimal = Field(
-        default=Decimal("0.15"),
-        gt=Decimal("0"),
-        description="Threshold for performance degradation",
-    )
 
 
 class OptimizationCandidate(BaseModel):
@@ -296,8 +253,16 @@ class GridGenerator:
         for param_name, param_def in self.parameter_space.parameters.items():
             if param_def.parameter_type.value == "continuous":
                 min_val, max_val = param_def.get_bounds()
-                values = np.linspace(float(min_val), float(max_val), self.config.grid_resolution)
-                parameter_grids[param_name] = [Decimal(str(v)) for v in values]
+                # Use Decimal arithmetic for precise financial calculations
+                if self.config.grid_resolution > 1:
+                    step_size = (max_val - min_val) / (self.config.grid_resolution - 1)
+                    values = [
+                        min_val + step_size * Decimal(str(i))
+                        for i in range(self.config.grid_resolution)
+                    ]
+                else:
+                    values = [min_val]
+                parameter_grids[param_name] = values
 
             elif param_def.parameter_type.value == "discrete":
                 min_val, max_val = param_def.get_bounds()
@@ -305,10 +270,9 @@ class GridGenerator:
                 values = list(range(min_val, max_val + 1, step))
                 # Subsample if too many values
                 if len(values) > self.config.grid_resolution:
-                    indices = np.linspace(
-                        0, len(values) - 1, self.config.grid_resolution, dtype=int
-                    )
-                    values = [values[i] for i in indices]
+                    # Use integer step calculation for precise selection
+                    step = max(1, len(values) // self.config.grid_resolution)
+                    values = values[::step][: self.config.grid_resolution]
                 parameter_grids[param_name] = values
 
             elif param_def.parameter_type.value == "categorical":
@@ -522,12 +486,14 @@ class GridGenerator:
         for param_name, param_def in self.parameter_space.parameters.items():
             if param_def.parameter_type.value == "continuous":
                 min_val, max_val = refined_bounds[param_name]
-                values = np.linspace(
-                    float(min_val),
-                    float(max_val),
-                    max(3, self.config.grid_resolution // 2),  # Smaller grid for refinement
-                )
-                parameter_grids[param_name] = [Decimal(str(v)) for v in values]
+                # Use precise Decimal arithmetic for refinement grid
+                grid_size = max(3, self.config.grid_resolution // 2)
+                if grid_size > 1:
+                    step_size = (max_val - min_val) / (grid_size - 1)
+                    values = [min_val + step_size * Decimal(str(i)) for i in range(grid_size)]
+                else:
+                    values = [min_val]
+                parameter_grids[param_name] = values
 
             elif param_def.parameter_type.value == "discrete":
                 # Use original discrete values
@@ -640,10 +606,13 @@ class BruteForceOptimizer(OptimizationEngine):
             initial_grid = self.grid_generator.generate_initial_grid()
             self._create_candidates(initial_grid)
 
-            # Initialize executor
-            self.evaluation_executor = ProcessPoolExecutor(
-                max_workers=self.grid_config.max_concurrent_evaluations
-            )
+            # Initialize executor only if enabled
+            if self.grid_config.use_process_executor:
+                self.evaluation_executor = ProcessPoolExecutor(
+                    max_workers=self.grid_config.max_concurrent_evaluations
+                )
+            else:
+                self.evaluation_executor = None
 
             self.progress.status = OptimizationStatus.RUNNING
             self.progress.total_iterations = len(self.candidates)
@@ -668,18 +637,36 @@ class BruteForceOptimizer(OptimizationEngine):
 
             return result
 
-        except Exception as e:
+        except (ValidationError, ValueError, TypeError) as e:
             self.progress.status = OptimizationStatus.FAILED
             logger.error(
-                "Brute force optimization failed",
+                "Brute force optimization failed due to configuration/data error",
                 optimization_id=self.optimization_id,
                 error=str(e),
             )
-            raise OptimizationError(f"Brute force optimization failed: {e!s}")
+            raise OptimizationError(f"Brute force optimization failed: {e!s}") from e
+        except Exception as e:
+            self.progress.status = OptimizationStatus.FAILED
+            logger.error(
+                "Brute force optimization failed unexpectedly",
+                optimization_id=self.optimization_id,
+                error=str(e),
+            )
+            raise OptimizationError(f"Brute force optimization failed: {e!s}") from e
 
         finally:
+            # Ensure executor is properly cleaned up
             if self.evaluation_executor:
-                self.evaluation_executor.shutdown(wait=True)
+                try:
+                    # For Python 3.9+, use cancel_futures parameter
+                    self.evaluation_executor.shutdown(wait=True, cancel_futures=True)
+                except TypeError:
+                    # Fallback for older Python versions
+                    self.evaluation_executor.shutdown(wait=True)
+                except Exception as e:
+                    logger.warning(f"Error shutting down evaluation executor: {e}")
+                finally:
+                    self.evaluation_executor = None
 
     def _create_candidates(self, parameter_combinations: list[dict[str, Any]]) -> None:
         """Create optimization candidates from parameter combinations."""
@@ -744,7 +731,19 @@ class BruteForceOptimizer(OptimizationEngine):
             tasks.append(task)
 
         if tasks:
-            await asyncio.gather(*tasks, return_exceptions=True)
+            # Use timeout to prevent hanging tasks
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(*tasks, return_exceptions=True),
+                    timeout=DEFAULT_BATCH_TIMEOUT_SECONDS
+                )
+            except asyncio.TimeoutError:
+                logger.warning(f"Batch evaluation timed out, canceling {len(tasks)} tasks")
+                for task in tasks:
+                    if not task.done():
+                        task.cancel()
+                # Wait briefly for cancellation to complete
+                await asyncio.gather(*tasks, return_exceptions=True)
 
     async def _evaluate_candidate(
         self, candidate: OptimizationCandidate, objective_function: Callable
@@ -787,37 +786,65 @@ class BruteForceOptimizer(OptimizationEngine):
             else:
                 candidate.mark_failed("Objective function returned None")
 
+        except (ValueError, TypeError, KeyError) as e:
+            candidate.mark_failed(str(e))
+            logger.warning(
+                "Candidate evaluation failed due to parameter/data issue",
+                candidate_id=candidate.candidate_id,
+                error=str(e),
+            )
         except Exception as e:
             candidate.mark_failed(str(e))
             logger.error(
-                "Candidate evaluation failed", candidate_id=candidate.candidate_id, error=str(e)
+                "Candidate evaluation failed unexpectedly",
+                candidate_id=candidate.candidate_id,
+                error=str(e),
             )
 
         finally:
             self.active_evaluations -= 1
+            # Clean up any resources associated with this evaluation
+            try:
+                # Clear any large data structures that might be held in memory
+                if hasattr(candidate, "_temp_data"):
+                    candidate._temp_data.clear()
+            except Exception as e:
+                logger.debug(f"Error cleaning up candidate resources: {e}")
 
     async def _run_objective_function(
         self, objective_function: Callable, parameters: dict[str, Any]
     ) -> Any:
         """Run the objective function with given parameters."""
         try:
-            # Convert parameters to appropriate types
+            # Convert parameters to appropriate types if parameter_space provided
             converted_params = self.parameter_space.clip_parameters(parameters)
 
-            # Run function (assume it's async-compatible)
+            # Run function with timeout
             if asyncio.iscoroutinefunction(objective_function):
-                result = await objective_function(converted_params)
+                result = await asyncio.wait_for(
+                    objective_function(converted_params),
+                    timeout=DEFAULT_OBJECTIVE_TIMEOUT_SECONDS
+                )
             else:
                 # Run in executor for CPU-bound functions
                 loop = asyncio.get_event_loop()
-                result = await loop.run_in_executor(
-                    self.evaluation_executor, objective_function, converted_params
+                result = await asyncio.wait_for(
+                    loop.run_in_executor(None, objective_function, converted_params),
+                    timeout=DEFAULT_OBJECTIVE_TIMEOUT_SECONDS
                 )
 
             return result
 
+        except asyncio.TimeoutError:
+            logger.warning("Objective function execution timed out")
+            return None
+        except (ValueError, TypeError, KeyError) as e:
+            logger.warning(
+                f"Objective function execution failed due to parameter/data issue: {e!s}"
+            )
+            return None
         except Exception as e:
-            logger.error(f"Objective function execution failed: {e!s}")
+            logger.error(f"Objective function execution failed unexpectedly: {e!s}")
             return None
 
     def _get_primary_objective_value(self, objective_values: dict[str, Decimal]) -> Decimal:
@@ -830,7 +857,10 @@ class BruteForceOptimizer(OptimizationEngine):
                 break
 
         if primary_obj is None:
-            primary_obj = self.objectives[0]  # Use first objective as primary
+            primary_obj = self.objectives[0] if self.objectives else None
+
+        if primary_obj is None:
+            return Decimal("0")
 
         return objective_values.get(primary_obj.name, Decimal("0"))
 
@@ -888,7 +918,7 @@ class BruteForceOptimizer(OptimizationEngine):
 
     def _validate_candidate(self, candidate: OptimizationCandidate) -> bool:
         """Validate candidate parameters."""
-        validation_results = self.parameter_space.validate_parameters(candidate.parameters)
+        validation_results = self.parameter_space.validate_parameter_set(candidate.parameters)
         return all(validation_results.values())
 
     async def _validate_candidate_performance(
@@ -919,8 +949,15 @@ class BruteForceOptimizer(OptimizationEngine):
             if scores:
                 return sum(scores) / len(scores)
 
+        except (ValueError, TypeError) as e:
+            logger.warning(
+                f"Cross-validation failed for candidate {candidate.candidate_id} due to parameter issue: {e!s}"
+            )
         except Exception as e:
-            logger.warning(f"Cross-validation failed for candidate {candidate.candidate_id}: {e!s}")
+            logger.error(
+                f"Cross-validation failed for candidate {candidate.candidate_id} unexpectedly: {e!s}"
+            )
+            # Continue with optimization
 
         return None
 
@@ -935,11 +972,25 @@ class BruteForceOptimizer(OptimizationEngine):
                 param_def = self.parameter_space.parameters[param_name]
 
                 if param_def.parameter_type.value == "continuous":
+                    # Add Gaussian noise for continuous parameters
                     min_val, max_val = param_def.get_bounds()
                     range_size = max_val - min_val
-                    noise = random.uniform(-noise_factor, noise_factor) * range_size
+                    noise_std = float(range_size) * noise_factor
+                    noise = random.gauss(0, noise_std)
                     new_value = Decimal(str(value)) + Decimal(str(noise))
                     perturbed[param_name] = param_def.clip_value(new_value)
+
+                elif param_def.parameter_type.value == "discrete":
+                    # Add discrete noise
+                    if random.random() < noise_factor:
+                        valid_values = param_def.get_valid_values()
+                        perturbed[param_name] = random.choice(valid_values)
+
+                elif param_def.parameter_type.value == "categorical":
+                    # Random category change
+                    if random.random() < noise_factor:
+                        choices = getattr(param_def, "choices", [])
+                        perturbed[param_name] = random.choice(choices)
 
         return perturbed
 
@@ -1084,8 +1135,11 @@ class BruteForceOptimizer(OptimizationEngine):
             else:
                 return Decimal("1.0")  # Not significant
 
+        except (ValueError, ArithmeticError, IndexError) as e:
+            logger.warning(f"Statistical significance calculation failed due to data issue: {e!s}")
+            return None
         except Exception as e:
-            logger.warning(f"Statistical significance calculation failed: {e!s}")
+            logger.error(f"Statistical significance calculation failed unexpectedly: {e!s}")
             return None
 
     def _analyze_parameter_stability(self) -> dict[str, Decimal]:

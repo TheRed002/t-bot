@@ -440,13 +440,13 @@ class BooleanParameter(ParameterDefinition):
 
     parameter_type: ParameterType = Field(default=ParameterType.BOOLEAN)
     default_value: bool | None = Field(default=None, description="Default parameter value")
-    true_probability: float = Field(
-        default=0.5, ge=0.0, le=1.0, description="Probability of sampling True"
+    true_probability: Decimal = Field(
+        default=Decimal("0.5"), ge=0, le=1, description="Probability of sampling True"
     )
 
     def sample(self, strategy: SamplingStrategy = SamplingStrategy.UNIFORM) -> bool:
         """Sample a boolean value."""
-        return random.random() < self.true_probability
+        return random.random() < float(self.true_probability)
 
     def validate_value(self, value: Any) -> bool:
         """Validate if value is boolean."""
@@ -571,7 +571,7 @@ class ParameterSpace(BaseModel):
         if context is None:
             context = {}
 
-        sampled = {}
+        sampled: dict[str, Any] = {}
 
         # Sort parameters to handle dependencies
         sorted_params = self._topological_sort()
@@ -590,7 +590,7 @@ class ParameterSpace(BaseModel):
 
         return sampled
 
-    def validate_parameters(self, parameters: dict[str, Any]) -> dict[str, bool]:
+    def validate_parameter_values(self, parameters: dict[str, Any]) -> dict[str, bool]:
         """
         Validate a parameter set.
 
@@ -610,6 +610,18 @@ class ParameterSpace(BaseModel):
                 results[param_name] = False
 
         return results
+
+    def validate_parameter_set(self, parameters: dict[str, Any]) -> dict[str, bool]:
+        """
+        Validate a parameter set (alias for validate_parameter_values).
+
+        Args:
+            parameters: Parameter values to validate
+
+        Returns:
+            Dictionary of validation results for each parameter
+        """
+        return self.validate_parameter_values(parameters)
 
     def clip_parameters(self, parameters: dict[str, Any]) -> dict[str, Any]:
         """
@@ -671,7 +683,7 @@ class ParameterSpace(BaseModel):
             List of parameter names in dependency order
         """
         # Build dependency graph
-        dependencies = {}
+        dependencies: dict[str, set[str]] = {}
         for name, param in self.parameters.items():
             dependencies[name] = set()
             if param.is_conditional:
@@ -775,11 +787,11 @@ class ParameterSpaceBuilder:
     def add_continuous(
         self,
         name: str,
-        min_value: float | Decimal,
-        max_value: float | Decimal,
+        min_value: Decimal | float,
+        max_value: Decimal | float,
         precision: int | None = None,
         log_scale: bool = False,
-        default_value: float | Decimal | None = None,
+        default_value: Decimal | float | None = None,
         description: str = "",
         **kwargs,
     ) -> "ParameterSpaceBuilder":
@@ -844,7 +856,7 @@ class ParameterSpaceBuilder:
     def add_boolean(
         self,
         name: str,
-        true_probability: float = 0.5,
+        true_probability: Decimal = Decimal("0.5"),
         default_value: bool | None = None,
         description: str = "",
         **kwargs,

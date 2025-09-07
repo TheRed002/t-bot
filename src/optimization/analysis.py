@@ -304,7 +304,7 @@ class ParameterImportanceAnalyzer:
         self, optimization_results: list[dict[str, Any]], parameter_names: list[str]
     ) -> dict[str, list[float]]:
         """Extract parameter data from optimization results."""
-        parameter_data = {name: [] for name in parameter_names}
+        parameter_data: dict[str, list[float]] = {name: [] for name in parameter_names}
 
         for result in optimization_results:
             parameters = result.get("parameters", {})
@@ -401,9 +401,12 @@ class ParameterImportanceAnalyzer:
                 interaction_strength=interaction_strengths,
             )
 
-        except Exception as e:
+        except (ValueError, ArithmeticError, TypeError) as e:
             logger.warning(f"Failed to analyze parameter {param_name}: {e!s}")
             return None
+        except Exception as e:
+            logger.error(f"Unexpected error analyzing parameter {param_name}: {e!s}")
+            raise
 
     def _calculate_parameter_stability(
         self, param_values: list[float], performance_values: list[float]
@@ -453,8 +456,8 @@ class ParameterImportanceAnalyzer:
         performance_values: list[float],
     ) -> tuple[list[str], dict[str, Decimal]]:
         """Find parameters that interact significantly with the given parameter."""
-        interaction_partners = []
-        interaction_strengths = {}
+        interaction_partners: list[str] = []
+        interaction_strengths: dict[str, float] = {}
 
         target_param_values = all_parameter_data.get(param_name, [])
 
@@ -479,12 +482,17 @@ class ParameterImportanceAnalyzer:
                     interaction_partners.append(other_param)
                     interaction_strengths[other_param] = Decimal(str(abs(interaction_corr)))
 
-            except Exception as e:
+            except (ValueError, ArithmeticError) as e:
                 logger.debug(
                     f"Failed to calculate interaction between {param_name} and {other_param}: {e!s}"
                 )
+            except Exception as e:
+                logger.warning(
+                    f"Unexpected error calculating interaction between {param_name} and {other_param}: {e!s}"
+                )
+                # Continue with other parameter pairs
 
-        return interaction_partners, interaction_strengths
+        return interaction_partners, {k: v for k, v in interaction_strengths.items()}
 
 
 class PerformanceAnalyzer:
@@ -1012,9 +1020,12 @@ class ResultsAnalyzer:
 
             logger.info("Comprehensive optimization analysis completed")
 
-        except Exception as e:
-            logger.error(f"Optimization analysis failed: {e!s}")
+        except (ValueError, TypeError, KeyError) as e:
+            logger.error(f"Optimization analysis failed due to data issues: {e!s}")
             analysis_results["error"] = str(e)
+        except Exception as e:
+            logger.error(f"Unexpected error in optimization analysis: {e!s}")
+            raise
 
         return analysis_results
 
@@ -1062,7 +1073,7 @@ class ResultsAnalyzer:
         self, optimization_results: list[dict[str, Any]], parameter_names: list[str]
     ) -> dict[str, dict[str, float]]:
         """Calculate correlation matrix between parameters."""
-        parameter_data = {}
+        parameter_data: dict[str, list[Any]] = {}
 
         # Extract parameter data
         for param_name in parameter_names:
@@ -1080,7 +1091,7 @@ class ResultsAnalyzer:
                     parameter_data[param_name].append(0.0)
 
         # Calculate correlation matrix
-        correlation_matrix = {}
+        correlation_matrix: dict[str, dict[str, float]] = {}
 
         for param1 in parameter_names:
             correlation_matrix[param1] = {}
@@ -1283,7 +1294,7 @@ class ResultsAnalyzer:
             raise DataProcessingError(
                 "Failed to analyze improvement potential",
                 processing_step="improvement_analysis",
-                input_data_sample={"results_count": len(optimization_results)},
+                input_data_sample={"results_count": len(sorted_performance)},
             ) from e
 
     def _analyze_best_result(self, best_result: dict[str, Any]) -> dict[str, Any]:
@@ -1306,7 +1317,7 @@ class ResultsAnalyzer:
 
     def _categorize_parameter_types(self, parameters: dict[str, Any]) -> dict[str, int]:
         """Categorize parameter types."""
-        type_counts = defaultdict(int)
+        type_counts: dict[str, int] = defaultdict(int)
 
         for value in parameters.values():
             if isinstance(value, bool):

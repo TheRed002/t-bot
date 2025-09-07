@@ -41,7 +41,7 @@ from sklearn.gaussian_process.kernels import (
 )
 from sklearn.preprocessing import StandardScaler
 
-from src.core.exceptions import OptimizationError
+from src.core.exceptions import OptimizationError, ValidationError
 from src.core.logging import get_logger
 from src.optimization.core import (
     OptimizationConfig,
@@ -54,6 +54,9 @@ from src.optimization.parameter_space import ParameterSpace, SamplingStrategy
 from src.utils.decorators import memory_usage, time_execution
 
 logger = get_logger(__name__)
+
+# Configuration constants
+DEFAULT_OBJECTIVE_TIMEOUT_SECONDS = 60.0
 
 # Suppress sklearn warnings for cleaner output
 warnings.filterwarnings("ignore", category=UserWarning, module="sklearn")
@@ -395,8 +398,11 @@ class GaussianProcessModel:
                 log_marginal_likelihood=self.gp.log_marginal_likelihood_value_,
             )
 
+        except (ValueError, ArithmeticError) as e:
+            logger.error(f"GP fitting failed due to data issue: {e!s}")
+            self.is_fitted = False
         except Exception as e:
-            logger.error(f"GP fitting failed: {e!s}")
+            logger.error(f"GP fitting failed unexpectedly: {e!s}")
             self.is_fitted = False
 
     def predict(
@@ -752,12 +758,33 @@ class BayesianOptimizer(OptimizationEngine):
 
             return result
 
+        except (ValidationError, ValueError, TypeError) as e:
+            self.progress.status = OptimizationStatus.FAILED
+            logger.error(
+                "Bayesian optimization failed due to configuration/data error",
+                optimization_id=self.optimization_id,
+                error=str(e),
+            )
+            raise OptimizationError(f"Bayesian optimization failed: {e!s}") from e
         except Exception as e:
             self.progress.status = OptimizationStatus.FAILED
             logger.error(
-                "Bayesian optimization failed", optimization_id=self.optimization_id, error=str(e)
+                "Bayesian optimization failed unexpectedly",
+                optimization_id=self.optimization_id,
+                error=str(e),
             )
-            raise OptimizationError(f"Bayesian optimization failed: {e!s}")
+            raise OptimizationError(f"Bayesian optimization failed: {e!s}") from e
+
+        finally:
+            # Clean up resources
+            try:
+                if hasattr(self, "gp_model") and self.gp_model:
+                    # Clear GP model data to free memory
+                    self.gp_model.X_train = None
+                    self.gp_model.y_train = None
+                    self.gp_model.is_fitted = False
+            except Exception as e:
+                logger.warning(f"Error cleaning up GP model resources: {e}")
 
     async def _generate_initial_points(
         self, objective_function: Callable, initial_parameters: dict[str, Any] | None = None
@@ -842,8 +869,16 @@ class BayesianOptimizer(OptimizationEngine):
             else:
                 logger.error(f"Objective function returned None for point {point.point_id}")
 
+        except (ValueError, TypeError, KeyError) as e:
+            logger.warning(
+                "Point evaluation failed due to parameter/data issue",
+                point_id=point.point_id,
+                error=str(e),
+            )
         except Exception as e:
-            logger.error("Point evaluation failed", point_id=point.point_id, error=str(e))
+            logger.error(
+                "Point evaluation failed unexpectedly", point_id=point.point_id, error=str(e)
+            )
 
     async def _run_objective_function(
         self, objective_function: Callable, parameters: dict[str, Any]
@@ -853,22 +888,37 @@ class BayesianOptimizer(OptimizationEngine):
             # Convert parameters to appropriate types
             converted_params = self.parameter_space.clip_parameters(parameters)
 
-            # Run function
+            # Run function with timeout
             if asyncio.iscoroutinefunction(objective_function):
-                result = await objective_function(converted_params)
+                result = await asyncio.wait_for(
+                    objective_function(converted_params),
+                    timeout=DEFAULT_OBJECTIVE_TIMEOUT_SECONDS
+                )
             else:
-                # Run in thread for CPU-bound functions
+                # Run in executor for CPU-bound functions
                 loop = asyncio.get_event_loop()
-                result = await loop.run_in_executor(None, objective_function, converted_params)
+                result = await asyncio.wait_for(
+                    loop.run_in_executor(None, objective_function, converted_params),
+                    timeout=DEFAULT_OBJECTIVE_TIMEOUT_SECONDS
+                )
 
             return result
 
+        except asyncio.TimeoutError:
+            logger.warning("Objective function execution timed out")
+            return None
+        except (ValueError, TypeError, KeyError) as e:
+            logger.warning(
+                f"Objective function execution failed due to parameter/data issue: {e!s}"
+            )
+            return None
         except Exception as e:
-            logger.error(f"Objective function execution failed: {e!s}")
+            logger.error(f"Objective function execution failed unexpectedly: {e!s}")
             return None
 
     def _get_primary_objective_value(self, objective_values: dict[str, Decimal]) -> Decimal:
         """Get primary objective value."""
+        # Find primary objective
         primary_obj = None
         for obj in self.objectives:
             if obj.is_primary:
@@ -876,7 +926,10 @@ class BayesianOptimizer(OptimizationEngine):
                 break
 
         if primary_obj is None:
-            primary_obj = self.objectives[0]
+            primary_obj = self.objectives[0] if self.objectives else None
+
+        if primary_obj is None:
+            return Decimal("0")
 
         return objective_values.get(primary_obj.name, Decimal("0"))
 
