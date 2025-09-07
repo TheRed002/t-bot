@@ -13,7 +13,6 @@ from typing import Any, Protocol
 from src.analytics.types import (
     AnalyticsAlert,
     AnalyticsReport,
-    BenchmarkData,
     OperationalMetrics,
     PortfolioMetrics,
     PositionMetrics,
@@ -53,6 +52,14 @@ class AnalyticsServiceProtocol(Protocol):
 
     async def get_risk_metrics(self) -> RiskMetrics:
         """Get risk metrics."""
+        ...
+
+    def record_risk_metrics(self, risk_metrics) -> None:
+        """Record risk metrics for analytics."""
+        ...
+
+    def record_risk_alert(self, alert) -> None:
+        """Record risk alert for analytics."""
         ...
 
 
@@ -160,6 +167,46 @@ class OperationalServiceProtocol(Protocol):
         self, component: str, error_type: str, error_message: str, **kwargs
     ) -> None:
         """Record system error."""
+        ...
+
+
+class RealtimeAnalyticsServiceProtocol(Protocol):
+    """Protocol for realtime analytics service."""
+
+    async def start(self) -> None:
+        """Start realtime analytics."""
+        ...
+
+    async def stop(self) -> None:
+        """Stop realtime analytics."""
+        ...
+
+    def update_position(self, position: Position) -> None:
+        """Update position data."""
+        ...
+
+    def update_trade(self, trade: Trade) -> None:
+        """Update trade data."""
+        ...
+
+    def update_order(self, order: Order) -> None:
+        """Update order data."""
+        ...
+
+    def update_price(self, symbol: str, price: Decimal) -> None:
+        """Update price data."""
+        ...
+
+    async def get_portfolio_metrics(self) -> PortfolioMetrics | None:
+        """Get portfolio metrics."""
+        ...
+
+    async def get_position_metrics(self, symbol: str | None = None) -> list[PositionMetrics]:
+        """Get position metrics."""
+        ...
+
+    async def get_strategy_metrics(self, strategy: str | None = None) -> list[StrategyMetrics]:
+        """Get strategy metrics."""
         ...
 
 

@@ -16,15 +16,13 @@ import numpy as np
 import psutil
 
 from src.analytics.types import (
-    AlertSeverity,
     AnalyticsConfiguration,
     OperationalMetrics,
 )
 from src.core.base.component import BaseComponent
-from src.monitoring.metrics import get_metrics_collector
-from src.monitoring.alerting import AlertSeverity
+from src.core.types import AlertSeverity
 from src.utils.datetime_utils import get_current_utc_timestamp
-from src.utils.decimal_utils import safe_decimal
+from src.utils.decimal_utils import to_decimal
 
 
 class OperationalAnalyticsEngine(BaseComponent):
@@ -40,16 +38,28 @@ class OperationalAnalyticsEngine(BaseComponent):
     - Infrastructure performance and capacity monitoring
     """
 
-    def __init__(self, config: AnalyticsConfiguration):
+    def __init__(self, config: AnalyticsConfiguration, metrics_collector=None):
         """
         Initialize operational analytics engine.
 
         Args:
             config: Analytics configuration
+            metrics_collector: Optional metrics collector (injected)
         """
         super().__init__()
         self.config = config
-        self.metrics_collector = get_metrics_collector()
+        # Use dependency injection - do not create dependencies directly
+        self.metrics_collector = metrics_collector
+
+        if self.metrics_collector is None:
+            from src.core.exceptions import ComponentError
+
+            raise ComponentError(
+                "metrics_collector must be injected via dependency injection",
+                component="OperationalAnalyticsEngine",
+                operation="__init__",
+                context={"missing_dependency": "metrics_collector"},
+            )
 
         # System metrics storage
         self._system_metrics: deque = deque(maxlen=1440)  # 24 hours of minute data
@@ -462,8 +472,11 @@ class OperationalAnalyticsEngine(BaseComponent):
             now = get_current_utc_timestamp()
 
             # System uptime
-            uptime_seconds = (now - self._start_time).total_seconds()
-            uptime_hours = safe_decimal(uptime_seconds / 3600)
+            if self._start_time is not None:
+                uptime_seconds = (now - self._start_time).total_seconds()
+                uptime_hours = to_decimal(uptime_seconds / 3600)
+            else:
+                uptime_hours = Decimal("0")
 
             # Strategy metrics
             active_strategies = len(
@@ -495,16 +508,16 @@ class OperationalAnalyticsEngine(BaseComponent):
                         if order.get("execution_time_ms"):
                             execution_times.append(order["execution_time_ms"])
 
-            fill_rate = safe_decimal(
+            fill_rate = to_decimal(
                 (orders_filled / orders_placed * 100) if orders_placed > 0 else 0
             )
-            avg_execution_time = safe_decimal(np.mean(execution_times) if execution_times else 0)
+            avg_execution_time = to_decimal(np.mean(execution_times) if execution_times else 0)
 
             # Error metrics (last 24 hours)
             recent_errors = [e for e in self._error_metrics if e["timestamp"] > cutoff_time]
 
             total_events = total_orders + len(recent_errors)  # Simplified event count
-            error_rate = safe_decimal(
+            error_rate = to_decimal(
                 (len(recent_errors) / total_events * 100) if total_events > 0 else 0
             )
             critical_errors = len(
@@ -518,25 +531,21 @@ class OperationalAnalyticsEngine(BaseComponent):
                 if l["timestamp"] > cutoff_time and l.get("latency_ms") is not None
             ]
 
-            latency_p50 = safe_decimal(
-                np.percentile(recent_latencies, 50) if recent_latencies else 0
-            )
-            latency_p95 = safe_decimal(
-                np.percentile(recent_latencies, 95) if recent_latencies else 0
-            )
+            latency_p50 = to_decimal(np.percentile(recent_latencies, 50) if recent_latencies else 0)
+            latency_p95 = to_decimal(np.percentile(recent_latencies, 95) if recent_latencies else 0)
 
             # System resource metrics
-            cpu_usage = safe_decimal(psutil.cpu_percent())
+            cpu_usage = to_decimal(psutil.cpu_percent())
             memory = psutil.virtual_memory()
-            memory_usage = safe_decimal(memory.percent)
+            memory_usage = to_decimal(memory.percent)
             disk = psutil.disk_usage("/")
-            disk_usage = safe_decimal((disk.used / disk.total) * 100)
+            disk_usage = to_decimal((disk.used / disk.total) * 100)
 
             # API success rate
             api_success_rate = await self._calculate_api_success_rate(cutoff_time)
 
             # WebSocket uptime (simplified)
-            websocket_uptime = safe_decimal(
+            websocket_uptime = to_decimal(
                 99.5
             )  # Placeholder - would track actual WebSocket connections
 
@@ -558,7 +567,7 @@ class OperationalAnalyticsEngine(BaseComponent):
                 orders_filled_today=orders_filled,
                 order_fill_rate=fill_rate,
                 avg_order_execution_time=avg_execution_time,
-                avg_order_slippage=safe_decimal(0),  # Would calculate from actual slippage data
+                avg_order_slippage=to_decimal(0),  # Would calculate from actual slippage data
                 api_call_success_rate=api_success_rate,
                 websocket_uptime_percent=websocket_uptime,
                 data_latency_p50=latency_p50,
@@ -583,7 +592,35 @@ class OperationalAnalyticsEngine(BaseComponent):
 
         except Exception as e:
             self.logger.error(f"Error calculating operational metrics: {e}")
-            return OperationalMetrics(timestamp=get_current_utc_timestamp())
+            timestamp = get_current_utc_timestamp()
+            return OperationalMetrics(
+                timestamp=timestamp,
+                system_uptime=Decimal("0"),
+                strategies_active=0,
+                strategies_total=0,
+                exchanges_connected=0,
+                exchanges_total=0,
+                orders_placed_today=0,
+                orders_filled_today=0,
+                order_fill_rate=Decimal("0"),
+                api_call_success_rate=Decimal("0"),
+                websocket_uptime_percent=Decimal("0"),
+                error_rate=Decimal("0"),
+                critical_errors_today=0,
+                memory_usage_percent=Decimal("0"),
+                cpu_usage_percent=Decimal("0"),
+                disk_usage_percent=Decimal("0"),
+                database_connections_active=0,
+                cache_hit_rate=Decimal("0"),
+                backup_status="unknown",
+                compliance_checks_passed=0,
+                compliance_checks_failed=0,
+                risk_limit_breaches=0,
+                circuit_breaker_triggers=0,
+                performance_degradation_events=0,
+                data_quality_issues=0,
+                exchange_outages=0,
+            )
 
     async def generate_health_report(self) -> dict[str, Any]:
         """
@@ -595,7 +632,7 @@ class OperationalAnalyticsEngine(BaseComponent):
         try:
             metrics = await self.calculate_operational_metrics()
 
-            health_status = {
+            health_status: dict[str, Any] = {
                 "overall_status": "healthy",
                 "component_status": {},
                 "alerts": [],
@@ -634,7 +671,7 @@ class OperationalAnalyticsEngine(BaseComponent):
             }
 
             # Assess each component
-            overall_health_score = 100
+            overall_health_score = 100.0
 
             for component, metrics_dict in components.items():
                 component_score = await self._assess_component_health(component, metrics_dict)
@@ -1024,11 +1061,11 @@ class OperationalAnalyticsEngine(BaseComponent):
                         if call["success"]:
                             successful_calls += 1
 
-            return safe_decimal((successful_calls / total_calls * 100) if total_calls > 0 else 100)
+            return to_decimal((successful_calls / total_calls * 100) if total_calls > 0 else 100)
 
         except Exception as e:
             self.logger.error(f"Error calculating API success rate: {e}")
-            return safe_decimal(100)
+            return to_decimal(100)
 
     async def _get_database_connections(self) -> int:
         """Get active database connections count."""
@@ -1055,8 +1092,8 @@ class OperationalAnalyticsEngine(BaseComponent):
                 if metric and hasattr(metric, "_value"):
                     # Convert seconds to milliseconds
                     seconds = getattr(metric, "_value", {}).get("", 0.0)
-                    return safe_decimal(seconds * 1000)
-                return safe_decimal(0.0)
+                    return to_decimal(seconds * 1000)
+                return to_decimal(0.0)
             return None
         except Exception as e:
             self.logger.error(f"Error getting average query time: {e}")
@@ -1070,12 +1107,12 @@ class OperationalAnalyticsEngine(BaseComponent):
                 # Use the correct method to get a metric value
                 metric = self.metrics_collector.get_metric("cache_hit_rate_percent")
                 if metric and hasattr(metric, "_value"):
-                    return safe_decimal(getattr(metric, "_value", {}).get("", 0.0))
-                return safe_decimal(0.0)
-            return safe_decimal(0.0)
+                    return to_decimal(getattr(metric, "_value", {}).get("", 0.0))
+                return to_decimal(0.0)
+            return to_decimal(0.0)
         except Exception as e:
             self.logger.error(f"Error getting cache hit rate: {e}")
-            return safe_decimal(0.0)
+            return to_decimal(0.0)
 
     async def _count_connected_exchanges(self) -> int:
         """Count currently connected exchanges."""

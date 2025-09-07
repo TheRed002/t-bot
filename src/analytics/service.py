@@ -7,35 +7,30 @@ risk monitoring, and operational analytics.
 """
 
 import asyncio
+from collections.abc import Callable
 from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
 from src.analytics.events import (
+    AlertEventHandler,
+    PortfolioEventHandler,
+    RiskEventHandler,
     get_event_bus,
     publish_order_updated,
     publish_position_updated,
     publish_price_updated,
     publish_trade_executed,
-    AlertEventHandler,
-    PortfolioEventHandler,
-    RiskEventHandler,
 )
 from src.analytics.interfaces import (
     AlertServiceProtocol,
     ExportServiceProtocol,
     OperationalServiceProtocol,
     PortfolioServiceProtocol,
+    RealtimeAnalyticsServiceProtocol,
     ReportingServiceProtocol,
     RiskServiceProtocol,
 )
-from src.analytics.alerts.alert_manager import AlertManager
-from src.analytics.export.data_exporter import DataExporter
-from src.analytics.operational.operational_analytics import OperationalAnalyticsEngine
-from src.analytics.portfolio.portfolio_analytics import PortfolioAnalyticsEngine
-from src.analytics.reporting.performance_reporter import PerformanceReporter
-from src.analytics.risk.risk_monitor import RiskMonitor
-from src.analytics.trading.realtime_analytics import RealtimeAnalyticsEngine
 from src.analytics.types import (
     AnalyticsConfiguration,
     AnalyticsReport,
@@ -47,10 +42,19 @@ from src.analytics.types import (
     RiskMetrics,
     StrategyMetrics,
 )
+from src.analytics.utils.error_handling import AnalyticsErrorHandler
+from src.analytics.utils.metrics_helpers import MetricsHelper
+from src.analytics.utils.task_management import TaskManager
 from src.core.base.component import BaseComponent
-from src.core.exceptions import DataError, RiskCalculationError, ValidationError, ComponentError
+from src.core.exceptions import ComponentError, ValidationError
 from src.core.types import Order, Position, Trade
 from src.monitoring.metrics import get_metrics_collector
+from src.utils.constants import (
+    ANALYTICS_PERFORMANCE_THRESHOLDS,
+    ANALYTICS_REPORT_VERSION,
+    ANALYTICS_TIMING,
+    VAR_CALCULATION_DEFAULTS,
+)
 from src.utils.datetime_utils import get_current_utc_timestamp
 
 
@@ -84,7 +88,7 @@ class AnalyticsService(BaseComponent):
     def __init__(
         self,
         config: AnalyticsConfiguration | None = None,
-        realtime_analytics: RealtimeAnalyticsEngine | None = None,
+        realtime_analytics: RealtimeAnalyticsServiceProtocol | None = None,
         portfolio_service: PortfolioServiceProtocol | None = None,
         reporting_service: ReportingServiceProtocol | None = None,
         risk_service: RiskServiceProtocol | None = None,
@@ -111,29 +115,49 @@ class AnalyticsService(BaseComponent):
         self.config = config or AnalyticsConfiguration()
         self.metrics_collector = metrics_collector or get_metrics_collector()
 
-        # Initialize analytics engines using dependency injection
-        self.realtime_analytics = realtime_analytics or RealtimeAnalyticsEngine(self.config)
-        self.portfolio_service = portfolio_service or PortfolioAnalyticsEngine(self.config)
-        self.reporting_service = reporting_service or PerformanceReporter(self.config)
-        self.risk_service = risk_service or RiskMonitor(self.config)
-        self.operational_service = operational_service or OperationalAnalyticsEngine(self.config)
-        self.alert_service = alert_service or AlertManager(self.config)
-        self.export_service = export_service or DataExporter()
+        self.error_handler = AnalyticsErrorHandler()
+        self.metrics_helper = MetricsHelper()
+        self.task_manager = TaskManager()
 
-        # Service state
+        self.metrics_helper.setup_metrics_collector(self.metrics_collector)
+
+        required_services = {
+            "realtime_analytics": realtime_analytics,
+            "portfolio_service": portfolio_service,
+            "reporting_service": reporting_service,
+            "risk_service": risk_service,
+            "operational_service": operational_service,
+            "alert_service": alert_service,
+            "export_service": export_service,
+        }
+
+        for service_name, service_instance in required_services.items():
+            if not service_instance:
+                raise ComponentError(
+                    f"{service_name} must be injected via dependency injection",
+                    component="AnalyticsService",
+                    operation="__init__",
+                    context={"missing_service": service_name},
+                )
+
+        self.realtime_analytics = realtime_analytics
+        self.portfolio_service = portfolio_service
+        self.reporting_service = reporting_service
+        self.risk_service = risk_service
+        self.operational_service = operational_service
+        self.alert_service = alert_service
+        self.export_service = export_service
+
         self._running = False
         self._background_tasks: set = set()
 
-        # Event bus for decoupled communication
         self.event_bus = get_event_bus()
-        self._event_handlers = []
+        self._event_handlers: list[Callable] = []
 
-        # Caching for performance
         self._cache_enabled = True
         self._cache_ttl = timedelta(seconds=self.config.cache_ttl_seconds)
         self._cached_metrics: dict[str, dict[str, Any]] = {}
 
-        # Set up event handlers
         self._setup_event_handlers()
 
         self.logger.info("AnalyticsService initialized with event-driven architecture")
@@ -147,19 +171,17 @@ class AnalyticsService(BaseComponent):
         self._running = True
 
         try:
-            # Start event bus first
             await self.event_bus.start()
 
-            # Start all analytics engines
-            await self.realtime_analytics.start()
-            if hasattr(self.risk_service, "start"):
+            if self.realtime_analytics and hasattr(self.realtime_analytics, "start"):
+                await self.realtime_analytics.start()
+            if self.risk_service and hasattr(self.risk_service, "start"):
                 await self.risk_service.start()
-            if hasattr(self.operational_service, "start"):
+            if self.operational_service and hasattr(self.operational_service, "start"):
                 await self.operational_service.start()
-            if hasattr(self.alert_service, "start"):
+            if self.alert_service and hasattr(self.alert_service, "start"):
                 await self.alert_service.start()
 
-            # Start background tasks
             tasks = [
                 self._periodic_reporting_loop(),
                 self._cache_maintenance_loop(),
@@ -187,15 +209,19 @@ class AnalyticsService(BaseComponent):
                 task.cancel()
 
             if self._background_tasks:
-                await asyncio.gather(*self._background_tasks, return_exceptions=True)
+                # Cancel all tasks and wait for them to complete
+                tasks_to_wait = list(self._background_tasks)
+                await asyncio.gather(*tasks_to_wait, return_exceptions=True)
+                self._background_tasks.clear()
 
             # Stop analytics engines
-            await self.realtime_analytics.stop()
-            if hasattr(self.risk_service, "stop"):
+            if self.realtime_analytics and hasattr(self.realtime_analytics, "stop"):
+                await self.realtime_analytics.stop()
+            if self.risk_service and hasattr(self.risk_service, "stop"):
                 await self.risk_service.stop()
-            if hasattr(self.operational_service, "stop"):
+            if self.operational_service and hasattr(self.operational_service, "stop"):
                 await self.operational_service.stop()
-            if hasattr(self.alert_service, "stop"):
+            if self.alert_service and hasattr(self.alert_service, "stop"):
                 await self.alert_service.stop()
 
             # Stop event bus last
@@ -206,7 +232,14 @@ class AnalyticsService(BaseComponent):
         except Exception as e:
             self.logger.error(f"Error stopping analytics service: {e}")
 
-    # Trading Data Input Methods
+    def __del__(self):
+        """Cleanup any remaining background tasks on garbage collection."""
+        if hasattr(self, "_background_tasks") and self._background_tasks:
+            # Cancel any remaining tasks to avoid warnings
+            for task in self._background_tasks:
+                if not task.done():
+                    task.cancel()
+            self._background_tasks.clear()
 
     def update_position(self, position: Position) -> None:
         """
@@ -216,29 +249,39 @@ class AnalyticsService(BaseComponent):
             position: Position update
         """
         try:
-            # Use consistent async task creation pattern
-            asyncio.create_task(self._update_position_async(position))
+            # Use consistent async task creation pattern with proper task management
+            if self._running:
+                try:
+                    # Check if event loop is running
+                    loop = asyncio.get_running_loop()
+                    task = loop.create_task(self._update_position_async(position))
+                    self._background_tasks.add(task)
+                    task.add_done_callback(self._background_tasks.discard)
+                except RuntimeError:
+                    # No event loop running, skip async processing
+                    self.logger.debug("No event loop running, skipping async position update")
 
         except Exception as e:
-            # Use consistent error propagation
-            from src.core.exceptions import ComponentError
-
-            raise ComponentError(
-                f"Position update failed for {position.symbol}",
-                component="AnalyticsService",
-                operation="update_position",
+            self.error_handler.handle_analytics_error(
+                e,
+                "update_position",
                 context={
                     "symbol": position.symbol,
                     "exchange": position.exchange,
                     "position_id": getattr(position, "position_id", "unknown"),
                 },
-            ) from e
+            )
 
     async def _update_position_async(self, position: Position) -> None:
         """Async position update using event-driven pattern."""
         try:
             # Update realtime analytics directly (high frequency)
-            self.realtime_analytics.update_position(position)
+            if self.realtime_analytics:
+                await self.realtime_analytics.update_position(position)
+
+            # Update portfolio service directly
+            if self.portfolio_service:
+                await self.portfolio_service.update_position(position)
 
             # Publish event for other services to handle asynchronously
             await publish_position_updated(position, "AnalyticsService")
@@ -246,9 +289,9 @@ class AnalyticsService(BaseComponent):
             self.logger.debug(f"Updated position: {position.symbol}")
 
         except Exception as e:
-            self.logger.error(f"Error updating position: {e}")
-            # Re-raise for consistent error propagation
-            raise
+            self.error_handler.handle_analytics_error(
+                e, "_update_position_async", context={"symbol": position.symbol}
+            )
 
     def update_trade(self, trade: Trade) -> None:
         """
@@ -258,13 +301,19 @@ class AnalyticsService(BaseComponent):
             trade: Trade data
         """
         try:
-            # Use consistent async task creation pattern
-            asyncio.create_task(self._update_trade_async(trade))
+            # Proper task management for trade updates
+            if self._running:
+                try:
+                    # Check if event loop is running
+                    loop = asyncio.get_running_loop()
+                    task = loop.create_task(self._update_trade_async(trade))
+                    self._background_tasks.add(task)
+                    task.add_done_callback(self._background_tasks.discard)
+                except RuntimeError:
+                    # No event loop running, skip async processing
+                    self.logger.debug("No event loop running, skipping async trade update")
 
         except Exception as e:
-            # Use consistent error propagation
-            from src.core.exceptions import ComponentError
-
             raise ComponentError(
                 f"Trade update failed for {trade.trade_id}",
                 component="AnalyticsService",
@@ -280,7 +329,12 @@ class AnalyticsService(BaseComponent):
         """Async trade update using event-driven pattern."""
         try:
             # Update realtime analytics directly (high frequency)
-            self.realtime_analytics.update_trade(trade)
+            if self.realtime_analytics:
+                await self.realtime_analytics.update_trade(trade)
+
+            # Update portfolio service directly
+            if self.portfolio_service:
+                await self.portfolio_service.update_trade(trade)
 
             # Publish event for other services to handle asynchronously
             await publish_trade_executed(trade, "AnalyticsService")
@@ -291,19 +345,19 @@ class AnalyticsService(BaseComponent):
                 and trade.fee > 0
                 and hasattr(self.reporting_service, "add_transaction_cost")
             ):
-                await self.reporting_service.add_transaction_cost(
-                    timestamp=trade.timestamp,
-                    symbol=trade.symbol,
-                    cost_type="commission",
-                    cost_amount=trade.fee,
-                    trade_value=trade.quantity * trade.price,
-                )
+                if self.reporting_service:
+                    await self.reporting_service.add_transaction_cost(
+                        timestamp=trade.timestamp,
+                        symbol=trade.symbol,
+                        cost_type="commission",
+                        cost_amount=trade.fee,
+                        trade_value=trade.quantity * trade.price,
+                    )
 
             self.logger.debug(f"Updated trade: {trade.trade_id}")
 
         except Exception as e:
             self.logger.error(f"Error updating trade: {e}")
-            # Re-raise for consistent error propagation
             raise
 
     def update_order(self, order: Order) -> None:
@@ -315,19 +369,31 @@ class AnalyticsService(BaseComponent):
         """
         try:
             # Update realtime analytics directly (high frequency)
-            self.realtime_analytics.update_order(order)
+            if self.realtime_analytics:
+                self.realtime_analytics.update_order(order)
 
-            # Publish event for other services to handle asynchronously
-            asyncio.create_task(publish_order_updated(order, "AnalyticsService"))
+            # Publish event for other services to handle asynchronously with task management
+            if self._running:
+                try:
+                    # Check if event loop is running
+                    loop = asyncio.get_running_loop()
+                    task = loop.create_task(publish_order_updated(order, "AnalyticsService"))
+                    self._background_tasks.add(task)
+                    task.add_done_callback(self._background_tasks.discard)
+                except RuntimeError:
+                    # No event loop running, skip async publishing
+                    self.logger.debug("No event loop running, skipping order update event")
 
             # Record order event for operational analytics
             if hasattr(self.operational_service, "record_order_update"):
-                self.operational_service.record_order_update(order)
+                if self.operational_service:
+                    self.operational_service.record_order_update(order)
 
             self.logger.debug(f"Updated order: {order.order_id}")
 
         except Exception as e:
             self.logger.error(f"Error updating order: {e}")
+            raise
 
     def update_price(self, symbol: str, price: Decimal, timestamp: datetime | None = None) -> None:
         """
@@ -342,15 +408,48 @@ class AnalyticsService(BaseComponent):
             timestamp = timestamp or get_current_utc_timestamp()
 
             # Update realtime analytics directly (high frequency)
-            self.realtime_analytics.update_price(symbol, price)
+            if self.realtime_analytics:
+                self.realtime_analytics.update_price(symbol, price)
 
-            # Publish event for other services to handle asynchronously
-            asyncio.create_task(publish_price_updated(symbol, price, timestamp, "AnalyticsService"))
+            # Publish event for other services to handle asynchronously with task management
+            if self._running:
+                try:
+                    # Check if event loop is running
+                    loop = asyncio.get_running_loop()
+                    task = loop.create_task(
+                        publish_price_updated(symbol, price, timestamp, "AnalyticsService")
+                    )
+                    self._background_tasks.add(task)
+                    task.add_done_callback(self._background_tasks.discard)
+                except RuntimeError:
+                    # No event loop running, skip async publishing
+                    self.logger.debug("No event loop running, skipping price update event")
 
             self.logger.debug(f"Updated price: {symbol} = {price}")
 
         except Exception as e:
             self.logger.error(f"Error updating price: {e}")
+            raise
+
+    def record_risk_metrics(self, risk_metrics) -> None:
+        """Record risk metrics for analytics."""
+        try:
+            if self.risk_service:
+                # Store risk metrics for analytics
+                self.risk_service.store_risk_metrics(risk_metrics)
+            self.logger.debug("Risk metrics recorded for analytics")
+        except Exception as e:
+            self.logger.error(f"Failed to record risk metrics: {e}")
+
+    def record_risk_alert(self, alert) -> None:
+        """Record risk alert for analytics."""
+        try:
+            if self.alert_service:
+                # Store risk alert for analytics
+                self.alert_service.store_risk_alert(alert)
+            self.logger.debug("Risk alert recorded for analytics")
+        except Exception as e:
+            self.logger.error(f"Failed to record risk alert: {e}")
 
     def update_benchmark_data(self, benchmark_name: str, data: BenchmarkData) -> None:
         """
@@ -362,13 +461,13 @@ class AnalyticsService(BaseComponent):
         """
         try:
             if hasattr(self.portfolio_service, "update_benchmark_data"):
-                self.portfolio_service.update_benchmark_data(benchmark_name, data)
+                if self.portfolio_service:
+                    self.portfolio_service.update_benchmark_data(benchmark_name, data)
             self.logger.debug(f"Updated benchmark: {benchmark_name}")
 
         except Exception as e:
             self.logger.error(f"Error updating benchmark data: {e}")
-
-    # Analytics Query Methods
+            raise
 
     async def get_portfolio_metrics(self) -> PortfolioMetrics | None:
         """
@@ -386,6 +485,8 @@ class AnalyticsService(BaseComponent):
                 if cached is not None:
                     return cached
 
+            if not self.realtime_analytics:
+                return {}
             metrics = await self.realtime_analytics.get_portfolio_metrics()
 
             # Cache result
@@ -398,7 +499,7 @@ class AnalyticsService(BaseComponent):
             self.logger.error(f"Error getting portfolio metrics: {e}")
             return None
 
-    async def get_position_metrics(self, symbol: str = None) -> list[PositionMetrics]:
+    async def get_position_metrics(self, symbol: str | None = None) -> list[PositionMetrics]:
         """
         Get position metrics.
 
@@ -409,13 +510,15 @@ class AnalyticsService(BaseComponent):
             List of position metrics
         """
         try:
+            if not self.realtime_analytics:
+                return None
             return await self.realtime_analytics.get_position_metrics(symbol)
 
         except Exception as e:
             self.logger.error(f"Error getting position metrics: {e}")
             return []
 
-    async def get_strategy_metrics(self, strategy: str = None) -> list[StrategyMetrics]:
+    async def get_strategy_metrics(self, strategy: str | None = None) -> list[StrategyMetrics]:
         """
         Get strategy performance metrics.
 
@@ -426,6 +529,8 @@ class AnalyticsService(BaseComponent):
             List of strategy metrics
         """
         try:
+            if not self.realtime_analytics:
+                return {}
             return await self.realtime_analytics.get_strategy_metrics(strategy)
 
         except Exception as e:
@@ -448,6 +553,8 @@ class AnalyticsService(BaseComponent):
                 if cached is not None:
                     return cached
 
+            if not self.risk_service:
+                return {}
             metrics = await self.risk_service.get_risk_metrics()
 
             # Cache result
@@ -468,6 +575,8 @@ class AnalyticsService(BaseComponent):
             Operational metrics
         """
         try:
+            if not self.operational_service:
+                return self._default_operational_metrics()
             return await self.operational_service.get_operational_metrics()
 
         except Exception as e:
@@ -477,7 +586,10 @@ class AnalyticsService(BaseComponent):
     # Risk Analysis Methods
 
     async def calculate_var(
-        self, confidence_level: float = 0.95, time_horizon: int = 1, method: str = "historical"
+        self,
+        confidence_level: float = VAR_CALCULATION_DEFAULTS["confidence_level"],
+        time_horizon: int = VAR_CALCULATION_DEFAULTS["time_horizon"],
+        method: str = VAR_CALCULATION_DEFAULTS["method"],
     ) -> dict[str, float]:
         """
         Calculate Value at Risk.
@@ -491,6 +603,8 @@ class AnalyticsService(BaseComponent):
             VaR calculation results
         """
         try:
+            if not self.risk_service:
+                return Decimal("0")
             return await self.risk_service.calculate_var(confidence_level, time_horizon, method)
 
         except Exception as e:
@@ -511,6 +625,8 @@ class AnalyticsService(BaseComponent):
             Stress test results
         """
         try:
+            if not self.risk_service:
+                return {}
             return await self.risk_service.run_stress_test(scenario_name, scenario_params)
 
         except Exception as e:
@@ -525,6 +641,8 @@ class AnalyticsService(BaseComponent):
             Portfolio composition metrics
         """
         try:
+            if not self.portfolio_service:
+                return {}
             return await self.portfolio_service.get_portfolio_composition()
 
         except Exception as e:
@@ -539,6 +657,8 @@ class AnalyticsService(BaseComponent):
             Correlation matrix DataFrame or None
         """
         try:
+            if not self.portfolio_service:
+                return {}
             return await self.portfolio_service.calculate_correlation_matrix()
 
         except Exception as e:
@@ -565,6 +685,8 @@ class AnalyticsService(BaseComponent):
             Complete analytics report
         """
         try:
+            if not self.reporting_service:
+                return {}
             return await self.reporting_service.generate_performance_report(
                 report_type, start_date, end_date
             )
@@ -582,9 +704,13 @@ class AnalyticsService(BaseComponent):
         """
         try:
             if hasattr(self.risk_service, "generate_risk_report"):
+                if not self.risk_service:
+                    return {}
                 return await self.risk_service.generate_risk_report()
             else:
                 # Fallback to basic risk metrics
+                if not self.risk_service:
+                    return {"risk_metrics": {}}
                 return {"risk_metrics": await self.risk_service.get_risk_metrics()}
 
         except Exception as e:
@@ -600,11 +726,15 @@ class AnalyticsService(BaseComponent):
         """
         try:
             if hasattr(self.operational_service, "generate_health_report"):
+                if not self.operational_service:
+                    return {}
                 return await self.operational_service.generate_health_report()
             else:
                 # Fallback to basic operational metrics
                 return {
                     "operational_metrics": await self.operational_service.get_operational_metrics()
+                    if self.operational_service
+                    else self._default_operational_metrics()
                 }
 
         except Exception as e:
@@ -624,12 +754,14 @@ class AnalyticsService(BaseComponent):
             alerts = []
 
             # Get alerts from real-time analytics
-            realtime_alerts = await self.realtime_analytics.get_active_alerts()
-            alerts.extend(realtime_alerts)
+            if self.realtime_analytics:
+                realtime_alerts = await self.realtime_analytics.get_active_alerts()
+                alerts.extend(realtime_alerts)
 
             # Get alerts from alert manager
-            alert_service_alerts = self.alert_service.get_active_alerts()
-            alerts.extend(alert_service_alerts)
+            if self.alert_service and hasattr(self.alert_service, "get_active_alerts"):
+                alert_service_alerts = self.alert_service.get_active_alerts()
+                alerts.extend(alert_service_alerts)
 
             return alerts
 
@@ -662,7 +794,9 @@ class AnalyticsService(BaseComponent):
 
             # Convert Pydantic models to dict for serialization
             def convert_for_export(obj):
-                if hasattr(obj, "dict"):
+                if hasattr(obj, "model_dump"):
+                    return obj.model_dump()
+                elif hasattr(obj, "dict"):
                     return obj.dict()
                 elif isinstance(obj, list):
                     return [convert_for_export(item) for item in obj]
@@ -713,7 +847,6 @@ class AnalyticsService(BaseComponent):
             Exported risk data
         """
         try:
-            risk_metrics = await self.get_risk_metrics()
             return await self.export_service.export_risk_data(format, include_metadata)
 
         except Exception as e:
@@ -736,7 +869,7 @@ class AnalyticsService(BaseComponent):
         try:
             position_metrics = await self.get_position_metrics()
             if position_metrics:
-                return await self.data_exporter.export_position_metrics(
+                return await self.export_service.export_position_metrics(
                     position_metrics, format, include_metadata
                 )
             return ""
@@ -761,7 +894,7 @@ class AnalyticsService(BaseComponent):
         try:
             strategy_metrics = await self.get_strategy_metrics()
             if strategy_metrics:
-                return await self.data_exporter.export_strategy_metrics(
+                return await self.export_service.export_strategy_metrics(
                     strategy_metrics, format, include_metadata
                 )
             return ""
@@ -785,7 +918,7 @@ class AnalyticsService(BaseComponent):
         """
         try:
             operational_metrics = await self.get_operational_metrics()
-            return await self.data_exporter.export_operational_metrics(
+            return await self.export_service.export_operational_metrics(
                 operational_metrics, format, include_metadata
             )
 
@@ -808,7 +941,7 @@ class AnalyticsService(BaseComponent):
             Exported report data
         """
         try:
-            return await self.data_exporter.export_complete_report(report, format, include_charts)
+            return await self.export_service.export_complete_report(report, format, include_charts)
 
         except Exception as e:
             self.logger.error(f"Error exporting complete report: {e}")
@@ -842,7 +975,7 @@ class AnalyticsService(BaseComponent):
         return await self.alert_service.acknowledge_alert(alert_id, acknowledged_by)
 
     async def resolve_alert(
-        self, alert_id: str, resolved_by: str, resolution_note: str = None
+        self, alert_id: str, resolved_by: str, resolution_note: str | None = None
     ) -> bool:
         """Resolve an alert."""
         if hasattr(self.alert_service, "resolve_alert"):
@@ -925,13 +1058,13 @@ class AnalyticsService(BaseComponent):
                     await self.generate_performance_report(ReportType.DAILY_PERFORMANCE)
 
                 # Wait before next check
-                await asyncio.sleep(300)  # Check every 5 minutes
+                await asyncio.sleep(ANALYTICS_TIMING["periodic_report_check_interval"])
 
             except asyncio.CancelledError:
                 break
             except Exception as e:
                 self.logger.error(f"Error in periodic reporting loop: {e}")
-                await asyncio.sleep(300)
+                await asyncio.sleep(ANALYTICS_TIMING["periodic_report_check_interval"])
 
     async def _cache_maintenance_loop(self) -> None:
         """Background loop for cache maintenance."""
@@ -949,13 +1082,13 @@ class AnalyticsService(BaseComponent):
                     del self._cached_metrics[key]
 
                 # Wait before next cleanup
-                await asyncio.sleep(60)  # Clean every minute
+                await asyncio.sleep(ANALYTICS_TIMING["cache_cleanup_interval"])
 
             except asyncio.CancelledError:
                 break
             except Exception as e:
                 self.logger.error(f"Error in cache maintenance loop: {e}")
-                await asyncio.sleep(60)
+                await asyncio.sleep(ANALYTICS_TIMING["cache_cleanup_interval"])
 
     def _get_cached_result(self, cache_key: str) -> Any | None:
         """Get cached result if valid."""
@@ -998,14 +1131,13 @@ class AnalyticsService(BaseComponent):
             event_type: Event type
             success: Whether event was successful
             error_message: Error message if not successful
-            
+
         Raises:
             ValidationError: If parameters are invalid
             ComponentError: If event recording fails
         """
-        # Add boundary validation consistent with monitoring module
-        from src.core.exceptions import ValidationError
-        
+        # Validate parameters
+
         if not isinstance(strategy_name, str) or not strategy_name:
             raise ValidationError(
                 "Invalid strategy_name parameter",
@@ -1013,15 +1145,15 @@ class AnalyticsService(BaseComponent):
                 field_value=strategy_name,
                 expected_type="non-empty str",
             )
-        
+
         if not isinstance(event_type, str) or not event_type:
             raise ValidationError(
-                "Invalid event_type parameter", 
+                "Invalid event_type parameter",
                 field_name="event_type",
                 field_value=event_type,
                 expected_type="non-empty str",
             )
-        
+
         if not isinstance(success, bool):
             raise ValidationError(
                 "Invalid success parameter",
@@ -1036,15 +1168,12 @@ class AnalyticsService(BaseComponent):
             )
 
         except ValidationError:
-            # Re-raise validation errors
             raise
         except Exception as e:
-            from src.core.exceptions import ComponentError
-            
             raise ComponentError(
                 f"Failed to record strategy event: {e}",
                 component="AnalyticsService",
-                operation="record_strategy_event", 
+                operation="record_strategy_event",
                 context={
                     "strategy_name": strategy_name,
                     "event_type": event_type,
@@ -1095,30 +1224,29 @@ class AnalyticsService(BaseComponent):
             error_type: Type of error
             error_message: Error message
             severity: Error severity level
-            
+
         Raises:
             ValidationError: If parameters are invalid
             ComponentError: If error recording fails
         """
-        # Add boundary validation consistent with monitoring patterns
-        from src.core.exceptions import ValidationError
-        
+        # Validate parameters
+
         if not isinstance(component, str) or not component:
             raise ValidationError(
                 "Invalid component parameter",
-                field_name="component", 
+                field_name="component",
                 field_value=component,
                 expected_type="non-empty str",
             )
-        
+
         if not isinstance(error_type, str) or not error_type:
             raise ValidationError(
                 "Invalid error_type parameter",
                 field_name="error_type",
-                field_value=error_type, 
+                field_value=error_type,
                 expected_type="non-empty str",
             )
-        
+
         valid_severities = ["low", "medium", "high", "critical", "info"]
         if severity not in valid_severities:
             raise ValidationError(
@@ -1129,29 +1257,16 @@ class AnalyticsService(BaseComponent):
             )
 
         try:
-            from src.monitoring.alerting import AlertSeverity
-
-            severity_map = {
-                "low": AlertSeverity.LOW,
-                "medium": AlertSeverity.MEDIUM,
-                "high": AlertSeverity.HIGH,
-                "critical": AlertSeverity.CRITICAL,
-                "info": AlertSeverity.INFO,
-            }
-
             self.operational_service.record_system_error(
                 component, error_type, error_message, severity=severity
             )
 
         except ValidationError:
-            # Re-raise validation errors
             raise
         except Exception as e:
-            from src.core.exceptions import ComponentError
-            
             raise ComponentError(
                 f"Failed to record system error: {e}",
-                component="AnalyticsService", 
+                component="AnalyticsService",
                 operation="record_system_error",
                 context={
                     "component": component,
@@ -1161,7 +1276,7 @@ class AnalyticsService(BaseComponent):
                 },
             ) from e
 
-    def record_api_call(
+    async def record_api_call(
         self,
         service: str,
         endpoint: str,
@@ -1181,13 +1296,14 @@ class AnalyticsService(BaseComponent):
         """
         try:
             if hasattr(self.operational_service, "record_api_call"):
-                self.operational_service.record_api_call(
-                    service=service,
-                    endpoint=endpoint,
-                    response_time_ms=response_time_ms,
-                    status_code=status_code,
-                    success=success,
-                )
+                if self.operational_service:
+                    await self.operational_service.record_api_call(
+                        service=service,
+                        endpoint=endpoint,
+                        response_time_ms=response_time_ms,
+                        status_code=status_code,
+                        success=success,
+                    )
 
         except Exception as e:
             self.logger.error(f"Error recording API call: {e}")
@@ -1205,13 +1321,13 @@ class AnalyticsService(BaseComponent):
             # Get data from all enhanced analytics engines
             realtime_dashboard = await self.realtime_analytics.generate_real_time_dashboard_data()
             portfolio_report = (
-                await self.portfolio_analytics.generate_institutional_analytics_report()
+                await self.portfolio_service.generate_institutional_analytics_report()
             )
-            risk_dashboard = await self.risk_monitor.create_real_time_risk_dashboard()
+            risk_dashboard = await self.risk_service.create_real_time_risk_dashboard()
             performance_report = (
-                await self.performance_reporter.generate_comprehensive_institutional_report()
+                await self.reporting_service.generate_comprehensive_institutional_report()
             )
-            operational_health = await self.operational_analytics.generate_system_health_dashboard()
+            operational_health = await self.operational_service.generate_system_health_dashboard()
 
             # Combine into unified dashboard
             comprehensive_dashboard = {
@@ -1321,21 +1437,21 @@ class AnalyticsService(BaseComponent):
 
                 if export_type == "prometheus":
                     task = asyncio.create_task(
-                        self.data_exporter.export_to_prometheus(dashboard_data)
+                        self.export_service.export_to_prometheus(dashboard_data)
                     )
                 elif export_type == "influxdb":
                     task = asyncio.create_task(
-                        self.data_exporter.export_to_influxdb_line_protocol(dashboard_data)
+                        self.export_service.export_to_influxdb_line_protocol(dashboard_data)
                     )
                 elif export_type == "kafka":
                     task = asyncio.create_task(
-                        self.data_exporter.export_to_kafka(
+                        self.export_service.export_to_kafka(
                             config.get("topic"), dashboard_data, config.get("kafka_config")
                         )
                     )
                 elif export_type == "api":
                     task = asyncio.create_task(
-                        self.data_exporter.export_to_rest_api(
+                        self.export_service.export_to_rest_api(
                             config.get("endpoint"),
                             dashboard_data,
                             config.get("headers"),
@@ -1344,7 +1460,7 @@ class AnalyticsService(BaseComponent):
                     )
                 elif export_type == "regulatory":
                     task = asyncio.create_task(
-                        self.data_exporter.export_regulatory_report(
+                        self.export_service.export_regulatory_report(
                             config.get("report_type"), dashboard_data, config.get("template")
                         )
                     )
@@ -1384,24 +1500,25 @@ class AnalyticsService(BaseComponent):
             await self.realtime_analytics._risk_monitoring_loop()
 
             # 2. Calculate portfolio optimization recommendations
-            mvo_results = await self.portfolio_analytics.optimize_portfolio_mvo()
-            black_litterman_results = await self.portfolio_analytics.optimize_black_litterman()
-            risk_parity_results = await self.portfolio_analytics.optimize_risk_parity()
+            mvo_results = await self.portfolio_service.optimize_portfolio_mvo()
+            black_litterman_results = await self.portfolio_service.optimize_black_litterman()
+            risk_parity_results = await self.portfolio_service.optimize_risk_parity()
 
             # 3. Execute comprehensive risk analysis
-            var_analysis = await self.risk_monitor.calculate_advanced_var_methodologies()
-            stress_test_results = await self.risk_monitor.execute_comprehensive_stress_test()
+            var_analysis = await self.risk_service.calculate_advanced_var_methodologies()
+            stress_test_results = await self.risk_service.execute_comprehensive_stress_test()
 
-            # 4. Generate performance attribution
-            institutional_report = (
-                await self.performance_reporter.generate_comprehensive_institutional_report()
-            )
+            # 4. Generate performance attribution (for metrics collection)
+            await self.reporting_service.generate_comprehensive_institutional_report()
 
             # 5. Check system health
-            system_health = await self.operational_analytics.generate_system_health_dashboard()
+            system_health = await self.operational_service.generate_system_health_dashboard()
 
             # 6. Update all metrics and alerts
-            await self.alert_manager.process_pending_alerts()
+            # Process any pending alerts through the alert service
+            if hasattr(self.alert_service, "get_active_alerts"):
+                active_alerts = self.alert_service.get_active_alerts()
+                self.logger.debug(f"Active alerts: {len(active_alerts)}")
 
             cycle_end = get_current_utc_timestamp()
             execution_time = (cycle_end - cycle_start).total_seconds()
@@ -1435,7 +1552,9 @@ class AnalyticsService(BaseComponent):
                     "overall_score": system_health.get("health_score", 0),
                     "component_status": system_health.get("component_status", {}),
                 },
-                "alerts_processed": len(await self.alert_manager.get_active_alerts()),
+                "alerts_processed": len(self.alert_service.get_active_alerts())
+                if self.alert_service and hasattr(self.alert_service, "get_active_alerts")
+                else 0,
                 "status": "completed",
             }
 
@@ -1457,29 +1576,43 @@ class AnalyticsService(BaseComponent):
         Args:
             cycle_interval_seconds: Interval between analytics cycles
         """
-        try:
-            self.logger.info("Starting continuous analytics processing")
 
-            while True:
-                # Run analytics cycle
-                cycle_result = await self.run_comprehensive_analytics_cycle()
+        # Create a background task for continuous analytics instead of blocking
+        async def _continuous_analytics_loop():
+            try:
+                self.logger.info("Starting continuous analytics processing")
 
-                # Log cycle completion
-                if cycle_result.get("status") == "completed":
-                    execution_time = cycle_result.get("execution_time_seconds", 0)
-                    self.logger.info(f"Analytics cycle completed in {execution_time:.2f}s")
-                else:
-                    self.logger.error(
-                        f"Analytics cycle failed: {cycle_result.get('error', 'unknown error')}"
-                    )
+                while self._running:
+                    # Run analytics cycle
+                    cycle_result = await self.run_comprehensive_analytics_cycle()
 
-                # Wait for next cycle
-                await asyncio.sleep(cycle_interval_seconds)
+                    # Log cycle completion
+                    if cycle_result.get("status") == "completed":
+                        execution_time = cycle_result.get("execution_time_seconds", 0)
+                        self.logger.info(f"Analytics cycle completed in {execution_time:.2f}s")
+                    else:
+                        self.logger.error(
+                            f"Analytics cycle failed: {cycle_result.get('error', 'unknown error')}"
+                        )
 
-        except asyncio.CancelledError:
-            self.logger.info("Continuous analytics processing cancelled")
-        except Exception as e:
-            self.logger.error(f"Error in continuous analytics: {e}")
+                    # Wait for next cycle
+                    await asyncio.sleep(cycle_interval_seconds)
+
+            except asyncio.CancelledError:
+                self.logger.info("Continuous analytics processing cancelled")
+            except Exception as e:
+                self.logger.error(f"Error in continuous analytics: {e}")
+
+        # Create task for the continuous loop
+        if self._running:
+            try:
+                loop = asyncio.get_running_loop()
+                task = loop.create_task(_continuous_analytics_loop())
+                self._background_tasks.add(task)
+                task.add_done_callback(self._background_tasks.discard)
+                self.logger.info("Continuous analytics task created")
+            except RuntimeError:
+                self.logger.warning("No event loop running, cannot start continuous analytics")
 
     def _setup_event_handlers(self) -> None:
         """Set up event handlers for decoupled service communication."""
@@ -1521,7 +1654,6 @@ class AnalyticsService(BaseComponent):
             # Extract key metrics
             kpis = dashboard.get("kpis", {})
             performance = dashboard.get("performance_analytics", {}).get("executive_summary", {})
-            risk = dashboard.get("risk_monitoring", {}).get("risk_summary", {})
 
             # Generate executive insights
             insights = []
@@ -1530,19 +1662,21 @@ class AnalyticsService(BaseComponent):
             daily_pnl = kpis.get("daily_pnl", 0)
             if daily_pnl > 0:
                 insights.append(f"Positive daily P&L of ${daily_pnl:,.0f}")
-            elif daily_pnl < -10000:
+            elif daily_pnl < -ANALYTICS_PERFORMANCE_THRESHOLDS["significant_daily_loss"]:
                 insights.append(f"Significant daily loss of ${abs(daily_pnl):,.0f}")
 
             # Risk insights
             var_95 = kpis.get("var_95", 0)
-            if var_95 > 50000:
+            if var_95 > ANALYTICS_PERFORMANCE_THRESHOLDS["elevated_var_threshold"]:
                 insights.append(f"Elevated VaR 95% at ${var_95:,.0f}")
 
             # Performance quality insights
             sharpe_ratio = kpis.get("sharpe_ratio", 0)
-            if sharpe_ratio > 1.5:
-                insights.append("Strong risk-adjusted performance (Sharpe > 1.5)")
-            elif sharpe_ratio < 0.5:
+            if sharpe_ratio > ANALYTICS_PERFORMANCE_THRESHOLDS["strong_sharpe_threshold"]:
+                insights.append(
+                    f"Strong risk-adjusted performance (Sharpe > {ANALYTICS_PERFORMANCE_THRESHOLDS['strong_sharpe_threshold']})"
+                )
+            elif sharpe_ratio < ANALYTICS_PERFORMANCE_THRESHOLDS["weak_sharpe_threshold"]:
                 insights.append("Below-target risk-adjusted performance")
 
             executive_summary = {
@@ -1595,7 +1729,7 @@ class AnalyticsService(BaseComponent):
             executive_summary = await self.generate_executive_summary()
             comprehensive_dashboard = await self.generate_comprehensive_analytics_dashboard()
             institutional_report = (
-                await self.performance_reporter.generate_comprehensive_institutional_report(
+                await self.reporting_service.generate_comprehensive_institutional_report(
                     period=report_type, include_regulatory=True, include_esg=False
                 )
             )
@@ -1606,7 +1740,7 @@ class AnalyticsService(BaseComponent):
                     "client_id": client_id,
                     "report_date": get_current_utc_timestamp().isoformat(),
                     "report_type": report_type,
-                    "report_version": "2.0",
+                    "report_version": ANALYTICS_REPORT_VERSION,
                     "generated_by": "T-Bot Analytics Service",
                 },
                 "executive_summary": executive_summary,
@@ -1630,3 +1764,35 @@ class AnalyticsService(BaseComponent):
                 "status": "error",
                 "error": str(e),
             }
+
+    def _default_operational_metrics(self) -> OperationalMetrics:
+        """Return default operational metrics when service is unavailable."""
+        now = datetime.now()
+        return OperationalMetrics(
+            timestamp=now,
+            system_uptime=Decimal("0"),
+            strategies_active=0,
+            strategies_total=0,
+            exchanges_connected=0,
+            exchanges_total=0,
+            orders_placed_today=0,
+            orders_filled_today=0,
+            order_fill_rate=Decimal("0"),
+            api_call_success_rate=Decimal("0"),
+            websocket_uptime_percent=Decimal("0"),
+            error_rate=Decimal("0"),
+            critical_errors_today=0,
+            memory_usage_percent=Decimal("0"),
+            cpu_usage_percent=Decimal("0"),
+            disk_usage_percent=Decimal("0"),
+            database_connections_active=0,
+            cache_hit_rate=Decimal("0"),
+            backup_status="unknown",
+            compliance_checks_passed=0,
+            compliance_checks_failed=0,
+            risk_limit_breaches=0,
+            circuit_breaker_triggers=0,
+            performance_degradation_events=0,
+            data_quality_issues=0,
+            exchange_outages=0,
+        )

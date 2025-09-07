@@ -36,9 +36,10 @@ from src.analytics.types import (
     RiskMetrics,
     StrategyMetrics,
 )
+from src.analytics.utils.data_conversion import DataConverter
+from src.analytics.utils.validation import ValidationHelper
 from src.core.base.component import BaseComponent
-from src.core.exceptions import DataError, ValidationError, ComponentError
-from src.monitoring.metrics import get_metrics_collector
+from src.core.exceptions import ComponentError, ValidationError
 from src.utils.datetime_utils import get_current_utc_timestamp
 
 
@@ -54,15 +55,40 @@ class DataExporter(BaseComponent):
     - Compression and encryption options
     """
 
-    def __init__(self):
-        """Initialize data exporter."""
+    def __init__(self, metrics_collector=None) -> None:
+        """
+        Initialize data exporter.
+
+        Args:
+            metrics_collector: Optional metrics collector (injected)
+        """
         super().__init__()
-        self.metrics_collector = get_metrics_collector()
+        # Use dependency injection - do not create dependencies directly
+        self.metrics_collector = metrics_collector
+
+        if self.metrics_collector is None:
+            raise ComponentError(
+                "metrics_collector must be injected via dependency injection",
+                component="DataExporter",
+                operation="__init__",
+                context={"missing_dependency": "metrics_collector"},
+            )
+
+        # Initialize utilities
+        self.data_converter = DataConverter()
+        self.validator = ValidationHelper()
 
         # Export statistics
         self._export_history: list[dict[str, Any]] = []
 
         self.logger.info("DataExporter initialized")
+
+    def _validate_format(
+        self, format_name: str, supported_formats: list[str], error_code: str = "EXPORT_001"
+    ) -> str:
+        """Validate export format - delegates to ValidationHelper."""
+        # Direct delegation removes duplication
+        return self.validator.validate_export_format(format_name, supported_formats)
 
     async def export_portfolio_metrics(
         self, metrics: PortfolioMetrics, format: str = "json", include_metadata: bool = True
@@ -79,22 +105,18 @@ class DataExporter(BaseComponent):
             Exported data as string or bytes
         """
         try:
+            # Validate format
+            validated_format = self._validate_format(format, ["json", "csv", "excel"])
+
             data = self._prepare_portfolio_data(metrics, include_metadata)
 
-            if format.lower() == "json":
-                result = json.dumps(data, indent=2, default=self._json_serializer)
-            elif format.lower() == "csv":
+            result: str | bytes
+            if validated_format.lower() == "json":
+                result = self.data_converter.safe_json_dumps(data, indent=2)
+            elif validated_format.lower() == "csv":
                 result = self._to_csv(data)
-            elif format.lower() == "excel":
+            elif validated_format.lower() == "excel":
                 result = await self._to_excel({"portfolio_metrics": data})
-            else:
-                raise ValidationError(
-                    f"Unsupported export format: {format}",
-                    error_code="EXPORT_001",
-                    field_name="format",
-                    field_value=format,
-                    validation_rule="supported_export_format",
-                )
 
             # Record export
             self._record_export("portfolio_metrics", format, len(str(result)))
@@ -123,7 +145,7 @@ class DataExporter(BaseComponent):
             data = self._prepare_risk_data(metrics, include_metadata)
 
             if format.lower() == "json":
-                result = json.dumps(data, indent=2, default=self._json_serializer)
+                result = self.data_converter.safe_json_dumps(data, indent=2)
             elif format.lower() == "csv":
                 result = self._to_csv(data)
             elif format.lower() == "excel":
@@ -163,7 +185,7 @@ class DataExporter(BaseComponent):
             data = [self._prepare_position_data(m, include_metadata) for m in metrics]
 
             if format.lower() == "json":
-                result = json.dumps({"positions": data}, indent=2, default=self._json_serializer)
+                result = self.data_converter.safe_json_dumps({"positions": data}, indent=2)
             elif format.lower() == "csv":
                 result = self._list_to_csv(data)
             elif format.lower() == "excel":
@@ -203,7 +225,7 @@ class DataExporter(BaseComponent):
             data = [self._prepare_strategy_data(m, include_metadata) for m in metrics]
 
             if format.lower() == "json":
-                result = json.dumps({"strategies": data}, indent=2, default=self._json_serializer)
+                result = self.data_converter.safe_json_dumps({"strategies": data}, indent=2)
             elif format.lower() == "csv":
                 result = self._list_to_csv(data)
             elif format.lower() == "excel":
@@ -243,7 +265,7 @@ class DataExporter(BaseComponent):
             data = self._prepare_operational_data(metrics, include_metadata)
 
             if format.lower() == "json":
-                result = json.dumps(data, indent=2, default=self._json_serializer)
+                result = self.data_converter.safe_json_dumps(data, indent=2)
             elif format.lower() == "csv":
                 result = self._to_csv(data)
             elif format.lower() == "excel":
@@ -283,7 +305,7 @@ class DataExporter(BaseComponent):
             data = self._prepare_report_data(report, include_charts)
 
             if format.lower() == "json":
-                result = json.dumps(data, indent=2, default=self._json_serializer)
+                result = self.data_converter.safe_json_dumps(data, indent=2)
             elif format.lower() == "excel":
                 result = await self._report_to_excel(data)
             else:
@@ -389,7 +411,7 @@ class DataExporter(BaseComponent):
             if format.lower() == "csv":
                 result = self._time_series_to_csv(filtered_data)
             elif format.lower() == "json":
-                result = json.dumps(filtered_data, indent=2, default=self._json_serializer)
+                result = self.data_converter.safe_json_dumps(filtered_data, indent=2)
             elif format.lower() == "parquet":
                 result = await self._time_series_to_parquet(filtered_data)
             else:
@@ -449,92 +471,39 @@ class DataExporter(BaseComponent):
         self, metrics: PortfolioMetrics, include_metadata: bool
     ) -> dict[str, Any]:
         """Prepare portfolio metrics for export."""
-        data = metrics.dict()
-
-        if not include_metadata:
-            # Remove metadata fields
-            data.pop("metadata", None)
-
-        # Convert Decimals to floats for better JSON compatibility
-        for key, value in data.items():
-            if isinstance(value, Decimal):
-                data[key] = float(value)
-            elif isinstance(value, dict):
-                for k, v in value.items():
-                    if isinstance(v, Decimal):
-                        value[k] = float(v)
-
-        return data
+        return self.data_converter.prepare_for_json_export(
+            metrics, remove_metadata=not include_metadata
+        )
 
     def _prepare_risk_data(self, metrics: RiskMetrics, include_metadata: bool) -> dict[str, Any]:
         """Prepare risk metrics for export."""
-        data = metrics.dict()
-
-        if not include_metadata:
-            data.pop("metadata", None)
-
-        # Convert Decimals and handle nested dictionaries
-        for key, value in data.items():
-            if isinstance(value, Decimal):
-                data[key] = float(value)
-            elif isinstance(value, dict):
-                for k, v in value.items():
-                    if isinstance(v, Decimal):
-                        value[k] = float(v)
-                    elif isinstance(v, dict):
-                        for k2, v2 in v.items():
-                            if isinstance(v2, Decimal):
-                                v[k2] = float(v2)
-
-        return data
+        return self.data_converter.prepare_for_json_export(
+            metrics, remove_metadata=not include_metadata
+        )
 
     def _prepare_position_data(
         self, metrics: PositionMetrics, include_metadata: bool
     ) -> dict[str, Any]:
         """Prepare position metrics for export."""
-        data = metrics.dict()
-
-        if not include_metadata:
-            data.pop("metadata", None)
-
-        # Convert Decimals to floats
-        for key, value in data.items():
-            if isinstance(value, Decimal):
-                data[key] = float(value)
-
-        return data
+        return self.data_converter.prepare_for_json_export(
+            metrics, remove_metadata=not include_metadata
+        )
 
     def _prepare_strategy_data(
         self, metrics: StrategyMetrics, include_metadata: bool
     ) -> dict[str, Any]:
         """Prepare strategy metrics for export."""
-        data = metrics.dict()
-
-        if not include_metadata:
-            data.pop("metadata", None)
-
-        # Convert Decimals to floats
-        for key, value in data.items():
-            if isinstance(value, Decimal):
-                data[key] = float(value)
-
-        return data
+        return self.data_converter.prepare_for_json_export(
+            metrics, remove_metadata=not include_metadata
+        )
 
     def _prepare_operational_data(
         self, metrics: OperationalMetrics, include_metadata: bool
     ) -> dict[str, Any]:
         """Prepare operational metrics for export."""
-        data = metrics.dict()
-
-        if not include_metadata:
-            data.pop("metadata", None)
-
-        # Convert Decimals to floats
-        for key, value in data.items():
-            if isinstance(value, Decimal):
-                data[key] = float(value)
-
-        return data
+        return self.data_converter.prepare_for_json_export(
+            metrics, remove_metadata=not include_metadata
+        )
 
     def _prepare_report_data(self, report: AnalyticsReport, include_charts: bool) -> dict[str, Any]:
         """Prepare analytics report for export."""
@@ -695,7 +664,7 @@ class DataExporter(BaseComponent):
         """Convert time series data to Parquet format."""
         # This would require pyarrow or similar library
         # For now, return JSON as bytes
-        json_data = json.dumps(time_series_data, default=self._json_serializer)
+        json_data = self.data_converter.safe_json_dumps(time_series_data)
         return json_data.encode("utf-8")
 
     def _flatten_dict(
@@ -716,17 +685,6 @@ class DataExporter(BaseComponent):
                 items.append((new_key, value))
 
         return dict(items)
-
-    def _json_serializer(self, obj: Any) -> Any:
-        """Custom JSON serializer for special types."""
-        if isinstance(obj, Decimal):
-            return float(obj)
-        elif isinstance(obj, datetime):
-            return obj.isoformat()
-        elif hasattr(obj, "dict"):
-            return obj.dict()
-        else:
-            return str(obj)
 
     def _record_export(self, data_type: str, format: str, size_bytes: int) -> None:
         """Record export for statistics."""
@@ -815,7 +773,7 @@ class DataExporter(BaseComponent):
             lines = []
             timestamp = int(datetime.now(timezone.utc).timestamp() * 1000000000)  # Nanoseconds
 
-            def process_metrics(data: dict, tags: dict = None) -> None:
+            def process_metrics(data: dict, tags: dict[Any, Any] | None = None) -> None:
                 tags = tags or {}
                 fields = []
 
@@ -848,7 +806,7 @@ class DataExporter(BaseComponent):
             return f"# Error: {e!s}"
 
     async def export_to_kafka(
-        self, topic: str, data: dict[str, Any], kafka_config: dict = None
+        self, topic: str, data: dict[str, Any], kafka_config: dict[Any, Any] | None = None
     ) -> bool:
         """
         Export data to Kafka topic.
@@ -884,7 +842,11 @@ class DataExporter(BaseComponent):
             return False
 
     async def export_to_rest_api(
-        self, endpoint: str, data: dict[str, Any], headers: dict = None, auth: dict = None
+        self,
+        endpoint: str,
+        data: dict[str, Any],
+        headers: dict[Any, Any] | None = None,
+        auth: dict[Any, Any] | None = None,
     ) -> bool:
         """
         Export data to external REST API.
@@ -934,20 +896,14 @@ class DataExporter(BaseComponent):
                         )
                         return False
             finally:
-                if session:
-                    await session.close()
+                await session.close()
 
         except Exception as e:
-            if session:
-                try:
-                    await session.close()
-                except Exception:
-                    pass
             self.logger.error(f"Error exporting to REST API: {e}")
             return False
 
     async def export_regulatory_report(
-        self, report_type: str, data: dict[str, Any], template: str = None
+        self, report_type: str, data: dict[str, Any], template: str | None = None
     ) -> str:
         """
         Export data in regulatory reporting format.
@@ -1095,39 +1051,89 @@ SA-CCR Exposure: {{ sa_ccr_exposure }}
 
     async def stream_real_time_data(self, websocket_clients: set, data: dict[str, Any]) -> None:
         """
-        Stream real-time data to WebSocket clients.
+        Stream real-time data to WebSocket clients with proper async handling.
 
         Args:
             websocket_clients: Set of WebSocket connections
             data: Data to stream
         """
-        try:
-            if not websocket_clients:
-                return
+        if not websocket_clients:
+            return
 
+        try:
             message = {
                 "timestamp": get_current_utc_timestamp().isoformat(),
                 "type": "analytics_stream",
                 "data": data,
             }
 
-            message_str = json.dumps(message, default=str)
+            # Serialize message with size check
+            try:
+                message_str = json.dumps(message, default=str)
+                max_size = 1024 * 1024  # 1MB limit
+                if len(message_str.encode("utf-8")) > max_size:
+                    self.logger.warning("Stream message too large, truncating data")
+                    # Create truncated message with essential data only
+                    message = {
+                        "timestamp": get_current_utc_timestamp().isoformat(),
+                        "type": "analytics_stream_truncated",
+                        "data": {
+                            "message": "Data truncated due to size limits",
+                            "original_keys": list(data.keys())
+                            if isinstance(data, dict)
+                            else "non_dict_data",
+                        },
+                    }
+                    message_str = json.dumps(message, default=str)
+            except Exception as e:
+                self.logger.error(f"Error serializing stream message: {e}")
+                return
 
-            # Send to all connected clients
+            # Use concurrent sending with proper error handling
+            clients_to_send = set(websocket_clients)  # Create copy to avoid modification issues
             disconnected_clients = set()
-            for client in websocket_clients:
-                try:
-                    await client.send(message_str)
-                except Exception as e:
-                    self.logger.warning(f"Failed to send data to WebSocket client: {e}")
-                    disconnected_clients.add(client)
 
-            # Remove disconnected clients
-            websocket_clients -= disconnected_clients
+            async def send_to_client(client):
+                try:
+                    # Add timeout to prevent hanging on slow clients
+                    await asyncio.wait_for(client.send(message_str), timeout=5.0)
+                    return client, None
+                except asyncio.TimeoutError:
+                    return client, "timeout"
+                except Exception as e:
+                    return client, str(e)
+
+            # Send to all clients concurrently
+            send_tasks = [send_to_client(client) for client in clients_to_send]
+
+            if send_tasks:
+                try:
+                    # Use gather with proper exception handling
+                    results = await asyncio.gather(*send_tasks, return_exceptions=True)
+
+                    # Process results and identify failed clients
+                    for result in results:
+                        if isinstance(result, tuple):
+                            client, error = result
+                            if error:
+                                self.logger.debug(f"WebSocket client send failed: {error}")
+                                disconnected_clients.add(client)
+                        elif isinstance(result, Exception):
+                            self.logger.warning(f"Unexpected error in stream send: {result}")
+
+                except Exception as e:
+                    self.logger.error(f"Critical error in WebSocket streaming: {e}")
+
+            # Remove disconnected clients from the original set
+            if disconnected_clients:
+                websocket_clients -= disconnected_clients
+                self.logger.debug(
+                    f"Removed {len(disconnected_clients)} disconnected streaming clients"
+                )
 
         except Exception as e:
             self.logger.error(f"Error streaming real-time data: {e}")
-            raise
+            raise  # Re-raise to allow caller to handle appropriately
 
     async def create_scheduled_export(
         self, export_config: dict[str, Any], schedule_interval_minutes: int = 60

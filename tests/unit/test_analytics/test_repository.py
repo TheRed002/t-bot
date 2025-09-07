@@ -1,0 +1,736 @@
+"""
+Comprehensive tests for Analytics Repository.
+
+Tests the AnalyticsRepository class with focus on:
+- Database operations and transactions
+- Error handling and rollback scenarios
+- Data conversion between analytics types and database models
+- Financial precision preservation
+- Edge cases and boundary conditions
+"""
+
+from datetime import datetime
+from decimal import Decimal
+from unittest.mock import AsyncMock, Mock, patch
+
+import pytest
+
+# Set pytest markers to optimize test execution
+# Test configuration
+
+from src.analytics.repository import AnalyticsRepository
+from src.analytics.types import PortfolioMetrics, PositionMetrics, RiskMetrics
+from src.core.exceptions import DataError, ValidationError
+from src.database.models.analytics import (
+    AnalyticsPortfolioMetrics,
+    AnalyticsPositionMetrics,
+    AnalyticsRiskMetrics,
+)
+
+
+@pytest.fixture(scope="function")
+def mock_uow():
+    """Mock unit of work for testing."""
+    uow = Mock()
+    uow.analytics_repository = AsyncMock()
+    
+    # Mock database operations
+    uow.analytics_repository.create = AsyncMock(return_value=Mock())
+    uow.commit = AsyncMock()
+    uow.rollback = AsyncMock()
+
+    # Make uow itself return the async context when used as context manager
+    uow.__aenter__ = AsyncMock(return_value=uow)
+    uow.__aexit__ = AsyncMock(return_value=None)
+
+    return uow
+
+
+@pytest.fixture(scope="function")
+def repository(mock_uow):
+    """Create repository instance with mocked dependencies."""
+    return AnalyticsRepository(uow=mock_uow)
+
+
+@pytest.fixture(scope="module")
+def sample_portfolio_metrics():
+    """Sample portfolio metrics for testing."""
+    # Use fixed timestamp for consistency and performance
+    fixed_timestamp = datetime(2024, 1, 15, 12, 0, 0)
+    return PortfolioMetrics(
+        timestamp=fixed_timestamp,
+        total_value=Decimal("100000.50"),
+        cash=Decimal("25000.25"),
+        invested_capital=Decimal("75000.25"),
+        unrealized_pnl=Decimal("5000.75"),
+        realized_pnl=Decimal("2000.00"),
+        total_pnl=Decimal("7000.75"),
+        daily_return=Decimal("0.0125"),
+        leverage=Decimal("1.5"),
+        margin_used=Decimal("50000.00"),
+        positions_count=5,
+    )
+
+
+@pytest.fixture(scope="module")
+def sample_position_metrics():
+    """Sample position metrics for testing."""
+    fixed_timestamp = datetime(2024, 1, 15, 12, 0, 0)
+    return [
+        PositionMetrics(
+            timestamp=fixed_timestamp,
+            symbol="BTC/USD",
+            exchange="coinbase",
+            quantity=Decimal("1.5"),
+            market_value=Decimal("45000.00"),
+            unrealized_pnl=Decimal("2500.00"),
+            unrealized_pnl_percent=Decimal("0.0588"),
+            realized_pnl=Decimal("1000.00"),
+            total_pnl=Decimal("3500.00"),
+            entry_price=Decimal("28333.33"),
+            current_price=Decimal("30000.00"),
+            weight=Decimal("0.69"),
+            side="long",
+        ),
+        PositionMetrics(
+            timestamp=fixed_timestamp,
+            symbol="ETH/USD",
+            exchange="binance",
+            quantity=Decimal("10.0"),
+            market_value=Decimal("20000.00"),
+            unrealized_pnl=Decimal("1500.00"),
+            unrealized_pnl_percent=Decimal("0.081"),
+            realized_pnl=Decimal("500.00"),
+            total_pnl=Decimal("2000.00"),
+            entry_price=Decimal("1850.00"),
+            current_price=Decimal("2000.00"),
+            weight=Decimal("0.31"),
+            side="long",
+        ),
+    ]
+
+
+@pytest.fixture(scope="module")
+def sample_risk_metrics():
+    """Sample risk metrics for testing."""
+    fixed_timestamp = datetime(2024, 1, 15, 12, 0, 0)
+    return RiskMetrics(
+        timestamp=fixed_timestamp,
+        portfolio_var_95=Decimal("5000.00"),
+        portfolio_var_99=Decimal("8000.00"),
+        max_drawdown=Decimal("0.15"),
+        volatility=Decimal("0.25"),
+        expected_shortfall=Decimal("6000.00"),
+        correlation_risk=Decimal("0.8"),
+        concentration_risk=Decimal("0.3"),
+    )
+
+
+class TestAnalyticsRepositoryInitialization:
+    """Test repository initialization."""
+
+    def test_initialization_with_uow(self, mock_uow):
+        """Test repository initialization with unit of work."""
+        repo = AnalyticsRepository(uow=mock_uow)
+
+        assert repo.uow is mock_uow
+        assert hasattr(repo, "logger")
+
+    def test_inheritance_from_base_component(self, repository):
+        """Test that repository inherits from BaseComponent."""
+        from src.analytics.interfaces import AnalyticsDataRepository
+        from src.core.base.component import BaseComponent
+
+        assert isinstance(repository, BaseComponent)
+        assert isinstance(repository, AnalyticsDataRepository)
+
+
+class TestPortfolioMetricsOperations:
+    """Test portfolio metrics storage and retrieval."""
+
+    @pytest.mark.asyncio
+    async def test_store_portfolio_metrics_success(
+        self, repository, mock_uow, sample_portfolio_metrics
+    ):
+        """Test successful portfolio metrics storage."""
+        await repository.store_portfolio_metrics(sample_portfolio_metrics)
+
+        # Verify database operations
+        mock_uow.__aenter__.assert_called_once()
+        mock_uow.analytics_repository.create.assert_called_once()
+        mock_uow.commit.assert_called_once()
+        mock_uow.rollback.assert_not_called()
+
+        # Verify data conversion
+        call_args = mock_uow.analytics_repository.create.call_args[0][0]
+        assert isinstance(call_args, AnalyticsPortfolioMetrics)
+        assert call_args.timestamp == sample_portfolio_metrics.timestamp
+        assert call_args.total_value == sample_portfolio_metrics.total_value
+        assert call_args.unrealized_pnl == sample_portfolio_metrics.unrealized_pnl
+        assert call_args.realized_pnl == sample_portfolio_metrics.realized_pnl
+        assert call_args.daily_pnl == sample_portfolio_metrics.daily_return
+        assert call_args.leverage_ratio == sample_portfolio_metrics.leverage
+        assert call_args.margin_usage == sample_portfolio_metrics.margin_used
+        assert call_args.cash_balance == sample_portfolio_metrics.cash
+
+    @pytest.mark.asyncio
+    async def test_store_portfolio_metrics_database_error(
+        self, repository, mock_uow, sample_portfolio_metrics
+    ):
+        """Test portfolio metrics storage database error handling."""
+        mock_uow.analytics_repository.create.side_effect = Exception("Database connection failed")
+
+        with pytest.raises(DataError) as exc_info:
+            await repository.store_portfolio_metrics(sample_portfolio_metrics)
+
+        assert "Failed to store portfolio metrics" in str(exc_info.value)
+        assert exc_info.value.context["timestamp"] == sample_portfolio_metrics.timestamp
+        mock_uow.rollback.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_store_portfolio_metrics_commit_error(
+        self, repository, mock_uow, sample_portfolio_metrics
+    ):
+        """Test portfolio metrics storage commit error handling."""
+        mock_uow.commit.side_effect = Exception("Commit failed")
+
+        with pytest.raises(DataError):
+            await repository.store_portfolio_metrics(sample_portfolio_metrics)
+
+        mock_uow.rollback.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_store_portfolio_metrics_decimal_precision(self, repository, mock_uow):
+        """Test that decimal precision is preserved during storage."""
+        metrics = PortfolioMetrics(
+            timestamp=datetime.utcnow(),
+            total_value=Decimal("123456.78901234"),
+            cash=Decimal("12345.87654321"),
+            invested_capital=Decimal("111110.91246913"),
+            unrealized_pnl=Decimal("5432.10987654"),
+            realized_pnl=Decimal("2109.87654321"),
+            total_pnl=Decimal("7541.98642975"),
+            daily_return=Decimal("0.01234567890123"),
+            leverage=Decimal("2.123456789"),
+            margin_used=Decimal("54321.09876543"),
+        )
+
+        await repository.store_portfolio_metrics(metrics)
+
+        call_args = mock_uow.analytics_repository.create.call_args[0][0]
+        assert call_args.total_value == Decimal("123456.78901234")
+        assert call_args.cash_balance == Decimal("12345.87654321")
+        assert call_args.unrealized_pnl == Decimal("5432.10987654")
+        assert call_args.realized_pnl == Decimal("2109.87654321")
+        assert call_args.daily_pnl == Decimal("0.01234567890123")
+        assert call_args.leverage_ratio == Decimal("2.123456789")
+
+    @pytest.mark.asyncio
+    async def test_get_historical_portfolio_metrics_success(self, repository, mock_uow):
+        """Test successful historical portfolio metrics retrieval."""
+        start_date = datetime(2024, 1, 1)
+        end_date = datetime(2024, 1, 31)
+
+        # Mock database response
+        db_metric = AnalyticsPortfolioMetrics(
+            timestamp=datetime(2024, 1, 15),
+            total_value=Decimal("100000.00"),
+            cash_balance=Decimal("25000.00"),
+            unrealized_pnl=Decimal("5000.00"),
+            realized_pnl=Decimal("2000.00"),
+            daily_pnl=Decimal("0.01"),
+            leverage_ratio=Decimal("1.5"),
+            margin_usage=Decimal("50000.00"),
+        )
+        mock_uow.analytics_repository.find_by_date_range.return_value = [db_metric]
+
+        result = await repository.get_historical_portfolio_metrics(start_date, end_date)
+
+        assert len(result) == 1
+        metric = result[0]
+        assert isinstance(metric, PortfolioMetrics)
+        assert metric.timestamp == datetime(2024, 1, 15)
+        assert metric.total_value == Decimal("100000.00")
+        assert metric.cash == Decimal("25000.00")
+        assert metric.invested_capital == Decimal("75000.00")  # total - cash
+        assert metric.unrealized_pnl == Decimal("5000.00")
+        assert metric.realized_pnl == Decimal("2000.00")
+        assert metric.total_pnl == Decimal("7000.00")  # unrealized + realized
+        assert metric.daily_return == Decimal("0.01")
+        assert metric.leverage == Decimal("1.5")
+        assert metric.margin_used == Decimal("50000.00")
+
+        mock_uow.analytics_repository.find_by_date_range.assert_called_once_with(
+            model_class=AnalyticsPortfolioMetrics, start_date=start_date, end_date=end_date
+        )
+
+    @pytest.mark.asyncio
+    async def test_get_historical_portfolio_metrics_invalid_date_range(self, repository):
+        """Test historical portfolio metrics retrieval with invalid date range."""
+        start_date = datetime(2024, 1, 31)
+        end_date = datetime(2024, 1, 1)
+
+        with pytest.raises(ValidationError) as exc_info:
+            await repository.get_historical_portfolio_metrics(start_date, end_date)
+
+        assert "Start date must be before end date" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_get_historical_portfolio_metrics_equal_dates(self, repository):
+        """Test historical portfolio metrics retrieval with equal start and end dates."""
+        date = datetime(2024, 1, 15)
+
+        with pytest.raises(ValidationError):
+            await repository.get_historical_portfolio_metrics(date, date)
+
+    @pytest.mark.asyncio
+    async def test_get_historical_portfolio_metrics_database_error(self, repository, mock_uow):
+        """Test historical portfolio metrics retrieval database error handling."""
+        start_date = datetime(2024, 1, 1)
+        end_date = datetime(2024, 1, 31)
+
+        mock_uow.analytics_repository.find_by_date_range.side_effect = Exception("Query failed")
+
+        with pytest.raises(DataError) as exc_info:
+            await repository.get_historical_portfolio_metrics(start_date, end_date)
+
+        assert "Failed to retrieve historical portfolio metrics" in str(exc_info.value)
+        assert exc_info.value.context["start_date"] == start_date
+        assert exc_info.value.context["end_date"] == end_date
+
+    @pytest.mark.asyncio
+    async def test_get_historical_portfolio_metrics_empty_result(self, repository, mock_uow):
+        """Test historical portfolio metrics retrieval with empty result."""
+        start_date = datetime(2024, 1, 1)
+        end_date = datetime(2024, 1, 31)
+
+        mock_uow.analytics_repository.find_by_date_range.return_value = []
+
+        result = await repository.get_historical_portfolio_metrics(start_date, end_date)
+
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_get_historical_portfolio_metrics_null_cash_balance(self, repository, mock_uow):
+        """Test historical portfolio metrics retrieval with null cash balance."""
+        start_date = datetime(2024, 1, 1)
+        end_date = datetime(2024, 1, 31)
+
+        # Mock database response with null cash_balance
+        db_metric = AnalyticsPortfolioMetrics(
+            timestamp=datetime(2024, 1, 15),
+            total_value=Decimal("100000.00"),
+            cash_balance=None,
+            unrealized_pnl=Decimal("5000.00"),
+            realized_pnl=Decimal("2000.00"),
+            daily_pnl=Decimal("0.01"),
+            leverage_ratio=Decimal("1.5"),
+            margin_usage=Decimal("50000.00"),
+        )
+        mock_uow.analytics_repository.find_by_date_range.return_value = [db_metric]
+
+        result = await repository.get_historical_portfolio_metrics(start_date, end_date)
+
+        assert len(result) == 1
+        metric = result[0]
+        assert metric.cash == Decimal("0")  # Should default to 0
+        assert metric.invested_capital == Decimal("100000.00")  # total - 0
+
+    @pytest.mark.asyncio
+    async def test_get_latest_portfolio_metrics_success(self, repository, mock_uow):
+        """Test successful latest portfolio metrics retrieval."""
+        db_metric = AnalyticsPortfolioMetrics(
+            timestamp=datetime.utcnow(),
+            total_value=Decimal("100000.00"),
+            cash_balance=Decimal("25000.00"),
+            unrealized_pnl=Decimal("5000.00"),
+            realized_pnl=Decimal("2000.00"),
+            daily_pnl=Decimal("0.01"),
+            leverage_ratio=Decimal("1.5"),
+            margin_usage=Decimal("50000.00"),
+        )
+        mock_uow.analytics_repository.find_latest.return_value = db_metric
+
+        result = await repository.get_latest_portfolio_metrics()
+
+        assert result is not None
+        assert isinstance(result, PortfolioMetrics)
+        assert result.total_value == Decimal("100000.00")
+        assert result.cash == Decimal("25000.00")
+        assert result.invested_capital == Decimal("75000.00")
+
+        mock_uow.analytics_repository.find_latest.assert_called_once_with(AnalyticsPortfolioMetrics)
+
+    @pytest.mark.asyncio
+    async def test_get_latest_portfolio_metrics_not_found(self, repository, mock_uow):
+        """Test latest portfolio metrics retrieval when none exist."""
+        mock_uow.analytics_repository.find_latest.return_value = None
+
+        result = await repository.get_latest_portfolio_metrics()
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_get_latest_portfolio_metrics_database_error(self, repository, mock_uow):
+        """Test latest portfolio metrics retrieval database error handling."""
+        mock_uow.analytics_repository.find_latest.side_effect = Exception("Query failed")
+
+        with pytest.raises(DataError) as exc_info:
+            await repository.get_latest_portfolio_metrics()
+
+        assert "Failed to retrieve latest portfolio metrics" in str(exc_info.value)
+
+
+class TestPositionMetricsOperations:
+    """Test position metrics storage operations."""
+
+    @pytest.mark.asyncio
+    async def test_store_position_metrics_success(
+        self, repository, mock_uow, sample_position_metrics
+    ):
+        """Test successful position metrics storage."""
+        await repository.store_position_metrics(sample_position_metrics)
+
+        # Verify database operations
+        mock_uow.__aenter__.assert_called_once()
+        assert mock_uow.analytics_repository.create.call_count == 2  # Two positions
+        mock_uow.commit.assert_called_once()
+        mock_uow.rollback.assert_not_called()
+
+        # Verify data conversion for first position
+        first_call_args = mock_uow.analytics_repository.create.call_args_list[0][0][0]
+        assert isinstance(first_call_args, AnalyticsPositionMetrics)
+        assert first_call_args.symbol == "BTC/USD"
+        assert first_call_args.exchange == "coinbase"
+        assert first_call_args.quantity == Decimal("1.5")
+        assert first_call_args.market_value == Decimal("45000.00")
+        assert first_call_args.unrealized_pnl == Decimal("2500.00")
+        assert first_call_args.realized_pnl == Decimal("1000.00")
+        assert first_call_args.average_price == Decimal("28333.33")
+        assert first_call_args.current_price == Decimal("30000.00")
+        assert first_call_args.position_side == "long"
+
+    @pytest.mark.asyncio
+    async def test_store_position_metrics_empty_list(self, repository, mock_uow):
+        """Test position metrics storage with empty list."""
+        await repository.store_position_metrics([])
+
+        # Should not perform any database operations
+        mock_uow.__aenter__.assert_not_called()
+        mock_uow.analytics_repository.create.assert_not_called()
+        mock_uow.commit.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_store_position_metrics_database_error(
+        self, repository, mock_uow, sample_position_metrics
+    ):
+        """Test position metrics storage database error handling."""
+        mock_uow.analytics_repository.create.side_effect = Exception("Database error")
+
+        with pytest.raises(DataError) as exc_info:
+            await repository.store_position_metrics(sample_position_metrics)
+
+        assert "Failed to store position metrics" in str(exc_info.value)
+        assert exc_info.value.context["count"] == 2
+        mock_uow.rollback.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_store_position_metrics_decimal_precision(self, repository, mock_uow):
+        """Test that decimal precision is preserved in position metrics."""
+        fixed_timestamp = datetime(2024, 1, 15, 12, 0, 0)
+        position_metrics = [
+            PositionMetrics(
+                timestamp=fixed_timestamp,
+                symbol="BTC/USD",
+                exchange="binance",
+                quantity=Decimal("1.23456789"),
+                market_value=Decimal("12345.87654321"),
+                unrealized_pnl=Decimal("543.21098765"),
+                unrealized_pnl_percent=Decimal("0.05432109"),
+                realized_pnl=Decimal("210.98765432"),
+                total_pnl=Decimal("754.19864197"),
+                entry_price=Decimal("10000.12345678"),
+                current_price=Decimal("10010.12345678"),
+                weight=Decimal("0.15"),
+                side="long",
+            )
+        ]
+
+        await repository.store_position_metrics(position_metrics)
+
+        call_args = mock_uow.analytics_repository.create.call_args[0][0]
+        assert call_args.quantity == Decimal("1.23456789")
+        assert call_args.market_value == Decimal("12345.87654321")
+        assert call_args.unrealized_pnl == Decimal("543.21098765")
+        assert call_args.realized_pnl == Decimal("210.98765432")
+        assert call_args.average_price == Decimal("10000.12345678")
+        assert call_args.current_price == Decimal("10010.12345678")
+
+    @pytest.mark.asyncio
+    async def test_store_position_metrics_batch_processing(self, repository, mock_uow):
+        """Test position metrics batch processing with many positions."""
+        # Reduce size for performance - 10 positions is sufficient
+        fixed_timestamp = datetime(2024, 1, 15, 12, 0, 0)
+        position_metrics = []
+        for i in range(10):
+            position_metrics.append(
+                PositionMetrics(
+                    timestamp=fixed_timestamp,
+                    symbol=f"SYMBOL{i}",
+                    exchange="test_exchange",
+                    quantity=Decimal(f"{i}.5"),
+                    market_value=Decimal(f"{i * 100}.00"),
+                    unrealized_pnl=Decimal(f"{i * 10}.00"),
+                    unrealized_pnl_percent=Decimal("0.05"),
+                    realized_pnl=Decimal(f"{i * 5}.00"),
+                    total_pnl=Decimal(f"{i * 15}.00"),
+                    entry_price=Decimal(f"{i + 100}.00"),
+                    current_price=Decimal(f"{i + 105}.00"),
+                    weight=Decimal("0.10"),
+                    side="long",
+                )
+            )
+
+        await repository.store_position_metrics(position_metrics)
+
+        # Verify all positions were processed
+        assert mock_uow.analytics_repository.create.call_count == 10
+        mock_uow.commit.assert_called_once()
+
+
+class TestRiskMetricsOperations:
+    """Test risk metrics storage and retrieval."""
+
+    @pytest.mark.asyncio
+    async def test_store_risk_metrics_success(self, repository, mock_uow, sample_risk_metrics):
+        """Test successful risk metrics storage."""
+        await repository.store_risk_metrics(sample_risk_metrics)
+
+        # Verify database operations
+        mock_uow.__aenter__.assert_called_once()
+        mock_uow.analytics_repository.create.assert_called_once()
+        mock_uow.commit.assert_called_once()
+        mock_uow.rollback.assert_not_called()
+
+        # Verify data conversion
+        call_args = mock_uow.analytics_repository.create.call_args[0][0]
+        assert isinstance(call_args, AnalyticsRiskMetrics)
+        assert call_args.timestamp == sample_risk_metrics.timestamp
+        assert call_args.portfolio_var_95 == sample_risk_metrics.portfolio_var_95
+        assert call_args.portfolio_var_99 == sample_risk_metrics.portfolio_var_99
+        assert call_args.expected_shortfall_95 == sample_risk_metrics.expected_shortfall
+        assert call_args.maximum_drawdown == sample_risk_metrics.max_drawdown
+        assert call_args.volatility == sample_risk_metrics.volatility
+        assert call_args.correlation_risk == sample_risk_metrics.correlation_risk
+        assert call_args.concentration_risk == sample_risk_metrics.concentration_risk
+        # These should be None as they're not available in RiskMetrics
+        assert call_args.sharpe_ratio is None
+        assert call_args.sortino_ratio is None
+
+    @pytest.mark.asyncio
+    async def test_store_risk_metrics_database_error(
+        self, repository, mock_uow, sample_risk_metrics
+    ):
+        """Test risk metrics storage database error handling."""
+        mock_uow.analytics_repository.create.side_effect = Exception("Database error")
+
+        with pytest.raises(DataError) as exc_info:
+            await repository.store_risk_metrics(sample_risk_metrics)
+
+        assert "Failed to store risk metrics" in str(exc_info.value)
+        assert exc_info.value.context["timestamp"] == sample_risk_metrics.timestamp
+        mock_uow.rollback.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_store_risk_metrics_decimal_precision(self, repository, mock_uow):
+        """Test that decimal precision is preserved in risk metrics."""
+        risk_metrics = RiskMetrics(
+            timestamp=datetime.utcnow(),
+            portfolio_var_95=Decimal("5000.12345678"),
+            portfolio_var_99=Decimal("8000.87654321"),
+            max_drawdown=Decimal("0.123456789"),
+            volatility=Decimal("0.987654321"),
+            expected_shortfall=Decimal("6000.55555555"),
+            correlation_risk=Decimal("0.123456789"),
+            concentration_risk=Decimal("0.987654321"),
+        )
+
+        await repository.store_risk_metrics(risk_metrics)
+
+        call_args = mock_uow.analytics_repository.create.call_args[0][0]
+        assert call_args.portfolio_var_95 == Decimal("5000.12345678")
+        assert call_args.portfolio_var_99 == Decimal("8000.87654321")
+        assert call_args.maximum_drawdown == Decimal("0.123456789")
+        assert call_args.volatility == Decimal("0.987654321")
+        assert call_args.expected_shortfall_95 == Decimal("6000.55555555")
+        assert call_args.correlation_risk == Decimal("0.123456789")
+        assert call_args.concentration_risk == Decimal("0.987654321")
+
+    @pytest.mark.asyncio
+    async def test_get_latest_risk_metrics_success(self, repository, mock_uow):
+        """Test successful latest risk metrics retrieval."""
+        db_metric = AnalyticsRiskMetrics(
+            timestamp=datetime.utcnow(),
+            portfolio_var_95=Decimal("5000.00"),
+            portfolio_var_99=Decimal("8000.00"),
+            expected_shortfall_95=Decimal("6000.00"),
+            maximum_drawdown=Decimal("0.15"),
+            volatility=Decimal("0.25"),
+            correlation_risk=Decimal("0.8"),
+            concentration_risk=Decimal("0.3"),
+        )
+        mock_uow.analytics_repository.find_latest.return_value = db_metric
+
+        result = await repository.get_latest_risk_metrics()
+
+        assert result is not None
+        assert isinstance(result, RiskMetrics)
+        assert result.portfolio_var_95 == Decimal("5000.00")
+        assert result.portfolio_var_99 == Decimal("8000.00")
+        assert result.max_drawdown == Decimal("0.15")
+        assert result.volatility == Decimal("0.25")
+
+        mock_uow.analytics_repository.find_latest.assert_called_once_with(AnalyticsRiskMetrics)
+
+    @pytest.mark.asyncio
+    async def test_get_latest_risk_metrics_not_found(self, repository, mock_uow):
+        """Test latest risk metrics retrieval when none exist."""
+        mock_uow.analytics_repository.find_latest.return_value = None
+
+        result = await repository.get_latest_risk_metrics()
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_get_latest_risk_metrics_database_error(self, repository, mock_uow):
+        """Test latest risk metrics retrieval database error handling."""
+        mock_uow.analytics_repository.find_latest.side_effect = Exception("Query failed")
+
+        with pytest.raises(DataError) as exc_info:
+            await repository.get_latest_risk_metrics()
+
+        assert "Failed to retrieve latest risk metrics" in str(exc_info.value)
+
+
+class TestErrorHandlingAndEdgeCases:
+    """Test error handling and edge cases."""
+
+    @pytest.mark.asyncio
+    async def test_context_manager_error_handling(
+        self, repository, mock_uow, sample_portfolio_metrics
+    ):
+        """Test context manager error handling during UOW operations."""
+        mock_uow.__aenter__.side_effect = Exception("Connection failed")
+
+        with pytest.raises(DataError):
+            await repository.store_portfolio_metrics(sample_portfolio_metrics)
+
+    @pytest.mark.asyncio
+    async def test_concurrent_operations_isolation(
+        self, repository, mock_uow, sample_portfolio_metrics
+    ):
+        """Test that concurrent operations don't interfere with each other."""
+        import asyncio
+
+        # Create multiple concurrent operations
+        tasks = [
+            repository.store_portfolio_metrics(sample_portfolio_metrics),
+            repository.store_portfolio_metrics(sample_portfolio_metrics),
+            repository.get_latest_portfolio_metrics(),
+        ]
+
+        # All should complete without interference
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # First two are store operations (should return None)
+        assert results[0] is None
+        assert results[1] is None
+        # Third is a get operation (should work with our mock)
+
+    @pytest.mark.asyncio
+    async def test_transaction_rollback_on_commit_failure(
+        self, repository, mock_uow, sample_risk_metrics
+    ):
+        """Test transaction rollback when commit fails."""
+        mock_uow.commit.side_effect = Exception("Commit failed")
+
+        with pytest.raises(DataError):
+            await repository.store_risk_metrics(sample_risk_metrics)
+
+        # Verify rollback was called
+        mock_uow.rollback.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_data_conversion_edge_cases(self, repository, mock_uow):
+        """Test data conversion with edge case values."""
+        # Test with zero and negative values
+        metrics = PortfolioMetrics(
+            timestamp=datetime.utcnow(),
+            total_value=Decimal("0.00"),
+            cash=Decimal("-1000.00"),  # Negative cash (margin account)
+            invested_capital=Decimal("1000.00"),
+            unrealized_pnl=Decimal("-5000.00"),  # Negative PnL
+            realized_pnl=Decimal("0.00"),
+            total_pnl=Decimal("-5000.00"),
+            daily_return=Decimal("-0.05"),  # Negative return
+            leverage=Decimal("0.00"),  # No leverage
+            margin_used=Decimal("0.00"),  # No margin
+        )
+
+        await repository.store_portfolio_metrics(metrics)
+
+        call_args = mock_uow.analytics_repository.create.call_args[0][0]
+        assert call_args.total_value == Decimal("0.00")
+        assert call_args.cash_balance == Decimal("-1000.00")
+        assert call_args.unrealized_pnl == Decimal("-5000.00")
+        assert call_args.realized_pnl == Decimal("0.00")
+        assert call_args.daily_pnl == Decimal("-0.05")
+        assert call_args.leverage_ratio == Decimal("0.00")
+        assert call_args.margin_usage == Decimal("0.00")
+
+    @pytest.mark.asyncio
+    async def test_large_dataset_handling(self, repository, mock_uow):
+        """Test handling of large datasets without memory issues."""
+        # Reduce size for performance - 25 positions is sufficient for testing
+        fixed_timestamp = datetime(2024, 1, 15, 12, 0, 0)
+        large_position_list = []
+        for i in range(25):
+            large_position_list.append(
+                PositionMetrics(
+                    timestamp=fixed_timestamp,
+                    symbol=f"SYMBOL{i:04d}",
+                    exchange="test",
+                    quantity=Decimal("1.0"),
+                    market_value=Decimal("1000.0"),
+                    unrealized_pnl=Decimal("0.0"),
+                    unrealized_pnl_percent=Decimal("0.0"),
+                    realized_pnl=Decimal("0.0"),
+                    total_pnl=Decimal("0.0"),
+                    entry_price=Decimal("1000.0"),
+                    current_price=Decimal("1000.0"),
+                    weight=Decimal("0.02"),
+                    side="long",
+                )
+            )
+
+        # Should handle large dataset without issues
+        await repository.store_position_metrics(large_position_list)
+
+        # Verify all positions were processed
+        assert mock_uow.analytics_repository.create.call_count == 25
+
+    @pytest.mark.asyncio
+    async def test_historical_metrics_boundary_dates(self, repository, mock_uow):
+        """Test historical metrics with boundary date conditions."""
+        # Test with microsecond precision
+        start_date = datetime(2024, 1, 1, 0, 0, 0, 1)  # 1 microsecond after midnight
+        end_date = datetime(2024, 1, 1, 23, 59, 59, 999999)  # 1 microsecond before next day
+
+        mock_uow.analytics_repository.find_by_date_range.return_value = []
+
+        result = await repository.get_historical_portfolio_metrics(start_date, end_date)
+
+        assert result == []
+        mock_uow.analytics_repository.find_by_date_range.assert_called_once_with(
+            model_class=AnalyticsPortfolioMetrics, start_date=start_date, end_date=end_date
+        )

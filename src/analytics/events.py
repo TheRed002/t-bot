@@ -14,6 +14,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
+from src.core.logging import get_logger
 from src.core.types import Order, Position, Trade
 
 
@@ -64,13 +65,16 @@ class PositionUpdatedEvent(AnalyticsEvent):
     """Event fired when position is updated."""
 
     def __init__(self, position: Position, source_component: str, **kwargs):
+        from src.utils.datetime_utils import get_current_utc_timestamp
+
+        timestamp = get_current_utc_timestamp()
         super().__init__(
-            event_id=f"position_updated_{position.symbol}_{position.timestamp}",
+            event_id=f"position_updated_{position.symbol}_{timestamp}",
             event_type=AnalyticsEventType.POSITION_UPDATED,
-            timestamp=position.timestamp,
+            timestamp=timestamp,
             source_component=source_component,
             data={
-                "position": position.dict(),
+                "position": position.model_dump(),
                 "symbol": position.symbol,
                 "exchange": position.exchange,
             },
@@ -88,7 +92,7 @@ class TradeExecutedEvent(AnalyticsEvent):
             timestamp=trade.timestamp,
             source_component=source_component,
             data={
-                "trade": trade.dict(),
+                "trade": trade.model_dump(),
                 "trade_id": trade.trade_id,
                 "symbol": trade.symbol,
                 "exchange": trade.exchange,
@@ -104,10 +108,10 @@ class OrderUpdatedEvent(AnalyticsEvent):
         super().__init__(
             event_id=f"order_updated_{order.order_id}",
             event_type=AnalyticsEventType.ORDER_UPDATED,
-            timestamp=order.timestamp,
+            timestamp=order.updated_at or order.created_at,
             source_component=source_component,
             data={
-                "order": order.dict(),
+                "order": order.model_dump(),
                 "order_id": order.order_id,
                 "symbol": order.symbol,
                 "exchange": order.exchange,
@@ -182,7 +186,7 @@ class AnalyticsEventHandler(ABC):
 class AnalyticsEventBus:
     """Event bus for analytics events."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize the event bus."""
         self._handlers: dict[AnalyticsEventType, list[AnalyticsEventHandler]] = {}
         self._event_queue: asyncio.Queue = asyncio.Queue()
@@ -190,6 +194,7 @@ class AnalyticsEventBus:
         self._running = False
         self._event_history: list[AnalyticsEvent] = []
         self._max_history = 1000
+        self.logger = get_logger(__name__)
 
     async def start(self) -> None:
         """Start the event bus."""
@@ -275,16 +280,17 @@ class AnalyticsEventBus:
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                # Log error but continue processing
-                print(f"Error processing event: {e}")
+                # Log error but continue processing events
+                self.logger.error(f"Error processing event: {e}")
 
 
 class PortfolioEventHandler(AnalyticsEventHandler):
     """Event handler for portfolio analytics."""
 
-    def __init__(self, portfolio_service):
+    def __init__(self, portfolio_service: Any) -> None:
         """Initialize with portfolio service."""
         self.portfolio_service = portfolio_service
+        self.logger = get_logger(__name__)
 
     async def handle_event(self, event: AnalyticsEvent) -> None:
         """Handle portfolio-related events."""
@@ -298,7 +304,7 @@ class PortfolioEventHandler(AnalyticsEventHandler):
                     await self.portfolio_service.handle_price_update(event.data)
 
         except Exception as e:
-            print(f"Error in portfolio event handler: {e}")
+            self.logger.error(f"Error in portfolio event handler: {e}")
 
     def can_handle(self, event_type: AnalyticsEventType) -> bool:
         """Check if this handler can handle the event type."""
@@ -312,9 +318,10 @@ class PortfolioEventHandler(AnalyticsEventHandler):
 class RiskEventHandler(AnalyticsEventHandler):
     """Event handler for risk monitoring."""
 
-    def __init__(self, risk_service):
+    def __init__(self, risk_service: Any) -> None:
         """Initialize with risk service."""
         self.risk_service = risk_service
+        self.logger = get_logger(__name__)
 
     async def handle_event(self, event: AnalyticsEvent) -> None:
         """Handle risk-related events."""
@@ -328,7 +335,7 @@ class RiskEventHandler(AnalyticsEventHandler):
                     await self.risk_service.handle_price_update(event.data)
 
         except Exception as e:
-            print(f"Error in risk event handler: {e}")
+            self.logger.error(f"Error in risk event handler: {e}")
 
     def can_handle(self, event_type: AnalyticsEventType) -> bool:
         """Check if this handler can handle the event type."""
@@ -342,9 +349,10 @@ class RiskEventHandler(AnalyticsEventHandler):
 class AlertEventHandler(AnalyticsEventHandler):
     """Event handler for alert management."""
 
-    def __init__(self, alert_service):
+    def __init__(self, alert_service: Any) -> None:
         """Initialize with alert service."""
         self.alert_service = alert_service
+        self.logger = get_logger(__name__)
 
     async def handle_event(self, event: AnalyticsEvent) -> None:
         """Handle alert-related events."""
@@ -354,7 +362,7 @@ class AlertEventHandler(AnalyticsEventHandler):
                     await self.alert_service.handle_risk_limit_breach(event.data)
 
         except Exception as e:
-            print(f"Error in alert event handler: {e}")
+            self.logger.error(f"Error in alert event handler: {e}")
 
     def can_handle(self, event_type: AnalyticsEventType) -> bool:
         """Check if this handler can handle the event type."""

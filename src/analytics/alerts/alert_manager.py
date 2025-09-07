@@ -13,13 +13,11 @@ from decimal import Decimal
 from typing import Any
 
 from src.analytics.types import (
-    AlertSeverity,
     AnalyticsAlert,
     AnalyticsConfiguration,
 )
 from src.core.base.component import BaseComponent
-from src.core.exceptions import ValidationError, ComponentError
-from src.monitoring.metrics import get_metrics_collector
+from src.core.types import AlertSeverity
 from src.utils.datetime_utils import get_current_utc_timestamp
 
 
@@ -60,16 +58,28 @@ class AlertManager(BaseComponent):
     - Escalation and acknowledgment workflows
     """
 
-    def __init__(self, config: AnalyticsConfiguration):
+    def __init__(self, config: AnalyticsConfiguration, metrics_collector=None):
         """
         Initialize alert manager.
 
         Args:
             config: Analytics configuration
+            metrics_collector: Optional metrics collector (injected)
         """
         super().__init__()
         self.config = config
-        self.metrics_collector = get_metrics_collector()
+        # Use dependency injection - do not create dependencies directly
+        self.metrics_collector = metrics_collector
+
+        if self.metrics_collector is None:
+            from src.core.exceptions import ComponentError
+
+            raise ComponentError(
+                "metrics_collector must be injected via dependency injection",
+                component="AlertManager",
+                operation="__init__",
+                context={"missing_dependency": "metrics_collector"},
+            )
 
         # Alert rules and state
         self._alert_rules: dict[str, AlertRule] = {}
@@ -159,8 +169,11 @@ class AlertManager(BaseComponent):
         """
         self._metric_values[metric_name] = value
 
-        # Trigger immediate evaluation for this metric
-        asyncio.create_task(self._evaluate_metric_rules(metric_name, value))
+        # Trigger immediate evaluation for this metric with proper task management
+        if self._running:
+            task = asyncio.create_task(self._evaluate_metric_rules(metric_name, value))
+            self._monitoring_tasks.add(task)
+            task.add_done_callback(self._monitoring_tasks.discard)
 
     async def generate_alert(
         self,

@@ -58,14 +58,7 @@ class PerformanceMetricType(Enum):
     PAYOFF_RATIO = "payoff_ratio"
 
 
-class AlertSeverity(Enum):
-    """Severity levels for analytics alerts."""
-
-    CRITICAL = "critical"
-    HIGH = "high"
-    MEDIUM = "medium"
-    LOW = "low"
-    INFO = "info"
+from src.core.types import AlertSeverity
 
 
 class ReportType(Enum):
@@ -121,7 +114,6 @@ class TimeSeries(BaseModel):
         )
         self.data_points.append(point)
 
-        # Update time boundaries
         if self.start_time is None or timestamp < self.start_time:
             self.start_time = timestamp
         if self.end_time is None or timestamp > self.end_time:

@@ -18,7 +18,7 @@ Key Features:
 """
 
 from datetime import datetime, timedelta
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal, getcontext
 from typing import Any
 
 import numpy as np
@@ -32,10 +32,8 @@ from src.analytics.types import (
     ReportType,
 )
 from src.core.base.component import BaseComponent
-from src.core.exceptions import DataError, ValidationError, ComponentError, RiskCalculationError
-from src.monitoring.metrics import get_metrics_collector
 from src.utils.datetime_utils import get_current_utc_timestamp
-from src.utils.decimal_utils import safe_decimal
+from src.utils.decimal_utils import to_decimal
 
 
 class PerformanceReporter(BaseComponent):
@@ -51,16 +49,32 @@ class PerformanceReporter(BaseComponent):
     - Style analysis and factor attribution
     """
 
-    def __init__(self, config: AnalyticsConfiguration):
+    def __init__(self, config: AnalyticsConfiguration, metrics_collector=None):
         """
         Initialize performance reporter.
 
         Args:
             config: Analytics configuration
+            metrics_collector: Optional metrics collector (injected)
         """
         super().__init__()
         self.config = config
-        self.metrics_collector = get_metrics_collector()
+        # Use dependency injection - do not create dependencies directly
+        self.metrics_collector = metrics_collector
+
+        if self.metrics_collector is None:
+            from src.core.exceptions import ComponentError
+
+            raise ComponentError(
+                "metrics_collector must be injected via dependency injection",
+                component="PerformanceReporter",
+                operation="__init__",
+                context={"missing_dependency": "metrics_collector"},
+            )
+
+        # Set decimal precision context for financial calculations
+        getcontext().prec = 28
+        getcontext().rounding = ROUND_HALF_UP
 
         # Data storage
         self._portfolio_returns: list[dict[str, Any]] = []
@@ -287,52 +301,83 @@ class PerformanceReporter(BaseComponent):
             if not period_returns:
                 return {}
 
-            returns = [float(r["portfolio_return"]) for r in period_returns]
-            values = [float(r["portfolio_value"]) for r in period_returns]
+            returns = [to_decimal(r["portfolio_return"]) for r in period_returns]
+            values = [to_decimal(r["portfolio_value"]) for r in period_returns]
 
             # Basic return metrics
-            total_return = (values[-1] - values[0]) / values[0] if values[0] > 0 else 0.0
+            total_return = (values[-1] - values[0]) / values[0] if values[0] > 0 else Decimal("0")
 
             # Annualized return
             period_days = (end_date - start_date).days
             if period_days > 0:
-                annualized_return = (1 + total_return) ** (365.25 / period_days) - 1
+                days_decimal = Decimal(str(period_days))
+                annualized_return = (
+                    (Decimal("1") + total_return) ** (Decimal("365.25") / days_decimal)
+                ) - Decimal("1")
             else:
-                annualized_return = 0.0
+                annualized_return = Decimal("0")
 
-            # Volatility metrics
-            volatility = np.std(returns) * np.sqrt(252) if len(returns) > 1 else 0.0
-            downside_returns = [r for r in returns if r < 0]
-            downside_volatility = (
-                np.std(downside_returns) * np.sqrt(252) if downside_returns else 0.0
+            # Volatility metrics (convert to numpy for calculations, then back to Decimal)
+            returns_float = [float(r) for r in returns]
+            volatility_float = (
+                np.std(returns_float) * np.sqrt(252) if len(returns_float) > 1 else 0.0
             )
+            volatility = Decimal(str(volatility_float)).quantize(Decimal("0.00000001"))
+
+            downside_returns = [r for r in returns if r < 0]
+            if downside_returns:
+                downside_float = [float(r) for r in downside_returns]
+                downside_vol_float = np.std(downside_float) * np.sqrt(252)
+                downside_volatility = Decimal(str(downside_vol_float)).quantize(
+                    Decimal("0.00000001")
+                )
+            else:
+                downside_volatility = Decimal("0")
 
             # Risk-adjusted metrics
-            excess_return = annualized_return - float(self.config.risk_free_rate)
-            sharpe_ratio = excess_return / volatility if volatility > 0 else 0.0
-            sortino_ratio = excess_return / downside_volatility if downside_volatility > 0 else 0.0
+            excess_return = annualized_return - to_decimal(self.config.risk_free_rate)
+            sharpe_ratio = excess_return / volatility if volatility > 0 else Decimal("0")
+            sortino_ratio = (
+                excess_return / downside_volatility if downside_volatility > 0 else Decimal("0")
+            )
 
             # Drawdown analysis
-            cumulative_returns = np.cumprod(1 + np.array(returns))
+            returns_float = [float(r) for r in returns]
+            cumulative_returns = np.cumprod(1 + np.array(returns_float))
             running_max = np.maximum.accumulate(cumulative_returns)
             drawdown = (cumulative_returns - running_max) / running_max
-            max_drawdown = abs(np.min(drawdown)) if len(drawdown) > 0 else 0.0
-            current_drawdown = abs(drawdown[-1]) if len(drawdown) > 0 else 0.0
+            max_drawdown_float = abs(np.min(drawdown)) if len(drawdown) > 0 else 0.0
+            current_drawdown_float = abs(drawdown[-1]) if len(drawdown) > 0 else 0.0
+            max_drawdown = Decimal(str(max_drawdown_float)).quantize(Decimal("0.00000001"))
+            current_drawdown = Decimal(str(current_drawdown_float)).quantize(Decimal("0.00000001"))
 
             # Calmar ratio
-            calmar_ratio = annualized_return / max_drawdown if max_drawdown > 0 else 0.0
+            calmar_ratio = annualized_return / max_drawdown if max_drawdown > 0 else Decimal("0")
 
             # Win rate
             positive_returns = len([r for r in returns if r > 0])
-            win_rate = positive_returns / len(returns) if returns else 0.0
+            win_rate = (
+                Decimal(str(positive_returns)) / Decimal(str(len(returns)))
+                if returns
+                else Decimal("0")
+            )
 
             # Best and worst periods
-            best_return = max(returns) if returns else 0.0
-            worst_return = min(returns) if returns else 0.0
+            best_return = max(returns) if returns else Decimal("0")
+            worst_return = min(returns) if returns else Decimal("0")
 
-            # Skewness and kurtosis
-            skewness = float(stats.skew(returns)) if len(returns) > 2 else 0.0
-            kurtosis = float(stats.kurtosis(returns)) if len(returns) > 2 else 0.0
+            # Skewness and kurtosis (statistical measures, converted back to Decimal)
+            if len(returns) > 2:
+                returns_float = [float(r) for r in returns]
+                skewness = Decimal(str(float(stats.skew(returns_float)))).quantize(
+                    Decimal("0.00000001")
+                )
+                kurtosis = Decimal(str(float(stats.kurtosis(returns_float)))).quantize(
+                    Decimal("0.00000001")
+                )
+            else:
+                skewness = Decimal("0")
+                kurtosis = Decimal("0")
 
             return {
                 "total_return": total_return,
@@ -350,8 +395,8 @@ class PerformanceReporter(BaseComponent):
                 "skewness": skewness,
                 "kurtosis": kurtosis,
                 "number_of_periods": len(returns),
-                "start_value": values[0] if values else 0.0,
-                "end_value": values[-1] if values else 0.0,
+                "start_value": values[0] if values else Decimal("0"),
+                "end_value": values[-1] if values else Decimal("0"),
             }
 
         except Exception as e:
@@ -371,15 +416,15 @@ class PerformanceReporter(BaseComponent):
                 return None
 
             # Calculate total return for period
-            values = [float(r["portfolio_value"]) for r in period_returns]
-            total_return = (values[-1] - values[0]) / values[0] if values[0] > 0 else 0.0
+            values = [to_decimal(r["portfolio_value"]) for r in period_returns]
+            total_return = (values[-1] - values[0]) / values[0] if values[0] > 0 else Decimal("0")
 
             # Get benchmark return for period
             benchmark_return = None
             if self.config.benchmark_symbols:
                 benchmark_symbol = self.config.benchmark_symbols[0]
                 # Simplified - would get actual benchmark data
-                benchmark_return = 0.05  # Placeholder 5% return
+                benchmark_return = Decimal("0.05")  # Placeholder 5% return
 
             # Active return
             active_return = (
@@ -387,9 +432,9 @@ class PerformanceReporter(BaseComponent):
             )
 
             # Attribution components (simplified Brinson attribution)
-            asset_selection = total_return * 0.6  # 60% attributed to selection
-            timing_effect = total_return * 0.3  # 30% attributed to timing
-            interaction_effect = total_return * 0.1  # 10% interaction
+            asset_selection = total_return * Decimal("0.6")  # 60% attributed to selection
+            timing_effect = total_return * Decimal("0.3")  # 30% attributed to timing
+            interaction_effect = total_return * Decimal("0.1")  # 10% interaction
 
             # Strategy-level attribution
             strategy_attribution = {}
@@ -398,24 +443,26 @@ class PerformanceReporter(BaseComponent):
                     r for r in strategy_returns if start_date <= r["timestamp"] <= end_date
                 ]
                 if strategy_period_returns:
-                    strategy_values = [float(r["strategy_value"]) for r in strategy_period_returns]
+                    strategy_values = [
+                        to_decimal(r["strategy_value"]) for r in strategy_period_returns
+                    ]
                     strategy_return = (
                         (strategy_values[-1] - strategy_values[0]) / strategy_values[0]
                         if strategy_values[0] > 0
-                        else 0.0
+                        else Decimal("0")
                     )
                     strategy_attribution[strategy_name] = strategy_return
 
             # Factor attribution (placeholder - would use factor model)
             factor_attribution = {
-                "market": total_return * 0.7,
-                "momentum": total_return * 0.15,
-                "value": total_return * 0.1,
-                "size": total_return * 0.05,
+                "market": total_return * Decimal("0.7"),
+                "momentum": total_return * Decimal("0.15"),
+                "value": total_return * Decimal("0.1"),
+                "size": total_return * Decimal("0.05"),
             }
 
             # Tracking error
-            tracking_error = 0.02  # Placeholder 2% tracking error
+            tracking_error = Decimal("0.02")  # Placeholder 2% tracking error
 
             # Information ratio
             information_ratio = (
@@ -426,16 +473,16 @@ class PerformanceReporter(BaseComponent):
                 timestamp=get_current_utc_timestamp(),
                 period_start=start_date,
                 period_end=end_date,
-                total_return=safe_decimal(total_return),
-                benchmark_return=safe_decimal(benchmark_return) if benchmark_return else None,
-                active_return=safe_decimal(active_return) if active_return else None,
-                asset_selection=safe_decimal(asset_selection),
-                timing_effect=safe_decimal(timing_effect),
-                interaction_effect=safe_decimal(interaction_effect),
-                strategy_attribution={k: safe_decimal(v) for k, v in strategy_attribution.items()},
-                factor_attribution={k: safe_decimal(v) for k, v in factor_attribution.items()},
-                tracking_error=safe_decimal(tracking_error),
-                information_ratio=safe_decimal(information_ratio) if information_ratio else None,
+                total_return=to_decimal(total_return),
+                benchmark_return=to_decimal(benchmark_return) if benchmark_return else None,
+                active_return=to_decimal(active_return) if active_return else None,
+                asset_selection=to_decimal(asset_selection),
+                timing_effect=to_decimal(timing_effect),
+                interaction_effect=to_decimal(interaction_effect),
+                strategy_attribution={k: to_decimal(v) for k, v in strategy_attribution.items()},
+                factor_attribution={k: to_decimal(v) for k, v in factor_attribution.items()},
+                tracking_error=to_decimal(tracking_error),
+                information_ratio=to_decimal(information_ratio) if information_ratio else None,
             )
 
         except Exception as e:
@@ -447,13 +494,13 @@ class PerformanceReporter(BaseComponent):
     ) -> dict[str, Any]:
         """Calculate benchmark comparison metrics."""
         try:
-            comparison = {}
+            comparison: dict[str, Any] = {}
 
             if not self.config.benchmark_symbols:
                 return comparison
 
             portfolio_returns = [
-                float(r["portfolio_return"])
+                to_decimal(r["portfolio_return"])
                 for r in self._portfolio_returns
                 if start_date <= r["timestamp"] <= end_date
             ]
@@ -462,62 +509,83 @@ class PerformanceReporter(BaseComponent):
                 return comparison
 
             portfolio_total_return = sum(portfolio_returns)
-            portfolio_volatility = np.std(portfolio_returns) * np.sqrt(252)
+            portfolio_returns_float = [float(r) for r in portfolio_returns]
+            portfolio_volatility = Decimal(
+                str(np.std(portfolio_returns_float) * np.sqrt(252))
+            ).quantize(Decimal("0.00000001"))
 
             for benchmark_symbol in self.config.benchmark_symbols:
                 # Placeholder benchmark data - would fetch real data
-                benchmark_returns = [0.001] * len(portfolio_returns)  # 0.1% daily return
+                benchmark_returns = [Decimal("0.001")] * len(portfolio_returns)  # 0.1% daily return
                 benchmark_total_return = sum(benchmark_returns)
-                benchmark_volatility = np.std(benchmark_returns) * np.sqrt(252)
+                benchmark_returns_float = [float(r) for r in benchmark_returns]
+                benchmark_volatility = Decimal(
+                    str(np.std(benchmark_returns_float) * np.sqrt(252))
+                ).quantize(Decimal("0.00000001"))
 
                 # Comparison metrics
                 active_return = portfolio_total_return - benchmark_total_return
-                tracking_error = np.std(
-                    np.array(portfolio_returns) - np.array(benchmark_returns)
-                ) * np.sqrt(252)
-                information_ratio = active_return / tracking_error if tracking_error > 0 else 0.0
+                portfolio_array = np.array([float(r) for r in portfolio_returns])
+                benchmark_array = np.array([float(r) for r in benchmark_returns])
+                tracking_error = Decimal(
+                    str(np.std(portfolio_array - benchmark_array) * np.sqrt(252))
+                ).quantize(Decimal("0.00000001"))
+                information_ratio = (
+                    active_return / tracking_error if tracking_error > 0 else Decimal("0")
+                )
 
                 # Correlation and beta
-                correlation = np.corrcoef(portfolio_returns, benchmark_returns)[0, 1]
-                beta = np.cov(portfolio_returns, benchmark_returns)[0, 1] / np.var(
-                    benchmark_returns
+                portfolio_array = np.array([float(r) for r in portfolio_returns])
+                benchmark_array = np.array([float(r) for r in benchmark_returns])
+                correlation = Decimal(
+                    str(np.corrcoef(portfolio_array, benchmark_array)[0, 1])
+                ).quantize(Decimal("0.00000001"))
+                covariance = np.cov(portfolio_array, benchmark_array)[0, 1]
+                variance = np.var(benchmark_array)
+                beta = Decimal(str(covariance / variance if variance != 0 else 0)).quantize(
+                    Decimal("0.00000001")
                 )
 
                 # Up/down capture ratios
                 up_periods = [
                     (p, b)
                     for p, b in zip(portfolio_returns, benchmark_returns, strict=False)
-                    if b > 0
+                    if b > Decimal("0")
                 ]
                 down_periods = [
                     (p, b)
                     for p, b in zip(portfolio_returns, benchmark_returns, strict=False)
-                    if b < 0
+                    if b < Decimal("0")
                 ]
 
-                up_capture = (
-                    (np.mean([p for p, b in up_periods]) / np.mean([b for p, b in up_periods]))
-                    if up_periods
-                    else 0.0
-                )
-                down_capture = (
-                    (np.mean([p for p, b in down_periods]) / np.mean([b for p, b in down_periods]))
-                    if down_periods
-                    else 0.0
-                )
+                up_capture = Decimal("0")
+                if up_periods:
+                    up_portfolio = [float(p) for p, b in up_periods]
+                    up_benchmark = [float(b) for p, b in up_periods]
+                    up_capture = Decimal(
+                        str(np.mean(up_portfolio) / np.mean(up_benchmark))
+                    ).quantize(Decimal("0.00000001"))
+
+                down_capture = Decimal("0")
+                if down_periods:
+                    down_portfolio = [float(p) for p, b in down_periods]
+                    down_benchmark = [float(b) for p, b in down_periods]
+                    down_capture = Decimal(
+                        str(np.mean(down_portfolio) / np.mean(down_benchmark))
+                    ).quantize(Decimal("0.00000001"))
 
                 comparison[benchmark_symbol] = {
-                    "portfolio_return": portfolio_total_return,
-                    "benchmark_return": benchmark_total_return,
-                    "active_return": active_return,
-                    "portfolio_volatility": portfolio_volatility,
-                    "benchmark_volatility": benchmark_volatility,
-                    "tracking_error": tracking_error,
-                    "information_ratio": information_ratio,
-                    "correlation": correlation,
-                    "beta": beta,
-                    "up_capture_ratio": up_capture,
-                    "down_capture_ratio": down_capture,
+                    "portfolio_return": float(portfolio_total_return),
+                    "benchmark_return": float(benchmark_total_return),
+                    "active_return": float(active_return),
+                    "portfolio_volatility": float(portfolio_volatility),
+                    "benchmark_volatility": float(benchmark_volatility),
+                    "tracking_error": float(tracking_error),
+                    "information_ratio": float(information_ratio),
+                    "correlation": float(correlation),
+                    "beta": float(beta),
+                    "up_capture_ratio": float(up_capture),
+                    "down_capture_ratio": float(down_capture),
                 }
 
             return comparison
@@ -548,11 +616,14 @@ class PerformanceReporter(BaseComponent):
                 if cost_type not in cost_by_type:
                     cost_by_type[cost_type] = {"amount": Decimal("0"), "trades": 0}
 
-                cost_by_type[cost_type]["amount"] += cost["cost_amount"]
+                cost_amount = to_decimal(cost["cost_amount"])
+                trade_value = to_decimal(cost["trade_value"])
+
+                cost_by_type[cost_type]["amount"] += cost_amount
                 cost_by_type[cost_type]["trades"] += 1
 
-                total_cost += cost["cost_amount"]
-                total_value += cost["trade_value"]
+                total_cost += cost_amount
+                total_value += trade_value
 
             # Calculate averages and percentages
             avg_cost_bps = (total_cost / total_value * 10000) if total_value > 0 else Decimal("0")
@@ -592,7 +663,7 @@ class PerformanceReporter(BaseComponent):
         """Calculate additional risk-adjusted performance metrics."""
         try:
             period_returns = [
-                float(r["portfolio_return"])
+                to_decimal(r["portfolio_return"])
                 for r in self._portfolio_returns
                 if start_date <= r["timestamp"] <= end_date
             ]
@@ -600,17 +671,28 @@ class PerformanceReporter(BaseComponent):
             if len(period_returns) < 10:  # Need sufficient data
                 return {}
 
-            returns_array = np.array(period_returns)
+            returns_float = [float(r) for r in period_returns]
+            returns_array = np.array(returns_float)
 
             # VaR and CVaR
-            var_95 = np.percentile(returns_array, 5)
-            var_99 = np.percentile(returns_array, 1)
+            var_95 = Decimal(str(np.percentile(returns_array, 5))).quantize(Decimal("0.00000001"))
+            var_99 = Decimal(str(np.percentile(returns_array, 1))).quantize(Decimal("0.00000001"))
 
-            cvar_95_returns = returns_array[returns_array <= var_95]
-            cvar_95 = np.mean(cvar_95_returns) if len(cvar_95_returns) > 0 else 0.0
+            var_95_float = float(var_95)
+            var_99_float = float(var_99)
+            cvar_95_returns = returns_array[returns_array <= var_95_float]
+            cvar_95 = (
+                Decimal(str(np.mean(cvar_95_returns))).quantize(Decimal("0.00000001"))
+                if len(cvar_95_returns) > 0
+                else Decimal("0")
+            )
 
-            cvar_99_returns = returns_array[returns_array <= var_99]
-            cvar_99 = np.mean(cvar_99_returns) if len(cvar_99_returns) > 0 else 0.0
+            cvar_99_returns = returns_array[returns_array <= var_99_float]
+            cvar_99 = (
+                Decimal(str(np.mean(cvar_99_returns))).quantize(Decimal("0.00000001"))
+                if len(cvar_99_returns) > 0
+                else Decimal("0")
+            )
 
             # Omega ratio
             threshold = 0.0
@@ -643,14 +725,14 @@ class PerformanceReporter(BaseComponent):
             sterling_ratio = total_return / avg_drawdown if avg_drawdown > 0 else 0.0
 
             return {
-                "var_95": var_95,
-                "var_99": var_99,
-                "cvar_95": cvar_95,
-                "cvar_99": cvar_99,
+                "var_95": float(var_95),
+                "var_99": float(var_99),
+                "cvar_95": float(cvar_95),
+                "cvar_99": float(cvar_99),
                 "omega_ratio": omega_ratio if omega_ratio != float("inf") else 999.99,
                 "gain_to_pain_ratio": gain_to_pain if gain_to_pain != float("inf") else 999.99,
                 "sterling_ratio": sterling_ratio,
-                "tail_ratio": var_95 / var_99 if var_99 != 0 else 0.0,
+                "tail_ratio": float(var_95 / var_99) if var_99 != 0 else 0.0,
                 "pain_index": abs(np.sum(drawdown)) / len(drawdown),
             }
 

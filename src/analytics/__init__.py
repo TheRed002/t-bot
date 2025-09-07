@@ -15,6 +15,43 @@ hedge funds and asset managers, providing the deep insights required for
 professional trading operations.
 """
 
+from src.analytics import services
+
+# Dependency injection registration
+from src.analytics.di_registration import (
+    configure_analytics_dependencies,
+    get_analytics_factory,
+    get_analytics_service,
+    register_analytics_services,
+)
+from src.analytics.factory import AnalyticsServiceFactory, create_default_analytics_service
+from src.analytics.interfaces import (
+    AlertServiceProtocol,
+    AnalyticsServiceProtocol,
+    ExportServiceProtocol,
+    OperationalServiceProtocol,
+    PortfolioServiceProtocol,
+    RealtimeAnalyticsServiceProtocol,
+    ReportingServiceProtocol,
+    RiskServiceProtocol,
+)
 from src.analytics.service import AnalyticsService
 
-__all__ = ["AnalyticsService"]
+__all__ = [
+    "AlertServiceProtocol",
+    "AnalyticsService",
+    "AnalyticsServiceFactory",
+    "AnalyticsServiceProtocol",
+    "ExportServiceProtocol",
+    "OperationalServiceProtocol",
+    "PortfolioServiceProtocol",
+    "RealtimeAnalyticsServiceProtocol",
+    "ReportingServiceProtocol",
+    "RiskServiceProtocol",
+    "configure_analytics_dependencies",
+    "create_default_analytics_service",
+    "get_analytics_factory",
+    "get_analytics_service",
+    "register_analytics_services",
+    "services",
+]

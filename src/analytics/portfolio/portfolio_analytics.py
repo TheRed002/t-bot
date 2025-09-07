@@ -15,10 +15,9 @@ Key Features:
 - Institutional-grade reporting and compliance analytics
 """
 
-import asyncio
 from collections import defaultdict, deque
 from datetime import datetime, timedelta
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal, getcontext
 from typing import Any
 
 import numpy as np
@@ -35,11 +34,9 @@ from src.analytics.types import (
     RiskMetrics,
 )
 from src.core.base.component import BaseComponent
-from src.core.exceptions import DataError, RiskCalculationError, ValidationError, OptimizationError
 from src.core.types.trading import Position
-from src.monitoring.metrics import get_metrics_collector
 from src.utils.datetime_utils import get_current_utc_timestamp
-from src.utils.decimal_utils import safe_decimal
+from src.utils.decimal_utils import to_decimal
 
 
 class PortfolioAnalyticsEngine(BaseComponent):
@@ -55,16 +52,34 @@ class PortfolioAnalyticsEngine(BaseComponent):
     - Leverage and margin utilization monitoring
     """
 
-    def __init__(self, config: AnalyticsConfiguration):
+    def __init__(self, config: AnalyticsConfiguration, metrics_collector=None, repository=None):
         """
         Initialize portfolio analytics engine.
 
         Args:
             config: Analytics configuration
+            metrics_collector: Optional metrics collector (injected)
+            repository: Optional analytics repository for data persistence
         """
         super().__init__()
         self.config = config
-        self.metrics_collector = get_metrics_collector()
+        # Use dependency injection - do not create dependencies directly
+        self.metrics_collector = metrics_collector
+        self.repository = repository
+
+        if self.metrics_collector is None:
+            from src.core.exceptions import ComponentError
+
+            raise ComponentError(
+                "metrics_collector must be injected via dependency injection",
+                component="PortfolioAnalyticsEngine",
+                operation="__init__",
+                context={"missing_dependency": "metrics_collector"},
+            )
+
+        # Set decimal precision context for financial calculations
+        getcontext().prec = 28
+        getcontext().rounding = ROUND_HALF_UP
 
         # Data storage
         self._positions: dict[str, Position] = {}
@@ -93,7 +108,7 @@ class PortfolioAnalyticsEngine(BaseComponent):
         self._optimization_constraints: dict[str, Any] = {}
 
         # Fama-French factor data (would be populated from external source)
-        self._fama_french_factors = {
+        self._fama_french_factors: dict[str, deque] = {
             "market_excess": deque(maxlen=252),
             "smb": deque(maxlen=252),  # Small Minus Big
             "hml": deque(maxlen=252),  # High Minus Low
@@ -113,7 +128,7 @@ class PortfolioAnalyticsEngine(BaseComponent):
 
         # Cache settings
         self._cache_ttl = timedelta(minutes=5)
-        self._last_calculation = {}
+        self._last_calculation: dict[str, datetime] = {}
 
         self.logger.info("PortfolioAnalyticsEngine initialized")
 
@@ -130,8 +145,8 @@ class PortfolioAnalyticsEngine(BaseComponent):
         self._correlation_matrix = None
         self._covariance_matrix = None
 
-        # Trigger analytics recalculation
-        asyncio.create_task(self._calculate_portfolio_composition())
+        # Mark that analytics need recalculation (will be calculated on next access)
+        self._last_calculation.clear()
 
     def update_price_data(self, symbol: str, price: Decimal, timestamp: datetime) -> None:
         """
@@ -175,8 +190,9 @@ class PortfolioAnalyticsEngine(BaseComponent):
             if not self._positions:
                 return {}
 
-            composition = {
-                "positions": [],
+            positions_list: list[dict[str, Any]] = []
+            composition: dict[str, Any] = {
+                "positions": positions_list,
                 "sector_allocation": {},
                 "currency_allocation": {},
                 "geography_allocation": {},
@@ -207,18 +223,18 @@ class PortfolioAnalyticsEngine(BaseComponent):
 
             # Calculate weights and allocations
             for symbol, market_value in position_values.items():
-                weight = float(market_value / total_portfolio_value)
+                weight = to_decimal(market_value / total_portfolio_value)
 
                 position_info = {
                     "symbol": symbol,
-                    "market_value": float(market_value),
-                    "weight": weight,
+                    "market_value": to_decimal(market_value),
+                    "weight": to_decimal(weight),
                     "sector": self._sector_mapping.get(symbol, "Unknown"),
                     "currency": self._currency_mapping.get(symbol, "USD"),
                     "geography": self._geography_mapping.get(symbol, "Unknown"),
                 }
 
-                composition["positions"].append(position_info)
+                positions_list.append(position_info)
 
                 # Aggregate allocations
                 sector = position_info["sector"]
@@ -238,7 +254,7 @@ class PortfolioAnalyticsEngine(BaseComponent):
                 )
 
             # Calculate concentration metrics
-            weights = [pos["weight"] for pos in composition["positions"]]
+            weights = [to_decimal(pos["weight"]) for pos in composition["positions"]]
             composition["concentration_metrics"] = await self._calculate_concentration_metrics(
                 weights
             )
@@ -252,11 +268,11 @@ class PortfolioAnalyticsEngine(BaseComponent):
             )
 
             if weights:
-                max_weight = max(weights)
-                self.metrics_collector.set_gauge("portfolio_max_position_weight", max_weight)
+                max_weight = to_decimal(max(weights))
+                self.metrics_collector.set_gauge("portfolio_max_position_weight", float(max_weight))
 
-                hhi = sum(w**2 for w in weights)
-                self.metrics_collector.set_gauge("portfolio_concentration_hhi", hhi)
+                hhi = to_decimal(sum(to_decimal(w) ** 2 for w in weights))
+                self.metrics_collector.set_gauge("portfolio_concentration_hhi", float(hhi))
 
             return composition
 
@@ -283,22 +299,22 @@ class PortfolioAnalyticsEngine(BaseComponent):
             returns_array = np.array(portfolio_returns)
 
             # Basic risk metrics
-            volatility = np.std(returns_array) * np.sqrt(252) * 100  # Annualized %
+            volatility = to_decimal(np.std(returns_array) * np.sqrt(252) * 100)  # Annualized %
             downside_returns = returns_array[returns_array < 0]
-            downside_deviation = (
+            downside_deviation = to_decimal(
                 np.std(downside_returns) * np.sqrt(252) * 100 if len(downside_returns) > 0 else 0
             )
 
             # VaR calculations
-            var_95 = np.percentile(returns_array, 5) * 100
-            var_99 = np.percentile(returns_array, 1) * 100
+            var_95 = to_decimal(np.percentile(returns_array, 5) * 100)
+            var_99 = to_decimal(np.percentile(returns_array, 1) * 100)
 
             # CVaR (Expected Shortfall)
             cvar_95_returns = returns_array[returns_array <= np.percentile(returns_array, 5)]
-            cvar_95 = np.mean(cvar_95_returns) * 100 if len(cvar_95_returns) > 0 else 0
+            cvar_95 = to_decimal(np.mean(cvar_95_returns) * 100 if len(cvar_95_returns) > 0 else 0)
 
             cvar_99_returns = returns_array[returns_array <= np.percentile(returns_array, 1)]
-            cvar_99 = np.mean(cvar_99_returns) * 100 if len(cvar_99_returns) > 0 else 0
+            cvar_99 = to_decimal(np.mean(cvar_99_returns) * 100 if len(cvar_99_returns) > 0 else 0)
 
             # Maximum drawdown
             max_drawdown, current_drawdown = await self._calculate_drawdown_metrics()
@@ -310,7 +326,7 @@ class PortfolioAnalyticsEngine(BaseComponent):
             concentration_risk = 0
             if composition.get("concentration_metrics"):
                 hhi = composition["concentration_metrics"].get("herfindahl_index", 0)
-                concentration_risk = hhi * 100
+                concentration_risk = hhi * Decimal("100")
 
             # Correlation risk
             correlation_risk = await self._calculate_correlation_risk()
@@ -326,24 +342,24 @@ class PortfolioAnalyticsEngine(BaseComponent):
 
             return RiskMetrics(
                 timestamp=now,
-                portfolio_var_95=safe_decimal(abs(var_95)),
-                portfolio_var_99=safe_decimal(abs(var_99)),
-                portfolio_cvar_95=safe_decimal(abs(cvar_95)),
-                portfolio_cvar_99=safe_decimal(abs(cvar_99)),
-                max_drawdown=safe_decimal(max_drawdown),
-                current_drawdown=safe_decimal(current_drawdown),
-                volatility=safe_decimal(volatility),
-                downside_deviation=safe_decimal(downside_deviation),
-                concentration_risk=safe_decimal(concentration_risk),
-                correlation_risk=safe_decimal(correlation_risk),
-                currency_risk=safe_decimal(currency_risk),
-                leverage_ratio=safe_decimal(leverage_ratio),
+                portfolio_var_95=to_decimal(abs(var_95)),
+                portfolio_var_99=to_decimal(abs(var_99)),
+                portfolio_cvar_95=to_decimal(abs(cvar_95)),
+                portfolio_cvar_99=to_decimal(abs(cvar_99)),
+                max_drawdown=to_decimal(max_drawdown),
+                current_drawdown=to_decimal(current_drawdown),
+                volatility=to_decimal(volatility),
+                downside_deviation=to_decimal(downside_deviation),
+                concentration_risk=to_decimal(concentration_risk),
+                correlation_risk=to_decimal(correlation_risk),
+                currency_risk=to_decimal(currency_risk),
+                leverage_ratio=to_decimal(float(leverage_ratio)),
                 sector_concentration={
-                    k: safe_decimal(v * 100)
+                    k: to_decimal(float(v) * 100)
                     for k, v in composition.get("sector_allocation", {}).items()
                 },
                 currency_concentration={
-                    k: safe_decimal(v * 100)
+                    k: to_decimal(float(v) * 100)
                     for k, v in composition.get("currency_allocation", {}).items()
                 },
                 stress_test_results=stress_results,
@@ -450,17 +466,19 @@ class PortfolioAnalyticsEngine(BaseComponent):
                 else 0
             )
 
-            factor_exposures["size_factor"] = min(avg_position_size / 1000000, 5.0)  # Normalized
+            factor_exposures["size_factor"] = float(
+                min(to_decimal(avg_position_size) / Decimal("1000000"), Decimal("5.0"))
+            )  # Normalized
 
             # Momentum factor (3-month return)
             if len(portfolio_returns) >= 60:
-                momentum_return = sum(portfolio_returns[-60:])
-                factor_exposures["momentum_factor"] = momentum_return
+                momentum_return = to_decimal(sum(portfolio_returns[-60:]))
+                factor_exposures["momentum_factor"] = float(momentum_return)
 
             # Volatility factor
             if len(portfolio_returns) >= 30:
-                volatility = np.std(portfolio_returns[-30:]) * np.sqrt(252)
-                factor_exposures["volatility_factor"] = volatility
+                volatility = to_decimal(np.std(portfolio_returns[-30:]) * np.sqrt(252))
+                factor_exposures["volatility_factor"] = float(volatility)
 
             # Store factor loadings
             self._factor_loadings = factor_exposures
@@ -501,7 +519,7 @@ class PortfolioAnalyticsEngine(BaseComponent):
             }
 
             # Calculate position-level contributions
-            total_contribution = 0.0
+            total_contribution = Decimal("0")
 
             for position_info in composition["positions"]:
                 symbol = position_info["symbol"]
@@ -513,13 +531,13 @@ class PortfolioAnalyticsEngine(BaseComponent):
                     continue
 
                 # Calculate contribution
-                contribution = weight * position_return
+                contribution = to_decimal(weight) * to_decimal(position_return)
                 total_contribution += contribution
 
                 # Sector attribution
                 sector = position_info["sector"]
                 if sector not in attribution["sector_attribution"]:
-                    attribution["sector_attribution"][sector] = 0.0
+                    attribution["sector_attribution"][sector] = Decimal("0")
                 attribution["sector_attribution"][sector] += contribution
 
                 # Security selection within sector
@@ -534,7 +552,7 @@ class PortfolioAnalyticsEngine(BaseComponent):
 
             for sector, contrib in attribution["sector_attribution"].items():
                 self.metrics_collector.set_gauge(
-                    "portfolio_sector_attribution", contrib, labels={"sector": sector}
+                    "portfolio_sector_attribution", float(contrib), labels={"sector": sector}
                 )
 
             return attribution
@@ -648,9 +666,9 @@ class PortfolioAnalyticsEngine(BaseComponent):
                 "average_correlation": avg_correlation,
                 "diversification_ratio": diversification_ratio,
                 "correlation_range": {
-                    "min": float(np.min(upper_triangle)),
-                    "max": float(np.max(upper_triangle)),
-                    "std": float(np.std(upper_triangle)),
+                    "min": Decimal(str(np.min(upper_triangle))).quantize(Decimal("0.00000001")),
+                    "max": Decimal(str(np.max(upper_triangle))).quantize(Decimal("0.00000001")),
+                    "std": Decimal(str(np.std(upper_triangle))).quantize(Decimal("0.00000001")),
                 },
             }
 
@@ -658,12 +676,12 @@ class PortfolioAnalyticsEngine(BaseComponent):
             self.logger.error(f"Error calculating diversification metrics: {e}")
             return {}
 
-    async def _calculate_drawdown_metrics(self) -> tuple[float, float]:
+    async def _calculate_drawdown_metrics(self) -> tuple[Decimal, Decimal]:
         """Calculate maximum and current drawdown."""
         try:
             portfolio_returns = await self._calculate_portfolio_returns()
             if len(portfolio_returns) < 2:
-                return 0.0, 0.0
+                return Decimal("0"), Decimal("0")
 
             # Calculate cumulative returns
             cumulative_returns = np.cumprod(1 + np.array(portfolio_returns))
@@ -674,10 +692,14 @@ class PortfolioAnalyticsEngine(BaseComponent):
             # Calculate drawdown
             drawdown = (cumulative_returns - running_max) / running_max
 
-            max_drawdown = abs(np.min(drawdown)) * 100  # Convert to percentage
-            current_drawdown = abs(drawdown[-1]) * 100
+            max_drawdown = to_decimal(abs(np.min(drawdown)) * 100)  # Convert to percentage
+            current_drawdown = to_decimal(abs(drawdown[-1]) * 100)
 
-            return max_drawdown, current_drawdown
+            max_drawdown_decimal = Decimal(str(max_drawdown)).quantize(Decimal("0.00000001"))
+            current_drawdown_decimal = Decimal(str(current_drawdown)).quantize(
+                Decimal("0.00000001")
+            )
+            return max_drawdown_decimal, current_drawdown_decimal
 
         except Exception as e:
             self.logger.error(f"Error calculating drawdown metrics: {e}")
@@ -693,9 +715,9 @@ class PortfolioAnalyticsEngine(BaseComponent):
             # Average absolute correlation as risk measure
             values = correlation_matrix.values
             upper_triangle = values[np.triu_indices_from(values, k=1)]
-            avg_abs_correlation = np.mean(np.abs(upper_triangle))
+            avg_abs_correlation = to_decimal(np.mean(np.abs(upper_triangle)))
 
-            return avg_abs_correlation * 100
+            return avg_abs_correlation * Decimal("100")
 
         except Exception as e:
             self.logger.error(f"Error calculating correlation risk: {e}")
@@ -716,7 +738,7 @@ class PortfolioAnalyticsEngine(BaseComponent):
                 if currency != base_currency
             )
 
-            return non_base_exposure * 100
+            return to_decimal(non_base_exposure) * Decimal("100")
 
         except Exception as e:
             self.logger.error(f"Error calculating currency risk: {e}")
@@ -728,19 +750,23 @@ class PortfolioAnalyticsEngine(BaseComponent):
             # Simplified leverage calculation
             # In practice, would include margin and borrowing data
             gross_exposure = sum(
-                abs(float(position.quantity * await self._get_current_price(symbol) or 0))
+                abs(
+                    float(
+                        position.quantity * (await self._get_current_price(symbol) or Decimal("0"))
+                    )
+                )
                 for symbol, position in self._positions.items()
                 if position.is_open()
             )
 
             net_value = sum(
-                float(position.quantity * await self._get_current_price(symbol) or 0)
+                float(position.quantity * (await self._get_current_price(symbol) or Decimal("0")))
                 for symbol, position in self._positions.items()
                 if position.is_open()
             )
 
             if net_value > 0:
-                return gross_exposure / net_value
+                return to_decimal(gross_exposure) / to_decimal(net_value)
             return 0.0
 
         except Exception as e:
@@ -753,13 +779,21 @@ class PortfolioAnalyticsEngine(BaseComponent):
             stress_results = {}
 
             # Market crash scenario (-20% market move)
-            market_crash_impact = np.percentile(returns_array, 1) * 5  # 5x worst 1% scenario
-            stress_results["market_crash"] = safe_decimal(market_crash_impact * 100)
+            market_crash_impact = to_decimal(
+                np.percentile(returns_array, 1) * 5
+            )  # 5x worst 1% scenario
+            stress_results["market_crash"] = Decimal(str(market_crash_impact)).quantize(
+                Decimal("0.00000001")
+            ) * Decimal("100")
 
             # Volatility spike scenario (2x current volatility)
-            current_vol = np.std(returns_array)
-            vol_spike_impact = -2 * current_vol * np.sqrt(252)  # Annualized negative impact
-            stress_results["volatility_spike"] = safe_decimal(vol_spike_impact * 100)
+            current_vol = to_decimal(np.std(returns_array))
+            vol_spike_impact = (
+                to_decimal(-2) * current_vol * to_decimal(np.sqrt(252))
+            )  # Annualized negative impact
+            stress_results["volatility_spike"] = Decimal(str(vol_spike_impact)).quantize(
+                Decimal("0.00000001")
+            ) * Decimal("100")
 
             # Liquidity crisis scenario (increased correlations)
             correlation_matrix = await self.calculate_correlation_matrix()
@@ -768,8 +802,12 @@ class PortfolioAnalyticsEngine(BaseComponent):
                 avg_correlation = correlation_matrix.values[
                     np.triu_indices_from(correlation_matrix.values, k=1)
                 ].mean()
-                correlation_impact = (0.8 - avg_correlation) * np.std(returns_array) * 100
-                stress_results["liquidity_crisis"] = safe_decimal(correlation_impact)
+                correlation_impact = to_decimal(
+                    (0.8 - avg_correlation) * np.std(returns_array) * 100
+                )
+                stress_results["liquidity_crisis"] = Decimal(str(correlation_impact)).quantize(
+                    Decimal("0.00000001")
+                )
 
             return stress_results
 
@@ -783,12 +821,12 @@ class PortfolioAnalyticsEngine(BaseComponent):
             if symbol not in self._price_data or len(self._price_data[symbol]) < period_days:
                 return None
 
-            prices = [float(p["price"]) for p in self._price_data[symbol]]
+            prices = [p["price"] for p in self._price_data[symbol]]
             if len(prices) < period_days + 1:
                 return None
 
-            start_price = prices[-period_days - 1]
-            end_price = prices[-1]
+            start_price = to_decimal(prices[-period_days - 1])
+            end_price = to_decimal(prices[-1])
 
             if start_price > 0:
                 return (end_price - start_price) / start_price
@@ -803,9 +841,9 @@ class PortfolioAnalyticsEngine(BaseComponent):
 
     async def optimize_portfolio_mvo(
         self,
-        target_return: float = None,
+        target_return: float | None = None,
         risk_aversion: float = 1.0,
-        constraints: dict[str, Any] = None,
+        constraints: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """
         Perform Mean-Variance Optimization using Modern Portfolio Theory.
@@ -894,7 +932,7 @@ class PortfolioAnalyticsEngine(BaseComponent):
                 return {
                     "optimal_weights": weight_dict,
                     "expected_return": float(portfolio_return),
-                    "volatility": float(portfolio_volatility),
+                    "volatility": portfolio_volatility,
                     "sharpe_ratio": float(sharpe_ratio),
                     "optimization_success": True,
                     "optimization_message": result.message,
@@ -907,7 +945,9 @@ class PortfolioAnalyticsEngine(BaseComponent):
             return {"optimization_success": False, "error": str(e)}
 
     async def optimize_portfolio_black_litterman(
-        self, views: dict[str, float] = None, view_confidences: dict[str, float] = None
+        self,
+        views: dict[str, float] | None = None,
+        view_confidences: dict[str, float] | None = None,
     ) -> dict[str, Any]:
         """
         Implement Black-Litterman portfolio optimization.
@@ -937,8 +977,10 @@ class PortfolioAnalyticsEngine(BaseComponent):
 
             # Risk aversion parameter (estimated from market portfolio)
             market_variance = np.dot(w_market, np.dot(sigma, w_market))
-            market_return = 0.08  # Assumed market return
-            risk_aversion = (market_return - self.config.risk_free_rate) / market_variance
+            market_return = to_decimal(0.08)  # Assumed market return
+            risk_aversion = (
+                market_return - to_decimal(float(self.config.risk_free_rate))
+            ) / to_decimal(market_variance)
 
             # Implied equilibrium returns
             pi = float(risk_aversion) * np.dot(sigma, w_market)
@@ -997,9 +1039,9 @@ class PortfolioAnalyticsEngine(BaseComponent):
 
             return {
                 "optimal_weights": weight_dict,
-                "expected_return": float(portfolio_return),
-                "volatility": float(portfolio_volatility),
-                "sharpe_ratio": float(sharpe_ratio),
+                "expected_return": portfolio_return,
+                "volatility": portfolio_volatility,
+                "sharpe_ratio": sharpe_ratio,
                 "implied_returns": dict(zip(symbols, pi, strict=False)),
                 "adjusted_returns": dict(zip(symbols, mu_bl, strict=False)),
                 "optimization_success": True,
@@ -1065,7 +1107,7 @@ class PortfolioAnalyticsEngine(BaseComponent):
                 return {
                     "optimal_weights": weight_dict,
                     "risk_contributions": risk_contrib_dict,
-                    "volatility": float(portfolio_volatility),
+                    "volatility": portfolio_volatility,
                     "optimization_success": True,
                 }
             else:
@@ -1235,12 +1277,17 @@ class PortfolioAnalyticsEngine(BaseComponent):
                         # Simplified implementation
                         beta = 1.0  # Default beta
                         market_return = 0.08  # Assumed market return
-                        capm_return = float(self.config.risk_free_rate) + beta * (
-                            market_return - float(self.config.risk_free_rate)
+                        capm_return = to_decimal(float(self.config.risk_free_rate)) + to_decimal(
+                            beta
+                        ) * (
+                            to_decimal(market_return)
+                            - to_decimal(float(self.config.risk_free_rate))
                         )
 
                 # Combine methods (weighted average)
-                expected_returns[symbol] = 0.7 * historical_mean + 0.3 * capm_return
+                expected_returns[symbol] = (
+                    to_decimal(0.7) * historical_mean + to_decimal(0.3) * capm_return
+                ).quantize(Decimal("0.00000001"))
 
             return expected_returns
 
@@ -1274,7 +1321,7 @@ class PortfolioAnalyticsEngine(BaseComponent):
                     half_life = self._risk_model_params["half_life_volatility"]
                     weights = np.exp(-np.arange(len(returns)) / half_life)
                     weights = weights[::-1] / np.sum(weights)
-                    vol = np.sqrt(np.sum(weights * returns.values**2)) * np.sqrt(252)
+                    vol = to_decimal(np.sqrt(np.sum(weights * returns.values**2)) * np.sqrt(252))
                     volatilities[symbol] = vol
 
             if not volatilities:
@@ -1325,7 +1372,7 @@ class PortfolioAnalyticsEngine(BaseComponent):
             Optimization recommendations and analysis
         """
         try:
-            recommendations = {
+            recommendations: dict[str, Any] = {
                 "current_portfolio": {},
                 "optimization_results": {},
                 "risk_analysis": {},
@@ -1604,7 +1651,7 @@ class PortfolioAnalyticsEngine(BaseComponent):
             current_regime = regime_names[current_regime_idx]
 
             # Regime transition analysis
-            transitions = {}
+            transitions: dict[str, int] = {}
             for i in range(len(regime_labels) - 1):
                 current_state = regime_names[regime_labels[i]]
                 next_state = regime_names[regime_labels[i + 1]]

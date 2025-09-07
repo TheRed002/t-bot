@@ -18,7 +18,7 @@ Key Features:
 
 import asyncio
 from collections import defaultdict, deque
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal, getcontext
 from typing import Any
 
 import numpy as np
@@ -26,19 +26,12 @@ import pandas as pd
 from scipy import stats
 
 from src.analytics.types import (
-    AlertSeverity,
     AnalyticsAlert,
     AnalyticsConfiguration,
 )
 from src.core.base.component import BaseComponent
-from src.core.exceptions import (
-    RiskCalculationError,
-    RiskManagementError,
-    ValidationError,
-    DataError,
-)
+from src.core.types import AlertSeverity
 from src.core.types.trading import Position
-from src.monitoring.metrics import get_metrics_collector
 from src.utils.datetime_utils import get_current_utc_timestamp
 
 
@@ -55,16 +48,32 @@ class RiskMonitor(BaseComponent):
     - Monte Carlo simulations and tail risk analysis
     """
 
-    def __init__(self, config: AnalyticsConfiguration):
+    def __init__(self, config: AnalyticsConfiguration, metrics_collector=None):
         """
         Initialize risk monitor.
 
         Args:
             config: Analytics configuration
+            metrics_collector: Optional metrics collector (injected)
         """
         super().__init__()
         self.config = config
-        self.metrics_collector = get_metrics_collector()
+        # Use dependency injection - do not create dependencies directly
+        self.metrics_collector = metrics_collector
+
+        if self.metrics_collector is None:
+            from src.core.exceptions import ComponentError
+
+            raise ComponentError(
+                "metrics_collector must be injected via dependency injection",
+                component="RiskMonitor",
+                operation="__init__",
+                context={"missing_dependency": "metrics_collector"},
+            )
+
+        # Set decimal precision context for financial calculations
+        getcontext().prec = 28
+        getcontext().rounding = ROUND_HALF_UP
 
         # Risk data storage
         self._positions: dict[str, Position] = {}
@@ -158,7 +167,7 @@ class RiskMonitor(BaseComponent):
         timestamp = get_current_utc_timestamp()
 
         for symbol, price in price_updates.items():
-            self._price_history[symbol].append({"timestamp": timestamp, "price": float(price)})
+            self._price_history[symbol].append({"timestamp": timestamp, "price": price})
 
         # Trigger portfolio return calculation
         asyncio.create_task(self._update_portfolio_returns())
@@ -179,7 +188,7 @@ class RiskMonitor(BaseComponent):
         """
         try:
             if len(self._portfolio_returns) < 30:
-                return {"error": "Insufficient historical data for VaR calculation"}
+                return {"error": "Insufficient historical data for VaR calculation", "var": 0.0}
 
             returns_array = np.array(list(self._portfolio_returns))
 
@@ -235,7 +244,7 @@ class RiskMonitor(BaseComponent):
 
         except Exception as e:
             self.logger.error(f"Error calculating VaR: {e}")
-            return {"error": str(e)}
+            return {"error": str(e), "var": 0.0}
 
     async def run_stress_test(
         self, scenario_name: str, scenario_params: dict[str, Any]
@@ -252,7 +261,7 @@ class RiskMonitor(BaseComponent):
         """
         try:
             if not self._positions:
-                return {"error": "No positions to stress test"}
+                return {"error": "No positions to stress test", "portfolio_pnl": 0.0}
 
             stress_results = {}
 
@@ -269,10 +278,11 @@ class RiskMonitor(BaseComponent):
                             impact = position.calculate_pnl(shocked_price)
                             total_impact += impact
 
-                stress_results["portfolio_impact"] = float(total_impact)
-                stress_results["portfolio_impact_percent"] = float(
-                    total_impact / await self._get_portfolio_value() * 100
-                )
+                stress_results["portfolio_impact"] = total_impact
+                portfolio_value = await self._get_portfolio_value()
+                stress_results["portfolio_impact_percent"] = (
+                    total_impact / portfolio_value * Decimal("100")
+                ).quantize(Decimal("0.00000001"))
 
             elif scenario_name == "volatility_spike":
                 # Volatility spike: 2x current volatility
@@ -296,19 +306,21 @@ class RiskMonitor(BaseComponent):
                 total_liquidity_cost = Decimal("0")
                 for position in self._positions.values():
                     if position.is_open():
-                        position_value = position.quantity * await self._get_current_price(
-                            position.symbol
-                        )
+                        current_price = await self._get_current_price(position.symbol)
+                        if current_price is None:
+                            continue
+                        position_value = position.quantity * current_price
                         # Assume 0.1% base spread, multiply by scenario factor
                         liquidity_cost = (
                             position_value * Decimal("0.001") * Decimal(str(spread_multiplier))
                         )
                         total_liquidity_cost += liquidity_cost
 
-                stress_results["liquidity_cost"] = float(total_liquidity_cost)
-                stress_results["liquidity_cost_percent"] = float(
-                    total_liquidity_cost / await self._get_portfolio_value() * 100
-                )
+                stress_results["liquidity_cost"] = total_liquidity_cost
+                portfolio_value = await self._get_portfolio_value()
+                stress_results["liquidity_cost_percent"] = (
+                    total_liquidity_cost / portfolio_value * Decimal("100")
+                ).quantize(Decimal("0.00000001"))
 
             elif scenario_name == "correlation_breakdown":
                 # Correlation breakdown: all correlations go to 1.0
@@ -338,7 +350,7 @@ class RiskMonitor(BaseComponent):
 
         except Exception as e:
             self.logger.error(f"Error running stress test {scenario_name}: {e}")
-            return {"error": str(e)}
+            return {"error": str(e), "portfolio_pnl": 0.0}
 
     async def calculate_concentration_risk(self) -> dict[str, float]:
         """
@@ -351,7 +363,7 @@ class RiskMonitor(BaseComponent):
             if not self._positions:
                 return {}
 
-            concentration_metrics = {}
+            concentration_metrics: dict[str, float] = {}
 
             # Calculate position weights
             total_portfolio_value = await self._get_portfolio_value()
@@ -359,14 +371,14 @@ class RiskMonitor(BaseComponent):
                 return concentration_metrics
 
             position_weights = {}
-            sector_weights = defaultdict(float)
+            sector_weights: dict[str, float] = defaultdict(float)
 
             for symbol, position in self._positions.items():
                 if position.is_open():
                     current_price = await self._get_current_price(symbol)
                     if current_price:
-                        position_value = float(position.quantity * current_price)
-                        weight = position_value / float(total_portfolio_value)
+                        position_value = position.quantity * current_price
+                        weight = position_value / total_portfolio_value
                         position_weights[symbol] = weight
 
                         # Aggregate by sector (simplified - would use real sector mapping)
@@ -396,7 +408,7 @@ class RiskMonitor(BaseComponent):
 
             # Check concentration limits
             max_position = concentration_metrics.get("max_position_weight", 0)
-            if max_position > float(self._risk_limits["max_single_position_weight"]):
+            if max_position > self._risk_limits["max_single_position_weight"]:
                 await self._generate_risk_alert(
                     "concentration_breach",
                     AlertSeverity.HIGH,
@@ -424,7 +436,10 @@ class RiskMonitor(BaseComponent):
         """
         try:
             if len(self._positions) < 2:
-                return {"error": "Need at least 2 positions for correlation analysis"}
+                return {
+                    "error": "Need at least 2 positions for correlation analysis",
+                    "correlation_matrix": {},
+                }
 
             # Build return matrix for positions
             symbol_returns = {}
@@ -439,12 +454,16 @@ class RiskMonitor(BaseComponent):
                         min_observations = min(min_observations, len(returns))
 
             if len(symbol_returns) < 2 or min_observations < 30:
-                return {"error": "Insufficient price history for correlation analysis"}
+                return {
+                    "error": "Insufficient price history for correlation analysis",
+                    "correlation_matrix": {},
+                }
 
             # Align return series
             aligned_returns = {}
+            min_obs = int(min_observations) if min_observations != float("inf") else 0
             for symbol, returns in symbol_returns.items():
-                aligned_returns[symbol] = returns[-min_observations:]
+                aligned_returns[symbol] = returns[-min_obs:] if min_obs > 0 else returns
 
             # Calculate correlation matrix
             df = pd.DataFrame(aligned_returns)
@@ -455,10 +474,18 @@ class RiskMonitor(BaseComponent):
             upper_triangle = corr_values[np.triu_indices_from(corr_values, k=1)]
 
             correlation_metrics = {
-                "average_correlation": float(np.mean(upper_triangle)),
-                "max_correlation": float(np.max(upper_triangle)),
-                "min_correlation": float(np.min(upper_triangle)),
-                "correlation_std": float(np.std(upper_triangle)),
+                "average_correlation": Decimal(str(np.mean(upper_triangle))).quantize(
+                    Decimal("0.00000001")
+                ),
+                "max_correlation": Decimal(str(np.max(upper_triangle))).quantize(
+                    Decimal("0.00000001")
+                ),
+                "min_correlation": Decimal(str(np.min(upper_triangle))).quantize(
+                    Decimal("0.00000001")
+                ),
+                "correlation_std": Decimal(str(np.std(upper_triangle))).quantize(
+                    Decimal("0.00000001")
+                ),
                 "high_correlation_pairs": len(upper_triangle[upper_triangle > 0.7]),
             }
 
@@ -489,7 +516,7 @@ class RiskMonitor(BaseComponent):
 
             # Check correlation risk limits
             avg_corr = correlation_metrics["average_correlation"]
-            if avg_corr > float(self._risk_limits["max_correlation_exposure"]):
+            if avg_corr > self._risk_limits["max_correlation_exposure"]:
                 await self._generate_risk_alert(
                     "correlation_risk_breach",
                     AlertSeverity.MEDIUM,
@@ -641,7 +668,7 @@ class RiskMonitor(BaseComponent):
             self.metrics_collector.set_gauge("risk_realtime_var_95", current_var)
 
             # Check for immediate threshold breaches
-            var_limit = float(self._risk_limits["max_portfolio_var_95"])
+            var_limit = self._risk_limits["max_portfolio_var_95"]
             if current_var > var_limit:
                 await self._generate_risk_alert(
                     "var_95_breach",
@@ -665,7 +692,7 @@ class RiskMonitor(BaseComponent):
             # Check leverage limits
             leverage_metrics = await self._calculate_leverage_ratio()
             current_leverage = leverage_metrics.get("leverage_ratio", 0)
-            leverage_limit = float(self._risk_limits["max_leverage_ratio"])
+            leverage_limit = self._risk_limits["max_leverage_ratio"]
 
             if current_leverage > leverage_limit:
                 await self._generate_risk_alert(
@@ -678,7 +705,7 @@ class RiskMonitor(BaseComponent):
             # Check drawdown limits
             drawdown_metrics = await self._calculate_drawdown_metrics()
             current_drawdown = drawdown_metrics.get("current_drawdown", 0)
-            drawdown_limit = float(self._risk_limits["max_drawdown_limit"])
+            drawdown_limit = self._risk_limits["max_drawdown_limit"]
 
             if current_drawdown > drawdown_limit:
                 await self._generate_risk_alert(
@@ -820,7 +847,7 @@ class RiskMonitor(BaseComponent):
                 current_price = await self._get_current_price(symbol)
                 if current_price:
                     position_value = position.quantity * current_price
-                    weights[symbol] = float(position_value / portfolio_value)
+                    weights[symbol] = position_value / portfolio_value
 
         return weights
 
@@ -877,7 +904,7 @@ class RiskMonitor(BaseComponent):
                 if position.is_open():
                     current_price = await self._get_current_price(position.symbol)
                     if current_price:
-                        position_value = float(position.quantity * current_price)
+                        position_value = position.quantity * current_price
                         gross_exposure += abs(position_value)
 
                         # Net exposure considers position direction
@@ -886,7 +913,7 @@ class RiskMonitor(BaseComponent):
                         else:
                             net_exposure -= position_value
 
-            portfolio_value = float(await self._get_portfolio_value())
+            portfolio_value = await self._get_portfolio_value()
 
             if portfolio_value > 0:
                 gross_leverage = gross_exposure / portfolio_value
@@ -987,21 +1014,21 @@ class RiskMonitor(BaseComponent):
             # VaR limit utilization
             var_95 = await self.calculate_var(0.95, 1, "historical")
             current_var = var_95.get("historical_var", 0)
-            var_limit = float(self._risk_limits["max_portfolio_var_95"])
+            var_limit = self._risk_limits["max_portfolio_var_95"]
             if var_limit > 0:
                 utilization["var_95"] = (current_var / var_limit) * 100
 
             # Concentration limit utilization
             concentration = await self.calculate_concentration_risk()
             max_position = concentration.get("max_position_weight", 0)
-            position_limit = float(self._risk_limits["max_single_position_weight"])
+            position_limit = self._risk_limits["max_single_position_weight"]
             if position_limit > 0:
                 utilization["max_position"] = (max_position / position_limit) * 100
 
             # Leverage limit utilization
             leverage = await self._calculate_leverage_ratio()
             current_leverage = leverage.get("leverage_ratio", 0)
-            leverage_limit = float(self._risk_limits["max_leverage_ratio"])
+            leverage_limit = self._risk_limits["max_leverage_ratio"]
             if leverage_limit > 0:
                 utilization["leverage"] = (current_leverage / leverage_limit) * 100
 
@@ -1120,7 +1147,7 @@ class RiskMonitor(BaseComponent):
 
             var_results = {
                 "timestamp": get_current_utc_timestamp().isoformat(),
-                "portfolio_value": float(portfolio_value),
+                "portfolio_value": portfolio_value,
                 "data_points": len(returns),
                 "methodologies": {},
             }
@@ -1183,9 +1210,9 @@ class RiskMonitor(BaseComponent):
                 confidence_key = f"{confidence:.1%}"
                 var_results["methodologies"][confidence_key] = {
                     "historical_simulation": {
-                        "var_percentage": float(historical_var),
-                        "var_dollar": float(historical_var * portfolio_value),
-                        "expected_shortfall_percentage": float(expected_shortfall_historical),
+                        "var_percentage": historical_var,
+                        "var_dollar": historical_var * portfolio_value,
+                        "expected_shortfall_percentage": expected_shortfall_historical,
                         "expected_shortfall_dollar": float(
                             expected_shortfall_historical * portfolio_value
                         ),

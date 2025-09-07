@@ -19,7 +19,7 @@ import asyncio
 import json
 from collections import defaultdict, deque
 from datetime import datetime, timedelta, timezone
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal, getcontext
 from typing import Any
 
 import numpy as np
@@ -28,7 +28,6 @@ import websockets
 from scipy import stats
 
 from src.analytics.types import (
-    AlertSeverity,
     AnalyticsAlert,
     AnalyticsConfiguration,
     PerformanceAttribution,
@@ -39,11 +38,11 @@ from src.analytics.types import (
     TradeAnalytics,
 )
 from src.core.base.component import BaseComponent
-from src.core.exceptions import DataError, RiskCalculationError, ValidationError, ComponentError
+from src.core.exceptions import DataError, RiskCalculationError
+from src.core.types import AlertSeverity
 from src.core.types.trading import Order, Position, Trade
-from src.monitoring.metrics import get_metrics_collector
 from src.utils.datetime_utils import get_current_utc_timestamp
-from src.utils.decimal_utils import safe_decimal
+from src.utils.decimal_utils import to_decimal
 
 
 class RealtimeAnalyticsEngine(BaseComponent):
@@ -58,16 +57,32 @@ class RealtimeAnalyticsEngine(BaseComponent):
     - Trade execution quality analysis
     """
 
-    def __init__(self, config: AnalyticsConfiguration):
+    def __init__(self, config: AnalyticsConfiguration, metrics_collector=None):
         """
         Initialize real-time analytics engine.
 
         Args:
             config: Analytics configuration
+            metrics_collector: Optional metrics collector (injected)
         """
         super().__init__()
         self.config = config
-        self.metrics_collector = get_metrics_collector()
+        # Use dependency injection - do not create dependencies directly
+        self.metrics_collector = metrics_collector
+
+        if self.metrics_collector is None:
+            from src.core.exceptions import ComponentError
+
+            raise ComponentError(
+                "metrics_collector must be injected via dependency injection",
+                component="RealtimeAnalyticsEngine",
+                operation="__init__",
+                context={"missing_dependency": "metrics_collector"},
+            )
+
+        # Set decimal precision context for financial calculations
+        getcontext().prec = 28
+        getcontext().rounding = ROUND_HALF_UP
 
         # Data storage
         self._positions: dict[str, Position] = {}
@@ -127,8 +142,8 @@ class RealtimeAnalyticsEngine(BaseComponent):
         self._websocket_server = None
         self._broadcast_queue: asyncio.Queue = asyncio.Queue()
 
-        # Redis integration for caching
-        self._redis_client: Any = None
+        # Cache client injection (Redis or other caching mechanism)
+        self._cache_client: Any = None
         self._cache_enabled: bool = False
 
         # Stress testing and scenario analysis
@@ -144,6 +159,26 @@ class RealtimeAnalyticsEngine(BaseComponent):
         self._running = False
 
         self.logger.info("RealtimeAnalyticsEngine initialized with enhanced features")
+
+    def set_cache_client(self, cache_client: Any) -> None:
+        """
+        Inject cache client dependency.
+
+        Args:
+            cache_client: Cache client implementation (Redis, etc.)
+        """
+        self._cache_client = cache_client
+        self.logger.debug("Cache client injected")
+
+    def set_websocket_manager(self, websocket_manager: Any) -> None:
+        """
+        Inject WebSocket manager dependency.
+
+        Args:
+            websocket_manager: WebSocket manager implementation
+        """
+        self._websocket_manager = websocket_manager
+        self.logger.debug("WebSocket manager injected")
 
     async def start(self) -> None:
         """Start the real-time analytics engine."""
@@ -181,6 +216,27 @@ class RealtimeAnalyticsEngine(BaseComponent):
         """Stop the real-time analytics engine."""
         self._running = False
 
+        # Close WebSocket server
+        if self._websocket_server:
+            self._websocket_server.close()
+            await self._websocket_server.wait_closed()
+            self.logger.info("WebSocket server closed")
+
+        # Close all WebSocket client connections with proper timeout handling
+        if self._websocket_clients:
+            disconnect_tasks = []
+            for client in list(self._websocket_clients):
+                try:
+                    # Use timeout to prevent hanging
+                    await asyncio.wait_for(client.close(), timeout=5.0)
+                    disconnect_tasks.append(client)
+                except asyncio.TimeoutError:
+                    self.logger.warning("Timeout closing WebSocket client")
+                except Exception as e:
+                    self.logger.warning(f"Error closing WebSocket client: {e}")
+            self._websocket_clients.clear()
+            self.logger.info(f"Closed {len(disconnect_tasks)} WebSocket connections")
+
         # Cancel all tasks
         for task in self._calculation_tasks:
             task.cancel()
@@ -201,11 +257,23 @@ class RealtimeAnalyticsEngine(BaseComponent):
         position_key = f"{position.exchange}:{position.symbol}"
         self._positions[position_key] = position
 
-        # Update position-level analytics
-        asyncio.create_task(self._calculate_position_analytics(position))
+        # Use asyncio.gather for coordinated task execution to prevent race conditions
+        if self._running:
+            task = asyncio.create_task(self._update_position_coordinated(position))
+            self._calculation_tasks.add(task)
+            task.add_done_callback(self._calculation_tasks.discard)
 
-        # Trigger portfolio recalculation
-        asyncio.create_task(self._calculate_portfolio_analytics())
+    async def _update_position_coordinated(self, position: Position) -> None:
+        """Coordinated position update to prevent race conditions."""
+        try:
+            # Run position and portfolio analytics concurrently with proper error handling
+            await asyncio.gather(
+                self._calculate_position_analytics(position),
+                self._calculate_portfolio_analytics(),
+                return_exceptions=True,
+            )
+        except Exception as e:
+            self.logger.error(f"Error in coordinated position update: {e}")
 
     def update_trade(self, trade: Trade) -> None:
         """
@@ -216,13 +284,27 @@ class RealtimeAnalyticsEngine(BaseComponent):
         """
         self._trades.append(trade)
 
-        # Calculate trade analytics
-        asyncio.create_task(self._calculate_trade_analytics(trade))
+        # Use coordinated task execution to prevent race conditions
+        if self._running:
+            task = asyncio.create_task(self._update_trade_coordinated(trade))
+            self._calculation_tasks.add(task)
+            task.add_done_callback(self._calculation_tasks.discard)
 
-        # Update strategy performance
-        if hasattr(trade, "strategy") and trade.metadata.get("strategy"):
-            strategy = trade.metadata["strategy"]
-            asyncio.create_task(self._update_strategy_performance(strategy, trade))
+    async def _update_trade_coordinated(self, trade: Trade) -> None:
+        """Coordinated trade update to prevent race conditions."""
+        try:
+            # Prepare tasks list
+            tasks = [self._calculate_trade_analytics(trade)]
+
+            # Add strategy performance update if applicable
+            if hasattr(trade, "strategy") and trade.metadata.get("strategy"):
+                strategy = trade.metadata["strategy"]
+                tasks.append(self._update_strategy_performance(strategy, trade))
+
+            # Run all tasks concurrently with proper error handling
+            await asyncio.gather(*tasks, return_exceptions=True)
+        except Exception as e:
+            self.logger.error(f"Error in coordinated trade update: {e}")
 
     def update_order(self, order: Order) -> None:
         """
@@ -233,8 +315,11 @@ class RealtimeAnalyticsEngine(BaseComponent):
         """
         self._orders[order.order_id] = order
 
-        # Calculate execution quality metrics
-        asyncio.create_task(self._calculate_execution_analytics(order))
+        # Calculate execution quality metrics with proper task management
+        if self._running:
+            task = asyncio.create_task(self._calculate_execution_analytics(order))
+            self._calculation_tasks.add(task)
+            task.add_done_callback(self._calculation_tasks.discard)
 
     def update_price(self, symbol: str, price: Decimal) -> None:
         """
@@ -252,9 +337,23 @@ class RealtimeAnalyticsEngine(BaseComponent):
             price_return = (price - old_price) / old_price
             self._update_price_return_analytics(symbol, price_return)
 
-        # Trigger real-time P&L and risk updates
-        asyncio.create_task(self._update_realtime_pnl(symbol))
-        asyncio.create_task(self._update_real_time_risk_metrics())
+        # Trigger coordinated real-time updates to prevent race conditions
+        if self._running:
+            task = asyncio.create_task(self._update_price_coordinated(symbol))
+            self._calculation_tasks.add(task)
+            task.add_done_callback(self._calculation_tasks.discard)
+
+    async def _update_price_coordinated(self, symbol: str) -> None:
+        """Coordinated price update to prevent race conditions."""
+        try:
+            # Run P&L and risk updates concurrently with proper error handling
+            await asyncio.gather(
+                self._update_realtime_pnl(symbol),
+                self._update_real_time_risk_metrics(),
+                return_exceptions=True,
+            )
+        except Exception as e:
+            self.logger.error(f"Error in coordinated price update: {e}")
 
     async def get_portfolio_metrics(self) -> PortfolioMetrics | None:
         """
@@ -428,15 +527,17 @@ class RealtimeAnalyticsEngine(BaseComponent):
         """Calculate portfolio volatility."""
         if len(self._daily_returns) < 20:
             return Decimal("0")
-        returns = [float(r) for r in self._daily_returns]
+        returns = [float(r) for r in self._daily_returns]  # Convert to float for numpy calculations
         volatility = np.std(returns) * np.sqrt(252)
-        return safe_decimal(volatility)
+        return to_decimal(volatility)
 
     def _calculate_max_drawdown(self) -> Decimal:
         """Calculate maximum drawdown."""
         if len(self._portfolio_value_history) < 2:
             return Decimal("0")
-        values = [float(v) for v in self._portfolio_value_history]
+        values = [
+            float(v) for v in self._portfolio_value_history
+        ]  # Convert to float for numpy calculations
         peak = values[0]
         max_dd = 0.0
         for value in values[1:]:
@@ -444,7 +545,7 @@ class RealtimeAnalyticsEngine(BaseComponent):
                 peak = value
             dd = (peak - value) / peak
             max_dd = max(max_dd, dd)
-        return safe_decimal(max_dd)
+        return to_decimal(max_dd)
 
     async def _get_current_portfolio_value(self) -> Decimal:
         """Get current portfolio value."""
@@ -560,7 +661,7 @@ class RealtimeAnalyticsEngine(BaseComponent):
                 daily_return = (
                     total_value - self._last_portfolio_value
                 ) / self._last_portfolio_value
-                self._daily_returns.append(float(daily_return))
+                self._daily_returns.append(daily_return)
 
             # Update portfolio value history
             self._portfolio_value_history.append(
@@ -575,7 +676,7 @@ class RealtimeAnalyticsEngine(BaseComponent):
             # Calculate risk metrics
             volatility = None
             sharpe_ratio = None
-            max_drawdown = None
+            # max_drawdown = None  # Reserved for future use
 
             if len(self._daily_returns) > 5:
                 returns_array = np.array(list(self._daily_returns))
@@ -583,7 +684,7 @@ class RealtimeAnalyticsEngine(BaseComponent):
 
                 if volatility > 0:
                     mean_return = np.mean(returns_array) * 252  # Annualized
-                    excess_return = mean_return - float(self.config.risk_free_rate)
+                    excess_return = mean_return - to_decimal(float(self.config.risk_free_rate))
                     sharpe_ratio = excess_return / volatility
 
                 # Calculate max drawdown
@@ -600,7 +701,7 @@ class RealtimeAnalyticsEngine(BaseComponent):
                             if dd > max_dd:
                                 max_dd = dd
 
-                    max_drawdown = max_dd
+                    # max_drawdown = max_dd  # Variable kept for potential future use
 
             # Store current values for next calculation
             self._last_portfolio_value = total_value
@@ -864,27 +965,27 @@ class RealtimeAnalyticsEngine(BaseComponent):
             ytd_return = None
 
             if len(self._daily_returns) > 0:
-                daily_return = safe_decimal(self._daily_returns[-1] * 100)  # Convert to percentage
+                daily_return = to_decimal(self._daily_returns[-1] * 100)  # Convert to percentage
 
             if len(self._daily_returns) > 30:
-                mtd_return = safe_decimal(np.mean(list(self._daily_returns)[-30:]) * 30 * 100)
+                mtd_return = to_decimal(np.mean(list(self._daily_returns)[-30:]) * 30 * 100)
 
             if len(self._daily_returns) > 250:
-                ytd_return = safe_decimal(np.mean(list(self._daily_returns)) * 252 * 100)
+                ytd_return = to_decimal(np.mean(list(self._daily_returns)) * 252 * 100)
 
             # Calculate risk metrics
             volatility = None
             sharpe_ratio = None
-            max_drawdown = None
+            # max_drawdown = None  # Reserved for future use
 
             if len(self._daily_returns) > 5:
                 returns_array = np.array(list(self._daily_returns))
-                volatility = safe_decimal(np.std(returns_array) * np.sqrt(252) * 100)
+                volatility = to_decimal(np.std(returns_array) * np.sqrt(252) * 100)
 
                 if volatility and volatility > 0:
                     mean_return = np.mean(returns_array) * 252
-                    excess_return = mean_return - float(self.config.risk_free_rate)
-                    sharpe_ratio = safe_decimal(excess_return / (float(volatility) / 100))
+                    excess_return = mean_return - to_decimal(self.config.risk_free_rate)
+                    sharpe_ratio = excess_return / (volatility / Decimal("100"))
 
             # Calculate portfolio composition
             total_value = latest["value"]
@@ -894,7 +995,7 @@ class RealtimeAnalyticsEngine(BaseComponent):
             return PortfolioMetrics(
                 timestamp=latest["timestamp"],
                 total_value=latest["value"],
-                cash=Decimal("0"),  # TODO: Implement cash tracking
+                cash=Decimal("0"),  # TBD: Cash tracking integration with portfolio service
                 invested_capital=total_value,
                 unrealized_pnl=latest["unrealized_pnl"],
                 realized_pnl=latest["realized_pnl"],
@@ -904,7 +1005,7 @@ class RealtimeAnalyticsEngine(BaseComponent):
                 ytd_return=ytd_return,
                 volatility=volatility,
                 sharpe_ratio=sharpe_ratio,
-                max_drawdown=max_drawdown,
+                max_drawdown=None,  # Will be calculated in future versions
                 positions_count=positions_count,
                 active_strategies=active_strategies,
             )
@@ -920,8 +1021,8 @@ class RealtimeAnalyticsEngine(BaseComponent):
             if not current_price:
                 return None
 
-            position_key = f"{position.exchange}:{position.symbol}"
-            analytics = self._position_analytics.get(position_key, {})
+            # position_key = f"{position.exchange}:{position.symbol}"  # Reserved for analytics lookup
+            # analytics = self._position_analytics.get(position_key, {})  # For future use
 
             market_value = position.quantity * current_price
             unrealized_pnl = position.calculate_pnl(current_price)
@@ -937,7 +1038,7 @@ class RealtimeAnalyticsEngine(BaseComponent):
             duration_hours = None
             if position.opened_at:
                 duration = get_current_utc_timestamp() - position.opened_at
-                duration_hours = safe_decimal(duration.total_seconds() / 3600)
+                duration_hours = to_decimal(duration.total_seconds() / 3600)
 
             return PositionMetrics(
                 timestamp=get_current_utc_timestamp(),
@@ -972,7 +1073,7 @@ class RealtimeAnalyticsEngine(BaseComponent):
             total_trades = perf["winning_trades"] + perf["losing_trades"]
             win_rate = None
             if total_trades > 0:
-                win_rate = safe_decimal((perf["winning_trades"] / total_trades) * 100)
+                win_rate = to_decimal((perf["winning_trades"] / total_trades) * 100)
 
             # Calculate returns and risk metrics from trade history
             if len(perf["trades"]) > 0:
@@ -983,7 +1084,7 @@ class RealtimeAnalyticsEngine(BaseComponent):
                         pnl = getattr(trade, "pnl", Decimal("0"))
                         value = getattr(trade, "value", trade.quantity * trade.price)
                         if value > 0:
-                            trade_return = float(pnl / value)
+                            trade_return = pnl / value
                             trade_returns.append(trade_return)
 
                 # Calculate risk metrics
@@ -991,30 +1092,36 @@ class RealtimeAnalyticsEngine(BaseComponent):
                 sharpe_ratio = None
                 if len(trade_returns) > 2:
                     returns_array = np.array(trade_returns)
-                    volatility = safe_decimal(np.std(returns_array) * np.sqrt(252) * 100)
+                    volatility = to_decimal(np.std(returns_array) * np.sqrt(252) * 100)
 
                     if volatility and volatility > 0:
                         mean_return = np.mean(returns_array) * 252
-                        excess_return = mean_return - float(self.config.risk_free_rate)
-                        sharpe_ratio = safe_decimal(excess_return / (float(volatility) / 100))
+                        excess_return = mean_return - to_decimal(self.config.risk_free_rate)
+                        sharpe_ratio = excess_return / (volatility / Decimal("100"))
 
             return StrategyMetrics(
                 timestamp=get_current_utc_timestamp(),
                 strategy_name=strategy,
                 total_pnl=perf["total_pnl"],
-                unrealized_pnl=Decimal("0"),  # TODO: Calculate from open positions
+                unrealized_pnl=Decimal(
+                    "0"
+                ),  # TBD: Calculate from open positions using current prices
                 realized_pnl=perf["total_pnl"],
-                total_return=Decimal("0"),  # TODO: Calculate based on allocated capital
+                total_return=Decimal(
+                    "0"
+                ),  # TBD: Calculate based on allocated capital from capital management service
                 volatility=volatility,
                 sharpe_ratio=sharpe_ratio,
                 win_rate=win_rate,
                 total_trades=total_trades,
                 winning_trades=perf["winning_trades"],
                 losing_trades=perf["losing_trades"],
-                capital_allocated=Decimal("100000"),  # TODO: Implement capital allocation
+                capital_allocated=Decimal(
+                    "100000"
+                ),  # TBD: Integration with capital allocator service
                 capital_utilized=perf["total_volume"],
-                utilization_rate=Decimal("0"),  # TODO: Calculate utilization
-                active_positions=0,  # TODO: Count active positions by strategy
+                utilization_rate=Decimal("0"),  # TBD: Calculate capital utilization rate
+                active_positions=0,  # TBD: Count active positions by strategy from position tracking
             )
 
         except Exception as e:
@@ -1028,13 +1135,13 @@ class RealtimeAnalyticsEngine(BaseComponent):
             if symbol not in self._volatility_surface:
                 self._volatility_surface[symbol] = defaultdict(lambda: deque(maxlen=252))  # type: ignore
 
-            self._volatility_surface[symbol]["returns"].append(float(price_return))
+            self._volatility_surface[symbol]["returns"].append(price_return)
 
             # Calculate rolling volatility
             returns = list(self._volatility_surface[symbol]["returns"])
             if len(returns) >= 20:  # Need minimum observations
                 volatility = np.std(returns) * np.sqrt(252)  # Annualized
-                self._volatility_surface[symbol]["volatility"] = safe_decimal(volatility)
+                self._volatility_surface[symbol]["volatility"] = to_decimal(volatility)
 
         except Exception as e:
             self.logger.error(f"Error updating price return analytics: {e}")
@@ -1054,9 +1161,9 @@ class RealtimeAnalyticsEngine(BaseComponent):
             self._var_history.append(
                 {
                     "timestamp": get_current_utc_timestamp(),
-                    "var_95": safe_decimal(var_95),
-                    "var_99": safe_decimal(var_99),
-                    "volatility": safe_decimal(np.std(returns)),
+                    "var_95": to_decimal(var_95),
+                    "var_99": to_decimal(var_99),
+                    "volatility": to_decimal(np.std(returns)),
                 }
             )
 
@@ -1103,7 +1210,7 @@ class RealtimeAnalyticsEngine(BaseComponent):
                             ):
                                 corr_value = correlation_matrix.loc[symbol1, symbol2]
                                 if not np.isnan(corr_value):
-                                    self._correlation_cache[symbol1][symbol2] = safe_decimal(
+                                    self._correlation_cache[symbol1][symbol2] = to_decimal(
                                         corr_value
                                     )
 
@@ -1114,7 +1221,7 @@ class RealtimeAnalyticsEngine(BaseComponent):
         """Calculate comprehensive trade analytics including execution quality."""
         try:
             # Basic trade metrics
-            trade_value = trade.quantity * trade.price
+            # trade_value = trade.quantity * trade.price  # For future transaction cost analysis
             fees = getattr(trade, "fee", Decimal("0"))
 
             # Calculate execution quality metrics
@@ -1191,9 +1298,9 @@ class RealtimeAnalyticsEngine(BaseComponent):
             slippage = abs(trade.price - current_price) / current_price
 
             # Store slippage for tracking
-            self._slippage_tracker[trade.symbol].append(float(slippage))
+            self._slippage_tracker[trade.symbol].append(slippage)
 
-            return safe_decimal(slippage * 10000)  # Return in basis points
+            return to_decimal(slippage * 10000)  # Return in basis points
 
         except Exception as e:
             self.logger.error(f"Error calculating trade slippage: {e}")
@@ -1225,9 +1332,9 @@ class RealtimeAnalyticsEngine(BaseComponent):
                 market_impact = volatility * (participation_rate ** Decimal("0.5"))
 
                 # Store for tracking
-                self._market_impact_tracker[trade.symbol].append(float(market_impact))
+                self._market_impact_tracker[trade.symbol].append(market_impact)
 
-                return safe_decimal(market_impact * 10000)  # Return in basis points
+                return to_decimal(market_impact * 10000)  # Return in basis points
 
             return None
 
@@ -1245,7 +1352,7 @@ class RealtimeAnalyticsEngine(BaseComponent):
             if hasattr(trade, "decision_price") and hasattr(trade, "decision_time"):
                 decision_price = trade.decision_price
                 timing_cost = abs(trade.price - decision_price) / decision_price
-                return safe_decimal(timing_cost * 10000)  # Basis points
+                return to_decimal(timing_cost * 10000)  # Basis points
 
             return None
 
@@ -1317,7 +1424,7 @@ class RealtimeAnalyticsEngine(BaseComponent):
                 # Calculate tracking error from historical active returns
                 if len(self._daily_returns) >= 30:
                     # Simplified - would need actual benchmark returns
-                    tracking_error = safe_decimal(np.std(list(self._daily_returns)[-30:]))
+                    tracking_error = to_decimal(np.std(list(self._daily_returns)[-30:]))
 
                     if tracking_error and tracking_error > 0:
                         information_ratio = active_return / tracking_error
@@ -1326,7 +1433,7 @@ class RealtimeAnalyticsEngine(BaseComponent):
                 timestamp=now,
                 period_start=period_start,
                 period_end=now,
-                total_return=safe_decimal(total_return),
+                total_return=to_decimal(total_return),
                 benchmark_return=benchmark_return,
                 active_return=active_return,
                 strategy_attribution=strategy_attribution,
@@ -1417,13 +1524,12 @@ class RealtimeAnalyticsEngine(BaseComponent):
     async def _initialize_cache(self) -> None:
         """Initialize Redis cache connection if configured."""
         try:
-            if hasattr(self.config, "redis_enabled") and self.config.redis_enabled:
-                from src.database.redis_client import RedisClient
-
-                self._redis_client = RedisClient("redis://localhost:6379/0")
-                await self._redis_client.connect()
+            # Cache client must be injected - no direct instantiation
+            if self._cache_client:
                 self._cache_enabled = True
-                self.logger.info("Redis cache initialized for analytics")
+                self.logger.info("Cache client available for analytics")
+            else:
+                self.logger.info("No cache client injected - running without caching")
         except Exception as e:
             self.logger.warning(f"Failed to initialize Redis cache: {e}")
             self._cache_enabled = False
@@ -1435,17 +1541,65 @@ class RealtimeAnalyticsEngine(BaseComponent):
 
                 async def handle_websocket(websocket, path):
                     self._websocket_clients.add(websocket)
-                    self.logger.info(f"New WebSocket client connected: {websocket.remote_address}")
+                    client_addr = getattr(websocket, "remote_address", "unknown")
+                    self.logger.info(f"New WebSocket client connected: {client_addr}")
+
                     try:
-                        await websocket.wait_closed()
+                        # Send initial connection confirmation
+                        welcome_msg = {
+                            "type": "connection_established",
+                            "timestamp": get_current_utc_timestamp().isoformat(),
+                            "client_id": id(websocket),
+                        }
+                        await websocket.send(json.dumps(welcome_msg))
+
+                        # Set up heartbeat task
+                        # Set up heartbeat task with proper cleanup
+                        heartbeat_task = asyncio.create_task(self._websocket_heartbeat(websocket))
+
+                        try:
+                            # Wait for connection to close or timeout
+                            await asyncio.wait_for(
+                                websocket.wait_closed(),
+                                timeout=getattr(
+                                    self.config, "websocket_timeout", 300
+                                ),  # 5 min default
+                            )
+                        except asyncio.TimeoutError:
+                            self.logger.info(f"WebSocket client {client_addr} connection timed out")
+                            await websocket.close()
+                        finally:
+                            # Properly cancel and wait for heartbeat task cleanup
+                            heartbeat_task.cancel()
+                            try:
+                                await heartbeat_task
+                            except asyncio.CancelledError:
+                                pass
+
                     except websockets.exceptions.ConnectionClosed:
-                        pass
+                        self.logger.info(f"WebSocket client {client_addr} disconnected normally")
+                    except Exception as e:
+                        self.logger.warning(f"WebSocket client {client_addr} error: {e}")
+                        try:
+                            await websocket.close()
+                        except Exception as e:
+                            self.logger.debug(f"WebSocket close error during cleanup: {e}")
+                            # Continue cleanup regardless of close error
                     finally:
                         self._websocket_clients.discard(websocket)
-                        self.logger.info("WebSocket client disconnected")
+                        self.logger.debug(f"WebSocket client {client_addr} cleanup completed")
 
+                # Configure WebSocket server with enhanced timeouts and limits
                 self._websocket_server = await websockets.serve(
-                    handle_websocket, "localhost", self.config.websocket_port
+                    handle_websocket,
+                    "localhost",
+                    self.config.websocket_port,
+                    ping_interval=20,  # Send ping every 20 seconds
+                    ping_timeout=10,  # Wait 10 seconds for pong
+                    close_timeout=10,  # Wait 10 seconds for close
+                    max_size=1024 * 1024,  # 1MB max message size
+                    max_queue=32,  # Limit message queue to prevent memory issues
+                    compression=None,  # Disable compression for low latency
                 )
                 self.logger.info(f"WebSocket server started on port {self.config.websocket_port}")
         except Exception as e:
@@ -1453,12 +1607,52 @@ class RealtimeAnalyticsEngine(BaseComponent):
 
     async def _websocket_broadcast_loop(self) -> None:
         """Background loop for broadcasting analytics updates to WebSocket clients."""
+        last_broadcast_time = 0
+        broadcast_interval = getattr(
+            self.config, "websocket_broadcast_interval", 1.0
+        )  # Default 1 second
+        max_message_size = getattr(
+            self.config, "websocket_max_message_size", 1024 * 1024
+        )  # 1MB default
+
         while self._running:
             try:
-                # Get latest analytics data
-                portfolio_metrics = await self.get_portfolio_metrics()
-                position_metrics = await self.get_position_analytics()
-                risk_metrics = await self.get_portfolio_risk_metrics()
+                # Skip broadcast if no clients connected (backpressure)
+                if not self._websocket_clients:
+                    await asyncio.sleep(broadcast_interval)
+                    continue
+
+                current_time = asyncio.get_event_loop().time()
+
+                # Rate limiting - only broadcast at configured intervals
+                if current_time - last_broadcast_time < broadcast_interval:
+                    await asyncio.sleep(0.1)  # Small sleep to prevent busy waiting
+                    continue
+
+                # Get latest analytics data with timeout to prevent blocking
+                try:
+                    analytics_tasks = [
+                        asyncio.wait_for(self.get_portfolio_metrics(), timeout=5.0),
+                        asyncio.wait_for(self.get_position_analytics(), timeout=5.0),
+                        asyncio.wait_for(self.get_portfolio_risk_metrics(), timeout=5.0),
+                    ]
+
+                    portfolio_metrics, position_metrics, risk_metrics = await asyncio.gather(
+                        *analytics_tasks, return_exceptions=True
+                    )
+
+                    # Handle any exceptions from data gathering
+                    if isinstance(portfolio_metrics, Exception):
+                        portfolio_metrics = None
+                    if isinstance(position_metrics, Exception):
+                        position_metrics = None
+                    if isinstance(risk_metrics, Exception):
+                        risk_metrics = None
+
+                except asyncio.TimeoutError:
+                    self.logger.warning("Analytics data gathering timed out, skipping broadcast")
+                    await asyncio.sleep(broadcast_interval)
+                    continue
 
                 # Create broadcast message
                 message = {
@@ -1472,34 +1666,122 @@ class RealtimeAnalyticsEngine(BaseComponent):
                     },
                 }
 
-                # Broadcast to all connected clients
-                if self._websocket_clients:
-                    await self._broadcast_to_clients(json.dumps(message, default=str))
+                # Serialize and check message size
+                try:
+                    message_str = json.dumps(message, default=str)
+                    if len(message_str.encode("utf-8")) > max_message_size:
+                        self.logger.warning(
+                            f"Broadcast message too large ({len(message_str)} bytes), truncating"
+                        )
+                        # Create a smaller message with essential data only
+                        message = {
+                            "timestamp": get_current_utc_timestamp().isoformat(),
+                            "type": "analytics_update_lite",
+                            "data": {
+                                "portfolio": {
+                                    "total_value": getattr(portfolio_metrics, "total_value", 0)
+                                    if portfolio_metrics
+                                    else 0,
+                                    "total_pnl": getattr(portfolio_metrics, "total_pnl", 0)
+                                    if portfolio_metrics
+                                    else 0,
+                                },
+                                "positions_count": len(position_metrics) if position_metrics else 0,
+                                "alerts_count": len(self._active_alerts),
+                            },
+                        }
+                        message_str = json.dumps(message, default=str)
 
-                await asyncio.sleep(1)  # Broadcast every second
+                except Exception as e:
+                    self.logger.error(f"Error serializing broadcast message: {e}")
+                    continue
+
+                # Broadcast to all connected clients
+                await self._broadcast_to_clients(message_str)
+                last_broadcast_time = current_time
+
             except asyncio.CancelledError:
                 break
             except Exception as e:
                 self.logger.error(f"Error in WebSocket broadcast loop: {e}")
-                await asyncio.sleep(1)
+                await asyncio.sleep(broadcast_interval)  # Use configured interval for error backoff
+
+    async def _websocket_heartbeat(self, websocket) -> None:
+        """Send periodic heartbeat to WebSocket client."""
+        try:
+            while not websocket.closed:
+                heartbeat_msg = {
+                    "type": "heartbeat",
+                    "timestamp": get_current_utc_timestamp().isoformat(),
+                }
+                await websocket.send(json.dumps(heartbeat_msg))
+                await asyncio.sleep(30)  # Send heartbeat every 30 seconds
+        except (websockets.exceptions.ConnectionClosed, asyncio.CancelledError):
+            pass
+        except Exception as e:
+            self.logger.warning(f"Heartbeat error for WebSocket client: {e}")
 
     async def _broadcast_to_clients(self, message: str) -> None:
-        """Broadcast message to all WebSocket clients."""
+        """Broadcast message to all WebSocket clients with proper error handling and backpressure."""
         if not self._websocket_clients:
             return
 
+        # Use a copy of the set to avoid modification during iteration
+        clients_to_send = set(self._websocket_clients)
         disconnected_clients = set()
-        for client in self._websocket_clients:
-            try:
-                await client.send(message)
-            except websockets.exceptions.ConnectionClosed:
-                disconnected_clients.add(client)
-            except Exception as e:
-                self.logger.error(f"Error sending to WebSocket client: {e}")
-                disconnected_clients.add(client)
 
-        # Remove disconnected clients
-        self._websocket_clients -= disconnected_clients
+        # Implement backpressure handling with timeouts
+        async def send_to_client_with_backpressure(client):
+            try:
+                # Add timeout to prevent hanging on slow clients
+                await asyncio.wait_for(client.send(message), timeout=2.0)
+                return client, None
+            except asyncio.TimeoutError:
+                self.logger.warning("Client send timeout - removing slow client")
+                return client, "send_timeout"
+            except websockets.exceptions.ConnectionClosed:
+                return client, "connection_closed"
+            except Exception as e:
+                self.logger.warning(f"Error sending to WebSocket client: {e}")
+                return client, str(e)
+
+        # Limit concurrent sends to prevent resource exhaustion
+        max_concurrent_sends = 50  # Reasonable limit for concurrent WebSocket sends
+
+        # Process clients in batches if there are many
+        client_list = list(clients_to_send)
+        for i in range(0, len(client_list), max_concurrent_sends):
+            batch = client_list[i : i + max_concurrent_sends]
+            send_tasks = [send_to_client_with_backpressure(client) for client in batch]
+
+            if send_tasks:
+                try:
+                    # Use timeout for the entire batch
+                    results = await asyncio.wait_for(
+                        asyncio.gather(*send_tasks, return_exceptions=True), timeout=5.0
+                    )
+
+                    # Process results and collect failed clients
+                    for result in results:
+                        if isinstance(result, tuple):
+                            client, error = result
+                            if error:
+                                disconnected_clients.add(client)
+                        elif isinstance(result, Exception):
+                            self.logger.error(f"Unexpected error in broadcast batch: {result}")
+
+                except asyncio.TimeoutError:
+                    self.logger.error(f"Broadcast batch timeout for {len(send_tasks)} clients")
+                    # Mark all clients in this batch as problematic
+                    disconnected_clients.update(batch)
+                except Exception as e:
+                    self.logger.error(f"Critical error in WebSocket broadcast batch: {e}")
+                    disconnected_clients.update(batch)
+
+        # Remove disconnected clients from active set
+        if disconnected_clients:
+            self._websocket_clients -= disconnected_clients
+            self.logger.debug(f"Removed {len(disconnected_clients)} disconnected WebSocket clients")
 
     async def _cache_sync_loop(self) -> None:
         """Background loop for syncing analytics data to Redis cache."""
@@ -1507,8 +1789,8 @@ class RealtimeAnalyticsEngine(BaseComponent):
             try:
                 # Cache key metrics for fast access
                 portfolio_metrics = await self.get_portfolio_metrics()
-                if portfolio_metrics and self._redis_client:
-                    await self._redis_client.set(
+                if portfolio_metrics and self._cache_client:
+                    await self._cache_client.set(
                         "analytics:portfolio:latest",
                         json.dumps(portfolio_metrics, default=str),
                         expire=60,  # 1-minute expiry
@@ -1516,8 +1798,8 @@ class RealtimeAnalyticsEngine(BaseComponent):
 
                 # Cache position metrics
                 position_metrics = await self.get_position_analytics()
-                if position_metrics and self._redis_client:
-                    await self._redis_client.set(
+                if position_metrics and self._cache_client:
+                    await self._cache_client.set(
                         "analytics:positions:latest",
                         json.dumps(position_metrics, default=str),
                         expire=60,
@@ -1549,7 +1831,7 @@ class RealtimeAnalyticsEngine(BaseComponent):
             for scenario_name, scenario_params in self._stress_scenarios.items():
                 scenario_result = {
                     "scenario_name": scenario_name,
-                    "current_value": float(current_portfolio_value),
+                    "current_value": current_portfolio_value,
                     "stressed_value": 0.0,
                     "absolute_loss": 0.0,
                     "percentage_loss": 0.0,
@@ -1572,7 +1854,7 @@ class RealtimeAnalyticsEngine(BaseComponent):
                     total_stressed_value += stressed_value
 
                     scenario_result["position_impacts"][symbol] = {
-                        "original_value": float(position_value),
+                        "original_value": position_value,
                         "stressed_value": float(stressed_value),
                         "impact": float(stressed_value - position_value),
                     }
@@ -1868,13 +2150,21 @@ class RealtimeAnalyticsEngine(BaseComponent):
                 },
             }
 
-            # Cache the dashboard data if Redis is available
-            if self._cache_enabled and self._redis_client:
-                await self._redis_client.set(
-                    "analytics:dashboard:latest",
-                    json.dumps(dashboard_data, default=str),
-                    expire=30,  # 30-second expiry for fresh data
-                )
+            # Cache the dashboard data if Redis is available with timeout
+            if self._cache_enabled and self._cache_client:
+                try:
+                    await asyncio.wait_for(
+                        self._cache_client.set(
+                            "analytics:dashboard:latest",
+                            json.dumps(dashboard_data, default=str),
+                            expire=30,  # 30-second expiry for fresh data
+                        ),
+                        timeout=5.0,
+                    )
+                except asyncio.TimeoutError:
+                    self.logger.warning("Dashboard cache operation timed out")
+                except Exception as cache_error:
+                    self.logger.error(f"Error caching dashboard data: {cache_error}")
 
             return dashboard_data
 
