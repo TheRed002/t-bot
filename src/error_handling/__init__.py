@@ -42,7 +42,6 @@ from .recovery_scenarios import (
     RecoveryScenario,
 )
 from .service import ErrorHandlingService
-from .service_adapter import ErrorHandlingServiceAdapter, create_error_handling_service_adapter
 from .state_monitor import StateMonitor
 
 # Global error handler instance
@@ -79,7 +78,6 @@ __all__ = [
     "ErrorHandler",
     "ErrorHandlerInterface",
     "ErrorHandlingService",
-    "ErrorHandlingServiceAdapter",
     "ErrorHandlingServiceInterface",
     "ErrorHandlingServicePort",
     "ErrorPatternAnalytics",
@@ -95,7 +93,6 @@ __all__ = [
     "RecoveryScenario",
     "StateMonitor",
     "configure_error_handling_di",
-    "create_error_handling_service_adapter",
     "get_active_handler_count",
     "get_global_error_handler",
     "register_error_handling_services",

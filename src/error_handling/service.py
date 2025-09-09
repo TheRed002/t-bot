@@ -9,7 +9,7 @@ proper separation of concerns.
 
 import asyncio
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any, Optional, Protocol
 
 if TYPE_CHECKING:
     from src.error_handling.error_handler import ErrorHandler
@@ -48,13 +48,15 @@ class ErrorHandlingService(BaseService, ErrorPropagationMixin):
     def __init__(
         self,
         config: Config,
-        error_handler: "ErrorHandler | None" = None,
-        global_handler: "GlobalErrorHandler | None" = None,
-        pattern_analytics: "ErrorPatternAnalytics | None" = None,
+        error_handler: Optional["ErrorHandler"] = None,
+        global_handler: Optional["GlobalErrorHandler"] = None,
+        pattern_analytics: Optional["ErrorPatternAnalytics"] = None,
         state_monitor: StateMonitorInterface | None = None,
     ) -> None:
         # Configuration constants
-        self._background_task_timeout = 10.0
+        from src.error_handling.error_handler import DEFAULT_BACKGROUND_TASK_CLEANUP_TIMEOUT
+
+        self._background_task_timeout = DEFAULT_BACKGROUND_TASK_CLEANUP_TIMEOUT
 
         # Convert Config to ConfigDict properly for BaseService
         from src.core.types.base import ConfigDict
@@ -79,6 +81,9 @@ class ErrorHandlingService(BaseService, ErrorPropagationMixin):
 
         # Service state
         self._initialized = False
+        DEFAULT_MAX_CONCURRENT_TASKS = 10  # Prevent overwhelming the system
+        self._max_concurrent_tasks = DEFAULT_MAX_CONCURRENT_TASKS
+        self._semaphore = None  # Initialize in async context
 
     async def initialize(self) -> None:
         """Initialize the error handling service and its components."""
@@ -108,6 +113,10 @@ class ErrorHandlingService(BaseService, ErrorPropagationMixin):
                     "Register StateMonitor with DI container for full functionality."
                 )
 
+            # Initialize semaphore for backpressure control
+            if self._semaphore is None:
+                self._semaphore = asyncio.Semaphore(self._max_concurrent_tasks)
+
             self._initialized = True
             self.logger.info("Error handling service initialized successfully")
 
@@ -119,17 +128,17 @@ class ErrorHandlingService(BaseService, ErrorPropagationMixin):
         """Configure dependencies via dependency injector."""
         try:
             # Resolve dependencies from DI container only if not already provided
-            if not self._error_handler and injector.has_service("ErrorHandler"):
-                self._error_handler = injector.resolve("ErrorHandler")
+            if not self._error_handler and injector.has("ErrorHandler"):
+                self._error_handler = injector.get("ErrorHandler")
 
-            if not self._global_handler and injector.has_service("GlobalErrorHandler"):
-                self._global_handler = injector.resolve("GlobalErrorHandler")
+            if not self._global_handler and injector.has("GlobalErrorHandler"):
+                self._global_handler = injector.get("GlobalErrorHandler")
 
-            if not self._pattern_analytics and injector.has_service("ErrorPatternAnalytics"):
-                self._pattern_analytics = injector.resolve("ErrorPatternAnalytics")
+            if not self._pattern_analytics and injector.has("ErrorPatternAnalytics"):
+                self._pattern_analytics = injector.get("ErrorPatternAnalytics")
 
-            if not self._state_monitor and injector.has_service("StateMonitor"):
-                self._state_monitor = injector.resolve("StateMonitor")
+            if not self._state_monitor and injector.has("StateMonitor"):
+                self._state_monitor = injector.get("StateMonitor")
 
             self.logger.debug("Dependencies configured via DI container")
         except Exception as e:
@@ -161,7 +170,7 @@ class ErrorHandlingService(BaseService, ErrorPropagationMixin):
         # Apply consistent data transformation for financial context
         transformed_context = self._transform_error_context(context or {}, component)
 
-        # Use service execution pattern for proper monitoring and error handling
+        # Use service execution pattern
         return await self.execute_with_monitoring(
             "handle_error",
             self._handle_error_impl,
@@ -183,14 +192,39 @@ class ErrorHandlingService(BaseService, ErrorPropagationMixin):
         """Implementation of error handling business logic."""
         await self._ensure_initialized()
 
-        # Apply consistent error propagation patterns matching database module validation
-        if isinstance(error, (ValidationError, DataValidationError)):
-            # Apply same error propagation pattern as database module
-            from src.utils.messaging_patterns import ErrorPropagationMixin
+        # Validate data at monitoring/risk_management/web_interface -> error_handling boundary
+        if (
+            component == "RiskMonitoringService"
+            or component.startswith("risk_")
+            or component.startswith("monitoring_")
+            or component == "web_interface"
+            or component.startswith("web_")
+        ):
+            boundary_data = {
+                "component": component,
+                "error_type": type(error).__name__,
+                "severity": "error",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "processing_mode": "batch",
+                "data_format": "boundary_validation_v1",
+                "message_pattern": "batch",
+                "boundary_crossed": True,
+            }
+            if context:
+                boundary_data.update(context)
 
-            propagator = ErrorPropagationMixin()
-            propagator.propagate_validation_error(error, f"{component}.{operation}")
-            # propagate_validation_error should always raise, but add explicit raise for mypy
+            # Use consistent boundary validation patterns
+            if component == "web_interface" or component.startswith("web_"):
+                # Use specific web interface boundary validation
+                BoundaryValidator.validate_web_interface_to_error_boundary(boundary_data)
+            else:
+                # Use general monitoring boundary validation
+                BoundaryValidator.validate_monitoring_to_error_boundary(boundary_data)
+
+        # Apply consistent error propagation patterns
+        if isinstance(error, ValidationError | DataValidationError):
+            # Delegate error propagation to service layer
+            self.propagate_validation_error(error, f"{component}.{operation}")
             raise error
 
         # Create error context
@@ -210,7 +244,7 @@ class ErrorHandlingService(BaseService, ErrorPropagationMixin):
         if self._pattern_analytics is not None:
             self._pattern_analytics.add_error_event(error_context.__dict__)
 
-        # Create response with boundary validation for monitoring module communication
+        # Create standardized response
         response_data = {
             "error_id": error_context.error_id,
             "handled": True,
@@ -220,9 +254,6 @@ class ErrorHandlingService(BaseService, ErrorPropagationMixin):
             "component": component,
             "operation": operation,
         }
-
-        # Validate at error_handling -> monitoring boundary for consistent data flow
-        BoundaryValidator.validate_error_to_monitoring_boundary(response_data)
 
         return response_data
 
@@ -410,40 +441,47 @@ class ErrorHandlingService(BaseService, ErrorPropagationMixin):
             self.logger.error(f"Failed to get error handler metrics: {e}")
             raise ServiceError(f"Error handler metrics retrieval failed: {e}") from e
 
-    def _transform_error_context(
-        self, context: dict[str, Any], component: str
-    ) -> dict[str, Any]:
-        """Transform error context data consistently across operations."""
-        # Apply consistent data transformation patterns matching database module exactly
+    def _transform_error_context(self, context: dict[str, Any], component: str) -> dict[str, Any]:
+        """Transform error context data for consistent processing."""
         transformed_context = context.copy()
 
-        # Use same messaging patterns transformation as database module
-        from src.utils.messaging_patterns import MessagingCoordinator
-
-        coordinator = MessagingCoordinator("ErrorHandlingTransform")
-        transformed_context = coordinator._apply_data_transformation(transformed_context)
-
-        # Standardize context format for consistent processing with database module
+        # Add standard processing fields
         transformed_context.update(
             {
-                "processing_mode": "async",
                 "processing_stage": "error_handling",
-                "data_format": "error_context_v1",
-                # Add fields consistent with database module patterns
-                "validation_status": "validated",
-                "boundary_crossed": True,
+                "processed_at": datetime.now(timezone.utc).isoformat(),
+                "component": component,
             }
         )
 
-        # Set audit fields consistently matching database module
-        transformed_context["processed_at"] = datetime.now(timezone.utc).isoformat()
-
         return transformed_context
+
+    async def start_error_monitoring(self) -> None:
+        """Start error monitoring services."""
+        await self._ensure_initialized()
+
+        # Start pattern analytics if available
+        if self._pattern_analytics and hasattr(self._pattern_analytics, "start_monitoring"):
+            try:
+                await self._pattern_analytics.start_monitoring()
+                self.logger.info("Pattern analytics monitoring started")
+            except Exception as e:
+                self.logger.warning(f"Failed to start pattern analytics monitoring: {e}")
+
+    async def stop_error_monitoring(self) -> None:
+        """Stop error monitoring services."""
+        # Stop pattern analytics if available
+        if self._pattern_analytics and hasattr(self._pattern_analytics, "stop_monitoring"):
+            try:
+                await self._pattern_analytics.stop_monitoring()
+                self.logger.info("Pattern analytics monitoring stopped")
+            except Exception as e:
+                self.logger.warning(f"Failed to stop pattern analytics monitoring: {e}")
 
     async def handle_batch_errors(
         self, errors: list[tuple[Exception, str, str, dict[str, Any] | None]]
     ) -> list[dict[str, Any]]:
-        """Handle multiple errors in batch for consistent processing paradigm."""
+        """Handle multiple errors in batch."""
         if not errors:
             return []
 
@@ -454,23 +492,23 @@ class ErrorHandlingService(BaseService, ErrorPropagationMixin):
     async def _handle_batch_errors_impl(
         self, errors: list[tuple[Exception, str, str, dict[str, Any] | None]]
     ) -> list[dict[str, Any]]:
-        """Implementation of batch error handling."""
+        """Implementation of batch error handling with backpressure control."""
         await self._ensure_initialized()
 
-        results = []
-        for error, component, operation, context in errors:
-            try:
-                result = await self._handle_error_impl(error, component, operation, context)
-                results.append(result)
-            except Exception as batch_error:
-                # Log but don't fail entire batch
-                self.logger.error(
-                    f"Failed to handle error in batch: {batch_error}", original_error=str(error)
-                )
-                import uuid
+        async def handle_single_error(error_data):
+            error, component, operation, context = error_data
+            # Use semaphore to limit concurrent processing
+            async with self._semaphore:
+                try:
+                    return await self._handle_error_impl(error, component, operation, context)
+                except Exception as batch_error:
+                    # Log but don't fail entire batch
+                    self.logger.error(
+                        f"Failed to handle error in batch: {batch_error}", original_error=str(error)
+                    )
+                    import uuid
 
-                results.append(
-                    {
+                    return {
                         "error_id": str(uuid.uuid4()),
                         "handled": False,
                         "recovery_success": False,
@@ -478,7 +516,10 @@ class ErrorHandlingService(BaseService, ErrorPropagationMixin):
                         "timestamp": datetime.now(timezone.utc).isoformat(),
                         "batch_error": str(batch_error),
                     }
-                )
+
+        # Process all errors concurrently but with backpressure control
+        tasks = [handle_single_error(error_data) for error_data in errors]
+        results = await asyncio.gather(*tasks, return_exceptions=False)
 
         return results
 
@@ -616,13 +657,12 @@ class ErrorHandlingService(BaseService, ErrorPropagationMixin):
             )
 
 
-# Factory function for dependency injection
 def create_error_handling_service(
     config: Config,
     dependency_container: Any | None = None,
-    error_handler: "ErrorHandler | None" = None,
-    global_handler: "GlobalErrorHandler | None" = None,
-    pattern_analytics: "ErrorPatternAnalytics | None" = None,
+    error_handler: Optional["ErrorHandler"] = None,
+    global_handler: Optional["GlobalErrorHandler"] = None,
+    pattern_analytics: Optional["ErrorPatternAnalytics"] = None,
     state_monitor: StateMonitorInterface | None = None,
 ) -> "ErrorHandlingService":
     """
@@ -641,14 +681,14 @@ def create_error_handling_service(
     """
     # Resolve dependencies from container if not provided directly
     if dependency_container:
-        if not error_handler and dependency_container.has_service("ErrorHandler"):
-            error_handler = dependency_container.resolve("ErrorHandler")
-        if not global_handler and dependency_container.has_service("GlobalErrorHandler"):
-            global_handler = dependency_container.resolve("GlobalErrorHandler")
-        if not pattern_analytics and dependency_container.has_service("ErrorPatternAnalytics"):
-            pattern_analytics = dependency_container.resolve("ErrorPatternAnalytics")
-        if not state_monitor and dependency_container.has_service("StateMonitor"):
-            state_monitor = dependency_container.resolve("StateMonitor")
+        if not error_handler and dependency_container.has("ErrorHandler"):
+            error_handler = dependency_container.get("ErrorHandler")
+        if not global_handler and dependency_container.has("GlobalErrorHandler"):
+            global_handler = dependency_container.get("GlobalErrorHandler")
+        if not pattern_analytics and dependency_container.has("ErrorPatternAnalytics"):
+            pattern_analytics = dependency_container.get("ErrorPatternAnalytics")
+        if not state_monitor and dependency_container.has("StateMonitor"):
+            state_monitor = dependency_container.get("StateMonitor")
 
     service = ErrorHandlingService(
         config=config,

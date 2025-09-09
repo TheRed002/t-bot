@@ -2,9 +2,12 @@
 
 from typing import Any
 
+from src.core.exceptions import DatabaseConnectionError, DatabaseError, DatabaseQueryError
 from src.error_handling.base import ErrorHandlerBase
-from src.error_handling.security_sanitizer import (
-    SensitivityLevel,
+from src.error_handling.security_validator import SensitivityLevel
+from src.utils.error_handling_utils import (
+    create_recovery_response,
+    get_or_create_sanitizer,
 )
 
 
@@ -13,20 +16,14 @@ class DatabaseErrorHandler(ErrorHandlerBase):
 
     def __init__(self, next_handler=None, sanitizer=None):
         super().__init__(next_handler)
-        self.sanitizer = sanitizer
-        if self.sanitizer is None:
-            # Get default sanitizer for production, but allow None in test environments
-            from src.error_handling.security_sanitizer import get_security_sanitizer
-            try:
-                self.sanitizer = get_security_sanitizer()
-            except Exception:
-                # In test environments, this might fail - use a mock or None
-                import logging
-                logger = logging.getLogger(__name__)
-                logger.debug("SecuritySanitizer not available, using minimal sanitization")
+        self.sanitizer = get_or_create_sanitizer(sanitizer)
 
     def can_handle(self, error: Exception) -> bool:
         """Check if this is a database error."""
+        # Check for specific database exceptions from core.exceptions first
+        if isinstance(error, DatabaseError | DatabaseConnectionError | DatabaseQueryError):
+            return True
+
         # Check for SQLAlchemy errors
         error_type_name = type(error).__name__
         db_error_types = [
@@ -77,62 +74,66 @@ class DatabaseErrorHandler(ErrorHandlerBase):
 
         # Handle deadlock with immediate retry
         if "deadlock" in error_msg:
-            sanitized_msg = self.sanitizer.sanitize_error_message(
-                str(error), SensitivityLevel.MEDIUM
+            response = create_recovery_response(
+                action="retry",
+                reason="deadlock",
+                error=error,
+                level=SensitivityLevel.MEDIUM,
+                sanitizer=self.sanitizer,
+                delay="0.1",
+                max_retries=3,
             )
-            self._logger.warning(f"Database deadlock detected: {sanitized_msg}")
-            return {
-                "action": "retry",
-                "delay": "0.1",  # Small delay
-                "reason": "deadlock",
-                "max_retries": 3,
-                "sanitized_error": sanitized_msg,
-            }
+            self._logger.warning(f"Database deadlock detected: {response['sanitized_error']}")
+            return response
 
         # Handle connection issues
         if any(word in error_msg for word in ["connection", "pool", "closed"]):
-            sanitized_msg = self.sanitizer.sanitize_error_message(str(error), SensitivityLevel.HIGH)
-            self._logger.error(f"Database connection error: {sanitized_msg}")
-            return {
-                "action": "reconnect",
-                "delay": "5",
-                "reason": "connection_lost",
-                "sanitized_error": sanitized_msg,
-            }
+            response = create_recovery_response(
+                action="reconnect",
+                reason="connection_lost",
+                error=error,
+                level=SensitivityLevel.HIGH,
+                sanitizer=self.sanitizer,
+                delay="5",
+            )
+            self._logger.error(f"Database connection error: {response['sanitized_error']}")
+            return response
 
         # Handle constraint violations
         if any(word in error_msg for word in ["constraint", "duplicate", "unique"]):
-            sanitized_msg = self.sanitizer.sanitize_error_message(
-                str(error), SensitivityLevel.MEDIUM
+            response = create_recovery_response(
+                action="reject",
+                reason="constraint_violation",
+                error=error,
+                level=SensitivityLevel.MEDIUM,
+                sanitizer=self.sanitizer,
+                recoverable=False,
             )
-            self._logger.error(f"Database constraint violation: {sanitized_msg}")
-            return {
-                "action": "reject",
-                "reason": "constraint_violation",
-                "sanitized_error": sanitized_msg,
-                "recoverable": False,
-            }
+            self._logger.error(f"Database constraint violation: {response['sanitized_error']}")
+            return response
 
         # Handle lock timeouts
         if "lock" in error_msg and "timeout" in error_msg:
-            sanitized_msg = self.sanitizer.sanitize_error_message(
-                str(error), SensitivityLevel.MEDIUM
+            response = create_recovery_response(
+                action="retry",
+                reason="lock_timeout",
+                error=error,
+                level=SensitivityLevel.MEDIUM,
+                sanitizer=self.sanitizer,
+                delay="2",
+                max_retries=2,
             )
-            self._logger.warning(f"Database lock timeout: {sanitized_msg}")
-            return {
-                "action": "retry",
-                "delay": "2",
-                "reason": "lock_timeout",
-                "max_retries": 2,
-                "sanitized_error": sanitized_msg,
-            }
+            self._logger.warning(f"Database lock timeout: {response['sanitized_error']}")
+            return response
 
         # Default database error handling
-        sanitized_msg = self.sanitizer.sanitize_error_message(str(error), SensitivityLevel.HIGH)
-        self._logger.error(f"Database error: {sanitized_msg}")
-        return {
-            "action": "fail",
-            "reason": "database_error",
-            "sanitized_error": sanitized_msg,
-            "requires_manual_intervention": True,
-        }
+        response = create_recovery_response(
+            action="fail",
+            reason="database_error",
+            error=error,
+            level=SensitivityLevel.HIGH,
+            sanitizer=self.sanitizer,
+            requires_manual_intervention=True,
+        )
+        self._logger.error(f"Database error: {response['sanitized_error']}")
+        return response

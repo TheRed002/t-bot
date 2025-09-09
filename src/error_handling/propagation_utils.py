@@ -123,7 +123,7 @@ def validate_propagation_data(
     elif target_module == "database":
         # Database requires entity tracking
         if "entity_id" in validated_data:
-            if not isinstance(validated_data["entity_id"], (str, int)):
+            if not isinstance(validated_data["entity_id"], str | int):
                 raise ValidationError(
                     "Database entity_id must be string or int",
                     error_code="PROP_003",
@@ -192,13 +192,16 @@ def transform_error_for_module(
 
 
 def _transform_for_core(data: dict[str, Any]) -> dict[str, Any]:
-    """Transform error data for core module compatibility."""
+    """Transform error data for core module compatibility with consistent patterns."""
     core_format = {
         "event_type": "error_occurred",
         "event_data": data,
         "timestamp": data.get("timestamp", datetime.now(timezone.utc).isoformat()),
-        "data_format": "core_event_v1",
+        "data_format": "event_data_v1",  # Align with state module format
         "processing_stage": "core_event_processing",
+        "processing_mode": "stream",  # Consistent processing mode
+        "message_pattern": "pub_sub",  # Consistent messaging pattern
+        "boundary_crossed": True,  # Cross-module event
     }
 
     # Preserve financial data precision
@@ -217,7 +220,7 @@ def _transform_for_core(data: dict[str, Any]) -> dict[str, Any]:
 
 def _transform_for_database(data: dict[str, Any]) -> dict[str, Any]:
     """Transform error data for database module compatibility."""
-    db_format = {
+    db_format: dict[str, Any] = {
         "table_context": "error_logs",
         "entity_data": data,
         "operation_type": "insert",
@@ -234,7 +237,7 @@ def _transform_for_database(data: dict[str, Any]) -> dict[str, Any]:
 
 
 def _transform_for_monitoring(data: dict[str, Any]) -> dict[str, Any]:
-    """Transform error data for monitoring module compatibility."""
+    """Transform error data for monitoring module compatibility with consistent patterns."""
     monitoring_format = {
         "metric_name": "error_occurred",
         "metric_value": 1,
@@ -246,6 +249,9 @@ def _transform_for_monitoring(data: dict[str, Any]) -> dict[str, Any]:
         },
         "timestamp": data.get("timestamp", datetime.now(timezone.utc).isoformat()),
         "data_format": "monitoring_metric_v1",
+        "processing_mode": "stream",  # Consistent processing mode
+        "message_pattern": "pub_sub",  # Consistent messaging pattern
+        "boundary_crossed": True,  # Cross-module event
     }
 
     return monitoring_format
@@ -253,7 +259,7 @@ def _transform_for_monitoring(data: dict[str, Any]) -> dict[str, Any]:
 
 def _transform_for_exchanges(data: dict[str, Any]) -> dict[str, Any]:
     """Transform error data for exchanges module compatibility."""
-    exchange_format = {
+    exchange_format: dict[str, Any] = {
         "exchange_error": True,
         "error_context": data,
         "data_format": "exchange_error_v1",

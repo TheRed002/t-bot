@@ -6,7 +6,7 @@ from collections.abc import Callable
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any, Protocol, runtime_checkable
 
-from src.core import BaseComponent
+from src.core.base import BaseComponent
 from src.error_handling.security_rate_limiter import (
     get_security_rate_limiter,
     record_recovery_failure,

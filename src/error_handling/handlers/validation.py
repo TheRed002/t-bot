@@ -4,10 +4,14 @@ from typing import Any
 
 from src.core.exceptions import ValidationError
 from src.error_handling.base import ErrorHandlerBase
-from src.error_handling.security_sanitizer import (
-    SensitivityLevel,
-)
+from src.error_handling.security_validator import SensitivityLevel
 from src.utils.error_categorization import detect_data_validation_error
+from src.utils.error_handling_utils import (
+    create_recovery_response,
+    extract_field_from_error,
+    get_or_create_sanitizer,
+    sanitize_error_with_level,
+)
 
 
 class ValidationErrorHandler(ErrorHandlerBase):
@@ -15,17 +19,7 @@ class ValidationErrorHandler(ErrorHandlerBase):
 
     def __init__(self, next_handler=None, sanitizer=None):
         super().__init__(next_handler)
-        self.sanitizer = sanitizer
-        if self.sanitizer is None:
-            # Get default sanitizer for production, but allow None in test environments
-            from src.error_handling.security_sanitizer import get_security_sanitizer
-            try:
-                self.sanitizer = get_security_sanitizer()
-            except Exception:
-                # In test environments, this might fail - use a mock or None
-                import logging
-                logger = logging.getLogger(__name__)
-                logger.debug("SecuritySanitizer not available, using minimal sanitization")
+        self.sanitizer = get_or_create_sanitizer(sanitizer)
 
     def can_handle(self, error: Exception) -> bool:
         """Check if this is a validation error."""
@@ -69,43 +63,22 @@ class ValidationErrorHandler(ErrorHandlerBase):
         Returns:
             Recovery action dictionary
         """
-        sanitized_msg = self.sanitizer.sanitize_error_message(str(error), SensitivityLevel.LOW)
+        sanitized_msg = sanitize_error_with_level(error, SensitivityLevel.LOW, self.sanitizer)
         self._logger.error(f"Validation error: {sanitized_msg}")
 
         # Extract field information if available
-        field = self._extract_field_name(error, context)
+        field = extract_field_from_error(error, context)
 
-        return {
-            "action": "reject",
-            "reason": "validation_failed",
-            "sanitized_error": sanitized_msg,
-            "field": field,
-            "recoverable": False,
-            "user_action_required": True,
-        }
-
-    def _extract_field_name(self, error: Exception, context: dict[str, Any] | None) -> str | None:
-        """Try to extract field name from error or context."""
-        # Check context first
-        if context and "field" in context:
-            return context["field"]
-
-        # Try to parse from error message
-        import re
-
-        error_str = str(error)
-
-        # Look for patterns like "field 'price' is invalid"
-        match = re.search(r"field\s+['\"]?(\w+)['\"]?", error_str, re.IGNORECASE)
-        if match:
-            return match.group(1)
-
-        # Look for "price must be"
-        match = re.search(r"(\w+)\s+must\s+be", error_str, re.IGNORECASE)
-        if match:
-            return match.group(1)
-
-        return None
+        return create_recovery_response(
+            action="reject",
+            reason="validation_failed",
+            error=error,
+            level=SensitivityLevel.LOW,
+            sanitizer=self.sanitizer,
+            field=field,
+            recoverable=False,
+            user_action_required=True,
+        )
 
 
 class DataValidationErrorHandler(ErrorHandlerBase):
@@ -113,17 +86,7 @@ class DataValidationErrorHandler(ErrorHandlerBase):
 
     def __init__(self, next_handler=None, sanitizer=None):
         super().__init__(next_handler)
-        self.sanitizer = sanitizer
-        if self.sanitizer is None:
-            # Get default sanitizer for production, but allow None in test environments
-            from src.error_handling.security_sanitizer import get_security_sanitizer
-            try:
-                self.sanitizer = get_security_sanitizer()
-            except Exception:
-                # In test environments, this might fail - use a mock or None
-                import logging
-                logger = logging.getLogger(__name__)
-                logger.debug("SecuritySanitizer not available, using minimal sanitization")
+        self.sanitizer = get_or_create_sanitizer(sanitizer)
 
     def can_handle(self, error: Exception) -> bool:
         """Check if this is a data validation error."""
@@ -143,20 +106,24 @@ class DataValidationErrorHandler(ErrorHandlerBase):
         Returns:
             Recovery action dictionary
         """
-        sanitized_msg = self.sanitizer.sanitize_error_message(str(error), SensitivityLevel.MEDIUM)
+        sanitized_msg = sanitize_error_with_level(error, SensitivityLevel.MEDIUM, self.sanitizer)
         self._logger.error(f"Data validation error: {sanitized_msg}")
 
         # Check if we can request fresh data
         if context and context.get("can_refresh", False):
-            return {
-                "action": "refresh",
-                "reason": "data_validation_failed",
-                "sanitized_error": sanitized_msg,
-            }
+            return create_recovery_response(
+                action="refresh",
+                reason="data_validation_failed",
+                error=error,
+                level=SensitivityLevel.MEDIUM,
+                sanitizer=self.sanitizer,
+            )
 
-        return {
-            "action": "reject",
-            "reason": "invalid_data",
-            "sanitized_error": sanitized_msg,
-            "recoverable": False,
-        }
+        return create_recovery_response(
+            action="reject",
+            reason="invalid_data",
+            error=error,
+            level=SensitivityLevel.MEDIUM,
+            sanitizer=self.sanitizer,
+            recoverable=False,
+        )

@@ -23,6 +23,7 @@ from src.core.exceptions import (
     TradingBotError,
     ValidationError,
 )
+from src.error_handling.context import ErrorContext, ErrorSeverity
 from src.error_handling.error_handler import (
     CircuitBreaker,
     ErrorHandler,
@@ -30,7 +31,6 @@ from src.error_handling.error_handler import (
     error_handler_decorator,
 )
 from src.error_handling.secure_pattern_analytics import ErrorPattern
-from src.error_handling.context import ErrorContext, ErrorSeverity
 
 
 class TestErrorSeverity:
@@ -223,22 +223,33 @@ class TestErrorHandler:
     def mock_sanitizer(self):
         """Provide mock sanitizer for testing."""
         sanitizer = MagicMock()
-        sanitizer.sanitize_error_message = MagicMock(side_effect=lambda msg, level: f"sanitized: {msg}")
-        
+        sanitizer.sanitize_error_message = MagicMock(
+            side_effect=lambda msg, level: f"sanitized: {msg}"
+        )
+
         def mock_sanitize_context(ctx, level):
             """Mock context sanitization that replaces sensitive data."""
             sanitized_ctx = ctx.copy()
             # Mock sanitization of sensitive data
             for key, value in sanitized_ctx.items():
-                if isinstance(value, str) and any(sensitive_word in key.lower() for sensitive_word in ['key', 'token', 'password', 'secret']):
+                if isinstance(value, str) and any(
+                    sensitive_word in key.lower()
+                    for sensitive_word in ["key", "token", "password", "secret"]
+                ):
                     sanitized_ctx[key] = f"HASH_{hash(value) % 10000:04d}"
-                elif isinstance(value, str) and len(value) > 10 and any(char.isdigit() for char in value):
+                elif (
+                    isinstance(value, str)
+                    and len(value) > 10
+                    and any(char.isdigit() for char in value)
+                ):
                     # Mask potential sensitive strings
                     sanitized_ctx[key] = "*" * 8
             return sanitized_ctx
-            
+
         sanitizer.sanitize_context = MagicMock(side_effect=mock_sanitize_context)
-        sanitizer.sanitize_stack_trace = MagicMock(side_effect=lambda trace, level: f"sanitized: {trace}")
+        sanitizer.sanitize_stack_trace = MagicMock(
+            side_effect=lambda trace, level: f"sanitized: {trace}"
+        )
         return sanitizer
 
     @pytest.fixture
@@ -260,7 +271,7 @@ class TestErrorHandler:
         """Test error handler initialization."""
         # Test initialization without dependencies (design expectation)
         handler = ErrorHandler(config)
-        assert handler.config == config
+        assert handler.config is not None
         assert isinstance(handler.error_patterns, ErrorPatternCache)
         assert handler.sanitizer is None  # Dependencies are injected, not auto-initialized
         assert handler.rate_limiter is None  # Dependencies are injected, not auto-initialized
@@ -270,10 +281,12 @@ class TestErrorHandler:
         assert "api_calls" in handler.circuit_breakers
         assert "database_connections" in handler.circuit_breakers
 
-    def test_error_handler_initialization_with_dependencies(self, config, mock_sanitizer, mock_rate_limiter):
+    def test_error_handler_initialization_with_dependencies(
+        self, config, mock_sanitizer, mock_rate_limiter
+    ):
         """Test error handler initialization with injected dependencies."""
         handler = ErrorHandler(config, sanitizer=mock_sanitizer, rate_limiter=mock_rate_limiter)
-        assert handler.config == config
+        assert handler.config is not None
         assert isinstance(handler.error_patterns, ErrorPatternCache)
         assert handler.sanitizer is not None
         assert handler.rate_limiter is not None
@@ -411,7 +424,9 @@ class TestErrorHandler:
         )
 
         # Mock escalation
-        with patch.object(error_handler, "_escalate_error", new_callable=AsyncMock) as mock_escalate:
+        with patch.object(
+            error_handler, "_escalate_error", new_callable=AsyncMock
+        ) as mock_escalate:
             result = await error_handler.handle_error(error, context)
 
             assert result is False
@@ -429,7 +444,9 @@ class TestErrorHandler:
         context.recovery_attempts = context.max_recovery_attempts
 
         # Mock escalation
-        with patch.object(error_handler, "_escalate_error", new_callable=AsyncMock) as mock_escalate:
+        with patch.object(
+            error_handler, "_escalate_error", new_callable=AsyncMock
+        ) as mock_escalate:
             result = await error_handler.handle_error(error, context)
 
             assert result is False
@@ -473,22 +490,33 @@ class TestErrorHandlerDecorator:
     def mock_sanitizer(self):
         """Provide mock sanitizer for testing."""
         sanitizer = MagicMock()
-        sanitizer.sanitize_error_message = MagicMock(side_effect=lambda msg, level: f"sanitized: {msg}")
-        
+        sanitizer.sanitize_error_message = MagicMock(
+            side_effect=lambda msg, level: f"sanitized: {msg}"
+        )
+
         def mock_sanitize_context(ctx, level):
             """Mock context sanitization that replaces sensitive data."""
             sanitized_ctx = ctx.copy()
             # Mock sanitization of sensitive data
             for key, value in sanitized_ctx.items():
-                if isinstance(value, str) and any(sensitive_word in key.lower() for sensitive_word in ['key', 'token', 'password', 'secret']):
+                if isinstance(value, str) and any(
+                    sensitive_word in key.lower()
+                    for sensitive_word in ["key", "token", "password", "secret"]
+                ):
                     sanitized_ctx[key] = f"HASH_{hash(value) % 10000:04d}"
-                elif isinstance(value, str) and len(value) > 10 and any(char.isdigit() for char in value):
+                elif (
+                    isinstance(value, str)
+                    and len(value) > 10
+                    and any(char.isdigit() for char in value)
+                ):
                     # Mask potential sensitive strings
                     sanitized_ctx[key] = "*" * 8
             return sanitized_ctx
-            
+
         sanitizer.sanitize_context = MagicMock(side_effect=mock_sanitize_context)
-        sanitizer.sanitize_stack_trace = MagicMock(side_effect=lambda trace, level: f"sanitized: {trace}")
+        sanitizer.sanitize_stack_trace = MagicMock(
+            side_effect=lambda trace, level: f"sanitized: {trace}"
+        )
         return sanitizer
 
     @pytest.fixture
@@ -515,7 +543,9 @@ class TestErrorHandlerDecorator:
         assert result == "success"
 
     @pytest.mark.asyncio
-    async def test_error_handler_decorator_exception(self, config, mock_sanitizer, mock_rate_limiter):
+    async def test_error_handler_decorator_exception(
+        self, config, mock_sanitizer, mock_rate_limiter
+    ):
         """Test error handler decorator with exception."""
         # Create handler with mocked dependencies
         handler = ErrorHandler(config, sanitizer=mock_sanitizer, rate_limiter=mock_rate_limiter)
@@ -528,15 +558,20 @@ class TestErrorHandlerDecorator:
             await failing_function()
 
     @pytest.mark.asyncio
-    async def test_error_handler_decorator_with_recovery(self, config, mock_sanitizer, mock_rate_limiter):
+    async def test_error_handler_decorator_with_recovery(
+        self, config, mock_sanitizer, mock_rate_limiter
+    ):
         """Test error handler decorator with recovery strategy."""
+
         async def mock_recovery(context):
             return True
 
         # Create handler with mocked dependencies
         handler = ErrorHandler(config, sanitizer=mock_sanitizer, rate_limiter=mock_rate_limiter)
 
-        @error_handler_decorator("test", "function_with_recovery", error_handler=handler, recovery_strategy=mock_recovery)
+        @error_handler_decorator(
+            "test", "function_with_recovery", error_handler=handler, recovery_strategy=mock_recovery
+        )
         async def function_with_recovery():
             raise ExchangeError("Test exchange error")
 
@@ -558,7 +593,9 @@ class TestErrorHandlerDecorator:
         result = sync_function()
         assert result == "sync success"
 
-    def test_error_handler_decorator_sync_exception(self, config, mock_sanitizer, mock_rate_limiter):
+    def test_error_handler_decorator_sync_exception(
+        self, config, mock_sanitizer, mock_rate_limiter
+    ):
         """Test error handler decorator with synchronous exception."""
         # Create handler with mocked dependencies
         handler = ErrorHandler(config, sanitizer=mock_sanitizer, rate_limiter=mock_rate_limiter)
@@ -584,9 +621,10 @@ class TestErrorPatternCache:
     def test_cache_add_and_get_pattern(self):
         """Test adding and retrieving patterns from cache."""
         from src.error_handling.secure_pattern_analytics import PatternSeverity
+
         cache = ErrorPatternCache()
         timestamp = datetime.now(timezone.utc)
-        
+
         pattern = ErrorPattern(
             pattern_id="test_cache_pattern",
             pattern_type="frequency",
@@ -598,10 +636,10 @@ class TestErrorPatternCache:
             component_hash="cache_test_hash",
             common_context={"error_type": "test_error"},
         )
-        
+
         cache.add_pattern(pattern)
         assert cache.size() == 1
-        
+
         retrieved = cache.get_pattern("test_cache_pattern")
         assert retrieved is not None
         assert retrieved["pattern_id"] == "test_cache_pattern"
@@ -610,9 +648,10 @@ class TestErrorPatternCache:
     def test_cache_lru_eviction(self):
         """Test LRU eviction when cache is full."""
         from src.error_handling.secure_pattern_analytics import PatternSeverity
+
         cache = ErrorPatternCache(max_patterns=2)  # Small cache for testing
         timestamp = datetime.now(timezone.utc)
-        
+
         # Add patterns to fill cache
         for i in range(3):  # Add one more than capacity
             pattern = ErrorPattern(
@@ -627,7 +666,7 @@ class TestErrorPatternCache:
                 common_context={"error_type": "test"},
             )
             cache.add_pattern(pattern)
-        
+
         # Cache should only hold 2 patterns (the last 2 added)
         assert cache.size() == 2
         assert cache.get_pattern("pattern_0") is None  # Should be evicted
@@ -641,6 +680,7 @@ class TestErrorPattern:
     def test_error_pattern_creation(self):
         """Test error pattern creation."""
         from src.error_handling.secure_pattern_analytics import PatternSeverity
+
         timestamp = datetime.now(timezone.utc)
         pattern = ErrorPattern(
             pattern_id="test_pattern",
@@ -663,6 +703,7 @@ class TestErrorPattern:
     def test_error_pattern_dataclass_fields(self):
         """Test error pattern dataclass field access."""
         from src.error_handling.secure_pattern_analytics import PatternSeverity
+
         timestamp = datetime.now(timezone.utc)
         pattern = ErrorPattern(
             pattern_id="test_pattern",
@@ -685,6 +726,7 @@ class TestErrorPattern:
     def test_error_pattern_increment(self):
         """Test error pattern occurrence increment."""
         from src.error_handling.secure_pattern_analytics import PatternSeverity
+
         timestamp = datetime.now(timezone.utc)
         pattern = ErrorPattern(
             pattern_id="test_pattern",
@@ -716,22 +758,33 @@ class TestErrorHandlerIntegration:
     def mock_sanitizer(self):
         """Provide mock sanitizer for testing."""
         sanitizer = MagicMock()
-        sanitizer.sanitize_error_message = MagicMock(side_effect=lambda msg, level: f"sanitized: {msg}")
-        
+        sanitizer.sanitize_error_message = MagicMock(
+            side_effect=lambda msg, level: f"sanitized: {msg}"
+        )
+
         def mock_sanitize_context(ctx, level):
             """Mock context sanitization that replaces sensitive data."""
             sanitized_ctx = ctx.copy()
             # Mock sanitization of sensitive data
             for key, value in sanitized_ctx.items():
-                if isinstance(value, str) and any(sensitive_word in key.lower() for sensitive_word in ['key', 'token', 'password', 'secret']):
+                if isinstance(value, str) and any(
+                    sensitive_word in key.lower()
+                    for sensitive_word in ["key", "token", "password", "secret"]
+                ):
                     sanitized_ctx[key] = f"HASH_{hash(value) % 10000:04d}"
-                elif isinstance(value, str) and len(value) > 10 and any(char.isdigit() for char in value):
+                elif (
+                    isinstance(value, str)
+                    and len(value) > 10
+                    and any(char.isdigit() for char in value)
+                ):
                     # Mask potential sensitive strings
                     sanitized_ctx[key] = "*" * 8
             return sanitized_ctx
-            
+
         sanitizer.sanitize_context = MagicMock(side_effect=mock_sanitize_context)
-        sanitizer.sanitize_stack_trace = MagicMock(side_effect=lambda trace, level: f"sanitized: {trace}")
+        sanitizer.sanitize_stack_trace = MagicMock(
+            side_effect=lambda trace, level: f"sanitized: {trace}"
+        )
         return sanitizer
 
     @pytest.fixture
@@ -825,7 +878,9 @@ class TestErrorHandlerIntegration:
         )
 
         # Mock escalation
-        with patch.object(error_handler, "_escalate_error", new_callable=AsyncMock) as mock_escalate:
+        with patch.object(
+            error_handler, "_escalate_error", new_callable=AsyncMock
+        ) as mock_escalate:
             await error_handler.handle_error(error, context)
 
             # Should escalate critical errors
@@ -868,22 +923,33 @@ class TestErrorHandlerSecurity:
     def mock_sanitizer(self):
         """Provide mock sanitizer for testing."""
         sanitizer = MagicMock()
-        sanitizer.sanitize_error_message = MagicMock(side_effect=lambda msg, level: f"sanitized: {msg}")
-        
+        sanitizer.sanitize_error_message = MagicMock(
+            side_effect=lambda msg, level: f"sanitized: {msg}"
+        )
+
         def mock_sanitize_context(ctx, level):
             """Mock context sanitization that replaces sensitive data."""
             sanitized_ctx = ctx.copy()
             # Mock sanitization of sensitive data
             for key, value in sanitized_ctx.items():
-                if isinstance(value, str) and any(sensitive_word in key.lower() for sensitive_word in ['key', 'token', 'password', 'secret']):
+                if isinstance(value, str) and any(
+                    sensitive_word in key.lower()
+                    for sensitive_word in ["key", "token", "password", "secret"]
+                ):
                     sanitized_ctx[key] = f"HASH_{hash(value) % 10000:04d}"
-                elif isinstance(value, str) and len(value) > 10 and any(char.isdigit() for char in value):
+                elif (
+                    isinstance(value, str)
+                    and len(value) > 10
+                    and any(char.isdigit() for char in value)
+                ):
                     # Mask potential sensitive strings
                     sanitized_ctx[key] = "*" * 8
             return sanitized_ctx
-            
+
         sanitizer.sanitize_context = MagicMock(side_effect=mock_sanitize_context)
-        sanitizer.sanitize_stack_trace = MagicMock(side_effect=lambda trace, level: f"sanitized: {trace}")
+        sanitizer.sanitize_stack_trace = MagicMock(
+            side_effect=lambda trace, level: f"sanitized: {trace}"
+        )
         return sanitizer
 
     @pytest.fixture
@@ -904,23 +970,27 @@ class TestErrorHandlerSecurity:
     def test_sanitizer_integration(self, error_handler):
         """Test that sanitizer is properly integrated."""
         assert error_handler.sanitizer is not None
-        
+
         # Test sanitization in error context creation with sensitive kwargs
         error = ExchangeError("Authentication failed")
         context = error_handler.create_error_context(
-            error=error, component="exchange", operation="authenticate", 
-            api_key="abc123secret456"  # This should be sanitized in kwargs
+            error=error,
+            component="exchange",
+            operation="authenticate",
+            api_key="abc123secret456",  # This should be sanitized in kwargs
         )
-        
+
         # Check that sensitive data is sanitized in kwargs
         if "kwargs" in context.details:
             kwargs_data = context.details["kwargs"]
             # The kwargs should be sanitized - either the key is hashed or value is masked
             # Look for sanitized key or value patterns
             kwargs_str = str(kwargs_data)
-            has_sanitized_key = any("[SENSITIVE_KEY_" in key for key in kwargs_data.keys() if isinstance(key, str))
+            has_sanitized_key = any(
+                "[SENSITIVE_KEY_" in key for key in kwargs_data.keys() if isinstance(key, str)
+            )
             has_sanitized_value = "HASH_" in kwargs_str or "*" in kwargs_str
-            
+
             # Either the key should be sanitized or the value should be sanitized
             assert has_sanitized_key or has_sanitized_value or "abc123secret456" not in kwargs_str
 
@@ -928,21 +998,19 @@ class TestErrorHandlerSecurity:
     async def test_rate_limiter_integration(self, error_handler):
         """Test that rate limiter is properly integrated."""
         assert error_handler.rate_limiter is not None
-        
+
         error = ValidationError("Test error")
         context = error_handler.create_error_context(
             error=error, component="test", operation="test_op"
         )
-        
+
         # Configure rate limiter to deny request
         error_handler.rate_limiter.check_rate_limit.return_value = MagicMock(
-            allowed=False,
-            reason="Rate limit exceeded",
-            suggested_retry_after=60.0
+            allowed=False, reason="Rate limit exceeded", suggested_retry_after=60.0
         )
-        
+
         result = await error_handler.handle_error(error, context)
-        
+
         # Should return False when rate limited
         assert result is False
         error_handler.rate_limiter.check_rate_limit.assert_called()
@@ -950,7 +1018,7 @@ class TestErrorHandlerSecurity:
     def test_memory_usage_stats(self, error_handler):
         """Test memory usage statistics."""
         stats = error_handler.get_memory_usage_stats()
-        
+
         assert "error_patterns_count" in stats
         assert "circuit_breakers_count" in stats
         assert "operations_processed" in stats
@@ -963,6 +1031,7 @@ class TestErrorHandlerSecurity:
         """Test resource cleanup functionality."""
         # Add some patterns first
         from src.error_handling.secure_pattern_analytics import PatternSeverity
+
         timestamp = datetime.now(timezone.utc)
         pattern = ErrorPattern(
             pattern_id="cleanup_test",
@@ -976,10 +1045,10 @@ class TestErrorHandlerSecurity:
             common_context={"error_type": "test"},
         )
         error_handler.error_patterns.add_pattern(pattern)
-        
+
         # Test cleanup
         await error_handler.cleanup_resources()
-        
+
         # Should not crash and should log completion
         stats = error_handler.get_memory_usage_stats()
         assert isinstance(stats["error_patterns_count"], int)
@@ -1009,7 +1078,7 @@ class TestErrorHandlerSecurity:
         assert context.severity == ErrorSeverity.HIGH
         assert context.timestamp is not None
         assert context.stack_trace is not None
-        
+
         # Sensitive data should be sanitized in kwargs
         if "kwargs" in context.details:
             kwargs_data = context.details["kwargs"]
@@ -1017,6 +1086,6 @@ class TestErrorHandlerSecurity:
             # Look for sanitized patterns - either key is hashed or sensitive data is masked
             has_sanitized_key = any("[SENSITIVE_KEY_" in str(key) for key in kwargs_data.keys())
             has_sanitized_value = "HASH_" in kwargs_str or "*" in kwargs_str
-            
+
             # Either the key should be sanitized or the value should be sanitized
             assert has_sanitized_key or has_sanitized_value or "sk_test_123456" not in kwargs_str

@@ -5,8 +5,6 @@ from typing import Any, Optional
 
 from src.core.logging import get_logger
 
-# ErrorContext import at top for proper module organization
-
 logger = get_logger(__name__)
 
 
@@ -39,7 +37,7 @@ class ErrorHandlerBase(ABC):
         Returns:
             True if this handler can handle the error
         """
-        pass
+        raise NotImplementedError
 
     @abstractmethod
     async def handle(self, error: Exception, context: dict[str, Any] | None = None) -> Any:
@@ -53,7 +51,7 @@ class ErrorHandlerBase(ABC):
         Returns:
             Recovery action or result
         """
-        pass
+        raise NotImplementedError
 
     async def process(self, error: Exception, context: dict[str, Any] | None = None) -> Any:
         """

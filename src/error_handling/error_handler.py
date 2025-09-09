@@ -19,16 +19,13 @@ from dataclasses import asdict, is_dataclass
 from datetime import datetime, timezone
 from decimal import ROUND_HALF_UP, Decimal
 from functools import wraps
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Union
 
 if TYPE_CHECKING:
     from src.error_handling.context import ErrorContext
     from src.error_handling.recovery import RecoveryStrategy
 
 from src.core.config import Config
-
-# MANDATORY: Import from P-001 core framework
-# Pattern data will be stored as dictionaries
 from src.core.exceptions import (
     DataError,
     ErrorSeverity,
@@ -48,10 +45,25 @@ from src.error_handling.security_rate_limiter import (
 from src.error_handling.security_sanitizer import (
     SensitivityLevel,
 )
-
-# MANDATORY: Import from P-007A utils framework
 from src.utils.decorators import time_execution
 from src.utils.error_categorization import is_financial_component
+
+# Configuration constants
+DEFAULT_ERROR_PATTERN_MAX_SIZE = 1000
+DEFAULT_ERROR_PATTERN_TTL_HOURS = 24
+DEFAULT_PERFORMANCE_LOG_INTERVAL_MINUTES = 10
+DEFAULT_CLEANUP_INTERVAL_MINUTES = 30
+DEFAULT_CIRCUIT_BREAKER_FAILURE_THRESHOLD = 5
+DEFAULT_CIRCUIT_BREAKER_RECOVERY_TIMEOUT = 30
+DEFAULT_BACKGROUND_TASK_CLEANUP_TIMEOUT = 10.0
+DEFAULT_DECIMAL_PRECISION = 8
+DEFAULT_MIN_TIME_HOURS = 0.1
+
+# Rate limiting constants
+DEFAULT_MAX_ATTEMPTS = 3
+NETWORK_ERROR_MAX_ATTEMPTS = 5
+API_RATE_LIMIT_MAX_ATTEMPTS = 3
+DATABASE_ERROR_MAX_ATTEMPTS = 3
 
 logger = get_logger(__name__)
 
@@ -59,7 +71,11 @@ logger = get_logger(__name__)
 class CircuitBreaker:
     """Circuit breaker pattern implementation for preventing cascading failures."""
 
-    def __init__(self, failure_threshold: int = 5, recovery_timeout: int = 30) -> None:
+    def __init__(
+        self,
+        failure_threshold: int = DEFAULT_CIRCUIT_BREAKER_FAILURE_THRESHOLD,
+        recovery_timeout: int = DEFAULT_CIRCUIT_BREAKER_RECOVERY_TIMEOUT,
+    ) -> None:
         self.failure_threshold = failure_threshold
         self.recovery_timeout = recovery_timeout
         self.failure_count = 0
@@ -103,6 +119,28 @@ class CircuitBreaker:
                 return time.time() - self.last_failure_time > self.recovery_timeout
             return False
 
+    def open(self) -> None:
+        """Manually open the circuit breaker."""
+        with self._lock:
+            self.state = "OPEN"
+            self.last_failure_time = time.time()
+
+    def is_open(self) -> bool:
+        """Check if circuit breaker is in OPEN state."""
+        return self.state == "OPEN"
+
+    def reset(self) -> None:
+        """Reset circuit breaker to CLOSED state."""
+        with self._lock:
+            self.state = "CLOSED"
+            self.failure_count = 0
+            self.last_failure_time = None
+
+    @property
+    def threshold(self) -> int:
+        """Get the failure threshold."""
+        return self.failure_threshold
+
 
 def ensure_timezone_aware(dt: datetime) -> datetime:
     """Ensure datetime is timezone-aware (UTC)."""
@@ -114,32 +152,32 @@ def ensure_timezone_aware(dt: datetime) -> datetime:
 class ErrorPatternCache:
     """Optimized error pattern storage with size limits and TTL."""
 
-    def __init__(self, max_patterns: int = 1000, ttl_hours: int = 24) -> None:
+    def __init__(
+        self,
+        max_patterns: int = DEFAULT_ERROR_PATTERN_MAX_SIZE,
+        ttl_hours: int = DEFAULT_ERROR_PATTERN_TTL_HOURS,
+    ) -> None:
         self.max_patterns = max_patterns
         self.ttl_hours = ttl_hours
         self._patterns: OrderedDict[str, dict[str, Any]] = OrderedDict()
         self._last_cleanup = datetime.now(timezone.utc)
-        self._cleanup_interval_minutes = 30
+        self._cleanup_interval_minutes = DEFAULT_CLEANUP_INTERVAL_MINUTES
 
     def add_pattern(self, pattern: dict[str, Any] | Any) -> None:
         """Add or update error pattern with automatic cleanup."""
-        # Periodic cleanup
         if self._should_cleanup():
             self._cleanup_expired()
 
-        # Remove LRU patterns if at capacity
         while len(self._patterns) >= self.max_patterns:
             self._patterns.popitem(last=False)
 
-        # Convert dataclass to dict if needed
         if is_dataclass(pattern) and not isinstance(pattern, type):
             pattern_dict = asdict(pattern)
         else:
             pattern_dict = pattern
 
-        # Add/update pattern
         self._patterns[pattern_dict["pattern_id"]] = pattern_dict
-        self._patterns.move_to_end(pattern_dict["pattern_id"])  # Mark as recently used
+        self._patterns.move_to_end(pattern_dict["pattern_id"])
 
     def get_pattern(self, pattern_id: str) -> dict[str, Any] | None:
         """Get pattern and mark as recently used."""
@@ -147,18 +185,15 @@ class ErrorPatternCache:
             return None
 
         pattern = self._patterns[pattern_id]
-        # Check if expired
         current_time_utc = datetime.now(timezone.utc)
-        # Ensure both datetimes are timezone-aware for comparison
-        # Handle both field names: first_detected (dict) and first_seen (dataclass)
         first_time_key = "first_detected" if "first_detected" in pattern else "first_seen"
         pattern_time = ensure_timezone_aware(pattern[first_time_key])
-        age_hours = (current_time_utc - pattern_time).total_seconds() / 3600
+        time_diff_seconds = (current_time_utc - pattern_time).total_seconds()
+        age_hours = Decimal(str(time_diff_seconds)) / Decimal("3600")
         if age_hours > self.ttl_hours:
             del self._patterns[pattern_id]
             return None
 
-        # Mark as recently used
         self._patterns.move_to_end(pattern_id)
         return pattern
 
@@ -172,7 +207,8 @@ class ErrorPatternCache:
         current_time_utc = datetime.now(timezone.utc)
         # Ensure both datetimes are timezone-aware for comparison
         last_cleanup_time = ensure_timezone_aware(self._last_cleanup)
-        minutes_since_cleanup = (current_time_utc - last_cleanup_time).total_seconds() / 60
+        cleanup_time_diff = (current_time_utc - last_cleanup_time).total_seconds()
+        minutes_since_cleanup = Decimal(str(cleanup_time_diff)) / Decimal("60")
         return minutes_since_cleanup >= self._cleanup_interval_minutes
 
     def _cleanup_expired(self) -> None:
@@ -185,7 +221,8 @@ class ErrorPatternCache:
             # Handle both field names: first_detected (dict) and first_seen (dataclass)
             first_time_key = "first_detected" if "first_detected" in pattern else "first_seen"
             pattern_time = ensure_timezone_aware(pattern[first_time_key])
-            age_hours = (current_time - pattern_time).total_seconds() / 3600
+            time_diff = (current_time - pattern_time).total_seconds()
+            age_hours = Decimal(str(time_diff)) / Decimal("3600")
             if age_hours > self.ttl_hours:
                 expired_keys.append(pattern_id)
 
@@ -212,44 +249,46 @@ class ErrorHandler:
 
     def __init__(self, config: Config, sanitizer=None, rate_limiter=None) -> None:
         # Use proper Config type from core
-        if hasattr(config, "model_dump"):
+        from src.core.config import Config as CoreConfig
+
+        if config is None:
+            self.config = CoreConfig()
+        elif hasattr(config, "model_dump"):
             self.config = config
         else:
             # Convert dict config to proper Config if needed
-            from src.core.config import Config as CoreConfig
-
-            self.config = CoreConfig() if config is None else config
+            self.config = CoreConfig()
 
         self.logger = get_logger(self.__class__.__module__)
 
-        # Security components - use injected dependencies (no fallback creation)
+        # Security components - use injected dependencies
         self.sanitizer = sanitizer
         self.rate_limiter = rate_limiter
 
         # Optimized error pattern storage
-        self.error_patterns = ErrorPatternCache(max_patterns=1000, ttl_hours=24)
+        self.error_patterns = ErrorPatternCache()
         self.circuit_breakers: dict[str, CircuitBreaker] = {}
 
         # Performance monitoring
         self._operation_count = 0
         self._last_performance_log = datetime.now(timezone.utc)
-        self._performance_log_interval_minutes = 10
+        self._performance_log_interval_minutes = DEFAULT_PERFORMANCE_LOG_INTERVAL_MINUTES
         self.retry_policies: dict[str, dict[str, Any]] = {
             "network_errors": {
-                "max_attempts": 5,
+                "max_attempts": NETWORK_ERROR_MAX_ATTEMPTS,
                 "backoff_strategy": "exponential",
                 "base_delay": 1,
                 "max_delay": 60,
                 "jitter": True,
             },
             "api_rate_limits": {
-                "max_attempts": 3,
+                "max_attempts": API_RATE_LIMIT_MAX_ATTEMPTS,
                 "backoff_strategy": "linear",
                 "base_delay": 5,
                 "respect_retry_after": True,
             },
             "database_errors": {
-                "max_attempts": 3,
+                "max_attempts": DATABASE_ERROR_MAX_ATTEMPTS,
                 "backoff_strategy": "exponential",
                 "base_delay": 0.5,
                 "max_delay": 10,
@@ -262,16 +301,16 @@ class ErrorHandler:
     def configure_dependencies(self, injector) -> None:
         """Configure dependencies via dependency injector using core patterns."""
         try:
-            # Use proper dependency injection interface from core.dependency_injection
-            if hasattr(injector, "has_service") and hasattr(injector, "resolve"):
-                # Try to resolve security components from DI container
-                if injector.has_service("SecuritySanitizer") and self.sanitizer is None:
-                    self.sanitizer = injector.resolve("SecuritySanitizer")
-
-                if injector.has_service("SecurityRateLimiter") and self.rate_limiter is None:
-                    self.rate_limiter = injector.resolve("SecurityRateLimiter")
-            else:
+            # Use proper dependency injection interface
+            if not (hasattr(injector, "has_service") and hasattr(injector, "resolve")):
                 raise ValueError("Invalid injector provided - must implement DI interface")
+
+            # Try to resolve security components from DI container
+            if injector.has_service("SecuritySanitizer") and self.sanitizer is None:
+                self.sanitizer = injector.resolve("SecuritySanitizer")
+
+            if injector.has_service("SecurityRateLimiter") and self.rate_limiter is None:
+                self.rate_limiter = injector.resolve("SecurityRateLimiter")
 
             # Ensure all required dependencies are resolved
             if self.sanitizer is None:
@@ -287,7 +326,7 @@ class ErrorHandler:
     def _initialize_circuit_breakers(self) -> None:
         """Initialize circuit breakers for critical system components."""
         self.circuit_breakers = {
-            "api_calls": CircuitBreaker(failure_threshold=5, recovery_timeout=30),
+            "api_calls": CircuitBreaker(),
             "database_connections": CircuitBreaker(failure_threshold=3, recovery_timeout=15),
             "exchange_connections": CircuitBreaker(failure_threshold=3, recovery_timeout=20),
             "model_inference": CircuitBreaker(failure_threshold=2, recovery_timeout=60),
@@ -295,10 +334,21 @@ class ErrorHandler:
 
     @time_execution
     def classify_error(self, error: Exception) -> ErrorSeverity:
-        """Classify error severity based on error type and context."""
-        # Ensure we have a valid exception type
-        error_type = type(error)
-        if not isinstance(error_type, type):
+        """
+        Classify error severity based on error type and context.
+
+        Args:
+            error: The exception to classify
+
+        Returns:
+            ErrorSeverity enum value indicating the severity level:
+            - CRITICAL: StateConsistencyError, SecurityError
+            - HIGH: RiskManagementError, ExchangeError, ConnectionError, ExecutionError
+            - MEDIUM: DataError, ModelError, or unknown error types
+            - LOW: ValidationError
+        """
+        # Ensure we have a valid exception
+        if not isinstance(error, Exception):
             return ErrorSeverity.MEDIUM
 
         if isinstance(error, StateConsistencyError | SecurityError):
@@ -351,7 +401,7 @@ class ErrorHandler:
         elif source_module == "database":
             # Validate database context
             if "entity_id" in validated_data and not isinstance(
-                validated_data["entity_id"], (str, int)
+                validated_data["entity_id"], str | int
             ):
                 raise ValidationError(
                     "Database entity_id must be string or int",
@@ -384,7 +434,7 @@ class ErrorHandler:
     def create_error_context(
         self, error: Exception, component: str, operation: str, **kwargs
     ) -> "ErrorContext":
-        """Create error context for tracking and recovery with security sanitization and boundary validation."""
+        """Create error context for tracking and recovery with security sanitization."""
         # Validate input at module boundary
         boundary_data = {
             "component": component,
@@ -403,11 +453,23 @@ class ErrorHandler:
         elif "exchange" in component.lower():
             source_module = "exchanges"
 
-        # Apply boundary validation
+        # Apply boundary validation with enhanced consistency patterns
         try:
             validated_boundary_data = self.validate_module_boundary_input(
                 boundary_data, source_module
             )
+
+            # Apply additional boundary validation for state-to-error flow
+            if source_module == "state" or "state" in component.lower():
+                from src.utils.messaging_patterns import BoundaryValidator
+
+                try:
+                    BoundaryValidator.validate_monitoring_to_error_boundary(validated_boundary_data)
+                except Exception as boundary_error:
+                    self.logger.warning(
+                        f"State-to-error boundary validation failed: {boundary_error}"
+                    )
+
         except Exception as validation_error:
             self.logger.warning(
                 "Boundary validation failed, proceeding with sanitization only",
@@ -427,39 +489,20 @@ class ErrorHandler:
         severity = self.classify_error(error)
         sensitivity_level = self._get_sensitivity_level(severity, component)
 
-        # Ensure sanitizer is available - should be injected via DI
+        # Ensure sanitizer is available - must be injected via DI
         if self.sanitizer is None:
-            # Get default sanitizer for production, but allow None in test environments
-            from src.error_handling.security_sanitizer import get_security_sanitizer
-            try:
-                self.sanitizer = get_security_sanitizer()
-            except Exception:
-                # In test environments, this might fail - use minimal sanitization
-                import logging
-                logger = logging.getLogger(__name__)
-                logger.debug("SecuritySanitizer not available, using minimal sanitization")
-                # Set a minimal sanitizer flag to avoid repeated attempts
-                self._minimal_sanitization = True
+            raise ValueError("SecuritySanitizer must be injected via dependency injection")
 
         # Sanitize error message and details using validated data
-        if self.sanitizer:
-            sanitized_error_message = self.sanitizer.sanitize_error_message(
-                validated_boundary_data.get("error_message", str(error)), sensitivity_level
-            )
-        else:
-            # Minimal sanitization if no sanitizer available
-            sanitized_error_message = str(error)[:100] + "..." if len(str(error)) > 100 else str(error)
-        if self.sanitizer:
-            sanitized_kwargs = self.sanitizer.sanitize_context(
-                validated_boundary_data, sensitivity_level
-            )
-            sanitized_stack_trace = self.sanitizer.sanitize_stack_trace(
-                self._get_stack_trace(), sensitivity_level
-            )
-        else:
-            # Minimal sanitization if no sanitizer available
-            sanitized_kwargs = validated_boundary_data
-            sanitized_stack_trace = self._get_stack_trace()
+        sanitized_error_message = self.sanitizer.sanitize_error_message(
+            validated_boundary_data.get("error_message", str(error)), sensitivity_level
+        )
+        sanitized_kwargs = self.sanitizer.sanitize_context(
+            validated_boundary_data, sensitivity_level
+        )
+        sanitized_stack_trace = self.sanitizer.sanitize_stack_trace(
+            self._get_stack_trace(), sensitivity_level
+        )
 
         # Import ErrorContext at runtime to avoid circular dependency
         from src.error_handling.context import ErrorContext
@@ -492,9 +535,9 @@ class ErrorHandler:
         self,
         error: Exception,
         context: "ErrorContext",
-        recovery_strategy: "RecoveryStrategy | Callable[..., Any] | None" = None,
+        recovery_strategy: Union["RecoveryStrategy", Callable[..., Any]] | None = None,
     ) -> bool:
-        """Handle error with consistent data flow patterns and security controls using pub/sub messaging."""
+        """Handle error with consistent data flow patterns and security controls."""
 
         # Ensure rate limiter is available - should be injected via DI
         if self.rate_limiter is None:
@@ -519,27 +562,32 @@ class ErrorHandler:
             )
             # Still log the error but don't attempt recovery
 
-        # Transform error data to match core event patterns (pub/sub messaging) with propagation
+        # Transform error data to match core event patterns
         from src.error_handling.propagation_utils import (
             ProcessingStage,
             PropagationMethod,
             add_propagation_step,
         )
+        from src.utils.messaging_patterns import MessagingCoordinator
 
-        error_event_data = self.validate_data_flow_consistency(
-            {
-                "error_id": context.error_id,
-                "error_type": type(error).__name__,
-                "error_message": str(error),
-                "component": context.component,
-                "operation": context.operation,
-                "severity": context.severity.value,
-                "processing_mode": "pub_sub",  # Align with core event patterns
-                "message_pattern": "event_driven",
-                "processing_stage": "error_handling",
-                **context.details,
-            }
-        )
+        # Use consistent messaging coordinator for data transformation
+        coordinator = MessagingCoordinator("ErrorHandler")
+
+        raw_error_data = {
+            "error_id": context.error_id,
+            "error_type": type(error).__name__,
+            "error_message": str(error),
+            "component": context.component,
+            "operation": context.operation,
+            "severity": context.severity.value,
+            "processing_mode": "stream",  # Align with state module default
+            "message_pattern": "pub_sub",  # Consistent messaging pattern
+            "processing_stage": "error_handling",
+            **context.details,
+        }
+
+        # Apply consistent data transformation
+        error_event_data = coordinator._apply_data_transformation(raw_error_data)
 
         # Add propagation tracking for consistent data flow
         error_event_data = add_propagation_step(
@@ -554,9 +602,6 @@ class ErrorHandler:
         sensitivity_level = self._get_sensitivity_level(
             context.severity, context.component or "unknown"
         )
-        sanitized_error_message = self.sanitizer.sanitize_error_message(
-            error_event_data.get("error_message", str(error)), sensitivity_level
-        )
         sanitized_details = self.sanitizer.sanitize_context(error_event_data, sensitivity_level)
 
         # Log error with sanitized structured data in event format
@@ -566,7 +611,8 @@ class ErrorHandler:
                 **sanitized_details,
                 "rate_limited": not rate_limit_result.allowed,
                 "event_type": "error_occurred",
-                "message_pattern": "pub_sub",
+                "message_pattern": "pub_sub",  # Consistent messaging pattern
+                "processing_mode": "stream",  # Align with state module
             },
         )
 
@@ -664,31 +710,49 @@ class ErrorHandler:
         """
         import asyncio
 
-        # Standardize sync context format with stream processing indicators
+        # Standardize sync context format aligned with state module processing patterns
+        from src.utils.messaging_patterns import ProcessingParadigmAligner
+
         kwargs.update(
             {
-                "processing_mode": "stream",  # Align with core stream processing
+                "processing_mode": "stream",  # Align with state module default
                 "processing_stage": "error_handling",
                 "data_format": "error_context_v1",
+                "message_pattern": "pub_sub",  # Consistent messaging
                 "stream_position": kwargs.get("stream_position", 0),
-                "batch_id": kwargs.get("batch_id"),
+                "correlation_id": kwargs.get(
+                    "correlation_id", f"error_stream_{datetime.now(timezone.utc).timestamp()}"
+                ),
             }
         )
+
+        # Apply processing paradigm alignment if needed
+        aligned_kwargs = ProcessingParadigmAligner.align_processing_modes("sync", "stream", kwargs)
 
         # Get or create event loop with consistent error handling
         try:
             loop = asyncio.get_running_loop()
             # Already in async context, create task for stream processing
-            # Create error context first with standardized format
+            # Create error context first with standardized format using aligned kwargs
             context = self.create_error_context(
-                error=error, component=component, operation=operation, **kwargs
+                error=error, component=component, operation=operation, **aligned_kwargs
             )
             task = asyncio.ensure_future(self.handle_error(error, context, recovery_strategy))
-            # Store task reference to prevent garbage collection
+            # Store task reference to prevent garbage collection (thread-safe initialization)
             if not hasattr(self, "_background_tasks"):
                 self._background_tasks = set()
-            self._background_tasks.add(task)
-            task.add_done_callback(self._background_tasks.discard)
+                self._background_task_lock = threading.RLock()
+
+            with self._background_task_lock:
+                self._background_tasks.add(task)
+
+            # Use a wrapper callback to ensure thread-safe removal
+            def safe_remove_task(finished_task):
+                with getattr(self, "_background_task_lock", threading.RLock()):
+                    if hasattr(self, "_background_tasks"):
+                        self._background_tasks.discard(finished_task)
+
+            task.add_done_callback(safe_remove_task)
             # Can't wait synchronously in running loop
             self.logger.warning(
                 "handle_error_sync called from async context, scheduled as stream task",
@@ -704,9 +768,9 @@ class ErrorHandler:
             try:
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
-                # Create error context first with standardized stream format
+                # Create error context first with standardized stream format using aligned kwargs
                 context = self.create_error_context(
-                    error=error, component=component, operation=operation, **kwargs
+                    error=error, component=component, operation=operation, **aligned_kwargs
                 )
                 return loop.run_until_complete(self.handle_error(error, context, recovery_strategy))
             finally:
@@ -718,8 +782,9 @@ class ErrorHandler:
                     finally:
                         try:
                             asyncio.set_event_loop(None)
-                        except Exception:
-                            pass
+                        except Exception as cleanup_error:
+                            error_msg = f"Event loop cleanup error (ignored): {cleanup_error}"
+                            self.logger.debug(error_msg)
 
     def handle_error_batch(
         self,
@@ -748,6 +813,7 @@ class ErrorHandler:
         batch_id = f"batch_{datetime.now(timezone.utc).timestamp()}"
 
         results = []
+        loop = None
         try:
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
@@ -789,8 +855,11 @@ class ErrorHandler:
                 finally:
                     try:
                         asyncio.set_event_loop(None)
-                    except Exception:
-                        pass
+                    except Exception as cleanup_error:
+                        error_msg = (
+                            f"Batch processing loop cleanup error (ignored): {cleanup_error}"
+                        )
+                        self.logger.debug(error_msg)
 
         return results
 
@@ -835,20 +904,21 @@ class ErrorHandler:
         if time_diff <= 0:
             # If no time has passed, return the count as instantaneous frequency
             return Decimal(str(pattern["occurrence_count"]))
-        hours = time_diff / 3600
+        hours = Decimal(str(time_diff)) / Decimal("3600")
         # Ensure minimum of 0.1 hours to prevent very high frequencies
-        hours = max(hours, 0.1)
+        hours = max(hours, Decimal(str(DEFAULT_MIN_TIME_HOURS)))
         from decimal import localcontext
 
         with localcontext() as ctx:
-            ctx.prec = 8
+            ctx.prec = DEFAULT_DECIMAL_PRECISION
             ctx.rounding = ROUND_HALF_UP
             return Decimal(str(pattern["occurrence_count"])) / Decimal(str(hours))
 
     def _log_performance_metrics(self) -> None:
         """Log performance metrics periodically."""
         now = datetime.now(timezone.utc)
-        minutes_since_log = (now - self._last_performance_log).total_seconds() / 60
+        time_diff = (now - self._last_performance_log).total_seconds()
+        minutes_since_log = Decimal(str(time_diff)) / Decimal("60")
 
         if minutes_since_log >= self._performance_log_interval_minutes:
             self.logger.info(
@@ -924,22 +994,31 @@ class ErrorHandler:
 
     async def cleanup_resources(self) -> None:
         """Manual cleanup of resources for memory management."""
-        # Cancel any background tasks
+        # Cancel any background tasks with thread-safe access
         if hasattr(self, "_background_tasks"):
-            for task in list(self._background_tasks):
+            # Get snapshot of tasks to cancel
+            with getattr(self, "_background_task_lock", threading.RLock()):
+                tasks_to_cancel = list(self._background_tasks)
+
+            # Cancel tasks
+            for task in tasks_to_cancel:
                 if not task.done():
                     task.cancel()
+
             try:
                 # Wait for tasks to complete with timeout
-                if self._background_tasks:
+                if tasks_to_cancel:
                     await asyncio.wait_for(
-                        asyncio.gather(*self._background_tasks, return_exceptions=True),
-                        timeout=10.0,
+                        asyncio.gather(*tasks_to_cancel, return_exceptions=True),
+                        timeout=DEFAULT_BACKGROUND_TASK_CLEANUP_TIMEOUT,
                     )
             except asyncio.TimeoutError:
                 self.logger.warning("Background task cleanup timed out")
             finally:
-                self._background_tasks.clear()
+                # Clear the background tasks set with lock
+                with getattr(self, "_background_task_lock", threading.RLock()):
+                    if hasattr(self, "_background_tasks"):
+                        self._background_tasks.clear()
 
         # Force cleanup of expired patterns
         self.error_patterns.cleanup_expired()
@@ -1037,6 +1116,7 @@ class ErrorHandler:
             await self.cleanup_resources()
         except Exception as e:
             self.logger.error(f"Error during resource cleanup: {e}")
+            raise
 
         # Force cleanup of expired patterns
         self.error_patterns.cleanup_expired()
@@ -1044,7 +1124,6 @@ class ErrorHandler:
         self.logger.info("Error handler shutdown completed")
 
 
-# Factory function following core.base.factory pattern
 def create_error_handler_factory(
     config: Config | None = None, dependency_container: Any | None = None
 ):
@@ -1097,7 +1176,7 @@ def error_handler_decorator(
     component: str,
     operation: str,
     error_handler: ErrorHandler | None = None,
-    recovery_strategy: "RecoveryStrategy | Callable[..., Any] | None" = None,
+    recovery_strategy: Union["RecoveryStrategy", Callable[..., Any]] | None = None,
     **kwargs: Any,
 ) -> Callable[..., Any]:
     """

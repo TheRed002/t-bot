@@ -19,9 +19,18 @@ from src.core.config import Config
 from src.core.exceptions import ValidationError
 from src.core.logging import get_logger
 from src.utils.decimal_utils import to_decimal
-
-# Core framework imports
 from src.utils.decorators import retry, time_execution
+
+from .constants import (
+    CRITICAL_THRESHOLD,
+    DEFAULT_COMPONENT_TIMEOUT,
+    DEFAULT_MAX_DAILY_LOSS,
+    DEFAULT_STATE_VALIDATION_FREQUENCY,
+    HIGH_THRESHOLD,
+    MAX_VALIDATION_HISTORY,
+    MEDIUM_THRESHOLD,
+    TOLERANCE_DECIMAL,
+)
 
 
 class DatabaseServiceInterface(Protocol):
@@ -62,7 +71,7 @@ class DatabaseServiceInterface(Protocol):
     async def get_order_details(self, order_id: str) -> dict[str, Any] | None: ...
 
 
-class RiskManagementServiceInterface(Protocol):
+class RiskServiceInterface(Protocol):
     """Protocol for risk management service operations."""
 
     async def initialize(self) -> None: ...
@@ -77,7 +86,7 @@ class RiskManagementServiceInterface(Protocol):
     async def adjust_leverage(self, reduction_factor: Decimal) -> None: ...
     async def activate_emergency_shutdown(self, reason: str) -> None: ...
     async def halt_trading(self, reason: str) -> None: ...
-    async def reduce_correlation_risk(self, amount: Decimal) -> None: ...
+    async def reduce_correlation_risk(self, excess: Decimal) -> None: ...
     async def send_alert(self, level: str, message: str) -> None: ...
 
 
@@ -108,7 +117,7 @@ class StateValidationResult:
     is_consistent: bool
     discrepancies: list[dict[str, Any]] = field(default_factory=list)
     validation_time: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-    component: str = ""
+    component: str = "all"
     severity: str = "low"  # low, medium, high, critical
 
 
@@ -119,7 +128,7 @@ class StateMonitor:
         self,
         config: Config,
         database_service: DatabaseServiceInterface | None = None,
-        risk_service: RiskManagementServiceInterface | None = None,
+        risk_service: RiskServiceInterface | None = None,
         execution_service: ExecutionServiceInterface | None = None,
     ) -> None:
         self.config = config
@@ -139,13 +148,13 @@ class StateMonitor:
             config,
             "error_handling",
             {
-                "state_validation_frequency": 60,
-                "max_state_drift_tolerance": 0.01,
+                "state_validation_frequency": DEFAULT_STATE_VALIDATION_FREQUENCY,
+                "max_state_drift_tolerance": Decimal("0.01"),
                 "state_history_retention_days": 7,
             },
         )
         self.validation_frequency = self.state_monitoring_config.get(
-            "state_validation_frequency", 60
+            "state_validation_frequency", DEFAULT_STATE_VALIDATION_FREQUENCY
         )
         self.consistency_checks = [
             "portfolio_balance_sync",
@@ -155,7 +164,10 @@ class StateMonitor:
         ]
         self.reconciliation_config = self.state_monitoring_config
         self.auto_reconcile = self.reconciliation_config.get("auto_reconciliation_enabled", True)
-        self.max_discrepancy = self.reconciliation_config.get("max_discrepancy_threshold", 0.01)
+        max_discrepancy_threshold = self.reconciliation_config.get(
+            "max_discrepancy_threshold", "0.01"
+        )
+        self.max_discrepancy = Decimal(str(max_discrepancy_threshold))
         self.force_sync_threshold = Decimal("0.05")
 
         # State tracking
@@ -187,7 +199,7 @@ class StateMonitor:
         if self._database_service is None:
             missing_services.append("DatabaseService")
         if self._risk_service is None:
-            missing_services.append("RiskManagementService")
+            missing_services.append("RiskService")
         if self._execution_service is None:
             missing_services.append("ExecutionService")
 
@@ -272,9 +284,9 @@ class StateMonitor:
         self.last_validation_results[component] = result
         self.state_history.append(result)
 
-        # Keep only last 1000 validation results
-        if len(self.state_history) > 1000:
-            self.state_history = self.state_history[-1000:]
+        # Keep only last MAX_VALIDATION_HISTORY validation results
+        if len(self.state_history) > MAX_VALIDATION_HISTORY:
+            self.state_history = self.state_history[-MAX_VALIDATION_HISTORY:]
 
         self.logger.info(
             "State consistency validation completed",
@@ -376,7 +388,7 @@ class StateMonitor:
                     )
 
                     # Check for discrepancies (with tolerance for rounding)
-                    tolerance = self._safe_to_decimal("0.00000001", "tolerance")
+                    tolerance = TOLERANCE_DECIMAL
 
                     if db_val["total"] > 0 or cache_val["total"] > 0 or exchange_val["total"] > 0:
                         max_diff = max(
@@ -409,13 +421,13 @@ class StateMonitor:
                             discrepancies.append(discrepancy)
 
                             # Determine severity based on difference
-                            if max_diff > self._safe_to_decimal("1.0", "severity_threshold"):
+                            if max_diff > CRITICAL_THRESHOLD:
                                 severity = "critical"
                                 is_consistent = False
-                            elif max_diff > self._safe_to_decimal("0.1", "severity_threshold"):
+                            elif max_diff > HIGH_THRESHOLD:
                                 severity = "high" if severity != "critical" else severity
                                 is_consistent = False
-                            elif max_diff > self._safe_to_decimal("0.01", "severity_threshold"):
+                            elif max_diff > MEDIUM_THRESHOLD:
                                 severity = (
                                     "medium" if severity not in ["critical", "high"] else severity
                                 )
@@ -476,9 +488,7 @@ class StateMonitor:
                         "severity": "low",
                     }
                 if self._risk_service is None:
-                    self.logger.warning(
-                        "RiskManagementService not available - limited position sync check"
-                    )
+                    self.logger.warning("RiskService not available - limited position sync check")
                     # Continue with limited functionality
 
                 db_service = self._database_service
@@ -577,7 +587,7 @@ class StateMonitor:
                 )
                 qty_diff = max_qty - min_qty
 
-                tolerance = Decimal("0.00000001")
+                tolerance = TOLERANCE_DECIMAL
 
                 if qty_diff > tolerance and max_qty > 0:
                     discrepancy = {
@@ -596,13 +606,13 @@ class StateMonitor:
                     discrepancies.append(discrepancy)
 
                     # Determine severity based on difference
-                    if qty_diff > Decimal("1.0"):
+                    if qty_diff > CRITICAL_THRESHOLD:
                         severity = "critical"
                         is_consistent = False
-                    elif qty_diff > Decimal("0.1"):
+                    elif qty_diff > HIGH_THRESHOLD:
                         severity = "high" if severity != "critical" else severity
                         is_consistent = False
-                    elif qty_diff > Decimal("0.01"):
+                    elif qty_diff > MEDIUM_THRESHOLD:
                         severity = "medium" if severity not in ["critical", "high"] else severity
 
             self.logger.info(
@@ -694,9 +704,7 @@ class StateMonitor:
                         "severity": "low",
                     }
                 if self._risk_service is None:
-                    self.logger.warning(
-                        "RiskManagementService not available - limited risk compliance check"
-                    )
+                    self.logger.warning("RiskService not available - limited risk compliance check")
                     # Continue with limited functionality
 
                 db_service = self._database_service
@@ -785,7 +793,8 @@ class StateMonitor:
 
             # Check maximum drawdown limits
             current_drawdown = Decimal(str(risk_metrics.get("current_drawdown", 0)))
-            max_drawdown = Decimal(str(getattr(self.config, "risk", {}).get("max_drawdown", 0.20)))
+            risk_config = getattr(self.config, "risk", {})
+            max_drawdown = Decimal(str(risk_config.get("max_drawdown", "0.20")))
 
             if abs(current_drawdown) > max_drawdown:
                 discrepancy = {
@@ -801,7 +810,7 @@ class StateMonitor:
             # Check daily loss limit
             daily_loss = Decimal(str(risk_metrics.get("daily_pnl", 0)))
             max_daily_loss = Decimal(
-                str(getattr(self.config, "risk", {}).get("max_daily_loss", 1000))
+                str(getattr(self.config, "risk", {}).get("max_daily_loss", DEFAULT_MAX_DAILY_LOSS))
             )
 
             if daily_loss < 0 and abs(daily_loss) > max_daily_loss:
@@ -818,7 +827,7 @@ class StateMonitor:
             # Check correlation limits
             correlation_risk = Decimal(str(risk_metrics.get("correlation_risk", 0)))
             max_correlation = Decimal(
-                str(getattr(self.config, "risk", {}).get("max_correlation_risk", 0.80))
+                str(getattr(self.config, "risk", {}).get("max_correlation_risk", "0.80"))
             )
 
             if correlation_risk > max_correlation:
@@ -1009,9 +1018,7 @@ class StateMonitor:
                     )
                     return False
                 if self._risk_service is None:
-                    self.logger.warning(
-                        "RiskManagementService not available - cannot reconcile positions"
-                    )
+                    self.logger.warning("RiskService not available - cannot reconcile positions")
                     return False
 
                 db_service = self._database_service
@@ -1133,7 +1140,7 @@ class StateMonitor:
                                 self.logger.debug(
                                     f"Service query failed during state monitoring: {e}"
                                 )
-                                pass
+                                # Continue monitoring other components despite this failure
                             break
 
                     if not exchange_name:
@@ -1202,9 +1209,7 @@ class StateMonitor:
                 self.logger.warning("ExecutionService not available - cannot reconcile risk limits")
                 return False
             if self._risk_service is None:
-                self.logger.warning(
-                    "RiskManagementService not available - cannot reconcile risk limits"
-                )
+                self.logger.warning("RiskService not available - cannot reconcile risk limits")
                 return False
 
             db_service = self._database_service
@@ -1374,7 +1379,7 @@ class StateMonitor:
                                 # Use asyncio.wait_for to prevent indefinite blocking
                                 reconciliation_result = await asyncio.wait_for(
                                     self.reconcile_state(component, discrepancies),
-                                    timeout=60.0,  # 1 minute timeout per component
+                                    timeout=DEFAULT_COMPONENT_TIMEOUT,
                                 )
 
                                 self.logger.debug(
@@ -1387,7 +1392,7 @@ class StateMonitor:
                                 self.logger.error(
                                     "Component reconciliation timeout",
                                     component=component,
-                                    timeout=60.0,
+                                    timeout=DEFAULT_COMPONENT_TIMEOUT,
                                 )
                             except asyncio.CancelledError:
                                 self.logger.info(
@@ -1450,16 +1455,15 @@ class StateMonitor:
         return [result for result in self.state_history if result.validation_time > cutoff]
 
 
-# Factory functions for dependency injection
 def create_state_monitor_factory(
     config: Config | None = None,
     database_service: DatabaseServiceInterface | None = None,
-    risk_service: RiskManagementServiceInterface | None = None,
+    risk_service: RiskServiceInterface | None = None,
     execution_service: ExecutionServiceInterface | None = None,
 ):
     """Create a factory function for StateMonitor instances."""
 
-    def factory():
+    def factory() -> "StateMonitor":
         return StateMonitor(
             config=config or Config(),
             database_service=database_service,
@@ -1473,7 +1477,7 @@ def create_state_monitor_factory(
 def register_state_monitor_with_di(injector, config: Config | None = None) -> None:
     """Register StateMonitor with dependency injection container."""
 
-    def state_monitor_factory():
+    def state_monitor_factory() -> "StateMonitor":
         # Resolve dependencies from injector
         resolved_config = (
             injector.resolve("Config") if injector.has_service("Config") else config or Config()

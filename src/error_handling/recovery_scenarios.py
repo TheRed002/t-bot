@@ -16,13 +16,26 @@ from typing import Any, Protocol
 
 from src.core import BaseComponent
 from src.core.config import Config
-
-# MANDATORY: Import from P-001 core framework
-# MANDATORY: Import from P-007A utils framework
 from src.utils.decorators import retry, time_execution
 
+from .constants import (
+    API_RATE_LIMIT_MAX_ATTEMPTS,
+    CONSERVATIVE_DATA_STOP_ADJUSTMENT,
+    CONSERVATIVE_STOP_ADJUSTMENT,
+    DEFAULT_CACHE_EXPIRY,
+    DEFAULT_DATA_FEED_MAX_STALENESS,
+    DEFAULT_MAINTENANCE_CHECK_INTERVAL,
+    DEFAULT_NETWORK_MAX_OFFLINE_DURATION,
+    NETWORK_ERROR_MAX_ATTEMPTS,
+    PARTIAL_FILL_MIN_PERCENTAGE,
+    PRICE_ADJUSTMENT_DOWN,
+    PRICE_ADJUSTMENT_UP,
+    QUANTITY_ADJUSTMENT,
+    STRING_TRUNCATION_LIMIT,
+    TOLERANCE_DECIMAL,
+)
 
-# Service interfaces to avoid tight coupling
+
 class DatabaseServiceInterface(Protocol):
     """Protocol for database service operations."""
 
@@ -96,10 +109,10 @@ class RecoveryScenario(BaseComponent):
             config,
             "error_handling",
             {
-                "partial_fill_min_percentage": 0.5,
+                "partial_fill_min_percentage": Decimal("0.5"),
                 "max_retry_attempts": 3,
                 "reconnect_timeout": 30,
-                "maintenance_check_interval": 300,
+                "maintenance_check_interval": DEFAULT_MAINTENANCE_CHECK_INTERVAL,
             },
         )
 
@@ -142,7 +155,11 @@ class RecoveryScenario(BaseComponent):
         self._logger.error(
             "Recovery scenario not implemented",
             scenario_class=self.__class__.__name__,
-            context=str(context)[:100] + "..." if len(str(context)) > 100 else str(context),
+            context=(
+                str(context)[:STRING_TRUNCATION_LIMIT] + "..."
+                if len(str(context)) > STRING_TRUNCATION_LIMIT
+                else str(context)
+            ),
         )
         return False
 
@@ -162,7 +179,13 @@ class PartialFillRecovery(RecoveryScenario):
         super().__init__(
             config, database_service, risk_service, cache_service, state_service, bot_service
         )
-        self.min_fill_percentage = self.recovery_config.get("partial_fill_min_percentage", 0.1)
+        self.min_fill_percentage = Decimal(
+            str(
+                self.recovery_config.get(
+                    "partial_fill_min_percentage", str(PARTIAL_FILL_MIN_PERCENTAGE)
+                )
+            )
+        )
         self.cancel_remainder = True  # Default behavior
         self.log_details = True  # Default behavior
 
@@ -177,7 +200,7 @@ class PartialFillRecovery(RecoveryScenario):
             self._logger.error("Invalid context for partial fill recovery", context=context)
             return False
 
-        fill_percentage = filled_quantity / order.quantity
+        fill_percentage = filled_quantity / Decimal(str(order.quantity))
 
         self._logger.info(
             "Processing partial fill recovery",
@@ -228,7 +251,7 @@ class PartialFillRecovery(RecoveryScenario):
                 "Partial fill logged",
                 order_id=order.get("id"),
                 filled_quantity=filled_quantity,
-                fill_percentage=filled_quantity / order["quantity"],
+                fill_percentage=filled_quantity / Decimal(str(order["quantity"])),
                 timestamp=datetime.now(timezone.utc).isoformat(),
             )
 
@@ -373,7 +396,7 @@ class PartialFillRecovery(RecoveryScenario):
                 if fill_ratio < Decimal("0.5"):
                     # Less than 50% filled - tighten stop
                     stop_distance = abs(entry_price - current_stop)
-                    new_stop_distance = stop_distance * Decimal("0.8")  # Tighten by 20%
+                    new_stop_distance = stop_distance * CONSERVATIVE_STOP_ADJUSTMENT
 
                     if order.get("side") == "buy":
                         new_stop = entry_price - new_stop_distance
@@ -419,13 +442,15 @@ class NetworkDisconnectionRecovery(RecoveryScenario):
         super().__init__(
             config, database_service, risk_service, cache_service, state_service, bot_service
         )
-        self.max_offline_duration = self.recovery_config.get("network_max_offline_duration", 300)
+        self.max_offline_duration = self.recovery_config.get(
+            "network_max_offline_duration", DEFAULT_NETWORK_MAX_OFFLINE_DURATION
+        )
         self.sync_on_reconnect = True  # Default behavior
         self.conservative_mode = True  # Default behavior
-        self.max_reconnect_attempts = 5
+        self.max_reconnect_attempts = NETWORK_ERROR_MAX_ATTEMPTS
 
     @time_execution
-    @retry(max_attempts=5, delay=2.0)
+    @retry(max_attempts=5, base_delay=Decimal("2.0"))  # Use Decimal for financial precision
     async def execute_recovery(self, context: dict[str, Any]) -> bool:
         """Handle network disconnection recovery."""
         component = context.get("component", "unknown")
@@ -483,7 +508,7 @@ class NetworkDisconnectionRecovery(RecoveryScenario):
                     "timestamp": datetime.now(timezone.utc).isoformat(),
                     "reason": "network_disconnection",
                 },
-                expiry=3600,  # 1 hour
+                expiry=DEFAULT_CACHE_EXPIRY,
             )
 
             # Pause bot operations via injected service
@@ -552,9 +577,6 @@ class NetworkDisconnectionRecovery(RecoveryScenario):
 
         try:
             self._logger.info("Attempting reconnection", component=component)
-
-            # ConnectionManager already imported above
-            pass
 
             # Initialize ConnectionManager if not already done
             connection_manager = ConnectionManager(self.config)
@@ -662,7 +684,7 @@ class NetworkDisconnectionRecovery(RecoveryScenario):
             exchange_balances = await self._fetch_exchange_balances(component)
 
             # Compare balances with tolerance
-            tolerance = Decimal("0.00001")  # Small tolerance for rounding differences
+            tolerance = TOLERANCE_DECIMAL
             discrepancies = {}
 
             for asset, cached_amount in cached_balances.items():
@@ -726,7 +748,7 @@ class NetworkDisconnectionRecovery(RecoveryScenario):
                     "timestamp": datetime.now(timezone.utc).isoformat(),
                     "reconnected_at": datetime.now(timezone.utc).isoformat(),
                 },
-                expiry=3600,
+                expiry=DEFAULT_CACHE_EXPIRY,
             )
 
             # Resume bot operations via injected service
@@ -951,7 +973,7 @@ class ExchangeMaintenanceRecovery(RecoveryScenario):
 
             pause_key = f"orders_paused_{exchange}"
             if self._cache_service:
-                await self._cache_service.set(pause_key, True, 3600)  # 1 hour cache
+                await self._cache_service.set(pause_key, True, DEFAULT_CACHE_EXPIRY)  # 1 hour cache
 
             self._logger.info("New orders paused for maintenance", exchange=exchange)
         except Exception as e:
@@ -973,7 +995,9 @@ class DataFeedInterruptionRecovery(RecoveryScenario):
         super().__init__(
             config, database_service, risk_service, cache_service, state_service, bot_service
         )
-        self.max_staleness = self.recovery_config.get("data_feed_max_staleness", 60)
+        self.max_staleness = self.recovery_config.get(
+            "data_feed_max_staleness", DEFAULT_DATA_FEED_MAX_STALENESS
+        )
         self.fallback_sources = ["backup_feed", "static_data"]  # Default fallback sources
         self.conservative_trading = True  # Default behavior
 
@@ -1047,7 +1071,9 @@ class DataFeedInterruptionRecovery(RecoveryScenario):
                             # Tighten stop losses by 5%
                             current_stop = position.get("stop_loss_price")
                             if current_stop:
-                                conservative_stop = Decimal(str(current_stop)) * Decimal("0.95")
+                                conservative_stop = (
+                                    Decimal(str(current_stop)) * CONSERVATIVE_DATA_STOP_ADJUSTMENT
+                                )
                                 await self._risk_service.update_stop_loss(
                                     symbol, conservative_stop, position.get("exchange", "default")
                                 )
@@ -1154,16 +1180,16 @@ class OrderRejectionRecovery(RecoveryScenario):
                     current_price = Decimal(str(order["price"]))
                     # Adjust by 0.1% towards market
                     if "too_high" in rejection_reason.lower():
-                        adjustments["price"] = current_price * Decimal("0.999")
+                        adjustments["price"] = current_price * PRICE_ADJUSTMENT_DOWN
                     elif "too_low" in rejection_reason.lower():
-                        adjustments["price"] = current_price * Decimal("1.001")
+                        adjustments["price"] = current_price * PRICE_ADJUSTMENT_UP
 
             elif "quantity" in rejection_reason.lower():
                 # Adjust quantity if invalid
                 if order and "quantity" in order:
                     current_qty = Decimal(str(order["quantity"]))
                     # Reduce by 10% for size issues
-                    adjustments["quantity"] = current_qty * Decimal("0.9")
+                    adjustments["quantity"] = current_qty * QUANTITY_ADJUSTMENT
 
             # Store adjustments for retry
             if adjustments and self._cache_service:
@@ -1195,7 +1221,7 @@ class APIRateLimitRecovery(RecoveryScenario):
             config, database_service, risk_service, cache_service, state_service, bot_service
         )
         self.respect_retry_after = True
-        self.max_retry_attempts = 3
+        self.max_retry_attempts = API_RATE_LIMIT_MAX_ATTEMPTS
         self.base_delay = 5
 
     @time_execution
@@ -1230,7 +1256,6 @@ class APIRateLimitRecovery(RecoveryScenario):
         return False
 
 
-# Factory functions for dependency injection
 def create_partial_fill_recovery_factory(config: Config | None = None):
     """Create a factory function for PartialFillRecovery instances."""
 

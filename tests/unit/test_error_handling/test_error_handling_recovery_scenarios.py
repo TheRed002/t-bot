@@ -66,7 +66,9 @@ class TestPartialFillRecovery:
         """Test partial fill recovery initialization."""
         recovery = PartialFillRecovery(config)
         assert recovery.config == config
-        assert recovery.min_fill_percentage == recovery.recovery_config.get("partial_fill_min_percentage", 0.1)
+        assert recovery.min_fill_percentage == recovery.recovery_config.get(
+            "partial_fill_min_percentage", 0.1
+        )
         assert recovery.cancel_remainder is True
         assert recovery.log_details is True
 
@@ -219,6 +221,7 @@ class TestExchangeMaintenanceRecovery:
     async def test_maintenance_recovery_execution(self, maintenance_recovery):
         """Test exchange maintenance recovery execution."""
         import time
+
         context = {"exchange": "binance", "maintenance_start": time.time()}
 
         with (

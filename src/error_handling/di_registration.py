@@ -26,6 +26,7 @@ def register_error_handling_services(injector, config: Config | None = None) -> 
 
     try:
         # Register SecuritySanitizer and SecurityRateLimiter first to avoid circular deps
+
         def security_sanitizer_factory():
             try:
                 from src.error_handling.security_sanitizer import get_security_sanitizer
@@ -44,21 +45,18 @@ def register_error_handling_services(injector, config: Config | None = None) -> 
                 logger.error(f"Failed to create SecurityRateLimiter: {e}")
                 raise
 
-        injector.register_factory("SecuritySanitizer", security_sanitizer_factory, singleton=True)
-        injector.register_factory(
-            "SecurityRateLimiter", security_rate_limiter_factory, singleton=True
-        )
+        injector.register("SecuritySanitizer", security_sanitizer_factory, singleton=True)
+        injector.register("SecurityRateLimiter", security_rate_limiter_factory, singleton=True)
         logger.debug("Registered security components")
 
         # Register ErrorHandler as singleton with proper error handling
+
         def error_handler_factory():
             try:
                 from src.error_handling.error_handler import ErrorHandler
 
                 resolved_config = (
-                    injector.resolve("Config")
-                    if injector.has_service("Config")
-                    else config or Config()
+                    injector.get("Config") if injector.has("Config") else config or Config()
                 )
 
                 # Try to resolve security components
@@ -66,12 +64,12 @@ def register_error_handling_services(injector, config: Config | None = None) -> 
                 rate_limiter = None
 
                 try:
-                    sanitizer = injector.resolve("SecuritySanitizer")
+                    sanitizer = injector.get("SecuritySanitizer")
                 except Exception as e:
                     logger.debug(f"Failed to resolve SecuritySanitizer: {e}")
 
                 try:
-                    rate_limiter = injector.resolve("SecurityRateLimiter")
+                    rate_limiter = injector.get("SecurityRateLimiter")
                 except Exception as e:
                     logger.debug(f"Failed to resolve SecurityRateLimiter: {e}")
 
@@ -87,44 +85,44 @@ def register_error_handling_services(injector, config: Config | None = None) -> 
                 logger.error(f"Failed to create ErrorHandler: {e}")
                 raise
 
-        injector.register_factory("ErrorHandler", error_handler_factory, singleton=True)
+        injector.register("ErrorHandler", error_handler_factory, singleton=True)
         logger.debug("Registered ErrorHandler")
 
         # Register ErrorContextFactory using simplified factory pattern
+
         def context_factory_factory():
             try:
                 from src.error_handling.context import ErrorContextFactory
 
-                # Use service locator pattern for factory creation
-                factory = ErrorContextFactory(dependency_container=injector)
-                return factory
+                # Use dependency injection for factory creation
+                return ErrorContextFactory(dependency_container=injector)
             except Exception as e:
                 logger.warning(f"Failed to create ErrorContextFactory with DI: {e}")
-                # Fallback to basic factory without dependency injection
+                # Fallback to basic factory
                 try:
                     from src.error_handling.context import ErrorContextFactory
 
                     return ErrorContextFactory()
                 except Exception as fallback_error:
-                    logger.error(f"Failed to create ErrorContextFactory fallback: {fallback_error}")
+                    error_msg = f"Failed to create ErrorContextFactory: {fallback_error}"
+                    logger.error(error_msg)
                     raise
 
-        injector.register_factory("ErrorContextFactory", context_factory_factory, singleton=True)
+        injector.register("ErrorContextFactory", context_factory_factory, singleton=True)
         logger.debug("Registered ErrorContextFactory with simplified factory pattern")
 
         # Register GlobalErrorHandler as singleton with dependency injection
+
         def global_handler_factory():
             try:
                 from src.error_handling.global_handler import GlobalErrorHandler
 
                 resolved_config = (
-                    injector.resolve("Config")
-                    if injector.has_service("Config")
-                    else config or Config()
+                    injector.get("Config") if injector.has("Config") else config or Config()
                 )
                 context_factory = (
-                    injector.resolve("ErrorContextFactory")
-                    if injector.has_service("ErrorContextFactory")
+                    injector.get("ErrorContextFactory")
+                    if injector.has("ErrorContextFactory")
                     else None
                 )
                 instance = GlobalErrorHandler(resolved_config, context_factory)
@@ -137,18 +135,17 @@ def register_error_handling_services(injector, config: Config | None = None) -> 
                 logger.error(f"Failed to create GlobalErrorHandler: {e}")
                 raise
 
-        injector.register_factory("GlobalErrorHandler", global_handler_factory, singleton=True)
+        injector.register("GlobalErrorHandler", global_handler_factory, singleton=True)
         logger.debug("Registered GlobalErrorHandler")
 
         # Register ErrorPatternAnalytics as singleton
+
         def pattern_analytics_factory():
             try:
                 from src.error_handling.pattern_analytics import ErrorPatternAnalytics
 
                 resolved_config = (
-                    injector.resolve("Config")
-                    if injector.has_service("Config")
-                    else config or Config()
+                    injector.get("Config") if injector.has("Config") else config or Config()
                 )
                 instance = ErrorPatternAnalytics(resolved_config)
 
@@ -160,20 +157,17 @@ def register_error_handling_services(injector, config: Config | None = None) -> 
                 logger.error(f"Failed to create ErrorPatternAnalytics: {e}")
                 raise
 
-        injector.register_factory(
-            "ErrorPatternAnalytics", pattern_analytics_factory, singleton=True
-        )
+        injector.register("ErrorPatternAnalytics", pattern_analytics_factory, singleton=True)
         logger.debug("Registered ErrorPatternAnalytics")
 
         # Register StateMonitor as singleton - this depends on other services
+
         def state_monitor_factory():
             try:
                 from src.error_handling.state_monitor import StateMonitor
 
                 resolved_config = (
-                    injector.resolve("Config")
-                    if injector.has_service("Config")
-                    else config or Config()
+                    injector.get("Config") if injector.has("Config") else config or Config()
                 )
 
                 # Try to resolve dependencies - these are optional for StateMonitor
@@ -183,26 +177,22 @@ def register_error_handling_services(injector, config: Config | None = None) -> 
 
                 try:
                     database_service = (
-                        injector.resolve("DatabaseService")
-                        if injector.has_service("DatabaseService")
-                        else None
+                        injector.get("DatabaseService") if injector.has("DatabaseService") else None
                     )
                 except Exception as e:
                     logger.debug(f"Failed to resolve DatabaseService for StateMonitor: {e}")
 
                 try:
                     risk_service = (
-                        injector.resolve("RiskService")
-                        if injector.has_service("RiskService")
-                        else None
+                        injector.get("RiskService") if injector.has("RiskService") else None
                     )
                 except Exception as e:
                     logger.debug(f"Failed to resolve RiskService for StateMonitor: {e}")
 
                 try:
                     execution_service = (
-                        injector.resolve("ExecutionService")
-                        if injector.has_service("ExecutionService")
+                        injector.get("ExecutionService")
+                        if injector.has("ExecutionService")
                         else None
                     )
                 except Exception as e:
@@ -223,18 +213,17 @@ def register_error_handling_services(injector, config: Config | None = None) -> 
                 logger.error(f"Failed to create StateMonitor: {e}")
                 raise
 
-        injector.register_factory("StateMonitor", state_monitor_factory, singleton=True)
+        injector.register("StateMonitor", state_monitor_factory, singleton=True)
         logger.debug("Registered StateMonitor")
 
         # Register ErrorHandlingService as singleton with all dependencies
+
         def service_factory():
             try:
                 from src.error_handling.service import ErrorHandlingService
 
                 resolved_config = (
-                    injector.resolve("Config")
-                    if injector.has_service("Config")
-                    else config or Config()
+                    injector.get("Config") if injector.has("Config") else config or Config()
                 )
 
                 # Resolve required dependencies - these should be available
@@ -245,17 +234,15 @@ def register_error_handling_services(injector, config: Config | None = None) -> 
 
                 try:
                     error_handler = (
-                        injector.resolve("ErrorHandler")
-                        if injector.has_service("ErrorHandler")
-                        else None
+                        injector.get("ErrorHandler") if injector.has("ErrorHandler") else None
                     )
                 except Exception as e:
                     logger.debug(f"Failed to resolve ErrorHandler: {e}")
 
                 try:
                     global_handler = (
-                        injector.resolve("GlobalErrorHandler")
-                        if injector.has_service("GlobalErrorHandler")
+                        injector.get("GlobalErrorHandler")
+                        if injector.has("GlobalErrorHandler")
                         else None
                     )
                 except Exception as e:
@@ -263,8 +250,8 @@ def register_error_handling_services(injector, config: Config | None = None) -> 
 
                 try:
                     pattern_analytics = (
-                        injector.resolve("ErrorPatternAnalytics")
-                        if injector.has_service("ErrorPatternAnalytics")
+                        injector.get("ErrorPatternAnalytics")
+                        if injector.has("ErrorPatternAnalytics")
                         else None
                     )
                 except Exception as e:
@@ -272,9 +259,7 @@ def register_error_handling_services(injector, config: Config | None = None) -> 
 
                 try:
                     state_monitor = (
-                        injector.resolve("StateMonitor")
-                        if injector.has_service("StateMonitor")
-                        else None
+                        injector.get("StateMonitor") if injector.has("StateMonitor") else None
                     )
                 except Exception as e:
                     logger.debug(f"Failed to resolve StateMonitor: {e}")
@@ -295,67 +280,31 @@ def register_error_handling_services(injector, config: Config | None = None) -> 
                 logger.error(f"Failed to create ErrorHandlingService: {e}")
                 raise
 
-        injector.register_factory("ErrorHandlingService", service_factory, singleton=True)
+        injector.register("ErrorHandlingService", service_factory, singleton=True)
         logger.debug("Registered ErrorHandlingService")
 
-        # Register ErrorHandlingServiceAdapter as the primary service interface
-        def service_adapter_factory():
-            try:
-                from src.error_handling.service_adapter import ErrorHandlingServiceAdapter
-
-                resolved_config = (
-                    injector.resolve("Config")
-                    if injector.has_service("Config")
-                    else config or Config()
-                )
-
-                error_handling_service = injector.resolve("ErrorHandlingService")
-
-                return ErrorHandlingServiceAdapter(
-                    config=resolved_config,
-                    error_handling_service=error_handling_service,
-                )
-            except Exception as e:
-                logger.error(f"Failed to create ErrorHandlingServiceAdapter: {e}")
-                raise
-
-        injector.register_factory(
-            "ErrorHandlingServiceAdapter", service_adapter_factory, singleton=True
-        )
-        logger.debug("Registered ErrorHandlingServiceAdapter")
-
-        # Register ErrorHandlerFactory and configure handlers using simplified pattern
+        # Register ErrorHandlerFactory using simplified pattern
         try:
             from src.error_handling.factory import ErrorHandlerFactory
 
-            # Use service locator pattern for factory registration
             def error_handler_factory_factory():
                 try:
-                    # Create factory with dependency injection using service locator
+                    # Create factory with dependency injection
                     factory = ErrorHandlerFactory(dependency_container=injector)
-
-                    # Register available handlers with the factory
                     _register_error_handlers(factory)
-
                     return factory
                 except Exception as e:
                     logger.warning(f"Failed to create ErrorHandlerFactory with DI: {e}")
-                    # Fallback to basic factory without DI
+                    # Fallback to basic factory
                     factory = ErrorHandlerFactory()
                     _register_error_handlers(factory)
                     return factory
 
-            injector.register_factory(
-                "ErrorHandlerFactory", error_handler_factory_factory, singleton=True
-            )
+            injector.register("ErrorHandlerFactory", error_handler_factory_factory, singleton=True)
 
-            # Configure class-level container using service locator pattern
-            try:
-                ErrorHandlerFactory.set_dependency_container(injector)
-                logger.debug("Registered ErrorHandlerFactory with service locator pattern")
-            except Exception as e:
-                logger.debug(f"Failed to set dependency container on factory: {e}")
-                # Continue without class-level DI
+            # Set class-level dependency container
+            ErrorHandlerFactory.set_dependency_container(injector)
+            logger.debug("Registered ErrorHandlerFactory with dependency injection")
 
         except Exception as e:
             logger.warning(f"Failed to register ErrorHandlerFactory: {e}")
@@ -366,36 +315,24 @@ def register_error_handling_services(injector, config: Config | None = None) -> 
 
             def error_chain_factory():
                 try:
-                    # Use service locator pattern for chain creation
                     return ErrorHandlerChain.create_default_chain(dependency_container=injector)
                 except Exception as e:
                     logger.warning(f"Failed to create default chain with DI: {e}")
-                    # Fallback to basic chain without dependency injection
-                    try:
-                        return ErrorHandlerChain([], None)  # Empty chain as fallback
-                    except Exception as fallback_error:
-                        logger.error(f"Failed to create fallback chain: {fallback_error}")
-                        # Return None to indicate factory failure
-                        return None
+                    # Fallback to empty chain
+                    return ErrorHandlerChain([], None)
 
-            injector.register_factory("ErrorHandlerChain", error_chain_factory, singleton=False)
-            logger.debug("Registered ErrorHandlerChain factory with service locator pattern")
+            injector.register("ErrorHandlerChain", error_chain_factory, singleton=False)
+            logger.debug("Registered ErrorHandlerChain factory with dependency injection")
         except Exception as e:
             logger.warning(f"Failed to register ErrorHandlerChain factory: {e}")
 
         logger.info("Successfully registered all error handling services and factories")
 
         # Configure dependencies after all services are registered to avoid circular deps
-        try:
-            _configure_service_dependencies(injector)
-        except Exception as e:
-            logger.warning(f"Failed to configure some service dependencies: {e}")
+        _configure_service_dependencies(injector)
 
         # Set up global error handler instance
-        try:
-            _setup_global_error_handler(injector)
-        except Exception as e:
-            logger.warning(f"Failed to setup global error handler: {e}")
+        _setup_global_error_handler(injector)
 
     except Exception as e:
         logger.error(f"Failed to register error handling services: {e}")
@@ -415,15 +352,14 @@ def _configure_service_dependencies(injector) -> None:
             "GlobalErrorHandler",  # Fourth - depends on ErrorContextFactory
             "StateMonitor",  # Fifth - optional dependencies only
             "ErrorHandlingService",  # Sixth - depends on all core components
-            "ErrorHandlingServiceAdapter",  # Last - depends on ErrorHandlingService
         ]
 
         configured_services = set()
 
         for service_name in service_names:
             try:
-                if injector.has_service(service_name) and service_name not in configured_services:
-                    service_instance = injector.resolve(service_name)
+                if injector.has(service_name) and service_name not in configured_services:
+                    service_instance = injector.get(service_name)
                     if hasattr(service_instance, "configure_dependencies"):
                         service_instance.configure_dependencies(injector)
                         logger.debug(f"Configured dependencies for {service_name}")
@@ -455,7 +391,7 @@ def get_error_handling_service(injector) -> Any:
     Returns:
         ErrorHandlingService instance
     """
-    return injector.resolve("ErrorHandlingService")
+    return injector.get("ErrorHandlingService")
 
 
 def _setup_global_error_handler(injector) -> None:
@@ -463,8 +399,8 @@ def _setup_global_error_handler(injector) -> None:
     try:
         from src.error_handling import set_global_error_handler
 
-        if injector.has_service("GlobalErrorHandler"):
-            global_handler = injector.resolve("GlobalErrorHandler")
+        if injector.has("GlobalErrorHandler"):
+            global_handler = injector.get("GlobalErrorHandler")
             set_global_error_handler(global_handler)
             logger.debug("Global error handler instance configured")
         else:
@@ -474,7 +410,7 @@ def _setup_global_error_handler(injector) -> None:
 
 
 def _register_error_handlers(factory) -> None:
-    """Register all available error handlers with the factory using service locator pattern."""
+    """Register all available error handlers with the factory."""
     try:
         from src.error_handling.handlers import (
             DatabaseErrorHandler,
@@ -484,28 +420,24 @@ def _register_error_handlers(factory) -> None:
             ValidationErrorHandler,
         )
 
-        # Register handlers with proper dependency injection configurations
-        handler_registry = {
-            "network": {
-                "class": NetworkErrorHandler,
-                "config": {"max_retries": 3, "base_delay": 1.0},
-            },
-            "rate_limit": {"class": RateLimitErrorHandler, "config": {}},
-            "database": {"class": DatabaseErrorHandler, "config": {}},
-            "validation": {"class": ValidationErrorHandler, "config": {}},
-            "data_validation": {"class": DataValidationErrorHandler, "config": {}},
-        }
+        # Register handlers with configurations
+        handlers = [
+            ("network", NetworkErrorHandler, {"max_retries": 3, "base_delay": 1.0}),
+            ("rate_limit", RateLimitErrorHandler, {}),
+            ("database", DatabaseErrorHandler, {}),
+            ("validation", ValidationErrorHandler, {}),
+            ("data_validation", DataValidationErrorHandler, {}),
+        ]
 
-        for handler_name, handler_info in handler_registry.items():
+        for handler_name, handler_class, config in handlers:
             try:
-                factory.register(handler_name, handler_info["class"], handler_info["config"])
+                factory.register(handler_name, handler_class, config)
                 logger.debug(f"Registered error handler: {handler_name}")
             except Exception as e:
                 logger.warning(f"Failed to register error handler '{handler_name}': {e}")
-                # Continue with other handlers
 
     except Exception as e:
-        logger.warning(f"Failed to register some error handlers: {e}")
+        logger.warning(f"Failed to register error handlers: {e}")
 
 
 def configure_error_handling_di(injector, config: Config | None = None) -> None:

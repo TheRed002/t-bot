@@ -69,6 +69,10 @@ class ErrorPatternAnalyticsInterface(Protocol):
         """Get summary of error trends."""
         ...
 
+    async def cleanup(self) -> None:
+        """Clean up analytics resources."""
+        ...
+
 
 @runtime_checkable
 class ErrorHandlerInterface(Protocol):
@@ -91,6 +95,14 @@ class ErrorHandlerInterface(Protocol):
         self, error: Exception, component: str, operation: str, **kwargs
     ) -> Any:
         """Create error context for tracking."""
+        ...
+
+    async def cleanup_resources(self) -> None:
+        """Clean up handler resources."""
+        ...
+
+    async def shutdown(self) -> None:
+        """Shutdown error handler."""
         ...
 
 
@@ -124,17 +136,17 @@ class ErrorHandlingServicePort(ABC):
         context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Process an error through the service layer."""
-        pass
+        raise NotImplementedError
 
     @abstractmethod
     async def analyze_error_patterns(self) -> dict[str, Any]:
         """Analyze current error patterns."""
-        pass
+        raise NotImplementedError
 
     @abstractmethod
     async def validate_system_state(self, component: str = "all") -> dict[str, Any]:
         """Validate system state consistency."""
-        pass
+        raise NotImplementedError
 
 
 class ErrorHandlingRepositoryPort(ABC):
@@ -143,19 +155,19 @@ class ErrorHandlingRepositoryPort(ABC):
     @abstractmethod
     async def store_error_event(self, error_data: dict[str, Any]) -> str:
         """Store error event data."""
-        pass
+        raise NotImplementedError
 
     @abstractmethod
     async def retrieve_error_patterns(
         self, component: str | None = None, hours: int = 24
     ) -> list[dict[str, Any]]:
         """Retrieve error patterns for analysis."""
-        pass
+        raise NotImplementedError
 
     @abstractmethod
     async def update_error_statistics(self, stats: dict[str, Any]) -> None:
         """Update error statistics."""
-        pass
+        raise NotImplementedError
 
 
 __all__ = [

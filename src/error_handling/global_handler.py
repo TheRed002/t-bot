@@ -2,15 +2,17 @@
 
 import asyncio
 import sys
+import threading
 import traceback
 from collections.abc import Callable
 from datetime import datetime, timezone
 from functools import wraps
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Optional
 
 if TYPE_CHECKING:
-    from src.error_handling.context import ErrorContext, ErrorContextFactory
+    from src.error_handling.context import ErrorContextFactory
     from src.error_handling.factory import ErrorHandlerChain, ErrorHandlerFactory
+
 
 from src.core.base.service import BaseService
 from src.core.logging import get_logger
@@ -27,7 +29,7 @@ class GlobalErrorHandler(BaseService):
     """
 
     def __init__(
-        self, config: Any | None = None, context_factory: "ErrorContextFactory | None" = None
+        self, config: Any | None = None, context_factory: Optional["ErrorContextFactory"] = None
     ):
         """Initialize global error handler with optional configuration and dependencies."""
         super().__init__(name="GlobalErrorHandler", config=config)
@@ -177,10 +179,18 @@ class GlobalErrorHandler(BaseService):
         self._last_error_time = datetime.now(timezone.utc)
 
         # Create error context using factory or direct creation
+        # Import ErrorContext at runtime to avoid circular dependency
+        from src.error_handling.context import ErrorContext
+
         if self._context_factory:
-            # Factory returns dict, convert to ErrorContext for compatibility
-            self._context_factory.create(error, **(context or {}))
-            error_context = ErrorContext.from_exception(error, **(context or {}))
+            # Create ErrorContext from factory result
+            try:
+                # Create ErrorContext
+                error_context = ErrorContext.from_exception(error, **(context or {}))
+            except Exception as e:
+                # Fallback to direct creation
+                self.logger.warning(f"Factory creation failed, using direct creation: {e}")
+                error_context = ErrorContext.from_exception(error, **(context or {}))
         else:
             error_context = ErrorContext.from_exception(error, **(context or {}))
 
@@ -285,8 +295,18 @@ class GlobalErrorHandler(BaseService):
             # Store task reference to prevent garbage collection
             if not hasattr(self, "_background_tasks"):
                 self._background_tasks = set()
-            self._background_tasks.add(task)
-            task.add_done_callback(self._background_tasks.discard)
+                self._background_task_lock = threading.RLock()
+
+            with self._background_task_lock:
+                self._background_tasks.add(task)
+
+            # Use a wrapper callback to ensure thread-safe removal
+            def safe_remove_task(finished_task):
+                with getattr(self, "_background_task_lock", threading.RLock()):
+                    if hasattr(self, "_background_tasks"):
+                        self._background_tasks.discard(finished_task)
+
+            task.add_done_callback(safe_remove_task)
             # Can't wait synchronously in running loop
             self.logger.warning(
                 "handle_error_sync called from async context, scheduled as task",
@@ -316,8 +336,10 @@ class GlobalErrorHandler(BaseService):
                     finally:
                         try:
                             asyncio.set_event_loop(None)
-                        except Exception:
-                            pass
+                        except Exception as cleanup_error:
+                            self.logger.debug(
+                                f"Event loop cleanup error (ignored): {cleanup_error}"
+                            )
 
     def handle_exception_hook(self, exc_type, exc_value, exc_traceback):
         """
@@ -408,7 +430,7 @@ class GlobalErrorHandler(BaseService):
                 except Exception as e:
                     context = {
                         "function": func.__name__,
-                        "args": str(args)[:200],  # Truncate for safety
+                        "args": str(args)[:200],
                         "kwargs": str(kwargs)[:200],
                     }
                     await self.handle_error(e, context, severity)
@@ -423,7 +445,7 @@ class GlobalErrorHandler(BaseService):
                 except Exception as e:
                     context = {
                         "function": func.__name__,
-                        "args": str(args)[:200],  # Truncate for safety
+                        "args": str(args)[:200],
                         "kwargs": str(kwargs)[:200],
                     }
                     # Try to handle via event loop, but don't break on failure
@@ -469,7 +491,6 @@ class GlobalErrorHandler(BaseService):
         self._last_error_time = None
 
 
-# Factory functions for dependency injection
 def create_global_error_handler_factory(config: Any | None = None):
     """Create a factory function for GlobalErrorHandler instances."""
 

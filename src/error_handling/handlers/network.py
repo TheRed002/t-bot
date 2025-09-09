@@ -5,10 +5,14 @@ from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
 from src.error_handling.base import ErrorHandlerBase
-from src.error_handling.security_sanitizer import (
-    SensitivityLevel,
-)
+from src.error_handling.security_validator import SensitivityLevel
 from src.utils.error_categorization import detect_rate_limiting
+from src.utils.error_handling_utils import (
+    create_recovery_response,
+    extract_retry_after_from_error,
+    get_or_create_sanitizer,
+    sanitize_error_with_level,
+)
 
 
 class NetworkErrorHandler(ErrorHandlerBase):
@@ -33,17 +37,7 @@ class NetworkErrorHandler(ErrorHandlerBase):
         super().__init__(next_handler)
         self.max_retries = max_retries
         self.base_delay = base_delay
-        self.sanitizer = sanitizer
-        if self.sanitizer is None:
-            # Get default sanitizer for production, but allow None in test environments
-            from src.error_handling.security_sanitizer import get_security_sanitizer
-            try:
-                self.sanitizer = get_security_sanitizer()
-            except Exception:
-                # In test environments, this might fail - use a mock or None
-                import logging
-                logger = logging.getLogger(__name__)
-                logger.debug("SecuritySanitizer not available, using minimal sanitization")
+        self.sanitizer = get_or_create_sanitizer(sanitizer)
 
     def can_handle(self, error: Exception) -> bool:
         """Check if this is a network error."""
@@ -88,34 +82,39 @@ class NetworkErrorHandler(ErrorHandlerBase):
         retry_count = context.get("retry_count", 0)
 
         if retry_count >= self.max_retries:
-            sanitized_msg = self.sanitizer.sanitize_error_message(
-                str(error), SensitivityLevel.MEDIUM
+            sanitized_msg = sanitize_error_with_level(
+                error, SensitivityLevel.MEDIUM, self.sanitizer
             )
             self._logger.error(
                 f"Max retries ({self.max_retries}) exceeded for network error: {sanitized_msg}"
             )
-            return {
-                "action": "fail",
-                "reason": "max_retries_exceeded",
-                "sanitized_error": sanitized_msg,
-            }
+            return create_recovery_response(
+                action="fail",
+                reason="max_retries_exceeded",
+                error=error,
+                level=SensitivityLevel.MEDIUM,
+                sanitizer=self.sanitizer,
+            )
 
         # Delegate delay calculation to service layer
         delay = self._calculate_retry_delay(retry_count)
 
-        sanitized_msg = self.sanitizer.sanitize_error_message(str(error), SensitivityLevel.MEDIUM)
+        sanitized_msg = sanitize_error_with_level(error, SensitivityLevel.MEDIUM, self.sanitizer)
         self._logger.warning(
             f"Network error occurred: {sanitized_msg}. "
             f"Retrying in {delay}s (attempt {retry_count + 1}/{self.max_retries})"
         )
 
-        return {
-            "action": "retry",
-            "delay": str(delay),
-            "retry_count": retry_count + 1,
-            "max_retries": self.max_retries,
-            "sanitized_error": sanitized_msg,
-        }
+        return create_recovery_response(
+            action="retry",
+            reason="network_error",
+            error=error,
+            level=SensitivityLevel.MEDIUM,
+            sanitizer=self.sanitizer,
+            delay=str(delay),
+            retry_count=retry_count + 1,
+            max_retries=self.max_retries,
+        )
 
     def _calculate_retry_delay(self, retry_count: int) -> Decimal:
         """Calculate retry delay - moved business logic to separate method."""
@@ -132,17 +131,7 @@ class RateLimitErrorHandler(ErrorHandlerBase):
 
     def __init__(self, next_handler: ErrorHandlerBase | None = None, sanitizer=None) -> None:
         super().__init__(next_handler)
-        self.sanitizer = sanitizer
-        if self.sanitizer is None:
-            # Get default sanitizer for production, but allow None in test environments
-            from src.error_handling.security_sanitizer import get_security_sanitizer
-            try:
-                self.sanitizer = get_security_sanitizer()
-            except Exception:
-                # In test environments, this might fail - use a mock or None
-                import logging
-                logger = logging.getLogger(__name__)
-                logger.debug("SecuritySanitizer not available, using minimal sanitization")
+        self.sanitizer = get_or_create_sanitizer(sanitizer)
 
     def can_handle(self, error: Exception) -> bool:
         """Check if this is a rate limit error."""
@@ -163,50 +152,25 @@ class RateLimitErrorHandler(ErrorHandlerBase):
             Recovery action dictionary
         """
         # Try to extract retry-after from error or context
-        retry_after = self._extract_retry_after(error, context)
+        retry_after = extract_retry_after_from_error(error, context)
 
         if retry_after is None:
             # Default to 60 seconds if not specified
-            retry_after = 60
+            from decimal import Decimal
 
-        sanitized_msg = self.sanitizer.sanitize_error_message(str(error), SensitivityLevel.MEDIUM)
+            retry_after = Decimal("60")
+
+        sanitized_msg = sanitize_error_with_level(error, SensitivityLevel.MEDIUM, self.sanitizer)
         self._logger.warning(
             f"Rate limit exceeded: {sanitized_msg}. Waiting {retry_after}s before retry"
         )
 
-        # Return wait instruction instead of blocking - let service layer handle timing
-
-        return {
-            "action": "wait",
-            "delay": str(retry_after),
-            "reason": "rate_limit",
-            "circuit_break": True,  # Suggest circuit breaker activation
-            "sanitized_error": sanitized_msg,
-        }
-
-    def _extract_retry_after(
-        self, error: Exception, context: dict[str, Any] | None = None
-    ) -> Decimal | None:
-        """Extract retry-after value from error or context."""
-        from decimal import Decimal
-
-        # Check context first
-        if context and "retry_after" in context:
-            return Decimal(str(context["retry_after"]))
-
-        # Try to parse from error message
-        import re
-
-        error_str = str(error)
-
-        # Look for patterns like "retry after 30 seconds"
-        match = re.search(r"retry[\s\-_]?after[\s:]*(\d+)", error_str, re.IGNORECASE)
-        if match:
-            return Decimal(match.group(1))
-
-        # Look for "429" status with time
-        match = re.search(r"429.*?(\d+)\s*(?:seconds?|s)", error_str, re.IGNORECASE)
-        if match:
-            return Decimal(match.group(1))
-
-        return None
+        return create_recovery_response(
+            action="wait",
+            reason="rate_limit",
+            error=error,
+            level=SensitivityLevel.MEDIUM,
+            sanitizer=self.sanitizer,
+            delay=str(retry_after),
+            circuit_break=True,
+        )

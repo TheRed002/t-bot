@@ -70,14 +70,15 @@ class ErrorHandlerFactory(BaseFactory[ErrorHandlerProtocol]):
         try:
             # This assumes there's a global factory instance
             # In practice, this would be managed by the DI container
-            pass
+            # No global registration needed in current implementation
+            return
         except Exception as e:
             # Legacy registration continues to work - log warning but continue
             import logging
 
             logger = logging.getLogger(__name__)
             logger.debug(f"Factory registration to global instance failed: {e}")
-            # Continue with legacy registration
+            # Continue with legacy registration - no action needed
 
     @classmethod
     def create(
@@ -113,17 +114,11 @@ class ErrorHandlerFactory(BaseFactory[ErrorHandlerProtocol]):
         if "next_handler" in sig.parameters:
             config["next_handler"] = next_handler
 
-        # Use dependency injection if available
+        # Use dependency injection - required
         if cls._dependency_container:
-            try:
-                cls._inject_common_dependencies(config)
-            except Exception as e:
-                # Continue without injection if it fails - log but don't fail creation
-                import logging
-
-                logger = logging.getLogger(__name__)
-                logger.debug(f"Dependency injection failed during error handler creation: {e}")
-                # Continue with creation without injection
+            cls._inject_common_dependencies(config, handler_class)
+        else:
+            raise ValueError("Dependency container required for error handler creation")
 
         try:
             instance = handler_class(**config)
@@ -147,15 +142,22 @@ class ErrorHandlerFactory(BaseFactory[ErrorHandlerProtocol]):
         cls._dependency_container = container
 
     @classmethod
-    def _inject_common_dependencies(cls, config: dict[str, Any]) -> None:
-        """Inject common dependencies into config via service locator pattern."""
+    def _inject_common_dependencies(cls, config: dict[str, Any], handler_class=None) -> None:
+        """Inject common dependencies into config using service locator pattern."""
         if not cls._dependency_container:
             raise ValueError("Dependency container required for service creation")
 
         container = cls._dependency_container
 
-        # Use service locator pattern for dependency injection
-        # Only inject dependencies that the handler actually needs
+        # Get handler constructor parameters if handler_class provided
+        valid_params = set()
+        if handler_class:
+            import inspect
+
+            sig = inspect.signature(handler_class.__init__)
+            valid_params = set(sig.parameters.keys())
+
+        # Service mappings for dependency injection
         service_mappings = {
             "Config": "config",
             "SecuritySanitizer": "sanitizer",
@@ -163,19 +165,30 @@ class ErrorHandlerFactory(BaseFactory[ErrorHandlerProtocol]):
         }
 
         for service_name, config_key in service_mappings.items():
-            # Only inject if the parameter is missing and service is available
+            # Only inject if the parameter is accepted by the handler
+            if handler_class and config_key not in valid_params:
+                continue
+
             if config_key not in config:
-                if hasattr(container, "has_service") and container.has_service(service_name):
-                    # Use service locator to get the service
-                    service = container.resolve(service_name)
-                    if service is not None:
-                        config[config_key] = service
-                else:
-                    # Required dependencies must be available
-                    if service_name in ["SecuritySanitizer", "SecurityRateLimiter"]:
+                try:
+                    if hasattr(container, "has_service") and container.has_service(service_name):
+                        service = container.resolve(service_name)
+                        if service is not None:
+                            config[config_key] = service
+                    elif service_name == "SecuritySanitizer" and config_key in valid_params:
+                        # SecuritySanitizer is required for handlers that accept it
                         raise ValueError(
                             f"Required service {service_name} not registered in DI container"
                         )
+                except Exception as e:
+                    # Log but continue for optional dependencies
+                    if service_name != "SecuritySanitizer" or config_key not in valid_params:
+                        import logging
+
+                        logger = logging.getLogger(__name__)
+                        logger.debug(f"Failed to inject optional dependency {service_name}: {e}")
+                    else:
+                        raise
 
     @classmethod
     def clear(cls) -> None:
@@ -222,22 +235,15 @@ class ErrorHandlerChain(BaseFactory[ErrorHandlerProtocol]):
             return
 
         # Build chain in reverse order using dependency injection
+        if not self._dependency_container:
+            raise ValueError("Dependency container required for handler chain building")
+
+        ErrorHandlerFactory.set_dependency_container(self._dependency_container)
+
         self.chain = None
         for handler_type in reversed(handler_types):
-            try:
-                # Use dependency injection if available
-                if self._dependency_container:
-                    ErrorHandlerFactory.set_dependency_container(self._dependency_container)
-
-                handler = ErrorHandlerFactory.create(handler_type, next_handler=self.chain)
-                self.chain = handler
-            except Exception as e:
-                # Log error but continue with simplified chain
-                import logging
-
-                logger = logging.getLogger(__name__)
-                logger.warning(f"Failed to create handler '{handler_type}' in chain: {e}")
-                # Skip this handler and continue
+            handler = ErrorHandlerFactory.create(handler_type, next_handler=self.chain)
+            self.chain = handler
 
     async def handle(self, error: Exception, context: dict[str, Any] | None = None) -> Any:
         """
@@ -262,20 +268,13 @@ class ErrorHandlerChain(BaseFactory[ErrorHandlerProtocol]):
         Args:
             handler_type: Type of handler to add
         """
-        try:
-            # Ensure factory uses dependency injection
-            if self._dependency_container:
-                ErrorHandlerFactory.set_dependency_container(self._dependency_container)
+        # Ensure factory uses dependency injection - required
+        if not self._dependency_container:
+            raise ValueError("Dependency container required for adding handlers")
 
-            new_handler = ErrorHandlerFactory.create(handler_type, next_handler=self.chain)
-            self.chain = new_handler
-        except Exception as e:
-            # Log error but don't fail the operation
-            import logging
-
-            logger = logging.getLogger(__name__)
-            logger.error(f"Failed to add handler '{handler_type}' to chain: {e}")
-            raise
+        ErrorHandlerFactory.set_dependency_container(self._dependency_container)
+        new_handler = ErrorHandlerFactory.create(handler_type, next_handler=self.chain)
+        self.chain = new_handler
 
     @classmethod
     def create_default_chain(cls, dependency_container: Any | None = None) -> "ErrorHandlerChain":
@@ -295,16 +294,9 @@ class ErrorHandlerChain(BaseFactory[ErrorHandlerProtocol]):
             "validation",  # Validation errors
         ]
 
-        try:
-            # Set up dependency injection for factory
-            if dependency_container:
-                ErrorHandlerFactory.set_dependency_container(dependency_container)
-
+        # Set up dependency injection for factory - required
+        if dependency_container:
+            ErrorHandlerFactory.set_dependency_container(dependency_container)
             return cls(default_handlers, dependency_container)
-        except Exception as e:
-            # Fallback to basic chain without dependency injection
-            import logging
-
-            logger = logging.getLogger(__name__)
-            logger.warning(f"Failed to create default chain with DI, using basic chain: {e}")
-            return cls(default_handlers, None)
+        else:
+            raise ValueError("Dependency container required for error handler chain creation")

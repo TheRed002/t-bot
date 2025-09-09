@@ -515,7 +515,7 @@ class AuthenticationErrorHandler(ErrorHandlerBase):
             "retry_after": rate_check.suggested_retry_after,
             "security_action": "rate_limited",
             "recoverable": True,
-            "threat_level": rate_check.threat_level.value,
+            "threat_level": rate_check.threat_level,
         }
 
     def _create_secure_auth_response(
@@ -546,7 +546,7 @@ class AuthenticationErrorHandler(ErrorHandlerBase):
             "security_action": "progressive_delay",
             "recoverable": error_category not in ["account_locked", "account_disabled"],
             "error_category": error_category,
-            "threat_level": threat_level.value,
+            "threat_level": threat_level,
             "retry_recommendations": self._get_retry_recommendations(error_category),
             "security_headers": self._get_security_headers(),
         }
@@ -624,7 +624,7 @@ class AuthenticationErrorHandler(ErrorHandlerBase):
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "event_type": "authentication_failure",
             "error_category": error_category,
-            "threat_level": threat_level.value,
+            "threat_level": threat_level,
             "client_ip": client_ip,
             "user_id": user_id,
             "error_type": type(error).__name__,
