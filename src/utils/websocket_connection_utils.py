@@ -109,7 +109,10 @@ class WebSocketConnectionManager:
                 # Create WebSocket connection with timeout
                 self.ws = await asyncio.wait_for(
                     websockets.connect(
-                        self.ws_url, ping_interval=self.ping_interval, ping_timeout=self.ping_timeout, close_timeout=10
+                        self.ws_url,
+                        ping_interval=self.ping_interval,
+                        ping_timeout=self.ping_timeout,
+                        close_timeout=10,
                     ),
                     timeout=30.0,  # Connection timeout
                 )
@@ -298,7 +301,9 @@ class WebSocketConnectionManager:
                         data = message
 
                     # Process message with timeout to prevent blocking
-                    await asyncio.wait_for(self._process_message(data), timeout=5.0)  # Message processing timeout
+                    await asyncio.wait_for(
+                        self._process_message(data), timeout=5.0
+                    )  # Message processing timeout
 
                 except asyncio.TimeoutError:
                     self.logger.warning(f"Message processing timed out for {self.exchange_name}")
@@ -331,7 +336,7 @@ class WebSocketConnectionManager:
         message_type = data.get("type") or data.get("channel")
         if message_type and message_type in self.callbacks:
             # Process callbacks concurrently to avoid blocking
-            callback_tasks = []
+            callback_tasks: list[asyncio.Task[Any] | asyncio.Future[Any]] = []
             for callback in self.callbacks[message_type]:
                 try:
                     if asyncio.iscoroutinefunction(callback):
@@ -371,7 +376,8 @@ class WebSocketConnectionManager:
                 # Check if we've received messages recently
                 if (
                     self.last_message_time
-                    and (current_time - self.last_message_time).total_seconds() > self.message_timeout
+                    and (current_time - self.last_message_time).total_seconds()
+                    > self.message_timeout
                 ):
                     self.logger.warning("No messages received within timeout, reconnecting")
                     self.connected = False
@@ -392,10 +398,16 @@ class WebSocketConnectionManager:
     async def _reconnect(self) -> None:
         """Reconnect with exponential backoff."""
         try:
-            while self.reconnect_attempts < self.max_reconnect_attempts and not self._shutdown and not self.connected:
-
+            while (
+                self.reconnect_attempts < self.max_reconnect_attempts
+                and not self._shutdown
+                and not self.connected
+            ):
                 # Calculate delay with exponential backoff
-                delay = min(self.base_reconnect_delay * (2**self.reconnect_attempts), self.max_reconnect_delay)
+                delay = min(
+                    self.base_reconnect_delay * (2**self.reconnect_attempts),
+                    self.max_reconnect_delay,
+                )
 
                 self.logger.info(
                     f"Reconnecting in {delay}s (attempt {self.reconnect_attempts + 1}/"
@@ -432,7 +444,7 @@ class WebSocketConnectionManager:
             batch_size = 10
             semaphore = asyncio.Semaphore(batch_size)
 
-            async def send_queued_message(message):
+            async def send_queued_message(message: dict[str, Any]) -> None:
                 async with semaphore:
                     success = await self.send_message(message)
                     if success:
@@ -466,7 +478,9 @@ class WebSocketConnectionManager:
         if cancel_tasks:
             try:
                 # Wait for all tasks to cancel with timeout
-                await asyncio.wait_for(asyncio.gather(*cancel_tasks, return_exceptions=True), timeout=5.0)
+                await asyncio.wait_for(
+                    asyncio.gather(*cancel_tasks, return_exceptions=True), timeout=5.0
+                )
             except asyncio.TimeoutError:
                 self.logger.warning(f"Task cancellation timed out for {self.exchange_name}")
             except Exception as e:
@@ -480,8 +494,12 @@ class WebSocketConnectionManager:
             "total_reconnections": self._total_reconnections,
             "total_messages_received": self._total_messages_received,
             "active_channels": len(self.subscribed_channels),
-            "connection_start_time": self._connection_start_time.isoformat() if self._connection_start_time else None,
-            "last_message_time": self.last_message_time.isoformat() if self.last_message_time else None,
+            "connection_start_time": self._connection_start_time.isoformat()
+            if self._connection_start_time
+            else None,
+            "last_message_time": self.last_message_time.isoformat()
+            if self.last_message_time
+            else None,
             "message_queue_size": len(self.message_queue),
         }
 
@@ -489,7 +507,15 @@ class WebSocketConnectionManager:
 class AuthenticatedWebSocketManager(WebSocketConnectionManager):
     """WebSocket manager with authentication support."""
 
-    def __init__(self, exchange_name: str, ws_url: str, api_key: str, api_secret: str, passphrase: str = "", **kwargs):
+    def __init__(
+        self,
+        exchange_name: str,
+        ws_url: str,
+        api_key: str,
+        api_secret: str,
+        passphrase: str = "",
+        **kwargs,
+    ):
         """
         Initialize authenticated WebSocket manager.
 
@@ -521,7 +547,7 @@ class AuthenticatedWebSocketManager(WebSocketConnectionManager):
 class MultiStreamWebSocketManager:
     """Manager for multiple WebSocket connections."""
 
-    def __init__(self, exchange_name: str):
+    def __init__(self, exchange_name: str) -> None:
         """
         Initialize multi-stream manager.
 
@@ -549,7 +575,7 @@ class MultiStreamWebSocketManager:
         Returns:
             Dict[str, bool]: Connection results by name
         """
-        results = {}
+        results: dict[str, bool] = {}
 
         if not self.connections:
             return results
@@ -606,7 +632,9 @@ class MultiStreamWebSocketManager:
                     timeout=30.0,  # Timeout for all disconnections
                 )
             except asyncio.TimeoutError:
-                self.logger.warning("Disconnect timeout - some connections may not have closed properly")
+                self.logger.warning(
+                    "Disconnect timeout - some connections may not have closed properly"
+                )
             except Exception as e:
                 self.logger.error(f"Error during disconnections: {e}")
 
@@ -624,13 +652,15 @@ class MultiStreamWebSocketManager:
 
     def get_all_stats(self) -> dict[str, dict[str, Any]]:
         """Get statistics for all connections."""
-        return {name: connection.get_connection_stats() for name, connection in self.connections.items()}
+        return {
+            name: connection.get_connection_stats() for name, connection in self.connections.items()
+        }
 
 
 class WebSocketMessageBuffer:
     """Buffer for WebSocket messages during connection issues."""
 
-    def __init__(self, max_size: int = 1000):
+    def __init__(self, max_size: int = 1000) -> None:
         """
         Initialize message buffer.
 
@@ -728,16 +758,24 @@ class WebSocketHeartbeatManager:
         while self.is_running:
             try:
                 await asyncio.sleep(self.ping_interval)
-                if hasattr(self.connection_manager, 'send_ping'):
-                    await self.connection_manager.send_ping()
+                if hasattr(self.connection_manager, "send_ping"):
+                    # Add timeout to prevent heartbeat hanging
+                    try:
+                        await asyncio.wait_for(self.connection_manager.send_ping(), timeout=5.0)
+                    except asyncio.TimeoutError:
+                        if hasattr(self.connection_manager, "logger"):
+                            self.connection_manager.logger.warning("Heartbeat ping timed out")
+                    except Exception as ping_error:
+                        if hasattr(self.connection_manager, "logger"):
+                            self.connection_manager.logger.error(
+                                f"Heartbeat ping error: {ping_error}"
+                            )
             except Exception as e:
                 # Log error but continue heartbeat
-                if hasattr(self.connection_manager, 'logger'):
-                    # Check if logger.error returns a coroutine and handle appropriately
+                if hasattr(self.connection_manager, "logger"):
+                    # Logger error is not a coroutine - call directly
                     try:
-                        result = self.connection_manager.logger.error(f"Heartbeat error: {e}")
-                        if asyncio.iscoroutine(result):
-                            await result
+                        self.connection_manager.logger.error(f"Heartbeat error: {e}")
                     except Exception:
                         # Fallback if logger call fails
                         pass
@@ -747,7 +785,7 @@ class WebSocketHeartbeatManager:
 class WebSocketSubscriptionManager:
     """Manager for WebSocket subscriptions and callbacks."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize subscription manager."""
         self.active_subscriptions: set[str] = set()
         self.subscription_callbacks: dict[str, Callable] = {}
@@ -787,16 +825,24 @@ class WebSocketSubscriptionManager:
         stream_name = message.get("stream")
         if stream_name and stream_name in self.subscription_callbacks:
             callback = self.subscription_callbacks[stream_name]
-            if asyncio.iscoroutinefunction(callback):
-                await callback(message)
-            else:
-                callback(message)
+            try:
+                if asyncio.iscoroutinefunction(callback):
+                    # Add timeout to prevent callback hanging
+                    await asyncio.wait_for(callback(message), timeout=10.0)
+                else:
+                    # Run sync callbacks in thread pool to avoid blocking
+                    loop = asyncio.get_event_loop()
+                    await loop.run_in_executor(None, callback, message)
+            except asyncio.TimeoutError:
+                logger.warning(f"Callback timeout for stream {stream_name}")
+            except Exception as e:
+                logger.error(f"Callback error for stream {stream_name}: {e}")
 
 
 class WebSocketStreamManager:
     """Manager for WebSocket streams."""
 
-    def __init__(self, max_streams: int = 50):
+    def __init__(self, max_streams: int = 50) -> None:
         """
         Initialize stream manager.
 
@@ -860,7 +906,15 @@ class WebSocketStreamManager:
         """
         if stream_id in self.stream_handlers:
             handler = self.stream_handlers[stream_id]
-            if asyncio.iscoroutinefunction(handler):
-                await handler(message)
-            else:
-                handler(message)
+            try:
+                if asyncio.iscoroutinefunction(handler):
+                    # Add timeout to prevent handler hanging
+                    await asyncio.wait_for(handler(message), timeout=10.0)
+                else:
+                    # Run sync handlers in thread pool to avoid blocking
+                    loop = asyncio.get_event_loop()
+                    await loop.run_in_executor(None, handler, message)
+            except asyncio.TimeoutError:
+                logger.warning(f"Handler timeout for stream {stream_id}")
+            except Exception as e:
+                logger.error(f"Handler error for stream {stream_id}: {e}")

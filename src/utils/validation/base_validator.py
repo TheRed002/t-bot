@@ -1,11 +1,10 @@
 """Base validator class with common validation patterns."""
 
+from abc import ABC, abstractmethod
 from typing import Any
 
-from src.data.interfaces import DataValidatorInterface
 
-
-class BaseRecordValidator(DataValidatorInterface):
+class BaseRecordValidator(ABC):
     """Base class for validators that process both single records and batches."""
 
     def __init__(self) -> None:
@@ -15,10 +14,10 @@ class BaseRecordValidator(DataValidatorInterface):
     def validate(self, data: Any) -> bool:
         """
         Validate data - handles both single records and batches.
-        
+
         Args:
             data: Data to validate (dict or list of dicts)
-            
+
         Returns:
             True if all data is valid, False otherwise
         """
@@ -38,18 +37,19 @@ class BaseRecordValidator(DataValidatorInterface):
             self.errors.append(f"Invalid data type: {type(data)}")
             return False
 
+    @abstractmethod
     def _validate_record(self, record: dict, index: int | None = None) -> bool:
         """
         Validate a single record. Must be implemented by subclasses.
-        
+
         Args:
             record: Record to validate
             index: Optional index for batch processing
-            
+
         Returns:
             True if record is valid
         """
-        raise NotImplementedError("Subclasses must implement _validate_record")
+        pass
 
     def get_errors(self) -> list[str]:
         """Get validation errors."""
@@ -58,6 +58,13 @@ class BaseRecordValidator(DataValidatorInterface):
     def reset(self) -> None:
         """Reset validator state."""
         self.errors.clear()
+
+    async def health_check(self) -> dict[str, Any]:
+        """Perform validator health check."""
+        return {
+            "status": "healthy",
+            "error_count": len(self.errors),
+        }
 
     def _add_error(self, message: str, index: int | None = None) -> None:
         """Add an error with optional index prefix."""

@@ -34,10 +34,6 @@ def normalize_symbol(symbol: str) -> str:
     return sanitized
 
 
-# Note: format_price is available in formatters module
-# from src.utils.formatters import format_price
-
-
 def parse_trading_pair(pair: str) -> tuple[str, str]:
     """
     Parse trading pair string into base and quote currencies.
@@ -167,7 +163,3 @@ def truncate(text: str, max_length: int, suffix: str = "...") -> str:
         return suffix[:max_length]
 
     return text[: max_length - len(suffix)] + suffix
-
-
-# Note: format_percentage is available in formatters module
-# from src.utils.formatters import format_percentage

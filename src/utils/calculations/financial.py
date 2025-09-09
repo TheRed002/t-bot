@@ -32,7 +32,7 @@ class FinancialCalculator(CalculatorInterface):
     def sharpe_ratio(
         returns: tuple[Decimal, ...],
         risk_free_rate: Decimal = Decimal("0.02"),
-        periods_per_year: int = 252
+        periods_per_year: int = 252,
     ) -> Decimal:
         """
         Calculate Sharpe ratio for given returns.
@@ -81,7 +81,7 @@ class FinancialCalculator(CalculatorInterface):
     def sortino_ratio(
         returns: tuple[Decimal, ...],
         risk_free_rate: Decimal = Decimal("0.02"),
-        periods_per_year: int = 252
+        periods_per_year: int = 252,
     ) -> Decimal:
         """Calculate Sortino ratio using math_utils implementation to avoid duplication."""
         from src.utils.math_utils import calculate_sortino_ratio
@@ -120,7 +120,9 @@ class FinancialCalculator(CalculatorInterface):
         for i in range(1, len(cumulative)):
             running_max.append(max(running_max[-1], cumulative[i]))
 
-        drawdown = [(cumulative[i] - running_max[i]) / running_max[i] for i in range(len(cumulative))]
+        drawdown = [
+            (cumulative[i] - running_max[i]) / running_max[i] for i in range(len(cumulative))
+        ]
         max_drawdown = abs(min(drawdown))
 
         if max_drawdown <= DECIMAL_EPSILON:
@@ -157,7 +159,9 @@ class FinancialCalculator(CalculatorInterface):
 
     @staticmethod
     @lru_cache(maxsize=256)
-    def moving_average(prices: tuple[Decimal, ...], period: int, ma_type: str = "simple") -> Decimal:
+    def moving_average(
+        prices: tuple[Decimal, ...], period: int, ma_type: str = "simple"
+    ) -> Decimal:
         """
         Calculate moving average (last value).
 
@@ -192,7 +196,9 @@ class FinancialCalculator(CalculatorInterface):
                 weights.append(weight)
 
             weights_sum = sum(weights)
-            weighted_sum = sum(price * weight for price, weight in zip(recent_prices, weights, strict=False))
+            weighted_sum = sum(
+                price * weight for price, weight in zip(recent_prices, weights, strict=False)
+            )
             return Decimal(str(weighted_sum / weights_sum))
 
         elif ma_type == "weighted":
@@ -208,7 +214,9 @@ class FinancialCalculator(CalculatorInterface):
             return weighted_sum / weights_sum
 
         else:
-            raise ValidationError(f"Unknown MA type: {ma_type}", field_name="ma_type", field_value=ma_type)
+            raise ValidationError(
+                f"Unknown MA type: {ma_type}", field_name="ma_type", field_value=ma_type
+            )
 
     @staticmethod
     def max_drawdown(prices: list[Decimal] | NDArray[np.float64]) -> tuple[Decimal, int, int]:
@@ -260,7 +268,10 @@ class FinancialCalculator(CalculatorInterface):
     @staticmethod
     @lru_cache(maxsize=128)
     def kelly_criterion(
-        win_probability: Decimal, win_amount: Decimal, loss_amount: Decimal, kelly_fraction: Decimal = Decimal("0.25")
+        win_probability: Decimal,
+        win_amount: Decimal,
+        loss_amount: Decimal,
+        kelly_fraction: Decimal = Decimal("0.25"),
     ) -> Decimal:
         """
         Calculate Kelly criterion for position sizing.
@@ -348,7 +359,9 @@ class FinancialCalculator(CalculatorInterface):
         return adjusted_size.quantize(Decimal("0.00000001"))
 
     @staticmethod
-    def calculate_returns(prices: list[Decimal] | NDArray[np.float64], method: str = "simple") -> list[Decimal]:
+    def calculate_returns(
+        prices: list[Decimal] | NDArray[np.float64], method: str = "simple"
+    ) -> list[Decimal]:
         """
         Calculate returns from prices with Decimal precision.
 
@@ -387,12 +400,16 @@ class FinancialCalculator(CalculatorInterface):
                 else:
                     returns.append(ZERO)
         else:
-            raise ValidationError(f"Unknown return method: {method}", field_name="method", field_value=method)
+            raise ValidationError(
+                f"Unknown return method: {method}", field_name="method", field_value=method
+            )
 
         return returns
 
     @staticmethod
-    def risk_reward_ratio(entry_price: Decimal, stop_loss: Decimal, take_profit: Decimal) -> Decimal:
+    def risk_reward_ratio(
+        entry_price: Decimal, stop_loss: Decimal, take_profit: Decimal
+    ) -> Decimal:
         """
         Calculate risk/reward ratio for a trade.
 
@@ -485,16 +502,25 @@ class FinancialCalculator(CalculatorInterface):
 
 
 # Backward compatibility - get instance from DI container
-def get_financial_calculator() -> FinancialCalculator:
-    """Get FinancialCalculator instance from DI container with lazy initialization."""
-    from src.core.dependency_injection import injector
+def get_financial_calculator(calculator: FinancialCalculator | None = None) -> FinancialCalculator:
+    """Get FinancialCalculator instance using dependency injection pattern.
 
-    try:
-        return injector.resolve("FinancialCalculator")
-    except Exception as e:
-        # Create fallback instance if DI container not available
-        logger.debug(f"Failed to resolve FinancialCalculator from DI container: {e}")
-        return FinancialCalculator()
+    Args:
+        calculator: Injected calculator (preferred from service layer)
+
+    Returns:
+        FinancialCalculator instance
+    """
+    if calculator is not None:
+        return calculator
+
+    # Create default instance but warn about architectural violation
+    logger.warning(
+        "FinancialCalculator not injected - creating default instance. "
+        "Inject via dependency injection for better testability."
+    )
+    return FinancialCalculator()
 
 
-calc = get_financial_calculator()
+# Create default calculator instance - services should inject their own
+calc = FinancialCalculator()

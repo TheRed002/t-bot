@@ -52,7 +52,7 @@ class HTTPSessionManager:
                     "raise_for_status": False,
                 }
                 session_config.update(session_kwargs)
-                self._sessions[key] = aiohttp.ClientSession(**session_config)
+                self._sessions[key] = aiohttp.ClientSession(**session_config)  # type: ignore[arg-type]
 
         return self._sessions[key]
 
@@ -66,7 +66,9 @@ class HTTPSessionManager:
 
         if close_tasks:
             try:
-                await asyncio.wait_for(asyncio.gather(*close_tasks, return_exceptions=True), timeout=10.0)
+                await asyncio.wait_for(
+                    asyncio.gather(*close_tasks, return_exceptions=True), timeout=10.0
+                )
             except asyncio.TimeoutError:
                 logger.warning("Some sessions did not close within timeout")
                 # Force close remaining sessions
@@ -99,52 +101,43 @@ class HTTPSessionManager:
             self._sessions.pop(key, None)
 
 
-async def get_http_session(key: str = "default", session_manager: HTTPSessionManager | None = None, **kwargs) -> aiohttp.ClientSession:
+async def get_http_session(
+    key: str = "default", session_manager: HTTPSessionManager | None = None, **kwargs
+) -> aiohttp.ClientSession:
     """Get a shared HTTP session using proper dependency injection.
-    
+
     Args:
         key: Session key identifier
         session_manager: Injected session manager (required for clean architecture)
         **kwargs: Additional session parameters
-        
+
     Returns:
         ClientSession: HTTP session
-        
+
     Raises:
         ValidationError: If session manager not injected properly
     """
     if session_manager is None:
-        # Try DI container as fallback but warn about violation
-        logger.warning("HTTPSessionManager not injected - violates clean architecture. Inject from service layer.")
-        try:
-            from src.core.dependency_injection import injector
-            session_manager = injector.resolve("HTTPSessionManager")
-        except Exception as e:
-            raise ValidationError(
-                "HTTPSessionManager must be injected from service layer. "
-                "Do not access DI container directly from utility functions.",
-                error_code="SERV_001"
-            ) from e
-    
+        # For utility functions, allow fallback but warn about architectural violation
+        logger.warning(
+            "HTTPSessionManager not injected - using default instance. "
+            "Inject via dependency injection for better testability and clean architecture."
+        )
+        session_manager = HTTPSessionManager()
+
     return await session_manager.get_session(key, **kwargs)
 
 
 async def cleanup_http_sessions(session_manager: HTTPSessionManager | None = None):
     """Cleanup all HTTP sessions with proper dependency injection.
-    
+
     Args:
         session_manager: Injected session manager (should be provided by service layer)
     """
     if session_manager is None:
-        # Fallback to DI but warn about violation
-        logger.warning("HTTPSessionManager not injected for cleanup - violates clean architecture.")
-        try:
-            from src.core.dependency_injection import injector
-            session_manager = injector.resolve("HTTPSessionManager")
-        except Exception as e:
-            logger.debug(f"No HTTPSessionManager to cleanup: {e}")
-            return
-    
+        logger.debug("No HTTPSessionManager provided for cleanup - skipping session cleanup")
+        return
+
     await session_manager.close_all()
 
 
@@ -182,7 +175,9 @@ async def create_error_context(
     )
 
 
-async def handle_error_with_fallback(error: Exception, error_handler: Any | None, context: ErrorContext) -> bool:
+async def handle_error_with_fallback(
+    error: Exception, error_handler: Any | None, context: ErrorContext
+) -> bool:
     """Handle error with fallback logic, returns True if handled successfully."""
     if not error_handler:
         return False
@@ -195,7 +190,9 @@ async def handle_error_with_fallback(error: Exception, error_handler: Any | None
             await error_handler.handle_error_sync(error, context)
             return True
         else:
-            logger.error(f"Error handler has no valid methods. Correlation: {context.details.get('correlation_id')}")
+            logger.error(
+                f"Error handler has no valid methods. Correlation: {context.details.get('correlation_id')}"
+            )
             return False
     except Exception as handler_error:
         logger.error(f"Error handler failed: {handler_error}")
@@ -203,7 +200,11 @@ async def handle_error_with_fallback(error: Exception, error_handler: Any | None
 
 
 def validate_monitoring_parameter(
-    value: Any, param_name: str, expected_type: type, allow_none: bool = False, validation_rule: str | None = None
+    value: Any,
+    param_name: str,
+    expected_type: type,
+    allow_none: bool = False,
+    validation_rule: str | None = None,
 ) -> None:
     """Validate a parameter with standardized error messages."""
     if value is None and not allow_none:
@@ -289,7 +290,9 @@ class AsyncTaskManager:
         # Wait for tasks to complete with timeout
         if tasks_to_cancel:
             try:
-                await asyncio.wait_for(asyncio.gather(*tasks_to_cancel, return_exceptions=True), timeout=timeout)
+                await asyncio.wait_for(
+                    asyncio.gather(*tasks_to_cancel, return_exceptions=True), timeout=timeout
+                )
             except asyncio.TimeoutError:
                 logger.warning(f"Some {self.component_name} tasks did not complete within timeout")
                 # Force cleanup of remaining tasks
@@ -310,7 +313,12 @@ class AsyncTaskManager:
 
 @asynccontextmanager
 async def http_request_with_retry(
-    session: aiohttp.ClientSession, method: str, url: str, max_retries: int = 3, retry_delay: float = 1.0, **kwargs
+    session: aiohttp.ClientSession,
+    method: str,
+    url: str,
+    max_retries: int = 3,
+    retry_delay: float = 1.0,
+    **kwargs,
 ):
     """HTTP request with retry logic and proper cleanup."""
     last_error = None
@@ -328,7 +336,9 @@ async def http_request_with_retry(
             last_error = e
             if attempt < max_retries - 1:
                 wait_time = retry_delay * (2**attempt)
-                logger.warning(f"HTTP {method} {url} failed (attempt {attempt + 1}/{max_retries}): {e}")
+                logger.warning(
+                    f"HTTP {method} {url} failed (attempt {attempt + 1}/{max_retries}): {e}"
+                )
                 await asyncio.sleep(wait_time)
             else:
                 logger.error(f"HTTP {method} {url} failed after {max_retries} attempts: {e}")
@@ -385,7 +395,8 @@ def safe_duration_parse(duration_str: str) -> int:
         if isinstance(e, ValueError) and "must be positive" in str(e):
             raise  # Re-raise our custom validation error
         raise ValidationError(
-            f"Invalid duration format: '{duration}'. Use format like '5m', '1h', '30s', '1d'. " f"Original error: {e}"
+            f"Invalid duration format: '{duration}'. Use format like '5m', '1h', '30s', '1d'. "
+            f"Original error: {e}"
         ) from e
 
 
@@ -431,12 +442,12 @@ class MetricValueProcessor:
 
 class SystemMetricsCollector:
     """Shared system metrics collection to eliminate duplication."""
-    
+
     @staticmethod
     async def collect_system_metrics() -> dict[str, Any]:
         """
         Collect system metrics using async-safe operations.
-        
+
         Returns:
             Dictionary of system metrics
         """
@@ -445,10 +456,10 @@ class SystemMetricsCollector:
         except ImportError:
             logger.warning("psutil not available - skipping system metrics")
             return {}
-            
+
         try:
             loop = asyncio.get_event_loop()
-            
+
             # Run all psutil operations concurrently in thread pool
             tasks = [
                 loop.run_in_executor(None, psutil.cpu_percent, None),
@@ -457,65 +468,70 @@ class SystemMetricsCollector:
                 loop.run_in_executor(None, psutil.net_io_counters),
                 loop.run_in_executor(None, psutil.Process),
             ]
-            
+
             # Wait for all tasks to complete with timeout
             results = await asyncio.wait_for(
-                asyncio.gather(*tasks, return_exceptions=True),
-                timeout=5.0
+                asyncio.gather(*tasks, return_exceptions=True), timeout=5.0
             )
-            
+
             cpu_percent, memory, disk_io, network_io, process = results
-            
+
             # Handle any exceptions from individual operations
             if isinstance(cpu_percent, Exception):
                 logger.warning(f"Failed to collect CPU metrics: {cpu_percent}")
                 cpu_percent = 0.0
-                
+
             if isinstance(memory, Exception):
                 logger.warning(f"Failed to collect memory metrics: {memory}")
                 memory = None
-                
+
             if isinstance(disk_io, Exception):
                 logger.warning(f"Failed to collect disk I/O metrics: {disk_io}")
                 disk_io = None
-                
+
             if isinstance(network_io, Exception):
                 logger.warning(f"Failed to collect network I/O metrics: {network_io}")
                 network_io = None
-                
+
             if isinstance(process, Exception):
                 logger.warning(f"Failed to get process info: {process}")
                 process = None
-            
+
             # Build metrics dictionary
             metrics = {
-                'cpu_percent': float(cpu_percent) if cpu_percent is not None else 0.0,
+                "cpu_percent": float(cpu_percent) if cpu_percent is not None else 0.0,
             }
-            
+
             if memory:
-                metrics.update({
-                    'memory_percent': memory.percent,
-                    'memory_available': memory.available,
-                    'memory_used': memory.used,
-                    'memory_total': memory.total,
-                })
-                
+                metrics.update(
+                    {
+                        "memory_percent": memory.percent,
+                        "memory_available": memory.available,
+                        "memory_used": memory.used,
+                        "memory_total": memory.total,
+                    }
+                )
+
             if disk_io:
-                metrics.update({
-                    'disk_read_bytes': disk_io.read_bytes,
-                    'disk_write_bytes': disk_io.write_bytes,
-                    'disk_read_count': disk_io.read_count,
-                    'disk_write_count': disk_io.write_count,
-                })
-                
+                metrics.update(
+                    {
+                        "disk_read_bytes": disk_io.read_bytes,
+                        "disk_write_bytes": disk_io.write_bytes,
+                        "disk_read_count": disk_io.read_count,
+                        "disk_write_count": disk_io.write_count,
+                    }
+                )
+
             if network_io:
-                metrics.update({
-                    'network_bytes_sent': network_io.bytes_sent,
-                    'network_bytes_recv': network_io.bytes_recv,
-                    'network_packets_sent': network_io.packets_sent,
-                    'network_packets_recv': network_io.packets_recv,
-                })
-                
+                metrics.update(
+                    {
+                        "network_bytes_sent": network_io.bytes_sent,
+                        "network_bytes_recv": network_io.bytes_recv,
+                        "network_packets_sent": network_io.packets_sent,
+                        "network_packets_recv": network_io.packets_recv,
+                    }
+                )
+
             if process:
                 try:
                     # Get process-specific metrics in thread pool
@@ -524,31 +540,32 @@ class SystemMetricsCollector:
                         loop.run_in_executor(None, process.cpu_percent),
                         loop.run_in_executor(None, process.num_threads),
                     ]
-                    
+
                     proc_results = await asyncio.wait_for(
-                        asyncio.gather(*process_tasks, return_exceptions=True),
-                        timeout=2.0
+                        asyncio.gather(*process_tasks, return_exceptions=True), timeout=2.0
                     )
-                    
+
                     proc_memory, proc_cpu, proc_threads = proc_results
-                    
+
                     if not isinstance(proc_memory, Exception):
-                        metrics.update({
-                            'process_memory_rss': proc_memory.rss,
-                            'process_memory_vms': proc_memory.vms,
-                        })
-                    
+                        metrics.update(
+                            {
+                                "process_memory_rss": proc_memory.rss,
+                                "process_memory_vms": proc_memory.vms,
+                            }
+                        )
+
                     if not isinstance(proc_cpu, Exception):
-                        metrics['process_cpu_percent'] = proc_cpu
-                        
+                        metrics["process_cpu_percent"] = proc_cpu
+
                     if not isinstance(proc_threads, Exception):
-                        metrics['process_thread_count'] = proc_threads
-                        
+                        metrics["process_thread_count"] = proc_threads
+
                 except Exception as e:
                     logger.warning(f"Failed to collect process metrics: {e}")
-            
+
             return metrics
-            
+
         except asyncio.TimeoutError:
             logger.warning("System metrics collection timed out")
             return {}

@@ -56,7 +56,9 @@ def calculate_sharpe_ratio(
     # Validate frequency
     valid_frequencies = {"daily": 252, "weekly": 52, "monthly": 12, "yearly": 1}
     if frequency not in valid_frequencies:
-        raise ValidationError(f"Invalid frequency: {frequency}. Must be one of {list(valid_frequencies.keys())}")
+        raise ValidationError(
+            f"Invalid frequency: {frequency}. Must be one of {list(valid_frequencies.keys())}"
+        )
 
     # Convert to Decimal for precise calculations
     decimal_returns = [to_decimal(r) if not isinstance(r, Decimal) else r for r in returns]
@@ -78,7 +80,9 @@ def calculate_sharpe_ratio(
         return ZERO
 
     # Calculate Sharpe ratio
-    rf_rate = to_decimal(risk_free_rate) if not isinstance(risk_free_rate, Decimal) else risk_free_rate
+    rf_rate = (
+        to_decimal(risk_free_rate) if not isinstance(risk_free_rate, Decimal) else risk_free_rate
+    )
     sharpe_ratio = (mean_return - rf_rate) / std_return
 
     return sharpe_ratio
@@ -152,7 +156,11 @@ def calculate_var(returns: list[Decimal], confidence_level: Decimal = Decimal("0
     if not returns:
         raise ValidationError("Returns list cannot be empty")
 
-    conf_level = to_decimal(confidence_level) if not isinstance(confidence_level, Decimal) else confidence_level
+    conf_level = (
+        to_decimal(confidence_level)
+        if not isinstance(confidence_level, Decimal)
+        else confidence_level
+    )
     if not (ZERO < conf_level < Decimal("1")):
         raise ValidationError("Confidence level must be between 0 and 1")
 
@@ -311,7 +319,8 @@ def calculate_beta(asset_returns: list[Decimal], market_returns: list[Decimal]) 
 
     # Calculate covariance and market variance
     covariance = sum(
-        (a - asset_mean) * (m - market_mean) for a, m in zip(asset_decimal, market_decimal, strict=False)
+        (a - asset_mean) * (m - market_mean)
+        for a, m in zip(asset_decimal, market_decimal, strict=False)
     ) / (n - Decimal("1"))
     market_variance = sum((m - market_mean) ** 2 for m in market_decimal) / (n - Decimal("1"))
 
@@ -358,7 +367,9 @@ def calculate_sortino_ratio(
         return ZERO
 
     mean_downside = sum(downside_returns) / n_downside
-    downside_variance = sum((r - mean_downside) ** 2 for r in downside_returns) / (n_downside - Decimal("1"))
+    downside_variance = sum((r - mean_downside) ** 2 for r in downside_returns) / (
+        n_downside - Decimal("1")
+    )
 
     if downside_variance <= ZERO:
         return ZERO
@@ -464,6 +475,7 @@ def safe_percentage(value: Decimal, total: Decimal, default: Decimal = ZERO) -> 
 
         # Use safe_divide from decimal_utils for proper handling and multiply by 100 for percentage
         from src.utils.decimal_utils import HUNDRED
+
         ratio = safe_divide(value_decimal, total_decimal, default_decimal)
         return ratio * HUNDRED
 

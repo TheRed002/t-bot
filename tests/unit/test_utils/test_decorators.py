@@ -8,11 +8,10 @@ and provide the expected functionality.
 
 import asyncio
 import time
-from datetime import datetime, timedelta
 
 import pytest
 
-from src.core.exceptions import TimeoutError, ValidationError
+from src.core.exceptions import TimeoutError
 from src.utils.decorators import (
     UnifiedDecorator,
     cached,
@@ -250,11 +249,11 @@ class TestValidated:
 
         # Test with valid order data (all required fields)
         valid_order = {
-            'symbol': 'BTC/USDT',
-            'type': 'LIMIT',
-            'side': 'BUY',
-            'price': 50000.0,
-            'quantity': 1.0
+            "symbol": "BTC/USDT",
+            "type": "LIMIT",
+            "side": "BUY",
+            "price": 50000.0,
+            "quantity": 1.0,
         }
         result = await test_func(valid_order)
         assert result == valid_order
@@ -305,7 +304,9 @@ class TestUnifiedDecorator:
         """Test combining retry and logging features."""
         call_count = 0
 
-        @UnifiedDecorator.enhance(retry=True, retry_times=3, retry_delay=0.01, log=True, log_level="info")
+        @UnifiedDecorator.enhance(
+            retry=True, retry_times=3, retry_delay=0.01, log=True, log_level="info"
+        )
         async def test_func():
             nonlocal call_count
             call_count += 1
@@ -419,23 +420,24 @@ class TestUnifiedDecorator:
 
         @validated()
         async def test_func(order: dict, price: float, quantity: float, symbol: str):
-            return {
-                'order': order,
-                'price': price,
-                'quantity': quantity,
-                'symbol': symbol
-            }
+            return {"order": order, "price": price, "quantity": quantity, "symbol": symbol}
 
         result = await test_func(
-            order={'type': 'LIMIT', 'side': 'BUY', 'symbol': 'BTC/USDT', 'price': 50000.0, 'quantity': 1.0},
+            order={
+                "type": "LIMIT",
+                "side": "BUY",
+                "symbol": "BTC/USDT",
+                "price": 50000.0,
+                "quantity": 1.0,
+            },
             price=50000.0,
             quantity=1.0,
-            symbol='BTC/USDT'
+            symbol="BTC/USDT",
         )
 
-        assert result['price'] == 50000.0
-        assert result['quantity'] == 1.0
-        assert result['symbol'] == 'BTC/USDT'
+        assert result["price"] == 50000.0
+        assert result["quantity"] == 1.0
+        assert result["symbol"] == "BTC/USDT"
 
     def test_sync_wrapper_in_running_loop(self):
         """Test sync wrapper behavior when event loop is running."""

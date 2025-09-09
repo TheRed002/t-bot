@@ -37,7 +37,8 @@ class ValidationFramework:
             ("side", lambda x: x in ["BUY", "SELL"], "Side must be BUY or SELL"),
             (
                 "type",
-                lambda x: x in ["MARKET", "LIMIT", "STOP", "STOP_LIMIT"],
+                lambda x: x
+                in ["MARKET", "LIMIT", "STOP", "STOP_LIMIT", "STOP_LOSS", "STOP_MARKET"],
                 "Invalid order type",
             ),
         ]
@@ -409,65 +410,135 @@ class ValidationFramework:
         """
         Run multiple validations and collect results with consistent error handling.
 
-        This method uses consistent error propagation patterns matching the messaging 
-        system's ErrorPropagationMixin for cross-module compatibility.
+        This method uses consistent error propagation patterns matching the messaging
+        system's ErrorPropagationMixin and standardized message formats for cross-module compatibility.
 
         Args:
             validations: List of (name, validator_func, data) tuples
 
         Returns:
-            Dictionary with validation results in consistent format
+            Dictionary with validation results in standardized message format
         """
         results = {}
+
+        # Import messaging patterns for consistent format
+        from datetime import timezone
+
+        # Lazy import to avoid circular dependency
+        from src.utils.messaging_patterns import ErrorPropagationMixin, ProcessingParadigmAligner
+
+        # Apply consistent processing mode alignment
+        error_propagator = ErrorPropagationMixin()
 
         for name, validator_func, data in validations:
             try:
                 result = validator_func(data)
-                results[name] = {
-                    "status": "success",
-                    "result": result,
-                    "timestamp": datetime.now().isoformat(),
-                    "context": f"validation_{name}",
-                    "processing_mode": "batch"
-                }
+
+                # Use standardized message format for batch processing
+                batch_data = ProcessingParadigmAligner.create_batch_from_stream(
+                    [
+                        {
+                            "status": "success",
+                            "result": result,
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                            "context": f"validation_{name}",
+                            "validation_name": name,
+                            "data_type": type(data).__name__,
+                            "processing_mode": "batch",
+                            "message_pattern": "batch",
+                            "data_format": "validation_result_v1",
+                        }
+                    ]
+                )
+                results[name] = batch_data
+
             except ValidationError as ve:
-                # Consistent with ErrorPropagationMixin pattern
+                # Use consistent error propagation pattern
                 from src.core.logging import get_logger
+
                 logger = get_logger(__name__)
-                logger.error(f"Validation error in {name}: {ve}")
-                
-                results[name] = {
-                    "status": "validation_error",
-                    "error": str(ve),
-                    "error_type": "ValidationError",
-                    "error_code": getattr(ve, 'error_code', None),
-                    "timestamp": datetime.now().isoformat(),
-                    "context": f"validation_{name}",
-                    "processing_mode": "batch"
-                }
+
+                try:
+                    # Apply consistent validation error propagation
+                    error_propagator.propagate_validation_error(ve, f"batch_validation_{name}")
+                except Exception:
+                    # Continue if propagation fails
+                    logger.error(f"Validation error in {name}: {ve}")
+
+                # Use standardized message format for errors in batch processing
+                error_batch = ProcessingParadigmAligner.create_batch_from_stream(
+                    [
+                        {
+                            "status": "validation_error",
+                            "error": str(ve),
+                            "error_type": "ValidationError",
+                            "error_code": getattr(ve, "error_code", None),
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                            "context": f"validation_{name}",
+                            "validation_name": name,
+                            "data_type": type(data).__name__,
+                            "processing_mode": "batch",
+                            "message_pattern": "batch",
+                            "data_format": "validation_error_v1",
+                            "boundary_crossed": True,
+                        }
+                    ]
+                )
+                results[name] = error_batch
+
             except Exception as e:
-                # Wrap other errors consistently with ErrorPropagationMixin
+                # Use consistent error propagation for non-validation errors
                 from src.core.exceptions import DataValidationError
                 from src.core.logging import get_logger
+
                 logger = get_logger(__name__)
-                logger.error(f"Validation error in {name}: {e}")
-                
+
                 wrapped_error = DataValidationError(
                     f"Value error in validation_{name}: {e}",
                     field_name=name,
                     field_value=str(data),
                     expected_type="valid value",
                 )
-                
-                results[name] = {
-                    "status": "error",
-                    "error": str(wrapped_error),
-                    "error_type": "DataValidationError",
-                    "original_error": str(e),
-                    "original_error_type": type(e).__name__,
-                    "timestamp": datetime.now().isoformat(),
-                    "context": f"validation_{name}",
-                    "processing_mode": "batch"
-                }
 
-        return results
+                try:
+                    # Apply consistent error propagation
+                    error_propagator.propagate_validation_error(
+                        wrapped_error, f"batch_validation_{name}"
+                    )
+                except Exception:
+                    # Continue if propagation fails
+                    logger.error(f"Validation error in {name}: {e}")
+
+                # Use standardized message format for wrapped errors in batch processing
+                wrapped_error_batch = ProcessingParadigmAligner.create_batch_from_stream(
+                    [
+                        {
+                            "status": "error",
+                            "error": str(wrapped_error),
+                            "error_type": "DataValidationError",
+                            "original_error": str(e),
+                            "original_error_type": type(e).__name__,
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                            "context": f"validation_{name}",
+                            "validation_name": name,
+                            "data_type": type(data).__name__,
+                            "processing_mode": "batch",
+                            "message_pattern": "batch",
+                            "data_format": "validation_error_v1",
+                            "boundary_crossed": True,
+                        }
+                    ]
+                )
+                results[name] = wrapped_error_batch
+
+        # Return results with consistent batch metadata
+        return {
+            "batch_id": datetime.now(timezone.utc)
+            .isoformat()
+            .replace(":", "")
+            .replace("-", "")[:16],
+            "batch_size": len(validations),
+            "processing_mode": "batch",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "validations": results,
+        }

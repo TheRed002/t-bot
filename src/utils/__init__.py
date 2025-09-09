@@ -19,6 +19,7 @@ Modern Usage (Recommended):
     def __init__(self, validation_service: ValidationService):
         self.validation_service = validation_service
 
+
     # Use shared exchange utilities to eliminate duplication
     from src.utils.exchange_order_utils import OrderManagementUtils
     from src.utils.exchange_validation_utils import ExchangeValidationUtils
@@ -71,6 +72,7 @@ from .decimal_utils import (
     clamp_decimal,
     format_decimal,
     round_to_precision,
+    safe_decimal_conversion,
     safe_divide,
     to_decimal,
 )
@@ -100,6 +102,18 @@ from .decorators import (
     validate_input,
     validate_output,
     validated,
+)
+
+# Execution utilities (new) - shared utilities to eliminate duplication in execution module
+from .execution_utils import (
+    calculate_order_value,
+    calculate_price_deviation_bps,
+    calculate_slippage_bps,
+    calculate_trade_risk_ratio,
+    convert_order_to_request,
+    extract_order_details,
+    is_order_within_price_bounds,
+    validate_order_basic,
 )
 from .formatters import (
     # API response formatting
@@ -178,21 +192,16 @@ from .monitoring_helpers import (
     safe_duration_parse,
     validate_monitoring_parameter,
 )
-from .validation import (
-    # Framework and service exports
-    ValidationFramework,
-    ValidationService,
-    get_validator,
-    validate_batch,
-    validate_exchange_credentials,
-    # Core validation exports
-    validate_order,
-    validate_price,
-    validate_quantity,
-    validate_risk_parameters,
-    validate_strategy_params,
-    validate_symbol,
-    validate_timeframe,
+
+# State constants (new)
+from .state_constants import (
+    BOT_STATE_REQUIRED_FIELDS,
+    CHECKPOINT_FILE_EXTENSION,
+    DEFAULT_CACHE_TTL,
+    DEFAULT_COMPRESSION_THRESHOLD,
+    DEFAULT_MAX_CHECKPOINTS,
+    STATE_TYPES,
+    VALIDATION_ERROR_TYPES,
 )
 
 # State management utilities (new)
@@ -204,9 +213,9 @@ from .state_utils import (
     detect_state_changes,
     ensure_directory_exists,
     format_cache_key,
+    get_from_redis_with_timeout,
     serialize_state_data,
     store_in_redis_with_timeout,
-    get_from_redis_with_timeout
 )
 
 # State validation utilities (new)
@@ -221,25 +230,41 @@ from .state_validation_utils import (
     validate_required_fields_with_details,
     validate_strategy_params,
     validate_symbol_format,
-    validate_var_limits
+    validate_var_limits,
+)
+from .validation import (
+    # Framework and service exports
+    ValidationFramework,
+    ValidationService,
+    get_validator,
+    validate_batch,
+    validate_exchange_credentials,
+    # Core validation exports
+    validate_order,
+    validate_price,
+    validate_quantity,
+    validate_risk_parameters,
+    validate_symbol,
+    validate_timeframe,
+)
+from .web_interface_utils import (
+    create_error_response,
+    extract_error_details,
+    handle_api_error,
+    handle_not_found,
+    safe_format_currency,
+    safe_format_percentage,
+    safe_get_api_facade,
+)
+from .websocket_manager_utils import (
+    BaseWebSocketManager,
+    BotStatusWebSocketManager,
+    MarketDataWebSocketManager,
+    authenticate_websocket,
+    handle_websocket_disconnect,
 )
 
-# State constants (new)
-from .state_constants import (
-    DEFAULT_CACHE_TTL,
-    DEFAULT_COMPRESSION_THRESHOLD,
-    DEFAULT_MAX_CHECKPOINTS,
-    CHECKPOINT_FILE_EXTENSION,
-    BOT_STATE_REQUIRED_FIELDS,
-    STATE_TYPES,
-    VALIDATION_ERROR_TYPES
-)
-
-# REMOVED: validation functions moved to validation/service.py
-# from .validators import (
-#     validate_decimal,     -> use ValidationService.validate_decimal()
-#     validate_positive_number,  -> use NumericValidationRule
-# )
+# Validation functions are available through ValidationService for type safety and consistency
 
 __all__ = [
     "API_ENDPOINTS",
@@ -354,7 +379,7 @@ __all__ = [
     "ttl_cache",
     "type_check",
     "validate_batch",
-    # "validate_decimal", "validate_positive_number", - REMOVED: use ValidationService
+    # Core validation functions available through ValidationService
     "validate_exchange_credentials",
     "validate_input",
     "validate_monitoring_parameter",
@@ -364,10 +389,64 @@ __all__ = [
     "validate_price",
     "validate_quantity",
     "validate_risk_parameters",
-    "validate_strategy_params",
     "validate_symbol",
     "validate_timeframe",
     "validated",
+    # Execution utilities
+    "calculate_order_value",
+    "calculate_price_deviation_bps",
+    "calculate_slippage_bps",
+    "calculate_trade_risk_ratio",
+    "convert_order_to_request",
+    "extract_order_details",
+    "is_order_within_price_bounds",
+    "safe_decimal_conversion",
+    "validate_order_basic",
+    # Web interface utilities
+    "handle_api_error",
+    "safe_format_currency",
+    "safe_format_percentage",
+    "safe_get_api_facade",
+    "create_error_response",
+    "handle_not_found",
+    "extract_error_details",
+    # WebSocket utilities
+    "BaseWebSocketManager",
+    "MarketDataWebSocketManager",
+    "BotStatusWebSocketManager",
+    "authenticate_websocket",
+    "handle_websocket_disconnect",
+    # State constants
+    "BOT_STATE_REQUIRED_FIELDS",
+    "CHECKPOINT_FILE_EXTENSION",
+    "DEFAULT_CACHE_TTL",
+    "DEFAULT_COMPRESSION_THRESHOLD",
+    "DEFAULT_MAX_CHECKPOINTS",
+    "STATE_TYPES",
+    "VALIDATION_ERROR_TYPES",
+    # State utilities
+    "calculate_state_checksum",
+    "create_state_change_record",
+    "create_state_metadata",
+    "deserialize_state_data",
+    "detect_state_changes",
+    "ensure_directory_exists",
+    "format_cache_key",
+    "get_from_redis_with_timeout",
+    "serialize_state_data",
+    "store_in_redis_with_timeout",
+    # State validation utilities
+    "validate_bot_id_format",
+    "validate_bot_status",
+    "validate_capital_allocation",
+    "validate_cash_balance",
+    "validate_decimal_field_with_details",
+    "validate_order_price_logic",
+    "validate_positive_value_with_details",
+    "validate_required_fields_with_details",
+    "validate_strategy_params",
+    "validate_symbol_format",
+    "validate_var_limits",
 ]
 
 __version__ = "1.0.0"

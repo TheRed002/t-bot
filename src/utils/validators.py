@@ -91,7 +91,9 @@ def validate_ttl(ttl: int | float | None, max_ttl: int = 86400) -> int:
     try:
         ttl_int = int(ttl)
     except (ValueError, TypeError, OverflowError) as e:
-        raise ValidationError(f"TTL must be convertible to integer, got: {type(ttl).__name__}") from e
+        raise ValidationError(
+            f"TTL must be convertible to integer, got: {type(ttl).__name__}"
+        ) from e
 
     if ttl_int < 0:
         raise ValidationError(f"TTL must be non-negative, got: {ttl_int}")
@@ -105,7 +107,9 @@ def validate_ttl(ttl: int | float | None, max_ttl: int = 86400) -> int:
     return ttl_int
 
 
-def validate_precision_range(precision: int, min_precision: int = 0, max_precision: int = 28) -> int:
+def validate_precision_range(
+    precision: int, min_precision: int = 0, max_precision: int = 28
+) -> int:
     """
     Validate precision parameter is within acceptable range.
 
@@ -219,7 +223,9 @@ def validate_null_handling(value: Any, allow_null: bool = False, field_name: str
     return value
 
 
-def validate_type_conversion(value: Any, target_type: type, field_name: str = "value", strict: bool = True) -> Any:
+def validate_type_conversion(
+    value: Any, target_type: type, field_name: str = "value", strict: bool = True
+) -> Any:
     """
     Validate type conversion with comprehensive error handling.
 
@@ -245,7 +251,9 @@ def validate_type_conversion(value: Any, target_type: type, field_name: str = "v
             elif isinstance(value, int | float):
                 if isinstance(value, float):
                     if not math.isfinite(value):
-                        raise ValidationError(f"Cannot convert non-finite float {field_name} to Decimal")
+                        raise ValidationError(
+                            f"Cannot convert non-finite float {field_name} to Decimal"
+                        )
                 return Decimal(str(value))
             elif isinstance(value, str):
                 return Decimal(value.strip())
@@ -255,7 +263,9 @@ def validate_type_conversion(value: Any, target_type: type, field_name: str = "v
         elif target_type is float:
             # FINANCIAL PRECISION WARNING: Float conversion for financial data
             # This should be avoided for price, quantity, amount fields
-            logger.warning(f"Converting {field_name} to float may cause precision loss for financial data")
+            logger.warning(
+                f"Converting {field_name} to float may cause precision loss for financial data"
+            )
 
             if isinstance(value, float):
                 if not math.isfinite(value):
@@ -263,29 +273,45 @@ def validate_type_conversion(value: Any, target_type: type, field_name: str = "v
                 return value
             elif isinstance(value, int | Decimal):
                 # Use safe conversion with precision warnings for financial data
-                if field_name.lower() in ["price", "quantity", "amount", "value", "balance", "fee", "cost"]:
+                if field_name.lower() in [
+                    "price",
+                    "quantity",
+                    "amount",
+                    "value",
+                    "balance",
+                    "fee",
+                    "cost",
+                ]:
                     logger.error(
                         f"CRITICAL: Converting financial field '{field_name}' from Decimal to float - use Decimal throughout"
                     )
                 try:
                     from src.monitoring.financial_precision import safe_decimal_to_float
 
-                    result = safe_decimal_to_float(value, f"validation_{field_name}", warn_on_loss=True)
+                    result = safe_decimal_to_float(
+                        value, f"validation_{field_name}", warn_on_loss=True
+                    )
                     if not math.isfinite(result):
-                        raise ValidationError(f"Conversion of {field_name} to float resulted in non-finite value")
+                        raise ValidationError(
+                            f"Conversion of {field_name} to float resulted in non-finite value"
+                        )
                     return result
                 except ImportError:
                     # Fallback if monitoring module not available
                     result = float(value)
                     if not math.isfinite(result):
-                        raise ValidationError(f"Conversion of {field_name} to float resulted in non-finite value")
+                        raise ValidationError(
+                            f"Conversion of {field_name} to float resulted in non-finite value"
+                        )
                     return result
             else:
                 # Use safe conversion for unknown types
                 try:
                     from src.monitoring.financial_precision import safe_decimal_to_float
 
-                    return safe_decimal_to_float(value, f"validation_{field_name}", warn_on_loss=True)
+                    return safe_decimal_to_float(
+                        value, f"validation_{field_name}", warn_on_loss=True
+                    )
                 except ImportError:
                     # Fallback conversion
                     return float(value)
@@ -301,7 +327,9 @@ def validate_type_conversion(value: Any, target_type: type, field_name: str = "v
                     return result
                 # Strict mode: check for precision loss using Decimal comparison
                 if Decimal(str(result)) != Decimal(str(value)):
-                    raise ValidationError(f"Precision loss converting {field_name} to int: {value} -> {result}")
+                    raise ValidationError(
+                        f"Precision loss converting {field_name} to int: {value} -> {result}"
+                    )
                 return result
             else:
                 return int(value)  # Let Python handle the conversion
@@ -310,7 +338,9 @@ def validate_type_conversion(value: Any, target_type: type, field_name: str = "v
             return target_type(value)
 
     except (ValueError, TypeError, OverflowError, InvalidOperation) as e:
-        raise ValidationError(f"Failed to convert {field_name} to {target_type.__name__}: {e}") from e
+        raise ValidationError(
+            f"Failed to convert {field_name} to {target_type.__name__}: {e}"
+        ) from e
 
 
 def validate_market_conditions(
@@ -643,17 +673,5 @@ class ValidationFramework:
 ValidationUtilities = ValidationFramework
 
 
-# Standalone validation functions for backward compatibility
-# NOTE: These functions are deprecated. Use ValidationService instead.
-# REMOVED: All validation functions moved to validation/service.py
-#
-# These functions are now available through ValidationService:
-# - validate_decimal() -> ValidationService.validate_decimal()
-# - validate_positive_number() -> use NumericValidationRule with min_value > 0
-# - validate_percentage() -> use NumericValidationRule with range 0-100
-# - validate_price() -> ValidationService.validate_price() or ValidationFramework.validate_price()
-# - validate_quantity() -> ValidationService.validate_quantity() or ValidationFramework.validate_quantity()
-#
-# For backward compatibility during transition, use:
-# from src.utils.validation import ValidationFramework
-# ValidationFramework.validate_price(price)
+# Validation functions are available through ValidationService for improved type safety and consistency.
+# Use ValidationService or ValidationFramework for all validation operations.

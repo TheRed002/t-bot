@@ -7,7 +7,7 @@ and exchange-specific formats. Eliminates duplication across exchange implementa
 
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Any, Dict
+from typing import Any
 
 from src.core.exceptions import ValidationError
 from src.core.types import (
@@ -20,8 +20,8 @@ from src.core.types import (
     OrderType,
     Ticker,
 )
-from src.utils.decimal_utils import round_to_precision
 from src.utils.data_utils import normalize_price
+from src.utils.decimal_utils import round_to_precision
 
 
 class SymbolConversionUtils:
@@ -195,7 +195,9 @@ class OrderConversionUtils:
             return OrderConversionUtils._to_generic_order(order, precision_config)
 
     @staticmethod
-    def _to_binance_order(order: OrderRequest, precision_config: dict[str, int] | None = None) -> dict[str, Any]:
+    def _to_binance_order(
+        order: OrderRequest, precision_config: dict[str, int] | None = None
+    ) -> dict[str, Any]:
         """Convert to Binance order format."""
         precision = precision_config.get("quantity", 8) if precision_config else 8
 
@@ -208,12 +210,16 @@ class OrderConversionUtils:
 
         if order.price and order.order_type == OrderType.LIMIT:
             price_precision = precision_config.get("price", 8) if precision_config else 8
-            binance_order["price"] = str(normalize_price(order.price, order.symbol, price_precision))
+            binance_order["price"] = str(
+                normalize_price(order.price, order.symbol, price_precision)
+            )
             binance_order["timeInForce"] = order.time_in_force or "GTC"
 
         if order.stop_price and order.order_type in [OrderType.STOP_LOSS, OrderType.TAKE_PROFIT]:
             stop_precision = precision_config.get("price", 8) if precision_config else 8
-            binance_order["stopPrice"] = str(normalize_price(order.stop_price, order.symbol, stop_precision))
+            binance_order["stopPrice"] = str(
+                normalize_price(order.stop_price, order.symbol, stop_precision)
+            )
 
         if order.client_order_id:
             binance_order["newClientOrderId"] = order.client_order_id
@@ -221,7 +227,9 @@ class OrderConversionUtils:
         return binance_order
 
     @staticmethod
-    def _to_coinbase_order(order: OrderRequest, precision_config: dict[str, int] | None = None) -> dict[str, Any]:
+    def _to_coinbase_order(
+        order: OrderRequest, precision_config: dict[str, int] | None = None
+    ) -> dict[str, Any]:
         """Convert to Coinbase order format."""
         precision = precision_config.get("quantity", 8) if precision_config else 8
 
@@ -251,7 +259,9 @@ class OrderConversionUtils:
         return coinbase_order
 
     @staticmethod
-    def _to_okx_order(order: OrderRequest, precision_config: dict[str, int] | None = None) -> dict[str, Any]:
+    def _to_okx_order(
+        order: OrderRequest, precision_config: dict[str, int] | None = None
+    ) -> dict[str, Any]:
         """Convert to OKX order format."""
         precision = precision_config.get("quantity", 8) if precision_config else 8
 
@@ -269,7 +279,9 @@ class OrderConversionUtils:
 
         if order.stop_price and order.order_type in [OrderType.STOP_LOSS, OrderType.TAKE_PROFIT]:
             stop_precision = precision_config.get("price", 8) if precision_config else 8
-            okx_order["slTriggerPx"] = str(normalize_price(order.stop_price, order.symbol, stop_precision))
+            okx_order["slTriggerPx"] = str(
+                normalize_price(order.stop_price, order.symbol, stop_precision)
+            )
 
         if order.client_order_id:
             okx_order["clOrdId"] = order.client_order_id
@@ -277,7 +289,9 @@ class OrderConversionUtils:
         return okx_order
 
     @staticmethod
-    def _to_generic_order(order: OrderRequest, precision_config: dict[str, int] | None = None) -> dict[str, Any]:
+    def _to_generic_order(
+        order: OrderRequest, precision_config: dict[str, int] | None = None
+    ) -> dict[str, Any]:
         """Convert to generic order format."""
         precision = precision_config.get("quantity", 8) if precision_config else 8
 
@@ -290,11 +304,15 @@ class OrderConversionUtils:
 
         if order.price:
             price_precision = precision_config.get("price", 8) if precision_config else 8
-            generic_order["price"] = str(normalize_price(order.price, order.symbol, price_precision))
+            generic_order["price"] = str(
+                normalize_price(order.price, order.symbol, price_precision)
+            )
 
         if order.stop_price:
             stop_precision = precision_config.get("price", 8) if precision_config else 8
-            generic_order["stop_price"] = str(normalize_price(order.stop_price, order.symbol, stop_precision))
+            generic_order["stop_price"] = str(
+                normalize_price(order.stop_price, order.symbol, stop_precision)
+            )
 
         if order.client_order_id:
             generic_order["client_order_id"] = order.client_order_id
@@ -345,7 +363,9 @@ class ResponseConversionUtils:
         if exchange == "binance":
             return ResponseConversionUtils._from_binance_response(exchange_response)
         elif exchange == "coinbase":
-            return ResponseConversionUtils._from_coinbase_response(exchange_response, original_symbol)
+            return ResponseConversionUtils._from_coinbase_response(
+                exchange_response, original_symbol
+            )
         elif exchange == "okx":
             return ResponseConversionUtils._from_okx_response(exchange_response)
         else:
@@ -370,7 +390,9 @@ class ResponseConversionUtils:
         )
 
     @staticmethod
-    def _from_coinbase_response(response: dict[str, Any], original_symbol: str = None) -> OrderResponse:
+    def _from_coinbase_response(
+        response: dict[str, Any], original_symbol: str = None
+    ) -> OrderResponse:
         """Convert Coinbase response to unified format."""
         # Parse order configuration for quantity and price
         order_config = response.get("order_configuration", {})
@@ -395,7 +417,9 @@ class ResponseConversionUtils:
             price=price,
             filled_quantity=Decimal(str(response.get("filled_size", "0"))),
             status=response.get("status", "pending"),
-            timestamp=ResponseConversionUtils._parse_timestamp(response.get("created_time"), format="iso"),
+            timestamp=ResponseConversionUtils._parse_timestamp(
+                response.get("created_time"), format="iso"
+            ),
         )
 
     @staticmethod
@@ -457,7 +481,11 @@ class ResponseConversionUtils:
     @staticmethod
     def _parse_okx_order_type(okx_type: str) -> OrderType:
         """Parse OKX order type."""
-        type_mapping = {"market": OrderType.MARKET, "limit": OrderType.LIMIT, "conditional": OrderType.STOP_LOSS}
+        type_mapping = {
+            "market": OrderType.MARKET,
+            "limit": OrderType.LIMIT,
+            "conditional": OrderType.STOP_LOSS,
+        }
         return type_mapping.get(okx_type, OrderType.LIMIT)
 
     @staticmethod
@@ -503,21 +531,33 @@ class MarketDataConversionUtils:
         return Ticker(
             symbol=symbol,
             bid_price=Decimal(str(exchange_data.get("bidPrice", exchange_data.get("bid", "0")))),
-            bid_quantity=Decimal(str(exchange_data.get("bidQty", exchange_data.get("bidSize", "0")))),
+            bid_quantity=Decimal(
+                str(exchange_data.get("bidQty", exchange_data.get("bidSize", "0")))
+            ),
             ask_price=Decimal(str(exchange_data.get("askPrice", exchange_data.get("ask", "0")))),
-            ask_quantity=Decimal(str(exchange_data.get("askQty", exchange_data.get("askSize", "0")))),
+            ask_quantity=Decimal(
+                str(exchange_data.get("askQty", exchange_data.get("askSize", "0")))
+            ),
             last_price=Decimal(
-                str(exchange_data.get("lastPrice", exchange_data.get("price", exchange_data.get("last", "0"))))
+                str(
+                    exchange_data.get(
+                        "lastPrice", exchange_data.get("price", exchange_data.get("last", "0"))
+                    )
+                )
             ),
             volume=Decimal(str(exchange_data.get("volume", exchange_data.get("vol24h", "0")))),
             timestamp=ResponseConversionUtils._parse_timestamp(
-                exchange_data.get("closeTime") or exchange_data.get("timestamp") or exchange_data.get("ts")
+                exchange_data.get("closeTime")
+                or exchange_data.get("timestamp")
+                or exchange_data.get("ts")
             ),
             exchange=exchange,
         )
 
     @staticmethod
-    def create_unified_order_book(exchange_data: dict[str, Any], symbol: str, exchange: str) -> OrderBook:
+    def create_unified_order_book(
+        exchange_data: dict[str, Any], symbol: str, exchange: str
+    ) -> OrderBook:
         """
         Create unified OrderBook from exchange-specific data.
 
@@ -538,11 +578,15 @@ class MarketDataConversionUtils:
 
         for bid in raw_bids:
             if isinstance(bid, list) and len(bid) >= 2:
-                bids.append(OrderBookLevel(price=Decimal(str(bid[0])), quantity=Decimal(str(bid[1]))))
+                bids.append(
+                    OrderBookLevel(price=Decimal(str(bid[0])), quantity=Decimal(str(bid[1])))
+                )
 
         for ask in raw_asks:
             if isinstance(ask, list) and len(ask) >= 2:
-                asks.append(OrderBookLevel(price=Decimal(str(ask[0])), quantity=Decimal(str(ask[1]))))
+                asks.append(
+                    OrderBookLevel(price=Decimal(str(ask[0])), quantity=Decimal(str(ask[1])))
+                )
 
         return OrderBook(
             symbol=symbol,
@@ -560,22 +604,22 @@ class ExchangeConversionUtils:
 
     @staticmethod
     def create_order_response(
-        exchange_data: Dict[str, Any],
-        field_mapping: Dict[str, str],
-        status_mapping: Dict[str, OrderStatus],
-        type_mapping: Dict[str, OrderType],
-        exchange_name: str = ""
+        exchange_data: dict[str, Any],
+        field_mapping: dict[str, str],
+        status_mapping: dict[str, OrderStatus],
+        type_mapping: dict[str, OrderType],
+        exchange_name: str = "",
     ) -> OrderResponse:
         """
         Create unified OrderResponse from exchange-specific data.
-        
+
         Args:
             exchange_data: Raw exchange response data
             field_mapping: Mapping of unified fields to exchange fields
             status_mapping: Mapping of exchange statuses to unified statuses
             type_mapping: Mapping of exchange types to unified types
             exchange_name: Exchange name for debugging
-            
+
         Returns:
             OrderResponse: Unified order response
         """
@@ -584,26 +628,32 @@ class ExchangeConversionUtils:
             order_id = str(exchange_data.get(field_mapping.get("id", "orderId"), ""))
             client_order_id = exchange_data.get(field_mapping.get("client_order_id"))
             symbol = exchange_data.get(field_mapping.get("symbol", "symbol"), "")
-            
+
             # Convert side
             side_value = exchange_data.get(field_mapping.get("side", "side"), "").upper()
             side = OrderSide.BUY if side_value in ["BUY", "buy"] else OrderSide.SELL
-            
+
             # Convert order type
             type_value = exchange_data.get(field_mapping.get("type", "type"), "")
             order_type = type_mapping.get(type_value, OrderType.LIMIT)
-            
+
             # Convert quantities and prices
-            quantity = Decimal(str(exchange_data.get(field_mapping.get("quantity", "origQty"), "0")))
+            quantity = Decimal(
+                str(exchange_data.get(field_mapping.get("quantity", "origQty"), "0"))
+            )
             price_field = exchange_data.get(field_mapping.get("price", "price"))
-            price = Decimal(str(price_field)) if price_field and price_field != "0.00000000" else None
-            
-            filled_quantity = Decimal(str(exchange_data.get(field_mapping.get("filled_quantity", "executedQty"), "0")))
-            
+            price = (
+                Decimal(str(price_field)) if price_field and price_field != "0.00000000" else None
+            )
+
+            filled_quantity = Decimal(
+                str(exchange_data.get(field_mapping.get("filled_quantity", "executedQty"), "0"))
+            )
+
             # Convert status
             status_value = exchange_data.get(field_mapping.get("status", "status"), "")
             status = status_mapping.get(status_value, OrderStatus.REJECTED).value
-            
+
             # Handle timestamp
             timestamp_field = exchange_data.get(field_mapping.get("timestamp"))
             if timestamp_field:
@@ -613,13 +663,19 @@ class ExchangeConversionUtils:
                     timestamp = datetime.fromisoformat(str(timestamp_field).replace("Z", "+00:00"))
             else:
                 timestamp = datetime.now(timezone.utc)
-            
+
             # Calculate average price if available
             average_price = None
             if exchange_data.get(field_mapping.get("quote_qty")) and filled_quantity > 0:
-                quote_qty = Decimal(str(exchange_data.get(field_mapping.get("quote_qty", "cummulativeQuoteQty"), "0")))
+                quote_qty = Decimal(
+                    str(
+                        exchange_data.get(
+                            field_mapping.get("quote_qty", "cummulativeQuoteQty"), "0"
+                        )
+                    )
+                )
                 average_price = quote_qty / filled_quantity
-            
+
             return OrderResponse(
                 id=order_id,
                 client_order_id=client_order_id,
@@ -630,17 +686,16 @@ class ExchangeConversionUtils:
                 price=price,
                 filled_quantity=filled_quantity,
                 status=status,
-                timestamp=timestamp,
+                created_at=timestamp,
                 average_price=average_price,
-                commission=Decimal(str(exchange_data.get(field_mapping.get("commission", "commission"), "0"))) if exchange_data.get(field_mapping.get("commission")) else None,
-                commission_asset=exchange_data.get(field_mapping.get("commission_asset"))
+                exchange=exchange_name,
             )
-            
+
         except Exception as e:
             raise ValidationError(f"Failed to convert {exchange_name} order response: {e}")
 
     @staticmethod
-    def get_binance_field_mapping() -> Dict[str, str]:
+    def get_binance_field_mapping() -> dict[str, str]:
         """Get field mapping for Binance responses."""
         return {
             "id": "orderId",
@@ -655,11 +710,11 @@ class ExchangeConversionUtils:
             "timestamp": "transactTime",
             "quote_qty": "cummulativeQuoteQty",
             "commission": "commission",
-            "commission_asset": "commissionAsset"
+            "commission_asset": "commissionAsset",
         }
 
     @staticmethod
-    def get_binance_status_mapping() -> Dict[str, OrderStatus]:
+    def get_binance_status_mapping() -> dict[str, OrderStatus]:
         """Get status mapping for Binance."""
         return {
             "NEW": OrderStatus.PENDING,
@@ -671,7 +726,7 @@ class ExchangeConversionUtils:
         }
 
     @staticmethod
-    def get_binance_type_mapping() -> Dict[str, OrderType]:
+    def get_binance_type_mapping() -> dict[str, OrderType]:
         """Get type mapping for Binance."""
         return {
             "MARKET": OrderType.MARKET,
@@ -683,7 +738,7 @@ class ExchangeConversionUtils:
         }
 
     @staticmethod
-    def get_coinbase_field_mapping() -> Dict[str, str]:
+    def get_coinbase_field_mapping() -> dict[str, str]:
         """Get field mapping for Coinbase responses."""
         return {
             "id": "order_id",
@@ -699,7 +754,7 @@ class ExchangeConversionUtils:
         }
 
     @staticmethod
-    def get_coinbase_status_mapping() -> Dict[str, OrderStatus]:
+    def get_coinbase_status_mapping() -> dict[str, OrderStatus]:
         """Get status mapping for Coinbase."""
         return {
             "OPEN": OrderStatus.PENDING,
@@ -715,7 +770,7 @@ class ExchangeConversionUtils:
         }
 
     @staticmethod
-    def get_coinbase_type_mapping() -> Dict[str, OrderType]:
+    def get_coinbase_type_mapping() -> dict[str, OrderType]:
         """Get type mapping for Coinbase."""
         return {
             "market": OrderType.MARKET,
@@ -725,7 +780,7 @@ class ExchangeConversionUtils:
         }
 
     @staticmethod
-    def get_okx_field_mapping() -> Dict[str, str]:
+    def get_okx_field_mapping() -> dict[str, str]:
         """Get field mapping for OKX responses."""
         return {
             "id": "ordId",
@@ -741,7 +796,7 @@ class ExchangeConversionUtils:
         }
 
     @staticmethod
-    def get_okx_status_mapping() -> Dict[str, OrderStatus]:
+    def get_okx_status_mapping() -> dict[str, OrderStatus]:
         """Get status mapping for OKX."""
         return {
             "live": OrderStatus.PENDING,
@@ -753,7 +808,7 @@ class ExchangeConversionUtils:
         }
 
     @staticmethod
-    def get_okx_type_mapping() -> Dict[str, OrderType]:
+    def get_okx_type_mapping() -> dict[str, OrderType]:
         """Get type mapping for OKX."""
         return {
             "market": OrderType.MARKET,
@@ -765,38 +820,38 @@ class ExchangeConversionUtils:
         }
 
     @staticmethod
-    def convert_binance_order_to_response(result: Dict[str, Any]) -> OrderResponse:
+    def convert_binance_order_to_response(result: dict[str, Any]) -> OrderResponse:
         """Convert Binance order result to unified OrderResponse."""
         # Handle both single order and list responses
         if isinstance(result, list) and len(result) > 0:
             result = result[0]
-            
+
         return ExchangeConversionUtils.create_order_response(
             exchange_data=result,
             field_mapping=ExchangeConversionUtils.get_binance_field_mapping(),
             status_mapping=ExchangeConversionUtils.get_binance_status_mapping(),
             type_mapping=ExchangeConversionUtils.get_binance_type_mapping(),
-            exchange_name="binance"
+            exchange_name="binance",
         )
 
     @staticmethod
-    def convert_coinbase_order_to_response(result: Dict[str, Any]) -> OrderResponse:
+    def convert_coinbase_order_to_response(result: dict[str, Any]) -> OrderResponse:
         """Convert Coinbase order result to unified OrderResponse."""
         return ExchangeConversionUtils.create_order_response(
             exchange_data=result,
             field_mapping=ExchangeConversionUtils.get_coinbase_field_mapping(),
             status_mapping=ExchangeConversionUtils.get_coinbase_status_mapping(),
             type_mapping=ExchangeConversionUtils.get_coinbase_type_mapping(),
-            exchange_name="coinbase"
+            exchange_name="coinbase",
         )
 
     @staticmethod
-    def convert_okx_order_to_response(result: Dict[str, Any]) -> OrderResponse:
+    def convert_okx_order_to_response(result: dict[str, Any]) -> OrderResponse:
         """Convert OKX order result to unified OrderResponse."""
         return ExchangeConversionUtils.create_order_response(
             exchange_data=result,
             field_mapping=ExchangeConversionUtils.get_okx_field_mapping(),
             status_mapping=ExchangeConversionUtils.get_okx_status_mapping(),
             type_mapping=ExchangeConversionUtils.get_okx_type_mapping(),
-            exchange_name="okx"
+            exchange_name="okx",
         )

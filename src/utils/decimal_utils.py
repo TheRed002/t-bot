@@ -10,7 +10,7 @@ to financial losses.
 """
 
 import warnings
-from decimal import ROUND_DOWN, ROUND_HALF_UP, Context, Decimal, InvalidOperation, setcontext
+from decimal import ROUND_DOWN, ROUND_HALF_UP, Context, Decimal, setcontext
 from typing import Any
 
 from src.core.exceptions import ValidationError
@@ -18,9 +18,6 @@ from src.core.logging import get_logger
 
 # Module level logger for static methods
 logger = get_logger(__name__)
-
-
-# Deprecated safe_decimal function removed - use to_decimal() instead
 
 
 # Set global decimal context for financial precision
@@ -215,9 +212,6 @@ def round_to_precision(value: Any, precision: int) -> Decimal:
     return decimal_value.quantize(quantizer, rounding=ROUND_HALF_UP)
 
 
-# REMOVED: round_to_precision_decimal - use round_to_precision instead
-
-
 def calculate_percentage(value: Decimal, percentage: Decimal) -> Decimal:
     """
     Calculate a percentage of a value with full precision.
@@ -328,6 +322,51 @@ def compare_decimals(a: Decimal, b: Decimal, tolerance: Decimal = SATOSHI) -> in
     return -1 if a < b else 1
 
 
+def safe_decimal_conversion(value: Any, precision: int = 8, default: Decimal = ZERO) -> Decimal:
+    """
+    Safely convert any value to Decimal with consistent error handling.
+
+    This function consolidates all safe decimal conversion logic across the codebase
+    to eliminate code duplication and ensure consistent behavior.
+
+    Args:
+        value: Value to convert (any type)
+        precision: Decimal precision places (default 8 for crypto)
+        default: Default value if conversion fails
+
+    Returns:
+        Decimal: Converted value with proper precision or default
+    """
+    if value is None:
+        return default
+
+    if isinstance(value, Decimal):
+        # Apply precision quantization if specified
+        if precision >= 0:
+            quantizer = Decimal(10) ** -precision
+            return value.quantize(quantizer, rounding=ROUND_HALF_UP)
+        return value
+
+    try:
+        # Use the existing to_decimal function for safe conversion
+        decimal_value = to_decimal(value)
+
+        # Check for NaN (which can happen in some decimal contexts)
+        if decimal_value != decimal_value:  # NaN check
+            return default
+
+        # Apply precision quantization
+        if precision >= 0:
+            quantizer = Decimal(10) ** -precision
+            return decimal_value.quantize(quantizer, rounding=ROUND_HALF_UP)
+
+        return decimal_value
+
+    except (ValidationError, ValueError, TypeError, Exception):
+        # Return default for any conversion failure
+        return default
+
+
 def format_decimal(value: Decimal, decimals: int = 8, thousands_sep: bool = True) -> str:
     """
     Format a Decimal for display with proper precision and separators.
@@ -342,7 +381,7 @@ def format_decimal(value: Decimal, decimals: int = 8, thousands_sep: bool = True
     """
     # For very small numbers, preserve their original precision
     # Handle scientific notation by checking the exponent
-    if abs(value) < Decimal('0.1') and value != 0:
+    if abs(value) < Decimal("0.1") and value != 0:
         # For small numbers, calculate needed precision from the value itself
         # Convert to string without scientific notation to get precision
         abs_val = abs(value)
@@ -354,7 +393,7 @@ def format_decimal(value: Decimal, decimals: int = 8, thousands_sep: bool = True
         # Add precision for significant digits
         if needed_precision > decimals:
             decimals = min(needed_precision + 3, 18)  # Add buffer for significant digits
-    
+
     # Quantize to specified decimals
     quantizer = Decimal(10) ** -decimals
     formatted_value = value.quantize(quantizer, rounding=ROUND_HALF_UP)
@@ -463,7 +502,8 @@ def decimal_to_float(value: Decimal) -> float:
     # FloatDeprecationWarning is defined later in the file
     # Direct warning for now
     warnings.warn(
-        "decimal_to_float conversion: Use Decimal for all financial calculations to prevent " "precision loss.",
+        "decimal_to_float conversion: Use Decimal for all financial calculations to prevent "
+        "precision loss.",
         DeprecationWarning,
         stacklevel=2,
     )
@@ -518,7 +558,9 @@ class FloatDeprecationWarning:
         warnings.filterwarnings("always", category=DeprecationWarning)
         return self
 
-    def __exit__(self, exc_type: type | None, exc_val: Exception | None, exc_tb: Any | None) -> None:
+    def __exit__(
+        self, exc_type: type | None, exc_val: Exception | None, exc_tb: Any | None
+    ) -> None:
         """Disable float deprecation warnings."""
         warnings.filterwarnings("default", category=DeprecationWarning)
 

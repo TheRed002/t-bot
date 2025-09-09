@@ -174,7 +174,9 @@ def parse_datetime(dt_str: str, format_str: str | None = None) -> datetime:
         try:
             return datetime.strptime(dt_str, format_str)
         except ValueError as e:
-            raise ValidationError(f"Cannot parse datetime '{dt_str}' with format '{format_str}': {e!s}") from e
+            raise ValidationError(
+                f"Cannot parse datetime '{dt_str}' with format '{format_str}': {e!s}"
+            ) from e
 
     # Try common formats
     common_formats = [

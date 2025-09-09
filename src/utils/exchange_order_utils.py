@@ -17,49 +17,30 @@ from src.core.exceptions import ValidationError
 from src.core.logging import get_logger
 from src.core.types import OrderRequest, OrderResponse, OrderSide, OrderStatus, OrderType
 from src.utils.decorators import retry
-from src.utils.interfaces import ValidationServiceInterface
 
 logger = get_logger(__name__)
 
 
 class OrderManagementUtils:
     """Shared utilities for order management across exchanges.
-    
+
     This class provides pure utility functions without business logic.
     Business validation should be handled by the service layer.
     """
 
-    def __init__(self, validation_service: ValidationServiceInterface | None = None):
-        """Initialize with injected validation service dependency.
-        
-        Args:
-            validation_service: Injected validation service (required for dependency injection)
+    def validate_order_structure(self, order: OrderRequest) -> None:
         """
-        self.validation_service = validation_service
+        Validate basic order structure only (no business logic).
 
-    def validate_order_request(self, order: OrderRequest, exchange_name: str = "") -> None:
-        """
-        DEPRECATED: Use ValidationService directly from service layer.
-        
-        This method violates service layer architecture by containing business logic.
-        Instead, the service layer should call ValidationService directly.
-        
+        This performs only structural/format validation.
+        Business validation should be done in the service layer.
+
         Args:
-            order: Order request to validate
-            exchange_name: Exchange name for context
+            order: Order request to validate structurally
 
         Raises:
-            ValidationError: If validation fails
+            ValidationError: If structure is invalid
         """
-        if not self.validation_service:
-            raise ValidationError(
-                "ValidationService must be injected. Use service layer for business validation.",
-                error_code="SERV_001"
-            )
-        
-        # Delegate to service layer - this should be called directly by services
-        logger.warning("OrderManagementUtils.validate_order_request is deprecated. Use ValidationService directly in service layer.")
-        
         # Basic structural validation only (not business validation)
         if not order.symbol or not order.symbol.strip():
             raise ValidationError("Symbol is required")
@@ -99,7 +80,9 @@ class OrderManagementUtils:
         pending_orders[order_response.id] = order_info
 
     @staticmethod
-    def update_order_status(order_id: str, status: OrderStatus, pending_orders: dict[str, dict[str, Any]]) -> None:
+    def update_order_status(
+        order_id: str, status: OrderStatus, pending_orders: dict[str, dict[str, Any]]
+    ) -> None:
         """
         Update order status in tracking dictionary.
 
@@ -275,7 +258,12 @@ class OrderStatusUtils:
         Returns:
             bool: True if status is terminal
         """
-        terminal_statuses = {OrderStatus.FILLED, OrderStatus.CANCELLED, OrderStatus.REJECTED, OrderStatus.EXPIRED}
+        terminal_statuses = {
+            OrderStatus.FILLED,
+            OrderStatus.CANCELLED,
+            OrderStatus.REJECTED,
+            OrderStatus.EXPIRED,
+        }
         return status in terminal_statuses
 
 
@@ -407,28 +395,12 @@ class FeeCalculationUtils:
         ).copy()
 
 
-# Factory function for dependency injection - SERVICE LAYER USE ONLY
-def get_order_management_utils(validation_service: ValidationServiceInterface | None = None) -> OrderManagementUtils:
+# Factory function for utility creation
+def get_order_management_utils() -> OrderManagementUtils:
     """
-    Factory function to create OrderManagementUtils with proper dependency injection.
-    
-    This should only be called from the service layer with proper dependency injection.
-    Direct DI container access violates clean architecture.
+    Factory function to create OrderManagementUtils.
 
-    Args:
-        validation_service: Validation service to inject (required from service layer)
-        
     Returns:
-        OrderManagementUtils: Instance with injected ValidationService
-        
-    Raises:
-        ValidationError: If called without proper service injection
+        OrderManagementUtils: Instance for utility functions
     """
-    if validation_service is None:
-        raise ValidationError(
-            "OrderManagementUtils requires ValidationService injection from service layer. "
-            "Do not call this factory directly - use through service layer.",
-            error_code="SERV_001"
-        )
-    
-    return OrderManagementUtils(validation_service=validation_service)
+    return OrderManagementUtils()

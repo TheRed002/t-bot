@@ -52,47 +52,47 @@ class TestFinancialFormatting:
 
     def test_format_currency_usd(self):
         """Test currency formatting for USD."""
-        amount = Decimal('1234.56')
+        amount = Decimal("1234.56")
 
         result = format_currency(amount, "USD")
 
-        assert '1,234.56' in result and 'USD' in result
+        assert "1,234.56" in result and "USD" in result
 
     def test_format_currency_eur(self):
         """Test currency formatting for EUR."""
-        amount = Decimal('1234.56')
+        amount = Decimal("1234.56")
 
         result = format_currency(amount, "EUR")
 
-        assert '1,234.56' in result and 'EUR' in result
+        assert "1,234.56" in result and "EUR" in result
 
     def test_format_currency_negative(self):
         """Test currency formatting for negative amount."""
-        amount = Decimal('-1234.56')
+        amount = Decimal("-1234.56")
 
         result = format_currency(amount, "USD")
 
-        assert '-1,234.56' in result and 'USD' in result
+        assert "-1,234.56" in result and "USD" in result
 
     def test_format_currency_zero(self):
         """Test currency formatting for zero."""
-        amount = Decimal('0')
+        amount = Decimal("0")
 
         result = format_currency(amount, "USD")
 
-        assert '0' in result and 'USD' in result
+        assert "0" in result and "USD" in result
 
     def test_format_currency_large_number(self):
         """Test currency formatting for large number."""
-        amount = Decimal('1234567.89')
+        amount = Decimal("1234567.89")
 
         result = format_currency(amount, "USD")
 
-        assert '1,234,567.89' in result and 'USD' in result
+        assert "1,234,567.89" in result and "USD" in result
 
     def test_format_currency_invalid_currency(self):
         """Test currency formatting with invalid currency."""
-        amount = Decimal('1234.56')
+        amount = Decimal("1234.56")
 
         # Should not raise an error, just use default precision
         result = format_currency(amount, "INVALID")
@@ -101,44 +101,46 @@ class TestFinancialFormatting:
 
     def test_format_percentage_positive(self):
         """Test percentage formatting for positive value."""
-        value = Decimal('0.1234')
+        value = Decimal("0.1234")
 
         result = format_percentage(value)
 
-        assert '+12.34%' in result or '12.34%' in result
+        assert "+12.34%" in result or "12.34%" in result
 
     def test_format_percentage_negative(self):
         """Test percentage formatting for negative value."""
-        value = Decimal('-0.1234')
+        value = Decimal("-0.1234")
 
         result = format_percentage(value)
 
-        assert '-12.34%' in result
+        assert "-12.34%" in result
 
     def test_format_percentage_zero(self):
         """Test percentage formatting for zero."""
-        value = Decimal('0')
+        value = Decimal("0")
 
         result = format_percentage(value)
 
-        assert '0.00%' in result
+        assert "0.00%" in result
 
     def test_format_percentage_custom_precision(self):
         """Test percentage formatting with custom precision."""
-        value = Decimal('0.123456')
+        value = Decimal("0.123456")
 
         result = format_percentage(value, precision=3)
 
-        assert '12.346%' in result
+        assert "12.346%" in result
 
     def test_format_percentage_invalid_value(self):
         """Test percentage formatting with invalid value."""
-        with pytest.raises(ValidationError, match="Value must be Decimal or int for financial precision"):
+        with pytest.raises(
+            ValidationError, match="Value must be Decimal or int for financial precision"
+        ):
             format_percentage("invalid")
 
     def test_format_pnl_positive(self):
         """Test P&L formatting for positive value."""
-        pnl = Decimal('1234.56')
+        pnl = Decimal("1234.56")
 
         result = format_pnl(pnl)
 
@@ -149,7 +151,7 @@ class TestFinancialFormatting:
 
     def test_format_pnl_negative(self):
         """Test P&L formatting for negative value."""
-        pnl = Decimal('-1234.56')
+        pnl = Decimal("-1234.56")
 
         result = format_pnl(pnl)
 
@@ -160,7 +162,7 @@ class TestFinancialFormatting:
 
     def test_format_pnl_zero(self):
         """Test P&L formatting for zero."""
-        pnl = Decimal('0')
+        pnl = Decimal("0")
 
         result = format_pnl(pnl)
 
@@ -171,7 +173,7 @@ class TestFinancialFormatting:
 
     def test_format_pnl_with_currency(self):
         """Test P&L formatting with custom currency."""
-        pnl = Decimal('1234.56')
+        pnl = Decimal("1234.56")
 
         result = format_pnl(pnl, "EUR")
 
@@ -182,7 +184,7 @@ class TestFinancialFormatting:
 
     def test_format_quantity_standard(self):
         """Test quantity formatting for standard symbol."""
-        quantity = Decimal('1.5')
+        quantity = Decimal("1.5")
         symbol = "BTCUSDT"
 
         result = format_quantity(quantity, symbol)
@@ -192,7 +194,7 @@ class TestFinancialFormatting:
 
     def test_format_quantity_small(self):
         """Test quantity formatting for small quantity."""
-        quantity = Decimal('0.0001')
+        quantity = Decimal("0.0001")
         symbol = "BTCUSDT"
 
         result = format_quantity(quantity, symbol)
@@ -202,7 +204,7 @@ class TestFinancialFormatting:
 
     def test_format_quantity_large(self):
         """Test quantity formatting for large quantity."""
-        quantity = Decimal('1000000')
+        quantity = Decimal("1000000")
         symbol = "BTCUSDT"
 
         result = format_quantity(quantity, symbol)
@@ -212,7 +214,7 @@ class TestFinancialFormatting:
 
     def test_format_quantity_invalid_symbol(self):
         """Test quantity formatting with invalid symbol."""
-        quantity = Decimal('1.5')
+        quantity = Decimal("1.5")
         symbol = ""  # Empty symbol should not raise error
 
         result = format_quantity(quantity, symbol)
@@ -222,7 +224,7 @@ class TestFinancialFormatting:
 
     def test_format_price_standard(self):
         """Test price formatting for standard symbol."""
-        price = Decimal('50000.0')
+        price = Decimal("50000.0")
         symbol = "BTCUSDT"
 
         result = format_price(price, symbol)
@@ -232,7 +234,7 @@ class TestFinancialFormatting:
 
     def test_format_price_crypto(self):
         """Test price formatting for crypto symbol."""
-        price = Decimal('0.00012345')
+        price = Decimal("0.00012345")
         symbol = "BTCUSDT"
 
         result = format_price(price, symbol)
@@ -242,7 +244,7 @@ class TestFinancialFormatting:
 
     def test_format_price_invalid_symbol(self):
         """Test price formatting with invalid symbol."""
-        price = Decimal('50000.0')
+        price = Decimal("50000.0")
         symbol = ""  # Empty symbol should not raise error
 
         result = format_price(price, symbol)
@@ -252,7 +254,7 @@ class TestFinancialFormatting:
 
     def test_format_price_negative(self):
         """Test price formatting for negative price."""
-        price = Decimal('-50000.0')
+        price = Decimal("-50000.0")
         symbol = "BTCUSDT"
 
         # Negative price should not raise error
@@ -448,11 +450,11 @@ class TestChartDataFormatting:
         ohlcv_data = [
             {
                 "timestamp": 1641600000,
-                "open": Decimal('50000.0'),
-                "high": Decimal('51000.0'),
-                "low": Decimal('49000.0'),
-                "close": Decimal('50500.0'),
-                "volume": Decimal('1000.0'),
+                "open": Decimal("50000.0"),
+                "high": Decimal("51000.0"),
+                "low": Decimal("49000.0"),
+                "close": Decimal("50500.0"),
+                "volume": Decimal("1000.0"),
             }
         ]
 
@@ -486,7 +488,7 @@ class TestChartDataFormatting:
     def test_format_indicator_data(self):
         """Test indicator data formatting."""
         indicator_name = "SMA"
-        values = [Decimal('50000.0'), Decimal('50100.0'), Decimal('50200.0')]
+        values = [Decimal("50000.0"), Decimal("50100.0"), Decimal("50200.0")]
         timestamps = [
             datetime(2022, 1, 8, 0, 0, 0, tzinfo=timezone.utc),
             datetime(2022, 1, 8, 1, 0, 0, tzinfo=timezone.utc),
@@ -503,7 +505,7 @@ class TestChartDataFormatting:
     def test_format_indicator_data_no_timestamps(self):
         """Test indicator data formatting without timestamps."""
         indicator_name = "SMA"
-        values = [Decimal('50000.0'), Decimal('50100.0'), Decimal('50200.0')]
+        values = [Decimal("50000.0"), Decimal("50100.0"), Decimal("50200.0")]
 
         result = format_indicator_data(indicator_name, values)
 
@@ -518,14 +520,14 @@ class TestChartDataFormatting:
         ohlcv_data = [
             {
                 "timestamp": 1641600000,
-                "open": Decimal('50000.0'),
-                "high": Decimal('51000.0'),
-                "low": Decimal('49000.0'),
-                "close": Decimal('50500.0'),
-                "volume": Decimal('1000.0'),
+                "open": Decimal("50000.0"),
+                "high": Decimal("51000.0"),
+                "low": Decimal("49000.0"),
+                "close": Decimal("50500.0"),
+                "volume": Decimal("1000.0"),
             }
         ]
-        indicators = {"SMA": [Decimal('50000.0'), Decimal('50100.0'), Decimal('50200.0')]}
+        indicators = {"SMA": [Decimal("50000.0"), Decimal("50100.0"), Decimal("50200.0")]}
 
         result = format_chart_data(symbol, ohlcv_data, indicators)
 
@@ -541,10 +543,10 @@ class TestReportFormatting:
     def test_format_performance_report(self):
         """Test performance report formatting."""
         performance_data = {
-            "total_return": Decimal('0.15'),
-            "sharpe_ratio": Decimal('1.2'),
-            "max_drawdown": Decimal('-0.05'),
-            "volatility": Decimal('0.12'),
+            "total_return": Decimal("0.15"),
+            "sharpe_ratio": Decimal("1.2"),
+            "max_drawdown": Decimal("-0.05"),
+            "volatility": Decimal("0.12"),
         }
 
         result = format_performance_report(performance_data)
@@ -569,7 +571,12 @@ class TestReportFormatting:
 
     def test_format_risk_report(self):
         """Test risk report formatting."""
-        risk_data = {"var_95": Decimal('-0.02'), "var_99": Decimal('-0.03'), "max_drawdown": Decimal('-0.05'), "volatility": Decimal('0.12')}
+        risk_data = {
+            "var_95": Decimal("-0.02"),
+            "var_99": Decimal("-0.03"),
+            "max_drawdown": Decimal("-0.05"),
+            "volatility": Decimal("0.12"),
+        }
 
         result = format_risk_report(risk_data)
 
@@ -597,8 +604,8 @@ class TestReportFormatting:
             {
                 "symbol": "BTCUSDT",
                 "side": "buy",
-                "quantity": Decimal('1.0'),
-                "price": Decimal('50000.0'),
+                "quantity": Decimal("1.0"),
+                "price": Decimal("50000.0"),
                 "timestamp": datetime.now(),
             }
         ]
@@ -702,8 +709,8 @@ class TestFormatterFunctionsIntegration:
 
     def test_financial_formatting_integration(self):
         """Test integration between financial formatting functions."""
-        amount = Decimal('1234.56')
-        percentage = Decimal('0.15')
+        amount = Decimal("1234.56")
+        percentage = Decimal("0.15")
 
         # Test currency and percentage formatting
         currency_result = format_currency(amount, "USD")
@@ -747,14 +754,14 @@ class TestFormatterFunctionsIntegration:
         ohlcv_data = [
             {
                 "timestamp": 1641600000,
-                "open": Decimal('50000.0'),
-                "high": Decimal('51000.0'),
-                "low": Decimal('49000.0'),
-                "close": Decimal('50500.0'),
-                "volume": Decimal('1000.0'),
+                "open": Decimal("50000.0"),
+                "high": Decimal("51000.0"),
+                "low": Decimal("49000.0"),
+                "close": Decimal("50500.0"),
+                "volume": Decimal("1000.0"),
             }
         ]
-        indicators = {"SMA": [Decimal('50000.0'), Decimal('50100.0'), Decimal('50200.0')]}
+        indicators = {"SMA": [Decimal("50000.0"), Decimal("50100.0"), Decimal("50200.0")]}
 
         # Test OHLCV and indicator data formatting
         formatted_ohlcv = format_ohlcv_data(ohlcv_data)
@@ -768,9 +775,16 @@ class TestFormatterFunctionsIntegration:
 
     def test_report_formatting_integration(self):
         """Test integration between report formatting functions."""
-        performance_data = {"total_return": Decimal('0.15'), "sharpe_ratio": Decimal('1.2')}
-        risk_data = {"var_95": Decimal('-0.02'), "max_drawdown": Decimal('-0.05')}
-        trades = [{"symbol": "BTCUSDT", "side": "buy", "quantity": Decimal('1.0'), "price": Decimal('50000.0')}]
+        performance_data = {"total_return": Decimal("0.15"), "sharpe_ratio": Decimal("1.2")}
+        risk_data = {"var_95": Decimal("-0.02"), "max_drawdown": Decimal("-0.05")}
+        trades = [
+            {
+                "symbol": "BTCUSDT",
+                "side": "buy",
+                "quantity": Decimal("1.0"),
+                "price": Decimal("50000.0"),
+            }
+        ]
 
         # Test performance, risk, and trade report formatting
         performance_report = format_performance_report(performance_data)

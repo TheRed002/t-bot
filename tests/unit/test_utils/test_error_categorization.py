@@ -1,15 +1,14 @@
 """Tests for error categorization utilities module."""
 
-import pytest
 
 from src.utils.error_categorization import (
     AUTH_KEYWORDS,
     AUTH_MESSAGE_KEYWORDS,
     AUTH_TOKEN_KEYWORDS,
     CRITICAL_KEYWORDS,
+    DATA_VALIDATION_KEYWORDS,
     DATABASE_KEYWORDS,
     DATABASE_MESSAGE_KEYWORDS,
-    DATA_VALIDATION_KEYWORDS,
     ERROR_KEYWORDS,
     EXCHANGE_KEYWORDS,
     EXCHANGE_MESSAGE_KEYWORDS,
@@ -81,20 +80,17 @@ class TestCategorizeByKeywords:
         keyword_map = {
             "auth": ["auth", "permission"],
             "network": ["connection", "timeout"],
-            "database": ["sql", "database"]
+            "database": ["sql", "database"],
         }
-        
+
         assert categorize_by_keywords("Authentication failed", keyword_map) == "auth"
         assert categorize_by_keywords("Connection timeout", keyword_map) == "network"
         assert categorize_by_keywords("SQL error", keyword_map) == "database"
 
     def test_categorize_by_keywords_no_match(self):
         """Test categorize_by_keywords with no matches."""
-        keyword_map = {
-            "auth": ["auth", "permission"],
-            "network": ["connection", "timeout"]
-        }
-        
+        keyword_map = {"auth": ["auth", "permission"], "network": ["connection", "timeout"]}
+
         assert categorize_by_keywords("Simple message", keyword_map) is None
         assert categorize_by_keywords("Unknown error", keyword_map) is None
 
@@ -108,9 +104,9 @@ class TestCategorizeByKeywords:
         """Test categorize_by_keywords returns first matching category."""
         keyword_map = {
             "first": ["error"],
-            "second": ["error", "failure"]  # Also contains "error"
+            "second": ["error", "failure"],  # Also contains "error"
         }
-        
+
         # Should return "first" as it appears first in iteration order
         result = categorize_by_keywords("Error occurred", keyword_map)
         # Note: dict iteration order in Python 3.7+ is insertion order
@@ -123,15 +119,19 @@ class TestGetErrorCategoryKeywords:
     def test_get_error_category_keywords_structure(self):
         """Test get_error_category_keywords returns correct structure."""
         categories = get_error_category_keywords()
-        
+
         expected_categories = [
-            "authentication", "validation", "network", 
-            "database", "exchange", "system"
+            "authentication",
+            "validation",
+            "network",
+            "database",
+            "exchange",
+            "system",
         ]
-        
+
         assert isinstance(categories, dict)
         assert set(categories.keys()) == set(expected_categories)
-        
+
         # Each category should map to a list of strings
         for category, keywords in categories.items():
             assert isinstance(keywords, list)
@@ -140,7 +140,7 @@ class TestGetErrorCategoryKeywords:
     def test_get_error_category_keywords_content(self):
         """Test get_error_category_keywords returns expected keywords."""
         categories = get_error_category_keywords()
-        
+
         assert categories["authentication"] == AUTH_KEYWORDS
         assert categories["validation"] == VALIDATION_KEYWORDS
         assert categories["network"] == NETWORK_KEYWORDS
@@ -155,12 +155,12 @@ class TestGetFallbackTypeKeywords:
     def test_get_fallback_type_keywords_structure(self):
         """Test get_fallback_type_keywords returns correct structure."""
         types = get_fallback_type_keywords()
-        
+
         expected_types = ["list", "dict", "set", "tuple", "str", "int", "bool"]
-        
+
         assert isinstance(types, dict)
         assert set(types.keys()) == set(expected_types)
-        
+
         # Each type should map to a list of strings
         for type_name, keywords in types.items():
             assert isinstance(keywords, list)
@@ -169,7 +169,7 @@ class TestGetFallbackTypeKeywords:
     def test_get_fallback_type_keywords_non_empty(self):
         """Test get_fallback_type_keywords returns non-empty lists."""
         types = get_fallback_type_keywords()
-        
+
         for type_name, keywords in types.items():
             assert len(keywords) > 0, f"Type {type_name} has empty keyword list"
 
@@ -212,20 +212,32 @@ class TestIsSensitiveKey:
     def test_is_sensitive_key_positive(self):
         """Test is_sensitive_key with sensitive keys."""
         sensitive_keys = [
-            "password", "api_key", "secret_token", "private_key",
-            "wallet_seed", "auth_credential", "jwt_token", "api_secret"
+            "password",
+            "api_key",
+            "secret_token",
+            "private_key",
+            "wallet_seed",
+            "auth_credential",
+            "jwt_token",
+            "api_secret",
         ]
-        
+
         for key in sensitive_keys:
             assert is_sensitive_key(key), f"Key '{key}' should be detected as sensitive"
 
     def test_is_sensitive_key_negative(self):
         """Test is_sensitive_key with non-sensitive keys."""
         non_sensitive_keys = [
-            "username", "email", "user_id", "timestamp",
-            "symbol", "price", "quantity", "order_id"
+            "username",
+            "email",
+            "user_id",
+            "timestamp",
+            "symbol",
+            "price",
+            "quantity",
+            "order_id",
         ]
-        
+
         for key in non_sensitive_keys:
             assert not is_sensitive_key(key), f"Key '{key}' should not be detected as sensitive"
 
@@ -247,30 +259,52 @@ class TestCategorizeErrorFromTypeAndMessage:
 
     def test_categorize_authentication_errors(self):
         """Test categorization of authentication errors."""
-        assert categorize_error_from_type_and_message("AuthError", "Login failed") == "authentication"
+        assert (
+            categorize_error_from_type_and_message("AuthError", "Login failed") == "authentication"
+        )
         # PermissionError contains "permission" which maps to authorization in AUTH_MESSAGE_KEYWORDS
-        assert categorize_error_from_type_and_message("PermissionError", "Access denied") == "authorization"
+        assert (
+            categorize_error_from_type_and_message("PermissionError", "Access denied")
+            == "authorization"
+        )
         # "unauthorized" is in AUTH_MESSAGE_KEYWORDS, should return authorization
-        assert categorize_error_from_type_and_message("Error", "Unauthorized access") == "authorization"
+        assert (
+            categorize_error_from_type_and_message("Error", "Unauthorized access")
+            == "authorization"
+        )
 
     def test_categorize_validation_errors(self):
         """Test categorization of validation errors."""
-        assert categorize_error_from_type_and_message("ValidationError", "Invalid data") == "validation"
+        assert (
+            categorize_error_from_type_and_message("ValidationError", "Invalid data")
+            == "validation"
+        )
         # ValueError contains "value" which is in VALIDATION_KEYWORDS
         assert categorize_error_from_type_and_message("ValueError", "Bad format") == "validation"
         # "required" is in VALIDATION_MESSAGE_KEYWORDS
-        assert categorize_error_from_type_and_message("Error", "Required field missing") == "validation"
+        assert (
+            categorize_error_from_type_and_message("Error", "Required field missing")
+            == "validation"
+        )
 
     def test_categorize_network_errors(self):
         """Test categorization of network errors."""
-        assert categorize_error_from_type_and_message("ConnectionError", "Failed to connect") == "network"
-        assert categorize_error_from_type_and_message("TimeoutError", "Request timed out") == "network"
+        assert (
+            categorize_error_from_type_and_message("ConnectionError", "Failed to connect")
+            == "network"
+        )
+        assert (
+            categorize_error_from_type_and_message("TimeoutError", "Request timed out") == "network"
+        )
         assert categorize_error_from_type_and_message("Error", "Network unavailable") == "network"
 
     def test_categorize_database_errors(self):
         """Test categorization of database errors."""
         assert categorize_error_from_type_and_message("DatabaseError", "Query failed") == "database"
-        assert categorize_error_from_type_and_message("OperationalError", "Connection lost") == "database"
+        assert (
+            categorize_error_from_type_and_message("OperationalError", "Connection lost")
+            == "database"
+        )
         assert categorize_error_from_type_and_message("Error", "SQL syntax error") == "database"
 
     def test_categorize_exchange_errors(self):
@@ -281,23 +315,35 @@ class TestCategorizeErrorFromTypeAndMessage:
 
     def test_categorize_rate_limit_errors(self):
         """Test categorization of rate limit errors."""
-        assert categorize_error_from_type_and_message("Error", "Rate limit exceeded") == "rate_limit"
-        assert categorize_error_from_type_and_message("HTTPError", "Too many requests") == "rate_limit"
+        assert (
+            categorize_error_from_type_and_message("Error", "Rate limit exceeded") == "rate_limit"
+        )
+        assert (
+            categorize_error_from_type_and_message("HTTPError", "Too many requests") == "rate_limit"
+        )
         assert categorize_error_from_type_and_message("Error", "API throttled") == "rate_limit"
 
     def test_categorize_maintenance_errors(self):
         """Test categorization of maintenance errors."""
-        assert categorize_error_from_type_and_message("Error", "Service unavailable") == "maintenance"
-        assert categorize_error_from_type_and_message("HTTPError", "Maintenance mode") == "maintenance"
+        assert (
+            categorize_error_from_type_and_message("Error", "Service unavailable") == "maintenance"
+        )
+        assert (
+            categorize_error_from_type_and_message("HTTPError", "Maintenance mode") == "maintenance"
+        )
 
     def test_categorize_system_errors(self):
         """Test categorization of system errors."""
-        assert categorize_error_from_type_and_message("SystemError", "Internal failure") == "internal"
+        assert (
+            categorize_error_from_type_and_message("SystemError", "Internal failure") == "internal"
+        )
         assert categorize_error_from_type_and_message("MemoryError", "Out of memory") == "internal"
 
     def test_categorize_unknown_errors(self):
         """Test categorization of unknown errors."""
-        assert categorize_error_from_type_and_message("UnknownError", "Strange failure") == "unknown"
+        assert (
+            categorize_error_from_type_and_message("UnknownError", "Strange failure") == "unknown"
+        )
         assert categorize_error_from_type_and_message("Error", "Undefined problem") == "unknown"
 
 
@@ -371,9 +417,9 @@ class TestIsRetryableError:
             "Connection timeout",
             "Temporary failure",
             "Service unavailable",
-            "Network error"
+            "Network error",
         ]
-        
+
         for message in retryable_messages:
             assert is_retryable_error(message), f"Message '{message}' should be retryable"
 
@@ -385,9 +431,9 @@ class TestIsRetryableError:
             "Permission denied",
             "Malformed request",
             "Validation error",
-            "Syntax error"
+            "Syntax error",
         ]
-        
+
         for message in non_retryable_messages:
             assert not is_retryable_error(message), f"Message '{message}' should not be retryable"
 
@@ -403,11 +449,13 @@ class TestDetectRateLimiting:
             "API throttled",
             "429 error occurred",
             "Rate-limit reached",
-            "Request throttled"
+            "Request throttled",
         ]
-        
+
         for message in rate_limit_messages:
-            assert detect_rate_limiting(message), f"Message '{message}' should be detected as rate limiting"
+            assert detect_rate_limiting(message), (
+                f"Message '{message}' should be detected as rate limiting"
+            )
 
     def test_detect_rate_limiting_negative(self):
         """Test detect_rate_limiting with non-rate-limiting messages."""
@@ -415,11 +463,13 @@ class TestDetectRateLimiting:
             "Connection failed",
             "Invalid request",
             "Server error",
-            "Authentication required"
+            "Authentication required",
         ]
-        
+
         for message in normal_messages:
-            assert not detect_rate_limiting(message), f"Message '{message}' should not be detected as rate limiting"
+            assert not detect_rate_limiting(message), (
+                f"Message '{message}' should not be detected as rate limiting"
+            )
 
 
 class TestDetectAuthTokenError:
@@ -431,11 +481,13 @@ class TestDetectAuthTokenError:
             "Token expired",
             "Bearer token invalid",
             "JWT verification failed",
-            "Authorization header missing"
+            "Authorization header missing",
         ]
-        
+
         for message in token_messages:
-            assert detect_auth_token_error(message), f"Message '{message}' should be detected as auth token error"
+            assert detect_auth_token_error(message), (
+                f"Message '{message}' should be detected as auth token error"
+            )
 
     def test_detect_auth_token_error_negative(self):
         """Test detect_auth_token_error with non-token messages."""
@@ -443,11 +495,13 @@ class TestDetectAuthTokenError:
             "Password incorrect",
             "User not found",
             "Database connection failed",
-            "Network timeout"
+            "Network timeout",
         ]
-        
+
         for message in non_token_messages:
-            assert not detect_auth_token_error(message), f"Message '{message}' should not be detected as auth token error"
+            assert not detect_auth_token_error(message), (
+                f"Message '{message}' should not be detected as auth token error"
+            )
 
 
 class TestDetectDataValidationError:
@@ -459,11 +513,13 @@ class TestDetectDataValidationError:
             "Data format invalid",
             "Schema validation failed",
             "Model structure incorrect",
-            "Data integrity check failed"
+            "Data integrity check failed",
         ]
-        
+
         for message in validation_messages:
-            assert detect_data_validation_error(message), f"Message '{message}' should be detected as data validation error"
+            assert detect_data_validation_error(message), (
+                f"Message '{message}' should be detected as data validation error"
+            )
 
     def test_detect_data_validation_error_negative(self):
         """Test detect_data_validation_error with non-validation messages."""
@@ -471,11 +527,13 @@ class TestDetectDataValidationError:
             "Network connection lost",
             "Authentication failed",
             "Rate limit exceeded",
-            "Server maintenance"
+            "Server maintenance",
         ]
-        
+
         for message in non_validation_messages:
-            assert not detect_data_validation_error(message), f"Message '{message}' should not be detected as data validation error"
+            assert not detect_data_validation_error(message), (
+                f"Message '{message}' should not be detected as data validation error"
+            )
 
 
 class TestKeywordConstants:
@@ -484,15 +542,27 @@ class TestKeywordConstants:
     def test_keyword_constants_not_empty(self):
         """Test that all keyword constant lists are not empty."""
         keyword_lists = [
-            CRITICAL_KEYWORDS, ERROR_KEYWORDS, WARNING_KEYWORDS,
-            AUTH_KEYWORDS, AUTH_MESSAGE_KEYWORDS, VALIDATION_KEYWORDS,
-            VALIDATION_MESSAGE_KEYWORDS, NETWORK_KEYWORDS, DATABASE_KEYWORDS,
-            DATABASE_MESSAGE_KEYWORDS, EXCHANGE_KEYWORDS, EXCHANGE_MESSAGE_KEYWORDS,
-            RATE_LIMIT_KEYWORDS, SYSTEM_KEYWORDS, FINANCIAL_COMPONENTS,
-            SENSITIVE_KEY_PATTERNS, AUTH_TOKEN_KEYWORDS, RATE_LIMIT_DETECTION_KEYWORDS,
-            DATA_VALIDATION_KEYWORDS
+            CRITICAL_KEYWORDS,
+            ERROR_KEYWORDS,
+            WARNING_KEYWORDS,
+            AUTH_KEYWORDS,
+            AUTH_MESSAGE_KEYWORDS,
+            VALIDATION_KEYWORDS,
+            VALIDATION_MESSAGE_KEYWORDS,
+            NETWORK_KEYWORDS,
+            DATABASE_KEYWORDS,
+            DATABASE_MESSAGE_KEYWORDS,
+            EXCHANGE_KEYWORDS,
+            EXCHANGE_MESSAGE_KEYWORDS,
+            RATE_LIMIT_KEYWORDS,
+            SYSTEM_KEYWORDS,
+            FINANCIAL_COMPONENTS,
+            SENSITIVE_KEY_PATTERNS,
+            AUTH_TOKEN_KEYWORDS,
+            RATE_LIMIT_DETECTION_KEYWORDS,
+            DATA_VALIDATION_KEYWORDS,
         ]
-        
+
         for keyword_list in keyword_lists:
             assert isinstance(keyword_list, list)
             assert len(keyword_list) > 0
@@ -501,10 +571,14 @@ class TestKeywordConstants:
     def test_keyword_constants_lowercase(self):
         """Test that keywords are in lowercase for consistency."""
         keyword_lists_to_check = [
-            CRITICAL_KEYWORDS, ERROR_KEYWORDS, WARNING_KEYWORDS,
-            AUTH_KEYWORDS, VALIDATION_KEYWORDS, NETWORK_KEYWORDS
+            CRITICAL_KEYWORDS,
+            ERROR_KEYWORDS,
+            WARNING_KEYWORDS,
+            AUTH_KEYWORDS,
+            VALIDATION_KEYWORDS,
+            NETWORK_KEYWORDS,
         ]
-        
+
         for keyword_list in keyword_lists_to_check:
             for keyword in keyword_list:
                 assert keyword == keyword.lower(), f"Keyword '{keyword}' should be lowercase"

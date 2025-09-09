@@ -14,25 +14,16 @@ from decimal import ROUND_HALF_UP, Decimal
 from src.core.exceptions import ValidationError
 from src.core.logging import get_logger
 from src.core.types import OrderRequest, OrderSide, OrderType
-from src.utils.interfaces import ValidationServiceInterface
 
 logger = get_logger(__name__)
 
 
 class ExchangeValidationUtils:
     """Common validation utilities for exchanges.
-    
+
     This class provides utility functions for exchange-specific validation.
     Business validation logic should be handled by the service layer.
     """
-
-    def __init__(self, validation_service: ValidationServiceInterface | None = None):
-        """Initialize with injected validation service dependency.
-        
-        Args:
-            validation_service: Injected validation service (required for dependency injection)
-        """
-        self.validation_service = validation_service
 
     # Common minimum order sizes by exchange
     MIN_ORDER_SIZES = {
@@ -50,74 +41,26 @@ class ExchangeValidationUtils:
         "default": Decimal("1000000"),
     }
 
-    def validate_order_request(self, order: OrderRequest, exchange: str = "") -> None:
-        """
-        DEPRECATED: Use ValidationService directly from service layer.
-        
-        This method contains business logic that belongs in the service layer.
-        Exchange services should validate orders using ValidationService directly.
+    @staticmethod
+    def validate_exchange_specific_order(order: OrderRequest, exchange: str) -> None:
+        """Validate exchange-specific order requirements (structural only).
+
+        This performs only exchange-specific structural validation.
+        Business validation should be done in the service layer.
 
         Args:
             order: Order request to validate
             exchange: Exchange name for specific rules
 
         Raises:
-            ValidationError: If validation fails
+            ValidationError: If structural validation fails
         """
-        logger.warning("ExchangeValidationUtils.validate_order_request is deprecated. Use ValidationService in service layer.")
-        
-        if not self.validation_service:
-            raise ValidationError(
-                "ValidationService must be injected. Business validation belongs in service layer.",
-                error_code="SERV_001"
-            )
-        
-        # Only perform exchange-specific structural validation
-        self._validate_exchange_specific(order, exchange)
-        self._validate_quantity_and_price(order, exchange)
-
-    # REMOVED: _validate_basic_fields and _validate_order_type_specific
-    # These are now handled by ValidationFramework.validate_order to avoid duplication
-
-    def _validate_exchange_specific(self, order: OrderRequest, exchange: str) -> None:
-        """Validate exchange-specific requirements."""
         if exchange == "binance":
             ExchangeValidationUtils._validate_binance_order(order)
         elif exchange == "coinbase":
             ExchangeValidationUtils._validate_coinbase_order(order)
         elif exchange == "okx":
             ExchangeValidationUtils._validate_okx_order(order)
-
-    @staticmethod
-    def _validate_quantity_and_price(order: OrderRequest, exchange: str) -> None:
-        """Validate quantity and price ranges."""
-        # Check minimum order size
-        min_size = ExchangeValidationUtils.MIN_ORDER_SIZES.get(
-            exchange, ExchangeValidationUtils.MIN_ORDER_SIZES["default"]
-        )
-        if order.quantity < min_size:
-            raise ValidationError(f"Order quantity {order.quantity} below minimum {min_size}")
-
-        # Check maximum order size
-        max_size = ExchangeValidationUtils.MAX_ORDER_SIZES.get(
-            exchange, ExchangeValidationUtils.MAX_ORDER_SIZES["default"]
-        )
-        if order.quantity > max_size:
-            raise ValidationError(f"Order quantity {order.quantity} above maximum {max_size}")
-
-        # Validate price if present
-        if order.price:
-            if order.price <= 0:
-                raise ValidationError("Order price must be positive")
-            if order.price > Decimal("1000000"):  # Reasonable upper limit
-                raise ValidationError("Order price too high")
-
-        # Validate stop price if present
-        if order.stop_price:
-            if order.stop_price <= 0:
-                raise ValidationError("Stop price must be positive")
-            if order.stop_price > Decimal("1000000"):  # Reasonable upper limit
-                raise ValidationError("Stop price too high")
 
     @staticmethod
     def _validate_binance_order(order: OrderRequest) -> None:
@@ -342,8 +285,15 @@ class PrecisionValidationUtils:
 
         # Check decimal places
         _, digits, exponent = value.as_tuple()
+        # Handle special decimal values
+        if isinstance(exponent, str):
+            # Special values like 'n' (NaN), 'N' (sNaN), 'F' (infinity) are invalid
+            raise ValidationError(f"{value_type} contains invalid special value: {exponent}")
+
         if exponent < -precision:
-            raise ValidationError(f"{value_type} precision exceeds maximum {precision} decimal places")
+            raise ValidationError(
+                f"{value_type} precision exceeds maximum {precision} decimal places"
+            )
 
     @staticmethod
     def validate_order_precision(
@@ -365,18 +315,26 @@ class PrecisionValidationUtils:
         )
 
         # Validate quantity precision
-        PrecisionValidationUtils.validate_precision(order.quantity, precision_config["quantity"], "Order quantity")
+        PrecisionValidationUtils.validate_precision(
+            order.quantity, precision_config["quantity"], "Order quantity"
+        )
 
         # Validate price precision
         if order.price:
-            PrecisionValidationUtils.validate_precision(order.price, precision_config["price"], "Order price")
+            PrecisionValidationUtils.validate_precision(
+                order.price, precision_config["price"], "Order price"
+            )
 
         # Validate stop price precision
         if order.stop_price:
-            PrecisionValidationUtils.validate_precision(order.stop_price, precision_config["price"], "Stop price")
+            PrecisionValidationUtils.validate_precision(
+                order.stop_price, precision_config["price"], "Stop price"
+            )
 
     @staticmethod
-    def round_to_exchange_precision(value: Decimal, precision: int, rounding_mode=ROUND_HALF_UP) -> Decimal:
+    def round_to_exchange_precision(
+        value: Decimal, precision: int, rounding_mode=ROUND_HALF_UP
+    ) -> Decimal:
         """
         Round value to exchange precision requirements.
 
@@ -400,7 +358,9 @@ class RiskValidationUtils:
 
     @staticmethod
     def validate_order_size_limits(
-        order: OrderRequest, portfolio_value: Decimal, max_position_percent: Decimal = Decimal("0.02")  # 2% default
+        order: OrderRequest,
+        portfolio_value: Decimal,
+        max_position_percent: Decimal = Decimal("0.02"),  # 2% default
     ) -> None:
         """
         Validate order size against portfolio limits.
@@ -496,28 +456,12 @@ class RiskValidationUtils:
                     raise ValidationError("Sell take profit: stop price must be above limit price")
 
 
-# Factory function for dependency injection - SERVICE LAYER USE ONLY
-def get_exchange_validation_utils(validation_service: ValidationServiceInterface | None = None) -> ExchangeValidationUtils:
+# Factory function for utility creation
+def get_exchange_validation_utils() -> ExchangeValidationUtils:
     """
-    Factory function to create ExchangeValidationUtils with proper dependency injection.
-    
-    This should only be called from the service layer with proper dependency injection.
-    Direct DI container access violates clean architecture.
+    Factory function to create ExchangeValidationUtils.
 
-    Args:
-        validation_service: Validation service to inject (required from service layer)
-        
     Returns:
-        ExchangeValidationUtils: Instance with injected ValidationService
-        
-    Raises:
-        ValidationError: If called without proper service injection
+        ExchangeValidationUtils: Instance for utility functions
     """
-    if validation_service is None:
-        raise ValidationError(
-            "ExchangeValidationUtils requires ValidationService injection from service layer. "
-            "Do not call this factory directly - use through service layer.",
-            error_code="SERV_001"
-        )
-    
-    return ExchangeValidationUtils(validation_service=validation_service)
+    return ExchangeValidationUtils()

@@ -40,7 +40,9 @@ logger = get_logger(__name__)
 # =============================================================================
 
 
-def format_currency(amount: Decimal | int, currency: str = "USD", precision: int | None = None) -> str:
+def format_currency(
+    amount: Decimal | int, currency: str = "USD", precision: int | None = None
+) -> str:
     """
     Format amount as currency string with proper financial precision.
 
@@ -58,7 +60,9 @@ def format_currency(amount: Decimal | int, currency: str = "USD", precision: int
     from src.utils.decimal_utils import DECIMAL_CONTEXT, to_decimal
 
     if not isinstance(amount, (int, Decimal)):
-        raise ValidationError(f"Amount must be Decimal or int for financial precision, got {type(amount).__name__}")
+        raise ValidationError(
+            f"Amount must be Decimal or int for financial precision, got {type(amount).__name__}"
+        )
 
     # Convert to Decimal for precise formatting
     decimal_amount = to_decimal(amount) if not isinstance(amount, Decimal) else amount
@@ -109,7 +113,9 @@ def format_percentage(value: Decimal | int, precision: int = 2) -> str:
     from src.utils.decimal_utils import DECIMAL_CONTEXT, HUNDRED, to_decimal
 
     if not isinstance(value, (int, Decimal)):
-        raise ValidationError(f"Value must be Decimal or int for financial precision, got {type(value).__name__}")
+        raise ValidationError(
+            f"Value must be Decimal or int for financial precision, got {type(value).__name__}"
+        )
 
     # Convert to Decimal for precise percentage calculation
     decimal_value = to_decimal(value) if not isinstance(value, Decimal) else value
@@ -148,7 +154,9 @@ def format_pnl(pnl: Decimal | int, currency: str = "USD") -> tuple[str, str]:
     from src.utils.decimal_utils import ZERO, to_decimal
 
     if not isinstance(pnl, (int, Decimal)):
-        raise ValidationError(f"P&L must be Decimal or int for financial precision, got {type(pnl).__name__}")
+        raise ValidationError(
+            f"P&L must be Decimal or int for financial precision, got {type(pnl).__name__}"
+        )
 
     # Convert to Decimal for comparison
     pnl_decimal = to_decimal(pnl) if not isinstance(pnl, Decimal) else pnl
@@ -186,14 +194,19 @@ def format_quantity(quantity: Decimal | int, symbol: str) -> str:
     from src.utils.decimal_utils import DECIMAL_CONTEXT, to_decimal
 
     if not isinstance(quantity, (int, Decimal)):
-        raise ValidationError(f"Quantity must be Decimal or int for financial precision, got {type(quantity).__name__}")
+        raise ValidationError(
+            f"Quantity must be Decimal or int for financial precision, got {type(quantity).__name__}"
+        )
 
     # Convert to Decimal for precise formatting
     decimal_qty = to_decimal(quantity) if not isinstance(quantity, Decimal) else quantity
 
     # Determine precision based on symbol type (crypto: 8 decimals, forex: 4, stocks: 2)
     symbol_upper = symbol.upper()
-    if any(crypto in symbol_upper for crypto in ["BTC", "ETH", "LTC", "XRP", "ADA", "DOT", "LINK", "SOL", "BNB"]):
+    if any(
+        crypto in symbol_upper
+        for crypto in ["BTC", "ETH", "LTC", "XRP", "ADA", "DOT", "LINK", "SOL", "BNB"]
+    ):
         precision = 8  # Crypto precision (DECIMAL(20,8))
     elif any(fiat in symbol_upper for fiat in ["EUR", "GBP", "JPY", "CAD", "AUD", "CHF", "NZD"]):
         precision = 4  # Forex precision (DECIMAL(20,4))
@@ -227,14 +240,19 @@ def format_price(price: Decimal | int, symbol: str) -> str:
     from src.utils.decimal_utils import DECIMAL_CONTEXT, to_decimal
 
     if not isinstance(price, (int, Decimal)):
-        raise ValidationError(f"Price must be Decimal or int for financial precision, got {type(price).__name__}")
+        raise ValidationError(
+            f"Price must be Decimal or int for financial precision, got {type(price).__name__}"
+        )
 
     # Convert to Decimal for precise formatting
     decimal_price = to_decimal(price) if not isinstance(price, Decimal) else price
 
     # Determine precision based on symbol type (crypto: 8 decimals, forex: 4, stocks: 2)
     symbol_upper = symbol.upper()
-    if any(crypto in symbol_upper for crypto in ["BTC", "ETH", "LTC", "XRP", "ADA", "DOT", "LINK", "SOL", "BNB"]):
+    if any(
+        crypto in symbol_upper
+        for crypto in ["BTC", "ETH", "LTC", "XRP", "ADA", "DOT", "LINK", "SOL", "BNB"]
+    ):
         precision = 8  # Crypto precision (DECIMAL(20,8))
     elif any(fiat in symbol_upper for fiat in ["EUR", "GBP", "JPY", "CAD", "AUD", "CHF", "NZD"]):
         precision = 4  # Forex precision (DECIMAL(20,4))
@@ -256,7 +274,9 @@ def format_price(price: Decimal | int, symbol: str) -> str:
 # =============================================================================
 
 
-def format_api_response(data: Any, success: bool = True, message: str | None = None) -> dict[str, Any]:
+def format_api_response(
+    data: Any, success: bool = True, message: str | None = None
+) -> dict[str, Any]:
     """
     Format standardized API response.
 
@@ -312,7 +332,9 @@ def format_error_response(error: Exception, error_code: str | None = None) -> di
     return response
 
 
-def format_success_response(data: Any, message: str = "Operation completed successfully") -> dict[str, Any]:
+def format_success_response(
+    data: Any, message: str = "Operation completed successfully"
+) -> dict[str, Any]:
     """
     Format success response for API.
 
@@ -326,7 +348,9 @@ def format_success_response(data: Any, message: str = "Operation completed succe
     return format_api_response(data, success=True, message=message)
 
 
-def format_paginated_response(data: list[Any], page: int, page_size: int, total: int) -> dict[str, Any]:
+def format_paginated_response(
+    data: list[Any], page: int, page_size: int, total: int
+) -> dict[str, Any]:
     """
     Format paginated response for API.
 
@@ -406,7 +430,9 @@ def format_correlation_id(correlation_id: str) -> str:
     return formatted
 
 
-def format_structured_log(level: str, message: str, correlation_id: str | None = None, **kwargs: Any) -> str:
+def format_structured_log(
+    level: str, message: str, correlation_id: str | None = None, **kwargs: Any
+) -> str:
     """
     Format structured log as JSON string.
 
@@ -559,7 +585,9 @@ def format_indicator_data(
 
 
 def format_chart_data(
-    symbol: str, ohlcv_data: list[dict[str, Any]], indicators: dict[str, list[Decimal]] | None = None
+    symbol: str,
+    ohlcv_data: list[dict[str, Any]],
+    indicators: dict[str, list[Decimal]] | None = None,
 ) -> dict[str, Any]:
     """
     Format complete chart data with financial precision.

@@ -34,8 +34,6 @@ logger = get_logger(__name__)
 class DataFlowIntegrityError(Exception):
     """Raised when data flow integrity is compromised."""
 
-    pass
-
 
 class PrecisionTracker:
     """
@@ -50,7 +48,9 @@ class PrecisionTracker:
         self.warning_count: int = 0
         self.error_count: int = 0
 
-    def track_conversion(self, original: Decimal, converted: float, context: str, precision_loss: bool = False) -> None:
+    def track_conversion(
+        self, original: Decimal, converted: float, context: str, precision_loss: bool = False
+    ) -> None:
         """
         Track a Decimal-to-float conversion event.
 
@@ -137,29 +137,36 @@ class PrecisionTracker:
 
 def get_precision_tracker(tracker: PrecisionTracker | None = None) -> PrecisionTracker:
     """Get precision tracker instance with proper dependency injection.
-    
+
     Args:
         tracker: Injected tracker (required from service layer)
-        
+
     Returns:
         PrecisionTracker: Tracker instance
-        
+
     Raises:
         ValidationError: If tracker not properly injected
     """
     if tracker is None:
-        # Fallback to DI but warn about violation
-        logger.warning("PrecisionTracker not injected - violates clean architecture. Inject from service layer.")
+        # Use factory pattern with dependency injection
         try:
             from src.core.dependency_injection import injector
-            return injector.resolve("PrecisionTracker")
-        except Exception as e:
-            raise ValidationError(
-                "PrecisionTracker must be injected from service layer. "
-                "Do not access DI container directly from utility functions.",
-                error_code="SERV_001"
-            ) from e
-    
+
+            return injector.resolve("PrecisionInterface")
+        except Exception:
+            # Fallback factory creation only if DI fails
+            logger.warning(
+                "PrecisionTracker not available via DI - using fallback factory. "
+                "Consider registering utils services properly."
+            )
+            try:
+                return PrecisionTracker()
+            except Exception as fallback_error:
+                raise ValidationError(
+                    "PrecisionTracker factory failed. Ensure utils services are registered.",
+                    error_code="SERV_001",
+                ) from fallback_error
+
     return tracker
 
 
@@ -233,7 +240,9 @@ class DataFlowValidator:
                 validated_value = self._validate_field(field_name, value, context)
                 validated_data[field_name] = validated_value
             except Exception as e:
-                raise DataFlowIntegrityError(f"Data flow validation failed for {field_name} in {context}: {e}") from e
+                raise DataFlowIntegrityError(
+                    f"Data flow validation failed for {field_name} in {context}: {e}"
+                ) from e
 
         return validated_data
 
@@ -243,7 +252,9 @@ class DataFlowValidator:
         rule = self._get_rule_for_field(field_name)
         if not rule:
             # No specific rule, apply basic validation
-            return self._validate_null_handling_service(value, allow_null=True, field_name=field_name)
+            return self._validate_null_handling_service(
+                value, allow_null=True, field_name=field_name
+            )
 
         # Apply null handling
         validated_value = self._validate_null_handling_service(
@@ -267,15 +278,23 @@ class DataFlowValidator:
 
             if min_val is not None or max_val is not None:
                 if isinstance(validated_value, Decimal):
-                    self._validate_financial_range_service(validated_value, min_val, max_val, field_name)
+                    self._validate_financial_range_service(
+                        validated_value, min_val, max_val, field_name
+                    )
                 elif min_val is not None and validated_value < min_val:
-                    raise ValidationError(f"{field_name} below minimum: {validated_value} < {min_val}")
+                    raise ValidationError(
+                        f"{field_name} below minimum: {validated_value} < {min_val}"
+                    )
                 elif max_val is not None and validated_value > max_val:
-                    raise ValidationError(f"{field_name} above maximum: {validated_value} > {max_val}")
+                    raise ValidationError(
+                        f"{field_name} above maximum: {validated_value} > {max_val}"
+                    )
 
         return validated_value
 
-    def _validate_null_handling_service(self, value: Any, allow_null: bool = False, field_name: str = "value") -> Any:
+    def _validate_null_handling_service(
+        self, value: Any, allow_null: bool = False, field_name: str = "value"
+    ) -> Any:
         """Service layer null handling validation."""
         if value is None:
             if allow_null:
@@ -317,7 +336,9 @@ class DataFlowValidator:
 
                     if isinstance(value, float):
                         if not math.isfinite(value):
-                            raise ValidationError(f"Cannot convert non-finite float {field_name} to Decimal")
+                            raise ValidationError(
+                                f"Cannot convert non-finite float {field_name} to Decimal"
+                            )
                     return Decimal(str(value))
                 elif isinstance(value, str):
                     return Decimal(value.strip())
@@ -334,15 +355,21 @@ class DataFlowValidator:
                     # Use safe conversion to maintain precision tracking
                     from src.monitoring.financial_precision import safe_decimal_to_float
 
-                    result = safe_decimal_to_float(value, f"validation_{field_name}", warn_on_loss=True)
+                    result = safe_decimal_to_float(
+                        value, f"validation_{field_name}", warn_on_loss=True
+                    )
                     if not math.isfinite(result):
-                        raise ValidationError(f"Conversion of {field_name} to float resulted in non-finite value")
+                        raise ValidationError(
+                            f"Conversion of {field_name} to float resulted in non-finite value"
+                        )
                     return result
                 else:
                     # Use safe conversion for unknown types
                     from src.monitoring.financial_precision import safe_decimal_to_float
 
-                    return safe_decimal_to_float(value, f"validation_{field_name}", warn_on_loss=True)
+                    return safe_decimal_to_float(
+                        value, f"validation_{field_name}", warn_on_loss=True
+                    )
             elif target_type is int:
                 import math
 
@@ -350,20 +377,26 @@ class DataFlowValidator:
                     return value
                 elif isinstance(value, float | Decimal):
                     if isinstance(value, float) and not math.isfinite(value):
-                        raise ValidationError(f"Cannot convert non-finite float {field_name} to int")
+                        raise ValidationError(
+                            f"Cannot convert non-finite float {field_name} to int"
+                        )
                     result = int(value)
                     if not strict:
                         return result
                     # Strict mode: check for precision loss using Decimal comparison
                     if Decimal(str(result)) != Decimal(str(value)):
-                        raise ValidationError(f"Precision loss converting {field_name} to int: {value} -> {result}")
+                        raise ValidationError(
+                            f"Precision loss converting {field_name} to int: {value} -> {result}"
+                        )
                     return result
                 else:
                     return int(value)  # Let Python handle the conversion
             else:
                 return target_type(value)
         except (ValueError, TypeError, OverflowError, InvalidOperation) as e:
-            raise ValidationError(f"Failed to convert {field_name} to {target_type.__name__}: {e}") from e
+            raise ValidationError(
+                f"Failed to convert {field_name} to {target_type.__name__}: {e}"
+            ) from e
 
     def _validate_financial_range_service(
         self,
@@ -389,14 +422,22 @@ class DataFlowValidator:
 
         # Dynamic range validation
         if min_value is not None:
-            min_decimal = Decimal(str(min_value)) if not isinstance(min_value, Decimal) else min_value
+            min_decimal = (
+                Decimal(str(min_value)) if not isinstance(min_value, Decimal) else min_value
+            )
             if decimal_value < min_decimal:
-                raise ValidationError(f"{field_name} below minimum: {decimal_value} < {min_decimal}")
+                raise ValidationError(
+                    f"{field_name} below minimum: {decimal_value} < {min_decimal}"
+                )
 
         if max_value is not None:
-            max_decimal = Decimal(str(max_value)) if not isinstance(max_value, Decimal) else max_value
+            max_decimal = (
+                Decimal(str(max_value)) if not isinstance(max_value, Decimal) else max_value
+            )
             if decimal_value > max_decimal:
-                raise ValidationError(f"{field_name} above maximum: {decimal_value} > {max_decimal}")
+                raise ValidationError(
+                    f"{field_name} above maximum: {decimal_value} > {max_decimal}"
+                )
 
         return decimal_value
 
@@ -452,18 +493,17 @@ class IntegrityPreservingConverter:
     and provide fallback strategies when precision loss is unavoidable.
     """
 
-    def __init__(self, track_precision: bool = True, precision_tracker: PrecisionTracker | None = None):
+    def __init__(
+        self, track_precision: bool = True, precision_tracker: PrecisionTracker | None = None
+    ):
         self.track_precision = track_precision
-        self.tracker: PrecisionTracker | None
-        # Use proper dependency injection - no automatic resolution
-        if precision_tracker is not None:
-            self.tracker = precision_tracker
-        elif track_precision:
-            # Require explicit injection from service layer
-            logger.warning("PrecisionTracker not injected - precision tracking disabled.")
-            self.tracker = None
-        else:
-            self.tracker = None
+        # Use dependency injection for PrecisionTracker - required for clean architecture
+        self.tracker = precision_tracker
+        if precision_tracker is None and track_precision:
+            logger.warning(
+                "PrecisionTracker not injected - precision tracking disabled. "
+                "Inject via dependency injection for full functionality."
+            )
 
     def safe_convert_for_metrics(
         self,
@@ -506,7 +546,11 @@ class IntegrityPreservingConverter:
             if fallback_strategy == "error":
                 raise DataFlowIntegrityError(f"Failed to convert {metric_name}: {e}") from e
             elif fallback_strategy == "warn":
-                warnings.warn(f"Conversion failed for {metric_name}: {e}", FinancialPrecisionWarning, stacklevel=2)
+                warnings.warn(
+                    f"Conversion failed for {metric_name}: {e}",
+                    FinancialPrecisionWarning,
+                    stacklevel=2,
+                )
                 return 0.0
             else:  # silent
                 return 0.0
@@ -533,64 +577,86 @@ class IntegrityPreservingConverter:
 
         for field_name, value in data.items():
             precision = precision_map.get(field_name, 8)
-            results[field_name] = self.safe_convert_for_metrics(value, f"{context}.{field_name}", precision)
+            results[field_name] = self.safe_convert_for_metrics(
+                value, f"{context}.{field_name}", precision
+            )
 
         return results
 
 
 def get_data_flow_validator(validator: DataFlowValidator | None = None) -> DataFlowValidator:
     """Get data flow validator instance with proper dependency injection.
-    
+
     Args:
         validator: Injected validator (required from service layer)
-        
+
     Returns:
         DataFlowValidator: Validator instance
-        
+
     Raises:
         ValidationError: If validator not properly injected
     """
     if validator is None:
-        # Fallback to DI but warn about violation
-        logger.warning("DataFlowValidator not injected - violates clean architecture. Inject from service layer.")
+        # Use factory pattern with dependency injection
         try:
             from src.core.dependency_injection import injector
-            return injector.resolve("DataFlowValidator")
-        except Exception as e:
-            raise ValidationError(
-                "DataFlowValidator must be injected from service layer. "
-                "Do not access DI container directly from utility functions.",
-                error_code="SERV_001"
-            ) from e
-    
+
+            return injector.resolve("DataFlowInterface")
+        except Exception:
+            # Fallback factory creation only if DI fails
+            logger.warning(
+                "DataFlowValidator not available via DI - using fallback factory. "
+                "Consider registering utils services properly."
+            )
+            try:
+                return DataFlowValidator()
+            except Exception as fallback_error:
+                raise ValidationError(
+                    "DataFlowValidator factory failed. Ensure utils services are registered.",
+                    error_code="SERV_001",
+                ) from fallback_error
+
     return validator
 
 
-def get_integrity_converter(converter: IntegrityPreservingConverter | None = None) -> IntegrityPreservingConverter:
+def get_integrity_converter(
+    converter: IntegrityPreservingConverter | None = None,
+) -> IntegrityPreservingConverter:
     """Get integrity converter instance with proper dependency injection.
-    
+
     Args:
         converter: Injected converter (required from service layer)
-        
+
     Returns:
         IntegrityPreservingConverter: Converter instance
-        
+
     Raises:
         ValidationError: If converter not properly injected
     """
     if converter is None:
-        # Fallback to DI but warn about violation
-        logger.warning("IntegrityPreservingConverter not injected - violates clean architecture. Inject from service layer.")
+        # Use factory pattern with dependency injection
         try:
             from src.core.dependency_injection import injector
+
             return injector.resolve("IntegrityPreservingConverter")
-        except Exception as e:
-            raise ValidationError(
-                "IntegrityPreservingConverter must be injected from service layer. "
-                "Do not access DI container directly from utility functions.",
-                error_code="SERV_001"
-            ) from e
-    
+        except Exception:
+            # Fallback factory creation only if DI fails
+            logger.warning(
+                "IntegrityPreservingConverter not available via DI - using fallback factory. "
+                "Consider registering utils services properly."
+            )
+            try:
+                # Create with default precision tracker
+                precision_tracker = get_precision_tracker()
+                return IntegrityPreservingConverter(
+                    track_precision=True, precision_tracker=precision_tracker
+                )
+            except Exception as fallback_error:
+                raise ValidationError(
+                    "IntegrityPreservingConverter factory failed. Ensure utils services are registered.",
+                    error_code="SERV_001",
+                ) from fallback_error
+
     return converter
 
 
@@ -598,11 +664,11 @@ def get_integrity_converter(converter: IntegrityPreservingConverter | None = Non
 
 
 def validate_cross_module_data(
-    data: dict[str, Any], 
-    source_module: str, 
-    target_module: str, 
+    data: dict[str, Any],
+    source_module: str,
+    target_module: str,
     operation: str = "transfer",
-    validator: DataFlowValidator | None = None
+    validator: DataFlowValidator | None = None,
 ) -> dict[str, Any]:
     """
     Validate data being transferred between modules.
@@ -654,7 +720,9 @@ def validate_cross_module_data(
         raise
 
 
-def fix_precision_cascade(data: dict[str, Any], target_formats: dict[str, str] | None = None) -> dict[str, Any]:
+def fix_precision_cascade(
+    data: dict[str, Any], target_formats: dict[str, str] | None = None
+) -> dict[str, Any]:
     """
     Fix precision loss cascade by ensuring proper type handling.
 
@@ -690,7 +758,9 @@ def fix_precision_cascade(data: dict[str, Any], target_formats: dict[str, str] |
                 decimal_value = Decimal(str(value))
                 fixed_data[field_name] = decimal_value
 
-                logger.debug(f"Fixed precision cascade for {field_name}: {value} -> {decimal_value}")
+                logger.debug(
+                    f"Fixed precision cascade for {field_name}: {value} -> {decimal_value}"
+                )
 
             except (InvalidOperation, ValueError) as e:
                 logger.warning(f"Could not convert {field_name} to Decimal: {e}")

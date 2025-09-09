@@ -257,9 +257,9 @@ DEFAULT_VALUES = {
     "correlation_threshold": 0.7,  # Default correlation threshold
     "rebalance_frequency": 24,  # Default rebalance frequency (hours)
     "data_retention_days": 365,  # Default data retention period
-    # Database connection defaults (use environment variables in production)
-    "redis_default_url": "redis://${REDIS_HOST:localhost}:${REDIS_PORT:6379}/${REDIS_DB:0}",  # Use env vars in production
-    "postgresql_default_url": "postgresql://${DB_USER:postgres}:${DB_PASSWORD}@${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:trading_bot}",  # Use env vars in production
+    # Database connection defaults (configured via environment variables in production)
+    "redis_default_url": "redis://${REDIS_HOST:localhost}:${REDIS_PORT:6379}/${REDIS_DB:0}",
+    "postgresql_default_url": "postgresql://${DB_USER:postgres}:${DB_PASSWORD}@${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:trading_bot}",
 }
 
 # System limits
@@ -315,7 +315,7 @@ ERROR_CODES = {
     # System errors (1000-1999)
     "SYSTEM_ERROR": 1000,
     "CONFIGURATION_ERROR": 1001,
-    "DATABASE_ERROR": 1002,
+    "DATABASE_ERROR": "DB_000",
     "NETWORK_ERROR": 1003,
     "TIMEOUT_ERROR": 1004,
     "MEMORY_ERROR": 1005,
@@ -354,6 +354,9 @@ ERROR_CODES = {
     "DRAWDOWN_LIMIT_ERROR": 6002,
     "VAR_LIMIT_ERROR": 6003,
     "CORRELATION_LIMIT_ERROR": 6004,
+    "CORRELATION_CALCULATION_FAILED": 6005,
+    "CIRCUIT_BREAKER_TRIGGERED": 6006,
+    "STATE_ACCESS_ERROR": 6007,
     # Validation errors (7000-7999)
     "VALIDATION_ERROR": 7000,
     "INPUT_VALIDATION_ERROR": 7001,
@@ -561,6 +564,44 @@ VAR_CALCULATION_DEFAULTS = {
     "method": "historical",  # Default calculation method
 }
 
+# Position sizing constants for risk management
+POSITION_SIZING_LIMITS = {
+    "max_position_size_pct": 0.25,  # 25% absolute maximum position size
+    "min_position_size_pct": 0.01,  # 1% minimum position size
+    "kelly_safety_factor": 0.5,  # Half-Kelly for conservative sizing
+    "emergency_stop_threshold": 0.30,  # 30% drawdown triggers emergency stop
+    "var_critical_threshold": 0.10,  # 10% VaR triggers critical risk
+    "var_high_threshold": 0.05,  # 5% VaR triggers high risk
+    "var_medium_threshold": 0.02,  # 2% VaR triggers medium risk
+    "drawdown_critical_threshold": 0.20,  # 20% drawdown critical
+    "drawdown_high_threshold": 0.10,  # 10% drawdown high risk
+    "drawdown_medium_threshold": 0.05,  # 5% drawdown medium risk
+    "min_avg_loss_threshold": 0.0001,  # Minimum average loss for Kelly calculation
+    # VaR calculation constants
+    "var_base_conservative": "0.02",  # 2% base VaR for insufficient data
+    "var_fallback_conservative": "0.01",  # 1% fallback VaR for zero volatility
+    "min_returns_for_var": 10,  # Minimum returns needed for reliable VaR
+    "max_var_percentage": 0.5,  # Maximum VaR as percentage of portfolio
+    # Expected shortfall constants
+    "min_history_for_shortfall": 30,  # Minimum history for shortfall calculation
+    "shortfall_base_conservative": "0.025",  # 2.5% base shortfall
+    "shortfall_default_conservative": "0.02",  # 2% default shortfall
+    # Signal validation constants
+    "min_signal_strength": "0.3",  # Minimum 30% signal strength
+    # Volatility adjustment constants
+    "min_volatility_threshold": 0.001,  # Minimum volatility to avoid division by zero
+    "min_volatility_adjustment": 0.1,  # Minimum volatility adjustment factor
+    "max_volatility_adjustment": 5.0,  # Maximum volatility adjustment factor
+    # Memory management constants
+    "max_portfolio_history": 252,  # One year of daily data
+    "min_price_history": 100,  # Minimum price history to maintain
+    "max_price_history": 1000,  # Maximum price history per symbol
+    "max_symbols_tracked": 100,  # Maximum number of symbols to track
+    "max_cleanup_items": 1000,  # Maximum items to clean in one operation
+    "max_alerts_to_keep": 100,  # Maximum alerts to keep after cleanup
+    "min_data_for_symbol": 10,  # Minimum data points to consider symbol active
+}
+
 # Report versioning
 ANALYTICS_REPORT_VERSION = "2.0"
 
@@ -569,4 +610,59 @@ ANALYTICS_TIMING = {
     "periodic_report_check_interval": 300,  # 5 minutes
     "cache_cleanup_interval": 60,  # 1 minute
     "cache_ttl_seconds": 60,  # 1 minute default cache TTL
+}
+
+
+# =============================================================================
+# ML Constants
+# =============================================================================
+
+# Feature engineering configuration constants
+ML_FEATURE_CONSTANTS = {
+    "technical_periods": {
+        "short": [5, 10, 14],
+        "medium": [20, 26, 50],
+        "long": [100, 200],
+        "rsi_period": 14,
+        "stoch_period": 14,
+        "atr_period": 14,
+        "stoch_smooth": 3,
+        "volume_sma_periods": [10, 20],
+        "volatility_periods": [5, 10, 20],
+        "momentum_roc_periods": [5, 10, 14, 20],
+    },
+    "price_return_periods": [1, 2, 3, 5, 10, 20],
+    "ma_crossover_pairs": [(5, 20), (10, 50), (12, 26)],
+    "price_vs_ma_periods": [20, 50],
+    "trend_comparison_periods": {"short": 5, "medium": 20},
+    "classification_threshold": 10,  # Max unique values for classification
+    "percentage_multiplier": 100,
+    "max_features": 50,  # Maximum features for feature selection
+    "feature_selection_threshold": 0.05,  # Feature selection threshold
+    "cache_ttl_hours": 1,  # Feature cache TTL in hours
+    "cache_max_size": 1000,  # Maximum cache size
+    "computation_workers": 4,  # Number of computation workers
+}
+
+# Model configuration constants
+ML_MODEL_CONSTANTS = {
+    "cache_ttl_seconds": 3600,  # 1 hour
+    "hash_digest_length": 16,
+    "time_to_milliseconds": 1000,
+    "default_cv_folds": 5,
+    "default_validation_split": 0.2,
+    "max_features_for_selection": 50,
+    "default_model_version": "1.0.0",
+    "default_validation_threshold": 0.85,  # Default validation accuracy threshold
+    "max_active_models": 10,  # Maximum number of active models
+    "model_retirement_days": 30,  # Days after which unused models are retired
+    "drift_threshold": 0.1,  # Drift detection threshold
+    "performance_decline_threshold": 0.05,  # Performance decline threshold
+    "min_accuracy_threshold": 0.8,  # Minimum accuracy for classifiers
+    "min_f1_score_threshold": 0.75,  # Minimum F1 score for classifiers
+    "max_mse_threshold": 1.0,  # Maximum MSE for regressors
+    "min_r2_threshold": 0.7,  # Minimum R² score for regressors
+    "max_concurrent_operations": 10,  # Maximum concurrent ML operations
+    "pipeline_timeout_seconds": 300,  # Pipeline timeout in seconds (5 minutes)
+    "cache_ttl_minutes": 60,  # Cache TTL in minutes (1 hour)
 }

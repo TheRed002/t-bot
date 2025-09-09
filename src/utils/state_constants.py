@@ -6,7 +6,6 @@ duplication across state components.
 """
 
 from decimal import Decimal
-from typing import Dict, Set
 
 # Cache configuration
 DEFAULT_CACHE_TTL = 300  # 5 minutes
@@ -30,49 +29,46 @@ MAX_RISK_PER_TRADE = Decimal("0.05")  # 5% maximum risk per trade
 MAX_CAPITAL_ALLOCATION = Decimal("1000000")  # $1M default maximum
 
 # State field requirements
-BOT_STATE_REQUIRED_FIELDS = {
-    "bot_id", "status", "created_at", "updated_at"
-}
+BOT_STATE_REQUIRED_FIELDS = {"bot_id", "status", "created_at", "updated_at"}
 
-POSITION_STATE_REQUIRED_FIELDS = {
-    "symbol", "quantity", "side", "entry_price"
-}
+POSITION_STATE_REQUIRED_FIELDS = {"symbol", "quantity", "side", "entry_price"}
 
-ORDER_STATE_REQUIRED_FIELDS = {
-    "order_id", "symbol", "quantity", "side", "type"
-}
+ORDER_STATE_REQUIRED_FIELDS = {"order_id", "symbol", "quantity", "side", "type"}
 
-RISK_STATE_REQUIRED_FIELDS = {
-    "max_position_size", "max_drawdown", "var_limit"
-}
+RISK_STATE_REQUIRED_FIELDS = {"max_position_size", "max_drawdown", "var_limit"}
 
 # Decimal fields that need special validation
 BOT_STATE_DECIMAL_FIELDS = {
-    "current_capital", "allocated_capital", "unrealized_pnl", "realized_pnl"
+    "current_capital",
+    "allocated_capital",
+    "unrealized_pnl",
+    "realized_pnl",
 }
 
-POSITION_STATE_DECIMAL_FIELDS = {
-    "quantity", "entry_price", "current_price", "unrealized_pnl"
-}
+POSITION_STATE_DECIMAL_FIELDS = {"quantity", "entry_price", "current_price", "unrealized_pnl"}
 
-ORDER_STATE_DECIMAL_FIELDS = {
-    "quantity", "price", "filled_quantity", "remaining_quantity"
-}
+ORDER_STATE_DECIMAL_FIELDS = {"quantity", "price", "filled_quantity", "remaining_quantity"}
 
-RISK_STATE_DECIMAL_FIELDS = {
-    "max_position_size", "max_drawdown", "var_limit", "current_var"
-}
+RISK_STATE_DECIMAL_FIELDS = {"max_position_size", "max_drawdown", "var_limit", "current_var"}
 
 # Positive value fields
 POSITIVE_VALUE_FIELDS = {
-    "current_capital", "allocated_capital", "entry_price", "current_price",
-    "price", "quantity", "max_position_size"
+    "current_capital",
+    "allocated_capital",
+    "entry_price",
+    "current_price",
+    "price",
+    "quantity",
+    "max_position_size",
 }
 
 # Non-negative value fields (can be zero)
 NON_NEGATIVE_VALUE_FIELDS = {
-    "filled_quantity", "remaining_quantity", "realized_pnl", "unrealized_pnl",
-    "current_var"
+    "filled_quantity",
+    "remaining_quantity",
+    "realized_pnl",
+    "unrealized_pnl",
+    "current_var",
 }
 
 # State transition rules
@@ -83,7 +79,7 @@ BOT_STATUS_TRANSITIONS = {
     "PAUSED": {"RUNNING", "STOPPING", "ERROR"},
     "STOPPING": {"STOPPED", "ERROR"},
     "STOPPED": {"INITIALIZING", "ERROR"},
-    "ERROR": {"INITIALIZING", "STOPPED"}
+    "ERROR": {"INITIALIZING", "STOPPED"},
 }
 
 ORDER_STATUS_TRANSITIONS = {
@@ -92,14 +88,14 @@ ORDER_STATUS_TRANSITIONS = {
     "PARTIALLY_FILLED": {"FILLED", "CANCELLED"},
     "FILLED": set(),  # Terminal state
     "CANCELLED": set(),  # Terminal state
-    "REJECTED": set()  # Terminal state
+    "REJECTED": set(),  # Terminal state
 }
 
 POSITION_STATUS_TRANSITIONS = {
     "OPENED": {"MODIFIED", "CLOSING", "CLOSED"},
     "MODIFIED": {"CLOSING", "CLOSED"},
     "CLOSING": {"CLOSED"},
-    "CLOSED": set()  # Terminal state
+    "CLOSED": set(),  # Terminal state
 }
 
 # Default retry configuration
@@ -171,27 +167,22 @@ VALIDATION_ERROR_TYPES = {
     "INVALID_FORMAT",
     "OUT_OF_RANGE",
     "BUSINESS_RULE_VIOLATION",
-    "CONSTRAINT_VIOLATION"
+    "CONSTRAINT_VIOLATION",
 }
 
 # State event types
 STATE_EVENT_TYPES = {
     "STATE_CREATED",
-    "STATE_UPDATED", 
+    "STATE_UPDATED",
     "STATE_DELETED",
     "STATE_VALIDATED",
     "STATE_SYNCHRONIZED",
     "STATE_PERSISTED",
-    "STATE_ERROR"
+    "STATE_ERROR",
 }
 
 # Priority levels
-PRIORITY_LEVELS = {
-    "LOW": 1,
-    "NORMAL": 2,
-    "HIGH": 3,
-    "CRITICAL": 4
-}
+PRIORITY_LEVELS = {"LOW": 1, "NORMAL": 2, "HIGH": 3, "CRITICAL": 4}
 
 # Resource limits
 MAX_CONCURRENT_OPERATIONS = 100
@@ -201,12 +192,12 @@ MAX_CPU_USAGE_PERCENT = 80.0
 # State types registry
 STATE_TYPES = {
     "bot_state",
-    "position_state", 
+    "position_state",
     "order_state",
     "risk_state",
     "portfolio_state",
     "execution_state",
-    "strategy_state"
+    "strategy_state",
 }
 
 # Default timeouts for different operations
@@ -215,16 +206,11 @@ OPERATION_TIMEOUTS = {
     "persist": 10.0,
     "synchronize": 15.0,
     "checkpoint": 30.0,
-    "restore": 60.0
+    "restore": 60.0,
 }
 
 # Alert severities mapped to numeric levels
-ALERT_SEVERITY_LEVELS = {
-    "LOW": 1,
-    "MEDIUM": 2,
-    "HIGH": 3,
-    "CRITICAL": 4
-}
+ALERT_SEVERITY_LEVELS = {"LOW": 1, "MEDIUM": 2, "HIGH": 3, "CRITICAL": 4}
 
 # Date format strings
 ISO_DATETIME_FORMAT = "%Y-%m-%dT%H:%M:%S.%fZ"
@@ -245,5 +231,5 @@ DEFAULT_CONFIG = {
     "metrics_collection_interval": METRICS_COLLECTION_INTERVAL,
     "sync_timeout": SYNC_TIMEOUT,
     "db_query_timeout": DB_QUERY_TIMEOUT,
-    "redis_key_expire_time": REDIS_KEY_EXPIRE_TIME
+    "redis_key_expire_time": REDIS_KEY_EXPIRE_TIME,
 }

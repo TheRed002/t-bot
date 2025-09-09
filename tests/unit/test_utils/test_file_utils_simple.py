@@ -4,22 +4,22 @@ Unit tests for file_utils module (simplified).
 Tests file utility functions that actually exist in the module.
 """
 
-import pytest
 import json
-from pathlib import Path
-from unittest.mock import mock_open, patch, MagicMock
+from unittest.mock import MagicMock, mock_open, patch
 
+import pytest
+
+from src.core.exceptions import ValidationError
 from src.utils.file_utils import (
-    safe_read_file,
-    safe_write_file,
+    delete_file,
     ensure_directory_exists,
     get_file_size,
-    load_config_file,
-    save_config_file,
-    delete_file,
     list_files,
+    load_config_file,
+    safe_read_file,
+    safe_write_file,
+    save_config_file,
 )
-from src.core.exceptions import ValidationError
 
 
 class TestSafeReadFile:
@@ -28,7 +28,7 @@ class TestSafeReadFile:
     def test_read_existing_file(self):
         """Test reading an existing file."""
         mock_content = "Test file content"
-        
+
         with patch("builtins.open", mock_open(read_data=mock_content)):
             with patch("pathlib.Path.exists", return_value=True):
                 with patch("pathlib.Path.is_file", return_value=True):
@@ -38,7 +38,7 @@ class TestSafeReadFile:
     def test_read_with_encoding(self):
         """Test reading file with specific encoding."""
         content = "Test with special chars: àéîôù"
-        
+
         with patch("builtins.open", mock_open(read_data=content)):
             with patch("pathlib.Path.exists", return_value=True):
                 with patch("pathlib.Path.is_file", return_value=True):
@@ -66,7 +66,7 @@ class TestSafeWriteFile:
     def test_write_file_success(self):
         """Test successful file writing."""
         content = "Test content to write"
-        
+
         with patch("builtins.open", mock_open()) as mock_file:
             with patch("pathlib.Path.parent") as mock_parent:
                 with patch("pathlib.Path.replace") as mock_replace:
@@ -79,7 +79,7 @@ class TestSafeWriteFile:
     def test_write_file_permission_error(self):
         """Test writing file with permission error."""
         content = "Test content"
-        
+
         with patch("builtins.open", side_effect=PermissionError("No permission")):
             with pytest.raises(ValidationError):
                 safe_write_file("protected.txt", content)
@@ -87,7 +87,7 @@ class TestSafeWriteFile:
     def test_write_with_encoding(self):
         """Test writing file with specific encoding."""
         content = "Test with special chars: àéîôù"
-        
+
         with patch("builtins.open", mock_open()) as mock_file:
             with patch("pathlib.Path.parent") as mock_parent:
                 with patch("pathlib.Path.replace") as mock_replace:
@@ -144,7 +144,7 @@ class TestLoadConfigFile:
         """Test loading JSON config file."""
         config_data = {"key": "value", "number": 123}
         json_content = json.dumps(config_data)
-        
+
         with patch("src.utils.file_utils.safe_read_file", return_value=json_content):
             result = load_config_file("config.json")
             assert result == config_data
@@ -153,7 +153,7 @@ class TestLoadConfigFile:
         """Test loading YAML config file."""
         config_data = {"key": "value", "number": 123}
         yaml_content = "key: value\nnumber: 123"
-        
+
         with patch("src.utils.file_utils.safe_read_file", return_value=yaml_content):
             with patch("yaml.safe_load", return_value=config_data):
                 result = load_config_file("config.yaml")
@@ -168,7 +168,7 @@ class TestLoadConfigFile:
     def test_load_config_invalid_json(self):
         """Test loading invalid JSON config."""
         invalid_json = "{ invalid json }"
-        
+
         with patch("src.utils.file_utils.safe_read_file", return_value=invalid_json):
             with pytest.raises(ValidationError):
                 load_config_file("config.json")
@@ -176,7 +176,7 @@ class TestLoadConfigFile:
     def test_load_config_invalid_yaml(self):
         """Test loading invalid YAML config."""
         invalid_yaml = "key: value\n  invalid: yaml: structure"
-        
+
         with patch("src.utils.file_utils.safe_read_file", return_value=invalid_yaml):
             with patch("yaml.safe_load", side_effect=Exception("Invalid YAML")):
                 with pytest.raises(ValidationError):
@@ -189,7 +189,7 @@ class TestSaveConfigFile:
     def test_save_json_config(self):
         """Test saving JSON config file."""
         config_data = {"key": "value", "number": 123}
-        
+
         with patch("src.utils.file_utils.safe_write_file") as mock_write:
             save_config_file("config.json", config_data)
             mock_write.assert_called_once()
@@ -200,7 +200,7 @@ class TestSaveConfigFile:
     def test_save_yaml_config(self):
         """Test saving YAML config file."""
         config_data = {"key": "value", "number": 123}
-        
+
         with patch("src.utils.file_utils.safe_write_file") as mock_write:
             with patch("yaml.dump", return_value="key: value\nnumber: 123\n"):
                 save_config_file("config.yaml", config_data)
@@ -209,7 +209,7 @@ class TestSaveConfigFile:
     def test_save_config_unsupported_format(self):
         """Test saving config with unsupported format."""
         config_data = {"key": "value"}
-        
+
         with pytest.raises(ValidationError):
             save_config_file("config.txt", config_data)
 
@@ -244,7 +244,7 @@ class TestListFiles:
     def test_list_files_success(self):
         """Test listing files successfully."""
         mock_files = ["file1.txt", "file2.txt", "file3.txt"]
-        
+
         with patch("pathlib.Path.exists", return_value=True):
             with patch("pathlib.Path.is_dir", return_value=True):
                 with patch("pathlib.Path.glob") as mock_glob:
@@ -264,7 +264,7 @@ class TestListFiles:
     def test_list_files_with_pattern(self):
         """Test listing files with specific pattern."""
         mock_files = ["file1.txt", "file2.txt"]
-        
+
         with patch("pathlib.Path.exists", return_value=True):
             with patch("pathlib.Path.is_dir", return_value=True):
                 with patch("pathlib.Path.glob") as mock_glob:
@@ -308,26 +308,20 @@ class TestFileUtilsIntegration:
     def test_config_round_trip(self):
         """Test complete config save/load cycle."""
         config_data = {
-            "database": {
-                "host": "localhost",
-                "port": 5432
-            },
-            "api": {
-                "timeout": 30,
-                "retries": 3
-            }
+            "database": {"host": "localhost", "port": 5432},
+            "api": {"timeout": 30, "retries": 3},
         }
-        
+
         filename = "test_config.json"
-        
+
         # Mock the write operation
         with patch("src.utils.file_utils.safe_write_file") as mock_write:
             save_config_file(filename, config_data)
             mock_write.assert_called_once()
-            
+
             # Get the written JSON content
             written_content = mock_write.call_args[0][1]
-            
+
             # Mock the read operation to return the same content
             with patch("src.utils.file_utils.safe_read_file", return_value=written_content):
                 loaded_config = load_config_file(filename)
@@ -337,7 +331,7 @@ class TestFileUtilsIntegration:
         """Test complete file workflow with cleanup."""
         content = "Test file workflow"
         filename = "workflow_test.txt"
-        
+
         with patch("builtins.open", mock_open()) as mock_file:
             with patch("src.utils.file_utils.Path") as mock_path:
                 mock_path_instance = MagicMock()
@@ -347,14 +341,14 @@ class TestFileUtilsIntegration:
                 mock_path_instance.parent.mkdir = MagicMock()
                 mock_path_instance.replace = MagicMock()  # Add this for atomic write
                 mock_path_instance.with_suffix.return_value = mock_path_instance  # For temp file
-                
+
                 # Write file
                 safe_write_file(filename, content)
-                
+
                 # Get file size
                 size = get_file_size(filename)
                 assert size == len(content)
-                
+
                 # Delete file
                 delete_file(filename)
                 mock_path_instance.unlink.assert_called()
@@ -362,16 +356,16 @@ class TestFileUtilsIntegration:
     def test_error_handling_consistency(self):
         """Test that error handling is consistent across functions."""
         # All functions should raise ValidationError for common issues
-        
+
         # Permission errors
         with patch("builtins.open", side_effect=PermissionError("No permission")):
             with pytest.raises(ValidationError):
                 safe_read_file("protected.txt")
-        
+
         with patch("builtins.open", side_effect=PermissionError("No permission")):
             with pytest.raises(ValidationError):
                 safe_write_file("protected.txt", "content")
-        
+
         with patch("pathlib.Path.stat", side_effect=PermissionError("No permission")):
             with pytest.raises(ValidationError):
                 get_file_size("protected.txt")
@@ -379,12 +373,12 @@ class TestFileUtilsIntegration:
     def test_directory_operations(self):
         """Test directory-related operations."""
         directory_path = "test/nested/directory"
-        
+
         # Ensure directory exists
         with patch("pathlib.Path.mkdir") as mock_mkdir:
             ensure_directory_exists(directory_path)
             mock_mkdir.assert_called_with(parents=True, exist_ok=True)
-        
+
         # List files in directory
         with patch("pathlib.Path.exists", return_value=True):
             with patch("pathlib.Path.is_dir", return_value=True):

@@ -25,6 +25,7 @@ Legacy Usage (Backward Compatibility):
 """
 
 from .core import ValidationFramework
+from .market_data_validation import MarketDataValidationUtils, MarketDataValidator
 from .service import (
     NumericValidationRule,
     StringValidationRule,
@@ -41,38 +42,40 @@ from .service import (
 )
 
 
-# Get validator instance from DI container for backward compatibility
-def _get_validator() -> ValidationFramework:
-    """Get validator instance from DI container with lazy initialization."""
-    from src.core.dependency_injection import injector
+# Get validator instance using dependency injection pattern
+def _get_validator(validator: ValidationFramework | None = None) -> ValidationFramework:
+    """Get validator instance using dependency injection pattern.
 
-    # Try to resolve, if not found, register via service registry
-    try:
-        return injector.resolve("ValidationFramework")
-    except Exception as e:
-        # Use service registry to properly register all services
-        from src.core.logging import get_logger
+    Args:
+        validator: Injected validator (preferred from service layer)
 
-        logger = get_logger(__name__)
-        logger.debug(f"Failed to resolve ValidationFramework, using service registry: {e}")
+    Returns:
+        ValidationFramework instance
+    """
+    if validator is not None:
+        return validator
 
-        # Import and call service registry to register all util services
-        from ..service_registry import register_util_services
+    # Create default instance but warn about architectural violation
+    from src.core.logging import get_logger
 
-        register_util_services()
+    logger = get_logger(__name__)
+    logger.warning(
+        "ValidationFramework not injected - creating default instance. "
+        "Inject via dependency injection for better testability."
+    )
 
-        return injector.resolve("ValidationFramework")
+    return ValidationFramework()
 
 
 # Use lazy property to avoid circular dependencies during module import
 _validator_instance = None
 
 
-def _get_validator_cached() -> ValidationFramework:
-    """Get cached validator instance."""
+def _get_validator_cached(validator: ValidationFramework | None = None) -> ValidationFramework:
+    """Get cached validator instance with dependency injection support."""
     global _validator_instance
     if _validator_instance is None:
-        _validator_instance = _get_validator()
+        _validator_instance = _get_validator(validator)
     return _validator_instance
 
 
@@ -129,6 +132,10 @@ def get_validator() -> ValidationFramework:
 
 
 __all__ = [
+    # Market data validation utilities
+    "MarketDataValidator",
+    "MarketDataValidationUtils",
+    # Core validation framework
     "NumericValidationRule",
     "StringValidationRule",
     "ValidationCache",

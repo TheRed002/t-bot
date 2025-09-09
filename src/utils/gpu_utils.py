@@ -174,7 +174,9 @@ class GPUManager:
     def _log_gpu_status(self) -> None:
         """Log GPU status information."""
         if self.gpu_available:
-            logger.info(f"GPU acceleration enabled: {self.device_info['device_count']} device(s) available")
+            logger.info(
+                f"GPU acceleration enabled: {self.device_info['device_count']} device(s) available"
+            )
             for device in self.device_info["devices"]:
                 memory_gb = device["total_memory"] / 1e9
                 logger.info(f"  Device {device['index']}: {device['name']} ({memory_gb:.2f} GB)")
@@ -278,7 +280,11 @@ class GPUManager:
     def _is_tensor_like(self, data: Any) -> bool:
         """Check if data is a tensor-like object."""
         return bool(
-            TORCH_AVAILABLE and torch_module and TORCH_DEVICE and hasattr(data, "to") and hasattr(data, "device")
+            TORCH_AVAILABLE
+            and torch_module
+            and TORCH_DEVICE
+            and hasattr(data, "to")
+            and hasattr(data, "device")
         )
 
     def _convert_tensor_to_gpu(self, data: Any) -> Any:
@@ -297,7 +303,9 @@ class GPUManager:
 
             # Handle PyTorch tensors
             if TORCH_AVAILABLE and torch_module:
-                if hasattr(data, "cpu") and hasattr(data, "numpy"):  # Check if it's a tensor-like object
+                if hasattr(data, "cpu") and hasattr(
+                    data, "numpy"
+                ):  # Check if it's a tensor-like object
                     return data.cpu().numpy()
 
             # Handle cuDF DataFrames
@@ -343,13 +351,14 @@ class GPUManager:
             except Exception as e:
                 # GPU memory cleanup can fail safely
                 logger.debug(f"GPU memory cleanup failed: {e}")
-                pass
 
 
 # GPUManager registration is handled by service_registry.py
 
 
-def get_optimal_batch_size(data_size: int, memory_limit_gb: float = 4.0, gpu_manager: GPUManager | None = None) -> int:
+def get_optimal_batch_size(
+    data_size: int, memory_limit_gb: float = 4.0, gpu_manager: GPUManager | None = None
+) -> int:
     """Calculate optimal batch size based on available GPU memory."""
     if gpu_manager is None:
         # Use proper dependency injection instead of direct instantiation
@@ -377,31 +386,42 @@ def get_optimal_batch_size(data_size: int, memory_limit_gb: float = 4.0, gpu_man
     return batch_size
 
 
-def _get_gpu_manager_service() -> GPUManager:
-    """Get GPU manager using service locator pattern."""
-    from src.core.dependency_injection import injector
+def _get_gpu_manager_service(gpu_manager: GPUManager | None = None) -> GPUManager:
+    """Get GPU manager using dependency injection pattern.
+
+    Args:
+        gpu_manager: Injected GPU manager (preferred from service layer)
+
+    Returns:
+        GPUManager instance
+
+    Raises:
+        ServiceError: If GPU manager cannot be obtained
+    """
+    if gpu_manager is not None:
+        return gpu_manager
+
+    # Fallback but warn about architectural violation
+    logger.warning(
+        "GPUManager not injected - creating default instance. "
+        "Inject via dependency injection for better testability."
+    )
 
     try:
-        return injector.resolve("GPUManager")
+        return GPUManager()
     except Exception as e:
-        # Register services if not available and retry
-        logger.debug(f"Failed to resolve GPUManager from DI container: {e}")
-        try:
-            from src.utils.service_registry import register_util_services
-
-            register_util_services()
-            return injector.resolve("GPUManager")
-        except Exception as registry_error:
-            logger.error(f"Failed to register util services: {registry_error}")
-            # Raise error instead of violating service layer architecture
-            raise ServiceError(
-                "GPUManager service not available. Ensure service registration is completed during application startup.",
-                error_code="SERV_000"
-            ) from registry_error
+        raise ServiceError(
+            f"Failed to create GPUManager: {e}",
+            error_code="SERV_000",
+        ) from e
 
 
 def parallel_apply(
-    df: pd.DataFrame, func: Any, axis: int = 0, use_gpu: bool = True, gpu_manager: "GPUManager | None" = None
+    df: pd.DataFrame,
+    func: Any,
+    axis: int = 0,
+    use_gpu: bool = True,
+    gpu_manager: "GPUManager | None" = None,
 ) -> pd.DataFrame:
     """Apply function to DataFrame with GPU acceleration if available."""
     if gpu_manager is None:
@@ -455,14 +475,12 @@ def gpu_accelerated_correlation(
             except Exception as e:
                 # GPU memory cleanup can fail safely
                 logger.debug(f"GPU memory cleanup failed: {e}")
-                pass
         if TORCH_AVAILABLE and torch_module and torch_module.cuda.is_available():
             try:
                 torch_module.cuda.empty_cache()
             except Exception as e:
                 # GPU memory cleanup can fail safely
                 logger.debug(f"GPU memory cleanup failed: {e}")
-                pass
 
     # Fallback to NumPy
     return np.corrcoef(data.T)
@@ -499,21 +517,18 @@ def gpu_accelerated_rolling_window(
             except Exception as e:
                 # GPU memory cleanup can fail safely
                 logger.debug(f"GPU memory cleanup failed: {e}")
-                pass
         if result is not None:
             try:
                 del result
             except Exception as e:
                 # GPU memory cleanup can fail safely
                 logger.debug(f"GPU memory cleanup failed: {e}")
-                pass
         if CUPY_AVAILABLE and cp_module:
             try:
                 cp_module.get_default_memory_pool().free_all_blocks()
             except Exception as e:
                 # GPU memory cleanup can fail safely
                 logger.debug(f"GPU memory cleanup failed: {e}")
-                pass
 
     # Fallback to NumPy
     result_np = np.zeros(len(data) - window_size + 1)

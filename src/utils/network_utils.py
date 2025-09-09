@@ -27,7 +27,9 @@ async def check_connection(host: str, port: int, timeout: float = 5.0) -> bool:
     try:
         # Create connection with timeout using async context management
         try:
-            reader, writer = await asyncio.wait_for(asyncio.open_connection(host, port), timeout=timeout)
+            reader, writer = await asyncio.wait_for(
+                asyncio.open_connection(host, port), timeout=timeout
+            )
             return True
         except asyncio.TimeoutError:
             logger.debug(f"Connection test timed out for {host}:{port}")
@@ -68,7 +70,9 @@ async def measure_latency(host: str, port: int, timeout: float = 5.0) -> float:
 
         # Create connection with timeout
         try:
-            reader, writer = await asyncio.wait_for(asyncio.open_connection(host, port), timeout=timeout)
+            reader, writer = await asyncio.wait_for(
+                asyncio.open_connection(host, port), timeout=timeout
+            )
         except asyncio.TimeoutError:
             raise ValidationError(f"Connection timeout to {host}:{port}") from None
 
@@ -134,7 +138,9 @@ async def ping_host(host: str, count: int = 3, port: int = 80) -> dict[str, Any]
         return {"host": host, "success": False, "error": str(e)}
 
 
-async def check_multiple_hosts(hosts: list[tuple[str, int]], timeout: float = 5.0) -> dict[str, bool]:
+async def check_multiple_hosts(
+    hosts: list[tuple[str, int]], timeout: float = 5.0
+) -> dict[str, bool]:
     """
     Check connectivity to multiple hosts in parallel.
 
@@ -180,7 +186,6 @@ async def check_multiple_hosts(hosts: list[tuple[str, int]], timeout: float = 5.
             await asyncio.gather(*tasks, return_exceptions=True)
         except Exception as e:
             logger.debug(f"Error during task cancellation: {e}")
-            pass  # Ignore cancellation errors
         # Return all False if gather fails unexpectedly
         return {host_port: False for host_port in host_port_mapping}
 
@@ -245,7 +250,9 @@ def parse_url(url: str) -> dict[str, Any]:
         raise ValidationError(f"Failed to parse URL '{url}': {e!s}") from e
 
 
-async def wait_for_service(host: str, port: int, max_wait: float = 30.0, check_interval: float = 1.0) -> bool:
+async def wait_for_service(
+    host: str, port: int, max_wait: float = 30.0, check_interval: float = 1.0
+) -> bool:
     """
     Wait for a service to become available with exponential backoff.
 

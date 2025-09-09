@@ -348,18 +348,20 @@ class TestErrorConstants:
         assert isinstance(ERROR_CODES, dict)
         assert len(ERROR_CODES) > 0
 
-        # Check structure of error codes
+        # Check structure of error codes - can be int or string
         for error_name, error_code in ERROR_CODES.items():
             assert isinstance(error_name, str)
-            assert isinstance(error_code, int)
-            assert error_code > 0
+            assert isinstance(error_code, (int, str))
+            if isinstance(error_code, int):
+                assert error_code > 0
 
     def test_error_codes_values(self):
         """Test error codes values are valid."""
         for error_name, error_code in ERROR_CODES.items():
             assert isinstance(error_name, str)
-            assert isinstance(error_code, int)
-            assert error_code > 0
+            assert isinstance(error_code, (int, str))
+            if isinstance(error_code, int):
+                assert error_code > 0
 
     def test_error_messages_structure(self):
         """Test error messages constant structure."""

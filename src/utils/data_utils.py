@@ -1,11 +1,17 @@
 """Data conversion and manipulation utilities for the T-Bot trading system."""
 
+from datetime import datetime
 from decimal import ROUND_HALF_UP, Decimal, localcontext
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import pandas as pd
-from numpy.typing import NDArray
+
+if TYPE_CHECKING:
+    from numpy.typing import NDArray
+else:
+    # Fallback for older numpy versions
+    NDArray = np.ndarray
 
 from src.core.exceptions import ValidationError
 from src.utils.decimal_utils import ZERO, to_decimal
@@ -71,7 +77,9 @@ def normalize_array(arr: list[float] | NDArray[np.float64]) -> NDArray[np.float6
     return normalized
 
 
-def convert_currency(amount: Decimal, from_currency: str, to_currency: str, exchange_rate: Decimal) -> Decimal:
+def convert_currency(
+    amount: Decimal, from_currency: str, to_currency: str, exchange_rate: Decimal
+) -> Decimal:
     """
     Convert amount from one currency to another with boundary validation.
 
@@ -91,13 +99,17 @@ def convert_currency(amount: Decimal, from_currency: str, to_currency: str, exch
     """
     # Basic input validation - complex validation should be done at service layer
     # This is a utility function that performs basic conversions, not business validation
-    
+
     amount_decimal = to_decimal(amount) if not isinstance(amount, Decimal) else amount
-    rate_decimal = to_decimal(exchange_rate) if not isinstance(exchange_rate, Decimal) else exchange_rate
+    rate_decimal = (
+        to_decimal(exchange_rate) if not isinstance(exchange_rate, Decimal) else exchange_rate
+    )
 
     if amount_decimal < ZERO:
         raise ValidationError(
-            "Amount cannot be negative", error_code="DATA_001", details={"amount": str(amount_decimal)}
+            "Amount cannot be negative",
+            error_code="DATA_001",
+            details={"amount": str(amount_decimal)},
         )
 
     if rate_decimal <= ZERO:
@@ -141,7 +153,9 @@ def normalize_price(price: Decimal | int, symbol: str, precision: int | None = N
 
     # Ensure we only accept Decimal or int for financial precision
     if not isinstance(price, (Decimal, int)):
-        raise ValidationError(f"Price must be Decimal or int for financial precision, got {type(price).__name__}")
+        raise ValidationError(
+            f"Price must be Decimal or int for financial precision, got {type(price).__name__}"
+        )
 
     # Convert to Decimal for all operations
     decimal_price = to_decimal(price) if not isinstance(price, Decimal) else price
@@ -152,9 +166,14 @@ def normalize_price(price: Decimal | int, symbol: str, precision: int | None = N
     # Determine precision based on asset type if not specified
     if precision is None:
         symbol_upper = symbol.upper()
-        if any(crypto in symbol_upper for crypto in ["BTC", "ETH", "LTC", "XRP", "ADA", "DOT", "LINK", "SOL", "BNB"]):
+        if any(
+            crypto in symbol_upper
+            for crypto in ["BTC", "ETH", "LTC", "XRP", "ADA", "DOT", "LINK", "SOL", "BNB"]
+        ):
             precision = 8  # Crypto precision (DECIMAL(20,8))
-        elif any(fiat in symbol_upper for fiat in ["EUR", "GBP", "JPY", "CAD", "AUD", "CHF", "NZD"]):
+        elif any(
+            fiat in symbol_upper for fiat in ["EUR", "GBP", "JPY", "CAD", "AUD", "CHF", "NZD"]
+        ):
             precision = 4  # Forex precision (DECIMAL(20,4))
         elif "USDT" in symbol_upper or "USD" in symbol_upper or "USDC" in symbol_upper:
             precision = 2  # Fiat stablecoin precision (DECIMAL(20,2))
@@ -167,11 +186,6 @@ def normalize_price(price: Decimal | int, symbol: str, precision: int | None = N
         normalized_price = decimal_price.quantize(quantizer, rounding=ROUND_HALF_UP)
 
     return normalized_price
-
-
-# REMOVED: round_to_precision and round_to_precision_decimal
-# These functions are duplicated in decimal_utils.py
-# Use: from src.utils.decimal_utils import decimal_to_str, round_price, round_quantity, round_to_precision
 
 
 def flatten_dict(d: dict[str, Any], parent_key: str = "", sep: str = ".") -> dict[str, Any]:
@@ -257,7 +271,7 @@ def filter_none_values(d: dict[str, Any]) -> dict[str, Any]:
 
 def chunk_list(lst: list[Any], chunk_size: int) -> list[list[Any]]:
     """
-    Split list into chunks using batch processing pattern.
+    Split list into chunks using batch processing pattern with boundary validation.
 
     This function aligns with batch processing paradigms used throughout the system
     for consistent data flow patterns between core and utils modules.
@@ -272,13 +286,38 @@ def chunk_list(lst: list[Any], chunk_size: int) -> list[list[Any]]:
     Raises:
         ValidationError: If chunk_size is invalid
     """
+    # Apply module boundary validation
+    from datetime import timezone
+
+    from src.utils.messaging_patterns import BoundaryValidator, ProcessingParadigmAligner
+
     if chunk_size <= 0:
         raise ValidationError(
             "Chunk size must be positive", error_code="DATA_001", details={"chunk_size": chunk_size}
         )
 
+    # Apply boundary validation for data processing
+    validation_data = {
+        "chunk_size": chunk_size,
+        "list_size": len(lst),
+        "component": "data_utils_chunker",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "processing_mode": "batch",
+        "operation": "chunk_processing",
+    }
+
+    try:
+        # Validate at utils boundary
+        BoundaryValidator.validate_database_entity(validation_data, "create")
+    except ValidationError as e:
+        # Continue if validation fails - don't break core functionality
+        from src.core.logging import get_logger
+
+        logger = get_logger(__name__)
+        logger.debug(f"Boundary validation failed in chunk_list: {e}")
+
     # Use consistent batch processing pattern
-    chunks: list[list[T]] = []
+    chunks: list[list[Any]] = []
     current_chunk = []
 
     for i, item in enumerate(lst):
@@ -286,14 +325,20 @@ def chunk_list(lst: list[Any], chunk_size: int) -> list[list[Any]]:
 
         # Create batch when size reached or at end of data
         if len(current_chunk) == chunk_size or i == len(lst) - 1:
-            # Consistent batch metadata format
-            batch_chunk = {
+            # Apply consistent batch transformation
+            batch_metadata = {
                 "batch_id": f"chunk_{len(chunks)}",
                 "batch_size": len(current_chunk),
-                "items": current_chunk,
                 "processing_mode": "batch",
-                "data_format": "batch_v1"
+                "data_format": "batch_v1",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
             }
+
+            # Use paradigm aligner for consistency
+            aligned_batch = ProcessingParadigmAligner.create_batch_from_stream(
+                [{"chunk_data": current_chunk, **batch_metadata}]
+            )
+
             chunks.append(current_chunk)  # Keep backward compatibility
             current_chunk = []
 

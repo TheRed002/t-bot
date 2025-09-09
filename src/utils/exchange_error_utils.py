@@ -41,24 +41,29 @@ class ExchangeErrorHandler:
         """
         self.exchange_name = exchange_name
         self.config = config
+        self.logger = get_logger(f"{exchange_name}.error_handler")
 
-        # Use dependency injection if error_handler not provided
+        # Use factory pattern with dependency injection
         if error_handler is None:
-            from src.core.dependency_injection import injector
-
             try:
+                from src.core.dependency_injection import injector
+
                 self.error_handler = injector.resolve("ErrorHandler")
-            except (KeyError, ImportError, AttributeError) as e:
-                # Fallback to direct creation when dependency injection fails
-                self.logger.warning(f"Failed to resolve ErrorHandler via DI: {e}. Using fallback creation.")
+            except Exception as e:
+                self.logger.warning(
+                    f"ErrorHandler not available via DI - using fallback factory: {e}. "
+                    "Consider registering error handling services properly."
+                )
                 self.error_handler = ErrorHandler(config)
         else:
             self.error_handler = error_handler
 
-        self.logger = get_logger(f"{exchange_name}.error_handler")
-
     async def handle_exchange_error(
-        self, error: Exception, operation: str, context: dict[str, Any] | None = None, order: OrderRequest | None = None
+        self,
+        error: Exception,
+        operation: str,
+        context: dict[str, Any] | None = None,
+        order: OrderRequest | None = None,
     ) -> None:
         """
         Handle exchange-specific errors using unified error mapping.
@@ -76,7 +81,11 @@ class ExchangeErrorHandler:
                 component=f"{self.exchange_name}_exchange",
                 operation=operation,
                 symbol=order.symbol if order else context.get("symbol") if context else None,
-                order_id=order.client_order_id if order else context.get("order_id") if context else None,
+                order_id=order.client_order_id
+                if order
+                else context.get("order_id")
+                if context
+                else None,
                 details={
                     "exchange_name": self.exchange_name,
                     "operation": operation,
@@ -86,7 +95,9 @@ class ExchangeErrorHandler:
             )
 
             # Log the error with context
-            self.logger.error(f"{self.exchange_name} {operation} failed: {error}", extra=error_context.details)
+            self.logger.error(
+                f"{self.exchange_name} {operation} failed: {error}", extra=error_context.details
+            )
 
             # Handle using error handler
             await self.error_handler.handle_error(error, error_context)
@@ -96,7 +107,9 @@ class ExchangeErrorHandler:
             self.logger.error(f"Error handling failed for {operation}: {handler_error}")
 
     @retry(max_attempts=3, delay=1)
-    async def handle_api_error(self, error: Exception, operation: str, context: dict[str, Any] | None = None) -> None:
+    async def handle_api_error(
+        self, error: Exception, operation: str, context: dict[str, Any] | None = None
+    ) -> None:
         """
         Handle API errors with automatic retry logic and timeout protection.
 
@@ -107,7 +120,8 @@ class ExchangeErrorHandler:
         """
         try:
             await asyncio.wait_for(
-                self.handle_exchange_error(error, operation, context), timeout=10.0  # Error handling timeout
+                self.handle_exchange_error(error, operation, context),
+                timeout=10.0,  # Error handling timeout
             )
         except asyncio.TimeoutError:
             self.logger.error(f"Error handling timed out for {operation}")
@@ -128,7 +142,14 @@ class ErrorMappingUtils:
         "account has insufficient",
     ]
 
-    RATE_LIMIT_PATTERNS = ["rate limit", "too many requests", "rate exceeded", "throttle", "frequency", "rate limiting"]
+    RATE_LIMIT_PATTERNS = [
+        "rate limit",
+        "too many requests",
+        "rate exceeded",
+        "throttle",
+        "frequency",
+        "rate limiting",
+    ]
 
     VALIDATION_PATTERNS = [
         "invalid",
@@ -152,7 +173,9 @@ class ErrorMappingUtils:
 
     @staticmethod
     def map_exchange_error(
-        error_data: dict[str, Any], exchange: str, default_error_class: type[Exception] = ExchangeError
+        error_data: dict[str, Any],
+        exchange: str,
+        default_error_class: type[Exception] = ExchangeError,
     ) -> Exception:
         """
         Map exchange-specific error to unified exception.
@@ -171,7 +194,9 @@ class ErrorMappingUtils:
         message_lower = message.lower()
 
         # Check for insufficient funds
-        if any(pattern in message_lower for pattern in ErrorMappingUtils.INSUFFICIENT_FUNDS_PATTERNS):
+        if any(
+            pattern in message_lower for pattern in ErrorMappingUtils.INSUFFICIENT_FUNDS_PATTERNS
+        ):
             return ExchangeInsufficientFundsError(f"Insufficient funds: {message}")
 
         # Check for rate limiting
@@ -277,7 +302,9 @@ class RetryableOperationHandler:
         try:
             self.logger.debug(f"Executing {operation_name}")
             # Add timeout to operation execution
-            result = await asyncio.wait_for(operation_func(*args, **kwargs), timeout=30.0)  # Operation timeout
+            result = await asyncio.wait_for(
+                operation_func(*args, **kwargs), timeout=30.0
+            )  # Operation timeout
             self.logger.debug(f"Successfully executed {operation_name}")
             return result
         except asyncio.TimeoutError:
@@ -288,7 +315,9 @@ class RetryableOperationHandler:
             raise
 
     @retry(max_attempts=5, delay=2)
-    async def execute_with_aggressive_retry(self, operation_func, operation_name: str, *args, **kwargs) -> Any:
+    async def execute_with_aggressive_retry(
+        self, operation_func, operation_name: str, *args, **kwargs
+    ) -> Any:
         """
         Execute an operation with aggressive retry logic and timeout protection.
 
@@ -304,11 +333,14 @@ class RetryableOperationHandler:
         try:
             # Add timeout to aggressive retry operations
             result = await asyncio.wait_for(
-                operation_func(*args, **kwargs), timeout=60.0  # Longer timeout for aggressive retry
+                operation_func(*args, **kwargs),
+                timeout=60.0,  # Longer timeout for aggressive retry
             )
             return result
         except asyncio.TimeoutError:
-            self.logger.error(f"Aggressive retry operation {operation_name} timed out after 60 seconds")
+            self.logger.error(
+                f"Aggressive retry operation {operation_name} timed out after 60 seconds"
+            )
             raise
         except (ExchangeConnectionError, ExchangeRateLimitError) as e:
             # These errors are worth aggressive retry
@@ -353,7 +385,10 @@ class ExchangeCircuitBreaker:
     """Simple circuit breaker for exchange operations."""
 
     def __init__(
-        self, failure_threshold: int = 5, recovery_timeout: int = 300, half_open_max_calls: int = 3  # 5 minutes
+        self,
+        failure_threshold: int = 5,
+        recovery_timeout: int = 300,
+        half_open_max_calls: int = 3,  # 5 minutes
     ):
         """
         Initialize circuit breaker.
@@ -368,7 +403,7 @@ class ExchangeCircuitBreaker:
         self.half_open_max_calls = half_open_max_calls
 
         self.failure_count = 0
-        self.last_failure_time = None
+        self.last_failure_time: float | None = None
         self.state = "closed"  # closed, open, half_open
         self.half_open_calls = 0
         self.logger = get_logger(f"{self.__class__.__name__}")
@@ -402,7 +437,9 @@ class ExchangeCircuitBreaker:
 
         try:
             # Add timeout to circuit breaker calls
-            result = await asyncio.wait_for(func(*args, **kwargs), timeout=45.0)  # Circuit breaker timeout
+            result = await asyncio.wait_for(
+                func(*args, **kwargs), timeout=45.0
+            )  # Circuit breaker timeout
             self._record_success()
             return result
         except asyncio.TimeoutError:
@@ -416,7 +453,7 @@ class ExchangeCircuitBreaker:
 
     def _should_attempt_reset(self) -> bool:
         """Check if circuit breaker should attempt to reset."""
-        if not self.last_failure_time:
+        if self.last_failure_time is None:
             return True
 
         import time

@@ -1,7 +1,6 @@
 """Tests for datetime utilities module."""
 
 from datetime import datetime, timezone
-from unittest.mock import patch
 
 import pytest
 import pytz
@@ -32,7 +31,7 @@ class TestGetCurrentUtcTimestamp:
         before = datetime.now(timezone.utc)
         result = get_current_utc_timestamp()
         after = datetime.now(timezone.utc)
-        
+
         assert before <= result <= after
 
 
@@ -181,7 +180,7 @@ class TestIsMarketOpen:
         """Test is_market_open for crypto exchanges (always open)."""
         dt_weekday = datetime(2023, 12, 25, 15, 0, 0, tzinfo=timezone.utc)  # Monday
         dt_weekend = datetime(2023, 12, 30, 15, 0, 0, tzinfo=timezone.utc)  # Saturday
-        
+
         assert is_market_open(dt_weekday, "binance") is True
         assert is_market_open(dt_weekend, "binance") is True
         assert is_market_open(dt_weekday, "okx") is True
@@ -196,7 +195,7 @@ class TestIsMarketOpen:
         """Test is_market_open for traditional market during weekend."""
         dt_saturday = datetime(2023, 12, 30, 12, 0, 0, tzinfo=timezone.utc)  # Saturday
         dt_sunday = datetime(2023, 12, 31, 12, 0, 0, tzinfo=timezone.utc)  # Sunday
-        
+
         assert is_market_open(dt_saturday, "nasdaq") is False
         assert is_market_open(dt_sunday, "nasdaq") is False
 
@@ -204,7 +203,7 @@ class TestIsMarketOpen:
         """Test is_market_open for traditional market after hours."""
         dt_early = datetime(2023, 12, 25, 7, 0, 0, tzinfo=timezone.utc)  # Monday 7 AM
         dt_late = datetime(2023, 12, 25, 18, 0, 0, tzinfo=timezone.utc)  # Monday 6 PM
-        
+
         assert is_market_open(dt_early, "nasdaq") is False
         assert is_market_open(dt_late, "nasdaq") is False
 
@@ -216,7 +215,7 @@ class TestConvertTimezone:
         """Test convert_timezone from UTC to Eastern."""
         dt = datetime(2023, 12, 25, 15, 30, 0, tzinfo=timezone.utc)
         result = convert_timezone(dt, "US/Eastern")
-        
+
         assert result.tzinfo.zone == "US/Eastern"
         # During winter, Eastern is UTC-5
         assert result.hour == 10  # 15 - 5 = 10
@@ -225,7 +224,7 @@ class TestConvertTimezone:
         """Test convert_timezone with naive datetime (assumes UTC)."""
         dt = datetime(2023, 12, 25, 15, 30, 0)  # No timezone
         result = convert_timezone(dt, "US/Pacific")
-        
+
         assert result.tzinfo.zone == "US/Pacific"
         # Should assume input was UTC and convert
 
@@ -234,21 +233,21 @@ class TestConvertTimezone:
         eastern = pytz.timezone("US/Eastern")
         dt = datetime(2023, 12, 25, 10, 30, 0, tzinfo=eastern)
         result = convert_timezone(dt, "UTC")
-        
+
         assert result.tzinfo.zone == "UTC"
         assert result.hour == 15  # 10 + 5 = 15
 
     def test_convert_timezone_invalid_timezone(self):
         """Test convert_timezone with invalid timezone."""
         dt = datetime(2023, 12, 25, 15, 30, 0, tzinfo=timezone.utc)
-        
+
         with pytest.raises(ValidationError, match="Invalid timezone"):
             convert_timezone(dt, "Invalid/Timezone")
 
     def test_convert_timezone_empty_timezone(self):
         """Test convert_timezone with empty timezone string."""
         dt = datetime(2023, 12, 25, 15, 30, 0, tzinfo=timezone.utc)
-        
+
         with pytest.raises(ValidationError, match="Timezone must be a non-empty string"):
             convert_timezone(dt, "")
 
@@ -258,7 +257,7 @@ class TestConvertTimezone:
     def test_convert_timezone_non_string_timezone(self):
         """Test convert_timezone with non-string timezone."""
         dt = datetime(2023, 12, 25, 15, 30, 0, tzinfo=timezone.utc)
-        
+
         with pytest.raises(ValidationError, match="Timezone must be a non-empty string"):
             convert_timezone(dt, None)
 

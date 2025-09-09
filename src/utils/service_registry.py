@@ -55,7 +55,7 @@ def register_util_services() -> None:
     # Register data flow integrity services using dependency injection pattern
     def precision_tracker_factory() -> PrecisionInterface:
         """Create precision tracker using dependency injection.
-        
+
         This factory creates a standalone PrecisionTracker for service registration.
         No circular dependencies since this is a self-contained utility.
         """
@@ -89,7 +89,9 @@ def register_util_services() -> None:
             from src.utils.data_flow_integrity import IntegrityPreservingConverter
 
             precision_tracker = injector.resolve("PrecisionTracker")
-            return IntegrityPreservingConverter(track_precision=True, precision_tracker=precision_tracker)
+            return IntegrityPreservingConverter(
+                track_precision=True, precision_tracker=precision_tracker
+            )
         except Exception as e:
             from src.core.logging import get_logger
 
@@ -102,7 +104,9 @@ def register_util_services() -> None:
     injector.register_factory("PrecisionInterface", precision_tracker_factory, singleton=True)
     injector.register_factory("DataFlowValidator", data_flow_validator_factory, singleton=True)
     injector.register_factory("DataFlowInterface", data_flow_validator_factory, singleton=True)
-    injector.register_factory("IntegrityPreservingConverter", integrity_converter_factory, singleton=True)
+    injector.register_factory(
+        "IntegrityPreservingConverter", integrity_converter_factory, singleton=True
+    )
 
     # Register validation services using dependency injection pattern
     def validation_framework_factory():
@@ -137,7 +141,9 @@ def register_util_services() -> None:
 
     # Register as singleton since validation service manages internal state
     injector.register_factory("ValidationService", validation_service_factory, singleton=True)
-    injector.register_factory("ValidationServiceInterface", validation_service_factory, singleton=True)
+    injector.register_factory(
+        "ValidationServiceInterface", validation_service_factory, singleton=True
+    )
 
     # Register financial calculator using dependency injection pattern
     from src.utils.interfaces import CalculatorInterface
@@ -191,9 +197,12 @@ def register_util_services() -> None:
     def messaging_coordinator_factory():
         """Create messaging coordinator using dependency injection."""
         try:
+            # Inject event emitter for proper dependency injection
+            from src.core.base.events import BaseEventEmitter
             from src.utils.messaging_patterns import MessagePattern, MessagingCoordinator
 
-            coordinator = MessagingCoordinator()
+            event_emitter = BaseEventEmitter(name="MessagingCoordinator_EventEmitter")
+            coordinator = MessagingCoordinator(event_emitter=event_emitter)
 
             # Register standard data transformation handler
             transform_handler = injector.resolve("DataTransformationHandler")
@@ -210,7 +219,9 @@ def register_util_services() -> None:
             logger.warning(f"MessagingCoordinator creation failed: {e}")
             raise ServiceError(f"Failed to create messaging coordinator: {e}") from e
 
-    injector.register_factory("DataTransformationHandler", data_transformation_handler_factory, singleton=True)
+    injector.register_factory(
+        "DataTransformationHandler", data_transformation_handler_factory, singleton=True
+    )
     injector.register_factory("MessagingCoordinator", messaging_coordinator_factory, singleton=True)
 
     # Mark services as registered

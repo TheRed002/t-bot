@@ -25,11 +25,8 @@ Dependencies:
 
 # Import from P-001 core components first
 # Import specialized utility modules
-from decimal import Decimal
-from typing import Any
 
 # Import formatting functions needed later
-import numpy as np
 
 import src.utils.data_utils as data_utils
 import src.utils.datetime_utils as datetime_utils
@@ -38,7 +35,18 @@ import src.utils.math_utils as math_utils
 import src.utils.network_utils as network_utils
 import src.utils.string_utils as string_utils
 from src.core.logging import get_logger
+
+# Import new utility modules for backtesting
+from src.utils.attribution_structures import (
+    create_attribution_summary,
+    create_empty_attribution_structure,
+    create_empty_service_attribution_structure,
+    create_symbol_attribution_summary,
+)
+from src.utils.config_conversion import convert_config_to_dict
 from src.utils.decimal_utils import format_decimal
+from src.utils.synthetic_data_generator import generate_synthetic_ohlcv_data, validate_ohlcv_data
+from src.utils.timezone_utils import ensure_timezone_aware, ensure_utc_timezone
 
 logger = get_logger(__name__)
 
@@ -82,7 +90,6 @@ get_redis_key_ttl = datetime_utils.get_redis_key_ttl
 # Re-export data conversion functions from data_utils
 convert_currency = data_utils.convert_currency
 normalize_price = data_utils.normalize_price
-# REMOVED: round_to_precision, round_to_precision_decimal (use decimal_utils.round_to_precision instead)
 normalize_array = data_utils.normalize_array
 dict_to_dataframe = data_utils.dict_to_dataframe
 flatten_dict = data_utils.flatten_dict
@@ -145,20 +152,24 @@ truncate = string_utils.truncate
 
 
 # Technical indicator helper functions moved to dedicated module
-# This avoids duplication with math_utils.py and keeps helpers.py focused
+# Advanced mathematical and technical analysis functions are available in dedicated modules:
+# - math_utils.py: Statistical calculations, z-score, moving averages
+# - Technical analysis functions: Available through specialized TA modules
 
 
-# ATR calculation moved to a dedicated technical analysis module
-# Use: from src.utils.math_utils import calculate_atr (if implemented there)
-# Or implement in a dedicated technical_analysis.py module
+# =============================================================================
+# Backtesting Utilities - New utility functions
+# =============================================================================
 
+# Re-export backtesting utility functions
+convert_config_to_dict = convert_config_to_dict
+ensure_timezone_aware = ensure_timezone_aware
+ensure_utc_timezone = ensure_utc_timezone
+generate_synthetic_ohlcv_data = generate_synthetic_ohlcv_data
+validate_ohlcv_data = validate_ohlcv_data
 
-# Z-score calculation moved to math_utils.py to eliminate duplication
-
-
-# RSI calculation moved to math_utils.py to eliminate duplication
-
-
-# Moving average and technical analysis functions moved to math_utils.py
-# This includes: calculate_moving_average, calculate_support_resistance
-# Use: from src.utils.math_utils import calculate_moving_average
+# Attribution structure utilities
+create_attribution_summary = create_attribution_summary
+create_empty_attribution_structure = create_empty_attribution_structure
+create_empty_service_attribution_structure = create_empty_service_attribution_structure
+create_symbol_attribution_summary = create_symbol_attribution_summary

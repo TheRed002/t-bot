@@ -150,7 +150,7 @@ class TestValidateEmail:
             "invalid",
             "@example.com",
             "user@",
-            "user@.com", 
+            "user@.com",
             "user@example",
             "user @example.com",  # Space not allowed
             "",

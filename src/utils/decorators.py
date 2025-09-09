@@ -184,7 +184,9 @@ class UnifiedDecorator:
     _cleanup_in_progress: ClassVar[bool] = False  # Prevent concurrent cleanups
 
     @classmethod
-    def _get_cache_key(cls, func: Callable[..., Any], args: tuple[Any, ...], kwargs: dict[str, Any]) -> str:
+    def _get_cache_key(
+        cls, func: Callable[..., Any], args: tuple[Any, ...], kwargs: dict[str, Any]
+    ) -> str:
         """Generate cache key from function and arguments."""
         func_name = f"{func.__module__}.{func.__name__}"
         # Create hashable key from args and kwargs
@@ -213,7 +215,9 @@ class UnifiedDecorator:
             cls._cache_timestamps[key] = datetime.now(timezone.utc) + timedelta(seconds=ttl)
 
     @classmethod
-    def _get_cached_result(cls, func: Callable[..., Any], args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any | None:
+    def _get_cached_result(
+        cls, func: Callable[..., Any], args: tuple[Any, ...], kwargs: dict[str, Any]
+    ) -> Any | None:
         """Get cached result if still valid."""
         key = cls._get_cache_key(func, args, kwargs)
 
@@ -251,7 +255,9 @@ class UnifiedDecorator:
             cls._cleanup_in_progress = True
             try:
                 # Remove expired entries
-                expired_keys = [key for key, timestamp in cls._cache_timestamps.items() if now >= timestamp]
+                expired_keys = [
+                    key for key, timestamp in cls._cache_timestamps.items() if now >= timestamp
+                ]
 
                 for key in expired_keys:
                     try:
@@ -263,7 +269,9 @@ class UnifiedDecorator:
 
                 # If still too many entries, remove oldest 20%
                 if len(cls._cache) > cls._max_cache_entries * 0.8:
-                    sorted_items = sorted(cls._cache_timestamps.items(), key=lambda x: x[1], reverse=True)
+                    sorted_items = sorted(
+                        cls._cache_timestamps.items(), key=lambda x: x[1], reverse=True
+                    )
                     # Keep 80% of max entries
                     keep_count = int(cls._max_cache_entries * 0.8)
                     keep_keys = {k for k, _ in sorted_items[:keep_count]}
@@ -271,7 +279,9 @@ class UnifiedDecorator:
                     # Remove entries not in keep_keys
                     try:
                         cls._cache = {k: v for k, v in cls._cache.items() if k in keep_keys}
-                        cls._cache_timestamps = {k: v for k, v in cls._cache_timestamps.items() if k in keep_keys}
+                        cls._cache_timestamps = {
+                            k: v for k, v in cls._cache_timestamps.items() if k in keep_keys
+                        }
                     except RuntimeError as e:
                         logger.debug(f"Dictionary changed during cleanup: {e}")
                         pass
@@ -305,7 +315,9 @@ class UnifiedDecorator:
 
             try:
                 cls._cache = {k: v for k, v in cls._cache.items() if k in keep_keys}
-                cls._cache_timestamps = {k: v for k, v in cls._cache_timestamps.items() if k in keep_keys}
+                cls._cache_timestamps = {
+                    k: v for k, v in cls._cache_timestamps.items() if k in keep_keys
+                }
             except RuntimeError as e:
                 logger.debug(f"Dictionary changed during force cleanup: {e}")
                 pass
@@ -388,7 +400,8 @@ class UnifiedDecorator:
             raise last_exception
         else:
             final_error = RuntimeError(
-                f"Failed to execute {func.__name__} after {retry_times} attempts. " f"Correlation: {correlation_id}"
+                f"Failed to execute {func.__name__} after {retry_times} attempts. "
+                f"Correlation: {correlation_id}"
             )
             final_error.correlation_id = correlation_id  # type: ignore
             raise final_error
@@ -402,7 +415,9 @@ class UnifiedDecorator:
         base_logger.debug(f"Metrics: {func.__name__} completed in {execution_time:.3f}s")
 
     @classmethod
-    def _bind_function_arguments(cls, func: Callable[..., Any], args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
+    def _bind_function_arguments(
+        cls, func: Callable[..., Any], args: tuple[Any, ...], kwargs: dict[str, Any]
+    ) -> Any:
         """Bind function arguments and apply defaults."""
         import inspect
 
@@ -442,10 +457,14 @@ class UnifiedDecorator:
             elif "symbol" in param_name.lower():
                 cls._validate_symbol_param(param_name, value)
         except Exception as validation_error:
-            raise ValidationError(f"Validation failed for {param_name}: {validation_error}") from validation_error
+            raise ValidationError(
+                f"Validation failed for {param_name}: {validation_error}"
+            ) from validation_error
 
     @classmethod
-    def _validate_args(cls, func: Callable[..., Any], args: tuple[Any, ...], kwargs: dict[str, Any]) -> None:
+    def _validate_args(
+        cls, func: Callable[..., Any], args: tuple[Any, ...], kwargs: dict[str, Any]
+    ) -> None:
         """Validate function arguments based on annotations."""
         import inspect
 
@@ -492,7 +511,9 @@ class UnifiedDecorator:
         }
 
     @classmethod
-    def _prepare_execution_context(cls, func: Callable[..., Any], config: dict[str, Any]) -> dict[str, Any]:
+    def _prepare_execution_context(
+        cls, func: Callable[..., Any], config: dict[str, Any]
+    ) -> dict[str, Any]:
         """Prepare execution context for enhanced function."""
         logger = get_logger(func.__module__) if config["log"] else None
         start_time = time.time()
@@ -676,7 +697,9 @@ class UnifiedDecorator:
                     )
                 except asyncio.TimeoutError as timeout_error:
                     # Add timeout context for better error tracking
-                    timeout_error.correlation_id = getattr(timeout_error, "correlation_id", str(uuid.uuid4())[:8])  # type: ignore
+                    timeout_error.correlation_id = getattr(  # type: ignore[attr-defined]
+                        timeout_error, "correlation_id", str(uuid.uuid4())[:8]
+                    )
                     raise timeout_error
             else:
                 result = await cls._execute_with_retry(
@@ -810,13 +833,16 @@ class UnifiedDecorator:
 
         if context["logger"]:
             context["logger"].error(
-                f"{func.__name__} failed: {type(error).__name__}: {error}. " f"Correlation: {correlation_id}"
+                f"{func.__name__} failed: {type(error).__name__}: {error}. "
+                f"Correlation: {correlation_id}"
             )
 
         # Use fallback if provided
         if config["fallback"]:
             if context["logger"]:
-                context["logger"].info(f"Using fallback for {func.__name__}. Correlation: {correlation_id}")
+                context["logger"].info(
+                    f"Using fallback for {func.__name__}. Correlation: {correlation_id}"
+                )
 
             try:
                 fallback_result = config["fallback"](*args, **kwargs)
@@ -856,13 +882,16 @@ class UnifiedDecorator:
 
         if context["logger"]:
             context["logger"].error(
-                f"{func.__name__} failed: {type(error).__name__}: {error}. " f"Correlation: {correlation_id}"
+                f"{func.__name__} failed: {type(error).__name__}: {error}. "
+                f"Correlation: {correlation_id}"
             )
 
         # Use fallback if provided
         if config["fallback"]:
             if context["logger"]:
-                context["logger"].info(f"Using fallback for {func.__name__}. Correlation: {correlation_id}")
+                context["logger"].info(
+                    f"Using fallback for {func.__name__}. Correlation: {correlation_id}"
+                )
             try:
                 return config["fallback"](*args, **kwargs)
             except Exception as fallback_error:
@@ -908,7 +937,9 @@ dec = UnifiedDecorator
 
 
 # Simple decorator functions for common use cases
-def retry(max_attempts: int = 3, delay: float = 1.0, base_delay: float | None = None) -> Callable[[F], F]:
+def retry(
+    max_attempts: int = 3, delay: float = 1.0, base_delay: float | None = None
+) -> Callable[[F], F]:
     """Retry decorator with exponential backoff."""
     # Handle different parameter names for backward compatibility
     actual_delay = base_delay if base_delay is not None else delay
@@ -942,7 +973,9 @@ def timeout(seconds: float) -> Callable[[F], F]:
 
 # Hybrid factory functions supporting both bare and parameterized usage
 def _make_hybrid_decorator(
-    base_decorator: Callable[..., Callable[[F], F]], default_args: tuple = (), default_kwargs: dict | None = None
+    base_decorator: Callable[..., Callable[[F], F]],
+    default_args: tuple = (),
+    default_kwargs: dict | None = None,
 ) -> Callable[..., Any]:
     """Create a hybrid decorator that works with or without parameters."""
     default_kwargs = default_kwargs or {}
@@ -1025,3 +1058,10 @@ __all__ = [
     "validate_output",
     "validated",
 ]
+
+
+# Aliases for compatibility with web interface
+with_cache = cached
+with_monitoring = monitored
+with_error_handler = robust
+with_audit_trail = logged
