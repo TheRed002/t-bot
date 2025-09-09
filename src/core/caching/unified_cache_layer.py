@@ -30,17 +30,29 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from pickle import PicklingError
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import redis.asyncio as redis
 from cachetools import TTLCache  # type: ignore
 
 from src.core.base.component import BaseComponent
-from src.core.config import Config
 from src.core.exceptions import CacheError
 from src.core.logging import get_logger
-from src.data.cache.data_cache import DataCache
-from src.utils.decorators import time_execution
+
+if TYPE_CHECKING:
+    from src.core.config import Config
+    from src.data.cache.data_cache import DataCache
+
+
+def time_execution(func):
+    """Simple timing decorator to avoid circular imports."""
+    def wrapper(*args, **kwargs):
+        import time
+        start_time = time.time()
+        result = func(*args, **kwargs)
+        end_time = time.time()
+        return result
+    return wrapper
 
 logger = get_logger(__name__)
 
@@ -660,7 +672,7 @@ class UnifiedCacheLayer(BaseComponent):
     - Performance monitoring and optimization
     """
 
-    def __init__(self, config: Config):
+    def __init__(self, config: "Config"):
         """Initialize unified cache layer."""
         super().__init__()
         self.config = config
@@ -789,6 +801,7 @@ class UnifiedCacheLayer(BaseComponent):
             self.l3_cache = L3RedisCache(redis_client)
 
         # L4 Data Cache
+        from src.data.cache.data_cache import DataCache
         self.data_cache = DataCache(self.config)
         await self.data_cache.initialize()
 

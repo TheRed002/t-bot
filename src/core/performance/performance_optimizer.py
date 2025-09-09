@@ -19,18 +19,19 @@ Features:
 
 import asyncio
 from datetime import datetime, timezone
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from src.core.base.component import BaseComponent
-
-# Import all performance optimization components
-from src.core.caching.unified_cache_layer import UnifiedCacheLayer
-from src.core.config import Config
 from src.core.exceptions import PerformanceError
 from src.core.logging import get_logger
-from src.core.performance.memory_optimizer import MemoryOptimizer
-from src.core.performance.performance_monitor import AlertLevel, PerformanceMonitor
-from src.core.performance.trading_profiler import TradingOperation, TradingOperationOptimizer
+
+if TYPE_CHECKING:
+    # Import all performance optimization components
+    from src.core.caching.unified_cache_layer import UnifiedCacheLayer
+    from src.core.config import Config
+    from src.core.performance.memory_optimizer import MemoryOptimizer
+    from src.core.performance.performance_monitor import AlertLevel, PerformanceMonitor
+    from src.core.performance.trading_profiler import TradingOperation, TradingOperationOptimizer
 from src.database.service import DatabaseService
 
 # from src.exchanges.connection_pool import ConnectionPoolManager
@@ -53,7 +54,7 @@ class PerformanceOptimizer(BaseComponent):
     - Real-time performance monitoring and alerting
     """
 
-    def __init__(self, config: Config):
+    def __init__(self, config: "Config"):
         """Initialize the integrated performance optimizer."""
         super().__init__()
         self.config = config
@@ -133,18 +134,21 @@ class PerformanceOptimizer(BaseComponent):
 
     async def _initialize_performance_monitor(self) -> None:
         """Initialize performance monitoring component."""
+        from src.core.performance.performance_monitor import PerformanceMonitor
         self.performance_monitor = PerformanceMonitor(self.config)
         await self.performance_monitor.initialize()
         self.logger.info("Performance monitor initialized")
 
     async def _initialize_memory_optimizer(self) -> None:
         """Initialize memory optimization component."""
+        from src.core.performance.memory_optimizer import MemoryOptimizer
         self.memory_optimizer = MemoryOptimizer(self.config)
         await self.memory_optimizer.initialize()
         self.logger.info("Memory optimizer initialized")
 
     async def _initialize_cache_layer(self) -> None:
         """Initialize unified caching layer."""
+        from src.core.caching.unified_cache_layer import UnifiedCacheLayer
         self.cache_layer = UnifiedCacheLayer(self.config)
         await self.cache_layer.initialize()
         self.logger.info("Unified cache layer initialized")
@@ -172,6 +176,7 @@ class PerformanceOptimizer(BaseComponent):
     async def _initialize_trading_profiler(self) -> None:
         """Initialize trading operation profiler."""
         if self.performance_monitor:
+            from src.core.performance.trading_profiler import TradingOperationOptimizer
             self.trading_profiler = TradingOperationOptimizer(self.config, self.performance_monitor)
             await self.trading_profiler.initialize()
             self.logger.info("Trading profiler initialized")
@@ -526,7 +531,7 @@ class PerformanceOptimizer(BaseComponent):
 
     # Public API methods
 
-    def optimize_trading_operation(self, operation: TradingOperation):
+    def optimize_trading_operation(self, operation: "TradingOperation"):
         """Decorator for optimizing trading operations."""
         if self.trading_profiler:
             return self.trading_profiler.optimize_function(operation)

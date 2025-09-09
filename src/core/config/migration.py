@@ -57,10 +57,27 @@ async def setup_config_service(
     """
     logger.info("Setting up ConfigService for application")
 
-    # Create and initialize ConfigService
-    service = ConfigService(
-        enable_hot_reload=enable_hot_reload, hot_reload_interval=hot_reload_interval
-    )
+    # Create ConfigService using DI container factory pattern
+    try:
+        from ..dependency_injection import get_global_injector
+        injector = get_global_injector()
+
+        # Register factory first if not already registered
+        if not injector.has_service("ConfigService"):
+            def config_service_factory() -> ConfigService:
+                return ConfigService(
+                    enable_hot_reload=enable_hot_reload,
+                    hot_reload_interval=hot_reload_interval
+                )
+            injector.register_factory("ConfigService", config_service_factory, singleton=True)
+
+        # Get from container
+        service = injector.resolve("ConfigService")
+    except (ImportError, Exception):
+        # Fallback to direct creation
+        service = ConfigService(
+            enable_hot_reload=enable_hot_reload, hot_reload_interval=hot_reload_interval
+        )
 
     await service.initialize(config_file=config_file)
 
@@ -195,7 +212,20 @@ async def test_migration() -> None:
 
     # Test modern pattern
     try:
-        service = ConfigService()
+        # Use factory pattern for testing
+        try:
+            from ..dependency_injection import get_global_injector
+            injector = get_global_injector()
+
+            # Register factory for test
+            def test_service_factory() -> ConfigService:
+                return ConfigService()
+            injector.register_factory("TestConfigService", test_service_factory, singleton=False)
+
+            service = injector.resolve("TestConfigService")
+        except (ImportError, Exception):
+            service = ConfigService()
+
         await service.initialize()
 
         db_config = service.get_database_config()
@@ -208,12 +238,12 @@ async def test_migration() -> None:
 
     # Test dependency injection
     try:
-        from ..dependency_injection import get_container
+        from ..dependency_injection import get_global_injector
 
         register_config_service_in_container()
 
-        container = get_container()
-        service = await container.get("ConfigService")
+        injector = get_global_injector()
+        service = injector.resolve("ConfigService")
         assert service is not None
 
         await service.shutdown()
@@ -263,7 +293,7 @@ class MyService:
         if config_service is None:
             # Try to get from dependency injection
             try:
-                config_service = get_container().get("ConfigService")
+                config_service = get_global_injector().resolve("ConfigService")
             except (KeyError, AttributeError):
                 # Fallback to legacy pattern
                 from src.core.config import get_config

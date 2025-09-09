@@ -42,6 +42,7 @@ class MarketRegime(Enum):
     HIGH_VOLATILITY = "high_volatility"
     MEDIUM_VOLATILITY = "medium_volatility"
     LOW_VOLATILITY = "low_volatility"
+    CRISIS = "crisis"
     UNKNOWN = "unknown"
 
     HIGH_CORRELATION = "high_correlation"
@@ -89,6 +90,12 @@ class StrategyConfig(BaseModel):
     stop_loss_pct: float | None = None
     take_profit_pct: float | None = None
     max_position_size: Decimal | None = None
+    min_confidence: float | None = None
+    max_positions: int | None = None
+    position_size_pct: float | None = None
+    exchange_type: str | None = None
+    requires_risk_manager: bool = False
+    requires_exchange: bool = False
 
     # Mean reversion specific
     window_size: int | None = None
@@ -128,6 +135,9 @@ class StrategyMetrics(BaseModel):
     current_position: Decimal | None = None
     last_signal: str | None = None
     last_trade_at: datetime | None = None
+    signals_generated: int = 0
+    last_signal_time: datetime | None = None
+    last_updated: datetime | None = None
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     def update_win_rate(self) -> None:

@@ -461,45 +461,45 @@ class RiskConfig(BaseConfig):
     default_position_size_method: str = Field(
         default="fixed_percentage", description="Default position sizing method"
     )
-    default_position_size_pct: float = Field(
-        default=0.02, description="Default position size percentage (2%)"
+    default_position_size_pct: Decimal = Field(
+        default=Decimal("0.02"), description="Default position size percentage (2%)"
     )
-    max_position_size_pct: float = Field(
-        default=0.1, description="Maximum position size percentage (10%)"
+    max_position_size_pct: Decimal = Field(
+        default=Decimal("0.1"), description="Maximum position size percentage (10%)"
     )
 
     # Portfolio limits
     max_total_positions: int = Field(default=10, description="Maximum total positions")
     max_positions_per_symbol: int = Field(default=1, description="Maximum positions per symbol")
-    max_portfolio_exposure: float = Field(
-        default=0.95, description="Maximum portfolio exposure (95%)"
+    max_portfolio_exposure: Decimal = Field(
+        default=Decimal("0.95"), description="Maximum portfolio exposure (95%)"
     )
-    max_sector_exposure: float = Field(default=0.25, description="Maximum sector exposure (25%)")
-    max_correlation_exposure: float = Field(
-        default=0.5, description="Maximum correlation exposure (50%)"
+    max_sector_exposure: Decimal = Field(default=Decimal("0.25"), description="Maximum sector exposure (25%)")
+    max_correlation_exposure: Decimal = Field(
+        default=Decimal("0.5"), description="Maximum correlation exposure (50%)"
     )
-    max_leverage: float = Field(
-        default=1.0, description="Maximum leverage (no leverage by default)"
+    max_leverage: Decimal = Field(
+        default=Decimal("1.0"), description="Maximum leverage (no leverage by default)"
     )
 
     # Risk thresholds
-    max_daily_loss_pct: float = Field(
-        default=0.05, description="Maximum daily loss percentage (5%)"
+    max_daily_loss_pct: Decimal = Field(
+        default=Decimal("0.05"), description="Maximum daily loss percentage (5%)"
     )
-    max_drawdown_pct: float = Field(default=0.15, description="Maximum drawdown percentage (15%)")
-    var_confidence_level: float = Field(
-        default=0.95, ge=0.5, le=0.999, description="VaR confidence level (95%)"
+    max_drawdown_pct: Decimal = Field(default=Decimal("0.15"), description="Maximum drawdown percentage (15%)")
+    var_confidence_level: Decimal = Field(
+        default=Decimal("0.95"), description="VaR confidence level (95%)"
     )
 
     # Kelly Criterion settings
     kelly_lookback_days: int = Field(
         default=30, description="Kelly Criterion lookback period in days"
     )
-    kelly_max_fraction: float = Field(default=0.25, description="Maximum Kelly fraction (25%)")
+    kelly_max_fraction: Decimal = Field(default=Decimal("0.25"), description="Maximum Kelly fraction (25%)")
 
     # Volatility adjustment
     volatility_window: int = Field(default=20, description="Volatility calculation window")
-    volatility_target: float = Field(default=0.02, description="Volatility target (2% daily)")
+    volatility_target: Decimal = Field(default=Decimal("0.02"), description="Volatility target (2% daily)")
 
     # Risk calculation settings
     var_calculation_window: int = Field(
@@ -568,8 +568,8 @@ class CapitalManagementConfig(BaseConfig):
     total_capital: Decimal = Field(
         default=Decimal("10000.0"), gt=0, description="Total available capital"
     )
-    emergency_reserve_pct: float = Field(
-        default=0.1, description="Emergency reserve percentage (10%)"
+    emergency_reserve_pct: Decimal = Field(
+        default=Decimal("0.1"), description="Emergency reserve percentage (10%)"
     )
 
     # Allocation strategy
@@ -577,24 +577,24 @@ class CapitalManagementConfig(BaseConfig):
         default="risk_parity", description="Capital allocation strategy"
     )
     rebalance_frequency_hours: int = Field(default=24, description="Rebalancing frequency in hours")
-    min_allocation_pct: float = Field(
-        default=0.01, description="Minimum allocation percentage (1%)"
+    min_allocation_pct: Decimal = Field(
+        default=Decimal("0.01"), description="Minimum allocation percentage (1%)"
     )
-    max_allocation_pct: float = Field(
-        default=0.25, description="Maximum allocation percentage (25%)"
+    max_allocation_pct: Decimal = Field(
+        default=Decimal("0.25"), description="Maximum allocation percentage (25%)"
     )
 
     # Exchange distribution
-    max_exchange_allocation_pct: float = Field(
-        default=0.6, description="Maximum exchange allocation (60%)"
+    max_exchange_allocation_pct: Decimal = Field(
+        default=Decimal("0.6"), description="Maximum exchange allocation (60%)"
     )
     min_exchange_balance: Decimal = Field(
         default=Decimal("100.0"), description="Minimum exchange balance"
     )
 
     # Fund flow controls
-    max_daily_reallocation_pct: float = Field(
-        default=0.2, description="Maximum daily reallocation (20%)"
+    max_daily_reallocation_pct: Decimal = Field(
+        default=Decimal("0.2"), description="Maximum daily reallocation (20%)"
     )
     fund_flow_cooldown_minutes: int = Field(default=60, description="Fund flow cooldown in minutes")
     min_deposit_amount: Decimal = Field(
@@ -603,8 +603,8 @@ class CapitalManagementConfig(BaseConfig):
     min_withdrawal_amount: Decimal = Field(
         default=Decimal("100.0"), description="Minimum withdrawal amount"
     )
-    max_withdrawal_pct: float = Field(
-        default=0.2, description="Maximum withdrawal percentage (20%)"
+    max_withdrawal_pct: Decimal = Field(
+        default=Decimal("0.2"), description="Maximum withdrawal percentage (20%)"
     )
 
     # Currency management
@@ -613,8 +613,8 @@ class CapitalManagementConfig(BaseConfig):
         description="Supported currencies for trading",
     )
     hedging_enabled: bool = Field(default=True, description="Enable currency hedging")
-    hedging_threshold: float = Field(default=0.1, description="Hedging threshold (10% exposure)")
-    hedge_ratio: float = Field(default=0.8, description="Hedge coverage ratio (80%)")
+    hedging_threshold: Decimal = Field(default=Decimal("0.1"), description="Hedging threshold (10% exposure)")
+    hedge_ratio: Decimal = Field(default=Decimal("0.8"), description="Hedge coverage ratio (80%)")
 
     # Withdrawal rules
     withdrawal_rules: dict[str, dict[str, Any]] = Field(
@@ -641,10 +641,10 @@ class CapitalManagementConfig(BaseConfig):
     )
 
     # Capital protection
-    max_daily_loss_pct: float = Field(default=0.05, description="Maximum daily loss (5%)")
-    max_weekly_loss_pct: float = Field(default=0.10, description="Maximum weekly loss (10%)")
-    max_monthly_loss_pct: float = Field(default=0.15, description="Maximum monthly loss (15%)")
-    profit_lock_pct: float = Field(default=0.5, description="Profit lock percentage (50%)")
+    max_daily_loss_pct: Decimal = Field(default=Decimal("0.05"), description="Maximum daily loss (5%)")
+    max_weekly_loss_pct: Decimal = Field(default=Decimal("0.10"), description="Maximum weekly loss (10%)")
+    max_monthly_loss_pct: Decimal = Field(default=Decimal("0.15"), description="Maximum monthly loss (15%)")
+    profit_lock_pct: Decimal = Field(default=Decimal("0.5"), description="Profit lock percentage (50%)")
 
     # Per-strategy minimum allocations
     per_strategy_minimum: dict[str, Decimal] = Field(
@@ -659,8 +659,8 @@ class CapitalManagementConfig(BaseConfig):
     )
 
     # Exchange allocation weights
-    exchange_allocation_weights: dict[str, float] = Field(
-        default={"binance": 0.5, "okx": 0.3, "coinbase": 0.2},
+    exchange_allocation_weights: dict[str, Decimal] = Field(
+        default={"binance": Decimal("0.5"), "okx": Decimal("0.3"), "coinbase": Decimal("0.2")},
         description="Default exchange allocation weights",
     )
 
@@ -718,14 +718,14 @@ class StrategyManagementConfig(BaseConfig):
     )
 
     # Default strategy parameters
-    default_min_confidence: float = Field(
-        default=0.6, description="Default minimum signal confidence"
+    default_min_confidence: Decimal = Field(
+        default=Decimal("0.6"), description="Default minimum signal confidence"
     )
-    default_position_size: float = Field(
-        default=0.02, description="Default position size percentage"
+    default_position_size: Decimal = Field(
+        default=Decimal("0.02"), description="Default position size percentage"
     )
-    default_stop_loss: float = Field(default=0.02, description="Default stop loss percentage")
-    default_take_profit: float = Field(default=0.04, description="Default take profit percentage")
+    default_stop_loss: Decimal = Field(default=Decimal("0.02"), description="Default stop loss percentage")
+    default_take_profit: Decimal = Field(default=Decimal("0.04"), description="Default take profit percentage")
 
     # Hot reloading
     enable_hot_reload: bool = Field(default=True, description="Enable hot reloading of strategies")
@@ -734,9 +734,9 @@ class StrategyManagementConfig(BaseConfig):
     )
 
     # Strategy performance thresholds
-    min_win_rate: float = Field(default=0.4, description="Minimum acceptable win rate")
-    min_sharpe_ratio: float = Field(default=0.5, description="Minimum acceptable Sharpe ratio")
-    max_drawdown_threshold: float = Field(default=0.15, description="Maximum acceptable drawdown")
+    min_win_rate: Decimal = Field(default=Decimal("0.4"), description="Minimum acceptable win rate")
+    min_sharpe_ratio: Decimal = Field(default=Decimal("0.5"), description="Minimum acceptable Sharpe ratio")
+    max_drawdown_threshold: Decimal = Field(default=Decimal("0.15"), description="Maximum acceptable drawdown")
 
     # Strategy monitoring
     performance_evaluation_frequency: int = Field(
@@ -745,8 +745,8 @@ class StrategyManagementConfig(BaseConfig):
     auto_disable_poor_performers: bool = Field(
         default=True, description="Auto-disable poorly performing strategies"
     )
-    performance_alert_threshold: float = Field(
-        default=0.3, description="Performance alert threshold"
+    performance_alert_threshold: Decimal = Field(
+        default=Decimal("0.3"), description="Performance alert threshold"
     )
 
     @field_validator(
@@ -794,17 +794,17 @@ class MLConfig(BaseConfig):
     model_cache_size: int = Field(default=10, description="Number of models to cache in memory")
 
     # Training settings
-    default_train_test_split: float = Field(
-        default=0.8, description="Default train/test split ratio"
+    default_train_test_split: Decimal = Field(
+        default=Decimal("0.8"), description="Default train/test split ratio"
     )
-    default_validation_split: float = Field(
-        default=0.2, description="Default validation split ratio"
+    default_validation_split: Decimal = Field(
+        default=Decimal("0.2"), description="Default validation split ratio"
     )
     max_training_time_hours: int = Field(default=24, description="Maximum training time in hours")
 
     # Feature engineering
-    feature_selection_threshold: float = Field(
-        default=0.01, description="Feature importance threshold for selection"
+    feature_selection_threshold: Decimal = Field(
+        default=Decimal("0.01"), description="Feature importance threshold for selection"
     )
     max_features: int = Field(default=1000, description="Maximum number of features")
     feature_cache_ttl_hours: int = Field(default=24, description="Feature cache TTL in hours")
@@ -817,8 +817,8 @@ class MLConfig(BaseConfig):
     # Model validation
     cross_validation_folds: int = Field(default=5, description="Number of CV folds")
     validation_frequency_days: int = Field(default=7, description="Validation frequency in days")
-    performance_degradation_threshold: float = Field(
-        default=0.1, description="Performance degradation threshold"
+    performance_degradation_threshold: Decimal = Field(
+        default=Decimal("0.1"), description="Performance degradation threshold"
     )
 
     # Drift detection
@@ -826,7 +826,7 @@ class MLConfig(BaseConfig):
     drift_check_frequency_hours: int = Field(
         default=6, description="Drift check frequency in hours"
     )
-    drift_threshold: float = Field(default=0.05, description="Drift detection threshold")
+    drift_threshold: Decimal = Field(default=Decimal("0.05"), description="Drift detection threshold")
 
     # Model serving
     inference_batch_size: int = Field(default=1000, description="Inference batch size")
@@ -847,14 +847,14 @@ class MLConfig(BaseConfig):
     )
 
     # Model performance thresholds
-    min_accuracy_threshold: float = Field(
-        default=0.55, description="Minimum model accuracy threshold"
+    min_accuracy_threshold: Decimal = Field(
+        default=Decimal("0.55"), description="Minimum model accuracy threshold"
     )
-    min_precision_threshold: float = Field(
-        default=0.50, description="Minimum model precision threshold"
+    min_precision_threshold: Decimal = Field(
+        default=Decimal("0.50"), description="Minimum model precision threshold"
     )
-    min_recall_threshold: float = Field(default=0.50, description="Minimum model recall threshold")
-    min_f1_threshold: float = Field(default=0.50, description="Minimum model F1 score threshold")
+    min_recall_threshold: Decimal = Field(default=Decimal("0.50"), description="Minimum model recall threshold")
+    min_f1_threshold: Decimal = Field(default=Decimal("0.50"), description="Minimum model F1 score threshold")
 
     # Resource limits
     max_memory_gb: float = Field(default=8.0, description="Maximum memory usage in GB")
@@ -862,10 +862,10 @@ class MLConfig(BaseConfig):
     gpu_enabled: bool = Field(default=False, description="Enable GPU acceleration")
 
     # Additional validation parameters
-    validation_threshold: float = Field(
-        default=0.6, description="Overall model validation threshold"
+    validation_threshold: Decimal = Field(
+        default=Decimal("0.6"), description="Overall model validation threshold"
     )
-    significance_level: float = Field(default=0.05, description="Statistical significance level")
+    significance_level: Decimal = Field(default=Decimal("0.05"), description="Statistical significance level")
     stability_window: int = Field(
         default=10, description="Number of periods for stability analysis"
     )

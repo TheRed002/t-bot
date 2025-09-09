@@ -261,7 +261,7 @@ class BaseEventEmitter(BaseComponent, EventEmitter):
             self._logger.debug(
                 "Event handler registered",
                 emitter=self._name,
-                event=event,
+                event_name=event,
                 handler=handler.name,
                 priority=priority.name,
             )
@@ -288,7 +288,7 @@ class BaseEventEmitter(BaseComponent, EventEmitter):
                 self._logger.debug(
                     "All handlers removed for event",
                     emitter=self._name,
-                    event=event,
+                    event_name=event,
                     count=removed_count,
                 )
             else:
@@ -308,7 +308,7 @@ class BaseEventEmitter(BaseComponent, EventEmitter):
                 self._logger.debug(
                     "Handler removed from event",
                     emitter=self._name,
-                    event=event,
+                    event_name=event,
                     count=removed_count,
                 )
 
@@ -348,7 +348,7 @@ class BaseEventEmitter(BaseComponent, EventEmitter):
         self._logger.debug(
             "One-time handler registered",
             emitter=self._name,
-            event=event,
+            event_name=event,
             handler=handler.name,
         )
 
@@ -462,7 +462,7 @@ class BaseEventEmitter(BaseComponent, EventEmitter):
                 self._logger.info(
                     "Event handlers removed",
                     emitter=self._name,
-                    event=event,
+                    event_name=event,
                     count=removed_count,
                 )
 
@@ -476,7 +476,7 @@ class BaseEventEmitter(BaseComponent, EventEmitter):
         tags: dict[str, Any] | None = None,
     ) -> None:
         """
-        Emit event synchronously with consistent data transformation.
+        Emit event synchronously with consistent data transformation and boundary validation.
 
         Args:
             event: Event name
@@ -485,6 +485,10 @@ class BaseEventEmitter(BaseComponent, EventEmitter):
             source: Event source identifier
             tags: Additional event tags
         """
+        # Apply consistent boundary validation for cross-module events
+        if source and (source.startswith(("monitoring", "error_handling")) or source == "execution"):
+            self._validate_cross_module_boundary(data, source, event)
+
         # Apply consistent data transformation patterns
         transformed_data = self._transform_event_data(data)
 
@@ -512,7 +516,7 @@ class BaseEventEmitter(BaseComponent, EventEmitter):
         tags: dict[str, Any] | None = None,
     ) -> None:
         """
-        Emit event asynchronously with consistent data transformation.
+        Emit event asynchronously with consistent data transformation and boundary validation.
 
         Args:
             event: Event name
@@ -521,6 +525,10 @@ class BaseEventEmitter(BaseComponent, EventEmitter):
             source: Event source identifier
             tags: Additional event tags
         """
+        # Apply consistent boundary validation for cross-module events
+        if source and (source.startswith(("monitoring", "error_handling")) or source == "execution"):
+            self._validate_cross_module_boundary(data, source, event)
+
         # Apply consistent data transformation
         transformed_data = self._transform_event_data(data)
 
@@ -554,7 +562,7 @@ class BaseEventEmitter(BaseComponent, EventEmitter):
             self._logger.debug(
                 "Emitting event",
                 emitter=self._name,
-                event=event,
+                event_name=event,
                 priority=metadata.priority.name,
                 has_data=data is not None,
             )
@@ -582,7 +590,7 @@ class BaseEventEmitter(BaseComponent, EventEmitter):
                     self._logger.error(
                         "Handler execution failed",
                         emitter=self._name,
-                        event=event,
+                        event_name=event,
                         handler=handler.name,
                         error=str(e),
                     )
@@ -599,7 +607,7 @@ class BaseEventEmitter(BaseComponent, EventEmitter):
             self._logger.debug(
                 "Event processing completed",
                 emitter=self._name,
-                event=event,
+                event_name=event,
                 handlers_executed=success_count,
                 total_handlers=len(handlers),
                 processing_time_ms=(datetime.now(timezone.utc) - start_time).total_seconds() * 1000,
@@ -609,7 +617,7 @@ class BaseEventEmitter(BaseComponent, EventEmitter):
             self._logger.error(
                 "Event emission failed",
                 emitter=self._name,
-                event=event,
+                event_name=event,
                 error=str(e),
                 error_type=type(e).__name__,
             )
@@ -983,6 +991,12 @@ class BaseEventEmitter(BaseComponent, EventEmitter):
 
                 data["quantity"] = to_decimal(data["quantity"])
 
+            # Add consistent processing metadata
+            if "processing_mode" not in data:
+                data["processing_mode"] = "stream"  # Default to stream processing
+            if "data_format" not in data:
+                data["data_format"] = "event_data_v1"  # Default format version
+
             return data
 
         # Transform non-dict data to standard format
@@ -990,6 +1004,8 @@ class BaseEventEmitter(BaseComponent, EventEmitter):
             "payload": data,
             "type": type(data).__name__,
             "timestamp": datetime.now(timezone.utc).isoformat(),
+            "processing_mode": "stream",
+            "data_format": "event_data_v1",
         }
 
         # Apply financial data transformation if applicable
@@ -1007,3 +1023,71 @@ class BaseEventEmitter(BaseComponent, EventEmitter):
                 transformed["quantity"] = to_decimal(data.quantity)
 
         return transformed
+
+    def _validate_cross_module_boundary(self, data: Any, source: str, event: str) -> None:
+        """Validate data at cross-module boundaries to ensure consistency."""
+        if not isinstance(data, (dict, type(None))):
+            from src.core.exceptions import ValidationError
+
+            raise ValidationError(
+                f"Cross-module event data must be dict or None for {event} from {source}",
+                field_name="event_data",
+                field_value=type(data).__name__,
+                expected_type="dict or None",
+            )
+
+        if isinstance(data, dict):
+            # Validate required boundary fields
+            if source.startswith("monitoring") and event.startswith(("alert", "metric")):
+                required_fields = ["processing_mode", "data_format"]
+                for field in required_fields:
+                    if field not in data:
+                        from src.core.exceptions import ValidationError
+
+                        raise ValidationError(
+                            f"Missing required boundary field '{field}' in {event} from {source}",
+                            field_name=field,
+                            field_value=None,
+                            expected_type="string",
+                        )
+
+            # Validate execution module boundary fields
+            if source == "execution" and event.startswith(("order", "execution", "trade")):
+                required_fields = ["processing_mode", "data_format"]
+                for field in required_fields:
+                    if field not in data:
+                        from src.core.exceptions import ValidationError
+
+                        raise ValidationError(
+                            f"Missing required execution boundary field '{field}' in {event}",
+                            field_name=field,
+                            field_value=None,
+                            expected_type="string",
+                        )
+
+                # Validate execution-specific fields
+                if event.startswith("order") and "order_type" not in data:
+                    from src.core.exceptions import ValidationError
+
+                    raise ValidationError(
+                        "Missing 'order_type' field in order event from execution module",
+                        field_name="order_type",
+                        field_value=None,
+                        expected_type="string",
+                    )
+
+            # Validate financial data consistency
+            financial_fields = ["price", "quantity", "volume"]
+            for field in financial_fields:
+                if field in data and data[field] is not None:
+                    try:
+                        float(data[field])
+                    except (ValueError, TypeError):
+                        from src.core.exceptions import ValidationError
+
+                        raise ValidationError(
+                            f"Financial field '{field}' must be numeric in cross-module event",
+                            field_name=field,
+                            field_value=data[field],
+                            validation_rule="must be numeric",
+                        )

@@ -1,6 +1,6 @@
 """Market data types for the T-Bot trading system."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from enum import Enum
 from typing import Any
@@ -145,8 +145,34 @@ class OrderBook(BaseModel):
         return total if total else Decimal("0")
 
 
+class Trade(BaseModel):
+    """Represents a trade executed on an exchange."""
+
+    id: str
+    symbol: str
+    exchange: str
+    side: str  # "BUY" or "SELL"
+    price: Decimal
+    quantity: Decimal
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    maker: bool = False
+    fee: Decimal | None = None
+
+
+class ExchangeGeneralInfo(BaseModel):
+    """General exchange information and capabilities."""
+
+    name: str
+    supported_symbols: list[str] = Field(default_factory=list)
+    rate_limits: dict[str, int] = Field(default_factory=dict)
+    features: list[str] = Field(default_factory=list)
+    api_version: str | None = None
+    status: ExchangeStatus = ExchangeStatus.ONLINE
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
 class ExchangeInfo(BaseModel):
-    """Exchange trading rules and information."""
+    """Exchange trading rules and information for a specific symbol."""
 
     symbol: str
     base_asset: str

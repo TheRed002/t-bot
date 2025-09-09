@@ -133,6 +133,8 @@ class BotMetrics(BaseModel):
     successful_trades: int = 0
     failed_trades: int = 0
     total_pnl: Decimal = Decimal("0")
+    unrealized_pnl: Decimal = Decimal("0")
+    max_drawdown: Decimal = Decimal("0")
 
     # Legacy attributes for compatibility
     profitable_trades: int = 0

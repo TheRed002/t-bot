@@ -18,6 +18,16 @@ from typing import Any
 
 from .resource_manager import ResourceType, get_resource_manager
 
+# Production task management constants
+DEFAULT_TASK_TIMEOUT = 300.0  # 5 minutes
+DEFAULT_CLEANUP_INTERVAL = 60  # seconds
+DEFAULT_WORKER_COUNT = 5
+MAX_COMPLETED_TASKS = 1000  # Keep for debugging
+WORKER_SHUTDOWN_TIMEOUT = 30.0  # seconds
+BACKGROUND_TASK_TIMEOUT = 10.0  # seconds
+TASK_QUEUE_TIMEOUT = 0.1  # seconds
+MONITORING_INTERVAL = 300  # 5 minutes
+
 
 class TaskState(Enum):
     """Task lifecycle states."""
@@ -87,14 +97,14 @@ class TaskManager:
 
         # Worker management
         self._workers: list[asyncio.Task[Any]] = []
-        self._worker_count = 5
+        self._worker_count = DEFAULT_WORKER_COUNT
         self._running = False
         self._shutdown_event = asyncio.Event()
 
         # Configuration
-        self._default_timeout = 300.0  # 5 minutes
-        self._cleanup_interval = 60  # seconds
-        self._max_completed_tasks = 1000  # Keep for debugging
+        self._default_timeout = DEFAULT_TASK_TIMEOUT
+        self._cleanup_interval = DEFAULT_CLEANUP_INTERVAL
+        self._max_completed_tasks = MAX_COMPLETED_TASKS
 
         # Background tasks
         self._cleanup_task: asyncio.Task | None = None
@@ -151,7 +161,7 @@ class TaskManager:
 
             try:
                 await asyncio.wait_for(
-                    asyncio.gather(*self._workers, return_exceptions=True), timeout=30.0
+                    asyncio.gather(*self._workers, return_exceptions=True), timeout=WORKER_SHUTDOWN_TIMEOUT
                 )
             except asyncio.TimeoutError:
                 self.logger.warning("Some workers did not complete within timeout")
@@ -163,7 +173,7 @@ class TaskManager:
             if bg_task and not bg_task.done():
                 bg_task.cancel()
                 try:
-                    await asyncio.wait_for(bg_task, timeout=10.0)
+                    await asyncio.wait_for(bg_task, timeout=BACKGROUND_TASK_TIMEOUT)
                 except (asyncio.CancelledError, asyncio.TimeoutError):
                     pass
 
@@ -262,10 +272,20 @@ class TaskManager:
                 try:
                     task_id, coro = queue.get_nowait()
                     # Properly close the coroutine to avoid RuntimeWarning
-                    if hasattr(coro, "close"):
-                        coro.close()
-                    queue.task_done()
+                    try:
+                        if hasattr(coro, "close"):
+                            coro.close()
+                        elif hasattr(coro, "aclose"):
+                            # Handle async generators
+                            await coro.aclose()
+                    except Exception as e:
+                        self.logger.warning(f"Error closing coroutine {task_id}: {e}")
+                    finally:
+                        queue.task_done()
                 except asyncio.QueueEmpty:
+                    break
+                except Exception as e:
+                    self.logger.error(f"Error clearing queue: {e}")
                     break
 
         self.logger.info(f"Cancelled {cancelled_count} tasks")
@@ -295,7 +315,7 @@ class TaskManager:
 
                     try:
                         # Try to get a task with short timeout
-                        task_id, coro = await asyncio.wait_for(queue.get(), timeout=0.1)
+                        task_id, coro = await asyncio.wait_for(queue.get(), timeout=TASK_QUEUE_TIMEOUT)
 
                         try:
                             await self._execute_task(task_id, coro, worker_name)
@@ -339,18 +359,21 @@ class TaskManager:
             task_info.state = TaskState.RUNNING
             task_info.started_at = datetime.now(timezone.utc)
 
-        # Create and track the actual asyncio task
+        # Create and track the actual asyncio task with proper exception handling
         actual_task = asyncio.create_task(coro)
-        self._task_refs[task_id] = actual_task
+
+        # Store task reference atomically to prevent race conditions
+        async with self._task_lock:
+            self._task_refs[task_id] = actual_task
 
         # Touch resource to indicate activity
         self._resource_manager.touch_resource(task_id)
 
         try:
             if task_info.timeout:
-                await asyncio.wait_for(actual_task, timeout=task_info.timeout)
+                result = await asyncio.wait_for(actual_task, timeout=task_info.timeout)
             else:
-                await actual_task
+                result = await actual_task
 
             # Task completed successfully
             async with self._task_lock:
@@ -449,8 +472,8 @@ class TaskManager:
                     self._log_task_stats()
 
                     await asyncio.wait_for(
-                        asyncio.sleep(300),  # Monitor every 5 minutes
-                        timeout=301.0,
+                        asyncio.sleep(MONITORING_INTERVAL),  # Monitor every 5 minutes
+                        timeout=MONITORING_INTERVAL + 1.0,
                     )
 
                 except asyncio.TimeoutError:
@@ -459,7 +482,7 @@ class TaskManager:
                     break
                 except Exception as e:
                     self.logger.error(f"Error in monitor loop: {e}")
-                    await asyncio.sleep(300)
+                    await asyncio.sleep(MONITORING_INTERVAL)
 
         except asyncio.CancelledError:
             pass

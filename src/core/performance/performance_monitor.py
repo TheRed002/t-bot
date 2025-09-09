@@ -13,18 +13,29 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import psutil
 from prometheus_client import CollectorRegistry, Counter, Gauge, Histogram, generate_latest
 
 from src.core.base.component import BaseComponent
-from src.core.config import Config
 from src.core.exceptions import PerformanceError
 from src.core.logging import get_logger
-from src.utils.decorators import time_execution
+
+if TYPE_CHECKING:
+    from src.core.config import Config
 
 logger = get_logger(__name__)
+
+
+def time_execution(func):
+    """Simple timing decorator to avoid circular imports."""
+    def wrapper(*args, **kwargs):
+        start_time = time.time()
+        result = func(*args, **kwargs)
+        end_time = time.time()
+        return result
+    return wrapper
 
 
 class MetricType(Enum):
@@ -343,7 +354,7 @@ class PerformanceMonitor(BaseComponent):
     for achieving sub-100ms trading latency targets.
     """
 
-    def __init__(self, config: Config):
+    def __init__(self, config: "Config"):
         """Initialize performance monitor."""
         super().__init__()
         self.config = config

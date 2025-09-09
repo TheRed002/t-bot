@@ -146,6 +146,65 @@ class BotManagementConfig(BaseModel):
         description="Alert thresholds for monitoring",
     )
 
+    # Connection and network timeouts
+    connection_timeouts: dict = Field(
+        default_factory=lambda: {
+            "database_close_timeout": 5.0,
+            "websocket_close_timeout": 3.0,
+            "websocket_ping_timeout": 2.0,
+            "websocket_connect_timeout": 10.0,
+            "graceful_close_timeout": 10.0,
+            "verification_close_timeout": 5.0,
+            "shutdown_connection_timeout": 2.0,
+            "error_logging_timeout": 1.0,
+        },
+        description="Connection and network timeout configurations",
+    )
+
+    # Operational delays and intervals
+    operational_delays: dict = Field(
+        default_factory=lambda: {
+            "graceful_shutdown_delay": 1.0,
+            "pause_delay": 2.0,
+            "stop_delay": 1.0,
+            "starting_delay": 0.5,
+            "running_delay": 1.0,
+            "stopping_delay": 1.5,
+            "stopped_delay": 2.0,
+            "paused_delay": 1.8,
+            "validation_delay": 2.0,
+            "position_close_delay": 10.0,
+            "cleanup_delay": 300.0,  # 5 minutes
+            "background_cleanup_delay": 60.0,
+            "resource_monitoring_delay": 10.0,
+            "message_processing_delay": 0.01,
+            "connection_retry_delay": 1.0,
+            "message_queue_timeout": 0.1,
+            "websocket_reconnect_delay": 10.0,
+            "service_restart_delay": 10.0,
+            "metrics_cleanup_delay": 10.0,
+            "health_service_delay": 30.0,
+        },
+        description="Operational delays and sleep intervals",
+    )
+
+    # Circuit breaker configurations
+    circuit_breaker_configs: dict = Field(
+        default_factory=lambda: {
+            "default_failure_threshold": 3,
+            "default_recovery_timeout": 60,
+            "lifecycle_failure_threshold": 5,
+            "lifecycle_recovery_timeout": 60,
+            "instance_failure_threshold": 5,
+            "instance_recovery_timeout": 30,
+            "coordination_failure_threshold": 3,
+            "coordination_recovery_timeout": 60,
+            "monitor_failure_threshold": 3,
+            "monitor_recovery_timeout": 60,
+        },
+        description="Circuit breaker failure thresholds and recovery timeouts",
+    )
+
     def get_resource_limits(self) -> dict:
         """Get resource limits configuration."""
         return self.resource_limits.copy()
@@ -180,6 +239,18 @@ class BotManagementConfig(BaseModel):
             "performance_window_minutes": self.performance_window_minutes,
             "alert_thresholds": self.alert_thresholds,
         }
+
+    def get_connection_timeouts(self) -> dict:
+        """Get connection timeout configuration."""
+        return self.connection_timeouts.copy()
+
+    def get_operational_delays(self) -> dict:
+        """Get operational delay configuration."""
+        return self.operational_delays.copy()
+
+    def get_circuit_breaker_configs(self) -> dict:
+        """Get circuit breaker configuration."""
+        return self.circuit_breaker_configs.copy()
 
     model_config = {"validate_assignment": True, "extra": "forbid"}
 

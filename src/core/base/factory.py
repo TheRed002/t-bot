@@ -15,7 +15,6 @@ from typing import (
     Generic,
     Protocol,
     TypeVar,
-    get_type_hints,
 )
 
 from src.core.base.component import BaseComponent
@@ -25,6 +24,21 @@ from src.core.exceptions import (
     RegistrationError,
 )
 from src.core.types.base import ConfigDict
+
+
+class DependencyInjectionMixin:
+    """Simple mixin for dependency injection to avoid circular imports."""
+
+    def __init__(self):
+        """Initialize dependency injection."""
+        self._injector = None
+
+    def get_injector(self):
+        """Get injector instance, importing only when needed."""
+        if self._injector is None:
+            from src.core.dependency_injection import get_global_injector
+            self._injector = get_global_injector()
+        return self._injector
 
 # Type variables for factory operations
 T = TypeVar("T", covariant=True)  # Product type
@@ -39,7 +53,7 @@ class CreatorFunction(Protocol, Generic[T]):
         ...
 
 
-class BaseFactory(BaseComponent, FactoryComponent, Generic[T]):
+class BaseFactory(BaseComponent, FactoryComponent, DependencyInjectionMixin, Generic[T]):
     """
     Base factory implementing the factory pattern.
 
@@ -86,6 +100,7 @@ class BaseFactory(BaseComponent, FactoryComponent, Generic[T]):
             correlation_id: Request correlation ID
         """
         super().__init__(name, config, correlation_id)
+        DependencyInjectionMixin.__init__(self)
 
         self._product_type = product_type
         self._creators: dict[str, type[T] | CreatorFunction[T] | Callable[..., T]] = {}
@@ -96,10 +111,6 @@ class BaseFactory(BaseComponent, FactoryComponent, Generic[T]):
         self._singletons: dict[str, T] = {}
         self._singleton_names: set[str] = set()
         self._creation_lock = threading.RLock()
-
-        # Dependency injection
-        self._dependency_container: Any | None = None
-        self._auto_inject = True
 
         # Creation tracking
         self._creation_metrics: dict[str, Any] = {
@@ -184,6 +195,57 @@ class BaseFactory(BaseComponent, FactoryComponent, Generic[T]):
                 raise RegistrationError(
                     f"Failed to register creator '{name}' in factory {self._name}: {e}"
                 ) from e
+
+    def register_interface(
+        self,
+        name: str,
+        interface: type,
+        creator: type[T] | CreatorFunction[T] | Callable[..., T],
+        config: dict[str, Any] | None = None,
+        singleton: bool = False,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        """
+        Register creator function or class with interface contract.
+
+        Args:
+            name: Unique name for this creator
+            interface: Interface/Protocol that created instances should conform to
+            creator: Creator function, class, or callable
+            config: Default configuration for created instances
+            singleton: Whether to create singleton instances
+            metadata: Additional metadata about the creator
+
+        Raises:
+            RegistrationError: If registration fails or name conflicts
+        """
+        # Store interface information in metadata
+        interface_metadata = metadata or {}
+        interface_metadata["interface"] = interface
+        interface_metadata["returns_interface"] = True
+
+        # Register normally but with interface metadata
+        self.register(name, creator, config, singleton, interface_metadata)
+
+        # Also register in dependency container by interface name if available
+        if self._dependency_container and hasattr(self._dependency_container, "resolve"):
+            try:
+                # Create a wrapper factory for the dependency container
+                def interface_factory():
+                    return self.create(name)
+
+                # Try to register in the dependency container
+                from src.core.dependency_injection import get_global_injector
+                injector = get_global_injector()
+                injector.register_interface(interface, interface_factory, singleton=singleton)
+
+            except Exception as e:
+                self._logger.warning(
+                    "Failed to register interface in dependency container",
+                    factory=self._name,
+                    interface=interface.__name__,
+                    error=str(e),
+                )
 
     def unregister(self, name: str) -> None:
         """
@@ -451,85 +513,9 @@ class BaseFactory(BaseComponent, FactoryComponent, Generic[T]):
         Returns:
             Updated keyword arguments with injected dependencies
         """
-        if not self._dependency_container:
-            return kwargs
+        creator = self._creators[creator_name]
+        return self._inject_dependencies_into_kwargs(creator, kwargs)
 
-        try:
-            creator = self._creators[creator_name]
-
-            # Get creator signature
-            if inspect.isclass(creator):
-                signature = inspect.signature(creator.__init__)
-            else:
-                signature = inspect.signature(creator)
-
-            # Get type hints
-            type_hints = get_type_hints(creator)
-
-            # Inject dependencies based on parameter types
-            for param_name, _param in signature.parameters.items():
-                if param_name not in kwargs and param_name != "self" and param_name in type_hints:
-                    param_type = type_hints[param_name]
-
-                    try:
-                        # Try resolving by type first
-                        if hasattr(self._dependency_container, "resolve"):
-                            dependency = self._dependency_container.resolve(param_type.__name__)
-                        elif hasattr(self._dependency_container, "get"):
-                            dependency = self._dependency_container.get(param_type.__name__)
-                        else:
-                            raise ValueError("Invalid dependency container")
-
-                        kwargs[param_name] = dependency
-
-                        self._logger.debug(
-                            "Dependency injected",
-                            factory=self._name,
-                            creator=creator_name,
-                            parameter=param_name,
-                            dependency_type=param_type.__name__,
-                        )
-
-                    except Exception as e:
-                        # Try resolving by parameter name as fallback
-                        try:
-                            if hasattr(self._dependency_container, "resolve"):
-                                dependency = self._dependency_container.resolve(param_name)
-                            elif hasattr(self._dependency_container, "get"):
-                                dependency = self._dependency_container.get(param_name)
-                            else:
-                                raise ValueError("Invalid dependency container")
-
-                            kwargs[param_name] = dependency
-
-                            self._logger.debug(
-                                "Dependency injected by name",
-                                factory=self._name,
-                                creator=creator_name,
-                                parameter=param_name,
-                            )
-                        except Exception:
-                            # Dependency injection is optional, log for debugging
-                            self._logger.debug(
-                                "Failed to inject dependency (optional)",
-                                factory=self._name,
-                                creator=creator_name,
-                                parameter=param_name,
-                                error=str(e),
-                                error_type=type(e).__name__,
-                            )
-                            continue
-
-            return kwargs
-
-        except Exception as e:
-            self._logger.warning(
-                "Dependency injection failed",
-                factory=self._name,
-                creator=creator_name,
-                error=str(e),
-            )
-            return kwargs
 
     # Validation
     def _validate_creator(
@@ -831,30 +817,7 @@ class BaseFactory(BaseComponent, FactoryComponent, Generic[T]):
             validate_products=validate_products,
         )
 
-    def configure_dependencies(self, container: Any) -> None:
-        """
-        Configure component dependencies.
 
-        Args:
-            container: Dependency injection container
-        """
-        self._dependency_container = container
-        self._auto_inject = True  # Enable auto-injection when container is available
-
-        self._logger.info(
-            "Dependencies configured",
-            factory=self._name,
-            has_container=container is not None,
-        )
-
-    def get_dependencies(self) -> list[str]:
-        """
-        Get list of required dependencies.
-
-        Returns:
-            List of dependency names
-        """
-        return []  # Factories typically don't have dependencies
 
     # Lifecycle Management
     async def _do_stop(self) -> None:

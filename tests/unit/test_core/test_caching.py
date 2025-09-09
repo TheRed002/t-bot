@@ -1,15 +1,14 @@
 """Tests for core/caching components."""
 
 import asyncio
-import pytest
-from unittest.mock import Mock, patch, AsyncMock
 from decimal import Decimal
-from datetime import datetime, timedelta
+from unittest.mock import Mock
+
+import pytest
 
 from src.core.caching.cache_manager import CacheManager
-from src.core.caching.unified_cache_layer import UnifiedCacheLayer
 from src.core.caching.cache_monitoring import CacheMonitor
-from src.core.exceptions import CacheError
+from src.core.caching.unified_cache_layer import UnifiedCacheLayer
 
 
 class TestCacheManager:
@@ -32,7 +31,7 @@ class TestCacheManager:
             # Should not raise exception
         except Exception:
             pass
-        
+
         try:
             await cache_manager.stop()
             # Should not raise exception
@@ -85,8 +84,10 @@ class TestCacheManager:
         try:
             await cache_manager.set("clear_key1", "value1")
             await cache_manager.set("clear_key2", "value2")
-            if hasattr(cache_manager, 'clear'):
-                await cache_manager.clear() if asyncio.iscoroutinefunction(cache_manager.clear) else cache_manager.clear()
+            if hasattr(cache_manager, "clear"):
+                await cache_manager.clear() if asyncio.iscoroutinefunction(
+                    cache_manager.clear
+                ) else cache_manager.clear()
             # Should clear all keys
         except Exception:
             pass
@@ -97,8 +98,12 @@ class TestCacheManager:
         try:
             await cache_manager.set("key1", "value1")
             await cache_manager.set("key2", "value2")
-            if hasattr(cache_manager, 'keys'):
-                keys = await cache_manager.keys() if asyncio.iscoroutinefunction(cache_manager.keys) else cache_manager.keys()
+            if hasattr(cache_manager, "keys"):
+                keys = (
+                    await cache_manager.keys()
+                    if asyncio.iscoroutinefunction(cache_manager.keys)
+                    else cache_manager.keys()
+                )
                 assert isinstance(keys, list) or keys is None
         except Exception:
             pass
@@ -135,11 +140,11 @@ class TestCacheManager:
         complex_object = {
             "string": "test",
             "number": 123,
-            "decimal": Decimal('99.99'),
+            "decimal": Decimal("99.99"),
             "list": [1, 2, 3],
-            "nested": {"inner": "value"}
+            "nested": {"inner": "value"},
         }
-        
+
         try:
             await cache_manager.set("complex_key", complex_object)
             retrieved = await cache_manager.get("complex_key")
@@ -154,7 +159,7 @@ class TestUnifiedCacheLayer:
     @pytest.fixture
     def unified_cache(self):
         """Create test unified cache layer."""
-        from unittest.mock import Mock
+
         mock_config = Mock()
         return UnifiedCacheLayer(mock_config)
 
@@ -186,8 +191,8 @@ class TestUnifiedCacheLayer:
         """Test unified cache multi-level operations."""
         try:
             # Test that cache levels exist
-            assert hasattr(unified_cache, 'l1_cache') or not hasattr(unified_cache, 'l1_cache')
-            assert hasattr(unified_cache, 'l2_cache') or not hasattr(unified_cache, 'l2_cache')
+            assert hasattr(unified_cache, "l1_cache") or not hasattr(unified_cache, "l1_cache")
+            assert hasattr(unified_cache, "l2_cache") or not hasattr(unified_cache, "l2_cache")
         except Exception:
             pass
 
@@ -246,7 +251,7 @@ class TestCacheMonitor:
             assert cache_monitor.is_running() or not cache_monitor.is_running()
         except Exception:
             pass
-        
+
         try:
             await cache_monitor.stop()
         except Exception:
@@ -265,7 +270,7 @@ class TestCacheMonitor:
         try:
             cache_monitor.record_hit("test_key")
             cache_monitor.record_miss("test_key")
-            
+
             hit_rate = cache_monitor.get_hit_rate()
             assert isinstance(hit_rate, (int, float)) or hit_rate is None
         except Exception:
@@ -276,7 +281,7 @@ class TestCacheMonitor:
         try:
             cache_monitor.record_operation_time("get", 0.001)
             cache_monitor.record_operation_time("set", 0.002)
-            
+
             avg_time = cache_monitor.get_average_operation_time("get")
             assert isinstance(avg_time, (int, float)) or avg_time is None
         except Exception:
@@ -317,7 +322,7 @@ class TestCacheEdgeCases:
         """Test cache with very large keys."""
         cache = CacheManager()
         large_key = "x" * 1000  # Very large key
-        
+
         try:
             await cache.set(large_key, "value")
             value = await cache.get(large_key)
@@ -330,7 +335,7 @@ class TestCacheEdgeCases:
         """Test cache with very large values."""
         cache = CacheManager()
         large_value = "x" * 10000  # Very large value
-        
+
         try:
             await cache.set("large_value_key", large_value)
             value = await cache.get("large_value_key")
@@ -348,9 +353,9 @@ class TestCacheEdgeCases:
             "key-with-dashes",
             "key_with_underscores",
             "key.with.dots",
-            "key/with/slashes"
+            "key/with/slashes",
         ]
-        
+
         for key in special_keys:
             try:
                 await cache.set(key, f"value_for_{key}")
@@ -363,8 +368,8 @@ class TestCacheEdgeCases:
     async def test_cache_with_numeric_keys(self):
         """Test cache with numeric keys."""
         cache = CacheManager()
-        numeric_keys = [0, 1, -1, 1.5, Decimal('99.99')]
-        
+        numeric_keys = [0, 1, -1, 1.5, Decimal("99.99")]
+
         for key in numeric_keys:
             try:
                 await cache.set(str(key), f"value_for_{key}")
@@ -376,14 +381,14 @@ class TestCacheEdgeCases:
     async def test_cache_concurrent_operations(self):
         """Test cache concurrent operations."""
         cache = CacheManager()
-        
+
         async def cache_operation(index):
             try:
                 await cache.set(f"concurrent_key_{index}", f"value_{index}")
                 return await cache.get(f"concurrent_key_{index}")
             except Exception:
                 return None
-        
+
         # Simulate concurrent operations
         tasks = [cache_operation(i) for i in range(10)]
         await asyncio.gather(*tasks, return_exceptions=True)
@@ -392,14 +397,14 @@ class TestCacheEdgeCases:
     async def test_cache_expiration_edge_cases(self):
         """Test cache expiration edge cases."""
         cache = CacheManager()
-        
+
         try:
             # Test with very short TTL
             await cache.set("short_ttl_key", "value", ttl=0.001)
-            
+
             # Test with very long TTL
             await cache.set("long_ttl_key", "value", ttl=31536000)  # 1 year
-            
+
             # Test with negative TTL
             await cache.set("negative_ttl_key", "value", ttl=-1)
         except Exception:
@@ -409,7 +414,7 @@ class TestCacheEdgeCases:
     async def test_cache_memory_pressure(self):
         """Test cache under memory pressure."""
         cache = CacheManager()
-        
+
         # Fill cache with many items
         try:
             for i in range(1000):
@@ -422,19 +427,19 @@ class TestCacheEdgeCases:
     async def test_cache_data_type_preservation(self):
         """Test cache preserves data types."""
         cache = CacheManager()
-        
+
         test_values = [
             ("string", "test_string"),
             ("int", 42),
             ("float", 3.14159),
-            ("decimal", Decimal('99.99')),
+            ("decimal", Decimal("99.99")),
             ("list", [1, 2, 3, "test"]),
             ("dict", {"key": "value", "number": 123}),
             ("bool_true", True),
             ("bool_false", False),
-            ("none", None)
+            ("none", None),
         ]
-        
+
         for key, value in test_values:
             try:
                 await cache.set(f"type_test_{key}", value)

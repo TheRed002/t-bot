@@ -26,6 +26,7 @@ class PositionSizeMethod(Enum):
     RISK_PARITY = "risk_parity"
     VOLATILITY_ADJUSTED = "volatility_adjusted"
     CONFIDENCE_WEIGHTED = "confidence_weighted"
+    ATR_BASED = "atr_based"
     OPTIMAL_F = "optimal_f"
     EQUAL_WEIGHT = "equal_weight"
     CUSTOM = "custom"
@@ -99,9 +100,9 @@ class RiskMetrics(BaseModel):
     expected_shortfall: Decimal | None = None
 
     # Performance metrics
-    sharpe_ratio: float | None = None
-    sortino_ratio: float | None = None
-    calmar_ratio: float | None = None
+    sharpe_ratio: Decimal | None = None
+    sortino_ratio: Decimal | None = None
+    calmar_ratio: Decimal | None = None
 
     # Drawdown metrics
     max_drawdown: Decimal | None = None
@@ -123,17 +124,17 @@ class RiskMetrics(BaseModel):
     position_risk: Decimal | None = None
     var_95: Decimal | None = None
     var_99: Decimal | None = None
-    delta: float | None = None
-    gamma: float | None = None
-    vega: float | None = None
-    theta: float | None = None
-    beta: float | None = None
-    correlation: float | None = None
-    information_ratio: float | None = None
+    delta: Decimal | None = None
+    gamma: Decimal | None = None
+    vega: Decimal | None = None
+    theta: Decimal | None = None
+    beta: Decimal | None = None
+    correlation: Decimal | None = None
+    information_ratio: Decimal | None = None
     drawdown_duration: int | None = None
     gross_exposure: Decimal | None = None
     net_exposure: Decimal | None = None
-    leverage: float | None = None
+    leverage: Decimal | None = None
 
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -152,8 +153,8 @@ class PositionLimits(BaseModel):
     max_position_value: Decimal | None = None
     max_loss_per_trade: Decimal | None = None
     max_daily_loss: Decimal | None = None
-    max_drawdown: float | None = None
-    concentration_limit: float | None = None  # Max % of portfolio
+    max_drawdown: Decimal | None = None
+    concentration_limit: Decimal | None = None  # Max % of portfolio
 
     # Time-based limits
     max_trades_per_day: int | None = None
@@ -162,7 +163,7 @@ class PositionLimits(BaseModel):
 
     # Conditional limits
     reduce_size_on_loss: bool = False
-    loss_reduction_factor: float = 1.0
+    loss_reduction_factor: Decimal = Decimal("1.0")
 
     metadata: dict[str, Any] = Field(default_factory=dict)
 
@@ -182,7 +183,7 @@ class RiskLimits(BaseModel):
     # Optional additional limits
     max_var_limit: Decimal | None = None
     max_concentration: Decimal | None = None
-    min_sharpe_ratio: float | None = None
+    min_sharpe_ratio: Decimal | None = None
 
     metadata: dict[str, Any] = Field(default_factory=dict)
 
@@ -228,11 +229,11 @@ class CapitalAllocation(BaseModel):
     allocation_id: str
     strategy_id: str | None = None
     symbol: str | None = None
-    allocated_capital: Decimal
-    used_capital: Decimal
-    available_capital: Decimal
-    allocation_pct: float
-    target_allocation_pct: float
+    allocated_amount: Decimal
+    utilized_amount: Decimal
+    available_amount: Decimal
+    allocation_percentage: Decimal
+    target_allocation_pct: Decimal
     min_allocation: Decimal
     max_allocation: Decimal
     last_rebalance: datetime
@@ -259,34 +260,34 @@ class CapitalMetrics(BaseModel):
     """Overall capital and portfolio metrics."""
 
     total_capital: Decimal
-    allocated_capital: Decimal
-    available_capital: Decimal
+    allocated_amount: Decimal
+    available_amount: Decimal
     total_pnl: Decimal
     realized_pnl: Decimal
     unrealized_pnl: Decimal
 
     # Return metrics
-    daily_return: float
-    weekly_return: float
-    monthly_return: float
-    yearly_return: float
-    total_return: float
+    daily_return: Decimal
+    weekly_return: Decimal
+    monthly_return: Decimal
+    yearly_return: Decimal
+    total_return: Decimal
 
     # Risk-adjusted returns
-    sharpe_ratio: float
-    sortino_ratio: float
-    calmar_ratio: float
+    sharpe_ratio: Decimal
+    sortino_ratio: Decimal
+    calmar_ratio: Decimal
 
     # Risk metrics
-    current_drawdown: float
-    max_drawdown: float
+    current_drawdown: Decimal
+    max_drawdown: Decimal
     var_95: Decimal
     expected_shortfall: Decimal
 
     # Allocation metrics
     strategies_active: int
     positions_open: int
-    leverage_used: float
+    leverage_used: Decimal
 
     timestamp: datetime
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -297,7 +298,7 @@ class CurrencyExposure(BaseModel):
 
     currency: str
     exposure_amount: Decimal
-    exposure_pct: float
+    exposure_pct: Decimal
     hedge_amount: Decimal = Decimal("0")
     net_exposure: Decimal
     exchange_rate: Decimal
@@ -309,10 +310,10 @@ class ExchangeAllocation(BaseModel):
     """Capital allocation across exchanges."""
 
     exchange: str
-    allocated_capital: Decimal
-    used_capital: Decimal
-    available_capital: Decimal
-    allocation_pct: float
+    allocated_amount: Decimal
+    utilized_amount: Decimal
+    available_amount: Decimal
+    allocation_percentage: Decimal
     num_positions: int
     total_pnl: Decimal
     last_activity: datetime
@@ -327,7 +328,7 @@ class WithdrawalRule(BaseModel):
     enabled: bool = True
     trigger_type: str  # "profit_target", "time_based", "drawdown"
     trigger_value: Any
-    withdrawal_pct: float
+    withdrawal_pct: Decimal
     min_withdrawal: Decimal
     max_withdrawal: Decimal
     destination: str
@@ -344,7 +345,7 @@ class CapitalProtection(BaseModel):
     min_capital_threshold: Decimal
     stop_trading_threshold: Decimal
     reduce_size_threshold: Decimal
-    size_reduction_factor: float
+    size_reduction_factor: Decimal
     max_daily_loss: Decimal
     max_weekly_loss: Decimal
     max_monthly_loss: Decimal

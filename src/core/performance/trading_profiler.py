@@ -37,13 +37,15 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from src.core.base.component import BaseComponent
-from src.core.config import Config
 from src.core.exceptions import PerformanceError
 from src.core.logging import get_logger
-from src.core.performance.performance_monitor import OperationType, PerformanceMonitor
+
+if TYPE_CHECKING:
+    from src.core.config import Config
+    from src.core.performance.performance_monitor import PerformanceMonitor
 
 logger = get_logger(__name__)
 
@@ -296,7 +298,7 @@ class TradingOperationOptimizer(BaseComponent):
     for trading-critical code paths.
     """
 
-    def __init__(self, config: Config, performance_monitor: PerformanceMonitor):
+    def __init__(self, config: "Config", performance_monitor: "PerformanceMonitor"):
         """Initialize trading operation optimizer."""
         super().__init__()
         self.config = config
@@ -448,6 +450,7 @@ class TradingOperationOptimizer(BaseComponent):
                 profiler.profile.execution_times.append(execution_time)
 
             # Record with performance monitor
+            from src.core.performance.performance_monitor import OperationType
             await self.performance_monitor.record_simple_latency(
                 OperationType.TRADING_ORDER,  # Map to generic operation type
                 profiling_data["execution_time_ms"],
@@ -939,6 +942,7 @@ class TradingOperationContext:
                 self.profiler.profile.execution_times.append(execution_time)
 
             # Record with performance monitor
+            from src.core.performance.performance_monitor import OperationType
             await self.optimizer.performance_monitor.record_simple_latency(
                 OperationType.TRADING_ORDER,
                 execution_time,

@@ -35,6 +35,8 @@ class OrderSide(Enum):
 
     BUY = "buy"
     SELL = "sell"
+    LONG = "long"
+    SHORT = "short"
 
 
 class PositionSide(Enum):
@@ -64,6 +66,7 @@ class OrderType(Enum):
 class OrderStatus(Enum):
     """Order status in exchange systems."""
 
+    NEW = "new"
     PENDING = "pending"
     OPEN = "open"
     PARTIALLY_FILLED = "partially_filled"
@@ -71,6 +74,7 @@ class OrderStatus(Enum):
     CANCELLED = "cancelled"
     EXPIRED = "expired"
     REJECTED = "rejected"
+    UNKNOWN = "unknown"
 
 
 class TimeInForce(Enum):
@@ -202,18 +206,18 @@ class OrderRequest(BaseModel):
     @classmethod
     def validate_quantity(cls, v: Decimal) -> Decimal:
         """Validate quantity using consistent validation patterns."""
+        from src.core.exceptions import ValidationError
+
         try:
             from src.utils.validation.core import ValidationFramework
 
             return ValidationFramework.validate_quantity(v)
-        except Exception:
+        except (ImportError, AttributeError, ValidationError):
             # Fallback validation
             from src.utils.decimal_utils import to_decimal
 
             qty = to_decimal(v)
             if qty <= 0:
-                from src.core.exceptions import ValidationError
-
                 raise ValidationError("Quantity must be positive") from None
             return qty
 
@@ -223,18 +227,19 @@ class OrderRequest(BaseModel):
         """Validate price using consistent validation patterns."""
         if v is None:
             return v
+
+        from src.core.exceptions import ValidationError
+
         try:
             from src.utils.validation.core import ValidationFramework
 
             return ValidationFramework.validate_price(v)
-        except Exception:
+        except (ImportError, AttributeError, ValidationError):
             # Fallback validation
             from src.utils.decimal_utils import to_decimal
 
             price = to_decimal(v)
             if price <= 0:
-                from src.core.exceptions import ValidationError
-
                 raise ValidationError("Price must be positive") from None
             return price
 
@@ -380,18 +385,18 @@ class ArbitrageOpportunity(BaseModel):
     @classmethod
     def validate_prices(cls, v: Decimal) -> Decimal:
         """Validate prices using consistent validation patterns."""
+        from src.core.exceptions import ValidationError
+
         try:
             from src.utils.validation.core import ValidationFramework
 
             return ValidationFramework.validate_price(v)
-        except Exception:
+        except (ImportError, AttributeError, ValidationError):
             # Fallback validation
             from src.utils.decimal_utils import to_decimal
 
             price = to_decimal(v)
             if price <= 0:
-                from src.core.exceptions import ValidationError
-
                 raise ValidationError("Prices must be positive") from None
             return price
 
@@ -399,18 +404,18 @@ class ArbitrageOpportunity(BaseModel):
     @classmethod
     def validate_quantity(cls, v: Decimal) -> Decimal:
         """Validate quantity using consistent validation patterns."""
+        from src.core.exceptions import ValidationError
+
         try:
             from src.utils.validation.core import ValidationFramework
 
             return ValidationFramework.validate_quantity(v)
-        except Exception:
+        except (ImportError, AttributeError, ValidationError):
             # Fallback validation
             from src.utils.decimal_utils import to_decimal
 
             qty = to_decimal(v)
             if qty <= 0:
-                from src.core.exceptions import ValidationError
-
                 raise ValidationError("Quantity must be positive") from None
             return qty
 

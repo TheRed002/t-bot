@@ -8,6 +8,7 @@ across the system to ensure consistency between publishers and subscribers.
 class AlertEvents:
     """Alert-related event names."""
 
+    CREATED = "alert.created"
     FIRED = "alert.fired"
     RESOLVED = "alert.resolved"
     ACKNOWLEDGED = "alert.acknowledged"
@@ -50,6 +51,15 @@ class RiskEvents:
     MARGIN_CALL = "risk.margin_call"
     CIRCUIT_BREAKER_TRIGGERED = "risk.circuit_breaker_triggered"
     EXPOSURE_WARNING = "risk.exposure_warning"
+    VALIDATION_ERROR = "risk.validation_error"
+
+
+class MetricEvents:
+    """Metric-related event names."""
+
+    RECORDED = "metric.recorded"
+    EXPORTED = "metric.exported"
+    AGGREGATED = "metric.aggregated"
 
 
 class SystemEvents:
@@ -99,3 +109,109 @@ class ExchangeEvents:
     RECONNECTING = "exchange.reconnecting"
     RATE_LIMITED = "exchange.rate_limited"
     API_ERROR = "exchange.api_error"
+
+
+class MLEvents:
+    """Machine learning event names."""
+
+    MODEL_REGISTERED = "ml.model_registered"
+    MODEL_LOADED = "ml.model_loaded"
+    MODEL_PROMOTED = "ml.model_promoted"
+    MODEL_DEACTIVATED = "ml.model_deactivated"
+    MODEL_DELETED = "ml.model_deleted"
+
+
+class TrainingEvents:
+    """Model training event names."""
+
+    STARTED = "training.started"
+    COMPLETED = "training.completed"
+    FAILED = "training.failed"
+    PROGRESS_UPDATED = "training.progress_updated"
+    EARLY_STOPPED = "training.early_stopped"
+
+
+class InferenceEvents:
+    """Model inference event names."""
+
+    PREDICTION_REQUESTED = "inference.prediction_requested"
+    PREDICTION_COMPLETED = "inference.prediction_completed"
+    PREDICTION_FAILED = "inference.prediction_failed"
+    BATCH_STARTED = "inference.batch_started"
+    BATCH_COMPLETED = "inference.batch_completed"
+
+
+class FeatureEvents:
+    """Feature engineering event names."""
+
+    FEATURES_COMPUTED = "features.computed"
+    FEATURES_SELECTED = "features.selected"
+    FEATURES_CACHED = "features.cached"
+    FEATURE_DRIFT_DETECTED = "features.drift_detected"
+
+
+class ModelValidationEvents:
+    """Model validation event names."""
+
+    VALIDATION_STARTED = "validation.started"
+    VALIDATION_COMPLETED = "validation.completed"
+    VALIDATION_FAILED = "validation.failed"
+    DRIFT_DETECTED = "validation.drift_detected"
+    PERFORMANCE_DEGRADED = "validation.performance_degraded"
+
+
+class StateEvents:
+    """State management event names."""
+
+    CHANGED = "state.changed"
+    VALIDATED = "state.validated"
+    PERSISTED = "state.persisted"
+    SYNCHRONIZED = "state.synchronized"
+    CREATED = "state.created"
+    UPDATED = "state.updated"
+    DELETED = "state.deleted"
+    RESTORED = "state.restored"
+
+
+class BacktestEvents:
+    """Backtesting event names."""
+
+    STARTED = "backtest.started"
+    COMPLETED = "backtest.completed"
+    FAILED = "backtest.failed"
+    CANCELLED = "backtest.cancelled"
+    PROGRESS_UPDATED = "backtest.progress_updated"
+    RESULT_GENERATED = "backtest.result_generated"
+
+
+class DataEvents:
+    """Data processing event names."""
+
+    STORED = "data.stored"
+    RETRIEVED = "data.retrieved"
+    VALIDATED = "data.validated"
+    VALIDATION_FAILED = "data.validation_failed"
+    CACHE_HIT = "data.cache_hit"
+    CACHE_MISS = "data.cache_miss"
+    PIPELINE_STARTED = "data.pipeline_started"
+    PIPELINE_COMPLETED = "data.pipeline_completed"
+    PIPELINE_FAILED = "data.pipeline_failed"
+    QUALITY_ALERT = "data.quality_alert"
+    PERFORMANCE_ALERT = "data.performance_alert"
+
+
+class OptimizationEvents:
+    """Optimization-related event names."""
+
+    STARTED = "optimization.started"
+    COMPLETED = "optimization.completed"
+    FAILED = "optimization.failed"
+    CANCELLED = "optimization.cancelled"
+    PROGRESS_UPDATED = "optimization.progress_updated"
+    PARAMETER_SET_EVALUATED = "optimization.parameter_set_evaluated"
+    CONVERGENCE_ACHIEVED = "optimization.convergence_achieved"
+    OVERFITTING_DETECTED = "optimization.overfitting_detected"
+    RESULT_SAVED = "optimization.result_saved"
+    BACKTEST_REQUESTED = "optimization.backtest_requested"
+    BACKTEST_COMPLETED = "optimization.backtest_completed"
+    BACKTEST_FAILED = "optimization.backtest_failed"

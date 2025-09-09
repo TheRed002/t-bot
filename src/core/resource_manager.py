@@ -313,12 +313,24 @@ class ResourceManager:
         # Execute cleanup callbacks outside the lock to prevent deadlocks
         if resource_info.async_cleanup_callback:
             try:
-                await resource_info.async_cleanup_callback()
+                await asyncio.wait_for(
+                    resource_info.async_cleanup_callback(),
+                    timeout=30.0
+                )
+            except asyncio.TimeoutError:
+                self.logger.warning(f"Async cleanup callback timed out for {resource_id}")
             except Exception as e:
                 self.logger.error(f"Error in async cleanup callback for {resource_id}: {e}")
         elif resource_info.cleanup_callback:
             try:
-                resource_info.cleanup_callback()
+                # Execute sync callback in executor to avoid blocking
+                loop = asyncio.get_event_loop()
+                await asyncio.wait_for(
+                    loop.run_in_executor(None, resource_info.cleanup_callback),
+                    timeout=30.0
+                )
+            except asyncio.TimeoutError:
+                self.logger.warning(f"Cleanup callback timed out for {resource_id}")
             except Exception as e:
                 self.logger.error(f"Error in cleanup callback for {resource_id}: {e}")
 
@@ -351,18 +363,32 @@ class ResourceManager:
         cleanup_tasks = []
         for resource_id in resource_ids:
             try:
-                cleanup_tasks.append(self.unregister_resource(resource_id))
+                # Create task with proper timeout handling
+                task = asyncio.create_task(self.unregister_resource(resource_id))
+                cleanup_tasks.append(task)
             except Exception as e:
                 self.logger.error(f"Error setting up cleanup for resource {resource_id}: {e}")
 
-        # Execute all cleanup tasks concurrently with timeout
+        # Execute all cleanup tasks concurrently with proper backpressure handling
         if cleanup_tasks:
             try:
-                await asyncio.wait_for(
+                # Use return_exceptions=True to prevent one failure from stopping others
+                results = await asyncio.wait_for(
                     asyncio.gather(*cleanup_tasks, return_exceptions=True),
                     timeout=self._cleanup_timeout,
                 )
+
+                # Log any exceptions that occurred during cleanup
+                for i, result in enumerate(results):
+                    if isinstance(result, Exception):
+                        self.logger.error(f"Cleanup failed for task {i}: {result}")
+
             except asyncio.TimeoutError:
+                # Cancel remaining tasks if timeout occurs
+                for task in cleanup_tasks:
+                    if not task.done():
+                        task.cancel()
+
                 self.logger.warning(
                     f"Resource cleanup timed out after {self._cleanup_timeout} seconds"
                 )
@@ -452,12 +478,32 @@ class ResourceManager:
             cleanup_tasks.append(self._cleanup_idle_resource(resource_id))
 
         if cleanup_tasks:
-            # Process cleanup tasks concurrently with timeout
+            # Process cleanup tasks concurrently with proper backpressure handling
             try:
-                await asyncio.wait_for(
-                    asyncio.gather(*cleanup_tasks, return_exceptions=True), timeout=60.0
+                # Limit concurrent cleanup operations to prevent resource exhaustion
+                semaphore = asyncio.Semaphore(10)  # Max 10 concurrent cleanups
+
+                async def bounded_cleanup(task):
+                    async with semaphore:
+                        return await task
+
+                bounded_tasks = [bounded_cleanup(task) for task in cleanup_tasks]
+                results = await asyncio.wait_for(
+                    asyncio.gather(*bounded_tasks, return_exceptions=True),
+                    timeout=60.0
                 )
+
+                # Log cleanup failures
+                failures = [r for r in results if isinstance(r, Exception)]
+                if failures:
+                    self.logger.warning(f"Failed to cleanup {len(failures)} idle resources")
+
             except asyncio.TimeoutError:
+                # Cancel remaining tasks
+                for task in cleanup_tasks:
+                    if hasattr(task, "cancel") and not task.done():
+                        task.cancel()
+
                 self.logger.warning(
                     f"Idle resource cleanup timed out for {len(cleanup_tasks)} resources"
                 )

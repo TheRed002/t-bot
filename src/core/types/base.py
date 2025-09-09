@@ -441,9 +441,9 @@ class BaseValidatedModel(BaseModel):
     )
 
     @classmethod
-    def __get_pydantic_json_schema__(cls, schema_generator) -> dict[str, Any]:
+    def __get_pydantic_json_schema__(cls, schema_generator: Any, handler: Any) -> dict[str, Any]:
         """Custom JSON schema for proper serialization."""
-        schema = super().__get_pydantic_json_schema__(schema_generator)
+        schema = super().__get_pydantic_json_schema__(schema_generator, handler)
         return schema
 
     def model_dump_json(self, **kwargs) -> str:
@@ -485,7 +485,10 @@ class FinancialBaseModel(BaseValidatedModel):
                 return Decimal(str(v))
         elif info.field_name and any(
             term in info.field_name.lower()
-            for term in ["amount", "value", "cost", "fee", "balance", "pnl", "volume"]
+            for term in ["amount", "value", "cost", "fee", "balance", "pnl", "volume",
+                        "percentage", "pct", "ratio", "rate", "factor", "threshold",
+                        "exposure", "allocation", "weight", "leverage", "correlation",
+                        "return", "profit", "loss", "drawdown", "sharpe", "sortino"]
         ):
             if isinstance(v, float):
                 return Decimal(str(v))

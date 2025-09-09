@@ -12,7 +12,7 @@ from typing import Any, TypeVar
 
 from src.core.base.component import BaseComponent
 from src.core.base.interfaces import HealthStatus, ServiceComponent
-from src.core.exceptions import DependencyError, ServiceError
+from src.core.exceptions import DependencyError, ServiceError, ValidationError
 from src.core.types.base import ConfigDict
 
 # Type variable for service operations
@@ -139,7 +139,7 @@ class BaseService(BaseComponent, ServiceComponent):
             if isinstance(arg, dict) and "data_format" in arg:
                 # Validate data format version compatibility
                 data_format = arg.get("data_format")
-                if not data_format.endswith("_v1"):
+                if data_format and not data_format.endswith("_v1"):
                     self._logger.warning(
                         "Data format version mismatch detected",
                         service=self._name,
@@ -185,6 +185,10 @@ class BaseService(BaseComponent, ServiceComponent):
             return result
 
         except Exception as e:
+            # ValidationErrors should not be wrapped - re-raise immediately
+            if isinstance(e, ValidationError):
+                raise
+
             # Record failed operation
             execution_time = (datetime.now(timezone.utc) - start_time).total_seconds()
             self._record_operation_failure(operation_name, execution_time, e)
@@ -199,12 +203,17 @@ class BaseService(BaseComponent, ServiceComponent):
                 error_type=type(e).__name__,
             )
 
+            # Apply consistent error propagation pattern
+            self._propagate_service_error_consistently(e, operation_name, execution_time)
+
             raise ServiceError(
                 f"Operation {operation_name} failed in service {self._name}: {e}",
                 details={
                     "operation": operation_name,
                     "execution_time": execution_time,
                     "error_type": type(e).__name__,
+                    "processing_mode": "sync",
+                    "data_format": "service_error_v1",
                 },
             ) from e
 
@@ -240,6 +249,10 @@ class BaseService(BaseComponent, ServiceComponent):
                 return await operation_func(*args, **kwargs)
 
             except Exception as e:
+                # ValidationErrors should not be retried - re-raise immediately
+                if isinstance(e, ValidationError):
+                    raise
+
                 last_exception = e
 
                 if attempt < self._max_retries:
@@ -376,6 +389,22 @@ class BaseService(BaseComponent, ServiceComponent):
             self._operation_history.pop(0)
 
     # Dependency Resolution
+    def configure_dependencies(self, dependency_injector: Any) -> None:
+        """
+        Configure dependencies from the DI container.
+
+        Args:
+            dependency_injector: Dependency injector instance
+
+        This method is called by the DI system to configure service dependencies.
+        Override in subclasses to resolve specific dependencies.
+        """
+        self._dependency_container = dependency_injector
+        self._logger.debug(
+            "Dependency container configured",
+            service=self._name,
+        )
+
     def resolve_dependency(self, dependency_name: str) -> Any:
         """
         Resolve a dependency from the DI container.
@@ -452,8 +481,19 @@ class BaseService(BaseComponent, ServiceComponent):
                 elif error_rate > 0.8:  # More than 80% errors
                     return HealthStatus.UNHEALTHY
 
-            # Service-specific health check
-            return await self._service_health_check()
+            # Service-specific health check with consistent error handling
+            try:
+                return await self._service_health_check()
+            except Exception as e:
+                self._logger.error(
+                    "Service health check failed",
+                    service=self._name,
+                    error=str(e),
+                    error_type=type(e).__name__,
+                )
+                # Apply consistent error propagation for health checks
+                self._propagate_service_error_consistently(e, "health_check", 0.0)
+                return HealthStatus.UNHEALTHY
 
         except Exception as e:
             self._logger.error(
@@ -591,6 +631,39 @@ class BaseService(BaseComponent, ServiceComponent):
             "Circuit breaker manually reset",
             service=self._name,
         )
+
+    def _propagate_service_error_consistently(
+        self, error: Exception, operation: str, execution_time: float
+    ) -> None:
+        """Propagate service errors with consistent patterns across modules."""
+        # Check error type and apply consistent error propagation
+        from src.core.exceptions import DataValidationError, RepositoryError, ValidationError
+
+        if isinstance(error, (ValidationError, DataValidationError)):
+            # Validation errors are re-raised as-is for consistency
+            self._logger.debug(
+                f"Validation error in {self._name}.{operation} - propagating as validation error",
+                service=self._name,
+                operation=operation,
+                error_type=type(error).__name__,
+            )
+        elif isinstance(error, RepositoryError):
+            # Repository errors are propagated with service context
+            self._logger.warning(
+                f"Repository error in {self._name}.{operation} - adding service context",
+                service=self._name,
+                operation=operation,
+                execution_time=execution_time,
+            )
+        else:
+            # Generic errors get service-level error propagation
+            self._logger.error(
+                f"Service error in {self._name}.{operation} - wrapping in ServiceError",
+                service=self._name,
+                operation=operation,
+                execution_time=execution_time,
+                original_error=str(error),
+            )
 
 
 class TransactionalService(BaseService):

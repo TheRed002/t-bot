@@ -7,7 +7,7 @@ These tests verify the structured logging, correlation tracking, and performance
 import asyncio
 import os
 import time
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 

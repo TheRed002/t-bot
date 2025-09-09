@@ -27,10 +27,13 @@ from .base import BaseConfig
 from .bot_management import BotManagementConfig
 from .capital import CapitalManagementConfig
 from .database import DatabaseConfig
+from .environment import EnvironmentConfig, ExchangeEnvironment, TradingEnvironment
 from .exchange import ExchangeConfig
+from .execution import ExecutionConfig
 from .main import Config, get_config
 from .migration import migrate_legacy_config_usage, setup_config_service, validate_migration_status
 from .risk import RiskConfig
+from .sandbox import SandboxEnvironment, SandboxExchangeConfig
 from .security import SecurityConfig
 from .service import (
     ConfigCache,
@@ -75,8 +78,14 @@ __all__ = [
     "ConfigService",
     "ConfigValidator",
     "DatabaseConfig",
+    "EnvironmentConfig",
     "EnvironmentConfigProvider",
     "ExchangeConfig",
+    "ExchangeEnvironment",
+    "SandboxExchangeConfig",
+    "SandboxEnvironment",
+    "ExecutionConfig",
+    "TradingEnvironment",
     "FileConfigProvider",
     "RiskConfig",
     "SecurityConfig",

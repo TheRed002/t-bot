@@ -1723,6 +1723,75 @@ class BacktestError(TradingBotError):
         super().__init__(message, **kwargs)
 
 
+class BacktestConfigurationError(BacktestError):
+    """Backtesting configuration errors."""
+
+    def __init__(self, message: str, **kwargs: Any) -> None:
+        kwargs.setdefault("error_code", "BACKTEST_002")
+        kwargs.setdefault("category", ErrorCategory.CONFIGURATION)
+        super().__init__(message, **kwargs)
+
+
+class BacktestDataError(BacktestError):
+    """Backtesting data-related errors."""
+
+    def __init__(self, message: str, **kwargs: Any) -> None:
+        kwargs.setdefault("error_code", "BACKTEST_003")
+        kwargs.setdefault("category", ErrorCategory.DATA_QUALITY)
+        super().__init__(message, **kwargs)
+
+
+class BacktestExecutionError(BacktestError):
+    """Backtesting execution errors."""
+
+    def __init__(self, message: str, **kwargs: Any) -> None:
+        kwargs.setdefault("error_code", "BACKTEST_004")
+        kwargs.setdefault("severity", ErrorSeverity.HIGH)
+        super().__init__(message, **kwargs)
+
+
+class BacktestServiceError(BacktestError):
+    """Backtesting service unavailability errors."""
+
+    def __init__(self, message: str, **kwargs: Any) -> None:
+        kwargs.setdefault("error_code", "BACKTEST_005")
+        kwargs.setdefault("severity", ErrorSeverity.HIGH)
+        super().__init__(message, **kwargs)
+
+
+class BacktestValidationError(BacktestError):
+    """Backtesting validation errors."""
+
+    def __init__(self, message: str, **kwargs: Any) -> None:
+        kwargs.setdefault("error_code", "BACKTEST_006")
+        kwargs.setdefault("category", ErrorCategory.VALIDATION)
+        super().__init__(message, **kwargs)
+
+
+class BacktestResultError(BacktestError):
+    """Backtesting result processing errors."""
+
+    def __init__(self, message: str, **kwargs: Any) -> None:
+        kwargs.setdefault("error_code", "BACKTEST_007")
+        super().__init__(message, **kwargs)
+
+
+class BacktestMetricsError(BacktestError):
+    """Backtesting metrics calculation errors."""
+
+    def __init__(self, message: str, **kwargs: Any) -> None:
+        kwargs.setdefault("error_code", "BACKTEST_008")
+        super().__init__(message, **kwargs)
+
+
+class BacktestStrategyError(BacktestError):
+    """Backtesting strategy-related errors."""
+
+    def __init__(self, message: str, **kwargs: Any) -> None:
+        kwargs.setdefault("error_code", "BACKTEST_009")
+        super().__init__(message, **kwargs)
+
+
 # =============================================================================
 # DATABASE EXCEPTIONS
 # =============================================================================

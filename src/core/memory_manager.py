@@ -27,14 +27,31 @@ import weakref
 from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Generic, TypeVar
+from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
 import psutil
 
-from src.core.config import Config
 from src.core.logging import get_logger
 
+if TYPE_CHECKING:
+    from src.core.config import Config
+
 T = TypeVar("T")
+
+
+class DependencyInjectionMixin:
+    """Simple mixin for dependency injection to avoid circular imports."""
+
+    def __init__(self):
+        """Initialize dependency injection."""
+        self._injector = None
+
+    def get_injector(self):
+        """Get injector instance, importing only when needed."""
+        if self._injector is None:
+            from src.core.dependency_injection import get_global_injector
+            self._injector = get_global_injector()
+        return self._injector
 
 
 @dataclass
@@ -371,10 +388,21 @@ class MemoryMappedCache:
             file_handle = open(self.file_path, "r+b")
             self.mmap_file = mmap.mmap(file_handle.fileno(), self.max_size)
             self.file_handle = file_handle
-        except Exception:
+        except (OSError, ValueError):
             if file_handle:
-                file_handle.close()
+                try:
+                    file_handle.close()
+                except OSError as close_error:
+                    self.logger.warning(f"Failed to close file handle: {close_error}")
             raise
+        finally:
+            # If exception occurred and we didn't successfully set self.file_handle,
+            # ensure file_handle is closed to prevent resource leak
+            if file_handle and self.file_handle != file_handle:
+                try:
+                    file_handle.close()
+                except OSError as close_error:
+                    self.logger.warning(f"Failed to close file handle in finally: {close_error}")
 
     def write_data(self, offset: int, data: bytes) -> bool:
         """Write data at offset."""
@@ -425,22 +453,15 @@ class MemoryMappedCache:
             self.file_handle = None
 
 
-class HighPerformanceMemoryManager:
+class HighPerformanceMemoryManager(DependencyInjectionMixin):
     """Comprehensive memory management system."""
 
-    def __init__(self, config: Config | None = None):
-        self.config = config
+    def __init__(self, config: "Config | None" = None):
+        DependencyInjectionMixin.__init__(self)
         self.logger = get_logger(__name__)
 
-        # Dependency injection support
-        self._dependency_container: Any | None = None
-
-        # Resolve config from DI container if not provided
-        if not self.config and self._dependency_container:
-            try:
-                self.config = self._dependency_container.resolve("Config")
-            except Exception:
-                pass
+        # Always try to resolve config from DI container first
+        self.config = self._resolve_config(config)
 
         # Object pools for common objects
         self.pools: dict[str, ObjectPool[Any]] = {}
@@ -468,6 +489,37 @@ class HighPerformanceMemoryManager:
         self.logger.info(
             "Memory manager initialized",
             initial_memory_mb=round(self._get_memory_usage().rss_mb, 2),
+        )
+
+    def _resolve_config(self, config: "Config | None") -> "Config | None":
+        """Resolve config from DI container or use provided config."""
+        # If config is provided directly, use it
+        if config is not None:
+            return config
+
+        # Try to resolve from DI container
+        if hasattr(self, '_injector') and self._injector:
+            try:
+                return self._injector.resolve("Config")
+            except (AttributeError, KeyError, TypeError) as e:
+                self.logger.debug(f"Could not resolve Config from DI container: {e}")
+
+        # Try to resolve from global injector as fallback
+        try:
+            from src.core.dependency_injection import get_global_injector
+            injector = get_global_injector()
+            return injector.resolve("Config")
+        except Exception as e:
+            self.logger.debug(f"Could not resolve Config from global injector: {e}")
+
+        # Return a minimal config object if no config is available
+        from types import SimpleNamespace
+        return SimpleNamespace(
+            memory=SimpleNamespace(
+                cleanup_interval=300,
+                leak_threshold=1000,
+                pool_size=1000
+            )
         )
 
     def _initialize_pools(self):
@@ -754,19 +806,6 @@ class HighPerformanceMemoryManager:
 
         self.logger.info("Memory manager cleaned up")
 
-    def configure_dependencies(self, container: Any) -> None:
-        """Configure dependency injection container."""
-        self._dependency_container = container
-
-        # Resolve config if not already set
-        if not self.config:
-            try:
-                self.config = container.resolve("Config")
-            except Exception:
-                pass
-
-        self.logger.debug("Memory manager dependencies configured")
-
     def get_dependencies(self) -> list[str]:
         """Get list of required dependencies."""
         return ["Config"]
@@ -776,7 +815,7 @@ class HighPerformanceMemoryManager:
 _memory_manager: HighPerformanceMemoryManager | None = None
 
 
-def initialize_memory_manager(config: Config) -> HighPerformanceMemoryManager:
+def initialize_memory_manager(config: "Config") -> HighPerformanceMemoryManager:
     """Initialize global memory manager."""
     global _memory_manager
     _memory_manager = HighPerformanceMemoryManager(config)
@@ -789,7 +828,7 @@ def get_memory_manager() -> HighPerformanceMemoryManager | None:
 
 
 def create_memory_manager_factory(
-    config: Config | None = None,
+    config: "Config | None" = None,
 ) -> Callable[[], HighPerformanceMemoryManager]:
     """Create a factory function for MemoryManager to use with DI container."""
 

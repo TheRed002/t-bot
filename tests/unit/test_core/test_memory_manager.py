@@ -1,12 +1,13 @@
 """Tests for memory_manager module."""
 
 import asyncio
-import pytest
-from unittest.mock import Mock, patch, AsyncMock
-from decimal import Decimal
 
-from src.core.memory_manager import HighPerformanceMemoryManager as MemoryManager, ObjectPool as MemoryPoolAllocator
-from src.core.exceptions import MemoryOptimizationError, ConfigurationError
+import pytest
+
+from src.core.memory_manager import (
+    HighPerformanceMemoryManager as MemoryManager,
+    ObjectPool as MemoryPoolAllocator,
+)
 
 
 class TestMemoryManager:
@@ -20,7 +21,7 @@ class TestMemoryManager:
     def test_memory_manager_initialization(self, memory_manager):
         """Test memory manager initialization."""
         assert memory_manager is not None
-        assert hasattr(memory_manager, 'config')
+        assert hasattr(memory_manager, "config")
 
     def test_memory_manager_initialization_with_config(self):
         """Test memory manager initialization with config."""
@@ -56,7 +57,7 @@ class TestMemoryPoolAllocator:
     @pytest.fixture
     def pool_allocator(self):
         """Create test pool allocator."""
-        return MemoryPoolAllocator(lambda: b'', max_size=1024)
+        return MemoryPoolAllocator(lambda: b"", max_size=1024)
 
     def test_pool_allocator_initialization(self, pool_allocator):
         """Test pool allocator initialization."""
@@ -147,7 +148,7 @@ class TestMemoryEdgeCases:
         """Test multiple memory manager instances."""
         manager1 = MemoryManager()
         manager2 = MemoryManager()
-        
+
         assert manager1 is not None
         assert manager2 is not None
         assert manager1 is not manager2
@@ -156,7 +157,7 @@ class TestMemoryEdgeCases:
     async def test_memory_manager_concurrent_operations(self):
         """Test concurrent memory operations."""
         manager = MemoryManager()
-        
+
         try:
             # Test concurrent start operations
             tasks = [manager.start_monitoring() for _ in range(3)]
@@ -167,12 +168,12 @@ class TestMemoryEdgeCases:
     def test_memory_pool_boundary_conditions(self):
         """Test memory pool boundary conditions."""
         # Test with very small pool
-        small_pool = MemoryPoolAllocator(lambda: b'', max_size=1)
+        small_pool = MemoryPoolAllocator(lambda: b"", max_size=1)
         assert small_pool is not None
-        
+
         # Test with large pool
         try:
-            large_pool = MemoryPoolAllocator(lambda: b'', max_size=1024*1024)
+            large_pool = MemoryPoolAllocator(lambda: b"", max_size=1024 * 1024)
             assert large_pool is not None
         except Exception:
             # Large pools might fail due to system limits
@@ -181,7 +182,7 @@ class TestMemoryEdgeCases:
     def test_memory_operations_error_handling(self):
         """Test error handling in memory operations."""
         manager = MemoryManager()
-        
+
         # Test operations on manager
         try:
             result = manager.get_memory_stats()
@@ -194,7 +195,7 @@ class TestMemoryEdgeCases:
     def test_memory_cleanup_operations(self):
         """Test memory cleanup operations."""
         manager = MemoryManager()
-        
+
         try:
             # Test cleanup operation
             manager.cleanup()
@@ -205,7 +206,7 @@ class TestMemoryEdgeCases:
     def test_memory_statistics_operations(self):
         """Test memory statistics operations."""
         manager = MemoryManager()
-        
+
         try:
             # Test statistics operation
             stats = manager.get_statistics()

@@ -407,25 +407,45 @@ class ServiceManager:
             task = asyncio.create_task(self._check_service_health(service_name))
             health_tasks.append((service_name, task))
 
-        # Wait for all health checks with timeout and consistent error handling
-        for service_name, task in health_tasks:
+        # Wait for all health checks with timeout and consistent error handling using gather
+        if health_tasks:
+            task_list = [task for _, task in health_tasks]
             try:
-                result = await asyncio.wait_for(task, timeout=30.0)
-                # Apply consistent health status format
-                health_status[service_name] = self._normalize_health_status(result)
+                results = await asyncio.wait_for(
+                    asyncio.gather(*task_list, return_exceptions=True),
+                    timeout=30.0
+                )
+
+                # Process results with proper error handling
+                for i, (service_name, _) in enumerate(health_tasks):
+                    result = results[i] if i < len(results) else None
+
+                    if isinstance(result, Exception):
+                        health_status[service_name] = {
+                            "status": "error",
+                            "error": str(result),
+                            "error_type": type(result).__name__,
+                            "timestamp": datetime.now().isoformat(),
+                        }
+                    elif result:
+                        health_status[service_name] = self._normalize_health_status(result)
+                    else:
+                        health_status[service_name] = {
+                            "status": "unknown",
+                            "error": "No result returned",
+                            "timestamp": datetime.now().isoformat(),
+                        }
+
             except asyncio.TimeoutError:
-                health_status[service_name] = {
-                    "status": "timeout",
-                    "error": "Health check timed out",
-                    "timestamp": datetime.now().isoformat(),
-                }
-            except Exception as e:
-                health_status[service_name] = {
-                    "status": "error",
-                    "error": str(e),
-                    "error_type": type(e).__name__,
-                    "timestamp": datetime.now().isoformat(),
-                }
+                # Handle timeout for all tasks
+                for service_name, task in health_tasks:
+                    if not task.done():
+                        task.cancel()
+                    health_status[service_name] = {
+                        "status": "timeout",
+                        "error": "Health check timed out",
+                        "timestamp": datetime.now().isoformat(),
+                    }
 
         # Consistent status aggregation using core health status patterns
         overall_status = self._aggregate_health_status(health_status)
@@ -463,237 +483,6 @@ class ServiceManager:
                 "error_type": type(e).__name__,
                 "timestamp": datetime.now().isoformat(),
             }
-
-
-# Global service manager instance - initialized lazily
-_service_manager: ServiceManager | None = None
-
-
-def get_service_manager() -> ServiceManager:
-    """Get the global service manager instance."""
-    global _service_manager
-    if _service_manager is None:
-        from src.core.dependency_injection import injector
-
-        _service_manager = ServiceManager(injector)
-
-        # Register core infrastructure factories with DI container
-        try:
-            from src.core.memory_manager import create_memory_manager_factory
-
-            memory_factory = create_memory_manager_factory(config=None)
-            injector.register_factory("MemoryManager", memory_factory, singleton=True)
-        except ImportError as e:
-            _service_manager._logger.warning(f"MemoryManager factory not available: {e}")
-
-        try:
-            from src.core.caching.cache_manager import create_cache_manager_factory
-
-            cache_factory = create_cache_manager_factory(config=None)
-            injector.register_factory("CacheManager", cache_factory, singleton=True)
-        except ImportError as e:
-            _service_manager._logger.warning(f"CacheManager factory not available: {e}")
-
-    return _service_manager
-
-
-def register_core_services(config: Any) -> None:
-    """
-    Register all core services with the service manager.
-
-    This function sets up the proper dependency chain to avoid circular imports.
-    """
-    service_manager = get_service_manager()
-    injector = service_manager._injector
-
-    # Register basic config first if provided
-    if config:
-        injector.register_singleton("Config", config)
-
-    # Register core infrastructure services with minimal dependencies
-    try:
-        from src.core.config.service import ConfigService
-
-        service_manager.register_service(
-            "ConfigService",
-            ConfigService,
-            config={"config": config} if config else {},
-            dependencies=[],
-        )
-    except ImportError:
-        pass  # Service may not exist yet
-
-    try:
-        from src.utils.validation.service import ValidationService
-
-        service_manager.register_service(
-            "ValidationService",
-            ValidationService,
-            dependencies=[],
-        )
-    except ImportError:
-        pass  # Service may not exist yet
-
-    try:
-        from src.database.service import DatabaseService
-
-        service_manager.register_service(
-            "DatabaseService",
-            DatabaseService,
-            config={"config": config} if config else {},
-            dependencies=["ConfigService", "ErrorHandlingService"],  # Include error handling
-        )
-    except ImportError:
-        pass  # Service may not exist yet
-
-    try:
-        from src.state.state_service import StateService
-
-        service_manager.register_service(
-            "StateService",
-            StateService,
-            config={"config": config} if config else {},
-            dependencies=["DatabaseService"],
-        )
-    except ImportError:
-        pass  # Service may not exist yet
-
-    # Register ErrorHandlingService as core infrastructure
-    try:
-        from src.error_handling.service import ErrorHandlingService
-
-        service_manager.register_service(
-            "ErrorHandlingService",
-            ErrorHandlingService,
-            config={"config": config} if config else {},
-            dependencies=["ConfigService"],  # Minimal dependencies
-        )
-
-        # Also register error handling components with DI container
-        from src.error_handling.di_registration import configure_error_handling_di
-
-        configure_error_handling_di(injector, config)
-
-    except ImportError:
-        pass  # Service may not exist yet
-
-
-def register_business_services(config: Any) -> None:
-    """Register business logic services."""
-    service_manager = get_service_manager()
-
-    # Register business services with proper error handling
-    business_services = [
-        (
-            "CapitalService",
-            "src.capital_management.service",
-            ["DatabaseService", "ErrorHandlingService"],
-        ),
-        (
-            "ExecutionService",
-            "src.execution.service",
-            ["DatabaseService", "ErrorHandlingService"],
-        ),
-        (
-            "RiskService",
-            "src.risk_management.service",
-            ["DatabaseService", "StateService", "ErrorHandlingService"],
-        ),
-        ("StrategyService", "src.strategies.service", ["ErrorHandlingService"]),
-        ("MLService", "src.ml.service", ["ErrorHandlingService"]),
-        (
-            "BotService",
-            "src.bot_management.service",
-            [
-                "DatabaseService",
-                "StateService",
-                "RiskService",
-                "ExecutionService",
-                "StrategyService",
-                "CapitalService",
-                "ErrorHandlingService",
-            ],
-        ),
-    ]
-
-    for service_name, module_path, deps in business_services:
-        try:
-            module = __import__(module_path, fromlist=[service_name])
-            service_class = getattr(module, service_name)
-            service_manager.register_service(
-                service_name,
-                service_class,
-                config={"config": config} if config else {},
-                dependencies=deps,
-            )
-        except (ImportError, AttributeError) as e:
-            service_manager._logger.warning(f"Business service {service_name} not available: {e}")
-            continue
-
-
-def register_application_services(config: Any) -> None:
-    """Register application-level services."""
-    service_manager = get_service_manager()
-
-    # Register application services with error handling
-    try:
-        from src.backtesting.service import BacktestService
-
-        service_manager.register_service(
-            "BacktestService",
-            BacktestService,
-            config={"config": config} if config else {},
-            dependencies=[
-                "DatabaseService",
-                "ExecutionService",
-                "RiskService",
-                "StrategyService",
-                "CapitalService",
-                "MLService",
-            ],
-        )
-    except ImportError as e:
-        service_manager._logger.warning(f"BacktestService not available: {e}")
-
-
-async def initialize_all_services(config: Any) -> ServiceManager:
-    """
-    Initialize all services in the correct order.
-
-    Args:
-        config: Application configuration
-
-    Returns:
-        Initialized service manager
-    """
-    logger.info("Initializing all services...")
-
-    service_manager = get_service_manager()
-
-    try:
-        # Register all services
-        register_core_services(config)
-        register_business_services(config)
-        register_application_services(config)
-
-        # Start all services
-        await service_manager.start_all_services()
-
-        logger.info("All services initialized successfully")
-        return service_manager
-
-    except Exception as e:
-        logger.error(f"Service initialization failed: {e}")
-        await service_manager.stop_all_services()
-        raise
-
-
-async def shutdown_all_services() -> None:
-    """Shutdown all services gracefully."""
-    logger.info("Shutting down all services...")
-    service_manager = get_service_manager()
-    await service_manager.stop_all_services()
-    logger.info("All services shut down")
 
     def _normalize_health_status(self, status_result: Any) -> dict[str, Any]:
         """Normalize health status to consistent format across all services."""
@@ -754,3 +543,374 @@ async def shutdown_all_services() -> None:
                 worst_status = status
 
         return worst_status
+
+
+# Global service manager instance - initialized lazily
+_service_manager: ServiceManager | None = None
+
+
+def get_service_manager(injector_instance: Any = None) -> ServiceManager:
+    """Get the global service manager instance.
+    
+    Args:
+        injector_instance: Optional injector instance to avoid circular dependency
+    """
+    global _service_manager
+    if _service_manager is None:
+        # Use provided injector or get from global state
+        if injector_instance is None:
+            from src.core.dependency_injection import get_global_injector
+            injector_instance = get_global_injector()
+
+        _service_manager = ServiceManager(injector_instance)
+
+        # Register core infrastructure factories with DI container
+        _register_core_infrastructure_factories(injector_instance, _service_manager)
+
+    return _service_manager
+
+
+def _register_core_infrastructure_factories(injector: Any, service_manager: ServiceManager) -> None:
+    """Register core infrastructure factories to avoid circular dependencies."""
+    try:
+        from src.core.memory_manager import create_memory_manager_factory
+
+        memory_factory = create_memory_manager_factory(config=None)
+        injector.register_factory("MemoryManager", memory_factory, singleton=True)
+    except ImportError as e:
+        service_manager._logger.warning(f"MemoryManager factory not available: {e}")
+
+    try:
+        from src.core.caching.cache_manager import create_cache_manager_factory
+
+        cache_factory = create_cache_manager_factory(config=None)
+        injector.register_factory("CacheManager", cache_factory, singleton=True)
+    except ImportError as e:
+        service_manager._logger.warning(f"CacheManager factory not available: {e}")
+
+
+def register_core_services(config: Any) -> None:
+    """
+    Register all core services with the service manager.
+
+    This function sets up the proper dependency chain to avoid circular imports.
+    """
+    from src.core.dependency_injection import get_global_injector
+    injector = get_global_injector()
+
+    # Get service manager with injector to avoid circular dependency
+    service_manager = get_service_manager(injector)
+
+    # Register basic config first if provided
+    if config:
+        injector.register_singleton("Config", config)
+
+    # Register core infrastructure services with minimal dependencies
+    try:
+        # Use factory pattern for ConfigService - SINGLETON (shared configuration state)
+        def config_service_factory():
+            from src.core.config.service import ConfigService
+            # Use service locator pattern for dependency resolution
+            try:
+                # Try to resolve dependencies from container
+                dependencies = {}
+                # ConfigService has minimal dependencies, create with available config
+                service = ConfigService()
+                return service
+            except Exception:
+                # Fallback to direct creation
+                return ConfigService()
+
+        injector.register_factory("ConfigService", config_service_factory, singleton=True)
+
+        # Also register interface for ConfigService if available
+        try:
+            from src.core.base.interfaces import ServiceComponent
+            injector.register_interface(ServiceComponent, config_service_factory, singleton=True)
+        except ImportError:
+            pass  # Interface not available
+    except ImportError:
+        pass  # Service may not exist yet
+
+    try:
+        # Use factory pattern for ValidationService - SINGLETON (stateless validators, shared cache)
+        def validation_service_factory():
+            from src.utils.validation.service import ValidationService
+            # Use service locator pattern for dependency resolution
+            try:
+                # ValidationService typically has minimal dependencies
+                dependencies = {}
+                # Try to resolve ConfigService if available
+                try:
+                    config_service = injector.resolve("ConfigService")
+                    dependencies["config_service"] = config_service
+                except Exception:
+                    pass
+
+                return ValidationService(**dependencies)
+            except Exception:
+                # Fallback to direct creation
+                return ValidationService()
+
+        injector.register_factory("ValidationService", validation_service_factory, singleton=True)
+    except ImportError:
+        pass  # Service may not exist yet
+
+    try:
+        # Use factory pattern for DatabaseService with proper dependency injection
+        def database_service_factory():
+            from src.database.service import DatabaseService
+
+            # Use service locator pattern for dependency resolution
+            try:
+                dependencies = {}
+                # Try to resolve common dependencies
+                try:
+                    dependencies["config_service"] = injector.resolve("ConfigService")
+                except Exception:
+                    if config:
+                        dependencies["config"] = config
+
+                try:
+                    dependencies["error_service"] = injector.resolve("ErrorHandlingService")
+                except Exception:
+                    pass  # Optional dependency
+
+                return DatabaseService(**dependencies)
+            except Exception:
+                # Fallback to direct creation with available config
+                return DatabaseService(config=config)
+
+        # DatabaseService - SINGLETON (connection pooling, shared database state)
+        injector.register_factory("DatabaseService", database_service_factory, singleton=True)
+
+        # Also register as ServiceComponent interface
+        try:
+            from src.core.base.interfaces import ServiceComponent
+            injector.register_interface(ServiceComponent, database_service_factory, singleton=True)
+        except ImportError:
+            pass
+    except ImportError:
+        pass  # Service may not exist yet
+
+    try:
+        # Use factory pattern for StateService with proper dependency injection
+        def state_service_factory():
+            from src.state.state_service import StateService
+
+            # Use service locator pattern for dependency resolution
+            try:
+                dependencies = {}
+                # Try to resolve required dependencies
+                try:
+                    dependencies["database_service"] = injector.resolve("DatabaseService")
+                except Exception:
+                    pass  # Service will handle missing database
+
+                try:
+                    dependencies["config_service"] = injector.resolve("ConfigService")
+                except Exception:
+                    if config:
+                        dependencies["config"] = config
+
+                return StateService(**dependencies)
+            except Exception:
+                # Fallback to direct creation
+                return StateService(config=config)
+
+        # StateService - SINGLETON (shared state management)
+        injector.register_factory("StateService", state_service_factory, singleton=True)
+    except ImportError:
+        pass  # Service may not exist yet
+
+    # Register ErrorHandlingService as core infrastructure
+    try:
+        # Use factory pattern for ErrorHandlingService
+        def error_service_factory():
+            from src.error_handling.service import ErrorHandlingService
+
+            # Use service locator pattern for dependency resolution
+            try:
+                dependencies = {}
+                # Try to resolve ConfigService dependency
+                try:
+                    dependencies["config_service"] = injector.resolve("ConfigService")
+                except Exception:
+                    if config:
+                        dependencies["config"] = config
+
+                return ErrorHandlingService(**dependencies)
+            except Exception:
+                # Fallback to direct creation
+                return ErrorHandlingService(config=config)
+
+        # ErrorHandlingService - SINGLETON (shared error handling context and patterns)
+        injector.register_factory("ErrorHandlingService", error_service_factory, singleton=True)
+
+        # Also register error handling components with DI container
+        try:
+            from src.error_handling.di_registration import configure_error_handling_di
+            configure_error_handling_di(injector, config)
+        except ImportError:
+            pass
+
+    except ImportError:
+        pass  # Service may not exist yet
+
+
+def register_business_services(config: Any) -> None:
+    """Register business logic services using factory patterns."""
+    from src.core.dependency_injection import get_global_injector
+    injector = get_global_injector()
+
+    # Register business services with factory patterns and proper dependency injection
+    business_service_configs = [
+        ("CapitalService", "src.capital_management.service", ["DatabaseService", "ValidationService", "ErrorHandlingService"]),
+        ("ExecutionService", "src.execution.service", ["DatabaseService", "ValidationService", "ErrorHandlingService"]),
+        ("RiskService", "src.risk_management.service", ["DatabaseService", "StateService", "ValidationService", "ErrorHandlingService"]),
+        ("StrategyService", "src.strategies.service", ["ValidationService", "ErrorHandlingService"]),
+        ("MLService", "src.ml.service", ["DatabaseService", "ValidationService", "ErrorHandlingService"]),
+        ("BotService", "src.bot_management.service", ["DatabaseService", "StateService", "RiskService", "ExecutionService", "StrategyService", "CapitalService", "ValidationService", "ErrorHandlingService"]),
+    ]
+
+    for service_name, module_path, deps in business_service_configs:
+        try:
+            def create_service_factory(svc_name, mod_path, dependencies):
+                def service_factory():
+                    module = __import__(mod_path, fromlist=[svc_name])
+                    service_class = getattr(module, svc_name)
+
+                    # Use service locator pattern for dependency resolution
+                    try:
+                        resolved_deps = {}
+                        for dep_name in dependencies:
+                            try:
+                                # Try to resolve from dependency injector
+                                dependency = injector.resolve(dep_name)
+                                # Convert service name to parameter name (e.g., DatabaseService -> database_service)
+                                param_name = dep_name.lower().replace("service", "") + ("_service" if dep_name.endswith("Service") else "")
+                                resolved_deps[param_name] = dependency
+                            except Exception:
+                                pass  # Dependency not available, service will handle gracefully
+
+                        # Add config if available and not already provided
+                        if config and "config" not in resolved_deps:
+                            resolved_deps["config"] = config
+
+                        return service_class(**resolved_deps)
+                    except Exception:
+                        # Fallback to direct creation with config
+                        return service_class(config=config)
+
+                return service_factory
+
+            factory = create_service_factory(service_name, module_path, deps)
+
+            # Determine correct lifetime based on service type
+            # Most business services should be singleton for shared state
+            is_singleton = service_name in {
+                "CapitalService",    # SINGLETON - shared capital state
+                "ExecutionService",  # SINGLETON - shared execution context
+                "RiskService",      # SINGLETON - shared risk monitoring
+                "StrategyService",  # SINGLETON - shared strategy registry
+                "MLService",        # SINGLETON - shared model cache
+                "BotService"        # SINGLETON - shared bot management
+            }
+
+            injector.register_factory(service_name, factory, singleton=is_singleton)
+
+        except (ImportError, AttributeError) as e:
+            from src.core.logging import get_logger
+            logger = get_logger(__name__)
+            logger.warning(f"Business service {service_name} not available: {e}")
+            continue
+
+
+def register_application_services(config: Any) -> None:
+    """Register application-level services using factory patterns."""
+    from src.core.dependency_injection import get_global_injector
+    injector = get_global_injector()
+
+    # Register BacktestService with factory pattern and proper dependency injection
+    try:
+        def backtest_service_factory():
+            from src.backtesting.service import BacktestService
+
+            # Resolve dependencies from injector
+            dependencies = [
+                "DatabaseService",
+                "ExecutionService",
+                "RiskService",
+                "StrategyService",
+                "CapitalService",
+                "MLService"
+            ]
+
+            resolved_deps = {}
+            for dep_name in dependencies:
+                try:
+                    resolved_deps[dep_name.lower().replace("service", "")] = injector.resolve(dep_name)
+                except Exception:
+                    pass  # Dependency not available, service will handle gracefully
+
+            # Create service with dependency injection
+            if resolved_deps:
+                return BacktestService(**resolved_deps, config=config)
+            else:
+                return BacktestService(config=config)
+
+        # BacktestService - TRANSIENT (each backtest should be isolated)
+        injector.register_factory("BacktestService", backtest_service_factory, singleton=False)
+
+    except ImportError as e:
+        from src.core.logging import get_logger
+        logger = get_logger(__name__)
+        logger.warning(f"BacktestService not available: {e}")
+
+
+async def initialize_all_services(config: Any) -> ServiceManager:
+    """
+    Initialize all services in the correct order.
+
+    Args:
+        config: Application configuration
+
+    Returns:
+        Initialized service manager
+    """
+    logger.info("Initializing all services...")
+
+    # Get injector first to avoid circular dependencies
+    from src.core.dependency_injection import get_global_injector
+    injector = get_global_injector()
+    service_manager = get_service_manager(injector)
+
+    try:
+        # Register all services
+        register_core_services(config)
+        register_business_services(config)
+        register_application_services(config)
+
+        # Start all services
+        await service_manager.start_all_services()
+
+        logger.info("All services initialized successfully")
+        return service_manager
+
+    except Exception as e:
+        logger.error(f"Service initialization failed: {e}")
+        await service_manager.stop_all_services()
+        raise
+
+
+async def shutdown_all_services() -> None:
+    """Shutdown all services gracefully."""
+    logger.info("Shutting down all services...")
+
+    # Get existing service manager without creating new one
+    global _service_manager
+    if _service_manager is not None:
+        await _service_manager.stop_all_services()
+        _service_manager = None  # Clear global reference
+
+    logger.info("All services shut down")

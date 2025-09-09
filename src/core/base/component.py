@@ -568,12 +568,12 @@ class EnhancedBaseComponent(BaseComponent):
         """Check if component is initialized (legacy compatibility)."""
         return self._is_running
 
-    def initialize(self) -> None:
+    async def initialize(self) -> None:
         """Initialize the component (legacy compatibility)."""
         self._initialized = True
         self.logger.debug(f"{self.__class__.__name__} initialized")
 
-    def cleanup(self) -> None:
+    async def cleanup(self) -> None:
         """Cleanup the component (legacy compatibility)."""
         self._initialized = False
         self.logger.debug(f"{self.__class__.__name__} cleaned up")

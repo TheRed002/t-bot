@@ -1,14 +1,15 @@
 """Tests for core/performance components."""
 
 import asyncio
-import pytest
-from unittest.mock import Mock, patch, AsyncMock
-from decimal import Decimal
 import time
+from decimal import Decimal
 
+import pytest
+
+from src.core.performance.memory_optimizer import MemoryOptimizer
 from src.core.performance.performance_monitor import PerformanceMonitor
 from src.core.performance.performance_optimizer import PerformanceOptimizer
-from src.core.performance.memory_optimizer import MemoryOptimizer
+
 try:
     from src.core.performance.trading_profiler import TradingProfiler
 except ImportError:
@@ -16,30 +17,41 @@ except ImportError:
     class TradingProfiler:
         def __init__(self):
             pass
+
         def profile_trade(self, trade_data):
             return {"latency": 0.001, "throughput": 1000}
+
         def start_timer(self, name):
             pass
+
         def end_timer(self, name):
             return 0.001
+
         def record_operation(self, name):
             pass
+
         def get_throughput(self, name):
             return 1000.0
+
         def profile_strategy(self, strategy_data):
             return {"performance": "good"}
+
         def record_market_data_latency(self, symbol, latency):
             pass
+
         def get_market_data_stats(self, symbol):
             return {"avg_latency": 0.001}
+
         def profile_order_book(self, symbol, order_book):
             return {"spread": 1.0}
+
         async def async_profile_trading_session(self):
             return {"session_stats": "complete"}
+
         def generate_performance_report(self):
             return {"report": "generated"}
 
-from src.core.exceptions import PerformanceError
+
 
 
 class TestPerformanceMonitor:
@@ -50,6 +62,7 @@ class TestPerformanceMonitor:
         """Create test performance monitor."""
         # PerformanceMonitor constructor requires Config parameter
         from src.core.config import Config
+
         config = Config()
         return PerformanceMonitor(config)
 
@@ -65,7 +78,7 @@ class TestPerformanceMonitor:
             assert performance_monitor.is_running() or not performance_monitor.is_running()
         except Exception:
             pass
-        
+
         try:
             await performance_monitor.stop()
         except Exception:
@@ -95,7 +108,7 @@ class TestPerformanceMonitor:
             performance_monitor.record_metric("avg_test", 1.0)
             performance_monitor.record_metric("avg_test", 2.0)
             performance_monitor.record_metric("avg_test", 3.0)
-            
+
             avg = performance_monitor.get_average("avg_test")
             assert isinstance(avg, (int, float)) or avg is None
         except Exception:
@@ -106,7 +119,7 @@ class TestPerformanceMonitor:
         try:
             performance_monitor.set_threshold("response_time", 0.1)
             performance_monitor.record_metric("response_time", 0.15)  # Above threshold
-            
+
             alerts = performance_monitor.get_alerts()
             assert isinstance(alerts, list) or alerts is None
         except Exception:
@@ -119,7 +132,7 @@ class TestPerformanceMonitor:
             cpu_usage = await performance_monitor.get_cpu_usage()
             memory_usage = await performance_monitor.get_memory_usage()
             disk_usage = await performance_monitor.get_disk_usage()
-            
+
             assert isinstance(cpu_usage, (int, float)) or cpu_usage is None
             assert isinstance(memory_usage, (int, float)) or memory_usage is None
             assert isinstance(disk_usage, (int, float)) or disk_usage is None
@@ -132,7 +145,7 @@ class TestPerformanceMonitor:
             # Record historical data
             for i in range(10):
                 performance_monitor.record_metric("historical_test", i * 0.1)
-            
+
             history = performance_monitor.get_historical_data("historical_test")
             assert isinstance(history, list) or history is None
         except Exception:
@@ -147,6 +160,7 @@ class TestPerformanceOptimizer:
         """Create test performance optimizer."""
         # PerformanceOptimizer constructor requires Config parameter
         from src.core.config import Config
+
         config = Config()
         return PerformanceOptimizer(config)
 
@@ -159,9 +173,9 @@ class TestPerformanceOptimizer:
         test_data = {
             "operation_times": [0.001, 0.002, 0.003, 0.15, 0.001],
             "memory_usage": [1024, 1048, 1072, 2048, 1024],
-            "cpu_usage": [10.5, 15.2, 12.8, 95.5, 11.0]
+            "cpu_usage": [10.5, 15.2, 12.8, 95.5, 11.0],
         }
-        
+
         try:
             analysis = performance_optimizer.analyze(test_data)
             assert isinstance(analysis, dict) or analysis is None
@@ -187,7 +201,7 @@ class TestPerformanceOptimizer:
     def test_performance_optimizer_optimize_query(self, performance_optimizer):
         """Test query optimization."""
         sample_query = "SELECT * FROM trades WHERE timestamp > '2023-01-01'"
-        
+
         try:
             optimized = performance_optimizer.optimize_query(sample_query)
             assert isinstance(optimized, str) or optimized is None
@@ -220,6 +234,7 @@ class TestMemoryOptimizer:
         """Create test memory optimizer."""
         # MemoryOptimizer constructor requires Config parameter
         from src.core.config import Config
+
         config = Config()
         return MemoryOptimizer(config)
 
@@ -232,7 +247,11 @@ class TestMemoryOptimizer:
         """Test memory usage analysis."""
         try:
             # Use _collect_memory_stats instead of non-existent analyze_memory_usage
-            usage = await memory_optimizer._collect_memory_stats() if hasattr(memory_optimizer, '_collect_memory_stats') else None
+            usage = (
+                await memory_optimizer._collect_memory_stats()
+                if hasattr(memory_optimizer, "_collect_memory_stats")
+                else None
+            )
             assert isinstance(usage, (dict, object)) or usage is None
         except Exception:
             pass
@@ -242,7 +261,11 @@ class TestMemoryOptimizer:
         """Test garbage collection optimization."""
         try:
             # Use force_memory_optimization instead of non-existent optimize_garbage_collection
-            result = await memory_optimizer.force_memory_optimization() if hasattr(memory_optimizer, 'force_memory_optimization') else None
+            result = (
+                await memory_optimizer.force_memory_optimization()
+                if hasattr(memory_optimizer, "force_memory_optimization")
+                else None
+            )
             assert isinstance(result, (bool, dict)) or result is None
         except Exception:
             pass
@@ -252,8 +275,10 @@ class TestMemoryOptimizer:
         """Test memory pool optimization."""
         try:
             # Use _optimize_object_pools instead of non-existent optimize_memory_pools
-            await memory_optimizer._optimize_object_pools() if hasattr(memory_optimizer, '_optimize_object_pools') else None
-            pools = memory_optimizer.pool_stats if hasattr(memory_optimizer, 'pool_stats') else None
+            await memory_optimizer._optimize_object_pools() if hasattr(
+                memory_optimizer, "_optimize_object_pools"
+            ) else None
+            pools = memory_optimizer.pool_stats if hasattr(memory_optimizer, "pool_stats") else None
             assert isinstance(pools, (dict, list)) or pools is None
         except Exception:
             pass
@@ -263,8 +288,14 @@ class TestMemoryOptimizer:
         """Test memory leak detection."""
         try:
             # Use _check_memory_leaks instead of non-existent detect_memory_leaks
-            await memory_optimizer._check_memory_leaks() if hasattr(memory_optimizer, '_check_memory_leaks') else None
-            leaks = memory_optimizer.leak_suspects if hasattr(memory_optimizer, 'leak_suspects') else None
+            await memory_optimizer._check_memory_leaks() if hasattr(
+                memory_optimizer, "_check_memory_leaks"
+            ) else None
+            leaks = (
+                memory_optimizer.leak_suspects
+                if hasattr(memory_optimizer, "leak_suspects")
+                else None
+            )
             assert isinstance(leaks, (list, dict)) or leaks is None
         except Exception:
             pass
@@ -274,7 +305,7 @@ class TestMemoryOptimizer:
         """Test memory cleanup operations."""
         try:
             # Use cleanup instead of non-existent cleanup_unused_memory
-            await memory_optimizer.cleanup() if hasattr(memory_optimizer, 'cleanup') else None
+            await memory_optimizer.cleanup() if hasattr(memory_optimizer, "cleanup") else None
             cleaned = True  # cleanup doesn't return a value
             assert isinstance(cleaned, (int, bool)) or cleaned is None
         except Exception:
@@ -285,7 +316,7 @@ class TestMemoryOptimizer:
         """Test async memory cleanup."""
         try:
             # Use cleanup since async_cleanup doesn't exist
-            await memory_optimizer.cleanup() if hasattr(memory_optimizer, 'cleanup') else None
+            await memory_optimizer.cleanup() if hasattr(memory_optimizer, "cleanup") else None
             result = True  # cleanup doesn't return a value
             assert result is not None or result is None
         except Exception:
@@ -296,7 +327,11 @@ class TestMemoryOptimizer:
         """Test memory profiling."""
         try:
             # Use get_memory_report instead of non-existent profile_memory_usage
-            profile = await memory_optimizer.get_memory_report() if hasattr(memory_optimizer, 'get_memory_report') else None
+            profile = (
+                await memory_optimizer.get_memory_report()
+                if hasattr(memory_optimizer, "get_memory_report")
+                else None
+            )
             assert isinstance(profile, dict) or profile is None
         except Exception:
             pass
@@ -309,6 +344,7 @@ class TestTradingProfiler:
     def trading_profiler(self):
         """Create test trading profiler."""
         from src.core.performance.trading_profiler import TradingOperation
+
         return TradingProfiler(TradingOperation.ORDER_PLACEMENT)
 
     def test_trading_profiler_initialization(self, trading_profiler):
@@ -320,11 +356,11 @@ class TestTradingProfiler:
         trade_data = {
             "symbol": "BTCUSDT",
             "side": "BUY",
-            "quantity": Decimal('1.0'),
-            "price": Decimal('50000.00'),
-            "timestamp": time.time()
+            "quantity": Decimal("1.0"),
+            "price": Decimal("50000.00"),
+            "timestamp": time.time(),
         }
-        
+
         try:
             profile = trading_profiler.profile_trade(trade_data)
             assert isinstance(profile, dict) or profile is None
@@ -337,7 +373,7 @@ class TestTradingProfiler:
             trading_profiler.start_timer("order_execution")
             time.sleep(0.001)  # Simulate processing time
             latency = trading_profiler.end_timer("order_execution")
-            
+
             assert isinstance(latency, (int, float)) or latency is None
         except Exception:
             pass
@@ -348,7 +384,7 @@ class TestTradingProfiler:
             # Simulate multiple operations
             for i in range(10):
                 trading_profiler.record_operation("trade_execution")
-            
+
             throughput = trading_profiler.get_throughput("trade_execution")
             assert isinstance(throughput, (int, float)) or throughput is None
         except Exception:
@@ -360,9 +396,9 @@ class TestTradingProfiler:
             "strategy_name": "test_strategy",
             "execution_time": 0.005,
             "signal_strength": 0.85,
-            "profit_loss": Decimal('100.50')
+            "profit_loss": Decimal("100.50"),
         }
-        
+
         try:
             performance = trading_profiler.profile_strategy(strategy_data)
             assert isinstance(performance, dict) or performance is None
@@ -374,18 +410,15 @@ class TestTradingProfiler:
         try:
             trading_profiler.record_market_data_latency("BTCUSDT", 0.002)
             latency_stats = trading_profiler.get_market_data_stats("BTCUSDT")
-            
+
             assert isinstance(latency_stats, dict) or latency_stats is None
         except Exception:
             pass
 
     def test_trading_profiler_order_book_analysis(self, trading_profiler):
         """Test order book analysis profiling."""
-        order_book = {
-            "bids": [[50000, 1.0], [49999, 2.0]],
-            "asks": [[50001, 1.5], [50002, 2.5]]
-        }
-        
+        order_book = {"bids": [[50000, 1.0], [49999, 2.0]], "asks": [[50001, 1.5], [50002, 2.5]]}
+
         try:
             analysis = trading_profiler.profile_order_book("BTCUSDT", order_book)
             assert isinstance(analysis, dict) or analysis is None
@@ -416,14 +449,15 @@ class TestPerformanceEdgeCases:
     def test_performance_with_zero_metrics(self):
         """Test performance monitoring with zero metrics."""
         from src.core.config import Config
+
         config = Config()
         monitor = PerformanceMonitor(config)
-        
+
         try:
             # Test operations with no recorded metrics
             metrics = monitor.get_metrics()
             avg = monitor.get_average("nonexistent_metric")
-            
+
             assert metrics is not None or metrics is None
             assert avg is None or avg == 0
         except Exception:
@@ -432,13 +466,14 @@ class TestPerformanceEdgeCases:
     def test_performance_with_negative_values(self):
         """Test performance monitoring with negative values."""
         from src.core.config import Config
+
         config = Config()
         monitor = PerformanceMonitor(config)
-        
+
         try:
             monitor.record_metric("negative_test", -1.5)
             monitor.record_metric("negative_test", -0.5)
-            
+
             avg = monitor.get_average("negative_test")
             assert isinstance(avg, (int, float)) or avg is None
         except Exception:
@@ -447,16 +482,17 @@ class TestPerformanceEdgeCases:
     def test_performance_with_extreme_values(self):
         """Test performance monitoring with extreme values."""
         from src.core.config import Config
+
         config = Config()
         monitor = PerformanceMonitor(config)
-        
+
         extreme_values = [
             0.000001,  # Very small
             999999999.999,  # Very large
-            float('inf'),  # Infinity
-            float('-inf'),  # Negative infinity
+            float("inf"),  # Infinity
+            float("-inf"),  # Negative infinity
         ]
-        
+
         for value in extreme_values:
             try:
                 monitor.record_metric("extreme_test", value)
@@ -467,14 +503,15 @@ class TestPerformanceEdgeCases:
     def test_performance_high_frequency_recording(self):
         """Test performance monitoring with high frequency recording."""
         from src.core.config import Config
+
         config = Config()
         monitor = PerformanceMonitor(config)
-        
+
         try:
             # Record many metrics quickly
             for i in range(1000):
                 monitor.record_metric("high_freq_test", i * 0.001)
-            
+
             metrics = monitor.get_metrics()
             # Should handle high frequency recording
         except Exception:
@@ -484,17 +521,18 @@ class TestPerformanceEdgeCases:
     async def test_memory_optimizer_with_limited_memory(self):
         """Test memory optimizer under memory constraints."""
         from src.core.config import Config
+
         config = Config()
         optimizer = MemoryOptimizer(config)
-        
+
         try:
             # Simulate memory pressure
             large_data = [i for i in range(100000)]
-            
+
             # Test optimization under pressure
-            if hasattr(optimizer, '_optimize_object_pools'):
+            if hasattr(optimizer, "_optimize_object_pools"):
                 await optimizer._optimize_object_pools()
-            if hasattr(optimizer, 'force_memory_optimization'):
+            if hasattr(optimizer, "force_memory_optimization"):
                 cleanup_result = await optimizer.force_memory_optimization()
         except Exception:
             # Should handle memory constraints gracefully
@@ -503,8 +541,9 @@ class TestPerformanceEdgeCases:
     def test_trading_profiler_with_malformed_data(self):
         """Test trading profiler with malformed data."""
         from src.core.performance.trading_profiler import TradingOperation
+
         profiler = TradingProfiler(TradingOperation.ORDER_PLACEMENT)
-        
+
         malformed_trades = [
             {},  # Empty trade
             {"symbol": None},  # None symbol
@@ -512,7 +551,7 @@ class TestPerformanceEdgeCases:
             {"quantity": "not_a_number"},  # Invalid quantity
             {"price": -100},  # Negative price
         ]
-        
+
         for trade in malformed_trades:
             try:
                 profile = profiler.profile_trade(trade)
@@ -524,9 +563,10 @@ class TestPerformanceEdgeCases:
     async def test_performance_monitor_concurrent_recording(self):
         """Test concurrent metric recording."""
         from src.core.config import Config
+
         config = Config()
         monitor = PerformanceMonitor(config)
-        
+
         async def record_metrics(metric_name, count):
             for i in range(count):
                 try:
@@ -534,28 +574,35 @@ class TestPerformanceEdgeCases:
                     await asyncio.sleep(0.001)
                 except Exception:
                     pass
-        
+
         # Run concurrent recording tasks
         tasks = [
             record_metrics("concurrent_1", 10),
             record_metrics("concurrent_2", 10),
-            record_metrics("concurrent_3", 10)
+            record_metrics("concurrent_3", 10),
         ]
-        
+
         await asyncio.gather(*tasks, return_exceptions=True)
 
     def test_performance_optimizer_with_no_data(self):
         """Test performance optimizer with no data."""
         from src.core.config import Config
+
         config = Config()
         optimizer = PerformanceOptimizer(config)
-        
+
         try:
             # Test operations with no data
-            analysis = optimizer.analyze({}) if hasattr(optimizer, 'analyze') else None
-            recommendations = optimizer.get_recommendations() if hasattr(optimizer, 'get_recommendations') else None
-            bottlenecks = optimizer.detect_bottlenecks() if hasattr(optimizer, 'detect_bottlenecks') else None
-            
+            analysis = optimizer.analyze({}) if hasattr(optimizer, "analyze") else None
+            recommendations = (
+                optimizer.get_recommendations()
+                if hasattr(optimizer, "get_recommendations")
+                else None
+            )
+            bottlenecks = (
+                optimizer.detect_bottlenecks() if hasattr(optimizer, "detect_bottlenecks") else None
+            )
+
             # Should handle empty data gracefully
         except Exception:
             pass

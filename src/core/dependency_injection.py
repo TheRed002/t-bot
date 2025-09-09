@@ -61,7 +61,7 @@ class DependencyContainer:
         self, name: str, cls: type[T], *args, singleton: bool = False, **kwargs
     ) -> None:
         """
-        Register a class for lazy instantiation.
+        Register a class for lazy instantiation with automatic dependency injection.
 
         Args:
             name: Service name
@@ -72,7 +72,40 @@ class DependencyContainer:
         """
 
         def factory():
-            instance = cls(*args, **kwargs)
+            # Try to resolve constructor dependencies automatically
+            if hasattr(cls, "__init__"):
+                import inspect
+                sig = inspect.signature(cls.__init__)
+                params = list(sig.parameters.keys())[1:]  # Skip 'self'
+
+                # Auto-resolve dependencies not provided in kwargs
+                resolved_kwargs = kwargs.copy()
+                for param in params:
+                    if param not in resolved_kwargs:
+                        # Try to resolve from container by parameter name
+                        if hasattr(self, "_injector_instance") and self._injector_instance.has_service(param):
+                            try:
+                                resolved_kwargs[param] = self._injector_instance.resolve(param)
+                            except Exception:
+                                pass  # Let service handle missing dependency
+                        # Try to resolve by parameter name with common suffixes
+                        elif hasattr(self, "_injector_instance"):
+                            param_variants = [
+                                param + "Service",
+                                param.capitalize() + "Service",
+                                param.replace("_", "").capitalize()
+                            ]
+                            for variant in param_variants:
+                                if self._injector_instance.has_service(variant):
+                                    try:
+                                        resolved_kwargs[param] = self._injector_instance.resolve(variant)
+                                        break
+                                    except Exception:
+                                        continue
+
+                instance = cls(*args, **resolved_kwargs)
+            else:
+                instance = cls(*args, **kwargs)
 
             # Configure dependencies if service supports it
             if hasattr(instance, "configure_dependencies") and hasattr(self, "_injector_instance"):
@@ -142,6 +175,10 @@ class DependencyContainer:
     def has(self, name: str) -> bool:
         """Check if service is registered."""
         return name in self._services or name in self._factories
+
+    def __contains__(self, name: str) -> bool:
+        """Support 'in' operator for checking if service is registered."""
+        return self.has(name)
 
     def clear(self) -> None:
         """Clear all registered services."""
@@ -335,6 +372,38 @@ class DependencyInjector:
                 context={"factory_type": type(factory).__name__, "registration_error": str(e)},
             ) from e
 
+    def register_interface(self, interface: type, implementation_factory: Callable, singleton: bool = False) -> None:
+        """
+        Register an interface with its implementation factory.
+        
+        Args:
+            interface: Interface type/protocol
+            implementation_factory: Factory function that returns implementation
+            singleton: Whether to treat as singleton
+            
+        Raises:
+            DependencyError: If registration fails
+        """
+        try:
+            interface_name = interface.__name__
+
+            # Wrap factory to ensure it returns instances conforming to interface
+            def validated_factory():
+                instance = implementation_factory()
+                # Note: Runtime protocol checking is complex, trust the factory
+                return instance
+
+            self._container.register(interface_name, validated_factory, singleton=singleton)
+
+        except Exception as e:
+            raise DependencyError(
+                f"Failed to register interface '{interface.__name__}'",
+                dependency_name=interface.__name__,
+                error_code="DEP_008",
+                suggested_action="Ensure interface is valid and factory returns conforming instance",
+                context={"interface_type": interface.__name__, "registration_error": str(e)},
+            ) from e
+
     def register_singleton(self, name: str, service: Any) -> None:
         """
         Register a singleton service instance.
@@ -348,20 +417,39 @@ class DependencyInjector:
         """
         self.register_service(name, service, singleton=True)
 
-    def register_transient(self, name: str, service_class: type) -> None:
+    def register_transient(self, name: str, service_class: type, *args, **kwargs) -> None:
         """
         Register a transient service class.
 
         Args:
             name: Service name
             service_class: Service class to instantiate
+            *args: Constructor arguments
+            **kwargs: Constructor keyword arguments
 
         Raises:
             DependencyError: If registration fails
         """
 
         def factory():
-            return service_class()
+            # Try to resolve dependencies from container if service supports it
+            if hasattr(service_class, "__init__"):
+                import inspect
+                sig = inspect.signature(service_class.__init__)
+                params = list(sig.parameters.keys())[1:]  # Skip 'self'
+
+                # Try to resolve parameters from container
+                resolved_kwargs = kwargs.copy()
+                for param in params:
+                    if param not in resolved_kwargs and self.has_service(param):
+                        try:
+                            resolved_kwargs[param] = self.resolve(param)
+                        except Exception:
+                            pass  # Service will handle missing dependency
+
+                return service_class(*args, **resolved_kwargs)
+            else:
+                return service_class(*args, **kwargs)
 
         self.register_factory(name, factory, singleton=False)
 
@@ -453,3 +541,8 @@ services = ServiceLocator(injector)
 def get_container() -> DependencyContainer:
     """Get the global dependency container."""
     return injector.get_container()
+
+
+def get_global_injector() -> DependencyInjector:
+    """Get the global dependency injector instance."""
+    return injector

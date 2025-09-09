@@ -1,34 +1,33 @@
 """Tests for service_manager module."""
 
 import asyncio
-import pytest
-from unittest.mock import Mock, patch, AsyncMock, MagicMock
-from decimal import Decimal
+from unittest.mock import Mock
 
-from src.core.service_manager import ServiceManager
-from src.core.exceptions import ServiceError, ConfigurationError, ValidationError
+import pytest
+
 from src.core.base import BaseService
+from src.core.service_manager import ServiceManager
 
 
 class MockService(BaseService):
     """Mock service for testing."""
-    
+
     def __init__(self, name: str = "mock_service"):
         super().__init__(name=name)
         self._is_running = False
         self.start_called = False
         self.stop_called = False
-    
+
     async def start(self):
         """Start the mock service."""
         self.start_called = True
         self._is_running = True
-    
+
     async def stop(self):
         """Stop the mock service."""
         self.stop_called = True
         self._is_running = False
-    
+
     def is_running(self) -> bool:
         """Check if service is running."""
         return self._is_running
@@ -41,7 +40,7 @@ class TestServiceManager:
     def service_manager(self):
         """Create test service manager."""
         from src.core.dependency_injection import DependencyContainer
-        
+
         # Create a mock injector that implements DIContainer interface
         injector = DependencyContainer()
         return ServiceManager(injector)
@@ -63,7 +62,7 @@ class TestServiceManager:
             # Should not raise exception
         except Exception:
             pass
-        
+
         try:
             await service_manager.stop()
             # Should not raise exception
@@ -130,7 +129,7 @@ class TestServiceManager:
         """Test service manager with multiple services."""
         service1 = MockService("service1")
         service2 = MockService("service2")
-        
+
         try:
             service_manager.register_service("service1", service1)
             service_manager.register_service("service2", service2)
@@ -155,7 +154,7 @@ class TestServiceManager:
         # Test with failing service
         failing_service = Mock()
         failing_service.start.side_effect = Exception("Service start failed")
-        
+
         try:
             service_manager.register_service("failing_service", failing_service)
             await service_manager.start_service("failing_service")
@@ -170,6 +169,7 @@ class TestServiceManagerInternal:
     def test_service_manager_registry_operations(self):
         """Test service registry operations."""
         from src.core.dependency_injection import DependencyContainer
+
         injector = DependencyContainer()
         service_manager = ServiceManager(injector)
         mock_service = MockService("test_service")
@@ -184,6 +184,7 @@ class TestServiceManagerInternal:
     def test_service_manager_service_listing(self):
         """Test listing all services."""
         from src.core.dependency_injection import DependencyContainer
+
         injector = DependencyContainer()
         service_manager = ServiceManager(injector)
         try:
@@ -195,6 +196,7 @@ class TestServiceManagerInternal:
     def test_service_manager_clear_services(self):
         """Test clearing service registry."""
         from src.core.dependency_injection import DependencyContainer
+
         injector = DependencyContainer()
         service_manager = ServiceManager(injector)
         mock_service = MockService("test_service")
@@ -212,6 +214,7 @@ class TestServiceManagerLifecycle:
     async def test_service_manager_lifecycle_operations(self):
         """Test service lifecycle operations."""
         from src.core.dependency_injection import DependencyContainer
+
         injector = DependencyContainer()
         service_manager = ServiceManager(injector)
         mock_service = MockService("test_service")
@@ -226,6 +229,7 @@ class TestServiceManagerLifecycle:
     async def test_service_manager_restart_service(self):
         """Test restarting service through manager."""
         from src.core.dependency_injection import DependencyContainer
+
         injector = DependencyContainer()
         service_manager = ServiceManager(injector)
         mock_service = MockService("test_service")
@@ -238,6 +242,7 @@ class TestServiceManagerLifecycle:
     def test_service_manager_get_service_status(self):
         """Test getting service status through manager."""
         from src.core.dependency_injection import DependencyContainer
+
         injector = DependencyContainer()
         service_manager = ServiceManager(injector)
         mock_service = MockService("test_service")
@@ -255,6 +260,7 @@ class TestServiceManagerEdgeCases:
     def test_service_manager_with_none_service(self):
         """Test service manager with None service."""
         from src.core.dependency_injection import DependencyContainer
+
         injector = DependencyContainer()
         service_manager = ServiceManager(injector)
         try:
@@ -266,10 +272,11 @@ class TestServiceManagerEdgeCases:
     def test_service_manager_with_invalid_service_name(self):
         """Test service manager with invalid service name."""
         from src.core.dependency_injection import DependencyContainer
+
         injector = DependencyContainer()
         service_manager = ServiceManager(injector)
         mock_service = MockService()
-        
+
         try:
             service_manager.register_service("", mock_service)  # Empty name
             service_manager.register_service(None, mock_service)  # None name
@@ -281,18 +288,19 @@ class TestServiceManagerEdgeCases:
     async def test_service_manager_concurrent_operations(self):
         """Test concurrent service manager operations."""
         from src.core.dependency_injection import DependencyContainer
+
         injector = DependencyContainer()
         service_manager = ServiceManager(injector)
         mock_services = [MockService(f"service_{i}") for i in range(5)]
-        
+
         try:
             # Register services concurrently
             tasks = []
             for i, service in enumerate(mock_services):
-                tasks.append(asyncio.create_task(
-                    service_manager.register_service(f"service_{i}", service)
-                ))
-            
+                tasks.append(
+                    asyncio.create_task(service_manager.register_service(f"service_{i}", service))
+                )
+
             await asyncio.gather(*tasks, return_exceptions=True)
         except Exception:
             pass
@@ -300,11 +308,12 @@ class TestServiceManagerEdgeCases:
     def test_service_manager_circular_dependencies(self):
         """Test service manager with circular dependencies."""
         from src.core.dependency_injection import DependencyContainer
+
         injector = DependencyContainer()
         service_manager = ServiceManager(injector)
         service1 = MockService("service1")
         service2 = MockService("service2")
-        
+
         try:
             # Create circular dependency
             service_manager.register_service("service1", service1, dependencies=["service2"])
@@ -317,15 +326,16 @@ class TestServiceManagerEdgeCases:
     async def test_service_manager_shutdown_with_active_services(self):
         """Test service manager shutdown with active services."""
         from src.core.dependency_injection import DependencyContainer
+
         injector = DependencyContainer()
         service_manager = ServiceManager(injector)
         mock_services = [MockService(f"service_{i}") for i in range(3)]
-        
+
         try:
             for i, service in enumerate(mock_services):
                 service_manager.register_service(f"service_{i}", service)
                 await service_manager.start_service(f"service_{i}")
-            
+
             # Shutdown manager with active services
             await service_manager.shutdown()
         except Exception:
@@ -335,9 +345,10 @@ class TestServiceManagerEdgeCases:
     async def test_service_manager_memory_cleanup(self):
         """Test service manager memory cleanup."""
         from src.core.dependency_injection import DependencyContainer
+
         injector = DependencyContainer()
         service_manager = ServiceManager(injector)
-        
+
         # Register many services to test memory usage
         for i in range(100):
             mock_service = MockService(f"service_{i}")
@@ -345,7 +356,7 @@ class TestServiceManagerEdgeCases:
                 service_manager.register_service(f"service_{i}", mock_service)
             except Exception:
                 break
-        
+
         try:
             await service_manager.stop_all_services()
         except Exception:

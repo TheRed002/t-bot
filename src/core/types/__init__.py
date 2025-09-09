@@ -6,10 +6,16 @@ Types are now organized into domain-specific modules for better maintainability.
 """
 
 # Base types and common enums
+# State types
+from enum import Enum
+
 from .base import (
     AlertSeverity,
+    BaseValidatedModel,
+    ConfigDict,
     ConnectionType,
     ExchangeType,
+    FinancialBaseModel,
     MarketType,
     RequestType,
     TradingMode,
@@ -55,7 +61,15 @@ from .execution import (
 )
 
 # Market data types
-from .market import ExchangeInfo, ExchangeStatus, MarketData, OrderBook, OrderBookLevel, Ticker
+from .market import (
+    ExchangeGeneralInfo,
+    ExchangeInfo,
+    ExchangeStatus,
+    MarketData,
+    OrderBook,
+    OrderBookLevel,
+    Ticker,
+)
 
 # Risk management types
 from .risk import (
@@ -112,12 +126,29 @@ from .trading import (
     TradeState,
 )
 
+
+class StateType(str, Enum):
+    """State type enumeration for type safety."""
+
+    BOT_STATE = "bot_state"
+    POSITION_STATE = "position_state"
+    ORDER_STATE = "order_state"
+    PORTFOLIO_STATE = "portfolio_state"
+    RISK_STATE = "risk_state"
+    STRATEGY_STATE = "strategy_state"
+    MARKET_STATE = "market_state"
+    TRADE_STATE = "trade_state"
+    EXECUTION = "execution"
+    SYSTEM_STATE = "system_state"
+
+
 # Export all for convenience
 __all__ = [
     "AlertSeverity",
     "AllocationStrategy",
     "ArbitrageOpportunity",
     "Balance",
+    "BaseValidatedModel",
     "BotConfiguration",
     "BotEvent",
     "BotMetrics",
@@ -132,12 +163,14 @@ __all__ = [
     "CircuitBreakerEvent",
     "CircuitBreakerStatus",
     "CircuitBreakerType",
+    "ConfigDict",
     "ConnectionType",
     "CurrencyExposure",
     "DriftType",
     "EmergencyAction",
     "ErrorPattern",
     "ExchangeAllocation",
+    "ExchangeGeneralInfo",
     "ExchangeInfo",
     # Market
     "ExchangeStatus",
@@ -148,6 +181,7 @@ __all__ = [
     "ExecutionResult",
     "ExecutionStatus",
     "FeatureSet",
+    "FinancialBaseModel",
     "FundFlow",
     "IngestionMode",
     "MLMarketData",
@@ -199,6 +233,8 @@ __all__ = [
     "TimeInForce",
     "Trade",
     "TradeState",
+    # State types
+    "StateType",
     # Base
     "TradingMode",
     "ValidationLevel",

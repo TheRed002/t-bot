@@ -7,9 +7,6 @@ These tests cover additional types and enums not covered in the basic types test
 from datetime import datetime, timezone
 from decimal import Decimal
 
-import pytest
-from pydantic import ValidationError
-
 from src.core.types import (
     AllocationStrategy,
     CapitalAllocation,
@@ -369,15 +366,16 @@ class TestOrderBook:
     def test_order_book_creation(self):
         """Test OrderBook model creation."""
         from src.core.types.market import OrderBookLevel
+
         order_book = OrderBook(
             symbol="BTC/USDT",
             bids=[
                 OrderBookLevel(price=Decimal("50000"), quantity=Decimal("1.5")),
-                OrderBookLevel(price=Decimal("49999"), quantity=Decimal("2.0"))
+                OrderBookLevel(price=Decimal("49999"), quantity=Decimal("2.0")),
             ],
             asks=[
                 OrderBookLevel(price=Decimal("50001"), quantity=Decimal("1.2")),
-                OrderBookLevel(price=Decimal("50002"), quantity=Decimal("1.8"))
+                OrderBookLevel(price=Decimal("50002"), quantity=Decimal("1.8")),
             ],
             timestamp=datetime.now(timezone.utc),
             exchange="binance",
@@ -479,11 +477,11 @@ class TestCapitalAllocation:
         allocation = CapitalAllocation(
             allocation_id="alloc_001",
             strategy_id="test_strategy",
-            allocated_capital=Decimal("10000.00"),
-            used_capital=Decimal("5000.00"),
-            available_capital=Decimal("5000.00"),
-            allocation_pct=0.1,
-            target_allocation_pct=0.15,
+            allocated_amount=Decimal("10000.00"),
+            utilized_amount=Decimal("5000.00"),
+            available_amount=Decimal("5000.00"),
+            allocation_percentage=Decimal("0.1"),
+            target_allocation_pct=Decimal("0.15"),
             min_allocation=Decimal("1000.00"),
             max_allocation=Decimal("20000.00"),
             last_rebalance=datetime.now(timezone.utc),
@@ -491,10 +489,10 @@ class TestCapitalAllocation:
 
         assert allocation.allocation_id == "alloc_001"
         assert allocation.strategy_id == "test_strategy"
-        assert allocation.allocated_capital == Decimal("10000.00")
-        assert allocation.used_capital == Decimal("5000.00")
-        assert allocation.available_capital == Decimal("5000.00")
-        assert allocation.allocation_pct == 0.1
+        assert allocation.allocated_amount == Decimal("10000.00")
+        assert allocation.utilized_amount == Decimal("5000.00")
+        assert allocation.available_amount == Decimal("5000.00")
+        assert allocation.allocation_percentage == Decimal("0.1")
 
 
 class TestFundFlow:
@@ -530,34 +528,34 @@ class TestCapitalMetrics:
         """Test CapitalMetrics model creation."""
         metrics = CapitalMetrics(
             total_capital=Decimal("100000.00"),
-            allocated_capital=Decimal("80000.00"),
-            available_capital=Decimal("20000.00"),
+            allocated_amount=Decimal("80000.00"),
+            available_amount=Decimal("20000.00"),
             total_pnl=Decimal("5000.00"),
             realized_pnl=Decimal("3000.00"),
             unrealized_pnl=Decimal("2000.00"),
-            daily_return=0.05,
-            weekly_return=0.12,
-            monthly_return=0.25,
-            yearly_return=0.45,
-            total_return=0.50,
-            sharpe_ratio=1.5,
-            sortino_ratio=1.8,
-            calmar_ratio=2.0,
-            current_drawdown=0.03,
-            max_drawdown=0.15,
+            daily_return=Decimal("0.05"),
+            weekly_return=Decimal("0.12"),
+            monthly_return=Decimal("0.25"),
+            yearly_return=Decimal("0.45"),
+            total_return=Decimal("0.50"),
+            sharpe_ratio=Decimal("1.5"),
+            sortino_ratio=Decimal("1.8"),
+            calmar_ratio=Decimal("2.0"),
+            current_drawdown=Decimal("0.03"),
+            max_drawdown=Decimal("0.15"),
             var_95=Decimal("1000.00"),
             expected_shortfall=Decimal("1500.00"),
             strategies_active=3,
             positions_open=10,
-            leverage_used=1.5,
+            leverage_used=Decimal("1.5"),
             timestamp=datetime.now(timezone.utc),
         )
 
         assert metrics.total_capital == Decimal("100000.00")
-        assert metrics.allocated_capital == Decimal("80000.00")
-        assert metrics.available_capital == Decimal("20000.00")
+        assert metrics.allocated_amount == Decimal("80000.00")
+        assert metrics.available_amount == Decimal("20000.00")
         assert metrics.total_pnl == Decimal("5000.00")
-        assert metrics.sharpe_ratio == 1.5
+        assert metrics.sharpe_ratio == Decimal("1.5")
 
 
 class TestCurrencyExposure:
@@ -591,20 +589,20 @@ class TestExchangeAllocation:
         """Test ExchangeAllocation model creation."""
         allocation = ExchangeAllocation(
             exchange="binance",
-            allocated_capital=Decimal("50000.00"),
-            used_capital=Decimal("20000.00"),
-            available_capital=Decimal("30000.00"),
-            allocation_pct=0.5,
+            allocated_amount=Decimal("50000.00"),
+            utilized_amount=Decimal("20000.00"),
+            available_amount=Decimal("30000.00"),
+            allocation_percentage=Decimal("0.5"),
             num_positions=10,
             total_pnl=Decimal("2000.00"),
             last_activity=datetime.now(timezone.utc),
         )
 
         assert allocation.exchange == "binance"
-        assert allocation.allocated_capital == Decimal("50000.00")
-        assert allocation.used_capital == Decimal("20000.00")
-        assert allocation.available_capital == Decimal("30000.00")
-        assert allocation.allocation_pct == 0.5
+        assert allocation.allocated_amount == Decimal("50000.00")
+        assert allocation.utilized_amount == Decimal("20000.00")
+        assert allocation.available_amount == Decimal("30000.00")
+        assert allocation.allocation_percentage == Decimal("0.5")
         assert allocation.num_positions == 10
 
 
@@ -629,7 +627,7 @@ class TestWithdrawalRule:
         assert rule.name == "profit_only"
         assert rule.enabled is True
         assert rule.trigger_type == "profit_threshold"
-        assert rule.withdrawal_pct == 0.2
+        assert rule.withdrawal_pct == Decimal("0.2")
         assert rule.min_withdrawal == Decimal("1000.00")
         assert rule.max_withdrawal == Decimal("10000.00")
 

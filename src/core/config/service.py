@@ -187,9 +187,7 @@ class FileConfigProvider:
                 self.config_file.stat().st_mtime, tz=timezone.utc
             )
 
-            file_handle = None
-            try:
-                file_handle = open(self.config_file)
+            with open(self.config_file) as file_handle:
                 if self.config_file.suffix.lower() in [".yaml", ".yml"]:
                     import yaml
 
@@ -206,9 +204,6 @@ class FileConfigProvider:
                             "suffix": self.config_file.suffix,
                         },
                     )
-            finally:
-                if file_handle:
-                    file_handle.close()
 
             self._last_modified = current_modified
             self.logger.info(f"Loaded configuration from {self.config_file}")
@@ -835,7 +830,32 @@ async def get_config_service(
     global _config_service_instance
 
     if _config_service_instance is None or reload:
-        _config_service_instance = ConfigService()
+        # Try to get from DI container first
+        try:
+            from ..dependency_injection import get_global_injector
+            injector = get_global_injector()
+            if injector.has_service("ConfigService"):
+                _config_service_instance = injector.resolve("ConfigService")
+                return _config_service_instance
+        except (ImportError, Exception):
+            pass  # Fall back to direct creation
+
+        # Use factory pattern for ConfigService creation
+        try:
+            from ..dependency_injection import get_global_injector
+            injector = get_global_injector()
+
+            # Register ConfigService factory if not already registered
+            if not injector.has_service("ConfigService"):
+                def config_service_factory():
+                    return ConfigService()
+                injector.register_factory("ConfigService", config_service_factory, singleton=True)
+
+            _config_service_instance = injector.resolve("ConfigService")
+        except Exception:
+            # Fallback to direct creation if dependency injection fails
+            _config_service_instance = ConfigService()
+
         await _config_service_instance.initialize(config_file=config_file)
 
     return _config_service_instance
@@ -862,7 +882,7 @@ def register_config_service_in_container(
         config_file: Optional path to configuration file
         enable_hot_reload: Enable hot reloading of configuration
     """
-    from ..dependency_injection import get_container
+    from ..dependency_injection import get_global_injector
 
     # Create ConfigService factory
     async def config_service_factory() -> ConfigService:
@@ -870,10 +890,10 @@ def register_config_service_in_container(
         await service.initialize(config_file=config_file)
         return service
 
-    # Register as singleton in the container
-    container = get_container()
-    container.register("ConfigService", config_service_factory, singleton=True)
-    container.register("config_service", config_service_factory, singleton=True)
+    # Register as singleton in the injector
+    injector = get_global_injector()
+    injector.register_factory("ConfigService", config_service_factory, singleton=True)
+    injector.register_factory("config_service", config_service_factory, singleton=True)
 
     # Log successful registration
     from src.core.logging import get_logger

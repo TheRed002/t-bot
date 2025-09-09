@@ -7,6 +7,7 @@ ensuring consistent behavior across the entire system.
 
 from __future__ import annotations
 
+import abc
 import builtins
 from datetime import datetime, timezone
 from enum import Enum
@@ -43,6 +44,16 @@ class HealthCheckResult:
         self.details = details or {}
         self.message = message
         self.check_time = check_time or datetime.now(timezone.utc)
+
+    @property
+    def healthy(self) -> bool:
+        """Check if the component is healthy."""
+        return self.status == HealthStatus.HEALTHY
+
+    @property
+    def component(self) -> str:
+        """Get component name from details or return default."""
+        return self.details.get("component", "Unknown")
 
     def to_dict(self) -> dict[str, Any]:
         """Convert health check result to dictionary."""
@@ -350,3 +361,159 @@ class FactoryComponent(Protocol):
     def logger(self) -> Any: ...
     @property
     def correlation_id(self) -> str | None: ...
+
+
+# Web Service Interface Protocols
+class WebServiceInterface(Protocol):
+    """Base interface for web service implementations."""
+
+    async def initialize(self) -> None:
+        """Initialize the service."""
+        ...
+
+    async def cleanup(self) -> None:
+        """Cleanup service resources."""
+        ...
+
+
+class TradingServiceInterface(WebServiceInterface):
+    """Interface for trading operations."""
+
+    @abc.abstractmethod
+    async def place_order(
+        self,
+        symbol: str,
+        side: str,  # Use string to avoid circular dependency
+        order_type: str,  # Use string to avoid circular dependency
+        amount: Any,  # Use Any to avoid decimal import issues
+        price: Any | None = None,
+    ) -> str:
+        """Place a trading order."""
+        ...
+
+    @abc.abstractmethod
+    async def cancel_order(self, order_id: str) -> bool:
+        """Cancel an order."""
+        ...
+
+    @abc.abstractmethod
+    async def get_positions(self) -> list[Any]:
+        """Get current positions."""
+        ...
+
+
+class BotManagementServiceInterface(WebServiceInterface):
+    """Interface for bot management operations."""
+
+    @abc.abstractmethod
+    async def create_bot(self, config: Any) -> str:
+        """Create a new trading bot."""
+        ...
+
+    @abc.abstractmethod
+    async def start_bot(self, bot_id: str) -> bool:
+        """Start a bot."""
+        ...
+
+    @abc.abstractmethod
+    async def stop_bot(self, bot_id: str) -> bool:
+        """Stop a bot."""
+        ...
+
+    @abc.abstractmethod
+    async def get_bot_status(self, bot_id: str) -> dict[str, Any]:
+        """Get bot status."""
+        ...
+
+    @abc.abstractmethod
+    async def list_bots(self) -> list[dict[str, Any]]:
+        """List all bots."""
+        ...
+
+    @abc.abstractmethod
+    async def get_all_bots_status(self) -> dict[str, Any]:
+        """Get status of all bots."""
+        ...
+
+    @abc.abstractmethod
+    async def delete_bot(self, bot_id: str, force: bool = False) -> bool:
+        """Delete a bot."""
+        ...
+
+
+class MarketDataServiceInterface(WebServiceInterface):
+    """Interface for market data operations."""
+
+    @abc.abstractmethod
+    async def get_ticker(self, symbol: str) -> Any:
+        """Get current ticker data."""
+        ...
+
+    @abc.abstractmethod
+    async def subscribe_to_ticker(self, symbol: str, callback: Any) -> None:
+        """Subscribe to ticker updates."""
+        ...
+
+    @abc.abstractmethod
+    async def unsubscribe_from_ticker(self, symbol: str) -> None:
+        """Unsubscribe from ticker updates."""
+        ...
+
+
+class PortfolioServiceInterface(WebServiceInterface):
+    """Interface for portfolio operations."""
+
+    @abc.abstractmethod
+    async def get_balance(self) -> dict[str, Any]:
+        """Get account balances."""
+        ...
+
+    @abc.abstractmethod
+    async def get_portfolio_summary(self) -> dict[str, Any]:
+        """Get portfolio summary."""
+        ...
+
+    @abc.abstractmethod
+    async def get_pnl_report(self, start_date: Any, end_date: Any) -> dict[str, Any]:
+        """Get P&L report for date range."""
+        ...
+
+
+class RiskServiceInterface(WebServiceInterface):
+    """Interface for risk management operations."""
+
+    @abc.abstractmethod
+    async def validate_order(
+        self, symbol: str, side: str, amount: Any, price: Any | None = None
+    ) -> dict[str, Any]:
+        """Validate an order against risk rules."""
+        ...
+
+    @abc.abstractmethod
+    async def get_risk_metrics(self) -> dict[str, Any]:
+        """Get current risk metrics."""
+        ...
+
+    @abc.abstractmethod
+    async def update_risk_limits(self, limits: dict[str, Any]) -> bool:
+        """Update risk limits."""
+        ...
+
+
+class StrategyServiceInterface(WebServiceInterface):
+    """Interface for strategy operations."""
+
+    @abc.abstractmethod
+    async def list_strategies(self) -> list[dict[str, Any]]:
+        """List available strategies."""
+        ...
+
+    @abc.abstractmethod
+    async def get_strategy_config(self, strategy_name: str) -> dict[str, Any]:
+        """Get strategy configuration."""
+        ...
+
+    @abc.abstractmethod
+    async def validate_strategy_config(self, strategy_name: str, config: dict[str, Any]) -> bool:
+        """Validate strategy configuration."""
+        ...

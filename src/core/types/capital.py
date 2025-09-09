@@ -27,6 +27,8 @@ class CapitalFundFlow(BaseModel):
     reason: str  # "deposit", "withdrawal", "reallocation", "auto_compound", "currency_conversion"
     timestamp: datetime
     metadata: dict[str, Any] = Field(default_factory=dict)
+    fees: Decimal | None = None
+    fee_amount: Decimal | None = None
 
 
 class CapitalCurrencyExposure(BaseModel):
@@ -35,7 +37,7 @@ class CapitalCurrencyExposure(BaseModel):
     currency: str
     total_exposure: Decimal  # Total amount in this currency
     base_currency_equivalent: Decimal  # Equivalent in base currency
-    exposure_percentage: float  # Percentage of total portfolio
+    exposure_percentage: Decimal  # Percentage of total portfolio
     hedging_required: bool = False
     hedge_amount: Decimal = Decimal("0")
     timestamp: datetime
@@ -48,10 +50,10 @@ class CapitalExchangeAllocation(BaseModel):
     allocated_amount: Decimal
     utilized_amount: Decimal = Decimal("0")
     available_amount: Decimal
-    utilization_rate: float = 0.0
-    liquidity_score: float = 0.5
-    fee_efficiency: float = 0.5
-    reliability_score: float = 0.5
+    utilization_rate: Decimal = Decimal("0.0")
+    liquidity_score: Decimal = Decimal("0.5")
+    fee_efficiency: Decimal = Decimal("0.5")
+    reliability_score: Decimal = Decimal("0.5")
     last_rebalance: datetime
 
 
@@ -63,18 +65,18 @@ class ExtendedCapitalProtection(BaseModel):
     min_capital_threshold: Decimal
     stop_trading_threshold: Decimal
     reduce_size_threshold: Decimal
-    size_reduction_factor: float
+    size_reduction_factor: Decimal
     max_daily_loss: Decimal
     max_weekly_loss: Decimal
     max_monthly_loss: Decimal
     emergency_threshold: Decimal
 
     # Additional fields used by fund flow manager
-    emergency_reserve_pct: float = 0.1
-    max_daily_loss_pct: float = 0.05
-    max_weekly_loss_pct: float = 0.10
-    max_monthly_loss_pct: float = 0.20
-    profit_lock_pct: float = 0.5
+    emergency_reserve_pct: Decimal = Decimal("0.1")
+    max_daily_loss_pct: Decimal = Decimal("0.05")
+    max_weekly_loss_pct: Decimal = Decimal("0.10")
+    max_monthly_loss_pct: Decimal = Decimal("0.20")
+    profit_lock_pct: Decimal = Decimal("0.5")
     auto_compound_enabled: bool = True
 
 
@@ -84,7 +86,7 @@ class ExtendedWithdrawalRule(BaseModel):
     name: str
     description: str = ""
     enabled: bool = True
-    threshold: float | None = None
+    threshold: Decimal | None = None
     min_amount: Decimal | None = None
-    max_percentage: float | None = None
+    max_percentage: Decimal | None = None
     cooldown_hours: int | None = None

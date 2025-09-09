@@ -100,6 +100,24 @@ class RiskConfig(BaseConfig):
     circuit_breaker_cooldown: int = Field(
         default=3600, ge=60, le=86400, description="Circuit breaker cooldown in seconds"
     )
+    daily_loss_limit_pct: float = Field(
+        default=0.05,
+        ge=0.001,
+        le=0.2,
+        description="Daily loss limit percentage for circuit breaker",
+    )
+    volatility_spike_threshold: float = Field(
+        default=0.05, ge=0.001, le=0.5, description="Volatility spike threshold for circuit breaker"
+    )
+    volatility_lookback_period: int = Field(
+        default=20, ge=5, le=100, description="Days for volatility calculation in circuit breaker"
+    )
+    breaker_evaluation_timeout: float = Field(
+        default=30.0,
+        ge=1.0,
+        le=300.0,
+        description="Timeout for circuit breaker evaluation in seconds",
+    )
 
     # Correlation limits
     max_correlation: float = Field(
@@ -107,6 +125,20 @@ class RiskConfig(BaseConfig):
     )
     correlation_window: int = Field(
         default=30, ge=10, le=100, description="Correlation calculation window in days"
+    )
+
+    # VaR calculation parameters
+    var_confidence_level: float = Field(
+        default=0.95, ge=0.5, le=0.999, description="VaR confidence level (95%)"
+    )
+    var_calculation_window: int = Field(
+        default=252, ge=10, le=1000, description="VaR calculation window (trading days)"
+    )
+    base_var_pct: float = Field(
+        default=0.02,
+        ge=0.001,
+        le=0.1,
+        description="Base VaR percentage for insufficient data fallback",
     )
 
     # Kelly Criterion parameters (if used)
@@ -129,6 +161,35 @@ class RiskConfig(BaseConfig):
     )
     risk_parity_rebalance_threshold: float = Field(
         default=0.1, ge=0.01, le=0.5, description="Rebalance threshold for risk parity"
+    )
+
+    # Position sizing volatility parameters
+    volatility_target: float = Field(
+        default=0.02, ge=0.005, le=0.10, description="Target volatility for position sizing"
+    )
+    min_volatility: float = Field(
+        default=0.001,
+        ge=0.0001,
+        le=0.01,
+        description="Minimum volatility to avoid division by zero",
+    )
+    min_volatility_adjustment: float = Field(
+        default=0.1, ge=0.01, le=1.0, description="Minimum volatility adjustment factor"
+    )
+    max_volatility_adjustment: float = Field(
+        default=5.0, ge=1.0, le=20.0, description="Maximum volatility adjustment factor"
+    )
+    min_reasonable_price: float = Field(
+        default=0.000001,
+        ge=0.000000001,
+        le=0.01,
+        description="Minimum reasonable price for validation",
+    )
+    max_reasonable_price: float = Field(
+        default=1000000.0,
+        ge=1000.0,
+        le=10000000.0,
+        description="Maximum reasonable price for validation",
     )
 
     # Portfolio limits

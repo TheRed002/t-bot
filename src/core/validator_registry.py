@@ -327,7 +327,7 @@ _validator_registry.register_rule(
 
 _validator_registry.register_rule(
     "percentage",
-    lambda x: isinstance(x, int | float) and 0 <= x <= 100,
+    lambda x: isinstance(x, int | float | Decimal) and Decimal("0") <= x <= Decimal("100"),
     "Percentage must be between 0 and 100",
 )
 

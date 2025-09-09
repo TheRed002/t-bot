@@ -29,15 +29,26 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import psutil
 
 from src.core.base.component import BaseComponent
-from src.core.config import Config
 from src.core.exceptions import PerformanceError
 from src.core.logging import get_logger
-from src.utils.decorators import time_execution
+
+if TYPE_CHECKING:
+    from src.core.config import Config
+
+
+def time_execution(func):
+    """Simple timing decorator to avoid circular imports."""
+    def wrapper(*args, **kwargs):
+        start_time = time.time()
+        result = func(*args, **kwargs)
+        end_time = time.time()
+        return result
+    return wrapper
 
 logger = get_logger(__name__)
 
@@ -389,7 +400,7 @@ class MemoryOptimizer(BaseComponent):
     and leak detection for high-performance trading operations.
     """
 
-    def __init__(self, config: Config):
+    def __init__(self, config: "Config"):
         """Initialize memory optimizer."""
         super().__init__()
         self.config = config

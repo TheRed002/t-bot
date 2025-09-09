@@ -11,8 +11,11 @@ import yaml
 from .bot_management import BotManagementConfig
 from .capital import CapitalManagementConfig
 from .database import DatabaseConfig
+from .environment import EnvironmentConfig
 from .exchange import ExchangeConfig
+from .execution import ExecutionConfig
 from .risk import RiskConfig
+from .sandbox import SandboxExchangeConfig
 from .security import SecurityConfig
 from .state_management import StateManagementConfig
 from .strategy import StrategyConfig
@@ -40,7 +43,10 @@ class Config:
 
         # Initialize domain configs
         self.database = DatabaseConfig()
+        self.environment_config = EnvironmentConfig()
         self.exchange = ExchangeConfig()
+        self.sandbox = SandboxExchangeConfig()
+        self.execution = ExecutionConfig()
         self.strategy = StrategyConfig()
         self.risk = RiskConfig()
         self.security = SecurityConfig()
@@ -82,25 +88,26 @@ class Config:
 
     def _parse_config_file(self, config_path: Path) -> dict[str, Any]:
         """Parse config file based on format."""
-        file_handle = None
         try:
-            file_handle = open(config_path)
-            if config_path.suffix in [".yaml", ".yml"]:
-                return yaml.safe_load(file_handle)
-            elif config_path.suffix == ".json":
-                return json.load(file_handle)
-            else:
-                raise ValueError(f"Unsupported config file format: {config_path.suffix}")
-        finally:
-            if file_handle:
-                file_handle.close()
+            with open(config_path) as file_handle:
+                if config_path.suffix in [".yaml", ".yml"]:
+                    return yaml.safe_load(file_handle)
+                elif config_path.suffix == ".json":
+                    return json.load(file_handle)
+                else:
+                    raise ValueError(f"Unsupported config file format: {config_path.suffix}")
+        except Exception as e:
+            raise ValueError(f"Failed to parse config file {config_path}: {e!s}") from e
 
     def _apply_config_data(self, config_data: dict[str, Any]) -> None:
         """Apply configuration data to domain configs."""
         # Define config section mappings
         config_mappings = {
             "database": self.database,
+            "environment": self.environment_config,
             "exchange": self.exchange,
+            "sandbox": self.sandbox,
+            "execution": self.execution,
             "strategy": self.strategy,
             "risk": self.risk,
             "security": self.security,
@@ -142,7 +149,9 @@ class Config:
                 "logs_dir": str(self.logs_dir),
             },
             "database": self.database.model_dump(),
+            "environment": self.environment_config.model_dump(),
             "exchange": self.exchange.model_dump(),
+            "execution": self.execution.model_dump(),
             "strategy": self.strategy.model_dump(),
             "risk": self.risk.model_dump(),
             "security": self.security.model_dump(),
@@ -240,8 +249,48 @@ class Config:
         return self.risk.risk_per_trade
 
     def get_exchange_config(self, exchange: str) -> dict[str, Any]:
-        """Get configuration for a specific exchange."""
-        return self.exchange.get_exchange_credentials(exchange)
+        """Get configuration for a specific exchange with environment awareness."""
+        # Get base configuration from exchange config
+        base_config = self.exchange.get_exchange_credentials(exchange)
+
+        # Merge with environment-specific settings
+        env_config = self.get_environment_exchange_config(exchange)
+
+        # Merge configurations (environment takes precedence)
+        merged_config = {**base_config, **env_config}
+
+        return merged_config
+
+    def get_environment_exchange_config(self, exchange: str) -> dict[str, Any]:
+        """Get environment-aware configuration for a specific exchange."""
+        # Get environment-specific endpoints
+        endpoints = self.environment_config.get_exchange_endpoints(exchange)
+
+        # Get environment-specific credentials
+        env_credentials = self.environment_config.get_exchange_credentials(exchange)
+
+        # Get sandbox credentials if in sandbox mode
+        sandbox_credentials = {}
+        if not self.environment_config.is_production_environment(exchange):
+            try:
+                sandbox_credentials = self.sandbox.get_sandbox_credentials(exchange)
+            except (AttributeError, KeyError, ValueError) as e:
+                # Fallback if sandbox config not available
+                self.logger.debug(f"Sandbox credentials not available for {exchange}: {e}")
+
+        # Merge credentials (sandbox overrides environment for non-production)
+        if sandbox_credentials:
+            credentials = {**env_credentials, **sandbox_credentials}
+        else:
+            credentials = env_credentials
+
+        # Combine endpoints and credentials
+        return {
+            **endpoints,
+            **credentials,
+            "environment_mode": self.environment_config.get_exchange_environment(exchange).value,
+            "is_production": self.environment_config.is_production_environment(exchange),
+        }
 
     def get_strategy_config(self, strategy_type: str) -> dict[str, Any]:
         """Get configuration for a specific strategy."""
@@ -265,10 +314,161 @@ class Config:
         return config_data
 
     def _json_serializer(self, obj):
-        """Custom JSON serializer for Decimal objects."""
+        """Custom JSON serializer for Decimal and Enum objects."""
+        from datetime import datetime
+        from enum import Enum
+        from pathlib import Path
+
         if isinstance(obj, Decimal):
             return float(obj)
+        elif isinstance(obj, Enum):
+            return obj.value
+        elif isinstance(obj, datetime):
+            return obj.isoformat()
+        elif isinstance(obj, Path):
+            return str(obj)
         raise TypeError(f"Object of type {obj.__class__.__name__} is not JSON serializable")
+
+    def switch_environment(self, environment: str, exchange: str = None) -> bool:
+        """
+        Switch trading environment globally or for a specific exchange.
+        
+        Args:
+            environment: Target environment ('sandbox', 'live', 'mock', 'hybrid')
+            exchange: Optional specific exchange name, None for global switch
+            
+        Returns:
+            bool: True if switch was successful
+            
+        Raises:
+            ValueError: If environment is invalid or switching failed
+        """
+        from .environment import ExchangeEnvironment, TradingEnvironment
+
+        if exchange:
+            # Switch specific exchange environment
+            exchange = exchange.lower()
+            try:
+                env_value = ExchangeEnvironment(environment.lower())
+                if exchange == "binance":
+                    self.environment_config.binance_environment = env_value
+                elif exchange == "coinbase":
+                    self.environment_config.coinbase_environment = env_value
+                elif exchange == "okx":
+                    self.environment_config.okx_environment = env_value
+                else:
+                    raise ValueError(f"Unknown exchange: {exchange}")
+
+                return True
+            except ValueError:
+                raise ValueError(f"Invalid environment for exchange {exchange}: {environment}")
+        else:
+            # Switch global environment
+            try:
+                self.environment_config.global_environment = TradingEnvironment(environment.lower())
+                return True
+            except ValueError:
+                raise ValueError(f"Invalid global environment: {environment}")
+
+    def validate_environment_switch(self, environment: str, exchange: str = None) -> dict[str, Any]:
+        """
+        Validate if environment switch is safe and possible.
+        
+        Args:
+            environment: Target environment
+            exchange: Optional specific exchange name
+            
+        Returns:
+            dict: Validation results with 'valid' bool and details
+        """
+        from .environment import ExchangeEnvironment, TradingEnvironment
+
+        results = {
+            "valid": True,
+            "warnings": [],
+            "errors": [],
+            "required_actions": []
+        }
+
+        try:
+            if exchange:
+                # Validate exchange-specific switch
+                env_value = ExchangeEnvironment(environment.lower())
+                target_exchange = exchange.lower()
+
+                # Check if production credentials are available for live trading
+                if env_value in (ExchangeEnvironment.LIVE, ExchangeEnvironment.PRODUCTION):
+                    if not self.environment_config.validate_production_credentials(target_exchange):
+                        results["valid"] = False
+                        results["errors"].append(
+                            f"Production credentials not configured for {target_exchange}"
+                        )
+                        results["required_actions"].append(
+                            f"Configure production API credentials for {target_exchange}"
+                        )
+
+                # Check production safeguards
+                if (env_value in (ExchangeEnvironment.LIVE, ExchangeEnvironment.PRODUCTION) and
+                    self.environment_config.enable_production_safeguards):
+                    results["warnings"].append(
+                        "Switching to production environment - ensure proper risk controls are in place"
+                    )
+                    if self.environment_config.production_confirmation:
+                        results["required_actions"].append(
+                            "Production confirmation required before switching"
+                        )
+            else:
+                # Validate global switch
+                env_value = TradingEnvironment(environment.lower())
+
+                if env_value == TradingEnvironment.LIVE:
+                    # Check all exchanges for production readiness
+                    for exch in ["binance", "coinbase", "okx"]:
+                        if not self.environment_config.validate_production_credentials(exch):
+                            results["warnings"].append(
+                                f"Production credentials not configured for {exch}"
+                            )
+
+        except ValueError:
+            results["valid"] = False
+            results["errors"].append(f"Invalid environment: {environment}")
+
+        return results
+
+    def get_current_environment_status(self) -> dict[str, Any]:
+        """Get detailed status of current environment configuration."""
+        return {
+            "global_environment": self.environment_config.global_environment.value,
+            "environment_summary": self.environment_config.get_environment_summary(),
+            "exchange_configurations": {
+                exchange: self.get_environment_exchange_config(exchange)
+                for exchange in ["binance", "coinbase", "okx"]
+            },
+            "production_safeguards": {
+                "enabled": self.environment_config.enable_production_safeguards,
+                "confirmation_required": self.environment_config.production_confirmation,
+                "credentials_validation": self.environment_config.require_credentials_validation,
+            }
+        }
+
+    def is_production_mode(self, exchange: str = None) -> bool:
+        """
+        Check if system is in production mode.
+        
+        Args:
+            exchange: Optional specific exchange, None for any exchange
+            
+        Returns:
+            bool: True if in production mode
+        """
+        if exchange:
+            return self.environment_config.is_production_environment(exchange)
+        else:
+            # Check if any exchange is in production mode
+            return any(
+                self.environment_config.is_production_environment(exch)
+                for exch in ["binance", "coinbase", "okx"]
+            )
 
 
 # Global config instance (singleton pattern)
