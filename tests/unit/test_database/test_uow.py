@@ -1,8 +1,10 @@
 """
 Optimized unit tests for Unit of Work pattern implementation.
 """
+
 import logging
 from unittest.mock import Mock
+
 import pytest
 
 # Set logging to CRITICAL to reduce I/O
@@ -40,14 +42,14 @@ class TestUnitOfWork:
         uow._logger = Mock()
         uow.trading_service = None
         uow._repositories = {}
-        
+
         # Mock the methods that exist in UnitOfWork
         uow.commit = Mock()
         uow.rollback = Mock()
         uow.close = Mock()
         uow.refresh = Mock()
         uow.flush = Mock()
-        
+
         return uow
 
     def test_unit_of_work_init_with_config(self, mock_session_factory, mock_config):
@@ -57,7 +59,7 @@ class TestUnitOfWork:
         uow.config = mock_config
         uow.session = None
         uow.error_handler = Mock()
-        
+
         assert uow.session_factory == mock_session_factory
         assert uow.config == mock_config
         assert uow.session is None
@@ -65,10 +67,8 @@ class TestUnitOfWork:
 
     def test_unit_of_work_methods_exist(self, unit_of_work):
         """Test that UnitOfWork has all expected methods."""
-        expected_methods = [
-            'commit', 'rollback', 'close', 'refresh', 'flush'
-        ]
-        
+        expected_methods = ["commit", "rollback", "close", "refresh", "flush"]
+
         for method_name in expected_methods:
             assert hasattr(unit_of_work, method_name)
             assert callable(getattr(unit_of_work, method_name))
@@ -77,14 +77,14 @@ class TestUnitOfWork:
         """Test entering context manager."""
         mock_session = Mock()
         mock_session_factory.return_value = mock_session
-        
+
         # Mock context manager behavior
         unit_of_work.__enter__ = Mock(return_value=unit_of_work)
         unit_of_work.session = mock_session
         unit_of_work.trading_service = Mock()
-        
+
         result = unit_of_work.__enter__()
-        
+
         assert result == unit_of_work
 
     def test_context_manager_exit_success(self, unit_of_work, mock_session_factory):
@@ -92,10 +92,10 @@ class TestUnitOfWork:
         mock_session = Mock()
         mock_session.commit = Mock()
         mock_session.close = Mock()
-        
+
         unit_of_work.session = mock_session
         unit_of_work.__exit__ = Mock()
-        
+
         unit_of_work.__exit__(None, None, None)
         unit_of_work.__exit__.assert_called_once_with(None, None, None)
 
@@ -103,10 +103,10 @@ class TestUnitOfWork:
         """Test explicit commit operation."""
         mock_session = Mock()
         mock_session.commit = Mock()
-        
+
         unit_of_work.session = mock_session
         unit_of_work.commit = Mock()
-        
+
         unit_of_work.commit()
         unit_of_work.commit.assert_called_once()
 
@@ -114,10 +114,10 @@ class TestUnitOfWork:
         """Test explicit rollback operation."""
         mock_session = Mock()
         mock_session.rollback = Mock()
-        
+
         unit_of_work.session = mock_session
         unit_of_work.rollback = Mock()
-        
+
         unit_of_work.rollback()
         unit_of_work.rollback.assert_called_once()
 
@@ -125,10 +125,10 @@ class TestUnitOfWork:
         """Test refreshing entity from database."""
         mock_session = Mock()
         mock_entity = Mock()
-        
+
         unit_of_work.session = mock_session
         unit_of_work.refresh = Mock()
-        
+
         unit_of_work.refresh(mock_entity)
         unit_of_work.refresh.assert_called_once_with(mock_entity)
 
@@ -166,23 +166,23 @@ class TestAsyncUnitOfWork:
         uow = Mock()
         uow.async_session_factory = mock_session_factory
         uow.session = None
-        
+
         assert uow.async_session_factory == mock_session_factory
         assert uow.session is None
 
     def test_async_context_manager(self, async_unit_of_work, mock_session_factory):
         """Test async context manager functionality."""
         mock_session = Mock()
-        
+
         async_unit_of_work.__aenter__ = Mock()
         async_unit_of_work.__aexit__ = Mock()
         async_unit_of_work.session = mock_session
-        
+
         # Test that async methods exist
-        assert hasattr(async_unit_of_work, '__aenter__')
-        assert hasattr(async_unit_of_work, '__aexit__')
-        assert hasattr(async_unit_of_work, 'commit')
-        assert hasattr(async_unit_of_work, 'rollback')
+        assert hasattr(async_unit_of_work, "__aenter__")
+        assert hasattr(async_unit_of_work, "__aexit__")
+        assert hasattr(async_unit_of_work, "commit")
+        assert hasattr(async_unit_of_work, "rollback")
 
 
 class TestUnitOfWorkErrorHandling:
@@ -238,9 +238,9 @@ class TestUnitOfWorkTransactionManagement:
         """Test transaction isolation between UoW instances."""
         uow1 = Mock()
         uow2 = Mock()
-        
+
         uow1.session = Mock()
         uow2.session = Mock()
-        
+
         # Each should have its own session
         assert uow1.session != uow2.session

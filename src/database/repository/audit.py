@@ -34,9 +34,13 @@ class CapitalAuditLogRepository(DatabaseRepository):
         """Get audit logs by exchange."""
         return await self.get_all(filters={"exchange": exchange}, order_by="-timestamp")
 
-    async def get_by_date_range(self, start_date: datetime, end_date: datetime) -> list[CapitalAuditLog]:
+    async def get_by_date_range(
+        self, start_date: datetime, end_date: datetime
+    ) -> list[CapitalAuditLog]:
         """Get audit logs by date range."""
-        return await self.get_all(filters={"timestamp": {"gte": start_date, "lte": end_date}}, order_by="-timestamp")
+        return await self.get_all(
+            filters={"timestamp": {"gte": start_date, "lte": end_date}}, order_by="-timestamp"
+        )
 
 
 class ExecutionAuditLogRepository(DatabaseRepository):

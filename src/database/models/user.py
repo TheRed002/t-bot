@@ -38,6 +38,14 @@ class User(Base, TimestampMixin, MetadataMixin):
 
     # Relationships
     balance_snapshots = relationship("BalanceSnapshot", back_populates="user")
+    backtest_runs = relationship("BacktestRun", back_populates="user", cascade="all, delete-orphan")
+
+    # Alert relationships - fix missing back_populates for system models
+    alert_rules_created = relationship("AlertRule", foreign_keys="AlertRule.created_by")
+    escalation_policies_created = relationship(
+        "EscalationPolicy", foreign_keys="EscalationPolicy.created_by"
+    )
+    audit_logs = relationship("AuditLog")
 
     # Indexes and constraints
     __table_args__ = (
@@ -47,11 +55,15 @@ class User(Base, TimestampMixin, MetadataMixin):
         Index("idx_users_verified", "is_verified"),  # User verification status
         Index("idx_users_login", "last_login_at"),  # Recent activity tracking
         Index("idx_users_locked", "locked_until"),  # Account lockout queries
-        CheckConstraint("failed_login_attempts >= 0", name="check_failed_login_attempts_non_negative"),
+        CheckConstraint(
+            "failed_login_attempts >= 0", name="check_failed_login_attempts_non_negative"
+        ),
         CheckConstraint("LENGTH(username) >= 3", name="check_username_min_length"),
         CheckConstraint("LENGTH(email) >= 5", name="check_email_min_length"),
         CheckConstraint("email LIKE '%@%'", name="check_email_format"),
-        CheckConstraint("failed_login_attempts <= 10", name="check_failed_login_attempts_max"),  # Reasonable limit
+        CheckConstraint(
+            "failed_login_attempts <= 10", name="check_failed_login_attempts_max"
+        ),  # Reasonable limit
     )
 
     def __repr__(self):

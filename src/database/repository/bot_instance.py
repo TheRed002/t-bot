@@ -77,7 +77,9 @@ class BotInstanceRepository(DatabaseRepository):
             List of bot instances with specified status
         """
         result = await self.session.execute(
-            select(BotInstance).where(BotInstance.status == status).order_by(desc(BotInstance.updated_at))
+            select(BotInstance)
+            .where(BotInstance.status == status)
+            .order_by(desc(BotInstance.updated_at))
         )
         return list(result.scalars().all())
 
@@ -92,7 +94,9 @@ class BotInstanceRepository(DatabaseRepository):
             List of bot instances using the strategy
         """
         result = await self.session.execute(
-            select(BotInstance).where(BotInstance.strategy_name == strategy_name).order_by(BotInstance.created_at)
+            select(BotInstance)
+            .where(BotInstance.strategy_name == strategy_name)
+            .order_by(BotInstance.created_at)
         )
         return list(result.scalars().all())
 
@@ -107,7 +111,9 @@ class BotInstanceRepository(DatabaseRepository):
             List of bot instances for the exchange
         """
         result = await self.session.execute(
-            select(BotInstance).where(BotInstance.exchange == exchange).order_by(BotInstance.created_at)
+            select(BotInstance)
+            .where(BotInstance.exchange == exchange)
+            .order_by(BotInstance.created_at)
         )
         return list(result.scalars().all())
 
@@ -302,27 +308,13 @@ class BotInstanceRepository(DatabaseRepository):
         Returns:
             Number of bots deleted
         """
-        from datetime import timedelta
-
-        cutoff_time = datetime.now(timezone.utc) - timedelta(days=days)
-
-        # Find bots to delete
-        result = await self.session.execute(
-            select(BotInstance).where(
-                and_(
-                    BotInstance.status == status,
-                    BotInstance.updated_at < cutoff_time,
-                )
-            )
+        return await RepositoryUtils.cleanup_old_entities(
+            self.session,
+            self.model,
+            days=days,
+            date_field="updated_at",
+            additional_filters={"status": status},
         )
-        bots_to_delete = result.scalars().all()
-
-        # Delete bots
-        for bot in bots_to_delete:
-            await self.session.delete(bot)
-
-        await self.session.commit()
-        return len(bots_to_delete)
 
     async def get_bots_by_symbol(self, symbol: str) -> list[BotInstance]:
         """

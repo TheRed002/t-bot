@@ -52,7 +52,9 @@ class RepositoryUtils(Generic[T]):
             raise RepositoryError(f"Failed to update {entity_name} status: {e}") from e
 
     @staticmethod
-    async def update_entity_fields(repository: Any, entity_id: str, entity_name: str, **fields: Any) -> bool:
+    async def update_entity_fields(
+        repository: Any, entity_id: str, entity_name: str, **fields: Any
+    ) -> bool:
         """
         Update entity fields with consistent pattern.
 
@@ -130,6 +132,7 @@ class RepositoryUtils(Generic[T]):
         hours: int = 24,
         additional_filters: dict[str, Any] | None = None,
         order_by: str = "-created_at",
+        timestamp_field: str = "created_at",
     ) -> list[T]:
         """
         Get recent entities within time range with consistent pattern.
@@ -139,18 +142,20 @@ class RepositoryUtils(Generic[T]):
             hours: Number of hours to look back
             additional_filters: Additional filters to apply
             order_by: Order by field (default: -created_at)
+            timestamp_field: Field to use for time filtering
 
         Returns:
             list: List of recent entities
         """
         try:
-            filters = additional_filters or {}
-            # Note: Time-based filtering would need to be implemented in the base repository
-            # This is a placeholder for consistent interface
-            cutoff_time = datetime.now(timezone.utc) - timedelta(hours=hours)
-            logger.debug(f"Getting entities from the last {hours} hours (cutoff: {cutoff_time})")
-
-            return await repository.get_all(filters=filters, order_by=order_by)
+            return await RepositoryUtils.execute_time_based_query(
+                repository.session,
+                repository.model,
+                timestamp_field=timestamp_field,
+                hours=hours,
+                additional_filters=additional_filters,
+                order_by=order_by,
+            )
         except Exception as e:
             logger.error(f"Failed to get recent entities: {e}")
             raise RepositoryError(f"Failed to get recent entities: {e}") from e
@@ -208,7 +213,9 @@ class RepositoryUtils(Generic[T]):
                 setattr(entity, field_name, field_value)
                 await repository.update(entity)
                 count += 1
-            logger.debug(f"Bulk marked {count} {entity_name} entities {field_name} as {field_value}")
+            logger.debug(
+                f"Bulk marked {count} {entity_name} entities {field_name} as {field_value}"
+            )
             return count
         except Exception as e:
             logger.error(f"Failed to bulk mark {entity_name} entities: {e}")
@@ -257,7 +264,9 @@ class RepositoryUtils(Generic[T]):
             raise RepositoryError(f"Failed to get total aggregation: {e}") from e
 
     @staticmethod
-    async def get_latest_entity_by_field(repository: Any, field_name: str, field_value: Any) -> T | None:
+    async def get_latest_entity_by_field(
+        repository: Any, field_name: str, field_value: Any
+    ) -> T | None:
         """
         Get latest entity by field with consistent pattern.
 
@@ -270,7 +279,9 @@ class RepositoryUtils(Generic[T]):
             Entity or None: Latest matching entity
         """
         try:
-            entities = await repository.get_all(filters={field_name: field_value}, order_by="-created_at", limit=1)
+            entities = await repository.get_all(
+                filters={field_name: field_value}, order_by="-created_at", limit=1
+            )
             return entities[0] if entities else None
         except Exception as e:
             logger.error(f"Failed to get latest entity by {field_name}: {e}")
@@ -320,3 +331,139 @@ class RepositoryUtils(Generic[T]):
         except Exception as e:
             logger.error(f"Failed to cleanup old {model.__name__} entities: {e}")
             raise RepositoryError(f"Failed to cleanup old entities: {e}") from e
+
+    @staticmethod
+    async def execute_time_based_query(
+        session: AsyncSession,
+        model: Any,
+        timestamp_field: str = "created_at",
+        hours: int | None = None,
+        days: int | None = None,
+        additional_filters: dict[str, Any] | None = None,
+        order_by: str = "-created_at",
+        limit: int | None = None,
+    ) -> list[T]:
+        """
+        Execute time-based query with consistent pattern.
+
+        Args:
+            session: Database session
+            model: SQLAlchemy model
+            timestamp_field: Field to use for time filtering
+            hours: Number of hours to look back (mutually exclusive with days)
+            days: Number of days to look back (mutually exclusive with hours)
+            additional_filters: Additional filters to apply
+            order_by: Order by field
+            limit: Limit number of results
+
+        Returns:
+            list: List of matching entities
+        """
+        try:
+            from sqlalchemy import asc, desc, select
+
+            if hours is not None and days is not None:
+                raise ValueError("Cannot specify both hours and days")
+
+            if hours is None and days is None:
+                raise ValueError("Must specify either hours or days")
+
+            # Calculate cutoff time
+            if hours is not None:
+                cutoff_time = datetime.now(timezone.utc) - timedelta(hours=hours)
+            else:
+                cutoff_time = datetime.now(timezone.utc) - timedelta(days=days)
+
+            stmt = select(model).where(getattr(model, timestamp_field) >= cutoff_time)
+
+            # Apply additional filters
+            if additional_filters:
+                for key, value in additional_filters.items():
+                    if hasattr(model, key):
+                        column = getattr(model, key)
+                        if isinstance(value, list):
+                            stmt = stmt.where(column.in_(value))
+                        else:
+                            stmt = stmt.where(column == value)
+
+            # Apply ordering
+            if order_by and hasattr(model, order_by.lstrip("-")):
+                order_field = getattr(model, order_by.lstrip("-"))
+                if order_by.startswith("-"):
+                    stmt = stmt.order_by(desc(order_field))
+                else:
+                    stmt = stmt.order_by(asc(order_field))
+
+            # Apply limit
+            if limit:
+                stmt = stmt.limit(limit)
+
+            result = await session.execute(stmt)
+            return list(result.scalars().all())
+
+        except Exception as e:
+            logger.error(f"Failed to execute time-based query: {e}")
+            raise RepositoryError(f"Failed to execute time-based query: {e}") from e
+
+    @staticmethod
+    async def execute_date_range_query(
+        session: AsyncSession,
+        model: Any,
+        start_date: datetime,
+        end_date: datetime,
+        timestamp_field: str = "created_at",
+        additional_filters: dict[str, Any] | None = None,
+        order_by: str = "-created_at",
+        limit: int | None = None,
+    ) -> list[T]:
+        """
+        Execute date range query with consistent pattern.
+
+        Args:
+            session: Database session
+            model: SQLAlchemy model
+            start_date: Start date for range
+            end_date: End date for range
+            timestamp_field: Field to use for date filtering
+            additional_filters: Additional filters to apply
+            order_by: Order by field
+            limit: Limit number of results
+
+        Returns:
+            list: List of matching entities
+        """
+        try:
+            from sqlalchemy import asc, desc, select
+
+            stmt = select(model).where(
+                getattr(model, timestamp_field).between(start_date, end_date)
+            )
+
+            # Apply additional filters
+            if additional_filters:
+                for key, value in additional_filters.items():
+                    if hasattr(model, key):
+                        column = getattr(model, key)
+                        if isinstance(value, list):
+                            stmt = stmt.where(column.in_(value))
+                        else:
+                            stmt = stmt.where(column == value)
+
+            # Apply ordering
+            if order_by and hasattr(model, order_by.lstrip("-")):
+                order_field = getattr(model, order_by.lstrip("-"))
+                if order_by.startswith("-"):
+                    stmt = stmt.order_by(desc(order_field))
+                else:
+                    stmt = stmt.order_by(asc(order_field))
+
+            # Apply limit
+            if limit:
+                stmt = stmt.limit(limit)
+
+            result = await session.execute(stmt)
+            return list(result.scalars().all())
+
+        except Exception as e:
+            logger.error(f"Failed to execute date range query: {e}")
+            raise RepositoryError(f"Failed to execute date range query: {e}") from e

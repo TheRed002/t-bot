@@ -77,7 +77,9 @@ class StateSnapshot(Base, AuditMixin, MetadataMixin, SoftDeleteMixin):
     is_protected = Column(Boolean, default=False, nullable=False)  # Prevent auto-deletion
 
     # Relationships
-    checkpoints = relationship("StateCheckpoint", back_populates="snapshot", cascade="all, delete-orphan")
+    checkpoints = relationship(
+        "StateCheckpoint", back_populates="snapshot", cascade="all, delete-orphan"
+    )
 
     # Indexes and constraints for performance and data integrity
     __table_args__ = (
@@ -89,7 +91,9 @@ class StateSnapshot(Base, AuditMixin, MetadataMixin, SoftDeleteMixin):
         Index("ix_state_snapshots_type_status", "snapshot_type", "status"),
         UniqueConstraint("state_checksum", name="uq_state_snapshots_checksum"),
         CheckConstraint("raw_size_bytes >= 0", name="ck_state_snapshots_raw_size_positive"),
-        CheckConstraint("compressed_size_bytes >= 0", name="ck_state_snapshots_compressed_size_positive"),
+        CheckConstraint(
+            "compressed_size_bytes >= 0", name="ck_state_snapshots_compressed_size_positive"
+        ),
         CheckConstraint("retention_days > 0", name="ck_state_snapshots_retention_positive"),
         CheckConstraint(
             "snapshot_type IN ('manual', 'automatic', 'scheduled', 'emergency')",
@@ -150,7 +154,9 @@ class StateCheckpoint(Base, AuditMixin, MetadataMixin):
         nullable=True,
         index=True,
     )
-    snapshot = relationship("StateSnapshot", back_populates="checkpoints", foreign_keys=[base_snapshot_id])
+    snapshot = relationship(
+        "StateSnapshot", back_populates="checkpoints", foreign_keys=[base_snapshot_id]
+    )
 
     # Previous checkpoint for chain
     previous_checkpoint_id = Column(
@@ -159,7 +165,9 @@ class StateCheckpoint(Base, AuditMixin, MetadataMixin):
         nullable=True,
         index=True,
     )
-    previous_checkpoint = relationship("StateCheckpoint", remote_side="StateCheckpoint.checkpoint_id")
+    previous_checkpoint = relationship(
+        "StateCheckpoint", remote_side="StateCheckpoint.checkpoint_id"
+    )
 
     # State changes (delta from base or previous checkpoint)
     state_changes = Column(JSONB, nullable=False)  # Only changed states
@@ -293,6 +301,10 @@ class StateHistory(Base, TimestampMixin, MetadataMixin):
             name="ck_state_history_operation_valid",
         ),
         CheckConstraint(
+            "state_type IN ('bot_state', 'position_state', 'order_state', 'portfolio_state', 'risk_state', 'strategy_state', 'market_state', 'trade_state', 'execution', 'system_state')",
+            name="ck_state_history_state_type_valid",
+        ),
+        CheckConstraint(
             "priority IN ('low', 'medium', 'high', 'critical')",
             name="ck_state_history_priority_valid",
         ),
@@ -379,6 +391,10 @@ class StateMetadata(Base, AuditMixin):
         CheckConstraint("current_size_bytes >= 0", name="ck_state_metadata_size_positive"),
         CheckConstraint("access_count >= 0", name="ck_state_metadata_access_count_positive"),
         CheckConstraint("cache_priority >= 0", name="ck_state_metadata_cache_priority_positive"),
+        CheckConstraint(
+            "state_type IN ('bot_state', 'position_state', 'order_state', 'portfolio_state', 'risk_state', 'strategy_state', 'market_state', 'trade_state', 'execution', 'system_state')",
+            name="ck_state_metadata_state_type_valid",
+        ),
     )
 
     def get_tag(self, key: str, default: Any = None) -> Any:
@@ -444,7 +460,9 @@ class StateBackup(Base, AuditMixin, MetadataMixin):
     # Compression and encryption
     is_compressed = Column(Boolean, default=True, nullable=False)
     compression_type = Column(String(50), nullable=True)
-    compression_ratio: Column[Decimal] = Column(DECIMAL(5, 4), nullable=True)  # Precise compression ratio
+    compression_ratio: Column[Decimal] = Column(
+        DECIMAL(5, 4), nullable=True
+    )  # Precise compression ratio
 
     is_encrypted = Column(Boolean, default=False, nullable=False)
     encryption_algorithm = Column(String(50), nullable=True)

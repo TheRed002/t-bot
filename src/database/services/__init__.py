@@ -5,4 +5,4 @@ from .ml_service import MLService
 from .service_registry import ServiceRegistry, service_registry
 from .trading_service import TradingService
 
-__all__ = ["BotService", "MLService", "TradingService", "ServiceRegistry", "service_registry"]
+__all__ = ["BotService", "MLService", "ServiceRegistry", "TradingService", "service_registry"]

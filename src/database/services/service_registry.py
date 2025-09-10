@@ -1,5 +1,6 @@
 """Service registry for managing service layer dependencies."""
 
+from collections.abc import Callable
 from typing import Any, TypeVar
 
 from src.core.logging import get_logger
@@ -15,7 +16,7 @@ class ServiceRegistry:
     def __init__(self) -> None:
         """Initialize service registry."""
         self._services: dict[str, Any] = {}
-        self._service_factories: dict[str, callable] = {}
+        self._service_factories: dict[str, Callable[[], Any]] = {}
 
     def register_service(self, name: str, service_instance: Any) -> None:
         """
@@ -28,7 +29,7 @@ class ServiceRegistry:
         self._services[name] = service_instance
         logger.info(f"Service registered: {name}")
 
-    def register_factory(self, name: str, factory: callable) -> None:
+    def register_factory(self, name: str, factory: Callable[[], Any]) -> None:
         """
         Register a service factory.
 

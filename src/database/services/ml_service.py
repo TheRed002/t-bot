@@ -30,7 +30,9 @@ class MLService(BaseService, MLServiceInterface):
         self.model_repo = model_repo
         self.training_repo = training_repo
 
-    async def get_model_performance_summary(self, model_name: str, days: int = 30) -> dict[str, Any]:
+    async def get_model_performance_summary(
+        self, model_name: str, days: int = 30
+    ) -> dict[str, Any]:
         """
         Get comprehensive performance summary for a model.
 
@@ -74,7 +76,7 @@ class MLService(BaseService, MLServiceInterface):
             raise
         except Exception as e:
             logger.error(f"Failed to get model performance summary for {model_name}: {e}")
-            raise ServiceError(f"Model performance summary failed: {e}")
+            raise ServiceError(f"Model performance summary failed: {e}") from e
 
     async def validate_model_deployment(self, model_name: str, version: int) -> bool:
         """
@@ -96,7 +98,9 @@ class MLService(BaseService, MLServiceInterface):
                 raise ValidationError(f"Model {model_name} version {version} not found")
 
             # Business logic: Check if model has completed training
-            training_jobs = await self.training_repo.get_job_by_model(model_name, status="completed")
+            training_jobs = await self.training_repo.get_job_by_model(
+                model_name, status="completed"
+            )
             if not training_jobs:
                 logger.warning(f"No completed training jobs for model {model_name}")
                 return False
@@ -113,7 +117,7 @@ class MLService(BaseService, MLServiceInterface):
             raise
         except Exception as e:
             logger.error(f"Failed to validate model deployment for {model_name}: {e}")
-            raise ServiceError(f"Model validation failed: {e}")
+            raise ServiceError(f"Model validation failed: {e}") from e
 
     async def get_model_recommendations(self, symbol: str, limit: int = 5) -> list[dict[str, Any]]:
         """
@@ -137,7 +141,9 @@ class MLService(BaseService, MLServiceInterface):
             recommendations = []
 
             for model in active_models:
-                predictions = await self.prediction_repo.get_by_model_and_symbol(model.model_name, symbol, limit=10)
+                predictions = await self.prediction_repo.get_by_model_and_symbol(
+                    model.model_name, symbol, limit=10
+                )
 
                 if predictions:
                     # Business logic: Calculate confidence and trend
@@ -163,4 +169,4 @@ class MLService(BaseService, MLServiceInterface):
             raise
         except Exception as e:
             logger.error(f"Failed to get model recommendations for {symbol}: {e}")
-            raise ServiceError(f"Model recommendations failed: {e}")
+            raise ServiceError(f"Model recommendations failed: {e}") from e

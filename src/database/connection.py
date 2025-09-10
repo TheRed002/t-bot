@@ -27,11 +27,14 @@ from src.core.config import Config
 from src.core.exceptions import DataSourceError
 from src.core.logging import PerformanceMonitor, get_logger
 
+# Import error handling decorators from P-002A
+from src.error_handling.decorators import with_circuit_breaker, with_retry
+
 # Error handling is provided by decorators
 from src.utils.constants import LIMITS, TIMEOUTS
 
 # Import utils from P-007A
-from src.utils.decorators import circuit_breaker, retry, time_execution, timeout
+from src.utils.decorators import time_execution, timeout
 from src.utils.formatters import format_api_response
 
 logger = get_logger(__name__)
@@ -56,8 +59,8 @@ class DatabaseConnectionManager:
         self._connection_healthy = True
 
     @time_execution
-    @retry(max_attempts=3)
-    @circuit_breaker(failure_threshold=3, recovery_timeout=30)
+    @with_retry(max_attempts=3)
+    @with_circuit_breaker(failure_threshold=3, recovery_timeout=30)
     @timeout(60)
     async def initialize(self) -> None:
         """Initialize all database connections."""
@@ -72,8 +75,8 @@ class DatabaseConnectionManager:
         """Start health monitoring task with network testing."""
         if self._health_check_task is None:
             # Use utils constants for health monitoring setup
-            db_host = getattr(self.config.database, 'postgresql_host', 'localhost')
-            db_port = getattr(self.config.database, 'postgresql_port', 5432)
+            db_host = getattr(self.config.database, "postgresql_host", "localhost")
+            db_port = getattr(self.config.database, "postgresql_port", 5432)
             logger.info(f"Starting health monitoring for {db_host}:{db_port}")
             monitor_interval = TIMEOUTS.get("HEALTH_CHECK_INTERVAL", 30)
             logger.debug(f"Health check interval: {monitor_interval}s")
@@ -122,16 +125,16 @@ class DatabaseConnectionManager:
                 self._connection_healthy = False
 
     @time_execution
-    @circuit_breaker(failure_threshold=2, recovery_timeout=15)
+    @with_circuit_breaker(failure_threshold=2, recovery_timeout=15)
     @timeout(30)
     async def _setup_postgresql(self) -> None:
         """Setup PostgreSQL connections with async support."""
-        # Create async engine using optimized limits for high-frequency trading
-        max_overflow = LIMITS.get("DB_MAX_OVERFLOW", 40)
-        pool_recycle = TIMEOUTS.get("DB_POOL_RECYCLE", 1800)
+        # Production-optimized configuration for high-frequency trading
+        max_overflow = LIMITS.get("DB_MAX_OVERFLOW", 50)
+        pool_recycle = TIMEOUTS.get("DB_POOL_RECYCLE", 3600)  # 1 hour for production stability
         pool_pre_ping = True
         pool_reset_on_return = "commit"
-        pool_timeout = 5
+        pool_timeout = 10  # Increased timeout for production reliability
 
         # Use NullPool under pytest to avoid pooled connection GC warnings
         try:
@@ -144,15 +147,27 @@ class DatabaseConnectionManager:
 
         async_pool_class = NullPool if use_null_pool else AsyncAdaptedQueuePool
 
+        # Production-optimized connection parameters
+        connect_args = {
+            "server_settings": {
+                "application_name": "trading_bot_suite",
+                "tcp_keepalives_idle": "300",
+                "tcp_keepalives_interval": "30",
+                "tcp_keepalives_count": "3",
+            },
+            "command_timeout": 60,
+        }
+
         async_engine_kwargs: dict[str, Any] = {
             "echo": self.config.debug,
+            "echo_pool": self.config.debug,
             "poolclass": async_pool_class,
-            "connect_args": {"server_settings": {"application_name": "trading_bot_suite"}},
+            "connect_args": connect_args,
         }
         if async_pool_class.__name__ != "NullPool":
             async_engine_kwargs.update(
                 {
-                    "pool_size": max(self.config.database.postgresql_pool_size, 20),
+                    "pool_size": max(self.config.database.postgresql_pool_size, 25),
                     "max_overflow": max_overflow,
                     "pool_pre_ping": pool_pre_ping,
                     "pool_recycle": pool_recycle,
@@ -160,10 +175,13 @@ class DatabaseConnectionManager:
                     "pool_timeout": pool_timeout,
                     "pool_reset_on_invalid": True,
                     "pool_events": True,
+                    "future": True,  # Enable future-compatible features for asyncpg
                 }
             )
 
-        database_url = self.config.database.postgresql_url.replace("postgresql://", "postgresql+asyncpg://")
+        database_url = self.config.database.postgresql_url.replace(
+            "postgresql://", "postgresql+asyncpg://"
+        )
         self.async_engine = create_async_engine(database_url, **async_engine_kwargs)
 
         # Create sync engine for migrations using limits
@@ -200,16 +218,19 @@ class DatabaseConnectionManager:
         logger.info("PostgreSQL connection established")
 
     @time_execution
-    @circuit_breaker(failure_threshold=2, recovery_timeout=15)
+    @with_circuit_breaker(failure_threshold=2, recovery_timeout=15)
     @timeout(20)
     async def _setup_redis(self) -> None:
         """Setup Redis connection with async support."""
         self.redis_client = redis.from_url(
             self.config.cache.redis_url,
             decode_responses=True,
-            max_connections=100,
+            max_connections=200,  # Increased for production load
             retry_on_timeout=True,
+            retry_on_error=[redis.ConnectionError, redis.TimeoutError],
             health_check_interval=30,
+            socket_keepalive=True,
+            socket_keepalive_options={},
         )
 
         # Test connection
@@ -217,7 +238,7 @@ class DatabaseConnectionManager:
         logger.info("Redis connection established")
 
     @time_execution
-    @circuit_breaker(failure_threshold=2, recovery_timeout=15)
+    @with_circuit_breaker(failure_threshold=2, recovery_timeout=15)
     @timeout(25)
     async def _setup_influxdb(self) -> None:
         """Setup InfluxDB connection."""
@@ -238,7 +259,9 @@ class DatabaseConnectionManager:
         if not self.async_engine:
             raise DataSourceError("Database not initialized")
 
-        async_session = async_sessionmaker(self.async_engine, class_=AsyncSession, expire_on_commit=False)
+        async_session = async_sessionmaker(
+            self.async_engine, class_=AsyncSession, expire_on_commit=False
+        )
 
         async with async_session() as session:
             try:
@@ -314,7 +337,7 @@ class DatabaseConnectionManager:
             await self._execute_close_tasks(close_tasks)
             logger.info("Database connections closed")
         except Exception as e:
-            logger.error("Error closing database connections", error=str(e))
+            logger.error(f"Error closing database connections: {e}")
         finally:
             self._clear_connection_references()
 
@@ -332,10 +355,14 @@ class DatabaseConnectionManager:
         close_tasks: list[Any] = []
 
         if connections["async_engine"]:
-            close_tasks.append(asyncio.wait_for(connections["async_engine"].dispose(), timeout=10.0))
+            close_tasks.append(
+                asyncio.wait_for(connections["async_engine"].dispose(), timeout=10.0)
+            )
 
         if connections["sync_engine"]:
-            close_tasks.append(asyncio.get_event_loop().run_in_executor(None, connections["sync_engine"].dispose))
+            close_tasks.append(
+                asyncio.get_event_loop().run_in_executor(None, connections["sync_engine"].dispose)
+            )
 
         if connections["redis_client"]:
             close_tasks.append(self._close_redis_task(connections["redis_client"]))
@@ -362,7 +389,9 @@ class DatabaseConnectionManager:
 
     def _close_influxdb_task(self, influxdb_client) -> Any:
         """Create InfluxDB close task."""
-        if hasattr(influxdb_client, "disconnect") and asyncio.iscoroutinefunction(influxdb_client.disconnect):
+        if hasattr(influxdb_client, "disconnect") and asyncio.iscoroutinefunction(
+            influxdb_client.disconnect
+        ):
             return asyncio.wait_for(influxdb_client.disconnect(), timeout=10.0)
         else:
             return asyncio.get_event_loop().run_in_executor(None, influxdb_client.close)
@@ -541,7 +570,7 @@ async def health_check() -> dict[str, bool]:
             await session.execute(text("SELECT 1"))
         health_status["postgresql"] = True
     except Exception as e:
-        logger.error("PostgreSQL health check failed", error=str(e))
+        logger.error(f"PostgreSQL health check failed: {e}")
 
     try:
         # Check Redis
@@ -549,7 +578,7 @@ async def health_check() -> dict[str, bool]:
         await redis_client.ping()
         health_status["redis"] = True
     except Exception as e:
-        logger.error("Redis health check failed", error=str(e))
+        logger.error(f"Redis health check failed: {e}")
 
     try:
         # Check InfluxDB (run sync ping in executor to avoid blocking)
@@ -557,7 +586,7 @@ async def health_check() -> dict[str, bool]:
         await asyncio.get_event_loop().run_in_executor(None, influxdb_client.ping)
         health_status["influxdb"] = True
     except Exception as e:
-        logger.error("InfluxDB health check failed", error=str(e))
+        logger.error(f"InfluxDB health check failed: {e}")
 
     return health_status
 

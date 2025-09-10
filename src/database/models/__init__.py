@@ -1,16 +1,28 @@
 """Database models package."""
 
 # Import base first to avoid circular dependencies
-# Import audit models
+# Import analytics models
+from .analytics import (
+    AnalyticsOperationalMetrics,
+    AnalyticsPortfolioMetrics,
+    AnalyticsPositionMetrics,
+    AnalyticsRiskMetrics,
+    AnalyticsStrategyMetrics,
+)
+
+# Import audit models (minimal dependencies)
 from .audit import (
     CapitalAuditLog,
     ExecutionAuditLog,
     PerformanceAuditLog,
     RiskAuditLog,
 )
+
+# Import backtesting models
+from .backtesting import BacktestResult, BacktestRun, BacktestTrade
 from .base import Base
 
-# Import bot models
+# Import bot models before dependent models
 from .bot import Bot, BotLog, Signal, Strategy
 from .bot_instance import BotInstance
 
@@ -22,7 +34,7 @@ from .capital import (
     FundFlowDB,
 )
 
-# Import data models
+# Import data models (minimal dependencies)
 from .data import (
     DataPipelineRecord,
     DataQualityRecord,
@@ -32,13 +44,29 @@ from .data import (
 # Import market data models
 from .market_data import MarketDataRecord
 
-# Import ML models
+# Import ML models (moderate dependencies)
 from .ml import MLModelMetadata, MLPrediction, MLTrainingJob
+
+# Import optimization models
+from .optimization import (
+    OptimizationObjectiveDB,
+    OptimizationResult,
+    OptimizationRun,
+    ParameterSet,
+)
+
+# Import risk management models (depends on bot_instance)
+from .risk import (
+    CircuitBreakerConfig,
+    CircuitBreakerEvent,
+    RiskConfiguration,
+    RiskViolation,
+)
 
 # Import state models
 from .state import StateBackup, StateCheckpoint, StateHistory, StateMetadata, StateSnapshot
 
-# Import system models
+# Import system models (depends on user)
 from .system import (
     Alert,
     AlertRule,
@@ -48,20 +76,11 @@ from .system import (
     PerformanceMetrics,
 )
 
-# Import trading models
+# Import trading models (depends on bot/strategy)
 from .trading import Order, OrderFill, Position, Trade
 
-# Import user models
+# Import independent models first (no foreign key dependencies)
 from .user import User
-
-# Import analytics models
-from .analytics import (
-    AnalyticsOperationalMetrics,
-    AnalyticsPortfolioMetrics,
-    AnalyticsPositionMetrics,
-    AnalyticsRiskMetrics,
-    AnalyticsStrategyMetrics,
-)
 
 __all__ = [
     # System models
@@ -111,10 +130,24 @@ __all__ = [
     "Trade",
     # User models
     "User",
-    # Analytics models  
+    # Analytics models
     "AnalyticsOperationalMetrics",
     "AnalyticsPortfolioMetrics",
     "AnalyticsPositionMetrics",
     "AnalyticsRiskMetrics",
     "AnalyticsStrategyMetrics",
+    # Risk management models
+    "CircuitBreakerConfig",
+    "CircuitBreakerEvent",
+    "RiskConfiguration",
+    "RiskViolation",
+    # Backtesting models
+    "BacktestRun",
+    "BacktestResult",
+    "BacktestTrade",
+    # Optimization models
+    "OptimizationObjectiveDB",
+    "OptimizationResult",
+    "OptimizationRun",
+    "ParameterSet",
 ]

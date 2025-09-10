@@ -38,7 +38,9 @@ class CapitalAllocationRepository(DatabaseRepository):
         """Get allocations by exchange."""
         return await RepositoryUtils.get_entities_by_field(self, "exchange", exchange)
 
-    async def find_by_strategy_exchange(self, strategy_id: str, exchange: str) -> CapitalAllocationDB | None:
+    async def find_by_strategy_exchange(
+        self, strategy_id: str, exchange: str
+    ) -> CapitalAllocationDB | None:
         """Find allocation by strategy and exchange using proper query."""
         try:
             filters = {"strategy_id": strategy_id, "exchange": exchange}
@@ -73,11 +75,15 @@ class FundFlowRepository(DatabaseRepository):
 
     async def get_by_from_strategy(self, strategy_id: str) -> list[FundFlowDB]:
         """Get flows from a strategy."""
-        return await RepositoryUtils.get_entities_by_field(self, "from_strategy", strategy_id, "-timestamp")
+        return await RepositoryUtils.get_entities_by_field(
+            self, "from_strategy", strategy_id, "-timestamp"
+        )
 
     async def get_by_to_strategy(self, strategy_id: str) -> list[FundFlowDB]:
         """Get flows to a strategy."""
-        return await RepositoryUtils.get_entities_by_field(self, "to_strategy", strategy_id, "-timestamp")
+        return await RepositoryUtils.get_entities_by_field(
+            self, "to_strategy", strategy_id, "-timestamp"
+        )
 
     async def get_by_exchange_flow(self, from_exchange: str, to_exchange: str) -> list[FundFlowDB]:
         """Get flows between exchanges."""
@@ -148,13 +154,16 @@ class ExchangeAllocationRepository(DatabaseRepository):
         # Note: ExchangeAllocationDB doesn't have available_amount field, using unutilized
         return sum(alloc.total_allocation - alloc.utilized_allocation for alloc in allocations)
 
-    async def get_underutilized_exchanges(self, threshold: Decimal = Decimal("0.5")) -> list[ExchangeAllocationDB]:
+    async def get_underutilized_exchanges(
+        self, threshold: Decimal = Decimal("0.5")
+    ) -> list[ExchangeAllocationDB]:
         """Get exchanges with low utilization."""
         allocations = await self.get_all()
         return [
             alloc
             for alloc in allocations
-            if alloc.allocated_amount > 0 and (alloc.utilized_amount / alloc.allocated_amount) < threshold
+            if alloc.allocated_amount > 0
+            and (alloc.utilized_amount / alloc.allocated_amount) < threshold
         ]
 
 

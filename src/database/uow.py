@@ -1,7 +1,7 @@
 """Unit of Work pattern for database transactions with service layer integration."""
 
 from contextlib import asynccontextmanager, contextmanager
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy.exc import IntegrityError, OperationalError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,61 +15,59 @@ from src.core.exceptions import (
 from src.core.logging import get_logger
 from src.database.interfaces import UnitOfWorkFactoryInterface
 
-# Import repository classes for UoW
-from src.database.repository.audit import (
-    CapitalAuditLogRepository,
-    ExecutionAuditLogRepository,
-    PerformanceAuditLogRepository,
-    RiskAuditLogRepository,
-)
-from src.database.repository.bot import (
-    BotLogRepository,
-    BotRepository,
-    SignalRepository,
-    StrategyRepository,
-)
-from src.database.repository.bot_instance import BotInstanceRepository
-from src.database.repository.capital import (
-    CapitalAllocationRepository,
-    CurrencyExposureRepository,
-    ExchangeAllocationRepository,
-    FundFlowRepository,
-)
-from src.database.repository.data import (
-    DataPipelineRepository,
-    DataQualityRepository,
-    FeatureRepository,
-)
-from src.database.repository.market_data import MarketDataRepository
-from src.database.repository.ml import (
-    MLModelMetadataRepository,
-    MLPredictionRepository,
-    MLRepository,
-    MLTrainingJobRepository,
-)
-from src.database.repository.state import (
-    StateBackupRepository,
-    StateCheckpointRepository,
-    StateHistoryRepository,
-    StateMetadataRepository,
-    StateSnapshotRepository,
-)
-from src.database.repository.system import (
-    AlertRepository,
-    AuditLogRepository,
-    BalanceSnapshotRepository,
-    PerformanceMetricsRepository,
-)
-from src.database.repository.trading import (
-    OrderFillRepository,
-    OrderRepository,
-    PositionRepository,
-    TradeRepository,
-)
-from src.database.repository.user import UserRepository
-
-# Import services instead of repositories for business logic
+# Use TYPE_CHECKING to avoid circular imports
 if TYPE_CHECKING:
+    from src.database.repository.audit import (
+        CapitalAuditLogRepository,
+        ExecutionAuditLogRepository,
+        PerformanceAuditLogRepository,
+        RiskAuditLogRepository,
+    )
+    from src.database.repository.bot import (
+        BotLogRepository,
+        BotRepository,
+        SignalRepository,
+        StrategyRepository,
+    )
+    from src.database.repository.bot_instance import BotInstanceRepository
+    from src.database.repository.capital import (
+        CapitalAllocationRepository,
+        CurrencyExposureRepository,
+        ExchangeAllocationRepository,
+        FundFlowRepository,
+    )
+    from src.database.repository.data import (
+        DataPipelineRepository,
+        DataQualityRepository,
+        FeatureRepository,
+    )
+    from src.database.repository.market_data import MarketDataRepository
+    from src.database.repository.ml import (
+        MLModelMetadataRepository,
+        MLPredictionRepository,
+        MLRepository,
+        MLTrainingJobRepository,
+    )
+    from src.database.repository.state import (
+        StateBackupRepository,
+        StateCheckpointRepository,
+        StateHistoryRepository,
+        StateMetadataRepository,
+        StateSnapshotRepository,
+    )
+    from src.database.repository.system import (
+        AlertRepository,
+        AuditLogRepository,
+        BalanceSnapshotRepository,
+        PerformanceMetricsRepository,
+    )
+    from src.database.repository.trading import (
+        OrderFillRepository,
+        OrderRepository,
+        PositionRepository,
+        TradeRepository,
+    )
+    from src.database.repository.user import UserRepository
     from src.database.services.trading_service import TradingService
 
 # Import error handling from P-002A
@@ -93,7 +91,9 @@ class UnitOfWork:
     and maintain clean separation of concerns.
     """
 
-    def __init__(self, session_factory: sessionmaker, config: Config | None = None, dependency_injector=None):
+    def __init__(
+        self, session_factory: sessionmaker, config: Config | None = None, dependency_injector=None
+    ):
         """
         Initialize Unit of Work with injected session factory and service layer.
 
@@ -113,8 +113,8 @@ class UnitOfWork:
         self.trading_service: TradingService | None = None
 
         # Repository access for service layer only - not exposed to controllers
-        self._repositories: dict[str, any] = {}
-        
+        self._repositories: dict[str, Any] = {}
+
         # Flag to prevent direct repository access
         self._repositories_hidden = False
 
@@ -151,14 +151,8 @@ class UnitOfWork:
             self._create_services_direct()
 
     def _create_service(self, service_name: str):
-        """Create service using dependency injection or direct instantiation."""
-        try:
-            # Try to resolve from dependency injector first
-            return self._dependency_injector.resolve(service_name)
-        except (ImportError, AttributeError, KeyError, TypeError) as e:
-            # Fallback handled by _create_services_direct
-            logger.debug(f"DI resolution failed for {service_name}, using direct instantiation: {e}")
-            raise
+        """Create service using dependency injection."""
+        return self._dependency_injector.resolve(service_name)
 
     def _create_services_direct(self):
         """Create services directly without dependency injection."""
@@ -191,36 +185,89 @@ class UnitOfWork:
         self._repositories["orders"] = OrderRepository(self.session)
         self._repositories["positions"] = PositionRepository(self.session)
         self._repositories["trades"] = TradeRepository(self.session)
-        
+
     def _hide_repositories(self) -> None:
         """Hide repositories from controllers to enforce service layer pattern."""
         self._repositories_hidden = True
         # Remove any accidentally exposed repository attributes
         for attr_name in list(self.__dict__.keys()):
-            if attr_name.endswith('_repo') or (attr_name in [
-                'users', 'bots', 'bot_instances', 'bot_logs', 'strategies', 'signals',
-                'orders', 'positions', 'trades', 'fills', 'capital_audit_logs',
-                'execution_audit_logs', 'performance_audit_logs', 'risk_audit_logs',
-                'capital_allocations', 'fund_flows', 'currency_exposures', 
-                'exchange_allocations', 'features', 'data_quality', 'data_pipelines',
-                'market_data', 'state_snapshots', 'state_checkpoints', 'state_history',
-                'state_metadata', 'state_backups', 'alerts', 'audit_logs', 
-                'performance_metrics', 'balance_snapshots'
-            ]):
+            if attr_name.endswith("_repo") or (
+                attr_name
+                in [
+                    "users",
+                    "bots",
+                    "bot_instances",
+                    "bot_logs",
+                    "strategies",
+                    "signals",
+                    "orders",
+                    "positions",
+                    "trades",
+                    "fills",
+                    "capital_audit_logs",
+                    "execution_audit_logs",
+                    "performance_audit_logs",
+                    "risk_audit_logs",
+                    "capital_allocations",
+                    "fund_flows",
+                    "currency_exposures",
+                    "exchange_allocations",
+                    "features",
+                    "data_quality",
+                    "data_pipelines",
+                    "market_data",
+                    "state_snapshots",
+                    "state_checkpoints",
+                    "state_history",
+                    "state_metadata",
+                    "state_backups",
+                    "alerts",
+                    "audit_logs",
+                    "performance_metrics",
+                    "balance_snapshots",
+                ]
+            ):
                 delattr(self, attr_name)
-                
+
     def __getattr__(self, name):
         """Prevent direct repository access by controllers."""
-        if getattr(self, '_repositories_hidden', False) and (name.endswith('_repo') or name in [
-            'users', 'bots', 'bot_instances', 'bot_logs', 'strategies', 'signals',
-            'orders', 'positions', 'trades', 'fills', 'capital_audit_logs',
-            'execution_audit_logs', 'performance_audit_logs', 'risk_audit_logs',
-            'capital_allocations', 'fund_flows', 'currency_exposures', 
-            'exchange_allocations', 'features', 'data_quality', 'data_pipelines',
-            'market_data', 'state_snapshots', 'state_checkpoints', 'state_history',
-            'state_metadata', 'state_backups', 'alerts', 'audit_logs', 
-            'performance_metrics', 'balance_snapshots'
-        ]):
+        if getattr(self, "_repositories_hidden", False) and (
+            name.endswith("_repo")
+            or name
+            in [
+                "users",
+                "bots",
+                "bot_instances",
+                "bot_logs",
+                "strategies",
+                "signals",
+                "orders",
+                "positions",
+                "trades",
+                "fills",
+                "capital_audit_logs",
+                "execution_audit_logs",
+                "performance_audit_logs",
+                "risk_audit_logs",
+                "capital_allocations",
+                "fund_flows",
+                "currency_exposures",
+                "exchange_allocations",
+                "features",
+                "data_quality",
+                "data_pipelines",
+                "market_data",
+                "state_snapshots",
+                "state_checkpoints",
+                "state_history",
+                "state_metadata",
+                "state_backups",
+                "alerts",
+                "audit_logs",
+                "performance_metrics",
+                "balance_snapshots",
+            ]
+        ):
             raise AttributeError(
                 f"Direct repository access is not allowed. Use service layer instead. "
                 f"Attempted to access: {name}"
@@ -305,10 +352,10 @@ class UnitOfWork:
         finally:
             # Always clear references even if close operations fail
             self.session = None
-            
+
             # Clear service references
             self.trading_service = None
-            
+
             # Clear internal repository references
             self._repositories.clear()
 
@@ -500,18 +547,72 @@ class AsyncUnitOfWork:
             self._create_repositories_direct()
 
     def _create_repository(self, repository_class):
-        """Create repository using dependency injection or direct instantiation."""
+        """Create repository using dependency injection with fallback."""
         try:
-            # Try to resolve from dependency injector first
             repo_name = repository_class.__name__
             return self._dependency_injector.resolve(repo_name)
         except (ImportError, AttributeError, KeyError, TypeError) as e:
-            # Fallback to direct instantiation on DI resolution failures
-            logger.debug(f"DI resolution failed for {repository_class.__name__}, " f"using direct instantiation: {e}")
+            logger.debug(
+                f"DI resolution failed for {repository_class.__name__}, "
+                f"using direct instantiation: {e}"
+            )
             return repository_class(self.session)
 
     def _create_repositories_direct(self):
         """Create repositories directly without dependency injection."""
+        # Import repositories at runtime to avoid circular imports
+        from src.database.repository.audit import (
+            CapitalAuditLogRepository,
+            ExecutionAuditLogRepository,
+            PerformanceAuditLogRepository,
+            RiskAuditLogRepository,
+        )
+        from src.database.repository.bot import (
+            BotLogRepository,
+            BotRepository,
+            SignalRepository,
+            StrategyRepository,
+        )
+        from src.database.repository.bot_instance import BotInstanceRepository
+        from src.database.repository.capital import (
+            CapitalAllocationRepository,
+            CurrencyExposureRepository,
+            ExchangeAllocationRepository,
+            FundFlowRepository,
+        )
+        from src.database.repository.data import (
+            DataPipelineRepository,
+            DataQualityRepository,
+            FeatureRepository,
+        )
+        from src.database.repository.market_data import MarketDataRepository
+        from src.database.repository.ml import (
+            MLModelMetadataRepository,
+            MLPredictionRepository,
+            MLRepository,
+            MLTrainingJobRepository,
+        )
+        from src.database.repository.state import (
+            StateBackupRepository,
+            StateCheckpointRepository,
+            StateHistoryRepository,
+            StateMetadataRepository,
+            StateSnapshotRepository,
+        )
+        from src.database.repository.system import (
+            AlertRepository,
+            AuditLogRepository,
+            BalanceSnapshotRepository,
+            PerformanceMetricsRepository,
+        )
+        from src.database.repository.trading import (
+            OrderFillRepository,
+            OrderRepository,
+            PositionRepository,
+            TradeRepository,
+        )
+        from src.database.repository.user import UserRepository
+
         # Initialize all repositories with async session
         self.users = UserRepository(self.session)
         self.bots = BotRepository(self.session)
@@ -766,7 +867,9 @@ class UnitOfWorkFactory(UnitOfWorkFactoryInterface):
         """Create new async Unit of Work."""
         if not self.async_session_factory:
             raise RuntimeError("Async session factory not configured")
-        return AsyncUnitOfWork(self.async_session_factory, dependency_injector=self._dependency_injector)
+        return AsyncUnitOfWork(
+            self.async_session_factory, dependency_injector=self._dependency_injector
+        )
 
     @contextmanager
     def transaction(self):

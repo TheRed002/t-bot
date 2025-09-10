@@ -10,6 +10,8 @@ used by all subsequent prompts for real-time state management.
 
 import asyncio
 import json
+import os
+import re
 from typing import Any
 
 import redis.asyncio as redis
@@ -17,19 +19,50 @@ import redis.asyncio as redis
 from src.core.base import BaseComponent
 
 # Import core components from P-001
-from src.core.exceptions import DataError, DataSourceError
+from src.core.exceptions import DataError
+
+# Import utils from P-007A
+from src.error_handling.decorators import with_circuit_breaker, with_retry
 
 # Error handling is provided by decorators
 from src.utils.constants import DEFAULT_VALUES, LIMITS, TIMEOUTS
+from src.utils.decorators import time_execution
 
-# Import utils from P-007A
-from src.utils.decorators import circuit_breaker, retry, time_execution
+
+def substitute_env_vars(url: str) -> str:
+    """
+    Substitute environment variables in URLs with shell-style syntax.
+
+    Supports patterns like:
+    - ${VAR}: Simple substitution
+    - ${VAR:default}: Substitution with default value
+
+    Args:
+        url: URL template with environment variables
+
+    Returns:
+        URL with environment variables substituted
+    """
+
+    def replace_var(match):
+        var_expr = match.group(1)
+        if ":" in var_expr:
+            var_name, default_value = var_expr.split(":", 1)
+        else:
+            var_name = var_expr
+            default_value = ""
+
+        return os.environ.get(var_name, default_value)
+
+    # Pattern to match ${VAR} or ${VAR:default}
+    pattern = r"\$\{([^}]+)\}"
+    return re.sub(pattern, replace_var, url)
 
 
 class RedisClient(BaseComponent):
     """Async Redis client with utilities for trading bot data."""
 
-    def __init__(self, config_or_url, *, auto_close: bool = False):
+    def __init__(self, config_or_url: Any | str, *, auto_close: bool = False) -> None:
         super().__init__()  # Initialize BaseComponent
         # Accept both config object and direct URL
         if hasattr(config_or_url, "redis"):
@@ -46,6 +79,9 @@ class RedisClient(BaseComponent):
             self.redis_url = DEFAULT_VALUES["redis_default_url"]
             self.config = None
 
+        # Apply environment variable substitution to Redis URL
+        self.redis_url = substitute_env_vars(str(self.redis_url))
+
         self.client: redis.Redis | None = None
         # Use utils constants for default TTL
         self._default_ttl = TIMEOUTS.get("REDIS_DEFAULT_TTL", 3600)
@@ -59,14 +95,14 @@ class RedisClient(BaseComponent):
         self._max_queue_size = LIMITS.get("REDIS_MAX_QUEUE_SIZE", 1000)
 
         # Connection timeout and heartbeat - Use constants from utils
-        self._last_heartbeat = None
+        self._last_heartbeat: float | None = None
         self._heartbeat_interval = TIMEOUTS.get("REDIS_HEARTBEAT_INTERVAL", 30)
-        self._heartbeat_task = None
+        self._heartbeat_task: asyncio.Task[None] | None = None
         self._connection_timeout = TIMEOUTS.get("REDIS_CONNECTION_TIMEOUT", 10)
 
     @time_execution
-    @retry(max_attempts=3)
-    @circuit_breaker(failure_threshold=3, recovery_timeout=30)
+    @with_retry(max_attempts=3)
+    @with_circuit_breaker(failure_threshold=3, recovery_timeout=30)
     async def connect(self) -> None:
         """Connect to Redis with proper configuration."""
         # Use constants for Redis connection configuration
@@ -74,6 +110,15 @@ class RedisClient(BaseComponent):
         health_check_interval = TIMEOUTS.get("REDIS_HEALTH_CHECK_INTERVAL", 30)
         socket_connect_timeout = TIMEOUTS.get("REDIS_SOCKET_CONNECT_TIMEOUT", 5)
         socket_timeout = TIMEOUTS.get("REDIS_SOCKET_TIMEOUT", 10)
+
+        # Validate URL before attempting connection
+        if "}" in self.redis_url and "${" not in self.redis_url:
+            # URL appears malformed - try to fix common issues
+            self.logger.warning(f"Malformed Redis URL detected: {self.redis_url}")
+            # Use configured fallback URL
+            fallback_url = DEFAULT_VALUES.get("redis_fallback_url", "redis://localhost:6379/0")
+            self.redis_url = fallback_url
+            self.logger.info(f"Using fallback Redis URL: {self.redis_url}")
 
         self.client = redis.Redis.from_url(
             self.redis_url,
@@ -127,7 +172,10 @@ class RedisClient(BaseComponent):
         else:
             # Check if heartbeat is recent enough
             current_time = asyncio.get_event_loop().time()
-            if self._last_heartbeat and current_time - self._last_heartbeat > self._heartbeat_interval * 2:
+            if (
+                self._last_heartbeat
+                and current_time - self._last_heartbeat > self._heartbeat_interval * 2
+            ):
                 self.logger.warning("Redis connection heartbeat stale, reconnecting...")
                 await self._cleanup_connection()
                 await self.connect()
@@ -162,9 +210,9 @@ class RedisClient(BaseComponent):
             async with self._operation_semaphore:
                 # Apply operation timeout to prevent hanging
                 return await asyncio.wait_for(operation(), timeout=self._connection_timeout)
-        except asyncio.TimeoutError:
+        except asyncio.TimeoutError as e:
             self.logger.error(f"Redis operation timed out after {self._connection_timeout}s")
-            raise DataError(f"Redis operation timed out after {self._connection_timeout}s")
+            raise DataError(f"Redis operation timed out after {self._connection_timeout}s") from e
         finally:
             self._operation_queue_size -= 1
 
@@ -219,8 +267,10 @@ class RedisClient(BaseComponent):
         """Get namespaced key for organization."""
         return f"{namespace}:{key}"
 
-    @circuit_breaker(failure_threshold=5, recovery_timeout=30)
-    async def set(self, key: str, value: Any, ttl: int | None = None, namespace: str = "trading_bot") -> bool:
+    @with_circuit_breaker(failure_threshold=5, recovery_timeout=30)
+    async def set(
+        self, key: str, value: Any, ttl: int | None = None, namespace: str = "trading_bot"
+    ) -> bool:
         """Set a key-value pair with optional TTL."""
 
         async def _set_operation():
@@ -237,7 +287,9 @@ class RedisClient(BaseComponent):
             if ttl is not None:
                 result = await self.client.setex(namespaced_key, ttl, serialized_value)
             else:
-                result = await self.client.setex(namespaced_key, self._default_ttl, serialized_value)
+                result = await self.client.setex(
+                    namespaced_key, self._default_ttl, serialized_value
+                )
             return result
 
         try:
@@ -245,15 +297,6 @@ class RedisClient(BaseComponent):
             return result
 
         except Exception as e:
-            if self.error_handler and self.config:
-                error_context = self.error_handler.create_error_context(
-                    e,
-                    "redis_client",
-                    "set",
-                    key=key,
-                    namespace=namespace,
-                )
-                await self.error_handler.handle_error(e, error_context)
             self.logger.error("Redis set operation failed", key=key, error=str(e))
             raise DataError(f"Redis set operation failed: {e!s}")
         finally:
@@ -465,7 +508,9 @@ class RedisClient(BaseComponent):
         finally:
             await self._maybe_autoclose()
 
-    async def lrange(self, key: str, start: int = 0, end: int = -1, namespace: str = "trading_bot") -> list[Any]:
+    async def lrange(
+        self, key: str, start: int = 0, end: int = -1, namespace: str = "trading_bot"
+    ) -> list[Any]:
         """Get a range of elements from a list."""
         try:
             await self._ensure_connected()

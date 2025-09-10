@@ -2,6 +2,7 @@
 
 from datetime import datetime
 from decimal import Decimal
+from typing import Any
 
 from src.core.base.service import BaseService
 from src.core.exceptions import ServiceError, ValidationError
@@ -9,6 +10,7 @@ from src.core.logging import get_logger
 from src.database.interfaces import TradingDataServiceInterface
 from src.database.models.trading import Order, Position, Trade
 from src.database.repository.trading import (
+    OrderFillRepository,
     OrderRepository,
     PositionRepository,
     TradeRepository,
@@ -22,38 +24,38 @@ class TradingService(BaseService, TradingDataServiceInterface):
 
     def __init__(
         self,
-        database_service=None,  # DatabaseService - injected dependency
-        order_repo: OrderRepository | None = None,
-        position_repo: PositionRepository | None = None,
-        trade_repo: TradeRepository | None = None,
+        order_repo: OrderRepository,
+        position_repo: PositionRepository,
+        trade_repo: TradeRepository,
+        fill_repo: OrderFillRepository | None = None,
     ):
-        """Initialize with injected dependencies."""
+        """Initialize with injected repositories."""
         super().__init__(name="TradingService")
-        self.database_service = database_service
         self.order_repo = order_repo
         self.position_repo = position_repo
         self.trade_repo = trade_repo
+        self.fill_repo = fill_repo
 
     async def cancel_order(self, order_id: str, reason: str = "User requested") -> bool:
         """Cancel order with business logic validation."""
         try:
-            # Get order through database service
-            from src.database.models.trading import Order
-            
-            order = await self.database_service.get_entity_by_id(Order, order_id)
+            # Get order through repository
+            order = await self.order_repo.get_by_id(order_id)
             if not order:
                 raise ValidationError(f"Order {order_id} not found")
 
             if not self._can_cancel_order(order):
-                raise ValidationError(f"Order {order_id} cannot be cancelled in status {order.status}")
+                raise ValidationError(
+                    f"Order {order_id} cannot be cancelled in status {order.status}"
+                )
 
             # Business logic for cancellation - update status
             order.status = "CANCELLED"
-            
-            # Update through database service
-            updated_order = await self.database_service.update_entity(order)
+
+            # Update through repository
+            updated_order = await self.order_repo.update(order)
             success = updated_order is not None
-            
+
             if success:
                 logger.info(f"Order {order_id} cancelled: {reason}")
                 # Add audit log entry for cancellation
@@ -68,10 +70,8 @@ class TradingService(BaseService, TradingDataServiceInterface):
     async def close_position(self, position_id: str, close_price: Decimal) -> bool:
         """Close position with business logic."""
         try:
-            # Get position through database service
-            from src.database.models.trading import Position
-            
-            position = await self.database_service.get_entity_by_id(Position, position_id)
+            # Get position through repository
+            position = await self.position_repo.get_by_id(position_id)
             if not position:
                 raise ValidationError(f"Position {position_id} not found")
 
@@ -87,12 +87,14 @@ class TradingService(BaseService, TradingDataServiceInterface):
             position.closed_at = datetime.utcnow()
             position.realized_pnl = realized_pnl
 
-            # Update through database service
-            updated_position = await self.database_service.update_entity(position)
+            # Update through repository
+            updated_position = await self.position_repo.update(position)
             success = updated_position is not None
 
             if success:
-                logger.info(f"Position {position_id} closed at {close_price} with P&L {realized_pnl}")
+                logger.info(
+                    f"Position {position_id} closed at {close_price} with P&L {realized_pnl}"
+                )
 
             return success
 
@@ -108,10 +110,8 @@ class TradingService(BaseService, TradingDataServiceInterface):
         start_time: datetime | None = None,
         end_time: datetime | None = None,
     ) -> list[Trade]:
-        """Get trades for bot - delegates to database service."""
+        """Get trades for bot - delegates to repository."""
         try:
-            from src.database.models.trading import Trade
-            
             filters = {"bot_id": bot_id}
 
             if start_time:
@@ -121,13 +121,8 @@ class TradingService(BaseService, TradingDataServiceInterface):
                     filters["created_at"] = {}
                 filters["created_at"]["lte"] = end_time
 
-            return await self.database_service.list_entities(
-                model_class=Trade,
-                filters=filters, 
-                limit=limit, 
-                offset=offset, 
-                order_by="created_at",
-                order_desc=True
+            return await self.trade_repo.list(
+                filters=filters, limit=limit, offset=offset, order_by="created_at", order_desc=True
             )
 
         except Exception as e:
@@ -135,15 +130,10 @@ class TradingService(BaseService, TradingDataServiceInterface):
             raise ServiceError(f"Failed to get trades: {e}") from e
 
     async def get_positions_by_bot(self, bot_id: str) -> list[Position]:
-        """Get positions for bot - delegates to database service."""
+        """Get positions for bot - delegates to repository."""
         try:
-            from src.database.models.trading import Position
-            
-            return await self.database_service.list_entities(
-                model_class=Position,
-                filters={"bot_id": bot_id}, 
-                order_by="created_at",
-                order_desc=True
+            return await self.position_repo.list(
+                filters={"bot_id": bot_id}, order_by="created_at", order_desc=True
             )
         except Exception as e:
             logger.error(f"Failed to get positions for bot {bot_id}: {e}")
@@ -177,7 +167,7 @@ class TradingService(BaseService, TradingDataServiceInterface):
         return order.status in cancellable_statuses
 
     def _calculate_realized_pnl(self, position: Position, close_price: Decimal) -> Decimal:
-        """Calculate realized P&L for position."""
+        """Calculate realized P&L for position - proper business logic in service layer."""
         if not position.entry_price or not position.quantity:
             return Decimal("0")
 
@@ -188,7 +178,7 @@ class TradingService(BaseService, TradingDataServiceInterface):
         return price_diff * position.quantity
 
     def _calculate_unrealized_pnl(self, position: Position, current_price: Decimal) -> Decimal:
-        """Calculate unrealized P&L for position."""
+        """Calculate unrealized P&L for position - proper business logic in service layer."""
         if not position.entry_price or not position.quantity:
             return Decimal("0")
 
@@ -201,10 +191,8 @@ class TradingService(BaseService, TradingDataServiceInterface):
     async def update_position_price(self, position_id: str, current_price: Decimal) -> bool:
         """Update position's current price with business logic."""
         try:
-            # Get position through database service
-            from src.database.models.trading import Position
-            
-            position = await self.database_service.get_entity_by_id(Position, position_id)
+            # Get position through repository
+            position = await self.position_repo.get_by_id(position_id)
             if not position:
                 raise ValidationError(f"Position {position_id} not found")
 
@@ -219,8 +207,8 @@ class TradingService(BaseService, TradingDataServiceInterface):
             position.current_price = current_price
             position.unrealized_pnl = unrealized_pnl
 
-            # Update through database service
-            updated_position = await self.database_service.update_entity(position)
+            # Update through repository
+            updated_position = await self.position_repo.update(position)
             return updated_position is not None
 
         except Exception as e:
@@ -230,21 +218,21 @@ class TradingService(BaseService, TradingDataServiceInterface):
     async def _log_order_cancellation(self, order_id: str, reason: str) -> None:
         """Log order cancellation for audit."""
         logger.info(f"Order {order_id} cancellation logged: {reason}")
-        
+
     async def create_trade(self, trade_data: dict) -> dict:
         """Create a new trade with business logic validation."""
         try:
             # Validate trade data with business rules
-            if not trade_data.get('symbol'):
+            if not trade_data.get("symbol"):
                 raise ValidationError("Symbol is required")
-            if not trade_data.get('side') in ['BUY', 'SELL', 'LONG', 'SHORT']:
+            if trade_data.get("side") not in ["BUY", "SELL", "LONG", "SHORT"]:
                 raise ValidationError("Valid side is required")
-            if not trade_data.get('quantity') or trade_data['quantity'] <= 0:
+            if not trade_data.get("quantity") or trade_data["quantity"] <= 0:
                 raise ValidationError("Positive quantity is required")
-                
+
             # Create trade entity with business logic
             from src.database.models.trading import Trade
-            
+
             trade = Trade(
                 symbol=trade_data.get("symbol"),
                 side=trade_data.get("side"),
@@ -256,10 +244,10 @@ class TradingService(BaseService, TradingDataServiceInterface):
                 strategy_id=trade_data.get("strategy_id"),
                 exchange=trade_data.get("exchange"),
             )
-            
-            # Save through database service
-            saved_trade = await self.database_service.create_entity(trade)
-            
+
+            # Save through repository
+            saved_trade = await self.trade_repo.create(trade)
+
             # Return as dict for API responses
             return {
                 "id": saved_trade.id,
@@ -270,33 +258,30 @@ class TradingService(BaseService, TradingDataServiceInterface):
                 "pnl": str(saved_trade.pnl) if saved_trade.pnl else None,
                 "timestamp": saved_trade.created_at,
             }
-            
+
         except ValidationError:
             raise
         except Exception as e:
             logger.error(f"Failed to create trade: {e}")
             raise ServiceError(f"Trade creation failed: {e}") from e
-            
-    async def get_positions(self, strategy_id: str | None = None, symbol: str | None = None) -> list[dict]:
+
+    async def get_positions(
+        self, strategy_id: str | None = None, symbol: str | None = None
+    ) -> list[dict]:
         """Get positions with business logic filtering."""
         try:
             # Build filters with business logic
-            from src.database.models.trading import Position
-            
             filters = {}
             if strategy_id:
                 filters["strategy_id"] = strategy_id
             if symbol:
                 filters["symbol"] = symbol
-                
-            # Get positions from database service
-            positions = await self.database_service.list_entities(
-                model_class=Position,
-                filters=filters, 
-                order_by="created_at",
-                order_desc=True
+
+            # Get positions from repository
+            positions = await self.position_repo.list(
+                filters=filters, order_by="created_at", order_desc=True
             )
-            
+
             # Convert to dict format for API responses
             return [
                 {
@@ -305,34 +290,34 @@ class TradingService(BaseService, TradingDataServiceInterface):
                     "side": position.side,
                     "quantity": str(position.quantity),
                     "entry_price": str(position.entry_price),
-                    "current_price": str(position.current_price) if position.current_price else None,
-                    "unrealized_pnl": str(position.unrealized_pnl) if position.unrealized_pnl else None,
+                    "current_price": str(position.current_price)
+                    if position.current_price
+                    else None,
+                    "unrealized_pnl": str(position.unrealized_pnl)
+                    if position.unrealized_pnl
+                    else None,
                     "status": position.status,
                     "created_at": position.created_at,
                 }
                 for position in positions
             ]
-            
+
         except Exception as e:
             logger.error(f"Failed to get positions: {e}")
             raise ServiceError(f"Get positions failed: {e}") from e
 
-    async def get_trade_statistics(self, bot_id: str, since: datetime | None = None) -> dict[str, Any]:
+    async def get_trade_statistics(
+        self, bot_id: str, since: datetime | None = None
+    ) -> dict[str, Any]:
         """Get trade statistics with business logic."""
         try:
-            from src.database.models.trading import Trade
-            
             # Build filters for trades
             filters = {"bot_id": bot_id}
             if since:
                 filters["created_at"] = {"gte": since}
-            
-            # Get trades through database service
-            trades = await self.database_service.list_entities(
-                model_class=Trade,
-                filters=filters,
-                order_by="created_at"
-            )
+
+            # Get trades through repository
+            trades = await self.trade_repo.list(filters=filters, order_by="created_at")
 
             if not trades:
                 return {
@@ -358,8 +343,9 @@ class TradingService(BaseService, TradingDataServiceInterface):
                 "total_pnl": total_pnl,
                 "average_pnl": total_pnl / Decimal(str(len(trades))) if trades else Decimal("0"),
                 "win_rate": (
-                    (Decimal(str(len(profitable))) / Decimal(str(len(trades)))) * Decimal("100") 
-                    if trades else Decimal("0")
+                    (Decimal(str(len(profitable))) / Decimal(str(len(trades)))) * Decimal("100")
+                    if trades
+                    else Decimal("0")
                 ),
                 "largest_win": max((t.pnl for t in profitable), default=Decimal("0")),
                 "largest_loss": min((t.pnl for t in losing), default=Decimal("0")),
@@ -372,20 +358,15 @@ class TradingService(BaseService, TradingDataServiceInterface):
     async def get_total_exposure(self, bot_id: str) -> dict[str, Decimal]:
         """Get total exposure by bot with business logic."""
         try:
-            from src.database.models.trading import Position
-            
             # Get open positions
-            positions = await self.database_service.list_entities(
-                model_class=Position,
-                filters={"bot_id": bot_id, "status": "OPEN"}
-            )
+            positions = await self.position_repo.list(filters={"bot_id": bot_id, "status": "OPEN"})
 
             # Business logic for exposure calculation
             total_long = Decimal("0")
             total_short = Decimal("0")
-            
+
             for position in positions:
-                if hasattr(position, 'value') and position.value:
+                if hasattr(position, "value") and position.value:
                     if position.side == "LONG":
                         total_long += position.value
                     elif position.side == "SHORT":
@@ -412,14 +393,12 @@ class TradingService(BaseService, TradingDataServiceInterface):
     async def get_order_fill_summary(self, order_id: str) -> dict[str, Decimal]:
         """Get order fill summary with business logic."""
         try:
-            from src.database.models.trading import OrderFill
-            
-            # Get fills for the order
-            fills = await self.database_service.list_entities(
-                model_class=OrderFill,
-                filters={"order_id": order_id},
-                order_by="created_at"
-            )
+            # Use injected repository instead of direct instantiation
+            if not self.fill_repo:
+                raise ServiceError("OrderFill repository not available")
+
+            # Get fills for the order through injected repository
+            fills = await self.fill_repo.list(filters={"order_id": order_id}, order_by="created_at")
 
             if not fills:
                 return {
@@ -436,8 +415,8 @@ class TradingService(BaseService, TradingDataServiceInterface):
             return {
                 "quantity": total_quantity,
                 "average_price": (
-                    (total_value / total_quantity) 
-                    if total_quantity and total_quantity > Decimal("0") 
+                    (total_value / total_quantity)
+                    if total_quantity and total_quantity > Decimal("0")
                     else Decimal("0")
                 ),
                 "total_fees": total_fees,

@@ -20,7 +20,9 @@ class AlertRepository(DatabaseRepository):
     def __init__(self, session: AsyncSession):
         """Initialize alert repository."""
 
-        super().__init__(session=session, model=Alert, entity_type=Alert, key_type=str, name="AlertRepository")
+        super().__init__(
+            session=session, model=Alert, entity_type=Alert, key_type=str, name="AlertRepository"
+        )
 
     async def get_by_user(self, user_id: str) -> list[Alert]:
         """Get alerts by user."""
@@ -28,7 +30,9 @@ class AlertRepository(DatabaseRepository):
 
     async def get_unread_alerts(self, user_id: str) -> list[Alert]:
         """Get unread alerts for user."""
-        return await self.get_all(filters={"user_id": user_id, "is_read": False}, order_by="-timestamp")
+        return await self.get_all(
+            filters={"user_id": user_id, "is_read": False}, order_by="-timestamp"
+        )
 
     async def get_by_severity(self, severity: str) -> list[Alert]:
         """Get alerts by severity."""
@@ -40,7 +44,9 @@ class AlertRepository(DatabaseRepository):
 
     async def get_by_type(self, alert_type: str) -> list[Alert]:
         """Get alerts by type."""
-        return await RepositoryUtils.get_entities_by_field(self, "alert_type", alert_type, "-timestamp")
+        return await RepositoryUtils.get_entities_by_field(
+            self, "alert_type", alert_type, "-timestamp"
+        )
 
     async def mark_as_read(self, alert_id: str) -> bool:
         """Mark alert as read."""
@@ -76,7 +82,9 @@ class AuditLogRepository(DatabaseRepository):
 
     async def get_by_resource_type(self, resource_type: str) -> list[AuditLog]:
         """Get audit logs by resource type."""
-        return await RepositoryUtils.get_entities_by_field(self, "resource_type", resource_type, "-timestamp")
+        return await RepositoryUtils.get_entities_by_field(
+            self, "resource_type", resource_type, "-timestamp"
+        )
 
     async def get_by_resource(self, resource_type: str, resource_id: str) -> list[AuditLog]:
         """Get audit logs for specific resource."""
@@ -153,7 +161,9 @@ class BalanceSnapshotRepository(DatabaseRepository):
         """Get balance snapshots by currency."""
         return await self.get_all(filters={"currency": currency}, order_by="-timestamp")
 
-    async def get_latest_snapshot(self, user_id: str, exchange: str, currency: str) -> BalanceSnapshot | None:
+    async def get_latest_snapshot(
+        self, user_id: str, exchange: str, currency: str
+    ) -> BalanceSnapshot | None:
         """Get latest balance snapshot."""
         snapshots = await self.get_all(
             filters={"user_id": user_id, "exchange": exchange, "currency": currency},

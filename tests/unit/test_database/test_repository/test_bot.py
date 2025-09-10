@@ -6,21 +6,20 @@ StrategyRepository, SignalRepository, and BotLogRepository.
 """
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
+
 # Removed decimal import as Bot model uses Float not Decimal
 from unittest.mock import AsyncMock, Mock, patch
-from typing import Any
 
 import pytest
-import pytest_asyncio
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.exceptions import RepositoryError
 from src.database.models.bot import Bot, BotLog, Signal, Strategy
 from src.database.repository.bot import (
-    BotRepository,
     BotLogRepository,
+    BotRepository,
     SignalRepository,
     StrategyRepository,
 )
@@ -35,7 +34,7 @@ class TestBotRepository:
         session = AsyncMock(spec=AsyncSession)
         # Make sync methods regular mocks to avoid warnings
         session.delete = Mock()
-        session.add = Mock() 
+        session.add = Mock()
         session.merge = AsyncMock()
         session.flush = AsyncMock()
         session.commit = AsyncMock()
@@ -61,13 +60,13 @@ class TestBotRepository:
             total_trades=15,
             winning_trades=10,
             losing_trades=5,
-            total_pnl=500.00
+            total_pnl=500.00,
         )
 
     def test_bot_repository_init(self, mock_session):
         """Test BotRepository initialization."""
         repo = BotRepository(mock_session)
-        
+
         assert repo.session == mock_session
         assert repo.model == Bot
         assert repo.name == "BotRepository"
@@ -82,7 +81,7 @@ class TestBotRepository:
         mock_session.execute.return_value = mock_result
 
         result = await bot_repository.get_active_bots()
-        
+
         assert len(result) == 2
         mock_session.execute.assert_called_once()
 
@@ -96,36 +95,37 @@ class TestBotRepository:
         mock_session.execute.return_value = mock_result
 
         result = await bot_repository.get_running_bots()
-        
+
         assert len(result) == 1
         mock_session.execute.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_get_bot_by_name_found(self, bot_repository, mock_session, sample_bot):
         """Test get_bot_by_name when bot exists."""
-        with patch.object(bot_repository, 'get_by', return_value=sample_bot):
+        with patch.object(bot_repository, "get_by", return_value=sample_bot):
             result = await bot_repository.get_bot_by_name("test_bot")
-            
+
             assert result == sample_bot
 
     @pytest.mark.asyncio
     async def test_get_bot_by_name_not_found(self, bot_repository):
         """Test get_bot_by_name when bot doesn't exist."""
-        with patch.object(bot_repository, 'get_by', return_value=None):
+        with patch.object(bot_repository, "get_by", return_value=None):
             result = await bot_repository.get_bot_by_name("nonexistent_bot")
-            
+
             assert result is None
 
     @pytest.mark.asyncio
     async def test_start_bot_success(self, bot_repository, sample_bot):
         """Test successful bot start operation."""
         sample_bot.status = "STOPPED"
-        
-        with patch.object(bot_repository, 'get', return_value=sample_bot), \
-             patch.object(bot_repository, 'update', return_value=sample_bot):
-            
+
+        with (
+            patch.object(bot_repository, "get", return_value=sample_bot),
+            patch.object(bot_repository, "update", return_value=sample_bot),
+        ):
             result = await bot_repository.start_bot(sample_bot.id)
-            
+
             assert result is True
             assert sample_bot.status == "INITIALIZING"
 
@@ -133,30 +133,31 @@ class TestBotRepository:
     async def test_start_bot_invalid_status(self, bot_repository, sample_bot):
         """Test start bot with invalid current status."""
         sample_bot.status = "RUNNING"  # Already running
-        
-        with patch.object(bot_repository, 'get', return_value=sample_bot):
+
+        with patch.object(bot_repository, "get", return_value=sample_bot):
             result = await bot_repository.start_bot(sample_bot.id)
-            
+
             assert result is False
 
     @pytest.mark.asyncio
     async def test_start_bot_not_found(self, bot_repository):
         """Test start bot when bot doesn't exist."""
-        with patch.object(bot_repository, 'get', return_value=None):
+        with patch.object(bot_repository, "get", return_value=None):
             result = await bot_repository.start_bot("nonexistent_id")
-            
+
             assert result is False
 
     @pytest.mark.asyncio
     async def test_stop_bot_success(self, bot_repository, sample_bot):
         """Test successful bot stop operation."""
         sample_bot.status = "RUNNING"
-        
-        with patch.object(bot_repository, 'get', return_value=sample_bot), \
-             patch.object(bot_repository, 'update', return_value=sample_bot):
-            
+
+        with (
+            patch.object(bot_repository, "get", return_value=sample_bot),
+            patch.object(bot_repository, "update", return_value=sample_bot),
+        ):
             result = await bot_repository.stop_bot(sample_bot.id)
-            
+
             assert result is True
             assert sample_bot.status == "STOPPING"
 
@@ -164,22 +165,23 @@ class TestBotRepository:
     async def test_stop_bot_invalid_status(self, bot_repository, sample_bot):
         """Test stop bot with invalid current status."""
         sample_bot.status = "STOPPED"  # Already stopped
-        
-        with patch.object(bot_repository, 'get', return_value=sample_bot):
+
+        with patch.object(bot_repository, "get", return_value=sample_bot):
             result = await bot_repository.stop_bot(sample_bot.id)
-            
+
             assert result is False
 
     @pytest.mark.asyncio
     async def test_pause_bot_success(self, bot_repository, sample_bot):
         """Test successful bot pause operation."""
         sample_bot.status = "RUNNING"
-        
-        with patch.object(bot_repository, 'get', return_value=sample_bot), \
-             patch.object(bot_repository, 'update', return_value=sample_bot):
-            
+
+        with (
+            patch.object(bot_repository, "get", return_value=sample_bot),
+            patch.object(bot_repository, "update", return_value=sample_bot),
+        ):
             result = await bot_repository.pause_bot(sample_bot.id)
-            
+
             assert result is True
             assert sample_bot.status == "PAUSED"
 
@@ -187,45 +189,43 @@ class TestBotRepository:
     async def test_pause_bot_invalid_status(self, bot_repository, sample_bot):
         """Test pause bot with invalid current status."""
         sample_bot.status = "STOPPED"
-        
-        with patch.object(bot_repository, 'get', return_value=sample_bot):
+
+        with patch.object(bot_repository, "get", return_value=sample_bot):
             result = await bot_repository.pause_bot(sample_bot.id)
-            
+
             assert result is False
 
     @pytest.mark.asyncio
     async def test_update_bot_status_success(self, bot_repository, sample_bot):
         """Test successful bot status update."""
-        with patch.object(bot_repository, 'get', return_value=sample_bot), \
-             patch.object(bot_repository, 'update', return_value=sample_bot):
-            
+        with (
+            patch.object(bot_repository, "get", return_value=sample_bot),
+            patch.object(bot_repository, "update", return_value=sample_bot),
+        ):
             result = await bot_repository.update_bot_status(sample_bot.id, "ERROR")
-            
+
             assert result is True
             assert sample_bot.status == "ERROR"
 
     @pytest.mark.asyncio
     async def test_update_bot_status_bot_not_found(self, bot_repository):
         """Test update bot status when bot doesn't exist."""
-        with patch.object(bot_repository, 'get', return_value=None):
+        with patch.object(bot_repository, "get", return_value=None):
             result = await bot_repository.update_bot_status("nonexistent_id", "ERROR")
-            
+
             assert result is False
 
     @pytest.mark.asyncio
     async def test_update_bot_metrics_success(self, bot_repository, sample_bot):
         """Test successful bot metrics update."""
-        metrics = {
-            "total_trades": 20,
-            "winning_trades": 12,
-            "total_pnl": 600.00
-        }
-        
-        with patch.object(bot_repository, 'get', return_value=sample_bot), \
-             patch.object(bot_repository, 'update', return_value=sample_bot):
-            
+        metrics = {"total_trades": 20, "winning_trades": 12, "total_pnl": 600.00}
+
+        with (
+            patch.object(bot_repository, "get", return_value=sample_bot),
+            patch.object(bot_repository, "update", return_value=sample_bot),
+        ):
             result = await bot_repository.update_bot_metrics(sample_bot.id, metrics)
-            
+
             assert result is True
             assert sample_bot.total_trades == 20
             assert sample_bot.winning_trades == 12
@@ -234,16 +234,14 @@ class TestBotRepository:
     @pytest.mark.asyncio
     async def test_update_bot_metrics_invalid_attribute(self, bot_repository, sample_bot):
         """Test update bot metrics with invalid attribute."""
-        metrics = {
-            "invalid_attribute": "value",
-            "total_trades": 20
-        }
-        
-        with patch.object(bot_repository, 'get', return_value=sample_bot), \
-             patch.object(bot_repository, 'update', return_value=sample_bot):
-            
+        metrics = {"invalid_attribute": "value", "total_trades": 20}
+
+        with (
+            patch.object(bot_repository, "get", return_value=sample_bot),
+            patch.object(bot_repository, "update", return_value=sample_bot),
+        ):
             result = await bot_repository.update_bot_metrics(sample_bot.id, metrics)
-            
+
             assert result is True
             assert sample_bot.total_trades == 20
             # Invalid attribute should be ignored
@@ -251,9 +249,9 @@ class TestBotRepository:
     @pytest.mark.asyncio
     async def test_get_bot_performance(self, bot_repository, sample_bot):
         """Test get bot performance metrics."""
-        with patch.object(bot_repository, 'get', return_value=sample_bot):
+        with patch.object(bot_repository, "get", return_value=sample_bot):
             result = await bot_repository.get_bot_performance(sample_bot.id)
-            
+
             expected = {
                 "total_trades": sample_bot.total_trades,
                 "winning_trades": sample_bot.winning_trades,
@@ -263,28 +261,31 @@ class TestBotRepository:
                 "average_pnl": sample_bot.average_pnl,
                 "allocated_capital": sample_bot.allocated_capital,
                 "current_balance": sample_bot.current_balance,
-                "roi": ((sample_bot.current_balance - sample_bot.allocated_capital) / 
-                       sample_bot.allocated_capital * 100)
+                "roi": (
+                    (sample_bot.current_balance - sample_bot.allocated_capital)
+                    / sample_bot.allocated_capital
+                    * 100
+                ),
             }
-            
+
             assert result == expected
 
     @pytest.mark.asyncio
     async def test_get_bot_performance_zero_allocated_capital(self, bot_repository, sample_bot):
         """Test get bot performance with zero allocated capital."""
         sample_bot.allocated_capital = 0.0
-        
-        with patch.object(bot_repository, 'get', return_value=sample_bot):
+
+        with patch.object(bot_repository, "get", return_value=sample_bot):
             result = await bot_repository.get_bot_performance(sample_bot.id)
-            
+
             assert result["roi"] == 0
 
     @pytest.mark.asyncio
     async def test_get_bot_performance_bot_not_found(self, bot_repository):
         """Test get bot performance when bot doesn't exist."""
-        with patch.object(bot_repository, 'get', return_value=None):
+        with patch.object(bot_repository, "get", return_value=None):
             result = await bot_repository.get_bot_performance("nonexistent_id")
-            
+
             assert result == {}
 
 
@@ -315,7 +316,7 @@ class TestStrategyRepository:
             risk_per_trade=0.02,
             total_signals=15,
             executed_signals=10,
-            successful_signals=6
+            successful_signals=6,
         )
 
     @pytest.mark.asyncio
@@ -328,7 +329,7 @@ class TestStrategyRepository:
         mock_session.execute.return_value = mock_result
 
         result = await strategy_repository.get_active_strategies()
-        
+
         assert len(result) == 2
 
     @pytest.mark.asyncio
@@ -342,7 +343,7 @@ class TestStrategyRepository:
         mock_session.execute.return_value = mock_result
 
         result = await strategy_repository.get_active_strategies(bot_id=bot_id)
-        
+
         assert len(result) == 1
 
     @pytest.mark.asyncio
@@ -356,29 +357,30 @@ class TestStrategyRepository:
         mock_session.execute.return_value = mock_result
 
         result = await strategy_repository.get_strategies_by_bot(bot_id)
-        
+
         assert len(result) == 1
 
     @pytest.mark.asyncio
     async def test_get_strategy_by_name(self, strategy_repository, sample_strategy):
         """Test get strategy by name."""
-        with patch.object(strategy_repository, 'get_by', return_value=sample_strategy):
+        with patch.object(strategy_repository, "get_by", return_value=sample_strategy):
             result = await strategy_repository.get_strategy_by_name(
                 sample_strategy.bot_id, sample_strategy.name
             )
-            
+
             assert result == sample_strategy
 
     @pytest.mark.asyncio
     async def test_activate_strategy_success(self, strategy_repository, sample_strategy):
         """Test successful strategy activation."""
         sample_strategy.status = "INACTIVE"
-        
-        with patch.object(strategy_repository, 'get', return_value=sample_strategy), \
-             patch.object(strategy_repository, 'update', return_value=sample_strategy):
-            
+
+        with (
+            patch.object(strategy_repository, "get", return_value=sample_strategy),
+            patch.object(strategy_repository, "update", return_value=sample_strategy),
+        ):
             result = await strategy_repository.activate_strategy(sample_strategy.id)
-            
+
             assert result is True
             assert sample_strategy.status == "ACTIVE"
 
@@ -386,22 +388,23 @@ class TestStrategyRepository:
     async def test_activate_strategy_invalid_status(self, strategy_repository, sample_strategy):
         """Test activate strategy with invalid current status."""
         sample_strategy.status = "ACTIVE"  # Already active
-        
-        with patch.object(strategy_repository, 'get', return_value=sample_strategy):
+
+        with patch.object(strategy_repository, "get", return_value=sample_strategy):
             result = await strategy_repository.activate_strategy(sample_strategy.id)
-            
+
             assert result is False
 
     @pytest.mark.asyncio
     async def test_deactivate_strategy_success(self, strategy_repository, sample_strategy):
         """Test successful strategy deactivation."""
         sample_strategy.status = "ACTIVE"
-        
-        with patch.object(strategy_repository, 'get', return_value=sample_strategy), \
-             patch.object(strategy_repository, 'update', return_value=sample_strategy):
-            
+
+        with (
+            patch.object(strategy_repository, "get", return_value=sample_strategy),
+            patch.object(strategy_repository, "update", return_value=sample_strategy),
+        ):
             result = await strategy_repository.deactivate_strategy(sample_strategy.id)
-            
+
             assert result is True
             assert sample_strategy.status == "INACTIVE"
 
@@ -409,12 +412,15 @@ class TestStrategyRepository:
     async def test_update_strategy_params_success(self, strategy_repository, sample_strategy):
         """Test successful strategy parameters update."""
         new_params = {"param1": "new_value", "param2": "value2"}
-        
-        with patch.object(strategy_repository, 'get', return_value=sample_strategy), \
-             patch.object(strategy_repository, 'update', return_value=sample_strategy):
-            
-            result = await strategy_repository.update_strategy_params(sample_strategy.id, new_params)
-            
+
+        with (
+            patch.object(strategy_repository, "get", return_value=sample_strategy),
+            patch.object(strategy_repository, "update", return_value=sample_strategy),
+        ):
+            result = await strategy_repository.update_strategy_params(
+                sample_strategy.id, new_params
+            )
+
             assert result is True
             assert sample_strategy.params["param1"] == "new_value"
             assert sample_strategy.params["param2"] == "value2"
@@ -422,16 +428,14 @@ class TestStrategyRepository:
     @pytest.mark.asyncio
     async def test_update_strategy_metrics_success(self, strategy_repository, sample_strategy):
         """Test successful strategy metrics update."""
-        metrics = {
-            "total_signals": 15,
-            "executed_signals": 9
-        }
-        
-        with patch.object(strategy_repository, 'get', return_value=sample_strategy), \
-             patch.object(strategy_repository, 'update', return_value=sample_strategy):
-            
+        metrics = {"total_signals": 15, "executed_signals": 9}
+
+        with (
+            patch.object(strategy_repository, "get", return_value=sample_strategy),
+            patch.object(strategy_repository, "update", return_value=sample_strategy),
+        ):
             result = await strategy_repository.update_strategy_metrics(sample_strategy.id, metrics)
-            
+
             assert result is True
             assert sample_strategy.total_signals == 15
             assert sample_strategy.executed_signals == 9
@@ -460,7 +464,7 @@ class TestSignalRepository:
             symbol="BTCUSD",
             strength=0.8,
             executed=False,
-            created_at=datetime.now(timezone.utc)
+            created_at=datetime.now(timezone.utc),
         )
 
     @pytest.mark.asyncio
@@ -473,11 +477,13 @@ class TestSignalRepository:
         mock_session.execute.return_value = mock_result
 
         result = await signal_repository.get_unexecuted_signals()
-        
+
         assert len(result) == 2
 
     @pytest.mark.asyncio
-    async def test_get_unexecuted_signals_with_strategy_filter(self, signal_repository, mock_session):
+    async def test_get_unexecuted_signals_with_strategy_filter(
+        self, signal_repository, mock_session
+    ):
         """Test get unexecuted signals with strategy filter."""
         strategy_id = str(uuid.uuid4())
         mock_result = Mock()
@@ -487,7 +493,7 @@ class TestSignalRepository:
         mock_session.execute.return_value = mock_result
 
         result = await signal_repository.get_unexecuted_signals(strategy_id=strategy_id)
-        
+
         assert len(result) == 1
 
     @pytest.mark.asyncio
@@ -501,7 +507,7 @@ class TestSignalRepository:
         mock_session.execute.return_value = mock_result
 
         result = await signal_repository.get_signals_by_strategy(strategy_id, limit=50)
-        
+
         assert len(result) == 1
 
     @pytest.mark.asyncio
@@ -514,7 +520,7 @@ class TestSignalRepository:
         mock_session.execute.return_value = mock_result
 
         result = await signal_repository.get_recent_signals(hours=12)
-        
+
         assert len(result) == 1
 
     @pytest.mark.asyncio
@@ -522,14 +528,15 @@ class TestSignalRepository:
         """Test successful mark signal as executed."""
         order_id = str(uuid.uuid4())
         execution_time = 1.5
-        
-        with patch.object(signal_repository, 'get', return_value=sample_signal), \
-             patch.object(signal_repository, 'update', return_value=sample_signal):
-            
+
+        with (
+            patch.object(signal_repository, "get", return_value=sample_signal),
+            patch.object(signal_repository, "update", return_value=sample_signal),
+        ):
             result = await signal_repository.mark_signal_executed(
                 sample_signal.id, order_id, execution_time
             )
-            
+
             assert result is True
             assert sample_signal.executed is True
             assert sample_signal.order_id == order_id
@@ -538,11 +545,9 @@ class TestSignalRepository:
     @pytest.mark.asyncio
     async def test_mark_signal_executed_signal_not_found(self, signal_repository):
         """Test mark signal executed when signal doesn't exist."""
-        with patch.object(signal_repository, 'get', return_value=None):
-            result = await signal_repository.mark_signal_executed(
-                "nonexistent_id", "order_id", 1.0
-            )
-            
+        with patch.object(signal_repository, "get", return_value=None):
+            result = await signal_repository.mark_signal_executed("nonexistent_id", "order_id", 1.0)
+
             assert result is False
 
     @pytest.mark.asyncio
@@ -550,14 +555,13 @@ class TestSignalRepository:
         """Test successful signal outcome update."""
         outcome = "SUCCESS"
         pnl = 125.50
-        
-        with patch.object(signal_repository, 'get', return_value=sample_signal), \
-             patch.object(signal_repository, 'update', return_value=sample_signal):
-            
-            result = await signal_repository.update_signal_outcome(
-                sample_signal.id, outcome, pnl
-            )
-            
+
+        with (
+            patch.object(signal_repository, "get", return_value=sample_signal),
+            patch.object(signal_repository, "update", return_value=sample_signal),
+        ):
+            result = await signal_repository.update_signal_outcome(sample_signal.id, outcome, pnl)
+
             assert result is True
             assert sample_signal.outcome == outcome
             assert sample_signal.pnl == pnl
@@ -566,14 +570,13 @@ class TestSignalRepository:
     async def test_update_signal_outcome_without_pnl(self, signal_repository, sample_signal):
         """Test signal outcome update without PnL."""
         outcome = "FAILED"
-        
-        with patch.object(signal_repository, 'get', return_value=sample_signal), \
-             patch.object(signal_repository, 'update', return_value=sample_signal):
-            
-            result = await signal_repository.update_signal_outcome(
-                sample_signal.id, outcome
-            )
-            
+
+        with (
+            patch.object(signal_repository, "get", return_value=sample_signal),
+            patch.object(signal_repository, "update", return_value=sample_signal),
+        ):
+            result = await signal_repository.update_signal_outcome(sample_signal.id, outcome)
+
             assert result is True
             assert sample_signal.outcome == outcome
 
@@ -581,7 +584,7 @@ class TestSignalRepository:
     async def test_get_signal_statistics_with_signals(self, signal_repository, mock_session):
         """Test get signal statistics with signals data."""
         strategy_id = str(uuid.uuid4())
-        
+
         # Mock signals with different outcomes
         signals = [
             Mock(executed=True, outcome="SUCCESS", execution_time=1.0),
@@ -589,7 +592,7 @@ class TestSignalRepository:
             Mock(executed=True, outcome="FAILED", execution_time=1.5),
             Mock(executed=False, outcome=None, execution_time=None),
         ]
-        
+
         mock_result = Mock()
         mock_scalars = Mock()
         mock_scalars.all.return_value = signals
@@ -597,16 +600,16 @@ class TestSignalRepository:
         mock_session.execute.return_value = mock_result
 
         result = await signal_repository.get_signal_statistics(strategy_id)
-        
+
         expected = {
             "total_signals": 4,
             "executed_signals": 3,
             "successful_signals": 2,
             "execution_rate": 75.0,
             "success_rate": 66.67,  # 2/3 * 100
-            "average_execution_time": 1.5  # (1.0 + 2.0 + 1.5) / 3
+            "average_execution_time": 1.5,  # (1.0 + 2.0 + 1.5) / 3
         }
-        
+
         assert result["total_signals"] == expected["total_signals"]
         assert result["executed_signals"] == expected["executed_signals"]
         assert result["successful_signals"] == expected["successful_signals"]
@@ -616,7 +619,7 @@ class TestSignalRepository:
     async def test_get_signal_statistics_no_signals(self, signal_repository, mock_session):
         """Test get signal statistics with no signals."""
         strategy_id = str(uuid.uuid4())
-        
+
         mock_result = Mock()
         mock_scalars = Mock()
         mock_scalars.all.return_value = []
@@ -624,16 +627,16 @@ class TestSignalRepository:
         mock_session.execute.return_value = mock_result
 
         result = await signal_repository.get_signal_statistics(strategy_id)
-        
+
         expected = {
             "total_signals": 0,
             "executed_signals": 0,
             "successful_signals": 0,
             "execution_rate": 0,
             "success_rate": 0,
-            "average_execution_time": 0
+            "average_execution_time": 0,
         }
-        
+
         assert result == expected
 
 
@@ -660,7 +663,7 @@ class TestBotLogRepository:
             message="Test log message",
             category="GENERAL",
             context={"key": "value"},
-            created_at=datetime.now(timezone.utc)
+            created_at=datetime.now(timezone.utc),
         )
 
     @pytest.mark.asyncio
@@ -674,7 +677,7 @@ class TestBotLogRepository:
         mock_session.execute.return_value = mock_result
 
         result = await log_repository.get_logs_by_bot(bot_id)
-        
+
         assert len(result) == 1
 
     @pytest.mark.asyncio
@@ -688,7 +691,7 @@ class TestBotLogRepository:
         mock_session.execute.return_value = mock_result
 
         result = await log_repository.get_logs_by_bot(bot_id, level="ERROR", limit=50)
-        
+
         assert len(result) == 1
 
     @pytest.mark.asyncio
@@ -701,7 +704,7 @@ class TestBotLogRepository:
         mock_session.execute.return_value = mock_result
 
         result = await log_repository.get_error_logs()
-        
+
         assert len(result) == 2
 
     @pytest.mark.asyncio
@@ -715,7 +718,7 @@ class TestBotLogRepository:
         mock_session.execute.return_value = mock_result
 
         result = await log_repository.get_error_logs(bot_id=bot_id, hours=12)
-        
+
         assert len(result) == 1
 
     @pytest.mark.asyncio
@@ -726,20 +729,14 @@ class TestBotLogRepository:
         message = "Test message"
         category = "TRADING"
         context = {"symbol": "BTCUSD"}
-        
+
         mock_log = BotLog(
-            bot_id=bot_id,
-            level=level,
-            message=message,
-            category=category,
-            context=context
+            bot_id=bot_id, level=level, message=message, category=category, context=context
         )
-        
-        with patch.object(log_repository, 'create', return_value=mock_log):
-            result = await log_repository.log_event(
-                bot_id, level, message, category, context
-            )
-            
+
+        with patch.object(log_repository, "create", return_value=mock_log):
+            result = await log_repository.log_event(bot_id, level, message, category, context)
+
             assert result == mock_log
             assert result.bot_id == bot_id
             assert result.level == level
@@ -751,18 +748,12 @@ class TestBotLogRepository:
         bot_id = str(uuid.uuid4())
         level = "ERROR"
         message = "Error occurred"
-        
-        mock_log = BotLog(
-            bot_id=bot_id,
-            level=level,
-            message=message,
-            category=None,
-            context=None
-        )
-        
-        with patch.object(log_repository, 'create', return_value=mock_log):
+
+        mock_log = BotLog(bot_id=bot_id, level=level, message=message, category=None, context=None)
+
+        with patch.object(log_repository, "create", return_value=mock_log):
             result = await log_repository.log_event(bot_id, level, message)
-            
+
             assert result == mock_log
             assert result.category is None
             assert result.context is None
@@ -776,10 +767,9 @@ class TestBotLogRepository:
         mock_session.execute.return_value = mock_result
 
         result = await log_repository.cleanup_old_logs(days=30)
-        
+
         assert result == 15
         mock_session.execute.assert_called_once()
-        mock_session.flush.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_cleanup_old_logs_no_logs(self, log_repository, mock_session):
@@ -789,7 +779,7 @@ class TestBotLogRepository:
         mock_session.execute.return_value = mock_result
 
         result = await log_repository.cleanup_old_logs(days=7)
-        
+
         assert result == 0
 
 
@@ -810,7 +800,7 @@ class TestBotRepositoryErrorHandling:
     async def test_database_error_handling(self, bot_repository, mock_session):
         """Test database error handling in repository operations."""
         mock_session.execute.side_effect = SQLAlchemyError("Database connection lost")
-        
+
         with pytest.raises(RepositoryError):
             await bot_repository.get_active_bots()
 
@@ -819,10 +809,10 @@ class TestBotRepositoryErrorHandling:
         """Test integrity error handling during create operations."""
         bot = Bot(id=str(uuid.uuid4()), name="test_bot", status="RUNNING")
         mock_session.flush.side_effect = IntegrityError("Duplicate key", None, None)
-        
+
         with pytest.raises(RepositoryError):
             await bot_repository.create(bot)
-            
+
         mock_session.rollback.assert_called_once()
 
 
@@ -844,14 +834,15 @@ class TestBotRepositoryConcurrency:
         """Test concurrent bot status updates."""
         bot_id = str(uuid.uuid4())
         bot = Bot(id=bot_id, name="test_bot", status="RUNNING")
-        
-        with patch.object(bot_repository, 'get', return_value=bot), \
-             patch.object(bot_repository, 'update', return_value=bot):
-            
+
+        with (
+            patch.object(bot_repository, "get", return_value=bot),
+            patch.object(bot_repository, "update", return_value=bot),
+        ):
             # Simulate concurrent updates
             result1 = await bot_repository.update_bot_status(bot_id, "PAUSED")
             result2 = await bot_repository.update_bot_status(bot_id, "STOPPED")
-            
+
             assert result1 is True
             assert result2 is True
 
@@ -860,16 +851,17 @@ class TestBotRepositoryConcurrency:
         """Test concurrent metric updates."""
         bot_id = str(uuid.uuid4())
         bot = Bot(id=bot_id, name="test_bot", status="RUNNING", total_trades=10)
-        
-        with patch.object(bot_repository, 'get', return_value=bot), \
-             patch.object(bot_repository, 'update', return_value=bot):
-            
+
+        with (
+            patch.object(bot_repository, "get", return_value=bot),
+            patch.object(bot_repository, "update", return_value=bot),
+        ):
             # Simulate concurrent metric updates
             metrics1 = {"total_trades": 15}
             metrics2 = {"winning_trades": 8}
-            
+
             result1 = await bot_repository.update_bot_metrics(bot_id, metrics1)
             result2 = await bot_repository.update_bot_metrics(bot_id, metrics2)
-            
+
             assert result1 is True
             assert result2 is True

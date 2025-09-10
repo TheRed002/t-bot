@@ -6,6 +6,7 @@ from decimal import Decimal
 from sqlalchemy import (
     DECIMAL,
     JSON,
+    BigInteger,
     Boolean,
     CheckConstraint,
     Column,
@@ -38,8 +39,8 @@ class Bot(Base, AuditMixin, MetadataMixin, SoftDeleteMixin):
     name = Column(String(255), nullable=False)
     description = Column(String(1000))
     status = Column(
-        String(20), nullable=False, default="STOPPED"
-    )  # INITIALIZING, RUNNING, PAUSED, STOPPING, STOPPED, ERROR
+        String(20), nullable=False, default="stopped"
+    )  # initializing, ready, running, paused, stopping, stopped, error, maintenance
 
     exchange = Column(String(50), nullable=False)
     test_mode = Column(Boolean, default=False)
@@ -59,13 +60,36 @@ class Bot(Base, AuditMixin, MetadataMixin, SoftDeleteMixin):
     config = Column(JSON, default={})
 
     # Relationships
+    instances = relationship("BotInstance", back_populates="bot", cascade="all, delete-orphan")
     strategies = relationship("Strategy", back_populates="bot", cascade="all, delete-orphan")
     orders = relationship("Order", back_populates="bot")
     positions = relationship("Position", back_populates="bot")
     trades = relationship("Trade", back_populates="bot")
     logs = relationship("BotLog", back_populates="bot", cascade="all, delete-orphan")
-    data_pipeline_records = relationship("DataPipelineRecord", back_populates="bot")
+    data_pipeline_records = relationship(
+        "DataPipelineRecord", back_populates="bot", cascade="all, delete-orphan"
+    )
     balance_snapshots = relationship("BalanceSnapshot", back_populates="bot")
+
+    # Analytics relationships
+    portfolio_metrics = relationship(
+        "AnalyticsPortfolioMetrics", back_populates="bot", cascade="all, delete-orphan"
+    )
+    position_metrics = relationship(
+        "AnalyticsPositionMetrics", back_populates="bot", cascade="all, delete-orphan"
+    )
+    risk_metrics = relationship(
+        "AnalyticsRiskMetrics", back_populates="bot", cascade="all, delete-orphan"
+    )
+    strategy_metrics = relationship(
+        "AnalyticsStrategyMetrics", back_populates="bot", cascade="all, delete-orphan"
+    )
+    operational_metrics = relationship(
+        "AnalyticsOperationalMetrics", back_populates="bot", cascade="all, delete-orphan"
+    )
+
+    # Capital management relationships
+    fund_flows = relationship("FundFlowDB", back_populates="bot", cascade="all, delete-orphan")
 
     # Indexes and constraints
     __table_args__ = (
@@ -77,9 +101,11 @@ class Bot(Base, AuditMixin, MetadataMixin, SoftDeleteMixin):
         CheckConstraint("total_trades >= 0", name="check_total_trades_non_negative"),
         CheckConstraint("winning_trades >= 0", name="check_winning_trades_non_negative"),
         CheckConstraint("losing_trades >= 0", name="check_losing_trades_non_negative"),
-        CheckConstraint("winning_trades + losing_trades <= total_trades", name="check_trades_consistency"),
         CheckConstraint(
-            "status IN ('INITIALIZING', 'RUNNING', 'PAUSED', 'STOPPING', 'STOPPED', 'ERROR')",
+            "winning_trades + losing_trades <= total_trades", name="check_trades_consistency"
+        ),
+        CheckConstraint(
+            "status IN ('initializing', 'ready', 'running', 'paused', 'stopping', 'stopped', 'error', 'maintenance')",
             name="check_bot_status",
         ),
         CheckConstraint(
@@ -94,13 +120,15 @@ class Bot(Base, AuditMixin, MetadataMixin, SoftDeleteMixin):
     @property
     def is_running(self) -> bool:
         """Check if bot is running."""
-        return bool(self.status == "RUNNING")
+        return bool(self.status == "running")
 
     def win_rate(self) -> Decimal:
         """Calculate win rate."""
         if int(self.total_trades) == 0:
             return Decimal("0.0")
-        return (Decimal(str(self.winning_trades)) / Decimal(str(self.total_trades))) * Decimal("100")
+        return (Decimal(str(self.winning_trades)) / Decimal(str(self.total_trades))) * Decimal(
+            "100"
+        )
 
     def average_pnl(self) -> Decimal:
         """Calculate average P&L per trade."""
@@ -117,7 +145,9 @@ class Strategy(Base, AuditMixin, MetadataMixin):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name = Column(String(255), nullable=False)
     type = Column(String(50), nullable=False)  # market_making, arbitrage, trend_following, etc.
-    status = Column(String(20), nullable=False, default="INACTIVE")  # ACTIVE, INACTIVE, PAUSED, ERROR
+    status = Column(
+        String(20), nullable=False, default="inactive"
+    )  # inactive, active, paused, starting, stopping, stopped, error
 
     bot_id = Column(UUID(as_uuid=True), ForeignKey("bots.id", ondelete="CASCADE"), nullable=False)
 
@@ -141,23 +171,55 @@ class Strategy(Base, AuditMixin, MetadataMixin):
     positions = relationship("Position", back_populates="strategy")
     trades = relationship("Trade", back_populates="strategy")
     signals = relationship("Signal", back_populates="strategy", cascade="all, delete-orphan")
-    capital_allocations = relationship("CapitalAllocationDB", back_populates="strategy", cascade="all, delete-orphan")
+    capital_allocations = relationship(
+        "CapitalAllocationDB", back_populates="strategy", cascade="all, delete-orphan"
+    )
+    fund_flows = relationship("FundFlowDB", back_populates="strategy", cascade="all, delete-orphan")
+
+    # Analytics relationships
+    strategy_metrics = relationship(
+        "AnalyticsStrategyMetrics", back_populates="strategy", cascade="all, delete-orphan"
+    )
+
+    # Backtesting relationships
+    backtest_runs = relationship(
+        "BacktestRun", back_populates="strategy", cascade="all, delete-orphan"
+    )
 
     # Indexes and constraints
     __table_args__ = (
         Index("idx_strategies_bot_id", "bot_id"),
         Index("idx_strategies_status", "status"),
         Index("idx_strategies_type", "type"),
-        CheckConstraint("risk_per_trade >= 0 AND risk_per_trade <= 1", name="check_risk_per_trade_range"),
+        CheckConstraint(
+            "risk_per_trade >= 0 AND risk_per_trade <= 1", name="check_risk_per_trade_range"
+        ),
         CheckConstraint("max_position_size > 0", name="check_max_position_size_positive"),
-        CheckConstraint("stop_loss_percentage >= 0 AND stop_loss_percentage <= 1", name="check_stop_loss_range"),
+        CheckConstraint(
+            "stop_loss_percentage >= 0 AND stop_loss_percentage <= 1", name="check_stop_loss_range"
+        ),
         CheckConstraint("take_profit_percentage >= 0", name="check_take_profit_non_negative"),
         CheckConstraint("total_signals >= 0", name="check_total_signals_non_negative"),
         CheckConstraint("executed_signals >= 0", name="check_executed_signals_non_negative"),
         CheckConstraint("successful_signals >= 0", name="check_successful_signals_non_negative"),
-        CheckConstraint("executed_signals <= total_signals", name="check_signals_execution_consistency"),
-        CheckConstraint("successful_signals <= executed_signals", name="check_signals_success_consistency"),
-        CheckConstraint("status IN ('ACTIVE', 'INACTIVE', 'PAUSED', 'ERROR')", name="check_strategy_status"),
+        CheckConstraint(
+            "executed_signals <= total_signals", name="check_signals_execution_consistency"
+        ),
+        CheckConstraint(
+            "successful_signals <= executed_signals", name="check_signals_success_consistency"
+        ),
+        CheckConstraint(
+            "status IN ('inactive', 'starting', 'active', 'paused', 'stopping', 'stopped', 'error')",
+            name="check_strategy_status",
+        ),
+        CheckConstraint(
+            "stop_loss_percentage IS NULL OR take_profit_percentage IS NULL OR stop_loss_percentage < take_profit_percentage",
+            name="check_stop_loss_less_than_take_profit",
+        ),
+        CheckConstraint(
+            "max_position_size <= 10000000",  # Reasonable upper limit
+            name="check_max_position_size_reasonable",
+        ),
     )
 
     def __repr__(self):
@@ -165,13 +227,15 @@ class Strategy(Base, AuditMixin, MetadataMixin):
 
     def is_active(self) -> bool:
         """Check if strategy is active."""
-        return bool(self.status == "ACTIVE")
+        return bool(self.status == "active")
 
     def signal_success_rate(self) -> Decimal:
         """Calculate signal success rate."""
         if int(self.executed_signals) == 0:
             return Decimal("0.0")
-        return (Decimal(str(self.successful_signals)) / Decimal(str(self.executed_signals))) * Decimal("100")
+        return (
+            Decimal(str(self.successful_signals)) / Decimal(str(self.executed_signals))
+        ) * Decimal("100")
 
 
 class Signal(Base, TimestampMixin, MetadataMixin):
@@ -180,7 +244,9 @@ class Signal(Base, TimestampMixin, MetadataMixin):
     __tablename__ = "signals"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    strategy_id = Column(UUID(as_uuid=True), ForeignKey("strategies.id", ondelete="CASCADE"), nullable=False)
+    strategy_id = Column(
+        UUID(as_uuid=True), ForeignKey("strategies.id", ondelete="CASCADE"), nullable=False
+    )
 
     symbol = Column(String(50), nullable=False)
     action = Column(String(20), nullable=False)  # BUY, SELL, HOLD, CLOSE
@@ -191,9 +257,16 @@ class Signal(Base, TimestampMixin, MetadataMixin):
     quantity: Mapped[Decimal | None] = mapped_column(DECIMAL(20, 8))
     reason = Column(Text)
 
+    # ML prediction link (if signal is generated by ML model)
+    ml_prediction_id = Column(
+        BigInteger, ForeignKey("ml_predictions.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+
     # Execution status
     executed = Column(Boolean, default=False)
-    execution_time: Mapped[Decimal | None] = mapped_column(DECIMAL(10, 3))  # Time to execute in seconds
+    execution_time: Mapped[Decimal | None] = mapped_column(
+        DECIMAL(10, 3)
+    )  # Time to execute in seconds
     order_id = Column(UUID(as_uuid=True), ForeignKey("orders.id", ondelete="SET NULL"))
 
     # Outcome
@@ -203,6 +276,7 @@ class Signal(Base, TimestampMixin, MetadataMixin):
     # Relationships
     strategy = relationship("Strategy", back_populates="signals")
     order = relationship("Order", back_populates="signal")
+    ml_prediction = relationship("MLPrediction", back_populates="signals")
 
     # Indexes and constraints
     __table_args__ = (
@@ -212,6 +286,7 @@ class Signal(Base, TimestampMixin, MetadataMixin):
         Index("idx_signals_executed", "executed"),
         Index("idx_signals_outcome", "outcome"),
         Index("idx_signals_strength", "strength"),
+        Index("idx_signals_ml_prediction", "ml_prediction_id"),  # ML prediction performance
         CheckConstraint("strength >= 0 AND strength <= 1", name="check_signal_strength_range"),
         CheckConstraint("price IS NULL OR price > 0", name="check_signal_price_positive"),
         CheckConstraint("quantity IS NULL OR quantity > 0", name="check_signal_quantity_positive"),
@@ -220,7 +295,9 @@ class Signal(Base, TimestampMixin, MetadataMixin):
             name="check_execution_time_non_negative",
         ),
         CheckConstraint("action IN ('BUY', 'SELL', 'HOLD', 'CLOSE')", name="check_signal_action"),
-        CheckConstraint("outcome IN ('SUCCESS', 'FAILURE', 'PARTIAL', 'EXPIRED')", name="check_signal_outcome"),
+        CheckConstraint(
+            "outcome IN ('SUCCESS', 'FAILURE', 'PARTIAL', 'EXPIRED')", name="check_signal_outcome"
+        ),
     )
 
     def __repr__(self):
@@ -287,10 +364,18 @@ class BotLog(Base, TimestampMixin):
         Index("idx_bot_logs_attention", "requires_attention"),
         Index("idx_bot_logs_severity", "severity_score"),
         Index("idx_bot_logs_composite", "bot_id", "level", "created_at"),
-        CheckConstraint("level IN ('DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL')", name="check_log_level"),
-        CheckConstraint("severity_score >= 0 AND severity_score <= 100", name="check_severity_score_range"),
-        CheckConstraint("resolved_at IS NULL OR resolved = true", name="check_resolved_consistency"),
-        UniqueConstraint("bot_id", "correlation_id", "created_at", name="unique_bot_log_correlation"),
+        CheckConstraint(
+            "level IN ('DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL')", name="check_log_level"
+        ),
+        CheckConstraint(
+            "severity_score >= 0 AND severity_score <= 100", name="check_severity_score_range"
+        ),
+        CheckConstraint(
+            "resolved_at IS NULL OR resolved = true", name="check_resolved_consistency"
+        ),
+        UniqueConstraint(
+            "bot_id", "correlation_id", "created_at", name="unique_bot_log_correlation"
+        ),
     )
 
     def __repr__(self):

@@ -6,13 +6,13 @@ in database models, ensuring 100% coverage and precision testing for critical
 trading operations involving Decimal types.
 """
 
-import pytest
 from decimal import Decimal, InvalidOperation
 
-from src.database.models.trading import Position, Order, OrderFill, Trade
+import pytest
+
+from src.database.models.bot import Bot, Signal
 from src.database.models.market_data import MarketDataRecord
-from src.database.models.bot import Bot, Strategy, Signal
-from src.core.types import OrderSide, OrderStatus, PositionSide, PositionStatus
+from src.database.models.trading import Order, OrderFill, Position, Trade
 
 
 class TestPositionFinancialCalculations:
@@ -23,12 +23,12 @@ class TestPositionFinancialCalculations:
         """Create a basic position for testing."""
         return Position(
             exchange="binance",
-            symbol="BTCUSDT", 
+            symbol="BTCUSDT",
             side="LONG",
             status="OPEN",
             quantity=Decimal("1.5"),
             entry_price=Decimal("50000.0"),
-            current_price=Decimal("52000.0")
+            current_price=Decimal("52000.0"),
         )
 
     def test_position_value_calculation(self, position):
@@ -76,9 +76,9 @@ class TestPositionFinancialCalculations:
             side="SHORT",
             status="OPEN",
             quantity=Decimal("10.0"),
-            entry_price=Decimal("3000.0")
+            entry_price=Decimal("3000.0"),
         )
-        
+
         # Short position: profit when price goes down
         pnl = position.calculate_pnl(Decimal("2800.0"))
         expected_pnl = (Decimal("3000.0") - Decimal("2800.0")) * Decimal("10.0")
@@ -105,9 +105,9 @@ class TestPositionFinancialCalculations:
             side="LONG",
             status="OPEN",
             quantity=Decimal("0.12345678"),  # 8 decimal places
-            entry_price=Decimal("50000.12345678")
+            entry_price=Decimal("50000.12345678"),
         )
-        
+
         pnl = position.calculate_pnl(Decimal("50001.12345678"))
         expected_pnl = Decimal("1.0") * Decimal("0.12345678")
         assert pnl == expected_pnl
@@ -122,9 +122,9 @@ class TestPositionFinancialCalculations:
             side="LONG",
             status="OPEN",
             quantity=Decimal("-1.0"),  # Negative quantity
-            entry_price=Decimal("50000.0")
+            entry_price=Decimal("50000.0"),
         )
-        
+
         pnl = position.calculate_pnl(Decimal("52000.0"))
         expected_pnl = (Decimal("52000.0") - Decimal("50000.0")) * Decimal("-1.0")
         assert pnl == Decimal("-2000.0")
@@ -144,7 +144,7 @@ class TestOrderFinancialCalculations:
             status="FILLED",
             quantity=Decimal("2.0"),
             price=Decimal("50000.0"),
-            filled_quantity=Decimal("1.5")
+            filled_quantity=Decimal("1.5"),
         )
 
     def test_remaining_quantity_calculation(self, order):
@@ -182,11 +182,7 @@ class TestOrderFillFinancialCalculations:
     @pytest.fixture
     def order_fill(self):
         """Create a basic order fill for testing."""
-        return OrderFill(
-            price=Decimal("50000.0"),
-            quantity=Decimal("1.5"),
-            fee=Decimal("75.0")
-        )
+        return OrderFill(price=Decimal("50000.0"), quantity=Decimal("1.5"), fee=Decimal("75.0"))
 
     def test_fill_value_calculation(self, order_fill):
         """Test order fill value calculation."""
@@ -198,7 +194,7 @@ class TestOrderFillFinancialCalculations:
         """Test order fill value with zero values."""
         order_fill.price = Decimal("0")
         assert order_fill.value == Decimal("0")
-        
+
         order_fill.price = Decimal("50000.0")
         order_fill.quantity = Decimal("0")
         assert order_fill.value == Decimal("0")
@@ -241,21 +237,21 @@ class TestTradeFinancialCalculations:
             entry_price=Decimal("50000.0"),
             exit_price=Decimal("55000.0"),
             pnl=Decimal("5000.0"),
-            fees=Decimal("25.0")
+            fees=Decimal("25.0"),
         )
 
     @pytest.fixture
     def losing_trade(self):
         """Create a losing trade for testing."""
         return Trade(
-            exchange="binance", 
+            exchange="binance",
             symbol="ETHUSD",
             side="SELL",
             quantity=Decimal("10.0"),
             entry_price=Decimal("3000.0"),
             exit_price=Decimal("2800.0"),
             pnl=Decimal("-2000.0"),
-            fees=Decimal("15.0")
+            fees=Decimal("15.0"),
         )
 
     def test_is_profitable_true(self, profitable_trade):
@@ -285,7 +281,9 @@ class TestTradeFinancialCalculations:
     def test_return_percentage_negative(self, losing_trade):
         """Test return percentage for losing trade."""
         # (2800 - 3000) / 3000 * 100 = -6.666...%
-        expected_return = (Decimal("2800.0") - Decimal("3000.0")) / Decimal("3000.0") * Decimal("100")
+        expected_return = (
+            (Decimal("2800.0") - Decimal("3000.0")) / Decimal("3000.0") * Decimal("100")
+        )
         actual_return = losing_trade.return_percentage
         assert actual_return == expected_return
         # Should be approximately -6.67%
@@ -310,13 +308,14 @@ class TestTradeFinancialCalculations:
             quantity=Decimal("1.0"),
             entry_price=Decimal("50000.12345678"),
             exit_price=Decimal("50001.12345678"),
-            pnl=Decimal("1.0")
+            pnl=Decimal("1.0"),
         )
-        
+
         # Very small percentage should maintain precision
         return_pct = trade.return_percentage
-        expected = ((Decimal("50001.12345678") - Decimal("50000.12345678")) / 
-                   Decimal("50000.12345678")) * Decimal("100")
+        expected = (
+            (Decimal("50001.12345678") - Decimal("50000.12345678")) / Decimal("50000.12345678")
+        ) * Decimal("100")
         assert return_pct == expected
 
 
@@ -334,7 +333,7 @@ class TestMarketDataFinancialCalculations:
             high_price=Decimal("52000.0"),
             low_price=Decimal("49000.0"),
             close_price=Decimal("51000.0"),
-            volume=Decimal("100.5")
+            volume=Decimal("100.5"),
         )
 
     def test_price_change_calculation(self, market_data):
@@ -354,7 +353,7 @@ class TestMarketDataFinancialCalculations:
         """Test price change with None values."""
         market_data.close_price = None
         assert market_data.price_change == Decimal("0")
-        
+
         market_data.close_price = Decimal("51000.0")
         market_data.open_price = None
         assert market_data.price_change == Decimal("0")
@@ -386,19 +385,20 @@ class TestMarketDataFinancialCalculations:
         """Test price change percentage precision."""
         market_data = MarketDataRecord(
             exchange="binance",
-            symbol="BTCUSDT", 
+            symbol="BTCUSDT",
             interval="1h",
             open_price=Decimal("50000.12345678"),
             close_price=Decimal("50001.12345678"),
             high_price=Decimal("52000.0"),
             low_price=Decimal("49000.0"),
-            volume=Decimal("100.5")
+            volume=Decimal("100.5"),
         )
-        
+
         # Small percentage change should maintain precision
         pct_change = market_data.price_change_percent
-        expected = ((Decimal("50001.12345678") - Decimal("50000.12345678")) / 
-                   Decimal("50000.12345678")) * Decimal("100")
+        expected = (
+            (Decimal("50001.12345678") - Decimal("50000.12345678")) / Decimal("50000.12345678")
+        ) * Decimal("100")
         assert pct_change == expected
 
 
@@ -416,7 +416,7 @@ class TestBotFinancialCalculations:
             winning_trades=65,
             total_pnl=Decimal("5000.0"),
             allocated_capital=Decimal("10000.0"),
-            current_balance=Decimal("15000.0")
+            current_balance=Decimal("15000.0"),
         )
 
     def test_win_rate_calculation(self, bot):
@@ -438,9 +438,9 @@ class TestBotFinancialCalculations:
             status="RUNNING",
             total_trades=3,
             winning_trades=1,
-            total_pnl=Decimal("100.0")
+            total_pnl=Decimal("100.0"),
         )
-        
+
         # 1/3 * 100 = 33.333...%
         expected_rate = (Decimal("1") / Decimal("3")) * Decimal("100")
         assert bot.win_rate() == expected_rate
@@ -475,7 +475,7 @@ class TestSignalFinancialCalculations:
             action="BUY",
             strength=0.85,
             price=Decimal("50000.0"),
-            quantity=Decimal("1.0")
+            quantity=Decimal("1.0"),
         )
 
     def test_signal_success_rate_calculation(self, signal):
@@ -497,12 +497,8 @@ class TestSignalFinancialCalculations:
 
     def test_signal_success_rate_precision(self):
         """Test signal success rate precision - Signal model doesn't have this method."""
-        signal = Signal(
-            symbol="BTCUSDT",
-            action="BUY",
-            strength=0.85
-        )
-        
+        signal = Signal(symbol="BTCUSDT", action="BUY", strength=0.85)
+
         # Signal model doesn't have success rate calculation
         assert signal.action == "BUY"
 
@@ -518,9 +514,9 @@ class TestFinancialCalculationEdgeCases:
             side="LONG",
             status="OPEN",
             quantity=Decimal("999999999999.99999999"),
-            entry_price=Decimal("999999999999.99999999")
+            entry_price=Decimal("999999999999.99999999"),
         )
-        
+
         # Should not raise overflow errors
         pnl = position.calculate_pnl(Decimal("1000000000000.00000000"))
         assert isinstance(pnl, Decimal)
@@ -534,9 +530,9 @@ class TestFinancialCalculationEdgeCases:
             side="LONG",
             status="OPEN",
             quantity=Decimal("0.00000001"),  # 1 satoshi
-            entry_price=Decimal("0.00000001")
+            entry_price=Decimal("0.00000001"),
         )
-        
+
         # Should maintain precision for tiny values
         pnl = position.calculate_pnl(Decimal("0.00000002"))
         # The calculation is (0.00000002 - 0.00000001) * 0.00000001 = 1E-16
@@ -551,9 +547,9 @@ class TestFinancialCalculationEdgeCases:
             status="STOPPED",
             total_trades=0,
             winning_trades=0,
-            total_pnl=Decimal("0")
+            total_pnl=Decimal("0"),
         )
-        
+
         # Should return 0 instead of raising ZeroDivisionError
         assert bot.win_rate() == Decimal("0.0")
         assert bot.average_pnl() == Decimal("0.0")
@@ -567,9 +563,9 @@ class TestFinancialCalculationEdgeCases:
             quantity=Decimal("1.0"),
             entry_price=None,  # None value
             exit_price=Decimal("100.0"),
-            pnl=None  # None value
+            pnl=None,  # None value
         )
-        
+
         assert trade.is_profitable is False
         assert trade.return_percentage == Decimal("0")
 
@@ -581,9 +577,9 @@ class TestFinancialCalculationEdgeCases:
             side="LONG",
             status="OPEN",
             quantity=Decimal("1.0"),
-            entry_price=Decimal("100.0")
+            entry_price=Decimal("100.0"),
         )
-        
+
         # Test with invalid string that can't be converted to Decimal
         # This should be handled gracefully by the calculation method
         try:
@@ -600,19 +596,19 @@ class TestFinancialCalculationEdgeCases:
         # Test with value that requires rounding
         position = Position(
             exchange="test",
-            symbol="TEST", 
+            symbol="TEST",
             side="LONG",
             status="OPEN",
             quantity=Decimal("1.0"),
-            entry_price=Decimal("100.333333333333333333")
+            entry_price=Decimal("100.333333333333333333"),
         )
-        
+
         pnl = position.calculate_pnl(Decimal("101.666666666666666666"))
         expected_pnl = Decimal("101.666666666666666666") - Decimal("100.333333333333333333")
-        
+
         assert pnl == expected_pnl
         # Should maintain high precision
-        assert len(str(pnl).split('.')[-1]) >= 8  # At least 8 decimal places
+        assert len(str(pnl).split(".")[-1]) >= 8  # At least 8 decimal places
 
     def test_negative_price_handling(self):
         """Test handling of negative prices (edge case)."""
@@ -622,9 +618,9 @@ class TestFinancialCalculationEdgeCases:
             side="LONG",
             status="OPEN",
             quantity=Decimal("1.0"),
-            entry_price=Decimal("-100.0")  # Negative price (shouldn't happen in reality)
+            entry_price=Decimal("-100.0"),  # Negative price (shouldn't happen in reality)
         )
-        
+
         # Should still calculate mathematically correct result
         pnl = position.calculate_pnl(Decimal("100.0"))
         expected_pnl = Decimal("100.0") - Decimal("-100.0")
@@ -635,7 +631,7 @@ class TestFinancialCalculationEdgeCases:
         """Test that all financial calculations meet precision requirements."""
         # This test ensures that financial calculations maintain at least 8 decimal places
         # as required for cryptocurrency trading
-        
+
         # Test position calculation
         position = Position(
             exchange="binance",
@@ -643,29 +639,29 @@ class TestFinancialCalculationEdgeCases:
             side="LONG",
             status="OPEN",
             quantity=Decimal("0.12345678"),
-            entry_price=Decimal("50000.12345678")
+            entry_price=Decimal("50000.12345678"),
         )
-        
+
         pnl = position.calculate_pnl(Decimal("50001.12345678"))
-        
+
         # Verify precision is maintained in result
         pnl_str = str(pnl)
-        if '.' in pnl_str:
-            decimal_places = len(pnl_str.split('.')[-1])
+        if "." in pnl_str:
+            decimal_places = len(pnl_str.split(".")[-1])
             assert decimal_places >= 8 or pnl == Decimal("0.12345678")
-        
+
         # Test MarketDataRecord percentage calculation precision
         market_data = MarketDataRecord(
             exchange="binance",
             symbol="BTCUSDT",
-            interval="1h", 
+            interval="1h",
             open_price=Decimal("50000.12345678"),
             close_price=Decimal("50000.23456789"),
             high_price=Decimal("50001.0"),
             low_price=Decimal("50000.0"),
-            volume=Decimal("100.0")
+            volume=Decimal("100.0"),
         )
-        
+
         pct_change = market_data.price_change_percent
         # Should maintain precision in percentage calculations
         assert isinstance(pct_change, Decimal)

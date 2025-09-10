@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 
-from influxdb_client import InfluxDBClient, Point, WritePrecision
+from influxdb_client import InfluxDBClient as InfluxClient, Point, WritePrecision
 from influxdb_client.client.query_api import QueryApi
 from influxdb_client.client.write_api import SYNCHRONOUS
 
@@ -21,12 +21,12 @@ from src.core.base import BaseComponent
 
 # Import core components from P-001
 from src.core.config import Config
-from src.core.exceptions import DataError, DataSourceError
+from src.core.exceptions import DataError
 
 # Error handling is provided by decorators
-
 # Import utils from P-007A
-from src.utils.decorators import circuit_breaker, retry, time_execution
+from src.error_handling.decorators import with_circuit_breaker, with_retry
+from src.utils.decorators import time_execution
 
 
 class InfluxDBClientWrapper(BaseComponent):
@@ -38,24 +38,26 @@ class InfluxDBClientWrapper(BaseComponent):
         self.token = token
         self.org = org
         self.bucket = bucket
-        self.client: InfluxDBClient | None = None
+        self.client: InfluxClient | None = None
         self.write_api: Any | None = None
         self.query_api: QueryApi | None = None
         self.config = config
 
     @time_execution
-    @retry(max_attempts=3)
-    @circuit_breaker(failure_threshold=3, recovery_timeout=30)
+    @with_retry(max_attempts=3)
+    @with_circuit_breaker(failure_threshold=3, recovery_timeout=30)
     async def connect(self) -> None:
         """Connect to InfluxDB."""
-        self.client = InfluxDBClient(url=self.url, token=self.token, org=self.org)
+        self.client = InfluxClient(url=self.url, token=self.token, org=self.org)
 
         # Initialize APIs
         self.write_api = self.client.write_api(write_options=SYNCHRONOUS)
         self.query_api = self.client.query_api()
 
         # Test connection with timeout
-        await asyncio.wait_for(asyncio.get_event_loop().run_in_executor(None, self.client.ping), timeout=10.0)
+        await asyncio.wait_for(
+            asyncio.get_event_loop().run_in_executor(None, self.client.ping), timeout=10.0
+        )
         self.logger.info("InfluxDB connection established")
 
     async def disconnect(self) -> None:
@@ -132,7 +134,9 @@ class InfluxDBClientWrapper(BaseComponent):
             if not write_api:
                 raise DataError("InfluxDB write API not initialized")
             # Run blocking write operation in executor to avoid blocking
-            await asyncio.get_event_loop().run_in_executor(None, write_api.write, self.bucket, point)
+            await asyncio.get_event_loop().run_in_executor(
+                None, write_api.write, self.bucket, point
+            )
         except Exception as e:
             self.logger.error("Failed to write point to InfluxDB", error=str(e))
             raise DataError(f"Failed to write point to InfluxDB: {e!s}") from e
@@ -158,7 +162,9 @@ class InfluxDBClientWrapper(BaseComponent):
             if not write_api:
                 raise DataError("InfluxDB write API not initialized")
             # Run blocking write operation in executor to avoid blocking
-            await asyncio.get_event_loop().run_in_executor(None, write_api.write, self.bucket, points)
+            await asyncio.get_event_loop().run_in_executor(
+                None, write_api.write, self.bucket, points
+            )
         except Exception as e:
             self.logger.error("Failed to write points to InfluxDB", error=str(e))
             raise DataError(f"Failed to write points to InfluxDB: {e!s}") from e
@@ -177,7 +183,9 @@ class InfluxDBClientWrapper(BaseComponent):
                         self.logger.error(f"Write API close failed: {close_error}")
 
     # Market data utilities
-    async def write_market_data(self, symbol: str, data: dict[str, Any], timestamp: datetime | None = None) -> None:
+    async def write_market_data(
+        self, symbol: str, data: dict[str, Any], timestamp: datetime | None = None
+    ) -> None:
         """Write market data point."""
         tags = {"symbol": symbol, "data_type": "market_data"}
         fields = {
@@ -193,7 +201,9 @@ class InfluxDBClientWrapper(BaseComponent):
         point = self._create_point("market_data", tags, fields, timestamp)
         await self.write_point(point)
 
-    async def write_market_data_batch(self, data_list: list[dict[str, Any]], timestamp: datetime | None = None) -> None:
+    async def write_market_data_batch(
+        self, data_list: list[dict[str, Any]], timestamp: datetime | None = None
+    ) -> None:
         """Write multiple market data points in batch."""
         points = []
 
@@ -230,7 +240,9 @@ class InfluxDBClientWrapper(BaseComponent):
         if points:
             await self.write_points(points)
 
-    async def write_trade(self, trade_data: dict[str, Any], timestamp: datetime | None = None) -> None:
+    async def write_trade(
+        self, trade_data: dict[str, Any], timestamp: datetime | None = None
+    ) -> None:
         """Write trade data point."""
         tags = {
             "symbol": trade_data.get("symbol", ""),
@@ -273,7 +285,9 @@ class InfluxDBClientWrapper(BaseComponent):
         point = self._create_point("performance_metrics", tags, fields, timestamp)
         await self.write_point(point)
 
-    async def write_system_metrics(self, metrics: dict[str, Any], timestamp: datetime | None = None) -> None:
+    async def write_system_metrics(
+        self, metrics: dict[str, Any], timestamp: datetime | None = None
+    ) -> None:
         """Write system monitoring metrics."""
         tags = {"data_type": "system_metrics"}
 
@@ -413,12 +427,12 @@ class InfluxDBClientWrapper(BaseComponent):
                 timeout=30.0,
             )
             return self._parse_query_result(result)
-        except asyncio.TimeoutError:
+        except asyncio.TimeoutError as e:
             self.logger.error("Query performance metrics timed out")
-            raise DataError("Query performance metrics timed out")
+            raise DataError("Query performance metrics timed out") from e
         except Exception as e:
             self.logger.error("Failed to query performance metrics", error=str(e))
-            raise DataError(f"Failed to query performance metrics: {e!s}")
+            raise DataError(f"Failed to query performance metrics: {e!s}") from e
         finally:
             # Ensure query resources are properly released
             if query_api:
@@ -545,7 +559,9 @@ class InfluxDBClientWrapper(BaseComponent):
             """
 
             total_result = await asyncio.wait_for(
-                asyncio.get_event_loop().run_in_executor(None, query_api.query, total_query, self.org),
+                asyncio.get_event_loop().run_in_executor(
+                    None, query_api.query, total_query, self.org
+                ),
                 timeout=30.0,
             )
             total_trades = 0
@@ -581,7 +597,9 @@ class InfluxDBClientWrapper(BaseComponent):
     async def health_check(self) -> bool:
         """Check InfluxDB health."""
         try:
-            await asyncio.wait_for(asyncio.get_event_loop().run_in_executor(None, self.client.ping), timeout=5.0)
+            await asyncio.wait_for(
+                asyncio.get_event_loop().run_in_executor(None, self.client.ping), timeout=5.0
+            )
             return True
         except asyncio.TimeoutError:
             self.logger.error("InfluxDB health check timed out")

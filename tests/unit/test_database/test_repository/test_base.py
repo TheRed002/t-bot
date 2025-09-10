@@ -5,26 +5,25 @@ This module tests the BaseRepository class and RepositoryInterface
 including all CRUD operations, filtering, and transaction management.
 """
 
-import uuid
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
-import pytest_asyncio
-from sqlalchemy import Column, Integer, String, select
+from sqlalchemy import Column, Integer, String
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.core.exceptions import RepositoryError
 from src.database.models.base import Base
 from src.database.repository.base import DatabaseRepository, RepositoryInterface
-from src.core.exceptions import RepositoryError
 
 
 # Test model for repository tests
 class MockDataModel(Base):
     """Test model for repository testing."""
+
     __tablename__ = "test_model"
-    
+
     id = Column(Integer, primary_key=True)
     name = Column(String(50))
     value = Column(Integer)
@@ -43,19 +42,30 @@ class TestRepositoryInterface:
     def test_repository_interface_methods(self):
         """Test that RepositoryInterface is a simple interface marker."""
         # RepositoryInterface doesn't have abstract methods, it's just a marker
-        assert hasattr(RepositoryInterface, '__init__')
+        assert hasattr(RepositoryInterface, "__init__")
 
     def test_concrete_repository_implementation(self):
         """Test that a concrete implementation can be created."""
-        
+
         class ConcreteRepository(RepositoryInterface):
-            async def get(self, id): return None
-            async def get_all(self, filters=None, order_by=None, limit=None, offset=None): return []
-            async def create(self, entity): return entity
-            async def update(self, entity): return entity
-            async def delete(self, id): return True
-            async def exists(self, id): return True
-        
+            async def get(self, id):
+                return None
+
+            async def get_all(self, filters=None, order_by=None, limit=None, offset=None):
+                return []
+
+            async def create(self, entity):
+                return entity
+
+            async def update(self, entity):
+                return entity
+
+            async def delete(self, id):
+                return True
+
+            async def exists(self, id):
+                return True
+
         # Should be able to instantiate
         repo = ConcreteRepository()
         assert isinstance(repo, RepositoryInterface)
@@ -70,7 +80,7 @@ class TestDatabaseRepository:
         session = AsyncMock(spec=AsyncSession)
         # Make sync methods regular mocks to avoid warnings
         session.delete = Mock()
-        session.add = Mock() 
+        session.add = Mock()
         session.merge = AsyncMock()
         session.flush = AsyncMock()
         session.commit = AsyncMock()
@@ -90,7 +100,7 @@ class TestDatabaseRepository:
     def test_base_repository_init(self, mock_session):
         """Test DatabaseRepository initialization."""
         repo = DatabaseRepository(mock_session, MockDataModel, MockDataModel)
-        
+
         assert repo.session == mock_session
         assert repo.model == MockDataModel
 
@@ -100,14 +110,14 @@ class TestDatabaseRepository:
         mock_result = Mock()
         mock_result.scalar_one_or_none.return_value = sample_entity
         mock_session.execute.return_value = mock_result
-        
+
         result = await repository.get_by_id(1)
-        
+
         assert result == sample_entity
         mock_session.execute.assert_called_once()
         # Check that correct SQL statement was used
         call_args = mock_session.execute.call_args[0][0]
-        assert hasattr(call_args, 'whereclause')
+        assert hasattr(call_args, "whereclause")
 
     @pytest.mark.asyncio
     async def test_get_not_found(self, repository, mock_session):
@@ -115,16 +125,16 @@ class TestDatabaseRepository:
         mock_result = Mock()
         mock_result.scalar_one_or_none.return_value = None
         mock_session.execute.return_value = mock_result
-        
+
         result = await repository.get_by_id(999)
-        
+
         assert result is None
 
     @pytest.mark.asyncio
     async def test_get_exception(self, repository, mock_session):
         """Test get operation with exception."""
         mock_session.execute.side_effect = SQLAlchemyError("Database error")
-        
+
         with pytest.raises(RepositoryError):
             await repository.get_by_id(1)
 
@@ -134,9 +144,9 @@ class TestDatabaseRepository:
         mock_result = Mock()
         mock_result.scalar_one_or_none.return_value = sample_entity
         mock_session.execute.return_value = mock_result
-        
+
         result = await repository.get_by(name="test_entity", value=100)
-        
+
         assert result == sample_entity
         mock_session.execute.assert_called_once()
 
@@ -146,9 +156,9 @@ class TestDatabaseRepository:
         mock_result = Mock()
         mock_result.scalar_one_or_none.return_value = None
         mock_session.execute.return_value = mock_result
-        
+
         result = await repository.get_by(name="nonexistent")
-        
+
         assert result is None
 
     @pytest.mark.asyncio
@@ -160,9 +170,9 @@ class TestDatabaseRepository:
         mock_scalars.all.return_value = entities
         mock_result.scalars.return_value = mock_scalars
         mock_session.execute.return_value = mock_result
-        
+
         result = await repository.list()
-        
+
         assert result == entities
         mock_session.execute.assert_called_once()
 
@@ -175,10 +185,10 @@ class TestDatabaseRepository:
         mock_scalars.all.return_value = entities
         mock_result.scalars.return_value = mock_scalars
         mock_session.execute.return_value = mock_result
-        
+
         filters = {"name": "test1", "value": 100}
         result = await repository.list(filters=filters)
-        
+
         assert result == entities
 
     @pytest.mark.asyncio
@@ -190,10 +200,10 @@ class TestDatabaseRepository:
         mock_scalars.all.return_value = entities
         mock_result.scalars.return_value = mock_scalars
         mock_session.execute.return_value = mock_result
-        
+
         filters = {"name": ["test1", "test2"]}
         result = await repository.list(filters=filters)
-        
+
         assert result == entities
 
     @pytest.mark.asyncio
@@ -205,13 +215,10 @@ class TestDatabaseRepository:
         mock_scalars.all.return_value = entities
         mock_result.scalars.return_value = mock_scalars
         mock_session.execute.return_value = mock_result
-        
-        filters = {
-            "value": {"gt": 50, "lt": 150},
-            "name": {"like": "test"}
-        }
+
+        filters = {"value": {"gt": 50, "lt": 150}, "name": {"like": "test"}}
         result = await repository.list(filters=filters)
-        
+
         assert result == entities
 
     @pytest.mark.asyncio
@@ -223,13 +230,13 @@ class TestDatabaseRepository:
         mock_scalars.all.return_value = entities
         mock_result.scalars.return_value = mock_scalars
         mock_session.execute.return_value = mock_result
-        
+
         # Test ascending order
         await repository.list(order_by="name")
-        
+
         # Test descending order
         await repository.list(order_by="-name")
-        
+
         assert mock_session.execute.call_count == 2
 
     @pytest.mark.asyncio
@@ -241,16 +248,16 @@ class TestDatabaseRepository:
         mock_scalars.all.return_value = entities
         mock_result.scalars.return_value = mock_scalars
         mock_session.execute.return_value = mock_result
-        
+
         result = await repository.list(limit=10, offset=5)
-        
+
         assert result == entities
 
     @pytest.mark.asyncio
     async def test_create_success(self, repository, mock_session, sample_entity):
         """Test successful create operation."""
         result = await repository.create(sample_entity)
-        
+
         assert result == sample_entity
         mock_session.add.assert_called_once_with(sample_entity)
         mock_session.flush.assert_called_once()
@@ -259,37 +266,34 @@ class TestDatabaseRepository:
     async def test_create_integrity_error(self, repository, mock_session, sample_entity):
         """Test create operation with integrity error."""
         mock_session.flush.side_effect = IntegrityError("Integrity constraint", None, None)
-        
+
         with pytest.raises(RepositoryError):
             await repository.create(sample_entity)
-        
+
         mock_session.rollback.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_create_general_error(self, repository, mock_session, sample_entity):
         """Test create operation with general error."""
         mock_session.flush.side_effect = SQLAlchemyError("Database error")
-        
+
         with pytest.raises(RepositoryError):
             await repository.create(sample_entity)
-        
+
         mock_session.rollback.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_create_many_success(self, repository, mock_session):
         """Test successful create_many operation."""
-        entities = [
-            MockDataModel(id=1, name="test1"),
-            MockDataModel(id=2, name="test2")
-        ]
-        
+        entities = [MockDataModel(id=1, name="test1"), MockDataModel(id=2, name="test2")]
+
         # DatabaseRepository doesn't have create_many, use individual creates
         results = []
         for entity in entities:
             result = await repository.create(entity)
             results.append(result)
         result = results
-        
+
         assert len(result) == len(entities)
         assert mock_session.add.call_count == len(entities)
         assert mock_session.flush.call_count == len(entities)
@@ -299,11 +303,11 @@ class TestDatabaseRepository:
         """Test create_many operation with error."""
         entities = [MockDataModel(id=1, name="test1")]
         mock_session.flush.side_effect = SQLAlchemyError("Database error")
-        
+
         with pytest.raises(RepositoryError):
             # DatabaseRepository doesn't have create_many, simulate error on first create
             await repository.create(entities[0])
-        
+
         mock_session.rollback.assert_called_once()
 
     @pytest.mark.asyncio
@@ -312,11 +316,11 @@ class TestDatabaseRepository:
         entity = MockDataModel(id=1, name="updated_entity")
         entity.updated_at = datetime.now(timezone.utc)
         entity.version = 1
-        
+
         mock_session.merge.return_value = entity
-        
+
         result = await repository.update(entity)
-        
+
         assert result == entity
         mock_session.merge.assert_called_once()
         mock_session.flush.assert_called_once()
@@ -328,13 +332,13 @@ class TestDatabaseRepository:
         """Test update operation on entity without version field."""
         entity = MockDataModel(id=1, name="updated_entity")
         # Remove version attribute if it exists
-        if hasattr(entity, 'version'):
-            delattr(entity, 'version')
-        
+        if hasattr(entity, "version"):
+            delattr(entity, "version")
+
         mock_session.merge.return_value = entity
-        
+
         result = await repository.update(entity)
-        
+
         assert result == entity
 
     @pytest.mark.asyncio
@@ -342,18 +346,20 @@ class TestDatabaseRepository:
         """Test update operation with error."""
         entity = MockDataModel(id=1, name="test")
         mock_session.merge.side_effect = SQLAlchemyError("Database error")
-        
+
         with pytest.raises(RepositoryError):
             await repository.update(entity)
-        
+
         mock_session.rollback.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_delete_success(self, repository, mock_session, sample_entity):
         """Test successful delete operation."""
-        with patch.object(repository, '_get_entity_by_id', new_callable=AsyncMock, return_value=sample_entity):
+        with patch.object(
+            repository, "_get_entity_by_id", new_callable=AsyncMock, return_value=sample_entity
+        ):
             result = await repository.delete(1)
-            
+
             assert result is True
             mock_session.delete.assert_called_once_with(sample_entity)
             mock_session.flush.assert_called_once()
@@ -361,22 +367,26 @@ class TestDatabaseRepository:
     @pytest.mark.asyncio
     async def test_delete_not_found(self, repository, mock_session):
         """Test delete operation when entity not found."""
-        with patch.object(repository, '_get_entity_by_id', new_callable=AsyncMock, return_value=None):
+        with patch.object(
+            repository, "_get_entity_by_id", new_callable=AsyncMock, return_value=None
+        ):
             result = await repository.delete(999)
-            
+
             assert result is False
             mock_session.delete.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_delete_error(self, repository, mock_session, sample_entity):
         """Test delete operation with error."""
-        with patch.object(repository, '_get_entity_by_id', new_callable=AsyncMock, return_value=sample_entity):
+        with patch.object(
+            repository, "_get_entity_by_id", new_callable=AsyncMock, return_value=sample_entity
+        ):
             # Make flush throw an error (since delete is sync but flush is async)
             mock_session.flush = AsyncMock(side_effect=SQLAlchemyError("Database error"))
-            
+
             with pytest.raises(RepositoryError):
                 await repository.delete(1)
-            
+
             mock_session.rollback.assert_called_once()
 
     @pytest.mark.asyncio
@@ -384,29 +394,37 @@ class TestDatabaseRepository:
         """Test successful soft delete operation."""
         entity = MockDataModel(id=1, name="test")
         entity.soft_delete = Mock()  # Add soft_delete method
-        
-        with patch.object(repository, '_get_entity_by_id', new_callable=AsyncMock, return_value=entity):
-            with patch.object(repository, '_update_entity', new_callable=AsyncMock, return_value=entity):
+
+        with patch.object(
+            repository, "_get_entity_by_id", new_callable=AsyncMock, return_value=entity
+        ):
+            with patch.object(
+                repository, "_update_entity", new_callable=AsyncMock, return_value=entity
+            ):
                 result = await repository.soft_delete(1, "admin")
-                
+
                 assert result is True
                 entity.soft_delete.assert_called_once_with("admin")
 
     @pytest.mark.asyncio
     async def test_soft_delete_not_found(self, repository, mock_session):
         """Test soft delete when entity not found."""
-        with patch.object(repository, '_get_entity_by_id', new_callable=AsyncMock, return_value=None):
+        with patch.object(
+            repository, "_get_entity_by_id", new_callable=AsyncMock, return_value=None
+        ):
             result = await repository.soft_delete(999)
-            
+
             assert result is False
 
     @pytest.mark.asyncio
     async def test_soft_delete_not_supported(self, repository, mock_session, sample_entity):
         """Test soft delete on entity that doesn't support it."""
         # sample_entity doesn't have soft_delete method
-        with patch.object(repository, '_get_entity_by_id', new_callable=AsyncMock, return_value=sample_entity):
+        with patch.object(
+            repository, "_get_entity_by_id", new_callable=AsyncMock, return_value=sample_entity
+        ):
             result = await repository.soft_delete(1)
-            
+
             assert result is False
 
     @pytest.mark.asyncio
@@ -415,9 +433,9 @@ class TestDatabaseRepository:
         mock_result = Mock()
         mock_result.scalar.return_value = 1  # ID exists
         mock_session.execute.return_value = mock_result
-        
+
         result = await repository.exists(1)
-        
+
         assert result is True
 
     @pytest.mark.asyncio
@@ -426,16 +444,16 @@ class TestDatabaseRepository:
         mock_result = Mock()
         mock_result.scalar.return_value = None
         mock_session.execute.return_value = mock_result
-        
+
         result = await repository.exists(999)
-        
+
         assert result is False
 
     @pytest.mark.asyncio
     async def test_exists_error(self, repository, mock_session):
         """Test exists operation with error."""
         mock_session.execute.side_effect = SQLAlchemyError("Database error")
-        
+
         with pytest.raises(RepositoryError):
             await repository.exists(1)
 
@@ -445,9 +463,9 @@ class TestDatabaseRepository:
         mock_result = Mock()
         mock_result.scalar.return_value = 5
         mock_session.execute.return_value = mock_result
-        
+
         result = await repository._count_entities(None)
-        
+
         assert result == 5
 
     @pytest.mark.asyncio
@@ -456,9 +474,9 @@ class TestDatabaseRepository:
         mock_result = Mock()
         mock_result.scalar.return_value = 3
         mock_session.execute.return_value = mock_result
-        
+
         result = await repository._count_entities({"name": "test"})
-        
+
         assert result == 3
 
     @pytest.mark.asyncio
@@ -467,16 +485,16 @@ class TestDatabaseRepository:
         mock_result = Mock()
         mock_result.scalar.return_value = None
         mock_session.execute.return_value = mock_result
-        
+
         result = await repository._count_entities(None)
-        
+
         assert result == 0
 
     @pytest.mark.asyncio
     async def test_count_error(self, repository, mock_session):
         """Test count operation with error."""
         mock_session.execute.side_effect = SQLAlchemyError("Database error")
-        
+
         with pytest.raises(RepositoryError):
             await repository._count_entities(None)
 
@@ -485,15 +503,15 @@ class TestDatabaseRepository:
         """Test transaction control methods."""
         mock_transaction = Mock()
         mock_session.begin = AsyncMock(return_value=mock_transaction)
-        
+
         # Test begin
         result = await repository.begin()
         assert result == mock_transaction
-        
+
         # Test commit
         await repository.commit()
         mock_session.commit.assert_called_once()
-        
+
         # Test rollback
         await repository.rollback()
         mock_session.rollback.assert_called_once()
@@ -507,9 +525,9 @@ class TestDatabaseRepository:
         mock_scalars.all.return_value = entities
         mock_result.scalars.return_value = mock_scalars
         mock_session.execute.return_value = mock_result
-        
+
         result = await repository.list(limit=10, offset=5, filters={"name": "test"})
-        
+
         assert result == entities
 
     @pytest.mark.asyncio
@@ -518,16 +536,16 @@ class TestDatabaseRepository:
         mock_result = Mock()
         mock_result.scalar_one_or_none.return_value = sample_entity
         mock_session.execute.return_value = mock_result
-        
+
         result = await repository.get_by_id(1)
-        
+
         assert result == sample_entity
 
     @pytest.mark.asyncio
     async def test_refresh_method(self, repository, mock_session, sample_entity):
         """Test refresh method."""
         await repository.refresh(sample_entity)
-        
+
         mock_session.refresh.assert_called_once_with(sample_entity)
 
 
@@ -552,18 +570,11 @@ class TestBaseRepositoryFiltering:
         mock_scalars.all.return_value = []
         mock_result.scalars.return_value = mock_scalars
         mock_session.execute.return_value = mock_result
-        
-        filters = {
-            "value": {
-                "gt": 10,
-                "gte": 10, 
-                "lt": 100,
-                "lte": 100
-            }
-        }
-        
+
+        filters = {"value": {"gt": 10, "gte": 10, "lt": 100, "lte": 100}}
+
         await repository.list(filters=filters)
-        
+
         # Verify SQL execution was called
         mock_session.execute.assert_called_once()
 
@@ -575,11 +586,11 @@ class TestBaseRepositoryFiltering:
         mock_scalars.all.return_value = []
         mock_result.scalars.return_value = mock_scalars
         mock_session.execute.return_value = mock_result
-        
+
         filters = {"name": {"like": "test"}}
-        
+
         await repository.list(filters=filters)
-        
+
         mock_session.execute.assert_called_once()
 
     @pytest.mark.asyncio
@@ -590,12 +601,12 @@ class TestBaseRepositoryFiltering:
         mock_scalars.all.return_value = []
         mock_result.scalars.return_value = mock_scalars
         mock_session.execute.return_value = mock_result
-        
+
         # Filter with attribute that doesn't exist on model
         filters = {"nonexistent_field": "value"}
-        
+
         await repository.list(filters=filters)
-        
+
         # Should still execute without adding invalid filter
         mock_session.execute.assert_called_once()
 
@@ -607,15 +618,15 @@ class TestBaseRepositoryFiltering:
         mock_scalars.all.return_value = []
         mock_result.scalars.return_value = mock_scalars
         mock_session.execute.return_value = mock_result
-        
+
         filters = {
-            "name": "exact_match",          # Exact match
-            "value": [10, 20, 30],         # IN clause
-            "id": {"gt": 5, "lt": 100},    # Range
+            "name": "exact_match",  # Exact match
+            "value": [10, 20, 30],  # IN clause
+            "id": {"gt": 5, "lt": 100},  # Range
         }
-        
+
         await repository.list(filters=filters)
-        
+
         mock_session.execute.assert_called_once()
 
 
@@ -636,7 +647,7 @@ class TestBaseRepositoryErrorHandling:
     async def test_database_connection_error(self, repository, mock_session):
         """Test handling of database connection errors."""
         mock_session.execute.side_effect = SQLAlchemyError("Connection lost")
-        
+
         with pytest.raises(RepositoryError):
             await repository.get_by_id(1)
 
@@ -645,23 +656,21 @@ class TestBaseRepositoryErrorHandling:
         """Test that transactions are rolled back on errors."""
         entity = MockDataModel(id=1, name="test")
         mock_session.flush.side_effect = SQLAlchemyError("Transaction error")
-        
+
         with pytest.raises(RepositoryError):
             await repository.create(entity)
-        
+
         mock_session.rollback.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_integrity_constraint_handling(self, repository, mock_session):
         """Test handling of integrity constraint violations."""
         entity = MockDataModel(id=1, name="duplicate")
-        mock_session.flush.side_effect = IntegrityError(
-            "Duplicate key", None, None
-        )
-        
+        mock_session.flush.side_effect = IntegrityError("Duplicate key", None, None)
+
         with pytest.raises(RepositoryError):
             await repository.create(entity)
-        
+
         mock_session.rollback.assert_called_once()
 
     @pytest.mark.asyncio
@@ -669,12 +678,12 @@ class TestBaseRepositoryErrorHandling:
         """Test handling of concurrent modification scenarios."""
         entity = MockDataModel(id=1, name="test")
         entity.version = 1
-        
+
         mock_session.merge.side_effect = SQLAlchemyError("Concurrent modification")
-        
+
         with pytest.raises(RepositoryError):
             await repository.update(entity)
-        
+
         mock_session.rollback.assert_called_once()
 
 
@@ -695,14 +704,14 @@ class TestBaseRepositoryPerformance:
     async def test_batch_operations(self, repository, mock_session):
         """Test batch operations for better performance."""
         entities = [MockDataModel(id=i, name=f"test{i}") for i in range(100)]
-        
+
         # DatabaseRepository doesn't have create_many, use individual creates
         results = []
         for entity in entities:
             result = await repository.create(entity)
             results.append(result)
         result = results
-        
+
         assert len(result) == 100
         # DatabaseRepository uses individual add() calls, not add_all
         assert mock_session.add.call_count == 100
@@ -716,9 +725,9 @@ class TestBaseRepositoryPerformance:
         mock_scalars.all.return_value = []
         mock_result.scalars.return_value = mock_scalars
         mock_session.execute.return_value = mock_result
-        
+
         await repository.list(limit=10, offset=100)
-        
+
         # Verify pagination parameters were applied
         mock_session.execute.assert_called_once()
 
@@ -728,9 +737,9 @@ class TestBaseRepositoryPerformance:
         mock_result = Mock()
         mock_result.scalar.return_value = 1
         mock_session.execute.return_value = mock_result
-        
+
         await repository.exists(1)
-        
+
         # Should use optimized query with only ID selection
         call_args = mock_session.execute.call_args[0][0]
         # The exists query should be more efficient than full entity fetch
@@ -758,13 +767,13 @@ class TestBaseRepositoryEdgeCases:
         mock_scalars.all.return_value = []
         mock_result.scalars.return_value = mock_scalars
         mock_session.execute.return_value = mock_result
-        
+
         # Test with empty dict
         await repository.list(filters={})
-        
+
         # Test with None
         await repository.list(filters=None)
-        
+
         assert mock_session.execute.call_count == 2
 
     @pytest.mark.asyncio
@@ -775,9 +784,9 @@ class TestBaseRepositoryEdgeCases:
         mock_scalars.all.return_value = []
         mock_result.scalars.return_value = mock_scalars
         mock_session.execute.return_value = mock_result
-        
+
         await repository.list(limit=0, offset=0)
-        
+
         mock_session.execute.assert_called_once()
 
     @pytest.mark.asyncio
@@ -788,18 +797,18 @@ class TestBaseRepositoryEdgeCases:
         mock_scalars.all.return_value = []
         mock_result.scalars.return_value = mock_scalars
         mock_session.execute.return_value = mock_result
-        
+
         await repository.list(limit=1000000, offset=1000000)
-        
+
         mock_session.execute.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_null_entity_values(self, repository, mock_session):
         """Test operations with entities containing null values."""
         entity = MockDataModel(id=1, name=None, value=None)
-        
+
         result = await repository.create(entity)
-        
+
         assert result == entity
         assert result.name is None
         assert result.value is None

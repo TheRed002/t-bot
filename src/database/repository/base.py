@@ -52,30 +52,25 @@ class DatabaseRepository(CoreBaseRepository):
     async def _create_entity(self, entity) -> Any:
         """Create entity in database with boundary validation."""
         try:
-            # Apply boundary validation for consistency with error_handling module
-            if hasattr(entity, "__dict__"):
-                entity_data = entity.__dict__.copy()
-                # Add required fields for boundary validation
-                entity_data.update({
-                    "component": "database",
-                    "error_type": "validation", 
-                    "severity": "medium",
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
-                })
-                # Validate but handle expected validation errors gracefully
-                try:
-                    from src.utils.messaging_patterns import BoundaryValidator
-                    BoundaryValidator.validate_monitoring_to_error_boundary(entity_data)
-                except Exception:
-                    # Expected for entities that don't match monitoring format
-                    pass
-                    
+            # Apply consistent boundary validation at database module boundary
+            self._validate_entity_at_boundary(entity, "create")
+
             self.session.add(entity)
             await self.session.flush()
             return entity
         except Exception as e:
             await self.session.rollback()
-            raise RepositoryError(f"Failed to create {self.model.__name__}: {e}") from e
+            # Use consistent error propagation patterns
+            try:
+                from src.utils.messaging_patterns import ErrorPropagationMixin
+
+                error_propagator = ErrorPropagationMixin()
+                error_propagator.propagate_database_error(
+                    e, f"repository_{self.model.__name__.lower()}_create"
+                )
+            except ImportError:
+                # Fallback to direct raise if pattern not available
+                raise RepositoryError(f"Failed to create {self.model.__name__}: {e}") from e
 
     async def _get_entity_by_id(self, entity_id: Any) -> Any | None:
         """Get entity by ID from database."""
@@ -89,6 +84,9 @@ class DatabaseRepository(CoreBaseRepository):
     async def _update_entity(self, entity: Any) -> Any | None:
         """Update entity in database with consistent patterns."""
         try:
+            # Apply consistent boundary validation at database module boundary
+            self._validate_entity_at_boundary(entity, "update")
+
             # Apply consistent data transformation for updates
             self._apply_update_transforms(entity)
 
@@ -98,7 +96,17 @@ class DatabaseRepository(CoreBaseRepository):
             return merged
         except Exception as e:
             await self.session.rollback()
-            raise RepositoryError(f"Failed to update {self.model.__name__}: {e}") from e
+            # Use consistent error propagation patterns
+            try:
+                from src.utils.messaging_patterns import ErrorPropagationMixin
+
+                error_propagator = ErrorPropagationMixin()
+                error_propagator.propagate_database_error(
+                    e, f"repository_{self.model.__name__.lower()}_update"
+                )
+            except ImportError:
+                # Fallback to direct raise if pattern not available
+                raise RepositoryError(f"Failed to update {self.model.__name__}: {e}") from e
 
     async def _delete_entity(self, entity_id) -> bool:
         """Delete entity from database."""
@@ -111,7 +119,17 @@ class DatabaseRepository(CoreBaseRepository):
             return False
         except Exception as e:
             await self.session.rollback()
-            raise RepositoryError(f"Failed to delete {self.model.__name__}: {e}") from e
+            # Use consistent error propagation patterns
+            try:
+                from src.utils.messaging_patterns import ErrorPropagationMixin
+
+                error_propagator = ErrorPropagationMixin()
+                error_propagator.propagate_database_error(
+                    e, f"repository_{self.model.__name__.lower()}_delete"
+                )
+            except ImportError:
+                # Fallback to direct raise if pattern not available
+                raise RepositoryError(f"Failed to delete {self.model.__name__}: {e}") from e
 
     async def _list_entities(
         self,
@@ -253,17 +271,7 @@ class DatabaseRepository(CoreBaseRepository):
         if hasattr(entity, "version"):
             entity.version = (entity.version or 0) + 1
 
-        # Apply consistent data transformation patterns matching error_handling module
-        if hasattr(entity, "__dict__"):
-            entity_dict = entity.__dict__
-            # Use same messaging patterns transformation as error_handling module
-            from src.utils.messaging_patterns import MessagingCoordinator
-            coordinator = MessagingCoordinator("RepositoryTransform")
-            transformed_dict = coordinator._apply_data_transformation(entity_dict)
-            # Apply transformed values back to entity
-            for key, value in transformed_dict.items():
-                if hasattr(entity, key):
-                    setattr(entity, key, value)
+        # Core already handles data transformation - no need for duplicate logic
 
     def _apply_consistent_filters(self, stmt, filters: dict[str, Any]):
         """Apply consistent filtering patterns across all queries."""
@@ -305,6 +313,39 @@ class DatabaseRepository(CoreBaseRepository):
             and isinstance(value_dict["between"], (list, tuple))
             and len(value_dict["between"]) == 2
         )
+
+    def _validate_entity_at_boundary(self, entity: Any, operation: str) -> None:
+        """Validate entity at database module boundary."""
+        try:
+            # Use consistent boundary validation patterns
+            from src.utils.messaging_patterns import BoundaryValidator
+
+            # Convert entity to dict for validation if needed
+            if hasattr(entity, "__dict__"):
+                entity_dict = {k: v for k, v in entity.__dict__.items() if not k.startswith("_")}
+            else:
+                entity_dict = entity
+
+            # Apply database-specific boundary validation
+            BoundaryValidator.validate_database_entity(entity_dict, operation)
+
+        except ImportError:
+            # Fallback: basic validation if pattern not available
+            if entity is None:
+                raise ValueError(f"Cannot {operation} None entity")
+
+            # Basic validation for financial fields if present
+            financial_fields = ["price", "quantity", "volume", "value"]
+            for field in financial_fields:
+                if hasattr(entity, field):
+                    value = getattr(entity, field)
+                    if value is not None and value < 0:
+                        raise ValueError(f"Financial field {field} cannot be negative")
+
+        except Exception as e:
+            logger.error(f"Entity boundary validation failed for {operation}: {e}")
+            # Allow operation to continue with warning for non-critical validation failures
+            logger.warning(f"Proceeding with {operation} despite validation warning")
 
 
 # Backward compatibility aliases

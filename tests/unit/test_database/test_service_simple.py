@@ -6,12 +6,12 @@ The full service tests are complex and need significant refactoring
 to match the actual service interface.
 """
 
-from unittest.mock import Mock, patch
+from unittest.mock import Mock
+
 import pytest
 
 from src.core.config.service import ConfigService
 from src.database.service import DatabaseService
-from src.utils.validation.service import ValidationService
 
 
 class TestDatabaseServiceBasic:
@@ -36,9 +36,11 @@ class TestDatabaseServiceBasic:
     def mock_validation_service(self):
         """Create mock ValidationService for testing."""
         validation_service = Mock()
+
         # Mock the async validate method
         async def mock_validate(*args, **kwargs):
             return True
+
         validation_service.validate = mock_validate
         validation_service.validate_decimal = Mock(return_value=True)
         validation_service.validate_price = Mock(return_value=True)
@@ -47,24 +49,30 @@ class TestDatabaseServiceBasic:
 
     def test_database_service_init(self, mock_config_service, mock_validation_service):
         """Test DatabaseService initialization."""
+        mock_connection_manager = Mock()
         service = DatabaseService(
+            connection_manager=mock_connection_manager,
             config_service=mock_config_service,
             validation_service=mock_validation_service,
-            correlation_id="test-correlation-123"
+            correlation_id="test-correlation-123",
         )
-        
+
         assert service.config_service == mock_config_service
         assert service.validation_service == mock_validation_service
         assert service.correlation_id == "test-correlation-123"
         assert service.name == "DatabaseService"
 
-    def test_database_service_init_no_correlation_id(self, mock_config_service, mock_validation_service):
+    def test_database_service_init_no_correlation_id(
+        self, mock_config_service, mock_validation_service
+    ):
         """Test DatabaseService initialization without correlation ID."""
+        mock_connection_manager = Mock()
         service = DatabaseService(
-            config_service=mock_config_service,
+            connection_manager=mock_connection_manager,
+            config_service=mock_config_service, 
             validation_service=mock_validation_service
         )
-        
+
         # Service auto-generates correlation_id if not provided
         assert service.correlation_id is not None
         assert len(service.correlation_id) > 0
@@ -72,12 +80,14 @@ class TestDatabaseServiceBasic:
     @pytest.mark.asyncio
     async def test_health_check_basic(self, mock_config_service, mock_validation_service):
         """Test basic health check functionality."""
+        mock_connection_manager = Mock()
         service = DatabaseService(
-            config_service=mock_config_service,
+            connection_manager=mock_connection_manager,
+            config_service=mock_config_service, 
             validation_service=mock_validation_service
         )
-        
+
         # Since the actual health check might require database connections,
         # we'll just test that the method exists and is callable
-        assert hasattr(service, 'get_health_status')
+        assert hasattr(service, "get_health_status")
         assert callable(service.get_health_status)

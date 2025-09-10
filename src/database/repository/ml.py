@@ -34,7 +34,9 @@ class MLPredictionRepository(DatabaseRepository):
             name="MLPredictionRepository",
         )
 
-    async def get_by_model_and_symbol(self, model_name: str, symbol: str, limit: int = 100) -> list[MLPrediction]:
+    async def get_by_model_and_symbol(
+        self, model_name: str, symbol: str, limit: int = 100
+    ) -> list[MLPrediction]:
         """
         Get predictions by model name and symbol.
 
@@ -147,7 +149,9 @@ class MLPredictionRepository(DatabaseRepository):
             "error_stddev": 0.0,
         }
 
-    async def update_with_actual(self, prediction_id: int, actual_value: Decimal) -> MLPrediction | None:
+    async def update_with_actual(
+        self, prediction_id: int, actual_value: Decimal
+    ) -> MLPrediction | None:
         """
         Update prediction with actual value for evaluation.
 
@@ -315,11 +319,15 @@ class MLTrainingJobRepository(DatabaseRepository):
             List of running training jobs
         """
         result = await self.session.execute(
-            select(MLTrainingJob).where(MLTrainingJob.status == "running").order_by(MLTrainingJob.started_at)
+            select(MLTrainingJob)
+            .where(MLTrainingJob.status == "running")
+            .order_by(MLTrainingJob.started_at)
         )
         return list(result.scalars().all())
 
-    async def get_job_by_model(self, model_name: str, status: str | None = None) -> list[MLTrainingJob]:
+    async def get_job_by_model(
+        self, model_name: str, status: str | None = None
+    ) -> list[MLTrainingJob]:
         """
         Get training jobs for a specific model.
 

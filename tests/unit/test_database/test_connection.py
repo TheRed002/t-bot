@@ -1,8 +1,10 @@
 """
 Optimized unit tests for database connection management.
 """
+
 import logging
 from unittest.mock import Mock
+
 import pytest
 
 # Set logging to CRITICAL to reduce I/O
@@ -40,13 +42,13 @@ class TestDatabaseConnectionManager:
         """Test DatabaseConnectionManager initialization."""
         manager = Mock()
         manager.config = mock_config
-        
+
         assert manager.config == mock_config
 
     def test_is_healthy(self, connection_manager):
         """Test health status check."""
         assert connection_manager.is_healthy() is True
-        
+
         connection_manager.is_healthy.return_value = False
         assert connection_manager.is_healthy() is False
 
@@ -60,7 +62,7 @@ class TestGlobalDatabaseFunctions:
             "postgresql_host": "localhost",
             "postgresql_port": 5432,
             "redis_host": "localhost",
-            "redis_port": 6379
+            "redis_port": 6379,
         }
         assert config["postgresql_host"] == "localhost"
         assert config["postgresql_port"] == 5432

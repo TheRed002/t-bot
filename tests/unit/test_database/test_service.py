@@ -1,9 +1,10 @@
 """
 Optimized unit tests for database service layer.
 """
+
 import logging
-from decimal import Decimal
 from unittest.mock import Mock
+
 import pytest
 
 # Set logging to CRITICAL to reduce I/O
@@ -19,7 +20,7 @@ class TestDatabaseService:
         config_service = Mock()
         config_service.get_database_config.return_value = {
             "postgresql_host": "localhost",
-            "postgresql_port": 5432
+            "postgresql_port": 5432,
         }
         return config_service
 
@@ -46,7 +47,7 @@ class TestDatabaseService:
         service.config_service = mock_config_service
         service.validation_service = mock_validation_service
         service.correlation_id = "test-123"
-        
+
         assert service.config_service == mock_config_service
         assert service.validation_service == mock_validation_service
         assert service.correlation_id == "test-123"
@@ -62,7 +63,7 @@ class TestDatabaseService:
         mock_entity = Mock()
         mock_entity.id = "test-id"
         mock_entity.name = "test-entity"
-        
+
         assert mock_entity.id == "test-id"
         assert mock_entity.name == "test-entity"
 
@@ -71,11 +72,11 @@ class TestDatabaseService:
         transaction = Mock()
         transaction.commit = Mock()
         transaction.rollback = Mock()
-        
+
         # Test commit
         transaction.commit()
         transaction.commit.assert_called_once()
-        
+
         # Test rollback
         transaction.rollback()
         transaction.rollback.assert_called_once()

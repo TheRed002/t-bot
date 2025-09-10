@@ -16,10 +16,20 @@ class BotService(BaseService, BotMetricsServiceInterface):
 
     def __init__(
         self,
-        bot_repo: BotRepository | None = None,
+        bot_repo: BotRepository,
     ):
-        """Initialize with injected repositories."""
+        """
+        Initialize with injected repositories.
+
+        Args:
+            bot_repo: Injected bot repository (required)
+        """
         super().__init__(name="BotService")
+
+        # Validate required dependencies
+        if bot_repo is None:
+            raise ValueError("bot_repo must be injected via dependency injection")
+
         self.bot_repo = bot_repo
 
     async def get_active_bots(self) -> list[dict[str, Any]]:
@@ -32,24 +42,25 @@ class BotService(BaseService, BotMetricsServiceInterface):
         try:
             if not self.bot_repo:
                 raise ServiceError("Bot repository not available")
-                
+
             # Get active bots through repository
             active_bots = await self.bot_repo.get_all(
-                filters={"status": "ACTIVE"},
-                order_by="-created_at"
+                filters={"status": "ACTIVE"}, order_by="-created_at"
             )
 
             # Convert to dict format with business logic
             bot_records = []
             for bot in active_bots:
-                bot_records.append({
-                    "bot_id": bot.id,
-                    "name": bot.name,
-                    "status": bot.status,
-                    "created_at": bot.created_at,
-                    "is_healthy": self._assess_bot_health(bot),
-                    "uptime_hours": self._calculate_uptime_hours(bot),
-                })
+                bot_records.append(
+                    {
+                        "bot_id": bot.id,
+                        "name": bot.name,
+                        "status": bot.status,
+                        "created_at": bot.created_at,
+                        "is_healthy": self._assess_bot_health(bot),
+                        "uptime_hours": self._calculate_uptime_hours(bot),
+                    }
+                )
 
             logger.info(f"Retrieved {len(bot_records)} active bots")
             return bot_records
@@ -71,7 +82,7 @@ class BotService(BaseService, BotMetricsServiceInterface):
         try:
             if not bot_id or not bot_id.strip():
                 raise ValidationError("Bot ID is required")
-                
+
             if not self.bot_repo:
                 raise ServiceError("Bot repository not available")
 
@@ -86,10 +97,10 @@ class BotService(BaseService, BotMetricsServiceInterface):
 
             # Archive the bot through repository
             success = await self.bot_repo.soft_delete(bot_id, deleted_by="system")
-            
+
             if success:
                 logger.info(f"Bot {bot_id} archived successfully")
-                
+
             return success
 
         except ValidationError:
@@ -112,7 +123,7 @@ class BotService(BaseService, BotMetricsServiceInterface):
         try:
             if not bot_id or not bot_id.strip():
                 raise ValidationError("Bot ID is required")
-                
+
             if limit <= 0:
                 raise ValidationError("Limit must be positive")
 
@@ -157,17 +168,17 @@ class BotService(BaseService, BotMetricsServiceInterface):
             # Validate required fields
             if "bot_id" not in metrics_record:
                 raise ValidationError("bot_id is required in metrics record")
-                
+
             if "metric_type" not in metrics_record:
                 raise ValidationError("metric_type is required in metrics record")
-                
+
             if "value" not in metrics_record:
                 raise ValidationError("value is required in metrics record")
 
             # Business logic: Validate metric value ranges
             metric_type = metrics_record["metric_type"]
             value = metrics_record["value"]
-            
+
             if metric_type in ["performance", "uptime"] and (value < 0 or value > 100):
                 raise ValidationError(f"Invalid value for {metric_type}: must be 0-100")
 
@@ -185,17 +196,17 @@ class BotService(BaseService, BotMetricsServiceInterface):
         """Business logic to assess bot health."""
         # Placeholder logic - would typically check various health indicators
         return bot.status == "ACTIVE"
-        
+
     def _calculate_uptime_hours(self, bot) -> float:
         """Business logic to calculate bot uptime in hours."""
         # Placeholder logic - would calculate based on created_at and status changes
         from datetime import datetime, timezone
-        
+
         if bot.created_at:
             delta = datetime.now(timezone.utc) - bot.created_at
             return delta.total_seconds() / 3600
         return 0.0
-        
+
     def _can_archive_bot(self, bot) -> bool:
         """Business logic to determine if bot can be archived."""
         # Don't archive active bots or bots with pending operations

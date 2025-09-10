@@ -45,20 +45,24 @@ class RepositoryFactory(RepositoryFactoryInterface):
         try:
             # Use dependency injector if available
             if self._dependency_injector:
+                repo_name = repository_class.__name__
                 try:
-                    repo_name = repository_class.__name__
                     # Try to resolve from dependency injector first
                     return self._dependency_injector.resolve(repo_name)
                 except (ImportError, AttributeError, KeyError, TypeError):
                     # Fallback to direct instantiation
-                    self._logger.debug(f"DI resolution failed for {repo_name}, using direct instantiation")
+                    self._logger.debug(
+                        f"DI resolution failed for {repo_name}, using direct instantiation"
+                    )
 
             # Direct instantiation with session
             return repository_class(session)
 
         except Exception as e:
             self._logger.error(f"Failed to create repository {repository_class.__name__}: {e}")
-            raise RuntimeError(f"Repository creation failed for {repository_class.__name__}: {e}") from e
+            raise RuntimeError(
+                f"Repository creation failed for {repository_class.__name__}: {e}"
+            ) from e
 
     def register_repository(self, name: str, repository_class: type[R]) -> None:
         """

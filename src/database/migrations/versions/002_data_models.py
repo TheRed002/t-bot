@@ -38,7 +38,7 @@ def upgrade() -> None:
         sa.Column("bid_volume", sa.Numeric(precision=20, scale=8), nullable=True),
         sa.Column("ask_volume", sa.Numeric(precision=20, scale=8), nullable=True),
         sa.Column("data_source", sa.String(length=100), nullable=False),
-        sa.Column("quality_score", sa.Float(), nullable=True),
+        sa.Column("quality_score", sa.Numeric(precision=5, scale=4), nullable=True),
         sa.Column("validation_status", sa.String(length=20), nullable=False),
         sa.Column(
             "created_at",
@@ -68,9 +68,15 @@ def upgrade() -> None:
         ["exchange", "timestamp"],
         unique=False,
     )
-    op.create_index("idx_market_data_quality", "market_data_records", ["quality_score"], unique=False)
-    op.create_index("idx_market_data_validation", "market_data_records", ["validation_status"], unique=False)
-    op.create_unique_constraint("uq_market_data_unique", "market_data_records", ["symbol", "exchange", "timestamp"])
+    op.create_index(
+        "idx_market_data_quality", "market_data_records", ["quality_score"], unique=False
+    )
+    op.create_index(
+        "idx_market_data_validation", "market_data_records", ["validation_status"], unique=False
+    )
+    op.create_unique_constraint(
+        "uq_market_data_unique", "market_data_records", ["symbol", "exchange", "timestamp"]
+    )
 
     # Create feature_records table
     op.create_table(
@@ -97,8 +103,12 @@ def upgrade() -> None:
     )
 
     # Create indexes for feature_records
-    op.create_index("idx_feature_symbol_type", "feature_records", ["symbol", "feature_type"], unique=False)
-    op.create_index("idx_feature_timestamp", "feature_records", ["calculation_timestamp"], unique=False)
+    op.create_index(
+        "idx_feature_symbol_type", "feature_records", ["symbol", "feature_type"], unique=False
+    )
+    op.create_index(
+        "idx_feature_timestamp", "feature_records", ["calculation_timestamp"], unique=False
+    )
     op.create_index("idx_feature_name", "feature_records", ["feature_name"], unique=False)
     op.create_unique_constraint(
         "uq_feature_unique",
@@ -113,11 +123,11 @@ def upgrade() -> None:
         sa.Column("symbol", sa.String(length=20), nullable=False),
         sa.Column("data_source", sa.String(length=100), nullable=False),
         sa.Column("quality_check_timestamp", sa.DateTime(timezone=True), nullable=False),
-        sa.Column("completeness_score", sa.Float(), nullable=False),
-        sa.Column("accuracy_score", sa.Float(), nullable=False),
-        sa.Column("consistency_score", sa.Float(), nullable=False),
-        sa.Column("timeliness_score", sa.Float(), nullable=False),
-        sa.Column("overall_score", sa.Float(), nullable=False),
+        sa.Column("completeness_score", sa.Numeric(precision=5, scale=4), nullable=False),
+        sa.Column("accuracy_score", sa.Numeric(precision=5, scale=4), nullable=False),
+        sa.Column("consistency_score", sa.Numeric(precision=5, scale=4), nullable=False),
+        sa.Column("timeliness_score", sa.Numeric(precision=5, scale=4), nullable=False),
+        sa.Column("overall_score", sa.Numeric(precision=5, scale=4), nullable=False),
         sa.Column("missing_data_count", sa.Integer(), nullable=False),
         sa.Column("outlier_count", sa.Integer(), nullable=False),
         sa.Column("duplicate_count", sa.Integer(), nullable=False),
@@ -147,7 +157,9 @@ def upgrade() -> None:
         ["data_source", "quality_check_timestamp"],
         unique=False,
     )
-    op.create_index("idx_quality_overall_score", "data_quality_records", ["overall_score"], unique=False)
+    op.create_index(
+        "idx_quality_overall_score", "data_quality_records", ["overall_score"], unique=False
+    )
     op.create_index("idx_quality_check_type", "data_quality_records", ["check_type"], unique=False)
 
     # Create data_pipeline_records table
@@ -199,7 +211,9 @@ def upgrade() -> None:
     )
     op.create_index("idx_pipeline_status", "data_pipeline_records", ["status"], unique=False)
     op.create_index("idx_pipeline_stage", "data_pipeline_records", ["stage"], unique=False)
-    op.create_index("idx_pipeline_execution_id", "data_pipeline_records", ["execution_id"], unique=False)
+    op.create_index(
+        "idx_pipeline_execution_id", "data_pipeline_records", ["execution_id"], unique=False
+    )
 
 
 def downgrade() -> None:

@@ -3,11 +3,16 @@
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import JSON, Column, DateTime, Integer, String
+from sqlalchemy import JSON, Column, DateTime, Integer, MetaData, String
 from sqlalchemy.orm import declarative_base, declared_attr
 from sqlalchemy.sql import func
 
-Base = declarative_base()
+# Create metadata with info to prevent redefinition errors
+metadata = MetaData()
+Base = declarative_base(metadata=metadata)
+
+# Add global table config to prevent redefinition errors during imports
+Base.metadata.bind = None
 
 
 class TimestampMixin:
@@ -19,7 +24,9 @@ class TimestampMixin:
 
     @declared_attr
     def updated_at(self):
-        return Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+        return Column(
+            DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+        )
 
 
 class AuditMixin(TimestampMixin):

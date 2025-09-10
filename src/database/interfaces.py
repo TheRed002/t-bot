@@ -62,7 +62,9 @@ class DatabaseServiceInterface(ABC):
         pass
 
     @abstractmethod
-    async def count_entities(self, model_class: type[T], filters: dict[str, Any] | None = None) -> int:
+    async def count_entities(
+        self, model_class: type[T], filters: dict[str, Any] | None = None
+    ) -> int:
         """Count entities matching filters."""
         pass
 
@@ -203,7 +205,9 @@ class MLServiceInterface(ABC):
     """Interface for ML service operations."""
 
     @abstractmethod
-    async def get_model_performance_summary(self, model_name: str, days: int = 30) -> dict[str, Any]:
+    async def get_model_performance_summary(
+        self, model_name: str, days: int = 30
+    ) -> dict[str, Any]:
         """Get comprehensive performance summary for a model."""
         pass
 
@@ -215,6 +219,45 @@ class MLServiceInterface(ABC):
     @abstractmethod
     async def get_model_recommendations(self, symbol: str, limit: int = 5) -> list[dict[str, Any]]:
         """Get ML model recommendations for a trading symbol."""
+        pass
+
+
+class ConnectionManagerInterface(ABC):
+    """Interface for database connection management operations."""
+
+    @abstractmethod
+    async def initialize(self) -> None:
+        """Initialize database connections."""
+        pass
+
+    @abstractmethod
+    async def close(self) -> None:
+        """Close database connections."""
+        pass
+
+    @abstractmethod
+    async def get_async_session(self):
+        """Get async database session context manager."""
+        pass
+
+    @abstractmethod
+    def get_sync_session(self):
+        """Get sync database session."""
+        pass
+
+    @abstractmethod
+    async def get_redis_client(self):
+        """Get Redis client."""
+        pass
+
+    @abstractmethod
+    def get_influxdb_client(self):
+        """Get InfluxDB client."""
+        pass
+
+    @abstractmethod
+    def is_healthy(self) -> bool:
+        """Check if connections are healthy."""
         pass
 
 
@@ -234,4 +277,69 @@ class UnitOfWorkFactoryInterface(ABC):
     @abstractmethod
     def configure_dependencies(self, dependency_injector: Any) -> None:
         """Configure dependency injection for created UoW instances."""
+        pass
+
+
+class CapitalServiceInterface(ABC):
+    """Interface for capital management operations."""
+
+    @abstractmethod
+    async def get_available_capital(self, account_id: str) -> Decimal:
+        """Get available capital for account."""
+        pass
+
+    @abstractmethod
+    async def allocate_capital(self, account_id: str, amount: Decimal, purpose: str) -> bool:
+        """Allocate capital for specific purpose."""
+        pass
+
+    @abstractmethod
+    async def release_capital(self, account_id: str, amount: Decimal, purpose: str) -> bool:
+        """Release allocated capital."""
+        pass
+
+
+class UserServiceInterface(ABC):
+    """Interface for user management operations."""
+
+    @abstractmethod
+    async def authenticate_user(self, email: str, password: str) -> dict[str, Any] | None:
+        """Authenticate user credentials."""
+        pass
+
+    @abstractmethod
+    async def get_user_permissions(self, user_id: str) -> list[str]:
+        """Get user permissions."""
+        pass
+
+
+class MarketDataServiceInterface(ABC):
+    """Interface for market data operations."""
+
+    @abstractmethod
+    async def get_latest_price(self, symbol: str) -> Decimal | None:
+        """Get latest price for symbol."""
+        pass
+
+    @abstractmethod
+    async def get_historical_data(
+        self, symbol: str, start_time: datetime, end_time: datetime
+    ) -> list[dict[str, Any]]:
+        """Get historical market data."""
+        pass
+
+
+class AuditServiceInterface(ABC):
+    """Interface for audit trail operations."""
+
+    @abstractmethod
+    async def log_action(self, action_data: dict[str, Any]) -> bool:
+        """Log user or system action."""
+        pass
+
+    @abstractmethod
+    async def get_audit_trail(
+        self, entity_type: str, entity_id: str, limit: int = 100
+    ) -> list[dict[str, Any]]:
+        """Get audit trail for entity."""
         pass

@@ -1,9 +1,11 @@
 """
 Optimized unit tests for Redis client.
 """
-import logging
+
 import json
+import logging
 from unittest.mock import Mock
+
 import pytest
 
 # Set logging to CRITICAL to reduce I/O
@@ -39,7 +41,7 @@ class TestRedisClient:
         client.redis_url = "redis://localhost:6379/0"
         client._default_ttl = 3600
         client.auto_close = False
-        
+
         assert client.config == mock_config
         assert client.redis_url == "redis://localhost:6379/0"
         assert client._default_ttl == 3600
@@ -51,7 +53,7 @@ class TestRedisClient:
         client = Mock()
         client.redis_url = url
         client.config = None
-        
+
         assert client.redis_url == url
         assert client.config is None
 
@@ -60,49 +62,49 @@ class TestRedisClient:
         mock_redis = Mock()
         redis_client.client = mock_redis
         redis_client.connect = Mock()
-        
+
         redis_client.connect()
         redis_client.connect.assert_called_once()
 
     def test_get_namespaced_key(self, redis_client):
         """Test namespaced key generation."""
         redis_client._get_namespaced_key = Mock(return_value="trading_bot:test_key")
-        
+
         key = redis_client._get_namespaced_key("test_key", "custom_namespace")
         result = redis_client._get_namespaced_key.return_value
-        
+
         assert "trading_bot:test_key" in result
 
     def test_set_success(self, redis_client):
         """Test successful set operation."""
         redis_client.set = Mock(return_value=True)
-        
+
         result = redis_client.set("test_key", {"data": "value"}, ttl=300)
-        
+
         assert result is True
 
     def test_get_success(self, redis_client):
         """Test successful get operation."""
         redis_client.get = Mock(return_value={"data": "value"})
-        
+
         result = redis_client.get("test_key")
-        
+
         assert result == {"data": "value"}
 
     def test_delete_success(self, redis_client):
         """Test successful delete operation."""
         redis_client.delete = Mock(return_value=True)
-        
+
         result = redis_client.delete("test_key")
-        
+
         assert result is True
 
     def test_exists_true(self, redis_client):
         """Test exists operation returns True."""
         redis_client.exists = Mock(return_value=True)
-        
+
         result = redis_client.exists("test_key")
-        
+
         assert result is True
 
     def test_data_serialization(self, redis_client):
@@ -110,7 +112,7 @@ class TestRedisClient:
         data = {"key": "value", "number": 42}
         serialized = json.dumps(data)
         deserialized = json.loads(serialized)
-        
+
         assert deserialized == data
         assert deserialized["key"] == "value"
         assert deserialized["number"] == 42
@@ -131,40 +133,36 @@ class TestRedisClientTradingUtilities:
 
     def test_store_market_data(self, redis_client):
         """Test storing market data."""
-        market_data = {
-            "price": 50000.0,
-            "volume": 100.0,
-            "timestamp": "2023-01-01T00:00:00Z"
-        }
-        
+        market_data = {"price": 50000.0, "volume": 100.0, "timestamp": "2023-01-01T00:00:00Z"}
+
         result = redis_client.store_market_data("BTCUSDT", market_data, ttl=600)
-        
+
         assert result is True
 
     def test_get_market_data(self, redis_client):
         """Test retrieving market data."""
         market_data = {"price": 50000.0, "volume": 100.0}
         redis_client.get_market_data.return_value = market_data
-        
+
         result = redis_client.get_market_data("BTCUSDT")
-        
+
         assert result == market_data
 
     def test_store_position(self, redis_client):
         """Test storing bot position data."""
         position_data = {"symbol": "BTCUSDT", "size": 0.1, "entry_price": 50000.0}
-        
+
         result = redis_client.store_position("bot_123", position_data)
-        
+
         assert result is True
 
     def test_get_position(self, redis_client):
         """Test retrieving bot position data."""
         position_data = {"symbol": "BTCUSDT", "size": 0.1, "entry_price": 50000.0}
         redis_client.get_position.return_value = position_data
-        
+
         result = redis_client.get_position("bot_123")
-        
+
         assert result == position_data
 
 

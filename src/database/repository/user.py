@@ -13,7 +13,9 @@ class UserRepository(DatabaseRepository):
     def __init__(self, session: AsyncSession):
         """Initialize user repository."""
 
-        super().__init__(session=session, model=User, entity_type=User, key_type=str, name="UserRepository")
+        super().__init__(
+            session=session, model=User, entity_type=User, key_type=str, name="UserRepository"
+        )
 
     async def get_by_username(self, username: str) -> User | None:
         """Get user by username."""

@@ -5,15 +5,16 @@ This repository uses the DatabaseService for all data access,
 providing a clean separation between service and repository layers.
 """
 
-from typing import Any, TypeVar
+# Use TYPE_CHECKING to avoid circular imports
+from typing import TYPE_CHECKING, Any, TypeVar
 
 from src.core.base.interfaces import HealthStatus
 from src.core.base.repository import BaseRepository
 from src.core.exceptions import DatabaseConnectionError, DatabaseQueryError
 from src.core.logging import get_logger
 
-# Import at module level to avoid forward reference
-from src.database.service import DatabaseService
+if TYPE_CHECKING:
+    from src.database.service import DatabaseService
 
 # Type variables
 T = TypeVar("T")
@@ -34,7 +35,7 @@ class DatabaseServiceRepository(BaseRepository[T, K]):
         self,
         entity_type: type[T],
         key_type: type[K],
-        database_service: DatabaseService,
+        database_service: "DatabaseService",
         name: str | None = None,
     ):
         """

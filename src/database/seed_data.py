@@ -238,7 +238,9 @@ class DatabaseSeeder:
         await session.commit()
         return users
 
-    async def seed_bot_instances(self, session: AsyncSession, users: list[User]) -> list[BotInstance]:
+    async def seed_bot_instances(
+        self, session: AsyncSession, users: list[User]
+    ) -> list[BotInstance]:
         """
         Seed bot instance data.
 
@@ -291,7 +293,9 @@ class DatabaseSeeder:
         await session.commit()
         return bots
 
-    async def seed_strategies(self, session: AsyncSession, bots: list[BotInstance]) -> list[Strategy]:
+    async def seed_strategies(
+        self, session: AsyncSession, bots: list[BotInstance]
+    ) -> list[Strategy]:
         """
         Seed strategy data.
 
@@ -330,7 +334,7 @@ class DatabaseSeeder:
                 max_position_size=Decimal("1000"),
                 risk_per_trade=Decimal("0.02"),
                 stop_loss_percentage=Decimal("0.05"),
-                status="ACTIVE" if strategy_data["status"] == StrategyStatus.ACTIVE else "INACTIVE",
+                status=strategy_data["status"].value,
                 bot_id=bot.id,
             )
 
@@ -341,7 +345,9 @@ class DatabaseSeeder:
         await session.commit()
         return strategies
 
-    async def seed_exchange_credentials(self, session: AsyncSession, users: list[User]) -> list[dict[str, Any]]:
+    async def seed_exchange_credentials(
+        self, session: AsyncSession, users: list[User]
+    ) -> list[dict[str, Any]]:
         """
         Seed exchange credential data.
 
@@ -370,7 +376,9 @@ class DatabaseSeeder:
                     "is_testnet": cred_data["is_testnet"],
                 }
                 credentials.append(credential)
-                logger.info(f"Created credential for {cred_data['exchange']} for user {user.username}")
+                logger.info(
+                    f"Created credential for {cred_data['exchange']} for user {user.username}"
+                )
 
         await session.commit()
         return credentials
@@ -405,7 +413,11 @@ class DatabaseSeeder:
                 entry_price = Decimal(str(45000 + (i * 100)))
                 exit_price = Decimal(str(45100 + (i * 100)))
                 quantity = Decimal("0.01")
-                pnl = (exit_price - entry_price) * quantity if i % 2 == 0 else (entry_price - exit_price) * quantity
+                pnl = (
+                    (exit_price - entry_price) * quantity
+                    if i % 2 == 0
+                    else (entry_price - exit_price) * quantity
+                )
 
                 trade = Trade(
                     id=uuid.uuid4(),
@@ -439,7 +451,9 @@ class DatabaseSeeder:
 
         # Only run in development mode
         if self.config.environment != "development":
-            logger.warning(f"Seeding is only allowed in development mode. Current: {self.config.environment}")
+            logger.warning(
+                f"Seeding is only allowed in development mode. Current: {self.config.environment}"
+            )
             return
 
         async with get_db_session() as session:
@@ -471,7 +485,8 @@ class DatabaseSeeder:
                 # Log successful seeding (passwords are not logged for security)
                 logger.info("Database seeded successfully with test data")
                 logger.info(
-                    f"Created {len(self._load_seed_data()['users'])} test users - " "see seed_data.py for credentials"
+                    f"Created {len(self._load_seed_data()['users'])} test users - "
+                    "see seed_data.py for credentials"
                 )
 
             except Exception as e:

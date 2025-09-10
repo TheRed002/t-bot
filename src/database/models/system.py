@@ -28,7 +28,7 @@ class Alert(Base, TimestampMixin):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     alert_type = Column(String(50), nullable=False)
-    severity = Column(String(20), nullable=False)  # LOW, MEDIUM, HIGH, CRITICAL, INFO
+    severity = Column(String(20), nullable=False)  # critical, high, medium, low, info
     title = Column(String(255), nullable=False)
     message = Column(Text, nullable=False)
 
@@ -40,7 +40,9 @@ class Alert(Base, TimestampMixin):
 
     # Foreign keys
     alert_rule_id = Column(UUID(as_uuid=True), ForeignKey("alert_rules.id", ondelete="SET NULL"))
-    escalation_policy_id = Column(UUID(as_uuid=True), ForeignKey("escalation_policies.id", ondelete="SET NULL"))
+    escalation_policy_id = Column(
+        UUID(as_uuid=True), ForeignKey("escalation_policies.id", ondelete="SET NULL")
+    )
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
     bot_id = Column(UUID(as_uuid=True), ForeignKey("bots.id", ondelete="SET NULL"))
 
@@ -63,7 +65,12 @@ class Alert(Base, TimestampMixin):
         Index("idx_alerts_user_id", "user_id"),
         Index("idx_alerts_bot_id", "bot_id"),
         Index("idx_alerts_status_severity", "status", "severity"),
-        CheckConstraint("severity IN ('LOW', 'MEDIUM', 'HIGH', 'CRITICAL', 'INFO')", name="check_alert_severity"),
+        Index("idx_alerts_acknowledged", "acknowledged_at"),  # Alert management queries
+        Index("idx_alerts_resolved", "resolved_at"),  # Alert resolution tracking
+        Index("idx_alerts_escalation_policy", "escalation_policy_id"),  # Escalation queries
+        CheckConstraint(
+            "severity IN ('critical', 'high', 'medium', 'low', 'info')", name="check_alert_severity"
+        ),
         CheckConstraint(
             "status IN ('ACTIVE', 'ACKNOWLEDGED', 'RESOLVED', 'SUPPRESSED')",
             name="check_alert_status",
@@ -72,7 +79,9 @@ class Alert(Base, TimestampMixin):
             "acknowledged_at IS NULL OR acknowledged_by IS NOT NULL",
             name="check_alert_acknowledge_consistency",
         ),
-        CheckConstraint("resolved_at IS NULL OR status = 'RESOLVED'", name="check_alert_resolve_consistency"),
+        CheckConstraint(
+            "resolved_at IS NULL OR status = 'RESOLVED'", name="check_alert_resolve_consistency"
+        ),
     )
 
     def __repr__(self):
@@ -87,7 +96,7 @@ class AlertRule(Base, TimestampMixin):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name = Column(String(100), nullable=False, unique=True)
     description = Column(Text)
-    severity = Column(String(20), nullable=False)  # LOW, MEDIUM, HIGH, CRITICAL, INFO
+    severity = Column(String(20), nullable=False)  # critical, high, medium, low, info
 
     # Rule configuration
     query = Column(Text, nullable=False)  # PromQL or other query language
@@ -100,7 +109,9 @@ class AlertRule(Base, TimestampMixin):
     escalation_delay = Column(String(20))  # e.g., "15m"
 
     # Foreign keys
-    escalation_policy_id = Column(UUID(as_uuid=True), ForeignKey("escalation_policies.id", ondelete="SET NULL"))
+    escalation_policy_id = Column(
+        UUID(as_uuid=True), ForeignKey("escalation_policies.id", ondelete="SET NULL")
+    )
     created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
 
     # Rule metadata
@@ -113,7 +124,7 @@ class AlertRule(Base, TimestampMixin):
     # Relationships
     escalation_policy = relationship("EscalationPolicy", back_populates="alert_rules")
     alerts = relationship("Alert", back_populates="alert_rule", cascade="all, delete-orphan")
-    creator = relationship("User")
+    creator = relationship("User", foreign_keys=[created_by], overlaps="alert_rules_created")
 
     # Indexes and constraints
     __table_args__ = (
@@ -124,10 +135,12 @@ class AlertRule(Base, TimestampMixin):
         Index("idx_alert_rules_created_by", "created_by"),
         Index("idx_alert_rules_enabled_severity", "enabled", "severity"),
         CheckConstraint(
-            "severity IN ('LOW', 'MEDIUM', 'HIGH', 'CRITICAL', 'INFO')",
+            "severity IN ('critical', 'high', 'medium', 'low', 'info')",
             name="check_alert_rule_severity",
         ),
-        CheckConstraint("operator IN ('>', '<', '>=', '<=', '==', '!=')", name="check_alert_rule_operator"),
+        CheckConstraint(
+            "operator IN ('>', '<', '>=', '<=', '==', '!=')", name="check_alert_rule_operator"
+        ),
         CheckConstraint("threshold >= 0", name="check_alert_rule_threshold_non_negative"),
         CheckConstraint("LENGTH(name) >= 1", name="check_alert_rule_name_not_empty"),
         CheckConstraint("LENGTH(query) >= 1", name="check_alert_rule_query_not_empty"),
@@ -148,7 +161,9 @@ class EscalationPolicy(Base, TimestampMixin):
 
     # Escalation configuration
     severity_levels = Column(JSONB, default=[])  # List of severity levels this policy applies to
-    escalation_steps = Column(JSONB, default=[])  # List of escalation steps with delays and channels
+    escalation_steps = Column(
+        JSONB, default=[]
+    )  # List of escalation steps with delays and channels
 
     # Policy settings
     repeat_interval = Column(String(20))  # e.g., "30m" - how often to repeat notifications
@@ -163,7 +178,9 @@ class EscalationPolicy(Base, TimestampMixin):
     # Relationships
     alert_rules = relationship("AlertRule", back_populates="escalation_policy")
     alerts = relationship("Alert", back_populates="escalation_policy")
-    creator = relationship("User")
+    creator = relationship(
+        "User", foreign_keys=[created_by], overlaps="escalation_policies_created"
+    )
 
     # Indexes and constraints
     __table_args__ = (
@@ -202,7 +219,7 @@ class AuditLog(Base, TimestampMixin):
     user_agent = Column(Text)
 
     # Relationships
-    user = relationship("User")
+    user = relationship("User", overlaps="audit_logs")
 
     # Indexes
     __table_args__ = (
@@ -240,8 +257,10 @@ class PerformanceMetrics(Base, TimestampMixin):
     period_end = Column(DateTime(timezone=True), nullable=False)
 
     # Foreign keys
-    bot_id = Column(UUID(as_uuid=True), ForeignKey("bots.id", ondelete="CASCADE"))
-    strategy_id = Column(UUID(as_uuid=True), ForeignKey("strategies.id", ondelete="CASCADE"))
+    bot_id = Column(UUID(as_uuid=True), ForeignKey("bots.id", ondelete="CASCADE"), nullable=True)
+    strategy_id = Column(
+        UUID(as_uuid=True), ForeignKey("strategies.id", ondelete="CASCADE"), nullable=True
+    )
 
     # Additional data
     metadata_json = Column(JSONB, default={})
@@ -261,11 +280,14 @@ class PerformanceMetrics(Base, TimestampMixin):
         Index("idx_performance_strategy_id", "strategy_id"),
         Index("idx_performance_type_period", "metric_type", "period_start", "period_end"),
         Index("idx_performance_bot_type", "bot_id", "metric_type"),
+        Index("idx_performance_entity_period", "entity_type", "entity_id", "period_start"),
         CheckConstraint("value >= 0", name="check_performance_value_non_negative"),
         CheckConstraint("period_start < period_end", name="check_performance_period_order"),
         CheckConstraint("LENGTH(metric_type) >= 1", name="check_performance_metric_type_not_empty"),
         CheckConstraint("LENGTH(entity_type) >= 1", name="check_performance_entity_type_not_empty"),
-        CheckConstraint("change_percentage >= -100", name="check_performance_change_percentage_min"),
+        CheckConstraint(
+            "change_percentage >= -100", name="check_performance_change_percentage_min"
+        ),
     )
 
     def __repr__(self):
@@ -292,8 +314,8 @@ class BalanceSnapshot(Base, TimestampMixin):
     exchange_rate: Mapped[Decimal | None] = mapped_column(DECIMAL(20, 8))
 
     # Foreign keys
-    bot_id = Column(UUID(as_uuid=True), ForeignKey("bots.id", ondelete="CASCADE"))
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"))
+    bot_id = Column(UUID(as_uuid=True), ForeignKey("bots.id", ondelete="CASCADE"), nullable=True)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
 
     # Snapshot metadata
     snapshot_reason = Column(String(50))  # scheduled, triggered, manual
@@ -315,13 +337,17 @@ class BalanceSnapshot(Base, TimestampMixin):
         CheckConstraint("total_balance >= 0", name="check_balance_total_non_negative"),
         CheckConstraint("available_balance >= 0", name="check_balance_available_non_negative"),
         CheckConstraint("locked_balance >= 0", name="check_balance_locked_non_negative"),
-        CheckConstraint("total_balance = available_balance + locked_balance", name="check_balance_consistency"),
+        CheckConstraint(
+            "total_balance = available_balance + locked_balance", name="check_balance_consistency"
+        ),
         CheckConstraint("account_type IN ('spot', 'futures', 'margin')", name="check_account_type"),
         CheckConstraint(
             "exchange IN ('binance', 'coinbase', 'okx', 'mock')",
             name="check_balance_supported_exchange",
         ),
-        CheckConstraint("usd_value IS NULL OR usd_value >= 0", name="check_balance_usd_value_non_negative"),
+        CheckConstraint(
+            "usd_value IS NULL OR usd_value >= 0", name="check_balance_usd_value_non_negative"
+        ),
         CheckConstraint(
             "exchange_rate IS NULL OR exchange_rate > 0",
             name="check_balance_exchange_rate_positive",
@@ -334,3 +360,72 @@ class BalanceSnapshot(Base, TimestampMixin):
 
     def __repr__(self):
         return f"<BalanceSnapshot {self.exchange} {self.currency}: {self.total_balance}>"
+
+
+class ResourceAllocation(Base, TimestampMixin):
+    """Resource allocation model for tracking bot resource allocations."""
+
+    __tablename__ = "resource_allocations"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    entity_id = Column(String(100), nullable=False)
+    entity_type = Column(String(50), nullable=False)
+    resource_type = Column(String(50), nullable=False)
+
+    # Allocation details
+    allocated_amount: Mapped[Decimal] = mapped_column(DECIMAL(20, 8), nullable=False)
+    max_amount: Mapped[Decimal] = mapped_column(DECIMAL(20, 8), nullable=False)
+
+    # Status and metadata
+    status = Column(String(20), nullable=False, default="active")
+    metadata_json = Column(JSONB, default={})
+
+    # Indexes and constraints
+    __table_args__ = (
+        Index("idx_resource_allocation_entity", "entity_type", "entity_id"),
+        Index("idx_resource_allocation_status", "status"),
+        Index("idx_resource_allocation_type", "resource_type"),
+        CheckConstraint("allocated_amount >= 0", name="check_allocation_amount_non_negative"),
+        CheckConstraint("max_amount >= allocated_amount", name="check_max_amount_valid"),
+        CheckConstraint("max_amount > 0", name="check_max_amount_positive"),
+        CheckConstraint("LENGTH(entity_id) >= 1", name="check_allocation_entity_id_not_empty"),
+    )
+
+    def __repr__(self):
+        return (
+            f"<ResourceAllocation {self.entity_type} {self.resource_type}: {self.allocated_amount}>"
+        )
+
+
+class ResourceUsage(Base, TimestampMixin):
+    """Resource usage model for tracking bot resource usage."""
+
+    __tablename__ = "resource_usage"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    entity_id = Column(String(100), nullable=False)
+    entity_type = Column(String(50), nullable=False)
+    resource_type = Column(String(50), nullable=False)
+
+    # Usage details
+    usage_amount: Mapped[Decimal] = mapped_column(DECIMAL(20, 8), nullable=False)
+    usage_percentage: Mapped[Decimal] = mapped_column(DECIMAL(8, 4), nullable=False)
+
+    # Metadata and timestamp
+    metadata_json = Column(JSONB, default={})
+    timestamp = Column(DateTime(timezone=True), nullable=False)
+
+    # Indexes and constraints
+    __table_args__ = (
+        Index("idx_resource_usage_entity", "entity_type", "entity_id"),
+        Index("idx_resource_usage_type", "resource_type"),
+        Index("idx_resource_usage_timestamp", "timestamp"),
+        CheckConstraint("usage_amount >= 0", name="check_usage_amount_non_negative"),
+        CheckConstraint(
+            "usage_percentage >= 0 AND usage_percentage <= 100", name="check_usage_percentage_valid"
+        ),
+        CheckConstraint("LENGTH(entity_id) >= 1", name="check_usage_entity_id_not_empty"),
+    )
+
+    def __repr__(self):
+        return f"<ResourceUsage {self.entity_type} {self.resource_type}: {self.usage_amount}>"

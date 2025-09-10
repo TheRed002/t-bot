@@ -33,7 +33,9 @@ class FeatureRepository(DatabaseRepository):
 
     async def get_by_feature_type(self, feature_type: str) -> list[FeatureRecord]:
         """Get features by type."""
-        return await self.get_all(filters={"feature_type": feature_type}, order_by="-calculation_timestamp")
+        return await self.get_all(
+            filters={"feature_type": feature_type}, order_by="-calculation_timestamp"
+        )
 
     async def get_by_symbol_and_type(self, symbol: str, feature_type: str) -> list[FeatureRecord]:
         """Get features by symbol and type."""
@@ -42,7 +44,9 @@ class FeatureRepository(DatabaseRepository):
             order_by="-calculation_timestamp",
         )
 
-    async def get_latest_feature(self, symbol: str, feature_type: str, feature_name: str) -> FeatureRecord | None:
+    async def get_latest_feature(
+        self, symbol: str, feature_type: str, feature_name: str
+    ) -> FeatureRecord | None:
         """Get latest feature value."""
         features = await self.get_all(
             filters={"symbol": symbol, "feature_type": feature_type, "feature_name": feature_name},
@@ -84,14 +88,20 @@ class DataQualityRepository(DatabaseRepository):
 
     async def get_by_data_source(self, data_source: str) -> list[DataQualityRecord]:
         """Get quality records by data source."""
-        return await self.get_all(filters={"data_source": data_source}, order_by="-quality_check_timestamp")
+        return await self.get_all(
+            filters={"data_source": data_source}, order_by="-quality_check_timestamp"
+        )
 
-    async def get_poor_quality_records(self, threshold: Decimal = Decimal("0.8")) -> list[DataQualityRecord]:
+    async def get_poor_quality_records(
+        self, threshold: Decimal = Decimal("0.8")
+    ) -> list[DataQualityRecord]:
         """Get records with poor quality scores."""
         records = await self.get_all()
         return [record for record in records if record.overall_score < threshold]
 
-    async def get_latest_quality_check(self, symbol: str, data_source: str) -> DataQualityRecord | None:
+    async def get_latest_quality_check(
+        self, symbol: str, data_source: str
+    ) -> DataQualityRecord | None:
         """Get latest quality check for symbol and source."""
         records = await self.get_all(
             filters={"symbol": symbol, "data_source": data_source},
@@ -104,11 +114,13 @@ class DataQualityRepository(DatabaseRepository):
         """Get quality trend for symbol over specified days."""
         end_date = datetime.now(timezone.utc)
         start_date = end_date - timedelta(days=days)
-        return await self.get_all(
-            filters={
-                "symbol": symbol,
-                "quality_check_timestamp": {"gte": start_date, "lte": end_date},
-            },
+        return await RepositoryUtils.execute_date_range_query(
+            self.session,
+            self.model,
+            start_date=start_date,
+            end_date=end_date,
+            timestamp_field="quality_check_timestamp",
+            additional_filters={"symbol": symbol},
             order_by="-quality_check_timestamp",
         )
 
@@ -129,7 +141,9 @@ class DataPipelineRepository(DatabaseRepository):
 
     async def get_by_pipeline_name(self, pipeline_name: str) -> list[DataPipelineRecord]:
         """Get records by pipeline name."""
-        return await self.get_all(filters={"pipeline_name": pipeline_name}, order_by="-execution_timestamp")
+        return await self.get_all(
+            filters={"pipeline_name": pipeline_name}, order_by="-execution_timestamp"
+        )
 
     async def get_by_status(self, status: str) -> list[DataPipelineRecord]:
         """Get records by status."""
@@ -145,17 +159,23 @@ class DataPipelineRepository(DatabaseRepository):
 
     async def get_latest_execution(self, pipeline_name: str) -> DataPipelineRecord | None:
         """Get latest execution for a pipeline."""
-        records = await self.get_all(filters={"pipeline_name": pipeline_name}, order_by="-execution_timestamp", limit=1)
+        records = await self.get_all(
+            filters={"pipeline_name": pipeline_name}, order_by="-execution_timestamp", limit=1
+        )
         return records[0] if records else None
 
-    async def get_pipeline_performance(self, pipeline_name: str, days: int = 30) -> list[DataPipelineRecord]:
+    async def get_pipeline_performance(
+        self, pipeline_name: str, days: int = 30
+    ) -> list[DataPipelineRecord]:
         """Get pipeline performance over specified days."""
         end_date = datetime.now(timezone.utc)
         start_date = end_date - timedelta(days=days)
-        return await self.get_all(
-            filters={
-                "pipeline_name": pipeline_name,
-                "execution_timestamp": {"gte": start_date, "lte": end_date},
-            },
+        return await RepositoryUtils.execute_date_range_query(
+            self.session,
+            self.model,
+            start_date=start_date,
+            end_date=end_date,
+            timestamp_field="execution_timestamp",
+            additional_filters={"pipeline_name": pipeline_name},
             order_by="-execution_timestamp",
         )
