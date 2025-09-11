@@ -40,13 +40,16 @@ try:
 
     def trace(operation_name: str, *args, **kwargs):
         """Trace decorator using OpenTelemetry."""
+
         def decorator(func):
             @functools.wraps(func)
             def wrapper(*func_args, **func_kwargs):
                 tracer = otel_trace_module.get_tracer(__name__)
                 with tracer.start_as_current_span(operation_name):
                     return func(*func_args, **func_kwargs)
+
             return wrapper
+
         return decorator
 
     Status = OtelStatus
@@ -56,11 +59,14 @@ except ImportError:
     # Use mock implementations
     def trace(operation_name: str, *args, **kwargs):
         """Mock trace decorator."""
+
         def decorator(func):
             @functools.wraps(func)
             def wrapper(*func_args, **func_kwargs):
                 return func(*func_args, **func_kwargs)
+
             return wrapper
+
         return decorator
 
     Status = MockStatus  # type: ignore[misc,assignment]

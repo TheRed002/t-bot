@@ -1,0 +1,898 @@
+"""
+Comprehensive test coverage boost for monitoring.telemetry module.
+
+Tests all classes and functions to achieve 70%+ coverage including:
+- OpenTelemetryConfig and TradingTracer classes
+- Telemetry setup and instrumentation
+- Tracing decorators and context managers
+- Global tracer management
+- Edge cases and error conditions
+"""
+
+import asyncio
+from decimal import Decimal
+from unittest.mock import Mock, patch
+
+import pytest
+
+# Complete OpenTelemetry mock infrastructure - Fixed version
+class MockSpan:
+    def __init__(self):
+        self.attributes = {}
+        self.events = []
+        self.status = None
+        self.exception = None
+    
+    def __enter__(self):
+        return self
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if exc_val:
+            self.record_exception(exc_val)
+        return None
+    
+    async def __aenter__(self):
+        return self
+    
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        if exc_val:
+            self.record_exception(exc_val)
+        return None
+    
+    def set_attribute(self, key, value):
+        self.attributes[key] = value
+    
+    def add_event(self, name, attributes=None):
+        self.events.append({"name": name, "attributes": attributes or {}})
+    
+    def set_status(self, status):
+        self.status = status
+    
+    def record_exception(self, exception):
+        self.exception = exception
+
+
+class MockTracer:
+    def __init__(self):
+        self.spans = []
+    
+    def start_as_current_span(self, name, **kwargs):
+        span = MockSpan()
+        self.spans.append(span)
+        return span
+    
+    def start_span(self, name, **kwargs):
+        span = MockSpan()
+        self.spans.append(span)
+        return span
+
+
+class MockResource:
+    def __init__(self, attributes=None):
+        self.attributes = attributes or {}
+    
+    @classmethod
+    def create(cls, attributes=None):
+        return cls(attributes)
+
+
+class MockTracerProvider:
+    def __init__(self, *args, **kwargs):
+        self.processors = []
+        self.shutdowns = 0
+    
+    def add_span_processor(self, processor):
+        self.processors.append(processor)
+    
+    def shutdown(self):
+        self.shutdowns += 1
+
+
+class MockMeterProvider:
+    def __init__(self, *args, **kwargs):
+        self.shutdowns = 0
+    
+    def shutdown(self):
+        self.shutdowns += 1
+
+
+class MockBatchSpanProcessor:
+    def __init__(self, exporter):
+        self.exporter = exporter
+
+
+class MockTraceIdRatioBased:
+    def __init__(self, ratio):
+        self.ratio = ratio
+
+
+class MockStatus:
+    def __init__(self, status_code, description=""):
+        self.status_code = status_code
+        self.description = description
+
+
+class MockStatusCode:
+    OK = "OK"
+    ERROR = "ERROR"
+
+
+# Create mock trace and metrics modules
+mock_trace = Mock()
+mock_trace.get_tracer = Mock(return_value=MockTracer())
+mock_trace.set_tracer_provider = Mock()
+mock_trace.get_tracer_provider = Mock(return_value=None)
+
+mock_metrics = Mock()
+mock_metrics.get_meter = Mock(return_value=Mock())
+mock_metrics.set_meter_provider = Mock()
+
+# Complete OpenTelemetry module mocks
+mock_otel_modules = {
+    "opentelemetry": Mock(),
+    "opentelemetry.metrics": mock_metrics,
+    "opentelemetry.trace": mock_trace,
+    "opentelemetry.exporter.jaeger.thrift": Mock(JaegerExporter=Mock()),
+    "opentelemetry.exporter.otlp.proto.grpc.trace_exporter": Mock(OTLPSpanExporter=Mock()),
+    "opentelemetry.instrumentation.aiohttp_client": Mock(AioHttpClientInstrumentor=Mock()),
+    "opentelemetry.instrumentation.asyncpg": Mock(AsyncPGInstrumentor=Mock()),
+    "opentelemetry.instrumentation.fastapi": Mock(FastAPIInstrumentor=Mock()),
+    "opentelemetry.instrumentation.redis": Mock(RedisInstrumentor=Mock()),
+    "opentelemetry.instrumentation.requests": Mock(RequestsInstrumentor=Mock()),
+    "opentelemetry.instrumentation.sqlalchemy": Mock(SQLAlchemyInstrumentor=Mock()),
+    "opentelemetry.sdk.metrics": Mock(MeterProvider=MockMeterProvider),
+    "opentelemetry.sdk.resources": Mock(Resource=MockResource),
+    "opentelemetry.sdk.trace": Mock(TracerProvider=MockTracerProvider, Span=MockSpan),
+    "opentelemetry.sdk.trace.export": Mock(BatchSpanProcessor=MockBatchSpanProcessor, ConsoleSpanExporter=Mock()),
+    "opentelemetry.sdk.trace.sampling": Mock(TraceIdRatioBased=MockTraceIdRatioBased),
+    "opentelemetry.semconv.trace": Mock(SpanAttributes=Mock()),
+    "opentelemetry.trace.status": Mock(Status=MockStatus, StatusCode=MockStatusCode),
+    "opentelemetry.util.http": Mock(get_excluded_urls=Mock(return_value="")),
+}
+
+# Apply comprehensive mocking
+with patch.dict("sys.modules", mock_otel_modules):
+    from src.monitoring.telemetry import (
+        OPENTELEMETRY_AVAILABLE,
+        OpenTelemetryConfig,
+        TradingTracer,
+        get_error_handler_fallback,
+        get_monitoring_logger,
+        get_tracer,
+        get_trading_tracer,
+        instrument_fastapi,
+        set_global_trading_tracer,
+        setup_telemetry,
+        trace_async_context,
+        trace_async_function,
+        trace_function,
+    )
+
+
+class TestOpenTelemetryConfig:
+    """Test OpenTelemetryConfig class."""
+
+    def test_opentelemetry_config_creation(self):
+        """Test OpenTelemetryConfig initialization."""
+        config = OpenTelemetryConfig()
+        config.service_name = "test-service"
+        config.service_version = "1.0.0"
+        config.environment = "test"
+        config.jaeger_endpoint = "http://jaeger:14268/api/traces"
+        config.otlp_endpoint = "http://otel-collector:4317"
+        config.sampling_rate = 0.1
+        config.console_enabled = True
+
+        assert config.service_name == "test-service"
+        assert config.service_version == "1.0.0"
+        assert config.environment == "test"
+        assert config.jaeger_endpoint == "http://jaeger:14268/api/traces"
+        assert config.otlp_endpoint == "http://otel-collector:4317"
+        assert config.sampling_rate == 0.1
+        assert config.console_enabled is True
+
+    def test_opentelemetry_config_defaults(self):
+        """Test OpenTelemetryConfig with default values."""
+        config = OpenTelemetryConfig()
+
+        assert config.service_name == "tbot-trading-system"
+        assert config.service_version == "1.0.0"
+        assert config.environment == "development"
+        assert config.jaeger_endpoint == "http://localhost:14268/api/traces"
+        assert config.otlp_endpoint == "http://localhost:4317"
+        assert config.sampling_rate == 1.0
+        assert config.console_enabled is False
+        assert config.tracing_enabled is True
+
+
+class TestTradingTracer:
+    """Test TradingTracer class."""
+
+    @pytest.fixture
+    def mock_tracer(self):
+        """Create a mock tracer for testing."""
+        tracer = Mock()
+        mock_span = Mock()
+        
+        # Mock both start_span and start_as_current_span
+        tracer.start_span.return_value = mock_span
+        tracer.start_as_current_span.return_value = mock_span
+        
+        # Setup context manager methods
+        mock_span.__enter__ = Mock(return_value=mock_span)
+        mock_span.__exit__ = Mock(return_value=None)
+        
+        return tracer
+
+    @pytest.fixture
+    def trading_tracer(self, mock_tracer):
+        """Create a TradingTracer instance for testing."""
+        return TradingTracer(mock_tracer)
+
+    def test_trading_tracer_initialization(self, trading_tracer, mock_tracer):
+        """Test TradingTracer initialization."""
+        assert trading_tracer._tracer == mock_tracer
+        assert hasattr(trading_tracer, "_active_spans")
+
+    def test_trading_tracer_attributes(self, trading_tracer):
+        """Test trading tracer has required attributes."""
+        assert hasattr(trading_tracer, "_tracer")
+        assert hasattr(trading_tracer, "_active_spans")
+        assert hasattr(trading_tracer, "_span_processors")
+
+    def test_start_span_available(self, trading_tracer):
+        """Test that start_span method is available."""
+        # start_span is available on TradingTracer as a generic method
+        assert hasattr(trading_tracer, 'start_span')
+        # Along with specific context managers
+        assert hasattr(trading_tracer, 'trace_order_execution')
+
+    def test_disable_not_implemented(self, trading_tracer):
+        """Test that disable method doesn't exist."""
+        # disable method doesn't exist in the actual implementation
+        assert not hasattr(trading_tracer, 'disable')
+
+    def test_market_data_processing_context(self, trading_tracer):
+        """Test market data processing context manager."""
+        from decimal import Decimal
+        
+        # Test the actual trace_market_data_processing method
+        with trading_tracer.trace_market_data_processing(
+            exchange="binance",
+            symbol="BTCUSDT", 
+            data_type="ticker",
+            latency_ms=Decimal("10.5")
+        ) as span:
+            # Should return a span context
+            assert span is not None
+
+    def test_trace_order_execution(self, trading_tracer):
+        """Test tracing order execution."""
+        from decimal import Decimal
+        
+        with trading_tracer.trace_order_execution(
+            order_id="order_123",
+            exchange="binance", 
+            symbol="BTCUSDT",
+            order_type="limit",
+            side="buy",
+            quantity=Decimal("1.0"),
+            price=Decimal("50000.0")
+        ) as span:
+            # Should return a span context
+            assert span is not None
+
+    def test_trace_trade_execution_not_implemented(self, trading_tracer):
+        """Test that trace_trade_execution method doesn't exist."""
+        # This method doesn't exist in the actual implementation
+        assert not hasattr(trading_tracer, 'trace_trade_execution')
+
+    def test_trace_exchange_api_call_not_implemented(self, trading_tracer):
+        """Test that trace_exchange_api_call method doesn't exist."""
+        # This method doesn't exist in the actual implementation  
+        assert not hasattr(trading_tracer, 'trace_exchange_api_call')
+
+    def test_trace_strategy_execution(self, trading_tracer):
+        """Test tracing strategy execution."""
+        from decimal import Decimal
+        
+        with trading_tracer.trace_strategy_execution(
+            strategy_name="mean_reversion",
+            symbol="BTCUSDT",
+            action="buy",
+            confidence=Decimal("0.8")
+        ) as span:
+            # Should return a span context
+            assert span is not None
+
+    def test_trace_risk_calculation(self, trading_tracer):
+        """Test tracing risk calculation."""
+        from decimal import Decimal
+        
+        with trading_tracer.trace_risk_check(
+            check_type="position_size",
+            symbol="BTCUSDT", 
+            position_size=Decimal("1.0"),
+            portfolio_value=Decimal("10000.0")
+        ) as span:
+            # Should return a span context
+            assert span is not None
+
+    def test_add_trading_event(self, trading_tracer):
+        """Test adding trading event to span."""
+        mock_span = Mock()
+        
+        # Test the actual add_trading_event method
+        trading_tracer.add_trading_event(mock_span, "order_placed", {
+            "exchange": "binance",
+            "symbol": "BTCUSDT"
+        })
+        
+        # Verify the event was added to the span
+        mock_span.add_event.assert_called_once()
+
+    def test_start_span_implemented(self, trading_tracer):
+        """Test that start_span method exists."""
+        # This method exists in the actual implementation
+        assert hasattr(trading_tracer, 'start_span')
+        # Along with context manager methods for specific operations
+        assert hasattr(trading_tracer, 'trace_order_execution')
+        assert hasattr(trading_tracer, 'trace_strategy_execution')
+
+    def test_cleanup(self, trading_tracer):
+        """Test cleanup method."""
+        # Test the actual cleanup method that exists
+        trading_tracer.cleanup()
+        
+        # Verify cleanup clears internal state
+        assert len(trading_tracer._active_spans) == 0
+        assert len(trading_tracer._span_processors) == 0
+
+
+class TestSetupFunctions:
+    """Test telemetry setup functions."""
+
+    def setup_method(self):
+        """Set up test fixtures before each test."""
+        # Reset any global telemetry state
+        from unittest.mock import patch
+        try:
+            import src.monitoring.telemetry
+            # Reset global tracer state if it exists
+            if hasattr(src.monitoring.telemetry, '_global_trading_tracer'):
+                src.monitoring.telemetry._global_trading_tracer = None
+        except (ImportError, AttributeError):
+            pass
+
+    def test_setup_telemetry_basic(self):
+        """Test basic telemetry setup."""
+        config = OpenTelemetryConfig(
+            service_name="test-service",
+            environment="test"
+        )
+
+        with patch("src.monitoring.telemetry.TracerProvider"), \
+             patch("src.monitoring.telemetry.MeterProvider"), \
+             patch("src.monitoring.telemetry.trace") as mock_trace:
+
+            mock_tracer = Mock()
+            mock_trace.get_tracer.return_value = mock_tracer
+            mock_trace.set_tracer_provider = Mock()
+
+            tracer = setup_telemetry(config)
+
+            assert isinstance(tracer, TradingTracer)
+
+    def test_setup_telemetry_with_jaeger(self):
+        """Test telemetry setup with Jaeger exporter."""
+        with patch("src.monitoring.telemetry.OPENTELEMETRY_AVAILABLE", True):
+            config = OpenTelemetryConfig(
+                service_name="test-service",
+                jaeger_enabled=True,
+                jaeger_endpoint="http://jaeger:14268/api/traces"
+            )
+
+            # Mock the OpenTelemetry modules properly
+            mock_trace = Mock()
+            mock_metrics = Mock()
+            with patch("src.monitoring.telemetry.trace", mock_trace), \
+                 patch("src.monitoring.telemetry.metrics", mock_metrics), \
+                 patch("src.monitoring.telemetry.JaegerExporter") as mock_jaeger, \
+                 patch("src.monitoring.telemetry.TracerProvider"), \
+                 patch("src.monitoring.telemetry.MeterProvider"):
+
+                tracer = setup_telemetry(config)
+
+                mock_jaeger.assert_called_once()
+                assert isinstance(tracer, TradingTracer)
+
+    def test_setup_telemetry_with_otlp(self):
+        """Test telemetry setup with OTLP exporter."""
+        with patch("src.monitoring.telemetry.OPENTELEMETRY_AVAILABLE", True):
+            config = OpenTelemetryConfig(
+                service_name="test-service",
+                otlp_enabled=True,
+                otlp_endpoint="http://otel-collector:4317"
+            )
+
+            # Mock the OpenTelemetry modules properly
+            mock_trace = Mock()
+            mock_metrics = Mock()
+            with patch("src.monitoring.telemetry.trace", mock_trace), \
+                 patch("src.monitoring.telemetry.metrics", mock_metrics), \
+                 patch("src.monitoring.telemetry.OTLPSpanExporter") as mock_otlp, \
+                 patch("src.monitoring.telemetry.TracerProvider"), \
+                 patch("src.monitoring.telemetry.MeterProvider"):
+
+                tracer = setup_telemetry(config)
+
+                mock_otlp.assert_called_once()
+                assert isinstance(tracer, TradingTracer)
+
+    def test_setup_telemetry_with_console_exporter(self):
+        """Test telemetry setup with console exporter."""
+        with patch("src.monitoring.telemetry.OPENTELEMETRY_AVAILABLE", True):
+            config = OpenTelemetryConfig(
+                service_name="test-service",
+                console_enabled=True
+            )
+
+            # Mock the OpenTelemetry modules properly
+            mock_trace = Mock()
+            mock_metrics = Mock()
+            with patch("src.monitoring.telemetry.trace", mock_trace), \
+                 patch("src.monitoring.telemetry.metrics", mock_metrics), \
+                 patch("src.monitoring.telemetry.ConsoleSpanExporter") as mock_console, \
+                 patch("src.monitoring.telemetry.TracerProvider"), \
+                 patch("src.monitoring.telemetry.MeterProvider"):
+
+                tracer = setup_telemetry(config)
+
+                mock_console.assert_called_once()
+                assert isinstance(tracer, TradingTracer)
+
+    def test_get_tracer(self):
+        """Test getting a tracer."""
+        mock_trace = Mock()
+        mock_trace.get_tracer = Mock()
+        with patch("src.monitoring.telemetry.trace", mock_trace) as mock_trace_module:
+            mock_get_tracer = mock_trace_module.get_tracer
+            mock_tracer = Mock()
+            mock_get_tracer.return_value = mock_tracer
+
+            tracer = get_tracer("test-tracer")
+
+            mock_get_tracer.assert_called_once_with("test-tracer")
+            assert tracer == mock_tracer
+
+    def test_instrument_fastapi(self):
+        """Test FastAPI instrumentation."""
+        mock_app = Mock()
+        config = OpenTelemetryConfig(service_name="test-service", instrument_fastapi=True)
+
+        with patch("src.monitoring.telemetry.FastAPIInstrumentor") as mock_instrumentor_class:
+            mock_instrumentor = Mock()
+            mock_instrumentor_class.instrument_app = Mock()
+
+            instrument_fastapi(mock_app, config)
+
+            # Should call instrument_app on the class
+            mock_instrumentor_class.instrument_app.assert_called_once()
+
+
+class TestTracingDecorators:
+    """Test tracing decorators and context managers."""
+
+    @pytest.mark.asyncio
+    async def test_trace_async_function_decorator(self):
+        """Test async function tracing decorator."""
+        with patch("src.monitoring.telemetry.get_tracer") as mock_get_tracer:
+            mock_tracer = Mock()
+            mock_span = Mock()
+            mock_tracer.start_as_current_span.return_value = mock_span
+            mock_span.__enter__ = Mock(return_value=mock_span)
+            mock_span.__exit__ = Mock(return_value=None)
+            mock_get_tracer.return_value = mock_tracer
+
+            @trace_async_function("test_async_operation", {"test_attr": "value"})
+            async def async_test_function(arg1: str, arg2: int) -> str:
+                await asyncio.sleep(0.001)
+                return f"{arg1}_{arg2}"
+
+            result = await async_test_function("test", 42)
+            assert result == "test_42"
+
+    def test_trace_function_decorator(self):
+        """Test sync function tracing decorator."""
+        with patch("src.monitoring.telemetry.get_tracer") as mock_get_tracer:
+            mock_tracer = Mock()
+            mock_span = Mock()
+            mock_tracer.start_as_current_span.return_value = mock_span
+            mock_span.__enter__ = Mock(return_value=mock_span)
+            mock_span.__exit__ = Mock(return_value=None)
+            mock_get_tracer.return_value = mock_tracer
+
+            @trace_function("test_sync_operation", {"test_attr": "value"})
+            def sync_test_function(arg1: str, arg2: int) -> str:
+                return f"{arg1}_{arg2}"
+
+            result = sync_test_function("test", 42)
+            assert result == "test_42"
+
+    @pytest.mark.asyncio
+    async def test_trace_async_context(self):
+        """Test async tracing context manager."""
+        with patch("src.monitoring.telemetry.get_tracer") as mock_get_tracer:
+            mock_tracer = Mock()
+            mock_span = Mock()
+            mock_tracer.start_as_current_span.return_value = mock_span
+            mock_span.__enter__ = Mock(return_value=mock_span)
+            mock_span.__exit__ = Mock(return_value=None)
+            mock_span.__aenter__ = Mock(return_value=mock_span)
+            mock_span.__aexit__ = Mock(return_value=None)
+            mock_get_tracer.return_value = mock_tracer
+
+            async with trace_async_context("test_context", {"context_attr": "value"}):
+                await asyncio.sleep(0.001)
+
+    @pytest.mark.asyncio
+    async def test_trace_async_function_with_exception(self):
+        """Test async function tracing with exception."""
+        with patch("src.monitoring.telemetry.get_tracer") as mock_get_tracer:
+            mock_tracer = Mock()
+            mock_span = Mock()
+            mock_tracer.start_as_current_span.return_value = mock_span
+            mock_span.__enter__ = Mock(return_value=mock_span)
+            mock_span.__exit__ = Mock(return_value=None)
+            mock_get_tracer.return_value = mock_tracer
+
+            @trace_async_function("test_operation_with_error")
+            async def failing_function():
+                raise ValueError("Test error")
+
+            with pytest.raises(ValueError, match="Test error"):
+                await failing_function()
+
+    def test_trace_function_with_exception(self):
+        """Test sync function tracing with exception."""
+        with patch("src.monitoring.telemetry.get_tracer") as mock_get_tracer:
+            mock_tracer = Mock()
+            mock_span = Mock()
+            mock_tracer.start_as_current_span.return_value = mock_span
+            mock_span.__enter__ = Mock(return_value=mock_span)
+            mock_span.__exit__ = Mock(return_value=None)
+            mock_get_tracer.return_value = mock_tracer
+
+            @trace_function("test_operation_with_error")
+            def failing_function():
+                raise ValueError("Test error")
+
+            with pytest.raises(ValueError, match="Test error"):
+                failing_function()
+
+    @pytest.mark.asyncio
+    async def test_trace_async_function_without_attributes(self):
+        """Test async function tracing without attributes."""
+        with patch("src.monitoring.telemetry.get_tracer") as mock_get_tracer:
+            mock_tracer = Mock()
+            mock_span = Mock()
+            mock_tracer.start_as_current_span.return_value = mock_span
+            mock_span.__enter__ = Mock(return_value=mock_span)
+            mock_span.__exit__ = Mock(return_value=None)
+            mock_get_tracer.return_value = mock_tracer
+
+            @trace_async_function("simple_async_operation")
+            async def simple_async_function() -> str:
+                return "success"
+
+            result = await simple_async_function()
+            assert result == "success"
+
+    def test_trace_function_without_attributes(self):
+        """Test sync function tracing without attributes."""
+        with patch("src.monitoring.telemetry.get_tracer") as mock_get_tracer:
+            mock_tracer = Mock()
+            mock_span = Mock()
+            mock_tracer.start_as_current_span.return_value = mock_span
+            mock_span.__enter__ = Mock(return_value=mock_span)
+            mock_span.__exit__ = Mock(return_value=None)
+            mock_get_tracer.return_value = mock_tracer
+
+            @trace_function("simple_sync_operation")
+            def simple_sync_function() -> str:
+                return "success"
+
+            result = simple_sync_function()
+            assert result == "success"
+
+
+class TestGlobalTracerManagement:
+    """Test global tracer management functions."""
+
+    def test_get_set_global_trading_tracer(self):
+        """Test getting and setting global trading tracer."""
+        original_tracer = get_trading_tracer()
+
+        mock_tracer = Mock()
+        new_tracer = TradingTracer(tracer=mock_tracer)
+        set_global_trading_tracer(new_tracer)
+
+        assert get_trading_tracer() is new_tracer
+
+        # Restore original
+        set_global_trading_tracer(original_tracer)
+
+    def test_get_trading_tracer_none(self):
+        """Test getting trading tracer when none is set."""
+        # Temporarily clear global tracer
+        original_tracer = get_trading_tracer()
+        set_global_trading_tracer(None)
+
+        tracer = get_trading_tracer()
+        assert tracer is None
+
+        # Restore original
+        set_global_trading_tracer(original_tracer)
+
+
+class TestUtilityFunctions:
+    """Test utility functions in telemetry module."""
+
+    def test_get_error_handler_fallback(self):
+        """Test getting error handler fallback."""
+        handlers = get_error_handler_fallback()
+
+        # Should return a tuple of callables
+        assert isinstance(handlers, tuple)
+        assert len(handlers) == 2
+        
+        with_error_context, with_retry = handlers
+        assert callable(with_error_context)
+        assert callable(with_retry)
+
+    def test_get_monitoring_logger(self):
+        """Test getting monitoring logger."""
+        logger = get_monitoring_logger("test_module")
+
+        assert logger is not None
+        assert hasattr(logger, "info")
+        assert hasattr(logger, "warning")
+        assert hasattr(logger, "error")
+
+    def test_opentelemetry_available_flag(self):
+        """Test OPENTELEMETRY_AVAILABLE flag."""
+        # The flag should be a boolean value
+        assert isinstance(OPENTELEMETRY_AVAILABLE, bool)
+        
+        # In testing environment, it could be True or False depending on whether
+        # OpenTelemetry is installed
+        # This is primarily testing that the flag exists and is correctly set
+
+
+class TestErrorHandling:
+    """Test error handling in telemetry module."""
+
+    def test_setup_telemetry_with_invalid_config(self):
+        """Test telemetry setup with invalid configuration."""
+        # Test with None config should raise MonitoringError
+        mock_trace = Mock()
+        mock_metrics = Mock()
+        with patch("src.monitoring.telemetry.trace", mock_trace), \
+             patch("src.monitoring.telemetry.metrics", mock_metrics):
+
+            with pytest.raises(Exception):  # Should raise an exception
+                setup_telemetry(None)
+
+    def test_tracer_operations_with_exception(self):
+        """Test tracer operations when underlying operations fail."""
+        mock_tracer = Mock()
+        mock_tracer.start_span.side_effect = Exception("Tracer error")
+
+        trading_tracer = TradingTracer(tracer=mock_tracer)
+
+        # Should handle tracer errors gracefully
+        span = trading_tracer.start_span("test_operation")
+        # Should not raise exception
+
+    @pytest.mark.asyncio
+    async def test_async_context_with_exception(self):
+        """Test async tracing context with exception."""
+        try:
+            async with trace_async_context("test_operation"):
+                # Exception within context should be handled
+                raise ValueError("Test exception")
+        except ValueError:
+            pass  # Exception should propagate but context should handle it
+
+    def test_decorator_with_invalid_operation_name(self):
+        """Test tracing decorators with invalid operation names."""
+        @trace_function("")  # Empty operation name
+        def test_function():
+            return "test"
+
+        # Should handle empty operation name gracefully
+        result = test_function()
+        assert result == "test"
+
+
+class TestTelemetryIntegration:
+    """Test telemetry integration scenarios."""
+
+    @pytest.mark.asyncio
+    async def test_nested_tracing_contexts(self):
+        """Test nested tracing contexts."""
+        async with trace_async_context("outer_operation"):
+            async with trace_async_context("inner_operation"):
+                await asyncio.sleep(0.001)
+
+    @pytest.mark.asyncio
+    async def test_concurrent_tracing_operations(self):
+        """Test concurrent tracing operations."""
+        @trace_async_function("concurrent_operation")
+        async def traced_operation(operation_id: int):
+            await asyncio.sleep(0.001)
+            return f"operation_{operation_id}"
+
+        # Run multiple operations concurrently
+        tasks = [traced_operation(i) for i in range(5)]
+        results = await asyncio.gather(*tasks)
+
+        assert len(results) == 5
+        for i, result in enumerate(results):
+            assert result == f"operation_{i}"
+
+    def test_tracer_lifecycle(self):
+        """Test complete tracer lifecycle."""
+        config = OpenTelemetryConfig(
+            service_name="lifecycle-test",
+            environment="test"
+        )
+
+        mock_trace = Mock()
+        mock_metrics = Mock()
+        with patch("src.monitoring.telemetry.trace", mock_trace), \
+             patch("src.monitoring.telemetry.metrics", mock_metrics):
+
+            # Setup telemetry
+            tracer = setup_telemetry(config)
+            set_global_trading_tracer(tracer)
+
+            # Use tracer
+            with tracer.start_span("test_operation"):
+                tracer.add_span_attributes({"test": "value"})
+
+            # Cleanup
+            set_global_trading_tracer(None)
+
+    @pytest.mark.asyncio
+    async def test_trading_operations_tracing(self):
+        """Test tracing of various trading operations."""
+        mock_tracer = Mock()
+        mock_span = Mock()
+        mock_tracer.start_span.return_value = mock_span
+        mock_span.__enter__ = Mock(return_value=mock_span)
+        mock_span.__exit__ = Mock(return_value=None)
+
+        trading_tracer = TradingTracer(tracer=mock_tracer)
+
+        # Test all trading operation tracing methods
+        async with trading_tracer.trace_order_execution({"symbol": "BTCUSDT"}):
+            pass
+
+        async with trading_tracer.trace_trade_execution({"trade_id": "123"}):
+            pass
+
+        async with trading_tracer.trace_exchange_api_call("binance", "/orders", "POST"):
+            pass
+
+        async with trading_tracer.trace_strategy_execution("test_strategy", "BTCUSDT"):
+            pass
+
+        async with trading_tracer.trace_risk_calculation("var", Decimal("100000")):
+            pass
+
+        # Should have called start_span multiple times
+        assert mock_tracer.start_span.call_count >= 5
+
+
+class TestFinancialPrecision:
+    """Test financial precision handling in telemetry."""
+
+    @pytest.mark.asyncio
+    async def test_decimal_precision_in_tracing(self):
+        """Test that tracing preserves Decimal precision in attributes."""
+        mock_tracer = Mock()
+        mock_span = Mock()
+        mock_tracer.start_span.return_value = mock_span
+        mock_span.__enter__ = Mock(return_value=mock_span)
+        mock_span.__exit__ = Mock(return_value=None)
+
+        trading_tracer = TradingTracer(tracer=mock_tracer)
+
+        # Use high precision Decimal values
+        portfolio_value = Decimal("123456.87654321")
+
+        async with trading_tracer.trace_risk_calculation("var", portfolio_value):
+            # Decimal should be converted to string to preserve precision
+            pass
+
+        # Verify the call was made
+        mock_tracer.start_span.assert_called()
+
+    def test_financial_attributes_conversion(self):
+        """Test conversion of financial values to trace attributes."""
+        mock_tracer = Mock()
+        mock_span = Mock()
+        mock_tracer.start_span.return_value = mock_span
+        mock_span.__enter__ = Mock(return_value=mock_span)
+        mock_span.__exit__ = Mock(return_value=None)
+
+        trading_tracer = TradingTracer(tracer=mock_tracer)
+
+        # Test with various financial values
+        attributes = {
+            "price": Decimal("50000.12345678"),
+            "quantity": Decimal("1.23456789"),
+            "fee": Decimal("25.00")
+        }
+
+        with trading_tracer.start_span("test_operation", attributes=attributes):
+            pass
+
+        # Should handle Decimal values in attributes
+        mock_tracer.start_span.assert_called()
+
+
+class TestMockFallbacks:
+    """Test mock fallbacks when OpenTelemetry is not available."""
+
+    def test_opentelemetry_not_available(self):
+        """Test behavior when OpenTelemetry is not available."""
+        # The OPENTELEMETRY_AVAILABLE flag should be False during testing
+        assert OPENTELEMETRY_AVAILABLE is False
+
+    def test_mock_tracer_functionality(self):
+        """Test that mock tracer provides expected interface."""
+        # When OPENTELEMETRY_AVAILABLE is False, should use mock implementations
+        config = OpenTelemetryConfig()
+
+        mock_trace = Mock()
+        mock_metrics = Mock()
+        with patch("src.monitoring.telemetry.trace", mock_trace), \
+             patch("src.monitoring.telemetry.metrics", mock_metrics):
+            mock_get_tracer = mock_trace.get_tracer
+
+            mock_tracer = Mock()
+            mock_get_tracer.return_value = mock_tracer
+
+            tracer = setup_telemetry(config)
+
+            # Should still create a TradingTracer
+            assert isinstance(tracer, TradingTracer)
+
+    def test_instrumentation_functions_with_mocks(self):
+        """Test instrumentation functions work with mocks."""
+        mock_app = Mock()
+        config = OpenTelemetryConfig()
+
+        # Should not raise exceptions even with mocked dependencies
+        instrument_fastapi(mock_app, config)
+
+    def test_auto_instrumentation_setup(self):
+        """Test auto instrumentation setup with mocks."""
+        config = OpenTelemetryConfig(enable_auto_instrumentation=True)
+
+        with patch("src.monitoring.telemetry.OPENTELEMETRY_AVAILABLE", True), \
+             patch("src.monitoring.telemetry._setup_auto_instrumentation") as mock_setup:
+            mock_trace = Mock()
+            mock_metrics = Mock()
+            with patch("src.monitoring.telemetry.trace", mock_trace), \
+                 patch("src.monitoring.telemetry.metrics", mock_metrics), \
+                 patch("src.monitoring.telemetry.TracerProvider"), \
+                 patch("src.monitoring.telemetry.MeterProvider"):
+
+                tracer = setup_telemetry(config)
+
+                # Should call auto instrumentation setup
+                mock_setup.assert_called_once_with(config)
+                assert isinstance(tracer, TradingTracer)

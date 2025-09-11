@@ -185,10 +185,13 @@ class WebSocketManager(BaseComponent):
         if self._websocket:
             try:
                 from src.monitoring.config import WEBSOCKET_CLOSE_TIMEOUT
+
                 if hasattr(self._websocket, "close"):
                     await asyncio.wait_for(self._websocket.close(), timeout=WEBSOCKET_CLOSE_TIMEOUT)
                 elif hasattr(self._websocket, "aclose"):
-                    await asyncio.wait_for(self._websocket.aclose(), timeout=WEBSOCKET_CLOSE_TIMEOUT)
+                    await asyncio.wait_for(
+                        self._websocket.aclose(), timeout=WEBSOCKET_CLOSE_TIMEOUT
+                    )
             except (asyncio.TimeoutError, Exception) as e:
                 self.logger.warning(f"Error closing WebSocket: {e}")
             finally:

@@ -25,10 +25,13 @@ import aiohttp
 def get_logger(name: str):
     """Get logger instance."""
     import logging
+
     return logging.getLogger(name)
 
-def with_retry(max_attempts: int = 3, backoff_factor = None):
+
+def with_retry(max_attempts: int = 3, backoff_factor=None):
     """Simple retry decorator."""
+
     def decorator(func):
         async def wrapper(*args, **kwargs):
             last_exception = None
@@ -39,26 +42,39 @@ def with_retry(max_attempts: int = 3, backoff_factor = None):
                     last_exception = e
                     if attempt < max_attempts - 1:
                         import asyncio
-                        await asyncio.sleep(0.5 * (2 ** attempt))
+
+                        await asyncio.sleep(0.5 * (2**attempt))
                     continue
             raise last_exception
+
         return wrapper
+
     return decorator
+
 
 class ErrorContext:
     """Local error context to avoid circular dependencies."""
-    def __init__(self, component: str, operation: str, details: dict = None, error: Exception = None):
+
+    def __init__(
+        self, component: str, operation: str, details: dict = None, error: Exception = None
+    ):
         self.component = component
         self.operation = operation
         self.details = details or {}
         self.error = error
 
-async def create_http_session(timeout: int = 30, connector_limit: int = 10, connector_limit_per_host: int = 5):
+
+async def create_http_session(
+    timeout: int = 30, connector_limit: int = 10, connector_limit_per_host: int = 5
+):
     """Create HTTP session."""
     return aiohttp.ClientSession(
         timeout=aiohttp.ClientTimeout(total=timeout),
-        connector=aiohttp.TCPConnector(limit=connector_limit, limit_per_host=connector_limit_per_host)
+        connector=aiohttp.TCPConnector(
+            limit=connector_limit, limit_per_host=connector_limit_per_host
+        ),
     )
+
 
 async def safe_session_close(session):
     """Safely close HTTP session."""
@@ -698,7 +714,7 @@ class GrafanaDashboardManager:
             grafana_url: Grafana server URL
             api_key: Grafana API key
             error_handler: Error handler instance (injected dependency)
-        
+
         Raises:
             ValueError: If required parameters are missing
         """
@@ -760,7 +776,9 @@ class GrafanaDashboardManager:
 
         session = None
         try:
-            session = await create_http_session(timeout=30, connector_limit=10, connector_limit_per_host=5)
+            session = await create_http_session(
+                timeout=30, connector_limit=10, connector_limit_per_host=5
+            )
             async with session.post(
                 url,
                 json=dashboard.to_dict(),
@@ -783,15 +801,17 @@ class GrafanaDashboardManager:
                                 "status_code": response.status,
                                 "error_text": error_text,
                             },
-                            error=Exception(error_msg)
+                            error=Exception(error_msg),
                         )
                         if hasattr(self._error_handler, "handle_error"):
-                            await self._error_handler.handle_error(Exception(error_msg), error_context)
+                            await self._error_handler.handle_error(
+                                Exception(error_msg), error_context
+                            )
                         elif hasattr(self._error_handler, "handle_error_sync"):
                             self._error_handler.handle_error_sync(
                                 Exception(error_msg),
                                 error_context.component,
-                                error_context.operation
+                                error_context.operation,
                             )
                         else:
                             logger.error(f"Error handler has no suitable method: {error_msg}")
@@ -806,15 +826,13 @@ class GrafanaDashboardManager:
                         "dashboard_title": dashboard.title,
                         "grafana_url": self.grafana_url,
                     },
-                    error=e
+                    error=e,
                 )
                 if hasattr(self._error_handler, "handle_error"):
                     await self._error_handler.handle_error(e, error_context)
                 elif hasattr(self._error_handler, "handle_error_sync"):
                     self._error_handler.handle_error_sync(
-                        e,
-                        error_context.component,
-                        error_context.operation
+                        e, error_context.component, error_context.operation
                     )
                 else:
                     logger.error(f"Error handler has no suitable method for {e}")

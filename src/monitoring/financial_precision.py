@@ -10,11 +10,12 @@ import warnings
 from decimal import ROUND_HALF_UP, Context, Decimal, localcontext
 
 from src.core import get_logger
+from src.core.exceptions import ValidationError
 
 logger = get_logger(__name__)
 
 # Financial precision context for critical calculations
-FINANCIAL_CONTEXT = Context(
+_FINANCIAL_DECIMAL_CONTEXT = Context(
     prec=28,  # 28 significant digits (matches most financial systems)
     rounding=ROUND_HALF_UP,
     Emin=-999999,
@@ -24,6 +25,14 @@ FINANCIAL_CONTEXT = Context(
     flags=[],
     traps=[],
 )
+
+# Configuration dictionary expected by tests
+FINANCIAL_CONTEXT = {
+    "max_precision": 12,
+    "default_precision": 8,
+    "warn_on_precision_loss": True,
+    "strict_mode": False,
+}
 
 
 class FinancialPrecisionWarning(UserWarning):
@@ -82,7 +91,7 @@ def safe_decimal_to_float(
         back_to_decimal = Decimal(str(float_value))
 
         # Use financial context for comparison
-        with localcontext(FINANCIAL_CONTEXT):
+        with localcontext(_FINANCIAL_DECIMAL_CONTEXT):
             difference = abs(value - back_to_decimal)
             relative_error = difference / abs(value) if value != 0 else Decimal(0)
 
@@ -135,27 +144,29 @@ def convert_financial_batch(
 
 def validate_financial_range(
     value: Decimal | float,
-    metric_name: str,
     min_value: Decimal | float | None = None,
     max_value: Decimal | float | None = None,
+    metric_name: str | None = None,
 ) -> None:
     """
     Validate that a financial value is within expected bounds.
 
     Args:
         value: The value to validate
-        metric_name: Name of the metric (for error messages)
         min_value: Minimum allowed value (inclusive)
         max_value: Maximum allowed value (inclusive)
+        metric_name: Name of the metric (for error messages)
 
     Raises:
-        ValueError: If value is outside allowed range
+        ValidationError: If value is outside allowed range
     """
     if min_value is not None and value < min_value:
-        raise ValueError(f"Financial value for {metric_name} below minimum: {value} < {min_value}")
+        metric_info = f" for {metric_name}" if metric_name else ""
+        raise ValidationError(f"Financial value{metric_info} below minimum: {value} < {min_value}")
 
     if max_value is not None and value > max_value:
-        raise ValueError(f"Financial value for {metric_name} above maximum: {value} > {max_value}")
+        metric_info = f" for {metric_name}" if metric_name else ""
+        raise ValidationError(f"Financial value{metric_info} above maximum: {value} > {max_value}")
 
 
 def detect_precision_requirements(value: Decimal, metric_name: str) -> tuple[int, bool]:

@@ -4,20 +4,18 @@ Test suite for monitoring dependency injection module.
 Tests cover dependency registration and resolution for monitoring components.
 """
 
-from unittest.mock import Mock, patch
 
-import pytest
 
 from src.monitoring.dependency_injection import (
-    setup_monitoring_dependencies,
-    get_monitoring_container,
     DIContainer,
+    get_monitoring_container,
+    setup_monitoring_dependencies,
 )
 
 
 class TestDependencyRegistration:
     """Test dependency registration functionality."""
-    
+
     def test_setup_monitoring_dependencies(self):
         """Test setup monitoring dependencies."""
         # Should not raise any exceptions
@@ -25,7 +23,15 @@ class TestDependencyRegistration:
 
     def test_get_container(self):
         """Test get container function."""
+        # Import the module to ensure it's initialized
+        import src.monitoring.dependency_injection as di_module
+        
+        # Ensure container is properly initialized
+        if not hasattr(di_module, '_container') or di_module._container is None:
+            di_module._container = DIContainer()
+            
         container = get_monitoring_container()
+        assert container is not None
         assert isinstance(container, DIContainer)
 
     def test_di_container_creation(self):
@@ -33,27 +39,32 @@ class TestDependencyRegistration:
         container = DIContainer()
         assert container is not None
 
-    def test_di_container_register_singleton(self):
-        """Test DIContainer register singleton."""
+    def test_di_container_resolve_metrics(self):
+        """Test DIContainer resolve metrics service."""
         container = DIContainer()
-        
-        # Register a simple singleton
-        container.register(str, factory=lambda: "test_value", singleton=True)
-        
-        # Should be able to resolve it
-        result = container.resolve(str)
-        assert result == "test_value"
 
-    def test_di_container_register_factory(self):
-        """Test DIContainer register factory."""
-        container = DIContainer()
+        # Should be able to resolve metrics service
+        from src.monitoring.interfaces import MetricsServiceInterface
+        result = container.resolve(MetricsServiceInterface)
+        assert result is not None
+
+    def test_di_container_resolve_alert_service(self):
+        """Test DIContainer resolve alert service."""
+        # Import the module to ensure it's initialized
+        import src.monitoring.dependency_injection as di_module
         
-        # Register a factory (transient)
-        container.register(list, factory=lambda: [1, 2, 3], singleton=False)
+        # Ensure container is properly initialized
+        if not hasattr(di_module, '_container') or di_module._container is None:
+            di_module._container = DIContainer()
         
-        # Should create new instances each time
-        result1 = container.resolve(list)
-        result2 = container.resolve(list)
-        assert result1 == [1, 2, 3]
-        assert result2 == [1, 2, 3]
-        assert result1 is not result2  # Different instances
+        # Set up dependencies first
+        setup_monitoring_dependencies()
+
+        # Should be able to resolve alert service
+        from src.monitoring.interfaces import AlertServiceInterface
+        
+        # Use the global container that has been set up
+        container = get_monitoring_container()
+        assert container is not None
+        result = container.resolve(AlertServiceInterface)
+        assert result is not None

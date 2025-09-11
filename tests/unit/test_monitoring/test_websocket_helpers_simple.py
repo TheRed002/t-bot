@@ -6,8 +6,6 @@ Basic tests to improve coverage of WebSocket connection management.
 
 from unittest.mock import Mock
 
-import pytest
-
 from src.monitoring.websocket_helpers import (
     WebSocketConfig,
     WebSocketManager,
@@ -19,7 +17,7 @@ from src.monitoring.websocket_helpers import (
 
 class TestWebSocketState:
     """Test WebSocket state enumeration."""
-    
+
     def test_websocket_state_values(self):
         """Test WebSocket state enum has correct values."""
         assert WebSocketState.DISCONNECTED.value == "disconnected"
@@ -32,7 +30,7 @@ class TestWebSocketState:
 
 class TestWebSocketConfig:
     """Test WebSocket configuration dataclass."""
-    
+
     def test_websocket_config_creation(self):
         """Test WebSocket config creation with required parameters."""
         config = WebSocketConfig(url="wss://example.com")
@@ -72,7 +70,7 @@ class TestWebSocketConfig:
 
 class TestWebSocketMetrics:
     """Test WebSocket metrics dataclass."""
-    
+
     def test_websocket_metrics_defaults(self):
         """Test WebSocket metrics default values."""
         metrics = WebSocketMetrics()
@@ -109,7 +107,7 @@ class TestWebSocketMetrics:
 
 class TestWebSocketManager:
     """Test WebSocket manager class."""
-    
+
     def test_websocket_manager_initialization(self):
         """Test WebSocket manager initialization."""
         config = WebSocketConfig(url="wss://test.com")
@@ -130,11 +128,9 @@ class TestWebSocketManager:
         config = WebSocketConfig(url="wss://test.com")
         message_handler = Mock()
         error_handler = Mock()
-        
+
         manager = WebSocketManager(
-            config,
-            message_handler=message_handler,
-            error_handler=error_handler
+            config, message_handler=message_handler, error_handler=error_handler
         )
         assert manager.message_handler == message_handler
         assert manager.error_handler == error_handler
@@ -151,19 +147,19 @@ class TestWebSocketManager:
         """Test WebSocket manager is_connected property logic."""
         config = WebSocketConfig(url="wss://test.com")
         manager = WebSocketManager(config)
-        
+
         # Test disconnected state
         manager._state = WebSocketState.DISCONNECTED
         assert manager.is_connected is False
-        
+
         # Test connecting state
         manager._state = WebSocketState.CONNECTING
         assert manager.is_connected is False
-        
+
         # Test connected state
         manager._state = WebSocketState.CONNECTED
         assert manager.is_connected is True
-        
+
         # Test error state
         manager._state = WebSocketState.ERROR
         assert manager.is_connected is False
@@ -171,7 +167,7 @@ class TestWebSocketManager:
 
 class TestCreateWebSocketConfig:
     """Test create_websocket_config utility function."""
-    
+
     def test_create_websocket_config_defaults(self):
         """Test creating WebSocket config with defaults."""
         config = create_websocket_config("wss://example.com")
@@ -211,7 +207,7 @@ class TestCreateWebSocketConfig:
 
 class TestWebSocketEdgeCases:
     """Test edge cases for WebSocket components."""
-    
+
     def test_websocket_config_edge_values(self):
         """Test WebSocket config with edge case values."""
         config = WebSocketConfig(
@@ -225,7 +221,7 @@ class TestWebSocketEdgeCases:
             message_queue_size=1,  # Tiny queue
             enable_compression=True,
         )
-        
+
         assert config.connect_timeout == 0.1
         assert config.heartbeat_interval == 0.1
         assert config.heartbeat_timeout == 0.01

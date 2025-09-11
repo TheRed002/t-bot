@@ -27,11 +27,11 @@ from datetime import datetime, timedelta, timezone
 from enum import Enum
 
 # Use service injection for error handling - no direct global dependencies
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
+from typing import TYPE_CHECKING, Any, Optional
 
 from src.core.base import BaseComponent
-from src.core.types import AlertSeverity
 from src.core.event_constants import AlertEvents
+from src.core.types import AlertSeverity
 from src.monitoring.config import (
     ALERT_BACKGROUND_TASK_TIMEOUT,
     ALERT_ESCALATION_CHECK_TIMEOUT,
@@ -69,8 +69,15 @@ else:
     try:
         from src.error_handling.context import ErrorContext
     except ImportError:
+
         class ErrorContext:
-            def __init__(self, component: str, operation: str, details: Union[dict, None] = None, error: Union[Exception, None] = None):
+            def __init__(
+                self,
+                component: str,
+                operation: str,
+                details: dict | None = None,
+                error: Exception | None = None,
+            ):
                 self.component = component
                 self.operation = operation
                 self.details = details
@@ -99,7 +106,7 @@ except ImportError:
 
     class MockMimeMultipart:
         def __init__(self, *args: Any, **kwargs: Any) -> None:
-            self._headers: Dict[str, str] = {}
+            self._headers: dict[str, str] = {}
 
         def __setitem__(self, key: str, value: str) -> None:
             self._headers[key] = value
@@ -173,10 +180,10 @@ class AlertRule:
     threshold: float
     operator: str  # >, <, >=, <=, ==, !=
     duration: str  # Duration string like "5m", "1h"
-    labels: Dict[str, str] = field(default_factory=dict)
-    annotations: Dict[str, str] = field(default_factory=dict)
-    notification_channels: List[NotificationChannel] = field(default_factory=list)
-    escalation_delay: Union[str, None] = None  # Escalation delay like "15m"
+    labels: dict[str, str] = field(default_factory=dict)
+    annotations: dict[str, str] = field(default_factory=dict)
+    notification_channels: list[NotificationChannel] = field(default_factory=list)
+    escalation_delay: str | None = None  # Escalation delay like "15m"
     enabled: bool = True
 
     def __post_init__(self):
@@ -197,14 +204,14 @@ class Alert:
     severity: AlertSeverity
     status: AlertStatus
     message: str
-    labels: Dict[str, str]
-    annotations: Dict[str, str]
+    labels: dict[str, str]
+    annotations: dict[str, str]
     starts_at: datetime
-    ends_at: Union[datetime, None] = None
+    ends_at: datetime | None = None
     fingerprint: str = ""
     notification_sent: bool = False
-    acknowledgment_by: Union[str, None] = None
-    acknowledgment_at: Union[datetime, None] = None
+    acknowledgment_by: str | None = None
+    acknowledgment_at: datetime | None = None
     escalated: bool = False
     escalation_count: int = 0
 
@@ -220,7 +227,7 @@ class Alert:
         """Check if alert is currently active."""
         return self.status == AlertStatus.FIRING
 
-    def to_db_model_dict(self) -> Dict[str, Any]:
+    def to_db_model_dict(self) -> dict[str, Any]:
         """Convert to database model format."""
         return {
             "alert_type": self.rule_name,
@@ -241,7 +248,7 @@ class Alert:
         }
 
     @classmethod
-    def from_db_model(cls, db_alert: Dict[str, Any]) -> "Alert":
+    def from_db_model(cls, db_alert: dict[str, Any]) -> "Alert":
         """Create Alert from database model."""
         context = db_alert.get("context", {})
         status_map = {
@@ -284,7 +291,7 @@ class NotificationConfig:
     email_username: str = ""
     email_password: str = ""
     email_from: str = "tbot-alerts@example.com"
-    email_to: List[str] = field(default_factory=list)
+    email_to: list[str] = field(default_factory=list)
     email_use_tls: bool = True
 
     # Slack configuration
@@ -297,13 +304,13 @@ class NotificationConfig:
     discord_webhook_url: str = ""
 
     # Webhook configuration
-    webhook_urls: List[str] = field(default_factory=list)
+    webhook_urls: list[str] = field(default_factory=list)
     webhook_timeout: int = DEFAULT_WEBHOOK_TIMEOUT
 
     # SMS configuration
     sms_provider: str = ""
     sms_api_key: str = ""
-    sms_phone_numbers: List[str] = field(default_factory=list)
+    sms_phone_numbers: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -312,8 +319,8 @@ class EscalationPolicy:
 
     name: str
     description: str
-    severity_levels: List[AlertSeverity]
-    escalation_rules: List[Dict[str, Any]]  # [{"delay": "15m", "channels": ["email"]}, ...]
+    severity_levels: list[AlertSeverity]
+    escalation_rules: list[dict[str, Any]]  # [{"delay": "15m", "channels": ["email"]}, ...]
     max_escalations: int = DEFAULT_ESCALATION_MAX
     enabled: bool = True
 
@@ -338,13 +345,13 @@ class AlertManager(BaseComponent):
         self.config = config
         # Use injected error handler for proper service layer separation
         self._error_handler = error_handler
-        self._rules: Dict[str, AlertRule] = {}
-        self._active_alerts: Dict[str, Alert] = {}
+        self._rules: dict[str, AlertRule] = {}
+        self._active_alerts: dict[str, Alert] = {}
         self._alert_history: deque = deque(maxlen=ALERT_HISTORY_MAX_SIZE)
-        self._suppression_rules: List[Dict[str, Any]] = []
-        self._escalation_policies: Dict[str, EscalationPolicy] = {}
+        self._suppression_rules: list[dict[str, Any]] = []
+        self._escalation_policies: dict[str, EscalationPolicy] = {}
         self._running = False
-        self._background_task: Union[asyncio.Task, None] = None
+        self._background_task: asyncio.Task | None = None
         self._notification_queue: asyncio.Queue = asyncio.Queue()
         # Initialize HTTP session manager for connection pooling
         try:
@@ -353,7 +360,7 @@ class AlertManager(BaseComponent):
             self._http_session_manager = HTTPSessionManager()
         except ImportError:
             # Fallback to basic session management
-            self._http_session_manager: Union[HTTPSessionManager, None] = None
+            self._http_session_manager: HTTPSessionManager | None = None
 
         # Metrics for alerting system
         self._alerts_fired = 0
@@ -399,7 +406,7 @@ class AlertManager(BaseComponent):
         self._escalation_policies[policy.name] = policy
         self.logger.info(f"Added escalation policy: {policy.name}")
 
-    def add_suppression_rule(self, rule: Dict[str, Any]) -> None:
+    def add_suppression_rule(self, rule: dict[str, Any]) -> None:
         """
         Add an alert suppression rule.
 
@@ -507,7 +514,7 @@ class AlertManager(BaseComponent):
                     details={
                         "fingerprint": fingerprint,
                     },
-                    error=e
+                    error=e,
                 )
                 # Use proper async error handling
                 try:
@@ -518,7 +525,7 @@ class AlertManager(BaseComponent):
                         self._error_handler.handle_error_sync(
                             e,
                             error_context.component or "AlertManager",
-                            error_context.operation or "resolve_alert"
+                            error_context.operation or "resolve_alert",
                         )
                     else:
                         self.logger.error("No suitable error handler method available")
@@ -570,7 +577,7 @@ class AlertManager(BaseComponent):
             self.logger.error(f"Error acknowledging alert: {e}")
             return False
 
-    def get_active_alerts(self, severity: Union[AlertSeverity, None] = None) -> List[Alert]:
+    def get_active_alerts(self, severity: AlertSeverity | None = None) -> list[Alert]:
         """
         Get active alerts, optionally filtered by severity.
 
@@ -585,7 +592,7 @@ class AlertManager(BaseComponent):
             alerts = [a for a in alerts if a.severity == severity]
         return sorted(alerts, key=lambda x: x.starts_at, reverse=True)
 
-    def get_alert_history(self, limit: int = 100) -> List[Alert]:
+    def get_alert_history(self, limit: int = 100) -> list[Alert]:
         """
         Get alert history.
 
@@ -599,7 +606,7 @@ class AlertManager(BaseComponent):
         alerts = list(self._alert_history)[-limit:]
         return sorted(alerts, key=lambda x: x.starts_at, reverse=True)
 
-    def get_alert_stats(self) -> Dict[str, Any]:
+    def get_alert_stats(self) -> dict[str, Any]:
         """
         Get alerting system statistics.
 
@@ -777,8 +784,7 @@ class AlertManager(BaseComponent):
         if processing_tasks:
             try:
                 await asyncio.wait_for(
-                    asyncio.gather(*processing_tasks, return_exceptions=True),
-                    timeout=5.0
+                    asyncio.gather(*processing_tasks, return_exceptions=True), timeout=5.0
                 )
             except asyncio.TimeoutError:
                 self.logger.warning("Some notification tasks did not complete during shutdown")
@@ -818,7 +824,7 @@ class AlertManager(BaseComponent):
                                 "channel": channel.value,
                                 "alert_name": alert.rule_name,
                             },
-                            error=e
+                            error=e,
                         )
                         # Properly handle error handling without incorrect await
                         try:
@@ -829,7 +835,7 @@ class AlertManager(BaseComponent):
                                 self._error_handler.handle_error_sync(
                                     e,
                                     error_context.component or "AlertManager",
-                                    error_context.operation or "send_notification"
+                                    error_context.operation or "send_notification",
                                 )
                             else:
                                 self.logger.error("No suitable error handler method available")
@@ -1167,7 +1173,8 @@ Fingerprint: {alert.fingerprint}
                     # Use session manager for connection pooling if available
                     if self._http_session_manager:
                         session = await self._http_session_manager.get_session(
-                            "webhooks", timeout=aiohttp.ClientTimeout(total=self.config.webhook_timeout)
+                            "webhooks",
+                            timeout=aiohttp.ClientTimeout(total=self.config.webhook_timeout),
                         )
                         async with session.post(
                             webhook_url,
@@ -1539,7 +1546,7 @@ Fingerprint: {alert.fingerprint}
             self.logger.error(f"Error escalating alert: {e}")
 
 
-def load_alert_rules_from_file(file_path: str) -> List[AlertRule]:
+def load_alert_rules_from_file(file_path: str) -> list[AlertRule]:
     """
     Load alert rules from a YAML file.
 
@@ -1613,6 +1620,7 @@ def get_alert_manager() -> Optional["AlertManager"]:
         return container.resolve(AlertManager)
     except (ServiceError, MonitoringError, ImportError, KeyError, ValueError) as e:
         import logging
+
         logger = logging.getLogger(__name__)
         logger.warning(f"Failed to resolve alert manager from DI container: {e}")
         # Fallback to global instance for backward compatibility

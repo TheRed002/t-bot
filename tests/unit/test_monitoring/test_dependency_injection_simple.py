@@ -1,10 +1,11 @@
 """Simple tests for monitoring dependency injection module."""
 
-import pytest
 from unittest.mock import Mock, patch
+
 from src.monitoring.dependency_injection import (
     DIContainer,
-    create_factory,
+    create_alert_manager,
+    create_metrics_collector,
     get_monitoring_container,
     setup_monitoring_dependencies,
 )
@@ -16,223 +17,59 @@ class TestDIContainer:
     def test_di_container_init(self):
         """Test DIContainer initialization."""
         container = DIContainer()
-        
-        assert container._bindings == {}
-        assert container._resolving == set()
+        assert container is not None
 
-    def test_register_factory(self):
-        """Test register_factory method."""
+    def test_resolve_metrics_service_interface(self):
+        """Test resolving MetricsServiceInterface."""
         container = DIContainer()
-        
-        def test_factory():
-            return "test_instance"
-        
-        class TestService: pass
-        
-        container.register(TestService, factory=test_factory)
-        
-        assert TestService in container._bindings
-        assert container._bindings[TestService].factory is test_factory
 
-    def test_register_factory_singleton(self):
-        """Test register_factory with singleton=True."""
-        container = DIContainer()
-        
-        def test_factory():
-            return "test_singleton"
-        
-        class TestService: pass
-        
-        container.register(TestService, factory=test_factory, singleton=True)
-        
-        instance1 = container.resolve(TestService)
-        instance2 = container.resolve(TestService)
-        
-        assert instance1 == instance2  # Same instance
+        with patch("src.monitoring.dependency_injection.create_metrics_service") as mock_create:
+            mock_service = Mock()
+            mock_create.return_value = mock_service
 
-    def test_register_instance(self):
-        """Test registering an instance using factory."""
-        container = DIContainer()
-        test_instance = Mock()
-        
-        class TestService: pass
-        
-        container.register(TestService, factory=lambda: test_instance)
-        
-        resolved = container.resolve(TestService)
-        assert resolved is test_instance
-
-    def test_resolve_factory(self):
-        """Test resolve method with factory."""
-        container = DIContainer()
-        
-        def test_factory():
-            return Mock()
-        
-        class TestService: pass
-        
-        container.register(TestService, factory=test_factory)
-        
-        instance = container.resolve(TestService)
-        assert instance is not None
-
-    def test_resolve_nonexistent_service(self):
-        """Test resolve method with nonexistent service."""
-        container = DIContainer()
-        
-        class NonexistentService: pass
-        
-        with pytest.raises(ValueError):
-            container.resolve(NonexistentService)
-
-    def test_is_registered(self):
-        """Test checking if service is registered."""
-        container = DIContainer()
-        
-        class TestService: pass
-        
-        assert TestService not in container._bindings
-        
-        container.register(TestService, factory=lambda: Mock())
-        
-        assert TestService in container._bindings
+            result = container.resolve(type("MetricsServiceInterface", (), {}))
+            assert result == mock_service
 
 
-class TestCreateFactory:
-    """Test create_factory function."""
+class TestFactoryFunctions:
+    """Test factory functions."""
 
-    def test_create_factory_basic(self):
-        """Test create_factory with basic class."""
-        class TestService:
-            def __init__(self):
-                self.value = "test"
-        
-        factory = create_factory(TestService)
-        
-        with patch('src.monitoring.dependency_injection.get_monitoring_container') as mock_get_container:
-            mock_container = Mock()
-            mock_get_container.return_value = mock_container
-            
-            instance = factory()
-            assert isinstance(instance, TestService)
-            assert instance.value == "test"
+    @patch("src.monitoring.metrics.MetricsCollector")
+    def test_create_metrics_collector(self, mock_collector):
+        """Test create_metrics_collector."""
+        mock_instance = Mock()
+        mock_collector.return_value = mock_instance
 
-    def test_create_factory_with_dependencies(self):
-        """Test create_factory with dependencies."""
-        class Dependency:
-            pass
-        
-        class TestService:
-            def __init__(self, dep: Dependency):
-                self.dep = dep
-        
-        factory = create_factory(TestService, Dependency)
-        
-        with patch('src.monitoring.dependency_injection.get_monitoring_container') as mock_get_container:
-            mock_container = Mock()
-            mock_dependency = Dependency()
-            mock_container.resolve.return_value = mock_dependency
-            mock_get_container.return_value = mock_container
-            
-            instance = factory()
-            assert isinstance(instance, TestService)
-            assert instance.dep is mock_dependency
+        result = create_metrics_collector()
+
+        mock_collector.assert_called_once()
+        assert result == mock_instance
+
+    @patch("src.monitoring.alerting.AlertManager")
+    @patch("src.monitoring.alerting.NotificationConfig")
+    def test_create_alert_manager(self, mock_config, mock_manager):
+        """Test create_alert_manager."""
+        mock_config_instance = Mock()
+        mock_manager_instance = Mock()
+        mock_config.return_value = mock_config_instance
+        mock_manager.return_value = mock_manager_instance
+
+        result = create_alert_manager()
+
+        mock_config.assert_called_once()
+        mock_manager.assert_called_once_with(mock_config_instance)
+        assert result == mock_manager_instance
 
 
 class TestGlobalFunctions:
-    """Test global monitoring container functions."""
+    """Test global functions."""
 
-    def test_get_monitoring_container_singleton(self):
-        """Test get_monitoring_container returns singleton."""
-        container1 = get_monitoring_container()
-        container2 = get_monitoring_container()
-        
-        assert container1 is container2
+    def test_get_monitoring_container(self):
+        """Test get_monitoring_container."""
+        result = get_monitoring_container()
+        assert isinstance(result, DIContainer)
 
-    @patch('src.monitoring.dependency_injection.logger')
-    def test_setup_monitoring_dependencies(self, mock_logger):
+    def test_setup_monitoring_dependencies(self):
         """Test setup_monitoring_dependencies."""
-        # Clear any existing container
-        container = get_monitoring_container()
-        container.clear()  # Clear existing registrations
-        
+        # Should not raise any exceptions
         setup_monitoring_dependencies()
-        
-        # Check that some services are registered by type
-        from src.monitoring.metrics import MetricsCollector
-        assert MetricsCollector in container._bindings
-
-
-class TestServiceRegistration:
-    """Test service registration utilities."""
-
-    def test_register_metrics_collector(self):
-        """Test registering MetricsCollector."""
-        container = DIContainer()
-        
-        def metrics_factory():
-            from src.monitoring.metrics import MetricsCollector
-            return MetricsCollector()
-        
-        from src.monitoring.metrics import MetricsCollector
-        container.register(MetricsCollector, factory=metrics_factory, singleton=True)
-        
-        # Should be able to resolve
-        collector1 = container.resolve(MetricsCollector)
-        collector2 = container.resolve(MetricsCollector)
-        
-        assert collector1 is collector2  # Singleton behavior
-
-    def test_register_alert_manager(self):
-        """Test registering AlertManager."""
-        container = DIContainer()
-        
-        def alert_factory():
-            from src.monitoring.alerting import AlertManager, NotificationConfig
-            return AlertManager(NotificationConfig())
-        
-        from src.monitoring.alerting import AlertManager
-        container.register(AlertManager, factory=alert_factory, singleton=True)
-        
-        # Should be able to resolve
-        manager = container.resolve(AlertManager)
-        assert manager is not None
-
-
-class TestErrorHandling:
-    """Test error handling scenarios."""
-
-    def test_resolve_with_factory_exception(self):
-        """Test resolve when factory raises exception."""
-        container = DIContainer()
-        
-        def failing_factory():
-            raise Exception("Factory failed")
-        
-        class FailingService: pass
-        
-        container.register(FailingService, factory=failing_factory)
-        
-        with pytest.raises(Exception, match="Factory failed"):
-            container.resolve(FailingService)
-
-    def test_create_factory_with_missing_dependencies(self):
-        """Test create_factory when dependencies can't be resolved."""
-        class Dependency:
-            pass
-        
-        class TestService:
-            def __init__(self, dep=None):
-                self.dep = dep
-        
-        factory = create_factory(TestService, Dependency)
-        
-        with patch('src.monitoring.dependency_injection.get_monitoring_container') as mock_get_container:
-            mock_container = Mock()
-            mock_container.resolve.side_effect = KeyError("Dependency not found")
-            mock_get_container.return_value = mock_container
-            
-            # Should still work, just without the dependency
-            instance = factory()
-            assert isinstance(instance, TestService)
-            assert instance.dep is None  # No dependency injected

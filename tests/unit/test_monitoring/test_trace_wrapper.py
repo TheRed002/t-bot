@@ -4,14 +4,13 @@ Test suite for monitoring trace_wrapper module.
 Tests cover trace functionality and status handling.
 """
 
-import pytest
 
 from src.monitoring.trace_wrapper import Status, StatusCode, trace
 
 
 class TestTraceWrapper:
     """Test trace wrapper functionality."""
-    
+
     def test_trace_import(self):
         """Test that trace can be imported."""
         assert trace is not None
@@ -27,8 +26,8 @@ class TestTraceWrapper:
     def test_status_code_values(self):
         """Test StatusCode has expected values."""
         # Should have basic status codes
-        assert hasattr(StatusCode, 'OK') or hasattr(StatusCode, 'ok')
-        assert hasattr(StatusCode, 'ERROR') or hasattr(StatusCode, 'error')
+        assert hasattr(StatusCode, "OK") or hasattr(StatusCode, "ok")
+        assert hasattr(StatusCode, "ERROR") or hasattr(StatusCode, "error")
 
     def test_trace_context_manager(self):
         """Test trace as context manager."""

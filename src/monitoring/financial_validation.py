@@ -8,7 +8,7 @@ used throughout the T-Bot trading system monitoring components.
 import logging
 from decimal import Decimal, InvalidOperation
 
-from src.monitoring.financial_precision import FINANCIAL_CONTEXT
+from src.monitoring.financial_precision import _FINANCIAL_DECIMAL_CONTEXT
 
 # Unused imports removed for production cleanup
 
@@ -207,7 +207,9 @@ def validate_execution_time(execution_time: float | int | Decimal, context: str 
     return time_decimal.quantize(Decimal("0.000001"))  # Microsecond precision
 
 
-def validate_var(var_value: float | int | Decimal, confidence_level: float | Decimal, context: str = "") -> Decimal:
+def validate_var(
+    var_value: float | int | Decimal, confidence_level: float | Decimal, context: str = ""
+) -> Decimal:
     """
     Validate Value at Risk.
 
@@ -397,7 +399,7 @@ def calculate_pnl_percentage(pnl_usd: float | Decimal, portfolio_value: float | 
     # Use Decimal arithmetic for financial precision
     from decimal import localcontext
 
-    with localcontext(FINANCIAL_CONTEXT):
+    with localcontext(_FINANCIAL_DECIMAL_CONTEXT):
         pnl_percentage_decimal = (pnl_decimal / portfolio_decimal) * Decimal("100")
 
     if abs(pnl_percentage_decimal) > 100:

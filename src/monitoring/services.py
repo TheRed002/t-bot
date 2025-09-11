@@ -92,7 +92,7 @@ class DefaultAlertService(BaseService, AlertServiceInterface, ErrorPropagationMi
                 "Invalid request parameter",
                 field_name="request",
                 field_value=type(request).__name__,
-                expected_type="AlertRequest"
+                expected_type="AlertRequest",
             )
 
         # Apply consistent data transformation patterns after validation
@@ -103,7 +103,7 @@ class DefaultAlertService(BaseService, AlertServiceInterface, ErrorPropagationMi
                 "Invalid rule_name parameter",
                 field_name="rule_name",
                 field_value=transformed_request.rule_name,
-                expected_type="str"
+                expected_type="str",
             )
 
         from src.monitoring.alerting import Alert, AlertStatus
@@ -123,11 +123,14 @@ class DefaultAlertService(BaseService, AlertServiceInterface, ErrorPropagationMi
             return alert.fingerprint
         except Exception as e:
             # Check if it's a validation error and propagate accordingly
-            if hasattr(e, '__class__') and ('ValidationError' in e.__class__.__name__ or 'DataValidationError' in e.__class__.__name__):
+            if hasattr(e, "__class__") and (
+                "ValidationError" in e.__class__.__name__
+                or "DataValidationError" in e.__class__.__name__
+            ):
                 # Apply consistent error propagation - re-raise validation errors
                 self.propagate_validation_error(e, "AlertService.create_alert")
                 return  # propagate_validation_error should raise, but add explicit return for safety
-            
+
             # Handle all other exceptions
             error_context = await create_error_context(
                 "AlertService",
@@ -217,11 +220,18 @@ class DefaultAlertService(BaseService, AlertServiceInterface, ErrorPropagationMi
         # Apply consistent Decimal transformation for financial data in annotations
         if "price" in transformed_annotations and transformed_annotations["price"] is not None:
             from src.utils.decimal_utils import to_decimal
+
             transformed_annotations["price"] = str(to_decimal(transformed_annotations["price"]))
 
-        if "quantity" in transformed_annotations and transformed_annotations["quantity"] is not None:
+        if (
+            "quantity" in transformed_annotations
+            and transformed_annotations["quantity"] is not None
+        ):
             from src.utils.decimal_utils import to_decimal
-            transformed_annotations["quantity"] = str(to_decimal(transformed_annotations["quantity"]))
+
+            transformed_annotations["quantity"] = str(
+                to_decimal(transformed_annotations["quantity"])
+            )
 
         return AlertRequest(
             rule_name=request.rule_name,
@@ -251,7 +261,7 @@ class DefaultMetricsService(BaseService, MetricsServiceInterface, ErrorPropagati
                 "Invalid request parameter",
                 field_name="request",
                 field_value=type(request).__name__,
-                expected_type="MetricRequest"
+                expected_type="MetricRequest",
             )
 
         # Apply consistent data transformation patterns after validation
@@ -262,7 +272,7 @@ class DefaultMetricsService(BaseService, MetricsServiceInterface, ErrorPropagati
                 "Invalid metric name",
                 field_name="name",
                 field_value=transformed_request.name,
-                expected_type="str"
+                expected_type="str",
             )
 
         if not isinstance(transformed_request.value, (int, float, Decimal)):
@@ -270,7 +280,7 @@ class DefaultMetricsService(BaseService, MetricsServiceInterface, ErrorPropagati
                 "Invalid value parameter",
                 field_name="value",
                 field_value=transformed_request.value,
-                expected_type="number"
+                expected_type="number",
             )
 
         if transformed_request.value < 0:
@@ -278,22 +288,32 @@ class DefaultMetricsService(BaseService, MetricsServiceInterface, ErrorPropagati
                 "Invalid metric value - value must be non-negative",
                 field_name="value",
                 field_value=transformed_request.value,
-                validation_rule="must be non-negative number"
+                validation_rule="must be non-negative number",
             )
 
         try:
             # Convert Decimal to float for metrics collector
-            value_as_float = float(transformed_request.value) if isinstance(transformed_request.value, Decimal) else transformed_request.value
+            value_as_float = (
+                float(transformed_request.value)
+                if isinstance(transformed_request.value, Decimal)
+                else transformed_request.value
+            )
             self._metrics_collector.increment_counter(
-                transformed_request.name, transformed_request.labels, value_as_float, transformed_request.namespace
+                transformed_request.name,
+                transformed_request.labels,
+                value_as_float,
+                transformed_request.namespace,
             )
         except Exception as e:
             # Check if it's a validation error and propagate accordingly
-            if hasattr(e, '__class__') and ('ValidationError' in e.__class__.__name__ or 'DataValidationError' in e.__class__.__name__):
+            if hasattr(e, "__class__") and (
+                "ValidationError" in e.__class__.__name__
+                or "DataValidationError" in e.__class__.__name__
+            ):
                 # Apply consistent error propagation - re-raise validation errors
                 self.propagate_validation_error(e, "MetricsService.record_counter")
                 return  # propagate_validation_error should raise, but add explicit return for safety
-            
+
             # Handle all other exceptions
             raise ComponentError(
                 f"Failed to record counter metric: {e}",
@@ -315,17 +335,27 @@ class DefaultMetricsService(BaseService, MetricsServiceInterface, ErrorPropagati
 
         try:
             # Convert Decimal to float for metrics collector
-            value_as_float = float(transformed_request.value) if isinstance(transformed_request.value, Decimal) else transformed_request.value
+            value_as_float = (
+                float(transformed_request.value)
+                if isinstance(transformed_request.value, Decimal)
+                else transformed_request.value
+            )
             self._metrics_collector.set_gauge(
-                transformed_request.name, value_as_float, transformed_request.labels, transformed_request.namespace
+                transformed_request.name,
+                value_as_float,
+                transformed_request.labels,
+                transformed_request.namespace,
             )
         except Exception as e:
             # Check if it's a validation error and propagate accordingly
-            if hasattr(e, '__class__') and ('ValidationError' in e.__class__.__name__ or 'DataValidationError' in e.__class__.__name__):
+            if hasattr(e, "__class__") and (
+                "ValidationError" in e.__class__.__name__
+                or "DataValidationError" in e.__class__.__name__
+            ):
                 # Apply consistent error propagation - re-raise validation errors
                 self.propagate_validation_error(e, "MetricsService.record_gauge")
                 return  # propagate_validation_error should raise, but add explicit return for safety
-            
+
             # Handle all other exceptions
             raise ComponentError(
                 f"Failed to record gauge metric: {e}",
@@ -345,17 +375,27 @@ class DefaultMetricsService(BaseService, MetricsServiceInterface, ErrorPropagati
 
         try:
             # Convert Decimal to float for metrics collector
-            value_as_float = float(transformed_request.value) if isinstance(transformed_request.value, Decimal) else transformed_request.value
+            value_as_float = (
+                float(transformed_request.value)
+                if isinstance(transformed_request.value, Decimal)
+                else transformed_request.value
+            )
             self._metrics_collector.observe_histogram(
-                transformed_request.name, value_as_float, transformed_request.labels, transformed_request.namespace
+                transformed_request.name,
+                value_as_float,
+                transformed_request.labels,
+                transformed_request.namespace,
             )
         except Exception as e:
             # Check if it's a validation error and propagate accordingly
-            if hasattr(e, '__class__') and ('ValidationError' in e.__class__.__name__ or 'DataValidationError' in e.__class__.__name__):
+            if hasattr(e, "__class__") and (
+                "ValidationError" in e.__class__.__name__
+                or "DataValidationError" in e.__class__.__name__
+            ):
                 # Apply consistent error propagation - re-raise validation errors
                 self.propagate_validation_error(e, "MetricsService.record_histogram")
                 return  # propagate_validation_error should raise, but add explicit return for safety
-            
+
             # Handle all other exceptions
             raise ComponentError(
                 f"Failed to record histogram metric: {e}",
@@ -398,8 +438,11 @@ class DefaultMetricsService(BaseService, MetricsServiceInterface, ErrorPropagati
         # Apply minimal transformation to preserve existing behavior
         # Only transform financial values where needed
         transformed_value = request.value
-        if isinstance(request.value, (float, int)) and ("price" in request.name.lower() or "quantity" in request.name.lower()):
+        if isinstance(request.value, (float, int)) and (
+            "price" in request.name.lower() or "quantity" in request.name.lower()
+        ):
             from src.utils.decimal_utils import to_decimal
+
             transformed_value = to_decimal(str(request.value))
 
         return MetricRequest(
@@ -445,7 +488,7 @@ class DefaultPerformanceService(BaseService, PerformanceServiceInterface, ErrorP
                 "Invalid exchange parameter",
                 field_name="exchange",
                 field_value=transformed_data["exchange"],
-                expected_type="str"
+                expected_type="str",
             )
 
         if not isinstance(transformed_data["symbol"], str):
@@ -453,15 +496,18 @@ class DefaultPerformanceService(BaseService, PerformanceServiceInterface, ErrorP
                 "Invalid symbol parameter",
                 field_name="symbol",
                 field_value=transformed_data["symbol"],
-                expected_type="str"
+                expected_type="str",
             )
 
-        if not isinstance(transformed_data["latency_ms"], (int, float, Decimal)) or transformed_data["latency_ms"] < 0:
+        if (
+            not isinstance(transformed_data["latency_ms"], (int, float, Decimal))
+            or transformed_data["latency_ms"] < 0
+        ):
             raise ValidationError(
                 "Invalid latency_ms parameter",
                 field_name="latency_ms",
                 field_value=transformed_data["latency_ms"],
-                validation_rule="must be non-negative number"
+                validation_rule="must be non-negative number",
             )
 
         # Convert string to OrderType enum with consistent error handling
@@ -484,7 +530,9 @@ class DefaultPerformanceService(BaseService, PerformanceServiceInterface, ErrorP
                 # This handles both real OrderType enums and mocked versions in tests
                 try:
                     # Check if it has the expected enum-like attributes
-                    if hasattr(transformed_data["order_type"], 'name') and hasattr(transformed_data["order_type"], 'value'):
+                    if hasattr(transformed_data["order_type"], "name") and hasattr(
+                        transformed_data["order_type"], "value"
+                    ):
                         order_type_enum = transformed_data["order_type"]
                     else:
                         raise ValueError("Not a valid OrderType enum")
@@ -502,11 +550,15 @@ class DefaultPerformanceService(BaseService, PerformanceServiceInterface, ErrorP
                 field_value=transformed_data["order_type"],
                 expected_type="valid OrderType enum value",
             ) from e
-        
+
         try:
             self._performance_profiler.record_order_execution(
-                transformed_data["exchange"], order_type_enum, transformed_data["symbol"],
-                transformed_data["latency_ms"], transformed_data["fill_rate"], transformed_data["slippage_bps"]
+                transformed_data["exchange"],
+                order_type_enum,
+                transformed_data["symbol"],
+                transformed_data["latency_ms"],
+                transformed_data["fill_rate"],
+                transformed_data["slippage_bps"],
             )
         except Exception as e:
             raise ComponentError(
@@ -542,14 +594,20 @@ class DefaultPerformanceService(BaseService, PerformanceServiceInterface, ErrorP
         return self._performance_profiler.get_system_resource_stats()
 
     def _transform_order_execution_data(
-        self, exchange: str, order_type: str, symbol: str,
-        latency_ms: Decimal, fill_rate: Decimal, slippage_bps: Decimal
+        self,
+        exchange: str,
+        order_type: str,
+        symbol: str,
+        latency_ms: Decimal,
+        fill_rate: Decimal,
+        slippage_bps: Decimal,
     ) -> dict[str, Any]:
         """Transform order execution data consistently across operations."""
         # Apply consistent data transformation patterns matching database module
 
         # Apply consistent Decimal transformation for financial data
         from src.utils.decimal_utils import to_decimal
+
         transformed_fill_rate = to_decimal(str(fill_rate))
         transformed_slippage_bps = to_decimal(str(slippage_bps))
 
@@ -615,7 +673,7 @@ class MonitoringService(BaseService):
                 "Invalid alert_service parameter - missing required methods",
                 field_name="alert_service",
                 field_value=type(alert_service).__name__,
-                expected_type="AlertServiceInterface"
+                expected_type="AlertServiceInterface",
             )
 
         if not hasattr(metrics_service, "record_counter"):
@@ -623,7 +681,7 @@ class MonitoringService(BaseService):
                 "Invalid metrics_service parameter - missing required methods",
                 field_name="metrics_service",
                 field_value=type(metrics_service).__name__,
-                expected_type="MetricsServiceInterface"
+                expected_type="MetricsServiceInterface",
             )
 
         if not hasattr(performance_service, "get_performance_summary"):
@@ -631,7 +689,7 @@ class MonitoringService(BaseService):
                 "Invalid performance_service parameter - missing required methods",
                 field_name="performance_service",
                 field_value=type(performance_service).__name__,
-                expected_type="PerformanceServiceInterface"
+                expected_type="PerformanceServiceInterface",
             )
 
         self.alerts = alert_service

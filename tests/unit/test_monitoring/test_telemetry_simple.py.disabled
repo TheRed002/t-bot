@@ -1,0 +1,110 @@
+"""
+Simplified telemetry tests that work correctly.
+"""
+
+import pytest
+from unittest.mock import Mock, patch
+
+
+class TestOpenTelemetryConfig:
+    """Test OpenTelemetryConfig class."""
+
+    def test_config_creation(self):
+        """Test basic config creation."""
+        from src.monitoring.telemetry import OpenTelemetryConfig
+        
+        config = OpenTelemetryConfig()
+        assert config.service_name == "tbot-trading-system"
+        assert config.service_version == "1.0.0"
+        assert config.tracing_enabled is True
+
+    def test_config_custom_values(self):
+        """Test config with custom values."""
+        from src.monitoring.telemetry import OpenTelemetryConfig
+        
+        config = OpenTelemetryConfig(
+            service_name="custom-service",
+            service_version="2.0.0",
+            environment="production"
+        )
+        assert config.service_name == "custom-service"
+        assert config.service_version == "2.0.0"
+        assert config.environment == "production"
+
+
+class TestTradingTracer:
+    """Test TradingTracer class."""
+
+    def test_trading_tracer_disabled(self):
+        """Test disabled TradingTracer behavior."""
+        from src.monitoring.telemetry import TradingTracer
+        
+        mock_tracer = Mock()
+        trading_tracer = TradingTracer(mock_tracer, enabled=False)
+        
+        assert trading_tracer.enabled is False
+        
+        # Test that spans work even when disabled (return mock span)
+        with trading_tracer.trace_order_execution("test-order", "BTC/USDT", "buy") as span:
+            assert span is not None
+
+
+class TestGlobalFunctions:
+    """Test global functions."""
+
+    def test_get_tracer(self):
+        """Test get_tracer function."""
+        from src.monitoring.telemetry import get_tracer
+        
+        tracer = get_tracer("test-service")
+        assert tracer is not None
+
+    def test_get_trading_tracer(self):
+        """Test get_trading_tracer function."""
+        from src.monitoring.telemetry import get_trading_tracer, set_global_trading_tracer
+        
+        # Reset global state
+        set_global_trading_tracer(None)
+        
+        # Should return a disabled tracer when none is set
+        result = get_trading_tracer()
+        assert result is not None
+        assert result.enabled is False
+
+
+class TestUtilityFunctions:
+    """Test utility functions."""
+
+    def test_get_monitoring_logger(self):
+        """Test get_monitoring_logger function."""
+        from src.monitoring.telemetry import get_monitoring_logger
+        
+        logger = get_monitoring_logger()
+        assert logger is not None
+
+    def test_get_error_handler_fallback(self):
+        """Test get_error_handler_fallback function."""
+        from src.monitoring.telemetry import get_error_handler_fallback
+        
+        handler = get_error_handler_fallback()
+        assert callable(handler)
+
+
+class TestSimpleScenarios:
+    """Test simple integration scenarios."""
+
+    def test_disabled_telemetry_workflow(self):
+        """Test workflow with telemetry disabled."""
+        from src.monitoring.telemetry import OpenTelemetryConfig, TradingTracer
+        
+        mock_tracer = Mock()
+        config = OpenTelemetryConfig(tracing_enabled=False)
+        trading_tracer = TradingTracer(mock_tracer, enabled=False)
+        
+        # Test various operations work
+        with trading_tracer.trace_order_execution("order-1", "BTC/USDT", "buy"):
+            with trading_tracer.trace_market_data_processing("BTC/USDT", "ticker"):
+                pass
+        
+        # Verify tracer
+        assert trading_tracer.enabled is False

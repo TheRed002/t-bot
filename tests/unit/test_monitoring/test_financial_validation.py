@@ -6,9 +6,9 @@ boundary conditions, and error handling scenarios.
 """
 
 import logging
-from decimal import Decimal, InvalidOperation
-from unittest.mock import Mock, patch
+from decimal import Decimal
 from functools import wraps
+from unittest.mock import Mock, patch
 
 import pytest
 
@@ -18,10 +18,12 @@ logging.getLogger().disabled = True
 
 # Disable ALL logger instances
 import sys
+
 for name in list(sys.modules.keys()):
-    if 'logging' in name or 'log' in name:
-        if hasattr(sys.modules[name], 'disabled'):
+    if "logging" in name or "log" in name:
+        if hasattr(sys.modules[name], "disabled"):
             sys.modules[name].disabled = True
+
 
 # Helper decorator to temporarily enable logging for logger tests
 def with_logging_enabled(func):
@@ -30,19 +32,19 @@ def with_logging_enabled(func):
         # Save current logging state
         original_disabled = logging.root.disabled
         original_level = logging.root.level
-        
+
         # Re-enable logging completely
         logging.disable(logging.NOTSET)
         logging.root.disabled = False
         logging.getLogger().disabled = False
-        
+
         # Enable the specific logger we're testing
-        fv_logger = logging.getLogger('src.monitoring.financial_validation')
+        fv_logger = logging.getLogger("src.monitoring.financial_validation")
         original_fv_disabled = fv_logger.disabled
         original_fv_level = fv_logger.level
         fv_logger.disabled = False
         fv_logger.setLevel(logging.WARNING)
-        
+
         try:
             return func(*args, **kwargs)
         finally:
@@ -52,57 +54,58 @@ def with_logging_enabled(func):
             logging.root.level = original_level
             fv_logger.disabled = original_fv_disabled
             fv_logger.level = original_fv_level
+
     return wrapper
+
 
 # Mock ALL heavy imports to prevent import chain issues
 COMPREHENSIVE_MOCKS = {
-    'src.core': Mock(),
-    'src.core.exceptions': Mock(),
-    'src.core.config': Mock(),
-    'src.core.caching': Mock(),
-    'src.database': Mock(),
-    'src.database.connection': Mock(),
-    'src.database.redis_client': Mock(),
-    'src.error_handling': Mock(),
-    'src.error_handling.error_handler': Mock(),
-    'src.error_handling.connection_manager': Mock(),
-    'src.utils': Mock(),
-    'src.utils.decorators': Mock(),
+    "src.core": Mock(),
+    "src.core.exceptions": Mock(),
+    "src.core.config": Mock(),
+    "src.core.caching": Mock(),
+    "src.database": Mock(),
+    "src.database.connection": Mock(),
+    "src.database.redis_client": Mock(),
+    "src.error_handling": Mock(),
+    "src.error_handling.error_handler": Mock(),
+    "src.error_handling.connection_manager": Mock(),
+    "src.utils": Mock(),
+    "src.utils.decorators": Mock(),
     # Don't mock financial_precision module since we need FINANCIAL_CONTEXT
     # 'src.monitoring.financial_precision': Mock(),
 }
 
 # Import real exceptions from core module
-from src.core.exceptions import ValidationError, ComponentError
 
 # Apply comprehensive mocking before imports
-with patch.dict('sys.modules', COMPREHENSIVE_MOCKS):
+with patch.dict("sys.modules", COMPREHENSIVE_MOCKS):
     from src.monitoring.financial_validation import (
-    BPS_DECIMAL_PLACES,
-    CRYPTO_DECIMAL_PLACES,
-    FIAT_DECIMAL_PLACES,
-    MAX_DRAWDOWN_PERCENT,
-    MAX_EXECUTION_TIME_SECONDS,
-    MAX_PORTFOLIO_VALUE_USD,
-    MAX_SHARPE_RATIO,
-    MAX_SLIPPAGE_BPS,
-    MAX_TRADE_VALUE_USD,
-    MAX_VAR_USD,
-    PERCENTAGE_DECIMAL_PLACES,
-    calculate_pnl_percentage,
-    validate_drawdown_percent,
-    validate_execution_time,
-    validate_portfolio_value,
-    validate_position_size_usd,
-    validate_pnl_usd,
-    validate_price,
-    validate_quantity,
-    validate_sharpe_ratio,
-    validate_slippage_bps,
-    validate_timeframe,
-    validate_var,
-    validate_volume_usd,
-)
+        BPS_DECIMAL_PLACES,
+        CRYPTO_DECIMAL_PLACES,
+        FIAT_DECIMAL_PLACES,
+        MAX_DRAWDOWN_PERCENT,
+        MAX_EXECUTION_TIME_SECONDS,
+        MAX_PORTFOLIO_VALUE_USD,
+        MAX_SHARPE_RATIO,
+        MAX_SLIPPAGE_BPS,
+        MAX_TRADE_VALUE_USD,
+        MAX_VAR_USD,
+        PERCENTAGE_DECIMAL_PLACES,
+        calculate_pnl_percentage,
+        validate_drawdown_percent,
+        validate_execution_time,
+        validate_pnl_usd,
+        validate_portfolio_value,
+        validate_position_size_usd,
+        validate_price,
+        validate_quantity,
+        validate_sharpe_ratio,
+        validate_slippage_bps,
+        validate_timeframe,
+        validate_var,
+        validate_volume_usd,
+    )
 
 
 class TestValidatePrice:
@@ -116,13 +119,13 @@ class TestValidatePrice:
             (Decimal("42000.50"), "BTC-USD", Decimal("42000.50000000")),
             ("123.456", "ETH-USD", Decimal("123.45600000")),
         ]
-        
+
         # Batch processing for performance
         results = [validate_price(price, symbol) for price, symbol, _ in test_cases]
         expected = [expected for _, _, expected in test_cases]
-        
+
         # Single batch assertion
-        assert all(result == exp for result, exp in zip(results, expected))
+        assert all(result == exp for result, exp in zip(results, expected, strict=False))
 
     def test_validate_price_edge_cases_batch(self):
         """Test price validation edge cases - OPTIMIZED batch testing."""
@@ -132,11 +135,11 @@ class TestValidatePrice:
             assert False, "Should have raised ValueError"
         except ValueError:
             pass
-        
+
         # Test invalid string - returns NaN
         result = validate_price("not_a_number", "BTC-USD")
         assert result != result  # NaN != NaN is True
-        
+
         # Test negative and zero - batch exception testing
         error_cases = [(-100, "BTC-USD"), (0, "BTC-USD")]
         for price, symbol in error_cases:
@@ -152,7 +155,7 @@ class TestValidatePrice:
         # The warning logging is implementation detail - we test the core functionality
         result = validate_price(1500000, "RARE-TOKEN")
         assert result == Decimal("1500000.00000000")
-        
+
         # Test that it still validates correctly and returns proper decimal precision
         result2 = validate_price(2000000.5555, "EXPENSIVE-TOKEN")
         assert result2 == Decimal("2000000.55550000")
@@ -197,7 +200,7 @@ class TestValidateQuantity:
         # Test core functionality - logging is implementation detail
         result = validate_quantity(2000000000, "DOGE")
         assert result == Decimal("2000000000.00000000")
-        
+
         # Test precision is maintained for large quantities (rounded to 8 decimal places)
         result2 = validate_quantity(1500000000.12345678, "MASSIVE-COIN")
         assert result2 == Decimal("1500000000.12345670")  # Rounded to 8 decimal places
@@ -232,7 +235,7 @@ class TestValidatePnlUsd:
         # Test core functionality - logging is implementation detail
         result = validate_pnl_usd(20000000, "large_trade")
         assert result == Decimal("20000000.00")
-        
+
         # Test negative large P&L
         result2 = validate_pnl_usd(-15000000, "big_loss")
         assert result2 == Decimal("-15000000.00")
@@ -271,7 +274,7 @@ class TestValidateVolumeUsd:
         # Test core functionality - logging is implementation detail
         result = validate_volume_usd(15000000, "whale_trade")
         assert result == Decimal("15000000.00")
-        
+
         # Test precision is maintained
         result2 = validate_volume_usd(12345678.9999, "precision_test")
         assert result2 == Decimal("12345679.00")
@@ -310,7 +313,7 @@ class TestValidateSlippageBps:
         # Test core functionality - logging is implementation detail
         result = validate_slippage_bps(1500, "high_slippage")
         assert result == Decimal("1500.00")
-        
+
         # Test negative slippage (also valid)
         result2 = validate_slippage_bps(-1200, "negative_slippage")
         assert result2 == Decimal("-1200.00")
@@ -349,7 +352,7 @@ class TestValidateExecutionTime:
         # Test core functionality - logging is implementation detail
         result = validate_execution_time(5000, "slow_order")
         assert result == Decimal("5000.000000")
-        
+
         # Test microsecond precision
         result2 = validate_execution_time(3661.123456789, "precise_timing")
         assert result2 == Decimal("3661.123457")
@@ -388,7 +391,7 @@ class TestValidateVar:
         # Test core functionality - logging is implementation detail
         result = validate_var(-5000, 0.99, "negative_var")
         assert result == Decimal("-5000.00")
-        
+
         # Test various confidence levels with negative VaR
         result2 = validate_var(-1000, 0.95, "small_negative")
         assert result2 == Decimal("-1000.00")
@@ -398,7 +401,7 @@ class TestValidateVar:
         # Test core functionality - logging is implementation detail
         result = validate_var(150000000, 0.99, "extreme_var")
         assert result == Decimal("150000000.00")
-        
+
         # Test that decimal precision is maintained for large values
         result2 = validate_var(200000000.25, 0.95, "huge_var")
         assert result2 == Decimal("200000000.25")
@@ -407,7 +410,7 @@ class TestValidateVar:
         """Test VaR validation with edge case confidence levels."""
         result1 = validate_var(10000, 0.5, "min_confidence")
         assert result1 == 10000.0
-        
+
         result2 = validate_var(10000, 0.999, "max_confidence")
         assert result2 == 10000.0
 
@@ -445,7 +448,7 @@ class TestValidateDrawdownPercent:
         # Test core functionality - logging is implementation detail
         result = validate_drawdown_percent(25.5, "concerning_drawdown")
         assert result == Decimal("25.5")
-        
+
         # Test that it still validates correctly for high values
         result2 = validate_drawdown_percent(35.0, "very_high_drawdown")
         assert result2 == Decimal("35.0")
@@ -489,7 +492,7 @@ class TestValidateSharpeRatio:
         # Test core functionality - logging is implementation detail
         result = validate_sharpe_ratio(2.5, "excellent_strategy")
         assert result == Decimal("2.5")
-        
+
         # Test that high Sharpe ratios are handled correctly
         result2 = validate_sharpe_ratio(3.2, "superb_strategy")
         assert result2 == Decimal("3.2")
@@ -499,7 +502,7 @@ class TestValidateSharpeRatio:
         # Test core functionality - logging is implementation detail
         result = validate_sharpe_ratio(-1.5, "terrible_strategy")
         assert result == Decimal("-1.5")
-        
+
         # Test that very poor Sharpe ratios are handled correctly
         result2 = validate_sharpe_ratio(-2.1, "awful_strategy")
         assert result2 == Decimal("-2.1")
@@ -538,7 +541,7 @@ class TestValidatePortfolioValue:
         # Test core functionality - logging is implementation detail
         result = validate_portfolio_value(1500000000, "whale_account")
         assert result == Decimal("1500000000.0")
-        
+
         # Test that extremely large values are handled correctly
         result2 = validate_portfolio_value(2500000000, "institutional_account")
         assert result2 == Decimal("2500000000.0")
@@ -557,28 +560,28 @@ class TestValidateTimeframe:
         timeframes = ["1s", "5s", "15s", "30s"]
         results = [validate_timeframe(tf) for tf in timeframes]
         # Batch assertion for performance
-        assert all(result == timeframe for result, timeframe in zip(results, timeframes))
+        assert all(result == timeframe for result, timeframe in zip(results, timeframes, strict=False))
 
     def test_validate_timeframe_success_minutes(self):
         """Test successful timeframe validation with minutes."""
         timeframes = ["1m", "5m", "15m", "30m"]
         results = [validate_timeframe(tf) for tf in timeframes]
         # Batch assertion for performance
-        assert all(result == timeframe for result, timeframe in zip(results, timeframes))
+        assert all(result == timeframe for result, timeframe in zip(results, timeframes, strict=False))
 
     def test_validate_timeframe_success_hours(self):
         """Test successful timeframe validation with hours."""
         timeframes = ["1h", "2h", "4h", "6h", "12h"]
         results = [validate_timeframe(tf) for tf in timeframes]
         # Batch assertion for performance
-        assert all(result == timeframe for result, timeframe in zip(results, timeframes))
+        assert all(result == timeframe for result, timeframe in zip(results, timeframes, strict=False))
 
     def test_validate_timeframe_success_days_weeks_months(self):
         """Test successful timeframe validation with longer periods."""
         timeframes = ["1d", "1w", "1M", "3M", "1y"]
         results = [validate_timeframe(tf) for tf in timeframes]
         # Batch assertion for performance
-        assert all(result == timeframe for result, timeframe in zip(results, timeframes))
+        assert all(result == timeframe for result, timeframe in zip(results, timeframes, strict=False))
 
     def test_validate_timeframe_invalid(self):
         """Test timeframe validation with invalid timeframe."""
@@ -634,7 +637,7 @@ class TestCalculatePnlPercentage:
         # Test core functionality - logging is implementation detail
         result = calculate_pnl_percentage(15000, 10000)  # 150% gain
         assert result == Decimal("150.0000")
-        
+
         # Test extreme loss
         result2 = calculate_pnl_percentage(-12000, 10000)  # 120% loss
         assert result2 == Decimal("-120.0000")
@@ -668,7 +671,7 @@ class TestValidatePositionSizeUsd:
         # Test core functionality - logging is implementation detail
         result = validate_position_size_usd(15000000, "whale_position")
         assert result == Decimal("15000000.0")
-        
+
         # Test that very large positions are handled correctly
         result2 = validate_position_size_usd(25000000, "institutional_position")
         assert result2 == Decimal("25000000.0")
@@ -685,12 +688,14 @@ class TestConstants:
     def test_decimal_places_constants(self):
         """Test decimal places constants - OPTIMIZED."""
         # Batch assertions for performance
-        assert all([
-            CRYPTO_DECIMAL_PLACES == 8,
-            FIAT_DECIMAL_PLACES == 2,
-            BPS_DECIMAL_PLACES == 2,
-            PERCENTAGE_DECIMAL_PLACES == 4
-        ])
+        assert all(
+            [
+                CRYPTO_DECIMAL_PLACES == 8,
+                FIAT_DECIMAL_PLACES == 2,
+                BPS_DECIMAL_PLACES == 2,
+                PERCENTAGE_DECIMAL_PLACES == 4,
+            ]
+        )
 
     def test_financial_bounds_constants(self):
         """Test financial bounds constants have reasonable values."""
@@ -735,7 +740,7 @@ class TestEdgeCases:
         # Test at exactly the maximum values
         result_var = validate_var(MAX_VAR_USD, 0.95, "max_var")
         assert result_var == MAX_VAR_USD
-        
+
         result_drawdown = validate_drawdown_percent(MAX_DRAWDOWN_PERCENT, "max_drawdown")
         assert result_drawdown == MAX_DRAWDOWN_PERCENT
 
@@ -751,7 +756,7 @@ class TestEdgeCases:
         result = validate_price(1500000, "TEST_SYMBOL")
         assert isinstance(result, Decimal)
         assert result == Decimal("1500000.00000000")
-        
+
         # Test that context doesn't affect functionality
         result2 = validate_price(999999, "ANOTHER_SYMBOL")
         assert result2 == Decimal("999999.00000000")
@@ -768,7 +773,7 @@ class TestIntegrationScenarios:
         volume = validate_volume_usd(5000, "trade_volume")
         slippage = validate_slippage_bps(50, "execution_slippage")
         execution_time = validate_execution_time(0.250, "order_execution")
-        
+
         assert price == Decimal("50000.00000000")
         assert quantity == Decimal("0.10000000")
         assert volume == 5000.0
@@ -781,11 +786,11 @@ class TestIntegrationScenarios:
         var_95 = validate_var(50000, 0.95, "daily_var")
         drawdown = validate_drawdown_percent(15.5, "max_drawdown")
         sharpe = validate_sharpe_ratio(1.8, "strategy_sharpe")
-        
+
         # Calculate P&L percentage
         daily_pnl = 15000
         pnl_pct = calculate_pnl_percentage(daily_pnl, portfolio_value)
-        
+
         assert portfolio_value == Decimal("1000000.0")
         assert var_95 == Decimal("50000.0")
         assert drawdown == Decimal("15.5")
@@ -795,12 +800,26 @@ class TestIntegrationScenarios:
     def test_timeframe_validation_complete_set(self):
         """Test validation of all supported timeframes."""
         timeframes = [
-            "1s", "5s", "15s", "30s",
-            "1m", "5m", "15m", "30m", 
-            "1h", "2h", "4h", "6h", "12h",
-            "1d", "1w", "1M", "3M", "1y"
+            "1s",
+            "5s",
+            "15s",
+            "30s",
+            "1m",
+            "5m",
+            "15m",
+            "30m",
+            "1h",
+            "2h",
+            "4h",
+            "6h",
+            "12h",
+            "1d",
+            "1w",
+            "1M",
+            "3M",
+            "1y",
         ]
-        
+
         # Batch validation for performance
         results = [validate_timeframe(tf) for tf in timeframes]
-        assert all(result == timeframe for result, timeframe in zip(results, timeframes))
+        assert all(result == timeframe for result, timeframe in zip(results, timeframes, strict=False))

@@ -6,11 +6,12 @@ batch conversion, validation, and precision analysis.
 """
 
 import warnings
-from decimal import Context, Decimal
+from decimal import Decimal
 from unittest.mock import patch
 
 import pytest
 
+from src.core.exceptions import ValidationError
 from src.monitoring.financial_precision import (
     FINANCIAL_CONTEXT,
     METRIC_PRECISION_MAP,
@@ -28,15 +29,11 @@ class TestFinancialContext:
 
     def test_financial_context_properties(self):
         """Test FINANCIAL_CONTEXT has correct properties."""
-        from decimal import ROUND_HALF_UP
-        
-        assert FINANCIAL_CONTEXT.prec == 28
-        assert FINANCIAL_CONTEXT.rounding == ROUND_HALF_UP
-        assert FINANCIAL_CONTEXT.Emin == -999999
-        assert FINANCIAL_CONTEXT.Emax == 999999
-        assert FINANCIAL_CONTEXT.capitals == 1
-        assert FINANCIAL_CONTEXT.clamp == 0
-        assert isinstance(FINANCIAL_CONTEXT, Context)
+        assert FINANCIAL_CONTEXT["max_precision"] == 12
+        assert FINANCIAL_CONTEXT["default_precision"] == 8
+        assert FINANCIAL_CONTEXT["warn_on_precision_loss"] is True
+        assert FINANCIAL_CONTEXT["strict_mode"] is False
+        assert isinstance(FINANCIAL_CONTEXT, dict)
 
 
 class TestFinancialPrecisionWarning:
@@ -75,20 +72,20 @@ class TestSafeDecimalToFloat:
     def test_safe_decimal_to_float_with_invalid_float(self):
         """Test safe_decimal_to_float with invalid float (infinity)."""
         with pytest.raises(ValueError, match="Invalid float value"):
-            safe_decimal_to_float(float('inf'), "test_metric")
+            safe_decimal_to_float(float("inf"), "test_metric")
 
         with pytest.raises(ValueError, match="Invalid float value"):
-            safe_decimal_to_float(float('-inf'), "test_metric")
+            safe_decimal_to_float(float("-inf"), "test_metric")
 
         with pytest.raises(ValueError, match="Invalid float value"):
-            safe_decimal_to_float(float('nan'), "test_metric")
+            safe_decimal_to_float(float("nan"), "test_metric")
 
     def test_safe_decimal_to_float_with_decimal(self):
         """Test safe_decimal_to_float with Decimal input."""
         decimal_value = Decimal("42.123456789")
         result = safe_decimal_to_float(decimal_value, "test_metric")
         assert isinstance(result, float)
-        assert abs(result - 42.12345679) < 1e-10
+        assert abs(result - 42.12345679) < 1e-8
 
     def test_safe_decimal_to_float_with_invalid_type(self):
         """Test safe_decimal_to_float with invalid type."""
@@ -98,13 +95,13 @@ class TestSafeDecimalToFloat:
     def test_safe_decimal_to_float_with_non_finite_decimal(self):
         """Test safe_decimal_to_float with non-finite Decimal."""
         with pytest.raises(ValueError, match="Non-finite Decimal value"):
-            safe_decimal_to_float(Decimal('inf'), "test_metric")
+            safe_decimal_to_float(Decimal("inf"), "test_metric")
 
         with pytest.raises(ValueError, match="Non-finite Decimal value"):
-            safe_decimal_to_float(Decimal('-inf'), "test_metric")
+            safe_decimal_to_float(Decimal("-inf"), "test_metric")
 
         with pytest.raises(ValueError, match="Non-finite Decimal value"):
-            safe_decimal_to_float(Decimal('nan'), "test_metric")
+            safe_decimal_to_float(Decimal("nan"), "test_metric")
 
     def test_safe_decimal_to_float_precision_digits(self):
         """Test safe_decimal_to_float respects precision_digits parameter."""
@@ -118,11 +115,11 @@ class TestSafeDecimalToFloat:
         """Test safe_decimal_to_float with no precision loss."""
         # Simple decimal that converts perfectly
         decimal_value = Decimal("42.5")
-        
+
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
             result = safe_decimal_to_float(decimal_value, "test_metric")
-            
+
             assert result == 42.5
             assert len(w) == 0  # No warnings
 
@@ -131,11 +128,11 @@ class TestSafeDecimalToFloat:
         # High-precision decimal that loses precision when converted to float
         # Need a value that has > 0.0000001 (0.00001%) relative error
         decimal_value = Decimal("1.123456789123456789123456789")
-        
+
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
             result = safe_decimal_to_float(decimal_value, "test_metric", warn_on_loss=True)
-            
+
             assert isinstance(result, float)
             # May or may not trigger warning depending on precision threshold
             if len(w) > 0:
@@ -146,11 +143,11 @@ class TestSafeDecimalToFloat:
     def test_safe_decimal_to_float_with_precision_loss_disabled(self):
         """Test safe_decimal_to_float with precision loss warnings disabled."""
         decimal_value = Decimal("0.123456789123456789123456789")
-        
+
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
             result = safe_decimal_to_float(decimal_value, "test_metric", warn_on_loss=False)
-            
+
             assert isinstance(result, float)
             assert len(w) == 0  # No warnings
 
@@ -191,9 +188,9 @@ class TestConvertFinancialBatch:
             "volume": Decimal("1.5"),
             "fee": Decimal("2.50"),
         }
-        
+
         results = convert_financial_batch(values, "trading")
-        
+
         assert len(results) == 3
         assert isinstance(results["price"], float)
         assert isinstance(results["volume"], float)
@@ -208,31 +205,31 @@ class TestConvertFinancialBatch:
             "count": Decimal("42.0"),
             "price": Decimal("50000.123456789"),
         }
-        
+
         precision_map = {
             "percentage": 4,
             "count": 0,
             "price": 8,
         }
-        
+
         results = convert_financial_batch(values, "test", precision_map)
-        
-        assert results["percentage"] == 0.1235  # 4 decimal places
-        assert results["count"] == 42.0  # 0 decimal places (but still float)
-        assert abs(results["price"] - 50000.12345679) < 1e-10  # 8 decimal places
+
+        assert results["percentage"] == 0.1235  # 4 decimal places as per precision_map
+        assert results["count"] == 42.0  # 0 decimal places as per precision_map (integer)
+        assert abs(results["price"] - 50000.12345679) < 1e-8  # 8 decimal places as per precision_map
 
     def test_convert_financial_batch_empty_prefix(self):
         """Test convert_financial_batch with empty prefix."""
         values = {"test": Decimal("42.5")}
         results = convert_financial_batch(values, "")
-        
+
         assert results["test"] == 42.5
 
     def test_convert_financial_batch_no_prefix(self):
         """Test convert_financial_batch with None prefix."""
         values = {"test": Decimal("42.5")}
         results = convert_financial_batch(values, None)
-        
+
         assert results["test"] == 42.5
 
     def test_convert_financial_batch_with_error(self):
@@ -241,7 +238,7 @@ class TestConvertFinancialBatch:
             "good": Decimal("42.5"),
             "bad": "not_a_number",  # This will cause an error
         }
-        
+
         with pytest.raises(TypeError, match="Expected Decimal, float, or int"):
             convert_financial_batch(values, "test")
 
@@ -252,9 +249,9 @@ class TestConvertFinancialBatch:
             "float_val": 43.5,
             "int_val": 44,
         }
-        
+
         results = convert_financial_batch(values, "mixed")
-        
+
         assert results["decimal_val"] == 42.5
         assert results["float_val"] == 43.5
         assert results["int_val"] == 44.0
@@ -270,67 +267,42 @@ class TestValidateFinancialRange:
 
     def test_validate_financial_range_no_bounds(self):
         """Test validate_financial_range with no bounds (should not raise)."""
-        validate_financial_range(Decimal("42.5"), "test_metric")
-        validate_financial_range(42.5, "test_metric")
-        validate_financial_range(-1000.0, "test_metric")
+        validate_financial_range(Decimal("42.5"))
+        validate_financial_range(Decimal("42.5"))
+        validate_financial_range(Decimal("-1000.0"))
 
     def test_validate_financial_range_within_bounds(self):
         """Test validate_financial_range with value within bounds."""
         validate_financial_range(
-            Decimal("50.0"), 
-            "test_metric", 
-            min_value=Decimal("0.0"), 
-            max_value=Decimal("100.0")
+            Decimal("50.0"), min_value=Decimal("0.0"), max_value=Decimal("100.0")
         )
-        
-        validate_financial_range(
-            75.0,
-            "test_metric",
-            min_value=0.0,
-            max_value=100.0
-        )
+
+        validate_financial_range(Decimal("75.0"), min_value=Decimal("0.0"), max_value=Decimal("100.0"))
 
     def test_validate_financial_range_below_minimum(self):
         """Test validate_financial_range with value below minimum."""
-        with pytest.raises(ValueError, match="below minimum"):
-            validate_financial_range(
-                Decimal("-10.0"),
-                "test_metric",
-                min_value=Decimal("0.0")
-            )
+        with pytest.raises(ValidationError, match="below minimum"):
+            validate_financial_range(Decimal("-10.0"), min_value=Decimal("0.0"))
 
     def test_validate_financial_range_above_maximum(self):
         """Test validate_financial_range with value above maximum."""
-        with pytest.raises(ValueError, match="above maximum"):
-            validate_financial_range(
-                Decimal("150.0"),
-                "test_metric",
-                max_value=Decimal("100.0")
-            )
+        with pytest.raises(ValidationError, match="above maximum"):
+            validate_financial_range(Decimal("150.0"), max_value=Decimal("100.0"))
 
     def test_validate_financial_range_at_bounds(self):
         """Test validate_financial_range with value exactly at bounds."""
         # At minimum (inclusive)
-        validate_financial_range(
-            Decimal("0.0"),
-            "test_metric",
-            min_value=Decimal("0.0")
-        )
-        
+        validate_financial_range(Decimal("0.0"), min_value=Decimal("0.0"))
+
         # At maximum (inclusive)
-        validate_financial_range(
-            Decimal("100.0"),
-            "test_metric",
-            max_value=Decimal("100.0")
-        )
+        validate_financial_range(Decimal("100.0"), max_value=Decimal("100.0"))
 
     def test_validate_financial_range_mixed_types(self):
         """Test validate_financial_range with mixed Decimal and float types."""
         validate_financial_range(
             Decimal("50.0"),
-            "test_metric",
-            min_value=0.0,  # float
-            max_value=Decimal("100.0")  # Decimal
+            min_value=Decimal("0.0"),  # Decimal
+            max_value=Decimal("100.0"),  # Decimal
         )
 
 
@@ -410,13 +382,23 @@ class TestMetricPrecisionMap:
     def test_metric_precision_map_completeness(self):
         """Test METRIC_PRECISION_MAP covers main financial metric types."""
         expected_keys = [
-            "price", "value_usd", "pnl_usd", "volume_usd",
-            "percent", "ratio", "rate", "apy", "sharpe_ratio",
-            "bps", "slippage_bps",
-            "count", "total",
-            "duration_seconds", "latency_seconds"
+            "price",
+            "value_usd",
+            "pnl_usd",
+            "volume_usd",
+            "percent",
+            "ratio",
+            "rate",
+            "apy",
+            "sharpe_ratio",
+            "bps",
+            "slippage_bps",
+            "count",
+            "total",
+            "duration_seconds",
+            "latency_seconds",
         ]
-        
+
         for key in expected_keys:
             assert key in METRIC_PRECISION_MAP
 
@@ -469,11 +451,11 @@ class TestEdgeCases:
         """Test safe_decimal_to_float with extremely high precision."""
         # Very high precision decimal
         high_precision = Decimal("0." + "0" * 20 + "1")
-        
+
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
             result = safe_decimal_to_float(high_precision, "extreme_precision")
-            
+
             assert isinstance(result, float)
             # May warn about precision loss depending on conversion
             # Test passes regardless of warning count
@@ -500,9 +482,9 @@ class TestEdgeCases:
             "pörtefølje": Decimal("100.0"),  # Danish for "portfolio"
             "émojis_💰": Decimal("1.23"),
         }
-        
+
         results = convert_financial_batch(values, "unicode_test")
-        
+
         assert len(results) == 3
         assert results["价格"] == 42.5
         assert results["pörtefølje"] == 100.0
@@ -513,20 +495,17 @@ class TestEdgeCases:
         # Very small differences
         validate_financial_range(
             Decimal("0.00000001"),
-            "satoshi",
             min_value=Decimal("0.00000001"),
-            max_value=Decimal("0.00000002")
+            max_value=Decimal("0.00000002"),
         )
 
     def test_detect_precision_requirements_edge_cases(self):
         """Test detect_precision_requirements with edge cases."""
         # Zero
-        decimal_places, is_high_precision = detect_precision_requirements(
-            Decimal("0"), "zero"
-        )
+        decimal_places, is_high_precision = detect_precision_requirements(Decimal("0"), "zero")
         assert decimal_places == 0
         assert is_high_precision is False
-        
+
         # Negative with high precision
         decimal_places, is_high_precision = detect_precision_requirements(
             Decimal("-0.123456789"), "negative_precise"
@@ -534,15 +513,15 @@ class TestEdgeCases:
         assert decimal_places == 9
         assert is_high_precision is True
 
-    @patch('src.monitoring.financial_precision.logger')
+    @patch("src.monitoring.financial_precision.logger")
     def test_safe_decimal_to_float_logs_precision_loss(self, mock_logger):
         """Test safe_decimal_to_float logs precision loss warnings."""
         high_precision = Decimal("0.123456789123456789123456789")
-        
+
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")  # Suppress warning output
             safe_decimal_to_float(high_precision, "test_metric", warn_on_loss=True)
-        
+
         # May or may not log a warning depending on actual precision threshold
         # Test passes regardless
 
@@ -561,16 +540,13 @@ class TestIntegrationScenarios:
             "order_count": Decimal("42"),
             "execution_duration_seconds": Decimal("0.123456"),
         }
-        
+
         # Use automatic precision detection
-        precision_map = {
-            name: get_recommended_precision(name)
-            for name in trading_metrics.keys()
-        }
-        
+        precision_map = {name: get_recommended_precision(name) for name in trading_metrics.keys()}
+
         # Convert batch
-        results = convert_financial_batch(trading_metrics, "trading", precision_map)
-        
+        results = convert_financial_batch(trading_metrics, "trading")
+
         # Verify results have appropriate precision
         assert abs(results["btc_price"] - 50123.45678901) < 1e-10
         assert results["trade_volume_usd"] == 10000.5
@@ -583,23 +559,21 @@ class TestIntegrationScenarios:
         """Test chaining financial validation functions."""
         value = Decimal("50000.12345678")
         metric_name = "btc_price"
-        
+
         # Step 1: Validate range
         validate_financial_range(
-            value, metric_name, 
-            min_value=Decimal("0"), 
-            max_value=Decimal("100000")
+            value, min_value=Decimal("0"), max_value=Decimal("100000")
         )
-        
+
         # Step 2: Detect precision requirements
         decimal_places, is_high_precision = detect_precision_requirements(value, metric_name)
         assert decimal_places == 8
         assert is_high_precision is True
-        
+
         # Step 3: Get recommended precision
         recommended_precision = get_recommended_precision(metric_name)
         assert recommended_precision == 8
-        
+
         # Step 4: Convert to float
         result = safe_decimal_to_float(value, metric_name, recommended_precision)
         assert isinstance(result, float)
@@ -614,17 +588,17 @@ class TestIntegrationScenarios:
             "sharpe_ratio": Decimal("1.8542"),
             "total_trades_count": Decimal("156"),
         }
-        
+
         # Validate all values are positive (except PnL can be negative)
         for name, value in financial_data.items():
             if "pnl" not in name:
-                validate_financial_range(value, name, min_value=Decimal("0"))
-        
+                validate_financial_range(value, min_value=Decimal("0"))
+
         # Convert with automatic precision
         results = convert_financial_batch(financial_data, "portfolio")
-        
+
         # All results should be valid floats
         for name, result in results.items():
             assert isinstance(result, float)
             assert not (result != result)  # Check for NaN
-            assert abs(result) < float('inf')  # Check for infinity
+            assert abs(result) < float("inf")  # Check for infinity

@@ -27,7 +27,7 @@ Infrastructure Layer:
 """
 
 # Core monitoring components
-from typing import Union
+from typing import Union, Optional
 
 from .alerting import (
     Alert,
@@ -46,6 +46,13 @@ from .dependency_injection import (
     setup_monitoring_dependencies,
 )
 from .di_registration import register_monitoring_services
+from .interfaces import (
+    AlertServiceInterface,
+    DashboardServiceInterface,
+    MetricsServiceInterface,
+    MonitoringServiceInterface,
+    PerformanceServiceInterface,
+)
 from .metrics import (
     ExchangeMetrics,
     MetricDefinition,
@@ -63,13 +70,6 @@ from .performance import (
     profile_async,
     profile_sync,
     set_global_profiler,
-)
-from .interfaces import (
-    AlertServiceInterface,
-    DashboardServiceInterface,
-    MetricsServiceInterface,
-    MonitoringServiceInterface,
-    PerformanceServiceInterface,
 )
 from .services import (
     AlertRequest,
@@ -103,6 +103,7 @@ try:
         StatusCode as StatusCodeImport,
         trace as TraceImport,
     )
+
     Status = StatusImport
     StatusCode = StatusCodeImport
     trace = TraceImport
@@ -184,9 +185,9 @@ __all__ = [
 
 
 def initialize_monitoring_service(
-    notification_config: Union[NotificationConfig, None] = None,
+    notification_config: Optional[NotificationConfig] = None,
     metrics_registry=None,
-    telemetry_config: Union[OpenTelemetryConfig, None] = None,
+    telemetry_config: Optional[OpenTelemetryConfig] = None,
     prometheus_port: int = 8001,  # Use METRICS_DEFAULT_PROMETHEUS_PORT from config
     use_dependency_injection: bool = True,
     injector=None,
@@ -222,20 +223,25 @@ def initialize_monitoring_service(
 
             # Setup Prometheus server (skip during tests to avoid blocking)
             import os
+
             if not os.environ.get("TESTING"):
                 try:
                     setup_prometheus_server(prometheus_port)
                 except Exception as e:
                     # Log warning but don't fail initialization
                     import logging
+
                     logger = logging.getLogger(__name__)
-                    logger.warning(f"Failed to setup Prometheus server on port {prometheus_port}: {e}")
+                    logger.warning(
+                        f"Failed to setup Prometheus server on port {prometheus_port}: {e}"
+                    )
 
             # Get monitoring service from DI container
             return injector.resolve("MonitoringServiceInterface")
 
         except Exception as e:
             import logging
+
             logger = logging.getLogger(__name__)
             logger.warning(f"Core DI initialization failed, trying monitoring DI: {e}")
 
@@ -256,20 +262,25 @@ def initialize_monitoring_service(
 
             # Setup Prometheus server (skip during tests to avoid blocking)
             import os
+
             if not os.environ.get("TESTING"):
                 try:
                     setup_prometheus_server(prometheus_port)
                 except Exception as e:
                     # Log warning but don't fail initialization
                     import logging
+
                     logger = logging.getLogger(__name__)
-                    logger.warning(f"Failed to setup Prometheus server on port {prometheus_port}: {e}")
+                    logger.warning(
+                        f"Failed to setup Prometheus server on port {prometheus_port}: {e}"
+                    )
 
             # Get monitoring service from DI container
             return create_monitoring_service()
 
         except Exception as e:
             import logging
+
             logger = logging.getLogger(__name__)
             logger.warning(f"DI initialization failed, falling back to manual wiring: {e}")
 
@@ -295,6 +306,7 @@ def initialize_monitoring_service(
     except Exception as e:
         # Log warning but don't fail initialization
         import logging
+
         logger = logging.getLogger(__name__)
         logger.warning(f"Failed to setup Prometheus server on port {prometheus_port}: {e}")
 

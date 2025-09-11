@@ -35,36 +35,21 @@ def register_monitoring_services(injector: DependencyInjector) -> None:
     def metrics_collector_factory() -> MetricsCollector:
         return MetricsCollector()
 
-    injector.register_factory(
-        "MetricsCollector",
-        metrics_collector_factory,
-        singleton=True
-    )
+    injector.register_factory("MetricsCollector", metrics_collector_factory, singleton=True)
 
     # Register AlertManager as singleton
     def alert_manager_factory() -> AlertManager:
         return AlertManager(NotificationConfig())
 
-    injector.register_factory(
-        "AlertManager",
-        alert_manager_factory,
-        singleton=True
-    )
+    injector.register_factory("AlertManager", alert_manager_factory, singleton=True)
 
     # Register PerformanceProfiler as singleton with dependency injection
     def performance_profiler_factory() -> PerformanceProfiler:
         metrics_collector = injector.resolve("MetricsCollector")
         alert_manager = injector.resolve("AlertManager")
-        return PerformanceProfiler(
-            metrics_collector=metrics_collector,
-            alert_manager=alert_manager
-        )
+        return PerformanceProfiler(metrics_collector=metrics_collector, alert_manager=alert_manager)
 
-    injector.register_factory(
-        "PerformanceProfiler",
-        performance_profiler_factory,
-        singleton=True
-    )
+    injector.register_factory("PerformanceProfiler", performance_profiler_factory, singleton=True)
 
     # Register GrafanaDashboardManager as singleton
     def dashboard_manager_factory():
@@ -85,11 +70,7 @@ def register_monitoring_services(injector: DependencyInjector) -> None:
 
         return GrafanaDashboardManager(grafana_url, api_key, error_handler)
 
-    injector.register_factory(
-        "GrafanaDashboardManager",
-        dashboard_manager_factory,
-        singleton=True
-    )
+    injector.register_factory("GrafanaDashboardManager", dashboard_manager_factory, singleton=True)
 
     # Register service implementations with proper dependency injection
 
@@ -98,22 +79,14 @@ def register_monitoring_services(injector: DependencyInjector) -> None:
         metrics_collector = injector.resolve("MetricsCollector")
         return DefaultMetricsService(metrics_collector)
 
-    injector.register_factory(
-        "DefaultMetricsService",
-        metrics_service_factory,
-        singleton=True
-    )
+    injector.register_factory("DefaultMetricsService", metrics_service_factory, singleton=True)
 
     # DefaultAlertService
     def alert_service_factory() -> DefaultAlertService:
         alert_manager = injector.resolve("AlertManager")
         return DefaultAlertService(alert_manager)
 
-    injector.register_factory(
-        "DefaultAlertService",
-        alert_service_factory,
-        singleton=True
-    )
+    injector.register_factory("DefaultAlertService", alert_service_factory, singleton=True)
 
     # DefaultPerformanceService
     def performance_service_factory() -> DefaultPerformanceService:
@@ -121,9 +94,7 @@ def register_monitoring_services(injector: DependencyInjector) -> None:
         return DefaultPerformanceService(performance_profiler)
 
     injector.register_factory(
-        "DefaultPerformanceService",
-        performance_service_factory,
-        singleton=True
+        "DefaultPerformanceService", performance_service_factory, singleton=True
     )
 
     # DefaultDashboardService
@@ -131,11 +102,7 @@ def register_monitoring_services(injector: DependencyInjector) -> None:
         dashboard_manager = injector.resolve("GrafanaDashboardManager")
         return DefaultDashboardService(dashboard_manager)
 
-    injector.register_factory(
-        "DefaultDashboardService",
-        dashboard_service_factory,
-        singleton=True
-    )
+    injector.register_factory("DefaultDashboardService", dashboard_service_factory, singleton=True)
 
     # Register service interfaces bound to implementations
     def metrics_service_interface_factory() -> MetricsServiceInterface:
@@ -150,10 +117,18 @@ def register_monitoring_services(injector: DependencyInjector) -> None:
     def dashboard_service_interface_factory() -> DashboardServiceInterface:
         return injector.resolve("DefaultDashboardService")
 
-    injector.register_factory("MetricsServiceInterface", metrics_service_interface_factory, singleton=True)
-    injector.register_factory("AlertServiceInterface", alert_service_interface_factory, singleton=True)
-    injector.register_factory("PerformanceServiceInterface", performance_service_interface_factory, singleton=True)
-    injector.register_factory("DashboardServiceInterface", dashboard_service_interface_factory, singleton=True)
+    injector.register_factory(
+        "MetricsServiceInterface", metrics_service_interface_factory, singleton=True
+    )
+    injector.register_factory(
+        "AlertServiceInterface", alert_service_interface_factory, singleton=True
+    )
+    injector.register_factory(
+        "PerformanceServiceInterface", performance_service_interface_factory, singleton=True
+    )
+    injector.register_factory(
+        "DashboardServiceInterface", dashboard_service_interface_factory, singleton=True
+    )
 
     # Register composite MonitoringService
     def monitoring_service_factory() -> MonitoringService:
@@ -162,16 +137,14 @@ def register_monitoring_services(injector: DependencyInjector) -> None:
         performance_service = injector.resolve("PerformanceServiceInterface")
         return MonitoringService(alert_service, metrics_service, performance_service)
 
-    injector.register_factory(
-        "MonitoringService",
-        monitoring_service_factory,
-        singleton=True
-    )
+    injector.register_factory("MonitoringService", monitoring_service_factory, singleton=True)
 
     # Register main interface
     def monitoring_service_interface_factory() -> MonitoringServiceInterface:
         return injector.resolve("MonitoringService")
 
-    injector.register_factory("MonitoringServiceInterface", monitoring_service_interface_factory, singleton=True)
+    injector.register_factory(
+        "MonitoringServiceInterface", monitoring_service_interface_factory, singleton=True
+    )
 
     logger.info("Monitoring services registered with dependency injector")
