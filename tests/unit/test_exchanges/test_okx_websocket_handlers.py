@@ -1,5 +1,3 @@
-import asyncio
-from decimal import Decimal
 
 import pytest
 
@@ -42,5 +40,3 @@ async def test_okx_ws_message_handlers(monkeypatch):
         ],
     }
     await mgr._handle_data_message(ob_data)
-
-

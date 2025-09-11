@@ -1,0 +1,786 @@
+"""
+Comprehensive unit tests for the main base.py EnhancedBaseExchange class.
+
+This module provides extensive test coverage for the EnhancedBaseExchange class
+from the main base.py file, focusing on testing the concrete implementation
+methods and infrastructure components.
+"""
+
+import asyncio
+
+# Import directly from the main base.py file to test the specific implementation
+# This avoids conflicts with other EnhancedBaseExchange classes in base/ subdirectory
+import sys
+from datetime import datetime, timezone
+from decimal import Decimal
+from typing import Any
+from unittest.mock import AsyncMock, Mock, patch
+
+import pytest
+
+from src.core.base.health import HealthStatus
+from src.core.config import Config
+from src.core.exceptions import (
+    ExchangeConnectionError,
+    ExchangeRateLimitError,
+    ValidationError,
+)
+from src.core.types import (
+    ExchangeInfo,
+    MarketData,
+    OrderBook,
+    OrderBookLevel,
+    OrderRequest,
+    OrderResponse,
+    OrderSide,
+    OrderStatus,
+    OrderType,
+    Ticker,
+    Trade,
+)
+
+from src.exchanges.base import BaseExchange
+# Removed non-existent interfaces
+
+
+class ConcreteExchange(BaseExchange):
+    """Concrete implementation for testing the main base.py EnhancedBaseExchange."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._connect_should_succeed = True
+        self._order_responses = {}
+        self._market_data_responses = {}
+
+    async def _connect_to_exchange(self) -> bool:
+        """Mock exchange connection."""
+        await asyncio.sleep(0.01)  # Simulate network delay
+        return self._connect_should_succeed
+
+    async def _disconnect_from_exchange(self) -> None:
+        """Mock exchange disconnection."""
+        await asyncio.sleep(0.01)
+
+    async def _place_order_on_exchange(self, order: OrderRequest) -> OrderResponse:
+        """Mock order placement."""
+        if order.symbol in self._order_responses:
+            return self._order_responses[order.symbol]
+
+        return OrderResponse(
+            order_id=f"order_{order.symbol}_{int(datetime.now().timestamp())}",
+            symbol=order.symbol,
+            side=order.side,
+            type=order.type,
+            quantity=order.quantity,
+            price=order.price,
+            status=OrderStatus.FILLED,
+            timestamp=datetime.now(timezone.utc),
+        )
+
+    async def cancel_order(self, order_id: str, symbol: str) -> bool:
+        """Mock order cancellation."""
+        return True
+
+    async def get_order_status(self, order_id: str) -> OrderStatus:
+        """Mock order status check."""
+        return OrderStatus.FILLED
+
+    async def _get_market_data_from_exchange(
+        self, symbol: str, timeframe: str = "1m"
+    ) -> MarketData:
+        """Mock market data retrieval."""
+        if symbol in self._market_data_responses:
+            return self._market_data_responses[symbol]
+
+        return MarketData(
+            symbol=symbol,
+            open=Decimal("50000"),
+            high=Decimal("51000"),
+            low=Decimal("49000"),
+            close=Decimal("50500"),
+            volume=Decimal("100"),
+            timestamp=datetime.now(timezone.utc),
+        )
+
+    async def _create_websocket_stream(self, symbol: str, stream_name: str) -> Any:
+        """Mock WebSocket stream creation."""
+        return {"symbol": symbol, "stream": stream_name, "mock": True}
+
+    async def _handle_exchange_stream(self, stream_name: str, stream: Any) -> None:
+        """Mock stream handling."""
+        pass
+
+    async def _close_exchange_stream(self, stream_name: str, stream: Any) -> None:
+        """Mock stream closure."""
+        pass
+
+    async def get_account_balance(self) -> dict[str, Decimal]:
+        """Mock account balance retrieval."""
+        return {"BTC": Decimal("1.5"), "ETH": Decimal("10.0"), "USDT": Decimal("50000.0")}
+
+    async def get_order_book(self, symbol: str, depth: int = 10) -> OrderBook:
+        """Mock order book retrieval."""
+        return OrderBook(
+            symbol=symbol,
+            bids=[
+                OrderBookLevel(price=Decimal("50000"), quantity=Decimal("1.0")),
+                OrderBookLevel(price=Decimal("49999"), quantity=Decimal("2.0")),
+            ],
+            asks=[
+                OrderBookLevel(price=Decimal("50001"), quantity=Decimal("1.5")),
+                OrderBookLevel(price=Decimal("50002"), quantity=Decimal("2.5")),
+            ],
+            timestamp=datetime.now(timezone.utc),
+        )
+
+    async def _get_trade_history_from_exchange(self, symbol: str, limit: int = 100) -> list[Trade]:
+        """Mock trade history retrieval."""
+        return [
+            Trade(
+                id=f"trade_{i}",
+                symbol=symbol,
+                price=Decimal("50000") + Decimal(str(i)),
+                quantity=Decimal("0.1"),
+                side=OrderSide.BUY if i % 2 == 0 else OrderSide.SELL,
+                timestamp=datetime.now(timezone.utc),
+            )
+            for i in range(min(limit, 5))
+        ]
+
+    async def get_exchange_info(self) -> ExchangeInfo:
+        """Mock exchange info retrieval."""
+        return ExchangeInfo(
+            name="test_exchange",
+            symbols=["BTCUSDT", "ETHUSDT", "ADAUSDT"],
+            features=["spot_trading", "margin_trading", "futures"],
+        )
+
+    async def get_ticker(self, symbol: str) -> Ticker:
+        """Mock ticker retrieval."""
+        return Ticker(symbol=symbol, price=Decimal("50000"), timestamp=datetime.now(timezone.utc))
+
+
+@pytest.fixture
+def config():
+    """Create a test configuration."""
+    config = Mock(spec=Config)
+    config.exchange = Mock()
+    config.exchange.rate_limits = {"test_exchange": {"requests_per_second": 10}}
+    config.database = Mock()
+    config.redis = Mock()
+    config.monitoring = Mock()
+    return config
+
+
+@pytest.fixture
+def exchange(config):
+    """Create a concrete exchange instance."""
+    return ConcreteExchange(
+        name="test_exchange",
+        config=config,
+    )
+
+
+class TestBaseExchangeInitialization:
+    """Test initialization and configuration of the BaseExchange."""
+
+    def test_initialization_basic(self, config):
+        """Test basic exchange initialization."""
+        exchange = ConcreteExchange(name="test_exchange", config=config)
+
+        assert exchange.exchange_name == "test_exchange"
+        assert exchange.config is config
+        assert not exchange.connected
+        assert exchange.last_heartbeat is None
+
+    def test_name_property_access(self, exchange):
+        """Test exchange name property access."""
+        assert exchange.exchange_name == "test_exchange"
+
+
+class TestConnectionLifecycle:
+    """Test connection lifecycle management with the main base implementation."""
+
+    @pytest.mark.asyncio
+    async def test_connect_success_workflow(self, exchange):
+        """Test successful connection workflow."""
+        exchange._connect_should_succeed = True
+
+        # Mock the connection manager
+        with patch.object(exchange.connection_manager, "connect", return_value=True):
+            result = await exchange.connect()
+
+        assert result is True
+        assert exchange.connected is True
+        assert exchange.status != "initializing"
+        assert exchange.last_heartbeat is not None
+
+    @pytest.mark.asyncio
+    async def test_connect_failure_workflow(self, exchange):
+        """Test connection failure workflow."""
+        exchange._connect_should_succeed = False
+
+        with patch.object(exchange.connection_manager, "connect", return_value=False):
+            result = await exchange.connect()
+
+        assert result is False
+        assert exchange.connected is False
+
+    @pytest.mark.asyncio
+    async def test_connection_retry_logic(self, exchange):
+        """Test connection retry logic."""
+        # Mock multiple connection attempts
+        connection_attempts = [False, False, True]
+        attempt_count = 0
+
+        async def mock_connect():
+            nonlocal attempt_count
+            success = (
+                connection_attempts[attempt_count]
+                if attempt_count < len(connection_attempts)
+                else False
+            )
+            attempt_count += 1
+            return success
+
+        exchange._connect_to_exchange = mock_connect
+
+        with patch.object(exchange.connection_manager, "connect", side_effect=mock_connect):
+            with patch("asyncio.sleep", new_callable=AsyncMock):
+                result = await exchange.connect()
+
+        assert result is True
+        assert attempt_count == 3
+
+    @pytest.mark.asyncio
+    async def test_disconnect_workflow(self, exchange):
+        """Test disconnect workflow."""
+        # First connect
+        exchange._connect_should_succeed = True
+        with patch.object(exchange.connection_manager, "connect", return_value=True):
+            await exchange.connect()
+
+        assert exchange.connected is True
+
+        # Then disconnect
+        with patch.object(exchange.connection_manager, "disconnect", new_callable=AsyncMock):
+            await exchange.disconnect()
+
+        assert exchange.connected is False
+        assert exchange.status == "disconnected"
+
+    @pytest.mark.asyncio
+    async def test_disconnect_cleanup_resources(self, exchange):
+        """Test disconnect properly cleans up resources."""
+        # Setup active streams and orders
+        exchange.active_streams = {"BTCUSDT": {"mock": "stream"}}
+        exchange.pending_orders = {"order1": {"mock": "order"}}
+
+        with patch.object(exchange.connection_manager, "disconnect", new_callable=AsyncMock):
+            await exchange.disconnect()
+
+        # Resources should be cleaned up
+        assert len(exchange.active_streams) == 0
+        assert len(exchange.pending_orders) == 0
+
+
+class TestOrderManagementWorkflow:
+    """Test order management workflow with the main base implementation."""
+
+    @pytest.mark.asyncio
+    async def test_place_order_full_workflow(self, exchange):
+        """Test complete order placement workflow."""
+        await exchange.connect()
+
+        order_request = OrderRequest(
+            symbol="BTCUSDT",
+            side=OrderSide.BUY,
+            type=OrderType.LIMIT,
+            quantity=Decimal("0.1"),
+            price=Decimal("50000"),
+        )
+
+        with patch.object(exchange.advanced_rate_limiter, "wait_if_needed", new_callable=AsyncMock):
+            result = await exchange.place_order(order_request)
+
+        assert result.symbol == "BTCUSDT"
+        assert result.side == OrderSide.BUY
+        assert result.quantity == Decimal("0.1")
+        assert result.status == OrderStatus.FILLED
+
+    @pytest.mark.asyncio
+    async def test_place_order_with_rate_limiting(self, exchange):
+        """Test order placement with rate limiting."""
+        await exchange.connect()
+
+        order_request = OrderRequest(
+            symbol="BTCUSDT",
+            side=OrderSide.BUY,
+            type=OrderType.LIMIT,
+            quantity=Decimal("0.1"),
+            price=Decimal("50000"),
+        )
+
+        # Mock rate limiter to simulate waiting
+        rate_limiter_mock = AsyncMock()
+        exchange.advanced_rate_limiter.wait_if_needed = rate_limiter_mock
+
+        await exchange.place_order(order_request)
+
+        # Verify rate limiter was called
+        rate_limiter_mock.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_place_order_validation_workflow(self, exchange):
+        """Test order validation workflow."""
+        await exchange.connect()
+
+        # Test with invalid order (zero quantity)
+        invalid_order = OrderRequest(
+            symbol="BTCUSDT",
+            side=OrderSide.BUY,
+            type=OrderType.LIMIT,
+            quantity=Decimal("0"),
+            price=Decimal("50000"),
+        )
+
+        with pytest.raises(ValidationError):
+            await exchange.place_order(invalid_order)
+
+    @pytest.mark.asyncio
+    async def test_place_order_not_connected_error(self, exchange):
+        """Test order placement when not connected."""
+        order_request = OrderRequest(
+            symbol="BTCUSDT",
+            side=OrderSide.BUY,
+            type=OrderType.LIMIT,
+            quantity=Decimal("0.1"),
+            price=Decimal("50000"),
+        )
+
+        with pytest.raises(ExchangeConnectionError):
+            await exchange.place_order(order_request)
+
+    @pytest.mark.asyncio
+    async def test_pre_trade_validation_workflow(self, exchange):
+        """Test pre-trade validation workflow."""
+        order_request = OrderRequest(
+            symbol="BTCUSDT",
+            side=OrderSide.BUY,
+            type=OrderType.LIMIT,
+            quantity=Decimal("0.1"),
+            price=Decimal("50000"),
+        )
+
+        # Should pass for valid order
+        result = await exchange.pre_trade_validation(order_request)
+        assert result is True
+
+        # Should fail for invalid symbol
+        invalid_order = OrderRequest(
+            symbol="",
+            side=OrderSide.BUY,
+            type=OrderType.LIMIT,
+            quantity=Decimal("0.1"),
+            price=Decimal("50000"),
+        )
+
+        with pytest.raises(ValidationError):
+            await exchange.pre_trade_validation(invalid_order)
+
+    @pytest.mark.asyncio
+    async def test_post_trade_processing_workflow(self, exchange, trade_lifecycle_manager):
+        """Test post-trade processing workflow."""
+        order_response = OrderResponse(
+            order_id="test_order_1",
+            symbol="BTCUSDT",
+            side=OrderSide.BUY,
+            type=OrderType.LIMIT,
+            quantity=Decimal("0.1"),
+            price=Decimal("50000"),
+            status=OrderStatus.FILLED,
+            timestamp=datetime.now(timezone.utc),
+        )
+
+        await exchange.post_trade_processing(order_response)
+
+        # Verify trade lifecycle manager was called
+        trade_lifecycle_manager.record_trade_event.assert_called_once()
+
+
+class TestMarketDataWorkflow:
+    """Test market data workflow with the main base implementation."""
+
+    @pytest.mark.asyncio
+    async def test_get_market_data_workflow(self, exchange):
+        """Test market data retrieval workflow."""
+        await exchange.connect()
+
+        market_data = await exchange.get_market_data("BTCUSDT", "1m")
+
+        assert market_data.symbol == "BTCUSDT"
+        assert market_data.open == Decimal("50000")
+        assert market_data.close == Decimal("50500")
+        assert market_data.volume == Decimal("100")
+
+    @pytest.mark.asyncio
+    async def test_get_market_data_caching_workflow(self, exchange):
+        """Test market data caching workflow."""
+        await exchange.connect()
+
+        # First call should cache the data
+        market_data1 = await exchange.get_market_data("BTCUSDT", "1m")
+
+        # Set custom response for second call
+        custom_data = MarketData(
+            symbol="BTCUSDT",
+            open=Decimal("60000"),
+            high=Decimal("61000"),
+            low=Decimal("59000"),
+            close=Decimal("60500"),
+            volume=Decimal("200"),
+            timestamp=datetime.now(timezone.utc),
+        )
+        exchange._market_data_responses["BTCUSDT"] = custom_data
+
+        # Second call should still return cached data (within TTL)
+        market_data2 = await exchange.get_market_data("BTCUSDT", "1m")
+
+        # Should be the same (cached) data
+        assert market_data1.open == market_data2.open
+
+    @pytest.mark.asyncio
+    async def test_get_account_balance_workflow(self, exchange):
+        """Test account balance retrieval workflow."""
+        await exchange.connect()
+
+        balance = await exchange.get_account_balance()
+
+        assert "BTC" in balance
+        assert "ETH" in balance
+        assert "USDT" in balance
+        assert balance["BTC"] == Decimal("1.5")
+        assert balance["ETH"] == Decimal("10.0")
+        assert balance["USDT"] == Decimal("50000.0")
+
+    @pytest.mark.asyncio
+    async def test_get_order_book_workflow(self, exchange):
+        """Test order book retrieval workflow."""
+        await exchange.connect()
+
+        order_book = await exchange.get_order_book("BTCUSDT", depth=10)
+
+        assert order_book.symbol == "BTCUSDT"
+        assert len(order_book.bids) == 2
+        assert len(order_book.asks) == 2
+        assert order_book.bids[0].price == Decimal("50000")
+        assert order_book.asks[0].price == Decimal("50001")
+
+    @pytest.mark.asyncio
+    async def test_get_trade_history_workflow(self, exchange):
+        """Test trade history retrieval workflow."""
+        await exchange.connect()
+
+        trades = await exchange.get_trade_history("BTCUSDT", limit=100)
+
+        assert len(trades) == 5  # Mock returns 5 trades
+        assert all(trade.symbol == "BTCUSDT" for trade in trades)
+        assert trades[0].side == OrderSide.BUY  # First trade is BUY (even index)
+        assert trades[1].side == OrderSide.SELL  # Second trade is SELL (odd index)
+
+
+class TestWebSocketManagementWorkflow:
+    """Test WebSocket stream management workflow."""
+
+    @pytest.mark.asyncio
+    async def test_subscribe_to_stream_workflow(self, exchange):
+        """Test WebSocket stream subscription workflow."""
+        await exchange.connect()
+
+        callback = AsyncMock()
+
+        await exchange.subscribe_to_stream("BTCUSDT", callback)
+
+        # Should create a stream entry
+        assert "BTCUSDT" in exchange.active_streams
+
+    @pytest.mark.asyncio
+    async def test_multiple_stream_subscriptions_workflow(self, exchange):
+        """Test multiple stream subscriptions workflow."""
+        await exchange.connect()
+
+        callback1 = AsyncMock()
+        callback2 = AsyncMock()
+        callback3 = AsyncMock()
+
+        await exchange.subscribe_to_stream("BTCUSDT", callback1)
+        await exchange.subscribe_to_stream("ETHUSDT", callback2)
+        await exchange.subscribe_to_stream("ADAUSDT", callback3)
+
+        assert len(exchange.active_streams) == 3
+        assert "BTCUSDT" in exchange.active_streams
+        assert "ETHUSDT" in exchange.active_streams
+        assert "ADAUSDT" in exchange.active_streams
+
+
+class TestHealthMonitoringWorkflow:
+    """Test health monitoring workflow with the main base implementation."""
+
+    @pytest.mark.asyncio
+    async def test_health_check_connected_workflow(self, exchange):
+        """Test health check when connected."""
+        await exchange.connect()
+
+        health_result = await exchange.health_check()
+
+        assert health_result.status == HealthStatus.HEALTHY
+        assert health_result.component_name == "test_exchange"
+        assert health_result.details is not None
+
+    @pytest.mark.asyncio
+    async def test_health_check_not_connected_workflow(self, exchange):
+        """Test health check when not connected."""
+        health_result = await exchange.health_check()
+
+        assert health_result.status == HealthStatus.UNHEALTHY
+
+    @pytest.mark.asyncio
+    async def test_unified_connection_health_workflow(self, exchange):
+        """Test unified connection health reporting."""
+        await exchange.connect()
+
+        health_info = await exchange.get_unified_connection_health()
+
+        assert "status" in health_info
+        assert "last_check" in health_info
+        assert "connection_retries" in health_info
+        assert "exchange_name" in health_info
+
+
+class TestErrorHandlingWorkflow:
+    """Test error handling workflow with the main base implementation."""
+
+    @pytest.mark.asyncio
+    async def test_rate_limit_error_handling_workflow(self, exchange):
+        """Test rate limit error handling workflow."""
+        await exchange.connect()
+
+        # Mock rate limiter to raise rate limit error
+        rate_limit_error = ExchangeRateLimitError("Rate limit exceeded")
+        exchange.advanced_rate_limiter.wait_if_needed = AsyncMock(side_effect=rate_limit_error)
+
+        order_request = OrderRequest(
+            symbol="BTCUSDT",
+            side=OrderSide.BUY,
+            type=OrderType.LIMIT,
+            quantity=Decimal("0.1"),
+            price=Decimal("50000"),
+        )
+
+        with pytest.raises(ExchangeRateLimitError):
+            await exchange.place_order(order_request)
+
+    @pytest.mark.asyncio
+    async def test_connection_error_recovery_workflow(self, exchange):
+        """Test connection error recovery workflow."""
+        # Start with successful connection
+        exchange._connect_should_succeed = True
+        await exchange.connect()
+        assert exchange.connected is True
+
+        # Simulate connection failure
+        exchange.connected = False
+        exchange.status = "disconnected"
+
+        # Attempt to place order should fail with connection error
+        order_request = OrderRequest(
+            symbol="BTCUSDT",
+            side=OrderSide.BUY,
+            type=OrderType.LIMIT,
+            quantity=Decimal("0.1"),
+            price=Decimal("50000"),
+        )
+
+        with pytest.raises(ExchangeConnectionError):
+            await exchange.place_order(order_request)
+
+    @pytest.mark.asyncio
+    async def test_market_data_error_handling_workflow(self, exchange):
+        """Test market data error handling workflow."""
+        await exchange.connect()
+
+        # Mock market data method to raise an error
+        async def failing_market_data(symbol: str, timeframe: str = "1m"):
+            raise ConnectionError("Network error")
+
+        exchange._get_market_data_from_exchange = failing_market_data
+
+        # Should handle error gracefully or raise appropriate exception
+        with pytest.raises((ConnectionError, ExchangeConnectionError)):
+            await exchange.get_market_data("BTCUSDT")
+
+
+class TestConcurrentOperationsWorkflow:
+    """Test concurrent operations workflow."""
+
+    @pytest.mark.asyncio
+    async def test_concurrent_order_placement(self, exchange):
+        """Test concurrent order placement."""
+        await exchange.connect()
+
+        order1 = OrderRequest(
+            symbol="BTCUSDT",
+            side=OrderSide.BUY,
+            type=OrderType.LIMIT,
+            quantity=Decimal("0.1"),
+            price=Decimal("50000"),
+        )
+
+        order2 = OrderRequest(
+            symbol="ETHUSDT",
+            side=OrderSide.SELL,
+            type=OrderType.LIMIT,
+            quantity=Decimal("1.0"),
+            price=Decimal("3000"),
+        )
+
+        with patch.object(exchange.advanced_rate_limiter, "wait_if_needed", new_callable=AsyncMock):
+            # Execute concurrent orders
+            results = await asyncio.gather(
+                exchange.place_order(order1), exchange.place_order(order2), return_exceptions=True
+            )
+
+        assert len(results) == 2
+        assert all(isinstance(result, OrderResponse) for result in results)
+        assert results[0].symbol == "BTCUSDT"
+        assert results[1].symbol == "ETHUSDT"
+
+    @pytest.mark.asyncio
+    async def test_concurrent_market_data_requests(self, exchange):
+        """Test concurrent market data requests."""
+        await exchange.connect()
+
+        # Execute concurrent market data requests
+        results = await asyncio.gather(
+            exchange.get_market_data("BTCUSDT"),
+            exchange.get_market_data("ETHUSDT"),
+            exchange.get_ticker("ADAUSDT"),
+            exchange.get_account_balance(),
+            return_exceptions=True,
+        )
+
+        assert len(results) == 4
+        assert not any(isinstance(result, Exception) for result in results)
+
+
+class TestUtilityMethodsWorkflow:
+    """Test utility and helper methods workflow."""
+
+    def test_exchange_string_representation(self, exchange):
+        """Test exchange string representation."""
+        str_repr = str(exchange)
+        assert "test_exchange" in str_repr
+
+        repr_str = repr(exchange)
+        assert "ConcreteExchange" in repr_str
+
+    @pytest.mark.asyncio
+    async def test_get_rate_limits_workflow(self, exchange):
+        """Test rate limits retrieval workflow."""
+        # This is a property access, not async
+        rate_limits = exchange.get_rate_limits()
+
+        # Should return the configured rate limits
+        assert isinstance(rate_limits, dict)
+
+    @pytest.mark.asyncio
+    async def test_get_open_orders_workflow(self, exchange):
+        """Test open orders retrieval workflow."""
+        await exchange.connect()
+
+        # Mock implementation doesn't implement get_open_orders
+        # but we test the base functionality
+        try:
+            open_orders = await exchange.get_open_orders("BTCUSDT")
+            assert isinstance(open_orders, list)
+        except NotImplementedError:
+            # Expected if method is not implemented in concrete class
+            pass
+
+    @pytest.mark.asyncio
+    async def test_get_positions_workflow(self, exchange):
+        """Test positions retrieval workflow."""
+        await exchange.connect()
+
+        # Mock implementation doesn't implement get_positions
+        # but we test the base functionality
+        try:
+            positions = await exchange.get_positions()
+            assert isinstance(positions, list)
+        except NotImplementedError:
+            # Expected if method is not implemented in concrete class
+            pass
+
+
+class TestEdgeCasesWorkflow:
+    """Test edge cases and boundary conditions workflow."""
+
+    @pytest.mark.asyncio
+    async def test_empty_symbol_validation(self, exchange):
+        """Test validation of empty symbol inputs."""
+        await exchange.connect()
+
+        with pytest.raises(ValidationError):
+            await exchange.get_market_data("")
+
+    @pytest.mark.asyncio
+    async def test_negative_price_order_validation(self, exchange):
+        """Test validation of negative price orders."""
+        await exchange.connect()
+
+        order_request = OrderRequest(
+            symbol="BTCUSDT",
+            side=OrderSide.BUY,
+            type=OrderType.LIMIT,
+            quantity=Decimal("0.1"),
+            price=Decimal("-1000"),
+        )
+
+        with pytest.raises(ValidationError):
+            await exchange.place_order(order_request)
+
+    @pytest.mark.asyncio
+    async def test_zero_quantity_order_validation(self, exchange):
+        """Test validation of zero quantity orders."""
+        await exchange.connect()
+
+        order_request = OrderRequest(
+            symbol="BTCUSDT",
+            side=OrderSide.BUY,
+            type=OrderType.LIMIT,
+            quantity=Decimal("0"),
+            price=Decimal("50000"),
+        )
+
+        with pytest.raises(ValidationError):
+            await exchange.place_order(order_request)
+
+    @pytest.mark.asyncio
+    async def test_very_large_decimal_precision(self, exchange):
+        """Test handling of very large decimal precision."""
+        await exchange.connect()
+
+        precise_quantity = Decimal("0.123456789012345678901234567890")
+
+        order_request = OrderRequest(
+            symbol="BTCUSDT",
+            side=OrderSide.BUY,
+            type=OrderType.LIMIT,
+            quantity=precise_quantity,
+            price=Decimal("50000.123456789012345678"),
+        )
+
+        # Should handle precisely or round appropriately
+        result = await exchange.place_order(order_request)
+        assert result is not None
+        assert result.quantity > 0

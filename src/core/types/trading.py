@@ -120,7 +120,12 @@ class Signal(BaseModel):
         if not Decimal("0") <= strength_decimal <= Decimal("1"):
             from src.core.exceptions import ValidationError
 
-            raise ValidationError("Signal strength must be between 0 and 1")
+            raise ValidationError(
+                "Signal strength must be between 0 and 1",
+                field_name="strength",
+                field_value=str(v),
+                validation_rule="range_validation"
+            )
         return strength_decimal
 
     @field_validator("symbol")
@@ -130,7 +135,12 @@ class Signal(BaseModel):
         if not v or not v.strip():
             from src.core.exceptions import ValidationError
 
-            raise ValidationError("Symbol cannot be empty")
+            raise ValidationError(
+                "Symbol cannot be empty",
+                field_name="symbol",
+                field_value=v,
+                validation_rule="not_empty"
+            )
 
         symbol_norm = v.strip().upper()
 
@@ -177,7 +187,12 @@ class Signal(BaseModel):
         if v.tzinfo is None:
             from src.core.exceptions import ValidationError
 
-            raise ValidationError("Timestamp must have timezone information")
+            raise ValidationError(
+                "Timestamp must have timezone information",
+                field_name="timestamp",
+                field_value=str(v),
+                validation_rule="timezone_required"
+            )
         return v
 
 
@@ -190,6 +205,7 @@ class OrderRequest(BaseModel):
     quantity: Decimal
     price: Decimal | None = None
     stop_price: Decimal | None = None
+    quote_quantity: Decimal | None = None
     time_in_force: TimeInForce = TimeInForce.GTC
     client_order_id: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -218,7 +234,12 @@ class OrderRequest(BaseModel):
 
             qty = to_decimal(v)
             if qty <= 0:
-                raise ValidationError("Quantity must be positive") from None
+                raise ValidationError(
+                    "Quantity must be positive",
+                    field_name="quantity",
+                    field_value=str(v),
+                    validation_rule="positive_number"
+                ) from None
             return qty
 
     @field_validator("price")
@@ -240,8 +261,40 @@ class OrderRequest(BaseModel):
 
             price = to_decimal(v)
             if price <= 0:
-                raise ValidationError("Price must be positive") from None
+                raise ValidationError(
+                    "Price must be positive",
+                    field_name="price",
+                    field_value=str(v),
+                    validation_rule="positive_number"
+                ) from None
             return price
+
+    @field_validator("quote_quantity")
+    @classmethod
+    def validate_quote_quantity(cls, v: Decimal | None) -> Decimal | None:
+        """Validate quote quantity using consistent validation patterns."""
+        if v is None:
+            return v
+
+        from src.core.exceptions import ValidationError
+
+        try:
+            from src.utils.validation.core import ValidationFramework
+
+            return ValidationFramework.validate_quantity(v)
+        except (ImportError, AttributeError, ValidationError):
+            # Fallback validation
+            from src.utils.decimal_utils import to_decimal
+
+            quote_qty = to_decimal(v)
+            if quote_qty <= 0:
+                raise ValidationError(
+                    "Quote quantity must be positive",
+                    field_name="quote_quantity",
+                    field_value=str(v),
+                    validation_rule="positive_number"
+                ) from None
+            return quote_qty
 
 
 class OrderResponse(BaseModel):
@@ -266,6 +319,11 @@ class OrderResponse(BaseModel):
     def id(self) -> str:
         """Alias for order_id for backward compatibility."""
         return self.order_id
+
+    @property
+    def remaining_quantity(self) -> Decimal:
+        """Calculate remaining quantity that hasn't been filled."""
+        return self.quantity - self.filled_quantity
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -397,7 +455,12 @@ class ArbitrageOpportunity(BaseModel):
 
             price = to_decimal(v)
             if price <= 0:
-                raise ValidationError("Prices must be positive") from None
+                raise ValidationError(
+                    "Prices must be positive",
+                    field_name="price",
+                    field_value=str(v),
+                    validation_rule="positive_number"
+                ) from None
             return price
 
     @field_validator("quantity")
@@ -416,7 +479,12 @@ class ArbitrageOpportunity(BaseModel):
 
             qty = to_decimal(v)
             if qty <= 0:
-                raise ValidationError("Quantity must be positive") from None
+                raise ValidationError(
+                    "Quantity must be positive",
+                    field_name="quantity",
+                    field_value=str(v),
+                    validation_rule="positive_number"
+                ) from None
             return qty
 
     @property

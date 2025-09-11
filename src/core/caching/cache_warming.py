@@ -337,7 +337,7 @@ class CacheWarmer(BaseComponent):
             self.register_warming_task(config_task)
 
     def register_risk_metrics_warming(
-        self, bot_ids: list[str], timeframes: list[str] | None = None
+        self, bot_ids: list[str] | None = None, timeframes: list[str] | None = None
     ) -> None:
         """Register risk metrics warming."""
         if timeframes is None:

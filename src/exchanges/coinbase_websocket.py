@@ -28,7 +28,8 @@ from src.core.exceptions import ExchangeConnectionError, ExchangeError
 from src.core.logging import get_logger
 
 # MANDATORY: Import from P-001
-from src.core.types import OrderBook, OrderSide, Ticker, Trade
+from src.core.types.market import OrderBook, OrderBookLevel, Ticker, Trade
+from src.core.types.trading import OrderSide
 
 # MANDATORY: Import from P-002A
 from src.error_handling.error_handler import ErrorHandler
@@ -42,23 +43,25 @@ class CoinbaseWebSocketHandler:
     through Coinbase's WebSocket API.
     """
 
-    def __init__(self, config: Config, exchange_name: str = "coinbase"):
+    def __init__(self, config: Config, exchange_name: str = "coinbase", error_handler: ErrorHandler | None = None):
         """
         Initialize Coinbase WebSocket handler.
 
         Args:
             config: Application configuration
             exchange_name: Exchange name (default: "coinbase")
+            error_handler: Error handler service (injected)
         """
         self.config = config
         self.exchange_name = exchange_name
-        self.error_handler = ErrorHandler(config)
+        # Use injected error handler if available
+        self.error_handler = error_handler or ErrorHandler(config)
 
         # Coinbase-specific configuration
-        self.api_key = config.exchange.coinbase_api_key
-        self.api_secret = config.exchange.coinbase_api_secret
-        self.passphrase = getattr(config.exchanges, "coinbase_passphrase", "")
-        self.sandbox = config.exchange.coinbase_sandbox
+        self.api_key = getattr(config.exchange, "coinbase_api_key", "")
+        self.api_secret = getattr(config.exchange, "coinbase_api_secret", "")
+        self.passphrase = getattr(config.exchange, "coinbase_passphrase", "")
+        self.sandbox = getattr(config.exchange, "coinbase_sandbox", False)
 
         # WebSocket URLs
         if self.sandbox:
@@ -78,14 +81,16 @@ class CoinbaseWebSocketHandler:
 
         # Connection state
         self.reconnect_attempts = 0
-        self.max_reconnect_attempts = 10
-        self.base_reconnect_delay = 1  # Base delay in seconds
-        self.max_reconnect_delay = 60  # Max delay in seconds
+        # Configuration-based reconnection parameters
+        ws_config = getattr(config, "websocket", {})
+        self.max_reconnect_attempts = getattr(ws_config, "max_reconnect_attempts", 10)
+        self.base_reconnect_delay = getattr(ws_config, "base_reconnect_delay_seconds", 1)
+        self.max_reconnect_delay = getattr(ws_config, "max_reconnect_delay_seconds", 60)
         self._shutdown = False
 
         # Health monitoring
         self.last_message_time = None
-        self.message_timeout = 60  # seconds
+        self.message_timeout = getattr(ws_config, "message_timeout_seconds", 60)
         self._health_check_task: asyncio.Task | None = None
 
         # Connection metrics
@@ -95,7 +100,7 @@ class CoinbaseWebSocketHandler:
 
         # Message queue for reconnection
         self.message_queue: list[dict] = []
-        self.max_queue_size = 1000
+        self.max_queue_size = getattr(ws_config, "max_queue_size", 1000)
 
         # Subscribed channels for reconnection
         self.subscribed_channels: set[str] = set()
@@ -114,6 +119,7 @@ class CoinbaseWebSocketHandler:
             bool: True if connection successful, False otherwise
         """
         async with self._connection_lock:
+            websocket_connection = None
             try:
                 if self._shutdown:
                     return False
@@ -121,10 +127,12 @@ class CoinbaseWebSocketHandler:
                 self.logger.info(f"Connecting to {self.exchange_name} WebSocket: {self.ws_url}")
 
                 # Connect to WebSocket
-                self.ws = await websockets.connect(
+                websocket_connection = await websockets.connect(
                     self.ws_url, ping_interval=20, ping_timeout=10, close_timeout=10
                 )
 
+                # Only assign after successful connection
+                self.ws = websocket_connection
                 self.connected = True
                 self.reconnect_attempts = 0
                 self._connection_start_time = datetime.now(timezone.utc)
@@ -146,6 +154,16 @@ class CoinbaseWebSocketHandler:
             except Exception as e:
                 self.logger.error(f"Failed to connect to {self.exchange_name} WebSocket: {e!s}")
                 self.connected = False
+
+                # Cleanup websocket connection on failure
+                if websocket_connection and not websocket_connection.closed:
+                    try:
+                        await websocket_connection.close()
+                    except Exception as cleanup_error:
+                        self.logger.error(
+                            f"Error closing websocket during cleanup: {cleanup_error}"
+                        )
+
                 await self._schedule_reconnect()
                 return False
 
@@ -156,24 +174,37 @@ class CoinbaseWebSocketHandler:
                 self._shutdown = True
                 self.logger.info(f"Disconnecting from {self.exchange_name} WebSocket")
 
-                # Cancel health monitoring
+                # Cancel health monitoring with proper resource cleanup
                 if self._health_check_task and not self._health_check_task.done():
                     self._health_check_task.cancel()
                     try:
                         await self._health_check_task
                     except asyncio.CancelledError:
                         pass
+                    except Exception as e:
+                        self.logger.error(f"Error canceling health check task: {e}")
+                    finally:
+                        # Always clear task reference
+                        self._health_check_task = None
 
-                # Close WebSocket connection
+                # Close WebSocket connection with proper resource cleanup
                 if self.ws and not self.ws.closed:
-                    await self.ws.close()
-                    self.ws = None
+                    try:
+                        await self.ws.close()
+                    except Exception as e:
+                        self.logger.error(f"Error closing WebSocket: {e}")
+                    finally:
+                        # Always clear websocket reference
+                        self.ws = None
 
-                # Clear state
+                # Clear state with proper error handling
                 self.connected = False
-                self.active_streams.clear()
-                self.callbacks.clear()
-                self.subscribed_channels.clear()
+                try:
+                    self.active_streams.clear()
+                    self.callbacks.clear()
+                    self.subscribed_channels.clear()
+                except Exception as e:
+                    self.logger.error(f"Error clearing state: {e}")
 
                 self.logger.info(f"Successfully disconnected from {self.exchange_name} WebSocket")
 
@@ -199,7 +230,9 @@ class CoinbaseWebSocketHandler:
             if self.api_key and self.api_secret:
                 subscribe_msg.update(self._create_auth_headers())
 
-            # Send subscription
+            # Send subscription with connection check
+            if not self.ws or self.ws.closed:
+                raise ExchangeConnectionError("WebSocket connection lost before subscription")
             await self.ws.send(json.dumps(subscribe_msg))
 
             # Track subscription
@@ -235,7 +268,9 @@ class CoinbaseWebSocketHandler:
             if self.api_key and self.api_secret:
                 subscribe_msg.update(self._create_auth_headers())
 
-            # Send subscription
+            # Send subscription with connection check
+            if not self.ws or self.ws.closed:
+                raise ExchangeConnectionError("WebSocket connection lost before subscription")
             await self.ws.send(json.dumps(subscribe_msg))
 
             # Track subscription
@@ -271,7 +306,9 @@ class CoinbaseWebSocketHandler:
             if self.api_key and self.api_secret:
                 subscribe_msg.update(self._create_auth_headers())
 
-            # Send subscription
+            # Send subscription with connection check
+            if not self.ws or self.ws.closed:
+                raise ExchangeConnectionError("WebSocket connection lost before subscription")
             await self.ws.send(json.dumps(subscribe_msg))
 
             # Track subscription
@@ -306,7 +343,9 @@ class CoinbaseWebSocketHandler:
             subscribe_msg = {"type": "subscribe", "channels": ["user"]}
             subscribe_msg.update(self._create_auth_headers())
 
-            # Send subscription
+            # Send subscription with connection check
+            if not self.ws or self.ws.closed:
+                raise ExchangeConnectionError("WebSocket connection lost before subscription")
             await self.ws.send(json.dumps(subscribe_msg))
 
             # Track subscription
@@ -396,12 +435,15 @@ class CoinbaseWebSocketHandler:
             # Convert to unified Ticker format
             ticker = Ticker(
                 symbol=message.get("product_id", ""),
-                bid=Decimal(str(message.get("bid", "0"))),
-                ask=Decimal(str(message.get("ask", "0"))),
+                bid_price=Decimal(str(message.get("bid", "0"))),
+                bid_quantity=Decimal("0"),  # Not available in Coinbase ticker
+                ask_price=Decimal(str(message.get("ask", "0"))),
+                ask_quantity=Decimal("0"),  # Not available in Coinbase ticker
                 last_price=Decimal(str(message.get("price", "0"))),
-                volume_24h=Decimal(str(message.get("volume_24h", "0"))),
-                price_change_24h=Decimal(str(message.get("price_change_24h", "0"))),
+                volume=Decimal(str(message.get("volume_24h", "0"))),
                 timestamp=datetime.fromisoformat(message.get("time", "").replace("Z", "+00:00")),
+                exchange="coinbase",
+                price_change=Decimal(str(message.get("price_change_24h", "0"))),
             )
 
             # Call registered callbacks
@@ -425,17 +467,21 @@ class CoinbaseWebSocketHandler:
         """
         try:
             # Convert to unified OrderBook format
+            bids = [
+                OrderBookLevel(price=Decimal(str(level[0])), quantity=Decimal(str(level[1])))
+                for level in message.get("bids", [])
+            ]
+            asks = [
+                OrderBookLevel(price=Decimal(str(level[0])), quantity=Decimal(str(level[1])))
+                for level in message.get("asks", [])
+            ]
+
             order_book = OrderBook(
                 symbol=message.get("product_id", ""),
-                bids=[
-                    [Decimal(str(level[0])), Decimal(str(level[1]))]
-                    for level in message.get("bids", [])
-                ],
-                asks=[
-                    [Decimal(str(level[0])), Decimal(str(level[1]))]
-                    for level in message.get("asks", [])
-                ],
+                bids=bids,
+                asks=asks,
                 timestamp=datetime.now(timezone.utc),
+                exchange="coinbase",
             )
 
             # Call registered callbacks
@@ -460,15 +506,19 @@ class CoinbaseWebSocketHandler:
         try:
             # Convert to unified Trade format
             trade = Trade(
-                id=message.get("trade_id", ""),
+                trade_id=str(message.get("trade_id", "")),
+                order_id=str(message.get("maker_order_id", message.get("taker_order_id", ""))),
                 symbol=message.get("product_id", ""),
-                # Convert to lowercase for consistency
-                side=message.get("side", "buy").lower(),
-                amount=Decimal(str(message.get("size", "0"))),
+                side=OrderSide.BUY
+                if message.get("side", "buy").lower() == "buy"
+                else OrderSide.SELL,
+                quantity=Decimal(str(message.get("size", "0"))),
                 price=Decimal(str(message.get("price", "0"))),
                 timestamp=datetime.fromisoformat(message.get("time", "").replace("Z", "+00:00")),
                 fee=Decimal("0"),  # Coinbase doesn't provide fee in trade data
-                fee_currency="USD",
+                fee_currency="USD",  # Default fee currency
+                exchange="coinbase",
+                is_maker=message.get("maker_order_id") is not None,
             )
 
             # Call registered callbacks
@@ -654,11 +704,15 @@ class CoinbaseWebSocketHandler:
         try:
             while not self._shutdown and self.ws and not self.ws.closed:
                 try:
-                    message = await self.ws.recv()
+                    # Add timeout to prevent hanging on recv()
+                    message = await asyncio.wait_for(self.ws.recv(), timeout=30.0)
                     await self._handle_message(message)
 
                 except websockets.exceptions.ConnectionClosed:
                     self.logger.warning("WebSocket connection closed")
+                    break
+                except asyncio.TimeoutError:
+                    self.logger.warning("WebSocket receive timeout, connection may be stale")
                     break
                 except Exception as e:
                     self.logger.error(f"Error receiving message: {e!s}")
@@ -720,12 +774,15 @@ class CoinbaseWebSocketHandler:
                 # Convert to unified Ticker format
                 ticker = Ticker(
                     symbol=symbol,
-                    bid=Decimal(str(data.get("best_bid", "0"))),
-                    ask=Decimal(str(data.get("best_ask", "0"))),
+                    bid_price=Decimal(str(data.get("best_bid", "0"))),
+                    bid_quantity=Decimal("0"),  # Not available in ticker
+                    ask_price=Decimal(str(data.get("best_ask", "0"))),
+                    ask_quantity=Decimal("0"),  # Not available in ticker
                     last_price=Decimal(str(data.get("price", "0"))),
-                    volume_24h=Decimal(str(data.get("volume_24h", "0"))),
-                    price_change_24h=Decimal("0"),  # Not available in ticker
+                    volume=Decimal(str(data.get("volume_24h", "0"))),
                     timestamp=datetime.fromisoformat(data.get("time", "").replace("Z", "+00:00")),
+                    exchange="coinbase",
+                    price_change=Decimal("0"),  # Not available in ticker
                 )
 
                 # Call registered callbacks
@@ -764,15 +821,16 @@ class CoinbaseWebSocketHandler:
                     size_decimal = Decimal(str(size))
 
                     if side == "buy":
-                        bids.append([price_decimal, size_decimal])
+                        bids.append(OrderBookLevel(price=price_decimal, quantity=size_decimal))
                     else:
-                        asks.append([price_decimal, size_decimal])
+                        asks.append(OrderBookLevel(price=price_decimal, quantity=size_decimal))
 
                 order_book = OrderBook(
                     symbol=symbol,
                     bids=bids,
                     asks=asks,
                     timestamp=datetime.fromisoformat(data.get("time", "").replace("Z", "+00:00")),
+                    exchange="coinbase",
                 )
 
                 # Call registered callbacks
@@ -802,13 +860,17 @@ class CoinbaseWebSocketHandler:
             if channel_key in self.callbacks:
                 # Convert to unified Trade format
                 trade = Trade(
-                    id=str(data.get("trade_id", "")),
+                    trade_id=str(data.get("trade_id", "")),
+                    order_id=str(data.get("maker_order_id", data.get("taker_order_id", ""))),
                     symbol=symbol,
                     side=OrderSide.BUY if data.get("side") == "buy" else OrderSide.SELL,
-                    amount=Decimal(str(data.get("size", "0"))),
+                    quantity=Decimal(str(data.get("size", "0"))),
                     price=Decimal(str(data.get("price", "0"))),
                     timestamp=datetime.fromisoformat(data.get("time", "").replace("Z", "+00:00")),
                     fee=Decimal("0"),
+                    fee_currency="USD",
+                    exchange="coinbase",
+                    is_maker=data.get("maker_order_id") is not None,
                 )
 
                 # Call registered callbacks
@@ -882,8 +944,10 @@ class CoinbaseWebSocketHandler:
             f"(attempt {self.reconnect_attempts}/{self.max_reconnect_attempts})"
         )
 
-        # Schedule reconnection
-        asyncio.create_task(self._reconnect_after_delay(delay))
+        # Schedule reconnection with proper task management
+        reconnect_task = asyncio.create_task(self._reconnect_after_delay(delay))
+        # Store task to prevent garbage collection
+        reconnect_task.add_done_callback(lambda t: None)
 
     async def _reconnect_after_delay(self, delay: float) -> None:
         """

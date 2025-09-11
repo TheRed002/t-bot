@@ -1,3 +1,4 @@
+
 """
 Configuration Migration Helper for T-Bot Trading System.
 

@@ -29,13 +29,16 @@ from src.core.types import OrderRequest, OrderResponse, OrderSide, OrderStatus, 
 
 # MANDATORY: Import from P-002A
 from src.error_handling.error_handler import ErrorHandler
-from src.error_handling.recovery_scenarios import OrderRejectionRecovery
-from src.utils import (
-    FEE_STRUCTURES,
-    PRECISION_LEVELS,
-    normalize_price,
-    round_to_precision_decimal,
-    to_decimal,
+
+# Fee structures and precision levels are retrieved via exchange info
+from src.utils.data_utils import normalize_price
+from src.utils.decimal_utils import round_to_precision, to_decimal
+from src.utils.exchange_conversion_utils import ExchangeConversionUtils
+from src.utils.exchange_error_utils import ExchangeErrorHandler
+from src.utils.exchange_order_utils import (
+    AssetPrecisionUtils,
+    FeeCalculationUtils,
+    OrderStatusUtils,
 )
 
 # MANDATORY: Import from P-007A (utils)
@@ -57,7 +60,7 @@ class BinanceOrderManager:
     CRITICAL: This class handles all Binance-specific order operations.
     """
 
-    def __init__(self, config: Config, client, exchange_name: str = "binance"):
+    def __init__(self, config: Config, client, exchange_name: str = "binance", error_handler: ErrorHandler | None = None):
         """
         Initialize Binance order manager.
 
@@ -65,10 +68,14 @@ class BinanceOrderManager:
             config: Application configuration
             client: Binance client instance
             exchange_name: Exchange name (default: "binance")
+            error_handler: Error handler service (injected)
         """
         self.config = config
         self.client = client
         self.exchange_name = exchange_name
+
+        # Store injected error handler
+        self._injected_error_handler = error_handler
 
         # Initialize logger
         self.logger = get_logger(self.__class__.__module__)
@@ -78,8 +85,9 @@ class BinanceOrderManager:
         self.filled_orders: dict[str, dict] = {}
         self.cancelled_orders: dict[str, dict] = {}
 
-        # Error handling
-        self.error_handler = ErrorHandler(config)
+        # Error handling - use injected handler if available
+        self.error_handler = self._injected_error_handler or ErrorHandler(config)
+        self.exchange_error_handler = ExchangeErrorHandler("binance", config, self.error_handler)
 
         # Order monitoring
         self.order_monitor_task: asyncio.Task | None = None
@@ -87,46 +95,22 @@ class BinanceOrderManager:
 
         self.logger.info("Initialized Binance order manager")
 
+    def _get_asset_precision(self, symbol: str, precision_type: str = "quantity") -> int:
+        """Get asset-specific precision - delegated to shared utility."""
+        return AssetPrecisionUtils.get_asset_precision(symbol, precision_type)
+
     async def _handle_order_error(
         self, error: Exception, operation: str, order: OrderRequest = None
     ) -> None:
         """
-        Handle order-related errors using the error handler.
+        Handle order-related errors using the shared error handler.
 
         Args:
             error: The exception that occurred
             operation: The operation being performed
             order: The order involved in the operation
         """
-        try:
-            # Create error context
-            error_context = self.error_handler.create_error_context(
-                error=error,
-                component="binance_order_manager",
-                operation=operation,
-                symbol=order.symbol if order else None,
-                order_id=order.client_order_id if order else None,
-                details={
-                    "exchange_name": self.exchange_name,
-                    "operation": operation,
-                    "order_type": order.order_type.value if order else None,
-                },
-            )
-
-            # Determine recovery scenario
-            if isinstance(error, OrderRejectionError):
-                recovery_scenario = OrderRejectionRecovery(self.config)
-            elif isinstance(error, ValidationError | ExecutionError):
-                recovery_scenario = None
-            else:
-                recovery_scenario = None
-
-            # Handle the error
-            await self.error_handler.handle_error(error, error_context, recovery_scenario)
-
-        except Exception as e:
-            # Fallback to basic logging if error handling fails
-            self.logger.error(f"Error handling failed for {operation}: {e!s}")
+        await self.exchange_error_handler.handle_exchange_error(error, operation, order=order)
 
     async def place_market_order(self, order: OrderRequest) -> OrderResponse:
         """
@@ -139,8 +123,17 @@ class BinanceOrderManager:
             OrderResponse: Order response with execution details
         """
         try:
-            # Validate order
-            self._validate_market_order(order)
+            # Validate order using validation framework
+            validation_dict = {
+                "symbol": order.symbol,
+                "side": order.side.value.upper(),
+                "type": order.order_type.value.upper(),
+                "quantity": str(order.quantity),
+            }
+            # Only include price for non-market orders
+            if order.price is not None:
+                validation_dict["price"] = str(order.price)
+            ValidationFramework.validate_order(validation_dict)
 
             # Convert to Binance format
             _ = self._convert_market_order_to_binance(order)
@@ -153,8 +146,8 @@ class BinanceOrderManager:
                 newClientOrderId=order.client_order_id,
             )
 
-            # Convert response
-            response = self._convert_binance_order_to_response(result)
+            # Convert response using shared utilities
+            response = ExchangeConversionUtils.convert_binance_order_to_response(result)
 
             # Track order
             self._track_order(response)
@@ -183,8 +176,17 @@ class BinanceOrderManager:
             OrderResponse: Order response with execution details
         """
         try:
-            # Validate order
-            self._validate_limit_order(order)
+            # Validate order using validation framework
+            validation_dict = {
+                "symbol": order.symbol,
+                "side": order.side.value.upper(),
+                "type": order.order_type.value.upper(),
+                "quantity": str(order.quantity),
+            }
+            # Always include price for limit orders
+            if order.price is not None:
+                validation_dict["price"] = str(order.price)
+            ValidationFramework.validate_order(validation_dict)
 
             # Convert to Binance format
             _ = self._convert_limit_order_to_binance(order)
@@ -199,8 +201,8 @@ class BinanceOrderManager:
                 newClientOrderId=order.client_order_id,
             )
 
-            # Convert response
-            response = self._convert_binance_order_to_response(result)
+            # Convert response using shared utilities
+            response = ExchangeConversionUtils.convert_binance_order_to_response(result)
 
             # Track order
             self._track_order(response)
@@ -229,8 +231,17 @@ class BinanceOrderManager:
             OrderResponse: Order response with execution details
         """
         try:
-            # Validate order
-            self._validate_stop_loss_order(order)
+            # Validate order using validation framework
+            validation_dict = {
+                "symbol": order.symbol,
+                "side": order.side.value.upper(),
+                "type": order.order_type.value.upper(),
+                "quantity": str(order.quantity),
+            }
+            # Include price and stop price for stop-loss orders
+            if order.price is not None:
+                validation_dict["price"] = str(order.price)
+            ValidationFramework.validate_order(validation_dict)
 
             # Convert to Binance format
             _ = self._convert_stop_loss_order_to_binance(order)
@@ -244,8 +255,8 @@ class BinanceOrderManager:
                 newClientOrderId=order.client_order_id,
             )
 
-            # Convert response
-            response = self._convert_binance_order_to_response(result)
+            # Convert response using shared utilities
+            response = ExchangeConversionUtils.convert_binance_order_to_response(result)
 
             # Track order
             self._track_order(response)
@@ -274,8 +285,17 @@ class BinanceOrderManager:
             OrderResponse: Order response with execution details
         """
         try:
-            # Validate order
-            self._validate_oco_order(order)
+            # Validate order using validation framework
+            validation_dict = {
+                "symbol": order.symbol,
+                "side": order.side.value.upper(),
+                "type": order.order_type.value.upper(),
+                "quantity": str(order.quantity),
+            }
+            # Include price for OCO orders
+            if order.price is not None:
+                validation_dict["price"] = str(order.price)
+            ValidationFramework.validate_order(validation_dict)
 
             # Convert to Binance format
             _ = self._convert_oco_order_to_binance(order)
@@ -450,22 +470,13 @@ class BinanceOrderManager:
             Decimal: Calculated fee amount
         """
         try:
-            # Use fee structure from constants
-            fee_structure = FEE_STRUCTURES.get("binance", FEE_STRUCTURES.get("default", {}))
-            fee_rate = Decimal(str(fee_structure.get("taker_fee", "0.001")))  # Default 0.1%
-
-            # Calculate fee based on order value using helper functions
-            # Keep everything as Decimal for precision
+            # Use shared utility for fee calculation
             normalized_price = to_decimal(normalize_price(fill_price, order.symbol))
-            precision = PRECISION_LEVELS.get("binance", {}).get("fee", 8)
-            normalized_quantity = round_to_precision_decimal(order.quantity, precision)
-
+            quantity_precision = self._get_asset_precision(order.symbol, "quantity")
+            normalized_quantity = round_to_precision(order.quantity, quantity_precision)
             order_value = normalized_quantity * normalized_price
-            fee = order_value * fee_rate
 
-            # Round fee to appropriate precision
-            rounded_fee = round_to_precision_decimal(fee, precision)
-            return rounded_fee
+            return FeeCalculationUtils.calculate_fee(order_value, "binance", order.symbol)
 
         except Exception as e:
             self.logger.error(f"Error calculating fees: {e!s}")
@@ -541,7 +552,8 @@ class BinanceOrderManager:
     def _convert_market_order_to_binance(self, order: OrderRequest) -> dict[str, Any]:
         """Convert market order to Binance format."""
         # Use helper function for quantity precision
-        rounded_quantity = round_to_precision_decimal(order.quantity, 8)
+        quantity_precision = self._get_asset_precision(order.symbol, "quantity")
+        rounded_quantity = round_to_precision(order.quantity, quantity_precision)
 
         return {
             "symbol": order.symbol,
@@ -555,7 +567,8 @@ class BinanceOrderManager:
         """Convert limit order to Binance format."""
         # Use helper functions for precision and normalization
         normalized_price = normalize_price(order.price, order.symbol)
-        rounded_quantity = round_to_precision_decimal(order.quantity, 8)
+        quantity_precision = self._get_asset_precision(order.symbol, "quantity")
+        rounded_quantity = round_to_precision(order.quantity, quantity_precision)
 
         return {
             "symbol": order.symbol,
@@ -571,7 +584,8 @@ class BinanceOrderManager:
         """Convert stop-loss order to Binance format."""
         # Use helper functions for precision and normalization
         normalized_stop_price = normalize_price(order.stop_price, order.symbol)
-        rounded_quantity = round_to_precision_decimal(order.quantity, 8)
+        quantity_precision = self._get_asset_precision(order.symbol, "quantity")
+        rounded_quantity = round_to_precision(order.quantity, quantity_precision)
 
         return {
             "symbol": order.symbol,
@@ -587,7 +601,8 @@ class BinanceOrderManager:
         # Use helper functions for precision and normalization
         normalized_price = normalize_price(order.price, order.symbol)
         normalized_stop_price = normalize_price(order.stop_price, order.symbol)
-        rounded_quantity = round_to_precision_decimal(order.quantity, 8)
+        quantity_precision = self._get_asset_precision(order.symbol, "quantity")
+        rounded_quantity = round_to_precision(order.quantity, quantity_precision)
 
         return {
             "symbol": order.symbol,
@@ -607,12 +622,21 @@ class BinanceOrderManager:
             client_order_id=result.get("clientOrderId"),
             symbol=result["symbol"],
             side=OrderSide.BUY if result["side"] == "BUY" else OrderSide.SELL,
-            order_type=self._convert_binance_type_to_order_type(result["type"]),
-            quantity=Decimal(str(result["origQty"])),
-            price=Decimal(str(result["price"])) if result.get("price") else None,
-            filled_quantity=Decimal(str(result["executedQty"])),
-            status=result["status"],
-            timestamp=datetime.fromtimestamp(result["time"] / 1000, tz=timezone.utc),
+            order_type=self._convert_binance_type_to_order_type(result.get("type", "LIMIT")),
+            quantity=Decimal(str(result.get("origQty", result.get("quantity", "0")))),
+            price=Decimal(str(result["price"]))
+            if result.get("price") and result["price"] != "0.00000000"
+            else None,
+            filled_quantity=Decimal(str(result.get("executedQty", "0"))),
+            status=self._convert_binance_status_to_order_status(result.get("status", "NEW")),
+            created_at=datetime.fromtimestamp(
+                result.get(
+                    "transactTime", result.get("time", int(datetime.now().timestamp() * 1000))
+                )
+                / 1000,
+                tz=timezone.utc,
+            ),
+            exchange=self.exchange_name,
         )
 
     def _convert_binance_oco_order_to_response(self, result: dict) -> OrderResponse:
@@ -640,15 +664,7 @@ class BinanceOrderManager:
 
     def _convert_binance_status_to_order_status(self, status: str) -> OrderStatus:
         """Convert Binance order status to OrderStatus enum."""
-        status_mapping = {
-            "NEW": OrderStatus.PENDING,
-            "PARTIALLY_FILLED": OrderStatus.PARTIALLY_FILLED,
-            "FILLED": OrderStatus.FILLED,
-            "CANCELED": OrderStatus.CANCELLED,
-            "REJECTED": OrderStatus.REJECTED,
-            "EXPIRED": OrderStatus.EXPIRED,
-        }
-        return status_mapping.get(status, OrderStatus.UNKNOWN)
+        return OrderStatusUtils.convert_status(status, "binance")
 
     # Order tracking methods
 
@@ -662,7 +678,7 @@ class BinanceOrderManager:
             "quantity": str(order.quantity),
             "price": str(order.price) if order.price else None,
             "status": order.status,
-            "timestamp": order.timestamp.isoformat(),
+            "timestamp": order.created_at.isoformat(),
         }
 
         self.pending_orders[order.id] = order_info

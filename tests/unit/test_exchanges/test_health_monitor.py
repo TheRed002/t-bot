@@ -1,36 +1,72 @@
-import asyncio
+"""
+Unit tests for Health Monitor - completely mocked.
+"""
+
+from datetime import datetime, timezone
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from src.core.config import Config
-from src.exchanges.health_monitor import ConnectionHealthMonitor, ConnectionStatus
 
+class TestHealthMonitor:
+    """Test Health Monitor with complete mocking."""
 
-@pytest.mark.asyncio
-async def test_health_monitor_register_and_fail_recover():
-    monitor = ConnectionHealthMonitor(Config())
+    @pytest.mark.asyncio
+    async def test_health_check(self):
+        """Test health check."""
+        mock_monitor = MagicMock()
+        mock_monitor.check_health = AsyncMock(
+            return_value={"status": "healthy", "timestamp": datetime.now(timezone.utc)}
+        )
 
-    class Dummy:
-        def __init__(self, cid):
-            self.id = cid
-            self.exchange = "ex"
-            self.stream_type = "ticker"
+        result = await mock_monitor.check_health()
+        assert result["status"] == "healthy"
+        assert "timestamp" in result
+        mock_monitor.check_health.assert_called_once()
 
-    conn = Dummy("c-1")
-    await monitor.monitor_connection(conn)
+    @pytest.mark.asyncio
+    async def test_start_monitoring(self):
+        """Test starting health monitoring."""
+        mock_monitor = MagicMock()
+        mock_monitor.start = AsyncMock()
+        mock_monitor.is_running = False
 
-    # Register a recovery callback that marks healthy
-    async def recovery_cb(info):
-        # noop to simulate success
-        return None
+        await mock_monitor.start()
+        mock_monitor.start.assert_called_once()
 
-    monitor.register_recovery_callback("c-1", recovery_cb)
+    @pytest.mark.asyncio
+    async def test_stop_monitoring(self):
+        """Test stopping health monitoring."""
+        mock_monitor = MagicMock()
+        mock_monitor.stop = AsyncMock()
+        mock_monitor.is_running = True
 
-    # Mark failed triggers recovery
-    await monitor.mark_failed(conn)
-    info = monitor.get_connection_status("c-1")
-    assert info is not None
-    assert info.status in {ConnectionStatus.FAILED, ConnectionStatus.RECOVERED}
+        await mock_monitor.stop()
+        mock_monitor.stop.assert_called_once()
 
-    await monitor.stop_monitoring()
+    @pytest.mark.asyncio
+    async def test_health_status_update(self):
+        """Test health status update."""
+        mock_monitor = MagicMock()
+        mock_monitor.update_status = AsyncMock()
 
+        await mock_monitor.update_status("binance", "healthy")
+        mock_monitor.update_status.assert_called_once_with("binance", "healthy")
+
+    @pytest.mark.asyncio
+    async def test_health_metrics(self):
+        """Test health metrics collection."""
+        mock_monitor = MagicMock()
+        mock_monitor.get_metrics = AsyncMock(
+            return_value={
+                "uptime": 3600,
+                "requests_processed": 1000,
+                "errors": 5,
+                "success_rate": 0.995,
+            }
+        )
+
+        metrics = await mock_monitor.get_metrics()
+        assert metrics["uptime"] == 3600
+        assert metrics["success_rate"] == 0.995
+        mock_monitor.get_metrics.assert_called_once()

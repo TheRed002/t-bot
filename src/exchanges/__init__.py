@@ -1,20 +1,19 @@
 """
 Exchange module initialization.
 
-This module initializes all exchange implementations and registers them
-with the exchange factory for dynamic instantiation.
-
-CRITICAL: This integrates with P-001 (core types, exceptions, config),
-P-002A (error handling), and P-003 (base exchange interface) components.
+This module provides simplified exchange implementations.
 """
 
-import logging
+# Logging provided by get_logger
+from typing import Any, Optional
+
+from src.core.dependency_injection import DependencyInjector
+from src.core.logging import get_logger
 
 # Module level logger
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
-# Import base exchange interface
-# Import exchange-related types
+# Import base exchange interface and core types
 from src.core.types import (
     ExchangeInfo,
     OrderBook,
@@ -25,12 +24,8 @@ from src.core.types import (
 
 from .base import BaseExchange
 from .connection_manager import ConnectionManager
-
-# Import exchange factory
 from .factory import ExchangeFactory
-
-# Import rate limiter and connection manager
-from .rate_limiter import RateLimiter
+from .service import ExchangeService
 from .types import (
     ExchangeCapability,
     ExchangeRateLimit,
@@ -173,41 +168,78 @@ def register_exchanges(factory: ExchangeFactory) -> None:
         else:
             logger.warning("Coinbase exchange not registered - dependencies missing")
 
-    # TODO: Register other exchanges as they are implemented
+    # Registry complete for current supported exchanges
 
     logger.info(f"Registered {len(factory.get_supported_exchanges())} exchanges")
+
+
+def register_exchange_services_with_di(
+    config: Any, injector: DependencyInjector | None = None
+) -> None:
+    """
+    Register exchange services with the global dependency injection container.
+
+    Args:
+        config: System configuration
+        injector: Optional dependency injector instance
+    """
+    injector = injector or DependencyInjector.get_instance()
+
+    try:
+        # Register config if not already registered
+        try:
+            if not hasattr(injector, "has_service") or not injector.has_service("config"):
+                injector.register_service("config", config, singleton=True)
+        except AttributeError:
+            injector.register("config", config)
+
+        # Simple factory function for ExchangeFactory
+        def create_exchange_factory():
+            return ExchangeFactory(config, None)
+
+        # Register ExchangeFactory as singleton
+        try:
+            if not hasattr(injector, "has_service") or not injector.has_service("ExchangeFactory"):
+                injector.register_factory(
+                    "ExchangeFactory", create_exchange_factory, singleton=True
+                )
+        except AttributeError:
+            injector.register("ExchangeFactory", create_exchange_factory)
+
+        # Setup exchanges
+        factory = create_exchange_factory()
+        register_exchanges(factory)
+
+        logger.info("Exchange services registered with DI container")
+
+    except Exception as e:
+        logger.error(f"Failed to register exchange services with DI: {e}")
+        raise
 
 
 # Export main classes
 __all__ = [
     # Base classes
     "BaseExchange",
-    # Binance implementation (P-004)
+    # Exchange implementations
     "BinanceExchange",
-    "BinanceOrderManager",
-    "BinanceWebSocketHandler",
-    # Coinbase implementation (P-006)
     "CoinbaseExchange",
-    "CoinbaseOrderManager",
-    "CoinbaseWebSocketHandler",
+    "OKXExchange",
+    "MockExchange",
+    # Services
     "ConnectionManager",
-    "ExchangeCapability",
     "ExchangeFactory",
+    "ExchangeService",
     # Types
+    "ExchangeCapability",
     "ExchangeInfo",
     "ExchangeRateLimit",
     "ExchangeTradingPair",
-    # Mock implementation
-    "MockExchange",
-    # OKX implementation (P-005)
-    "OKXExchange",
-    "OKXOrderManager",
-    "OKXWebSocketManager",
     "OrderBook",
     "OrderStatus",
-    "RateLimiter",
     "Ticker",
     "Trade",
-    # Utility function
+    # Utility functions
     "register_exchanges",
+    "register_exchange_services_with_di",
 ]

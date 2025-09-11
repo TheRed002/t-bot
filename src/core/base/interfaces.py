@@ -517,3 +517,81 @@ class StrategyServiceInterface(WebServiceInterface):
     async def validate_strategy_config(self, strategy_name: str, config: dict[str, Any]) -> bool:
         """Validate strategy configuration."""
         ...
+
+
+# Infrastructure Service Interfaces
+class CacheClientInterface(Protocol):
+    """Interface for cache client implementations (Redis, etc.)."""
+
+    async def connect(self) -> None:
+        """Connect to the cache server."""
+        ...
+
+    async def disconnect(self) -> None:
+        """Disconnect from the cache server."""
+        ...
+
+    async def ping(self) -> bool:
+        """Ping the cache server."""
+        ...
+
+    async def get(self, key: str, namespace: str = "cache") -> Any | None:
+        """Get value from cache."""
+        ...
+
+    async def set(self, key: str, value: Any, ttl: int | None = None, namespace: str = "cache") -> bool:
+        """Set value in cache with optional TTL."""
+        ...
+
+    async def delete(self, key: str, namespace: str = "cache") -> bool:
+        """Delete key from cache."""
+        ...
+
+    async def exists(self, key: str, namespace: str = "cache") -> bool:
+        """Check if key exists in cache."""
+        ...
+
+    async def expire(self, key: str, ttl: int, namespace: str = "cache") -> bool:
+        """Set expiration for existing key."""
+        ...
+
+    async def info(self) -> dict[str, Any]:
+        """Get cache server information."""
+        ...
+
+    def _get_namespaced_key(self, key: str, namespace: str) -> str:
+        """Get namespaced key."""
+        ...
+
+    @property
+    def client(self) -> Any:
+        """Get underlying client instance."""
+        ...
+
+
+class DatabaseServiceInterface(Protocol):
+    """Interface for database service implementations."""
+
+    async def start(self) -> None:
+        """Start database service."""
+        ...
+
+    async def stop(self) -> None:
+        """Stop database service."""
+        ...
+
+    async def health_check(self) -> HealthCheckResult:
+        """Perform database health check."""
+        ...
+
+    def get_performance_metrics(self) -> dict[str, Any]:
+        """Get database performance metrics."""
+        ...
+
+    async def execute_query(self, query: str, params: dict[str, Any] | None = None) -> Any:
+        """Execute a database query."""
+        ...
+
+    async def get_connection_pool_status(self) -> dict[str, Any]:
+        """Get connection pool status."""
+        ...

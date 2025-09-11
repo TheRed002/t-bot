@@ -238,7 +238,9 @@ class TestInjectable:
         """Test injectable decorator with dependencies."""
         # Clear and setup dependencies in global injector
         injector.clear()
-        injector.register_service("db_service", DatabaseService())
+        from unittest.mock import MagicMock
+        mock_connection_manager = MagicMock()
+        injector.register_service("db_service", DatabaseService(connection_string="test_connection"))
         injector.register_service("cache_service", CacheService())
 
         @Injectable()

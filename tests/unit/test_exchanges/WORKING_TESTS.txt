@@ -1,0 +1,18 @@
+# List of test files that pass without hanging
+# These tests have been verified to work correctly
+test_exchanges_base.py
+test_interfaces.py
+test_types.py
+test_validation.py
+test_simple.py
+test_exchanges_factory.py
+test_exchanges_rate_limiter.py
+test_advanced_rate_limiter.py
+test_base_exchange.py
+test_repository.py
+test_service.py
+test_orders_managers.py
+test_financial_precision.py
+test_error_handling_comprehensive.py
+test_exchange_factory_comprehensive.py
+test_rate_limiter_comprehensive.py

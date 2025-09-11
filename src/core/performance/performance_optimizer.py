@@ -22,6 +22,7 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
 from src.core.base.component import BaseComponent
+from src.core.base.interfaces import DatabaseServiceInterface
 from src.core.exceptions import PerformanceError
 from src.core.logging import get_logger
 
@@ -32,7 +33,6 @@ if TYPE_CHECKING:
     from src.core.performance.memory_optimizer import MemoryOptimizer
     from src.core.performance.performance_monitor import AlertLevel, PerformanceMonitor
     from src.core.performance.trading_profiler import TradingOperation, TradingOperationOptimizer
-from src.database.service import DatabaseService
 
 # from src.exchanges.connection_pool import ConnectionPoolManager
 # Removed to fix circular dependency
@@ -64,8 +64,8 @@ class PerformanceOptimizer(BaseComponent):
         self.performance_monitor: PerformanceMonitor | None = None
         self.trading_profiler: TradingOperationOptimizer | None = None
         self.cache_layer: UnifiedCacheLayer | None = None
-        self.database_service: DatabaseService | None = None
-        # self.connection_pool_manager: ConnectionPoolManager | None = None
+        self.database_service: DatabaseServiceInterface | None = None
+        # self.connection_pool_manager: Optional[ConnectionPoolManager] = None
         # Commented to fix circular dependency
 
         # Performance targets
@@ -155,15 +155,17 @@ class PerformanceOptimizer(BaseComponent):
 
     async def _initialize_database_service(self) -> None:
         """Initialize database service."""
-        from src.core.config.service import ConfigService
-        from src.utils.validation.service import ValidationService
+        if self._dependency_container:
+            try:
+                self.database_service = self._dependency_container.resolve("DatabaseServiceInterface")
+                if hasattr(self.database_service, "start"):
+                    await self.database_service.start()
+                self.logger.info("Database service initialized via DI")
+            except (AttributeError, KeyError, TypeError) as e:
+                self.logger.debug(f"Could not resolve DatabaseServiceInterface from DI container: {e}")
 
-        config_service = ConfigService(self.config.to_dict())
-        validation_service = ValidationService(config_service)
-
-        self.database_service = DatabaseService(config_service, validation_service)
-        await self.database_service.start()
-        self.logger.info("Database service initialized")
+        if not self.database_service:
+            self.logger.warning("Database service not available - performance optimization will be limited")
 
     async def _initialize_connection_pools(self) -> None:
         """Initialize connection pool management."""

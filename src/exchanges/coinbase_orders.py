@@ -29,6 +29,12 @@ from src.core.types import OrderRequest, OrderResponse, OrderSide, OrderStatus, 
 # MANDATORY: Import from P-002A
 from src.error_handling.error_handler import ErrorHandler
 from src.utils import ValidationFramework, normalize_price, round_to_precision
+from src.utils.exchange_conversion_utils import ExchangeConversionUtils
+from src.utils.exchange_order_utils import (
+    AssetPrecisionUtils,
+    FeeCalculationUtils,
+    OrderStatusUtils,
+)
 
 # Note: Using generic Exception handling for REST API as no specific
 # exceptions are documented
@@ -46,17 +52,19 @@ class CoinbaseOrderManager:
     - Order history and analytics
     """
 
-    def __init__(self, config: Config, exchange_name: str = "coinbase"):
+    def __init__(self, config: Config, exchange_name: str = "coinbase", error_handler: ErrorHandler | None = None):
         """
         Initialize Coinbase order manager.
 
         Args:
             config: Application configuration
             exchange_name: Exchange name (default: "coinbase")
+            error_handler: Error handler service (injected)
         """
         self.config = config
         self.exchange_name = exchange_name
-        self.error_handler = ErrorHandler(config)
+        # Use injected error handler if available
+        self.error_handler = error_handler or ErrorHandler(config)
 
         # Initialize logger
         self.logger = get_logger(self.__class__.__module__)
@@ -78,12 +86,38 @@ class CoinbaseOrderManager:
         self.total_fees: dict[str, Decimal] = {}
         self.fee_currency = "USD"
 
-        # Initialize rate limiter
-        from src.exchanges.rate_limiter import RateLimiter
+        # Initialize simple rate limiter using available infrastructure
 
-        self.rate_limiter = RateLimiter(config, exchange_name)
+        # Create a simple rate limiter instance for this exchange
+        self.rate_limiter = self._create_rate_limiter(config)
 
         self.logger.info(f"Initialized {exchange_name} order manager")
+
+    def _get_asset_precision(self, symbol: str, precision_type: str = "quantity") -> int:
+        """Get asset-specific precision - delegated to shared utility."""
+        return AssetPrecisionUtils.get_asset_precision(symbol, precision_type)
+
+    def _create_rate_limiter(self, config: Config) -> Any:
+        """Create a simple rate limiter for this exchange."""
+        # Simple rate limiter using decorators
+        class SimpleRateLimiter:
+            def __init__(self):
+                self.last_request_time = 0.0
+                self.min_interval = 1.0 / 10  # 10 requests per second max
+
+            async def acquire(self, resource_type: str, amount: int) -> None:
+                """Simple rate limiting."""
+                import asyncio
+                import time
+                current_time = time.time()
+                time_since_last = current_time - self.last_request_time
+
+                if time_since_last < self.min_interval:
+                    await asyncio.sleep(self.min_interval - time_since_last)
+
+                self.last_request_time = time.time()
+
+        return SimpleRateLimiter()
 
     async def initialize(self) -> bool:
         """
@@ -142,8 +176,8 @@ class CoinbaseOrderManager:
             # Place order
             result = await self.client.create_order(**coinbase_order)
 
-            # Convert response to unified format
-            order_response = self._convert_coinbase_order_to_response(result)
+            # Convert response to unified format using shared utilities
+            order_response = ExchangeConversionUtils.convert_coinbase_order_to_response(result)
 
             # Track order
             self.pending_orders[order_response.id] = order
@@ -160,7 +194,7 @@ class CoinbaseOrderManager:
             self.logger.error(f"Failed to place order: {e!s}")
             raise ExecutionError(f"Failed to place order: {e!s}")
 
-    async def cancel_order(self, order_id: str) -> bool:
+    async def cancel_order(self, order_id: str, symbol: str) -> bool:
         """
         Cancel an existing order on Coinbase exchange.
 
@@ -218,7 +252,7 @@ class CoinbaseOrderManager:
 
         except Exception as e:
             self.logger.error(f"Failed to get order status for {order_id}: {e!s}")
-            return OrderStatus.UNKNOWN
+            return OrderStatus.REJECTED
 
     async def get_order_details(self, order_id: str) -> OrderResponse | None:
         """
@@ -237,8 +271,8 @@ class CoinbaseOrderManager:
             # Get order details
             order = await self.client.get_order(order_id)
 
-            # Convert to unified format
-            order_response = self._convert_coinbase_order_to_response(order)
+            # Convert to unified format using shared utilities
+            order_response = ExchangeConversionUtils.convert_coinbase_order_to_response(order)
 
             return order_response
 
@@ -266,7 +300,7 @@ class CoinbaseOrderManager:
             # Convert to unified format
             order_responses = []
             for order in orders:
-                order_response = self._convert_coinbase_order_to_response(order)
+                order_response = ExchangeConversionUtils.convert_coinbase_order_to_response(order)
                 order_responses.append(order_response)
 
             return order_responses
@@ -298,7 +332,7 @@ class CoinbaseOrderManager:
             # Convert to unified format
             order_responses = []
             for order in orders:
-                order_response = self._convert_coinbase_order_to_response(order)
+                order_response = ExchangeConversionUtils.convert_coinbase_order_to_response(order)
                 order_responses.append(order_response)
 
             return order_responses
@@ -345,16 +379,18 @@ class CoinbaseOrderManager:
             # Get product information for fee calculation
             _ = await self.client.get_product(order.symbol)
 
-            # Calculate fees based on order type and size
-            if order.order_type == OrderType.MARKET:
-                # Market orders typically have higher fees
-                fee_rate = Decimal("0.006")  # 0.6% for market orders
+            # Calculate fee amount using shared utility
+            if order.price:
+                order_value = order.quantity * order.price
+                is_maker = order.order_type == OrderType.LIMIT
+                fee_amount = FeeCalculationUtils.calculate_fee(order_value, "coinbase", order.symbol, is_maker)
+                fee_rates = FeeCalculationUtils.get_fee_rates("coinbase")
+                fee_rate = fee_rates["maker"] if is_maker else fee_rates["taker"]
             else:
-                # Limit orders have lower fees
-                fee_rate = Decimal("0.004")  # 0.4% for limit orders
-
-            # Calculate fee amount
-            fee_amount = order.quantity * fee_rate
+                # For market orders without price, use quantity-based approximation
+                fee_rates = FeeCalculationUtils.get_fee_rates("coinbase")
+                fee_rate = fee_rates["taker"]  # Market orders are always taker
+                fee_amount = order.quantity * fee_rate
 
             return {
                 "fee_rate": fee_rate,
@@ -458,22 +494,25 @@ class CoinbaseOrderManager:
             "order_configuration": {},
         }
 
+        # Get precision for the symbol
+        quantity_precision = self._get_asset_precision(order.symbol, "quantity")
+
         # Configure order based on type
         if order.order_type == OrderType.MARKET:
             coinbase_order["order_configuration"] = {
-                "market_market_ioc": {"quote_size": str(round_to_precision(order.quantity, 8))}
+                "market_market_ioc": {"quote_size": str(round_to_precision(order.quantity, quantity_precision))}
             }
         elif order.order_type == OrderType.LIMIT:
             coinbase_order["order_configuration"] = {
                 "limit_limit_gtc": {
-                    "base_size": str(round_to_precision(order.quantity, 8)),
+                    "base_size": str(round_to_precision(order.quantity, quantity_precision)),
                     "limit_price": str(normalize_price(order.price, order.symbol)),
                 }
             }
         elif order.order_type == OrderType.STOP_LOSS:
             coinbase_order["order_configuration"] = {
                 "stop_limit_stop_limit_gtc": {
-                    "base_size": str(round_to_precision(order.quantity, 8)),
+                    "base_size": str(round_to_precision(order.quantity, quantity_precision)),
                     "limit_price": str(normalize_price(order.price, order.symbol)),
                     "stop_price": str(normalize_price(order.stop_price, order.symbol)),
                 }
@@ -526,29 +565,14 @@ class CoinbaseOrderManager:
             quantity=quantity,
             price=price,
             filled_quantity=Decimal(str(result.get("filled_size", "0"))),
-            status=result["status"],
-            timestamp=datetime.fromisoformat(result["created_time"].replace("Z", "+00:00")),
+            status=self._convert_coinbase_status_to_order_status(result.get("status", "REJECTED")),
+            created_at=datetime.fromisoformat(result["created_time"].replace("Z", "+00:00")),
+            exchange=self.exchange_name,
         )
 
     def _convert_coinbase_status_to_order_status(self, status: str) -> OrderStatus:
-        """
-        Convert Coinbase order status to unified OrderStatus.
-
-        Args:
-            status: Coinbase order status
-
-        Returns:
-            OrderStatus: Unified order status
-        """
-        status_mapping = {
-            "OPEN": OrderStatus.PENDING,
-            "FILLED": OrderStatus.FILLED,
-            "CANCELLED": OrderStatus.CANCELLED,
-            "EXPIRED": OrderStatus.EXPIRED,
-            "REJECTED": OrderStatus.REJECTED,
-            "PARTIALLY_FILLED": OrderStatus.PARTIALLY_FILLED,
-        }
-        return status_mapping.get(status, OrderStatus.UNKNOWN)
+        """Convert Coinbase order status to unified OrderStatus."""
+        return OrderStatusUtils.convert_status(status, "coinbase")
 
     async def __aenter__(self):
         """Async context manager entry."""

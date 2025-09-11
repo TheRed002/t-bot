@@ -9,8 +9,8 @@ from datetime import datetime, timezone
 from typing import Any
 
 from src.core.base.component import BaseComponent
+from src.core.base.interfaces import CacheClientInterface
 from src.core.exceptions import CacheError
-from src.database.redis_client import RedisClient
 
 
 # Simple mixins to avoid circular imports
@@ -71,7 +71,7 @@ class CacheManager(
     - Fallback mechanisms
     """
 
-    def __init__(self, redis_client: RedisClient | None = None, config: Any | None = None):
+    def __init__(self, redis_client: CacheClientInterface | None = None, config: Any | None = None):
         super().__init__()
         DependencyInjectionMixin.__init__(self)
         ConnectionManagerMixin.__init__(self)
@@ -105,15 +105,12 @@ class CacheManager(
             if not self.redis_client or self.redis_client is None:
                 if self._dependency_container:
                     try:
-                        self.redis_client = self._dependency_container.resolve("RedisClient")
+                        self.redis_client = self._dependency_container.resolve("CacheClientInterface")
                     except (AttributeError, KeyError, TypeError) as e:
-                        self.logger.debug(f"Could not resolve RedisClient from DI container: {e}")
+                        self.logger.debug(f"Could not resolve CacheClientInterface from DI container: {e}")
 
                 if not self.redis_client:
-                    if self.config:
-                        self.redis_client = RedisClient(self.config)
-                    else:
-                        raise CacheError("Redis client not available and no config provided")
+                    raise CacheError("Cache client not available and no dependency injection configured")
 
             # Check if client is connected and healthy
             if (
@@ -706,7 +703,7 @@ class CacheManager(
 
     def get_dependencies(self) -> list[str]:
         """Get list of required dependencies."""
-        return ["RedisClient"]
+        return ["CacheClientInterface"]
 
     def __del__(self):
         """Ensure cleanup on deletion."""
@@ -719,7 +716,7 @@ _cache_manager: CacheManager | None = None
 
 
 def get_cache_manager(
-    redis_client: RedisClient | None = None, config: Any | None = None
+    redis_client: CacheClientInterface | None = None, config: Any | None = None
 ) -> CacheManager:
     """Get or create global cache manager instance."""
     global _cache_manager

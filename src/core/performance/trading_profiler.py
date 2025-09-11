@@ -117,7 +117,7 @@ class TradingProfiler:
     def __init__(self, operation: TradingOperation):
         self.operation = operation
         self.profile = OperationProfile(operation=operation)
-        self._profiler: cProfile.Profile | None = None
+        self._profiler: cProfile.Optional[Profile] = None
         self._memory_tracer_active = False
         self._start_time = 0.0
         self._start_memory = 0

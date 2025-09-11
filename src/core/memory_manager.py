@@ -498,7 +498,7 @@ class HighPerformanceMemoryManager(DependencyInjectionMixin):
             return config
 
         # Try to resolve from DI container
-        if hasattr(self, '_injector') and self._injector:
+        if hasattr(self, "_injector") and self._injector:
             try:
                 return self._injector.resolve("Config")
             except (AttributeError, KeyError, TypeError) as e:

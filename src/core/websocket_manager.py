@@ -19,7 +19,7 @@ from src.core.resource_manager import ResourceManager, ResourceType
 # Production WebSocket constants
 DEFAULT_HEARTBEAT_INTERVAL = 30  # seconds
 DEFAULT_RECONNECT_ATTEMPTS = 5
-DEFAULT_RECONNECT_DELAY = 1.0  # seconds 
+DEFAULT_RECONNECT_DELAY = 1.0  # seconds
 DEFAULT_CONNECTION_TIMEOUT = 30.0  # seconds
 DEFAULT_MESSAGE_QUEUE_SIZE = 1000
 TASK_CANCELLATION_TIMEOUT = 5.0  # seconds
@@ -299,6 +299,8 @@ class WebSocketManager:
                                 "payload": raw_data,
                                 "message_type": raw_data.get("type", "unknown"),
                                 "processing_stage": "message_received",
+                                "processing_mode": "stream",  # WebSocket is inherently stream-based
+                                "message_pattern": "pub_sub",  # WebSocket messages use pub/sub pattern
                             }
                         else:
                             standardized_data = raw_data
@@ -311,6 +313,8 @@ class WebSocketManager:
                             "payload": {"raw_message": raw_data},
                             "message_type": "raw_data",
                             "processing_stage": "message_received",
+                            "processing_mode": "stream",  # WebSocket is inherently stream-based
+                            "message_pattern": "pub_sub",  # WebSocket messages use pub/sub pattern
                         }
 
                     # Queue message for processing with backpressure handling
@@ -401,6 +405,8 @@ class WebSocketManager:
                 "payload": message,
                 "message_type": message.get("type", "unknown"),
                 "correlation_id": message.get("correlation_id"),
+                "processing_mode": "stream",  # WebSocket is inherently stream-based
+                "message_pattern": "pub_sub",  # WebSocket messages use pub/sub pattern
             }
 
             json_message = json.dumps(standardized_message)

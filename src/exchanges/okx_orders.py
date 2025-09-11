@@ -37,6 +37,12 @@ from src.core.types import OrderRequest, OrderResponse, OrderSide, OrderStatus, 
 # MANDATORY: Import from P-002A
 from src.error_handling.error_handler import ErrorHandler
 from src.utils import ValidationFramework, normalize_price, round_to_precision
+from src.utils.exchange_conversion_utils import ExchangeConversionUtils
+from src.utils.exchange_order_utils import (
+    AssetPrecisionUtils,
+    FeeCalculationUtils,
+    OrderStatusUtils,
+)
 
 
 class OKXOrderManager:
@@ -51,13 +57,14 @@ class OKXOrderManager:
     - Order cancellation and confirmation
     """
 
-    def __init__(self, config: Config, trade_client: OKXTrade):
+    def __init__(self, config: Config, trade_client: OKXTrade, error_handler: ErrorHandler | None = None):
         """
         Initialize OKX order manager.
 
         Args:
             config: Application configuration
             trade_client: OKX trade client instance
+            error_handler: Error handler service (injected)
         """
         self.config = config
         self.trade_client = trade_client
@@ -69,14 +76,20 @@ class OKXOrderManager:
         self.active_orders: dict[str, dict] = {}
         self.order_history: dict[str, list[dict]] = {}
 
-        # Fee structure (OKX-specific)
-        self.maker_fee_rate = Decimal("0.001")  # 0.1% maker fee
-        self.taker_fee_rate = Decimal("0.001")  # 0.1% taker fee
+        # Fee structure (OKX-specific) - moved to config
+        exchange_config = getattr(self.config, "okx", {})
+        self.maker_fee_rate = Decimal(str(exchange_config.get("maker_fee_rate", "0.001")))
+        self.taker_fee_rate = Decimal(str(exchange_config.get("taker_fee_rate", "0.001")))
 
         # Initialize error handling
-        self.error_handler = ErrorHandler(config)
+        # Use injected error handler if available
+        self.error_handler = error_handler or ErrorHandler(config)
 
         self.logger.info("Initialized OKX order manager")
+
+    def _get_asset_precision(self, symbol: str, precision_type: str = "quantity") -> int:
+        """Get asset-specific precision - delegated to shared utility."""
+        return AssetPrecisionUtils.get_asset_precision(symbol, precision_type)
 
     async def place_order(self, order: OrderRequest) -> OrderResponse:
         """
@@ -98,7 +111,12 @@ class OKXOrderManager:
                 raise ValidationError("Order validation failed using utils validators")
 
             # Additional OKX-specific validation
-            self._validate_order_request(order)
+            ValidationFramework.validate_order(
+                {
+                    "price": str(order.price) if order.price else "0",
+                    "quantity": str(order.quantity),
+                }
+            )
 
             # Convert order to OKX format
             okx_order = self._convert_order_to_okx(order)
@@ -113,8 +131,10 @@ class OKXOrderManager:
                 else:
                     raise ExchangeError(f"Order placement failed: {error_msg}")
 
-            # Convert response to unified format
-            order_response = self._convert_okx_order_to_response(result.get("data", [{}])[0])
+            # Convert response to unified format using shared utilities
+            order_response = ExchangeConversionUtils.convert_okx_order_to_response(
+                result.get("data", [{}])[0]
+            )
 
             # Track active order
             self.active_orders[order_response.id] = {
@@ -133,7 +153,7 @@ class OKXOrderManager:
                 raise
             raise ExchangeError(f"Failed to place order on OKX: {e!s}")
 
-    async def cancel_order(self, order_id: str) -> bool:
+    async def cancel_order(self, order_id: str, symbol: str) -> bool:
         """
         Cancel an existing order on OKX.
 
@@ -183,7 +203,7 @@ class OKXOrderManager:
                     f"Failed to get order status for {order_id}: "
                     f"{result.get('msg', 'Unknown error')}"
                 )
-                return OrderStatus.UNKNOWN
+                return OrderStatus.REJECTED
 
             data = result.get("data", [{}])[0]
             status = data.get("state", "")
@@ -192,7 +212,7 @@ class OKXOrderManager:
 
         except Exception as e:
             self.logger.error(f"Failed to get order status for {order_id} on OKX: {e!s}")
-            return OrderStatus.UNKNOWN
+            return OrderStatus.REJECTED
 
     async def get_order_fills(self, order_id: str) -> list[OrderResponse]:
         """
@@ -350,15 +370,13 @@ class OKXOrderManager:
             Decimal: Calculated fee amount
         """
         try:
-            # Get fee rate based on order type
-            fee_rate = self.maker_fee_rate if is_maker else self.taker_fee_rate
+            # For market orders without price, fee calculation should be deferred
+            if order.price is None:
+                self.logger.warning(f"Cannot calculate fee for {order.symbol}: no price provided")
+                return Decimal("0")
 
-            # Calculate fee based on order value
-            order_value = order.quantity * (order.price or Decimal("0"))
-            fee = order_value * fee_rate
-
-            self.logger.debug(f"Calculated fee for order: {fee} (rate: {fee_rate})")
-            return fee
+            order_value = order.quantity * order.price
+            return FeeCalculationUtils.calculate_fee(order_value, "okx", order.symbol, is_maker)
 
         except Exception as e:
             self.logger.error(f"Failed to calculate fee: {e!s}")
@@ -411,12 +429,13 @@ class OKXOrderManager:
         Returns:
             Dict[str, Any]: OKX-formatted order parameters
         """
+        quantity_precision = self._get_asset_precision(order.symbol, "quantity")
         okx_order = {
             "instId": order.symbol,
             "tdMode": "cash",  # Spot trading
             "side": order.side.value.lower(),
             "ordType": self._convert_order_type_to_okx(order.order_type),
-            "sz": str(round_to_precision(order.quantity, 8)),
+            "sz": str(round_to_precision(order.quantity, quantity_precision)),
         }
 
         # Add price for limit orders
@@ -449,6 +468,15 @@ class OKXOrderManager:
         Returns:
             OrderResponse: Unified order response
         """
+        # Parse timestamp if available
+        created_at = datetime.now(timezone.utc)
+        if result.get("cTime"):
+            try:
+                created_at = datetime.fromtimestamp(int(result["cTime"]) / 1000, tz=timezone.utc)
+            except Exception:
+                # Fallback to current time if parsing fails
+                pass
+
         return OrderResponse(
             id=result.get("ordId", ""),
             client_order_id=result.get("clOrdId"),
@@ -456,32 +484,18 @@ class OKXOrderManager:
             side=OrderSide.BUY if result.get("side") == "buy" else OrderSide.SELL,
             order_type=self._convert_okx_order_type_to_unified(result.get("ordType", "")),
             quantity=Decimal(result.get("sz", "0")),
-            price=Decimal(result.get("px", "0")) if result.get("px") else None,
+            price=Decimal(result.get("px", "0"))
+            if result.get("px") and result.get("px") != "0"
+            else None,
             filled_quantity=Decimal(result.get("accFillSz", "0")),
-            status=self._convert_okx_status_to_order_status(result.get("state", "")).value,
-            timestamp=datetime.now(timezone.utc),
+            status=self._convert_okx_status_to_order_status(result.get("state", "")),
+            created_at=created_at,
+            exchange=self.exchange_name,
         )
 
     def _convert_okx_status_to_order_status(self, status: str) -> OrderStatus:
-        """
-        Convert OKX order status to unified OrderStatus.
-
-        Args:
-            status: OKX order status string
-
-        Returns:
-            OrderStatus: Unified order status
-        """
-        status_mapping = {
-            "live": OrderStatus.PENDING,
-            "filled": OrderStatus.FILLED,
-            "canceled": OrderStatus.CANCELLED,
-            "partially_filled": OrderStatus.PARTIALLY_FILLED,
-            "expired": OrderStatus.EXPIRED,
-            "failed": OrderStatus.REJECTED,
-        }
-
-        return status_mapping.get(status, OrderStatus.UNKNOWN)
+        """Convert OKX order status to unified OrderStatus."""
+        return OrderStatusUtils.convert_status(status, "okx")
 
     def _convert_order_type_to_okx(self, order_type: OrderType) -> str:
         """

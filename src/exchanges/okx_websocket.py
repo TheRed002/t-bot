@@ -34,7 +34,8 @@ from src.core.exceptions import ExchangeConnectionError, ExchangeError
 from src.core.logging import get_logger
 
 # MANDATORY: Import from P-001
-from src.core.types import OrderBook, OrderSide, Ticker, Trade
+from src.core.types.market import OrderBook, OrderBookLevel, Ticker, Trade
+from src.core.types.trading import OrderSide
 
 # MANDATORY: Import from P-002A
 from src.error_handling.error_handler import ErrorHandler
@@ -50,22 +51,26 @@ class OKXWebSocketManager:
     - Automatic reconnection and error handling
     """
 
-    def __init__(self, config: Config, exchange_name: str = "okx"):
+    def __init__(self, config: Config, exchange_name: str = "okx", error_handler: ErrorHandler | None = None):
         """
         Initialize OKX WebSocket manager.
 
         Args:
             config: Application configuration
             exchange_name: Exchange name (default: "okx")
+            error_handler: Error handler service (injected)
         """
         self.config = config
         self.exchange_name = exchange_name
 
+        # Store injected error handler
+        self._injected_error_handler = error_handler
+
         # OKX API credentials
-        self.api_key = config.exchange.okx_api_key
-        self.api_secret = config.exchange.okx_api_secret
-        self.passphrase = config.exchange.okx_passphrase
-        self.sandbox = config.exchange.okx_sandbox
+        self.api_key = getattr(config.exchange, "okx_api_key", "")
+        self.api_secret = getattr(config.exchange, "okx_api_secret", "")
+        self.passphrase = getattr(config.exchange, "okx_passphrase", "")
+        self.sandbox = getattr(config.exchange, "okx_sandbox", False)
 
         # WebSocket URLs
         if self.sandbox:
@@ -76,8 +81,8 @@ class OKXWebSocketManager:
             self.private_ws_url = "wss://ws.okx.com:8443/ws/v5/private"
 
         # WebSocket connections
-        self.public_ws: websockets.WebSocketServerProtocol | None = None
-        self.private_ws: websockets.WebSocketServerProtocol | None = None
+        self.public_ws: websockets.WebSocketClientProtocol | None = None
+        self.private_ws: websockets.WebSocketClientProtocol | None = None
 
         # Stream subscriptions
         self.public_subscriptions: dict[str, list[Callable]] = {}
@@ -87,15 +92,17 @@ class OKXWebSocketManager:
         self.connected = False
         self.last_heartbeat = None
         self.reconnect_attempts = 0
-        self.max_reconnect_attempts = 10
-        self.base_reconnect_delay = 1  # Base delay in seconds
-        self.max_reconnect_delay = 60  # Max delay in seconds
+        # Configuration-based reconnection parameters
+        ws_config = getattr(config, "websocket", {})
+        self.max_reconnect_attempts = getattr(ws_config, "max_reconnect_attempts", 10)
+        self.base_reconnect_delay = getattr(ws_config, "base_reconnect_delay_seconds", 1)
+        self.max_reconnect_delay = getattr(ws_config, "max_reconnect_delay_seconds", 60)
         self._shutdown = False
         self._connection_lock = asyncio.Lock()
 
         # Health monitoring
         self.last_message_time = None
-        self.message_timeout = 60  # seconds
+        self.message_timeout = getattr(ws_config, "message_timeout_seconds", 60)
         self._health_check_task: asyncio.Task | None = None
 
         # Connection metrics
@@ -112,7 +119,8 @@ class OKXWebSocketManager:
         self.message_queue: list[dict] = []
 
         # Initialize error handling
-        self.error_handler = ErrorHandler(config)
+        # Use injected error handler if available
+        self.error_handler = self._injected_error_handler or ErrorHandler(config)
 
         # Initialize logger
         self.logger = get_logger(f"okx.websocket.{exchange_name}")
@@ -166,21 +174,30 @@ class OKXWebSocketManager:
                 self._shutdown = True
                 self.logger.info("Disconnecting from OKX WebSocket...")
 
-                # Cancel health monitoring
+                # Cancel health monitoring with proper resource cleanup
                 if self._health_check_task and not self._health_check_task.done():
                     self._health_check_task.cancel()
                     try:
                         await self._health_check_task
                     except asyncio.CancelledError:
                         pass
+                    except Exception as e:
+                        self.logger.error(f"Error waiting for health check task: {e}")
+                    finally:
+                        self._health_check_task = None
 
-                # Cancel listener tasks
+                # Cancel listener tasks with proper resource cleanup
                 if self._public_listener_task and not self._public_listener_task.done():
                     self._public_listener_task.cancel()
                     try:
                         await self._public_listener_task
                     except asyncio.CancelledError:
                         pass
+                    except Exception as e:
+                        self.logger.error(f"Error canceling public listener task: {e}")
+                    finally:
+                        # Always clear task reference
+                        self._public_listener_task = None
 
                 if self._private_listener_task and not self._private_listener_task.done():
                     self._private_listener_task.cancel()
@@ -188,16 +205,31 @@ class OKXWebSocketManager:
                         await self._private_listener_task
                     except asyncio.CancelledError:
                         pass
+                    except Exception as e:
+                        self.logger.error(f"Error canceling private listener task: {e}")
+                    finally:
+                        # Always clear task reference
+                        self._private_listener_task = None
 
-                # Close public WebSocket
-                if self.public_ws:
-                    await self.public_ws.close()
-                    self.public_ws = None
+                # Close public WebSocket with proper resource cleanup
+                if self.public_ws and not self.public_ws.closed:
+                    try:
+                        await self.public_ws.close()
+                    except Exception as e:
+                        self.logger.error(f"Error closing public WebSocket: {e}")
+                    finally:
+                        # Always clear websocket reference
+                        self.public_ws = None
 
-                # Close private WebSocket
-                if self.private_ws:
-                    await self.private_ws.close()
-                    self.private_ws = None
+                # Close private WebSocket with proper resource cleanup
+                if self.private_ws and not self.private_ws.closed:
+                    try:
+                        await self.private_ws.close()
+                    except Exception as e:
+                        self.logger.error(f"Error closing private WebSocket: {e}")
+                    finally:
+                        # Always clear websocket reference
+                        self.private_ws = None
 
                 # Clear state
                 self.connected = False
@@ -225,12 +257,14 @@ class OKXWebSocketManager:
 
             self.public_subscriptions[stream_name].append(callback)
 
-            # Subscribe to stream
+            # Subscribe to stream with connection check
             subscribe_message = {
                 "op": "subscribe",
                 "args": [{"channel": "tickers", "instId": symbol}],
             }
 
+            if not self.public_ws or self.public_ws.closed:
+                raise ExchangeConnectionError("Public WebSocket not connected")
             await self._send_public_message(subscribe_message)
             self.logger.info(f"Subscribed to ticker stream for {symbol}")
 
@@ -326,12 +360,16 @@ class OKXWebSocketManager:
 
     async def _connect_public_websocket(self) -> None:
         """
-        Connect to OKX public WebSocket.
+        Connect to OKX public WebSocket with proper resource cleanup.
         """
+        websocket_connection = None
         try:
-            self.public_ws = await websockets.connect(
+            websocket_connection = await websockets.connect(
                 self.public_ws_url, ping_interval=20, ping_timeout=10
             )
+
+            # Only assign after successful connection
+            self.public_ws = websocket_connection
 
             # Start listening for messages
             self._public_listener_task = asyncio.create_task(self._listen_public_messages())
@@ -340,16 +378,28 @@ class OKXWebSocketManager:
 
         except Exception as e:
             self.logger.error(f"Failed to connect to OKX public WebSocket: {e!s}")
+
+            # Cleanup websocket connection on failure
+            if websocket_connection and not websocket_connection.closed:
+                try:
+                    await websocket_connection.close()
+                except Exception as cleanup_error:
+                    self.logger.error(f"Error closing websocket during cleanup: {cleanup_error}")
+
             raise ExchangeConnectionError(f"Failed to connect to public WebSocket: {e!s}")
 
     async def _connect_private_websocket(self) -> None:
         """
-        Connect to OKX private WebSocket with authentication.
+        Connect to OKX private WebSocket with authentication and proper resource cleanup.
         """
+        websocket_connection = None
         try:
-            self.private_ws = await websockets.connect(
+            websocket_connection = await websockets.connect(
                 self.private_ws_url, ping_interval=20, ping_timeout=10
             )
+
+            # Only assign after successful connection
+            self.private_ws = websocket_connection
 
             # Authenticate private WebSocket
             await self._authenticate_private_websocket()
@@ -361,6 +411,14 @@ class OKXWebSocketManager:
 
         except Exception as e:
             self.logger.error(f"Failed to connect to OKX private WebSocket: {e!s}")
+
+            # Cleanup websocket connection on failure
+            if websocket_connection and not websocket_connection.closed:
+                try:
+                    await websocket_connection.close()
+                except Exception as cleanup_error:
+                    self.logger.error(f"Error closing websocket during cleanup: {cleanup_error}")
+
             raise ExchangeConnectionError(f"Failed to connect to private WebSocket: {e!s}")
 
     async def _authenticate_private_websocket(self) -> None:
@@ -393,9 +451,16 @@ class OKXWebSocketManager:
 
             await self._send_private_message(auth_message)
 
-            # Wait for authentication response
-            response = await self.private_ws.recv()
-            response_data = json.loads(response)
+            # Wait for authentication response with timeout
+            try:
+                if not self.private_ws:
+                    raise ExchangeError("Private WebSocket connection lost during authentication")
+                response = await asyncio.wait_for(self.private_ws.recv(), timeout=10.0)
+                response_data = json.loads(response)
+            except asyncio.TimeoutError:
+                raise ExchangeError("Authentication timeout")
+            except Exception as e:
+                raise ExchangeError(f"Authentication response error: {e}")
 
             if response_data.get("code") != "0":
                 raise ExchangeError(
@@ -415,7 +480,8 @@ class OKXWebSocketManager:
         try:
             while not self._shutdown and self.connected and self.public_ws:
                 try:
-                    message = await self.public_ws.recv()
+                    # Add timeout to prevent hanging on recv()
+                    message = await asyncio.wait_for(self.public_ws.recv(), timeout=30.0)
 
                     # Update last message time
                     self.last_message_time = datetime.now(timezone.utc)
@@ -424,6 +490,9 @@ class OKXWebSocketManager:
                     await self._handle_public_message(message)
                 except websockets.exceptions.ConnectionClosed:
                     self.logger.warning("Public WebSocket connection closed")
+                    break
+                except asyncio.TimeoutError:
+                    self.logger.warning("Public WebSocket receive timeout, connection may be stale")
                     break
                 except Exception as e:
                     self.logger.error(f"Error handling public message: {e!s}")
@@ -441,7 +510,8 @@ class OKXWebSocketManager:
         try:
             while not self._shutdown and self.connected and self.private_ws:
                 try:
-                    message = await self.private_ws.recv()
+                    # Add timeout to prevent hanging on recv()
+                    message = await asyncio.wait_for(self.private_ws.recv(), timeout=30.0)
 
                     # Update last message time
                     self.last_message_time = datetime.now(timezone.utc)
@@ -450,6 +520,9 @@ class OKXWebSocketManager:
                     await self._handle_private_message(message)
                 except websockets.exceptions.ConnectionClosed:
                     self.logger.warning("Private WebSocket connection closed")
+                    break
+                except asyncio.TimeoutError:
+                    self.logger.warning("Private WebSocket receive timeout, connection may be stale")
                     break
                 except Exception as e:
                     self.logger.error(f"Error handling private message: {e!s}")
@@ -613,23 +686,36 @@ class OKXWebSocketManager:
                     # Convert to unified Ticker format
                     ticker = Ticker(
                         symbol=symbol,
-                        bid=Decimal(ticker_data.get("bidPx", "0")),
-                        ask=Decimal(ticker_data.get("askPx", "0")),
+                        bid_price=Decimal(ticker_data.get("bidPx", "0")),
+                        bid_quantity=Decimal(ticker_data.get("bidSz", "0")),
+                        ask_price=Decimal(ticker_data.get("askPx", "0")),
+                        ask_quantity=Decimal(ticker_data.get("askSz", "0")),
                         last_price=Decimal(ticker_data.get("last", "0")),
-                        volume_24h=Decimal(ticker_data.get("vol24h", "0")),
-                        price_change_24h=Decimal(ticker_data.get("change24h", "0")),
+                        volume=Decimal(ticker_data.get("vol24h", "0")),
                         timestamp=datetime.now(timezone.utc),
+                        exchange="okx",
+                        price_change=Decimal(ticker_data.get("change24h", "0")),
                     )
 
-                    # Call all registered callbacks
+                    # Call all registered callbacks concurrently
+                    callback_tasks = []
                     for callback in self.public_subscriptions[stream_name]:
                         try:
                             if asyncio.iscoroutinefunction(callback):
-                                await callback(ticker)
+                                callback_tasks.append(callback(ticker))
                             else:
-                                callback(ticker)
+                                # Run sync callback in executor to avoid blocking
+                                callback_tasks.append(
+                                    asyncio.get_event_loop().run_in_executor(
+                                        None, callback, ticker
+                                    )
+                                )
                         except Exception as e:
-                            self.logger.error(f"Error in ticker callback: {e!s}")
+                            self.logger.error(f"Error preparing ticker callback: {e!s}")
+
+                    # Execute all callbacks concurrently with error handling
+                    if callback_tasks:
+                        await asyncio.gather(*callback_tasks, return_exceptions=True)
 
         except Exception as e:
             self.logger.error(f"Error handling ticker data: {e!s}")
@@ -649,25 +735,41 @@ class OKXWebSocketManager:
                 for book_data in data:
                     # Convert to unified OrderBook format
                     bids = [
-                        [Decimal(price), Decimal(size)] for price, size in book_data.get("bids", [])
+                        OrderBookLevel(price=Decimal(str(price)), quantity=Decimal(str(size)))
+                        for price, size in book_data.get("bids", [])
                     ]
                     asks = [
-                        [Decimal(price), Decimal(size)] for price, size in book_data.get("asks", [])
+                        OrderBookLevel(price=Decimal(str(price)), quantity=Decimal(str(size)))
+                        for price, size in book_data.get("asks", [])
                     ]
 
                     order_book = OrderBook(
-                        symbol=symbol, bids=bids, asks=asks, timestamp=datetime.now(timezone.utc)
+                        symbol=symbol,
+                        bids=bids,
+                        asks=asks,
+                        timestamp=datetime.now(timezone.utc),
+                        exchange="okx",
                     )
 
-                    # Call all registered callbacks
+                    # Call all registered callbacks concurrently
+                    callback_tasks = []
                     for callback in self.public_subscriptions[stream_name]:
                         try:
                             if asyncio.iscoroutinefunction(callback):
-                                await callback(order_book)
+                                callback_tasks.append(callback(order_book))
                             else:
-                                callback(order_book)
+                                # Run sync callback in executor to avoid blocking
+                                callback_tasks.append(
+                                    asyncio.get_event_loop().run_in_executor(
+                                        None, callback, order_book
+                                    )
+                                )
                         except Exception as e:
-                            self.logger.error(f"Error in order book callback: {e!s}")
+                            self.logger.error(f"Error preparing order book callback: {e!s}")
+
+                    # Execute all callbacks concurrently with error handling
+                    if callback_tasks:
+                        await asyncio.gather(*callback_tasks, return_exceptions=True)
 
         except Exception as e:
             self.logger.error(f"Error handling order book data: {e!s}")
@@ -687,16 +789,19 @@ class OKXWebSocketManager:
                 for trade_data in data:
                     # Convert to unified Trade format
                     trade = Trade(
-                        id=trade_data.get("tradeId", ""),
+                        trade_id=str(trade_data.get("tradeId", "")),
+                        order_id="",  # Not available in public trade data
                         symbol=symbol,
                         side=OrderSide.BUY if trade_data.get("side") == "buy" else OrderSide.SELL,
-                        amount=Decimal(trade_data.get("sz", "0")),
-                        price=Decimal(trade_data.get("px", "0")),
+                        quantity=Decimal(str(trade_data.get("sz", "0"))),
+                        price=Decimal(str(trade_data.get("px", "0"))),
                         timestamp=datetime.fromtimestamp(
                             int(trade_data.get("ts", 0)) / 1000, tz=timezone.utc
                         ),
-                        # OKX doesn't provide fee in trade data
-                        fee=Decimal("0"),
+                        fee=Decimal("0"),  # Not available in public trade data
+                        fee_currency="USDT",  # Default fee currency
+                        exchange="okx",
+                        is_maker=False,  # Not available in public trade data
                     )
 
                     # Call all registered callbacks

@@ -1,3 +1,5 @@
+from typing import Optional
+
 """
 Configuration management for the T-Bot trading system.
 

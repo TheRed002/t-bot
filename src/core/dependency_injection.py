@@ -457,6 +457,10 @@ class DependencyInjector:
         """Check if service is registered."""
         return self._container.has(name)
 
+    def is_registered(self, name: str) -> bool:
+        """Check if service is registered (alias for has_service)."""
+        return self.has_service(name)
+
     def clear(self) -> None:
         """Clear all registered services."""
         self._container.clear()
@@ -467,6 +471,17 @@ class DependencyInjector:
         if cls._instance is None:
             cls._instance = cls()
         return cls._instance
+
+    @classmethod
+    def reset_instance(cls) -> None:
+        """Reset singleton instance for testing."""
+        with cls._lock:
+            if cls._instance is not None:
+                try:
+                    cls._instance.clear()
+                except:
+                    pass
+                cls._instance = None
 
     def get_container(self) -> DependencyContainer:
         """Get the dependency container."""

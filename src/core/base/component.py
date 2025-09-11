@@ -124,6 +124,11 @@ class BaseComponent(
         return self._name
 
     @property
+    def component_name(self) -> str:
+        """Get component name (alias for backward compatibility)."""
+        return self._name
+
+    @property
     def logger(self) -> Any:
         """Get logger instance for this component."""
         return self._logger

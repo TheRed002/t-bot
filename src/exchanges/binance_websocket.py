@@ -22,10 +22,12 @@ from src.core.exceptions import ExchangeError
 from src.core.logging import get_logger
 
 # MANDATORY: Import from P-001
-from src.core.types import OrderBook, OrderSide, Ticker, Trade
+from src.core.types.market import OrderBook, OrderBookLevel, Ticker, Trade
+from src.core.types.trading import OrderSide
 
 # MANDATORY: Import from P-002A
 from src.error_handling.error_handler import ErrorHandler
+from src.utils.websocket_manager_utils import ExchangeWebSocketReconnectionManager
 
 
 class BinanceWebSocketHandler:
@@ -41,7 +43,7 @@ class BinanceWebSocketHandler:
     CRITICAL: This class handles all WebSocket connections and data processing.
     """
 
-    def __init__(self, config: Config, client, exchange_name: str = "binance"):
+    def __init__(self, config: Config, client, exchange_name: str = "binance", error_handler: ErrorHandler | None = None):
         """
         Initialize Binance WebSocket handler.
 
@@ -49,10 +51,14 @@ class BinanceWebSocketHandler:
             config: Application configuration
             client: Binance client instance
             exchange_name: Exchange name (default: "binance")
+            error_handler: Error handler service (injected)
         """
         self.config = config
         self.client = client
         self.exchange_name = exchange_name
+
+        # Store injected error handler
+        self._injected_error_handler = error_handler
 
         # Initialize WebSocket manager
         self.ws_manager = BinanceSocketManager(client)
@@ -62,18 +68,23 @@ class BinanceWebSocketHandler:
         self.callbacks: dict[str, list[Callable]] = {}
         self.stream_handlers: dict[str, asyncio.Task] = {}
 
+        # Get WebSocket configuration
+        self.ws_config = getattr(config, "websocket", {})
+        if hasattr(config, "exchange") and hasattr(config.exchange, "get_websocket_config"):
+            self.ws_config = config.exchange.get_websocket_config(exchange_name)
+
         # Connection state
         self.connected = False
         self.reconnect_attempts = 0
-        self.max_reconnect_attempts = 10
-        self.base_reconnect_delay = 1  # Base delay in seconds
-        self.max_reconnect_delay = 60  # Max delay in seconds
+        self.max_reconnect_attempts = self.ws_config.get("reconnect_attempts", 10)
+        self.base_reconnect_delay = self.ws_config.get("reconnect_delay", 1.0)
+        self.max_reconnect_delay = self.ws_config.get("max_reconnect_delay", 60.0)
         self._shutdown = False
         self._connection_lock = asyncio.Lock()
 
         # Health monitoring
         self.last_message_time = None
-        self.message_timeout = 60  # seconds
+        self.message_timeout = self.ws_config.get("message_timeout", 60)
         self._health_check_task: asyncio.Task | None = None
 
         # Connection metrics
@@ -82,8 +93,13 @@ class BinanceWebSocketHandler:
         self._total_reconnections = 0
         self._reconnect_task: asyncio.Task | None = None
 
-        # Error handling
-        self.error_handler = ErrorHandler(config)
+        # Error handling - use injected handler if available
+        self.error_handler = self._injected_error_handler or ErrorHandler(config)
+
+        # Reconnection management using shared utility
+        self.reconnection_manager = ExchangeWebSocketReconnectionManager(
+            exchange_name, self.max_reconnect_attempts
+        )
 
         # Keep track of listen key renewal task
         self.listen_key_task: asyncio.Task | None = None
@@ -108,8 +124,17 @@ class BinanceWebSocketHandler:
                 self.logger.info("Connecting Binance WebSocket streams...")
 
                 # Test connection by getting server time
-                server_time = await self.client.get_server_time()
-                self.logger.info(f"Binance server time: {server_time}")
+                try:
+                    if hasattr(self.client, "get_server_time"):
+                        if asyncio.iscoroutinefunction(self.client.get_server_time):
+                            server_time = await self.client.get_server_time()
+                        else:
+                            server_time = self.client.get_server_time()
+                        self.logger.info(f"Binance server time: {server_time}")
+                except Exception as e:
+                    self.logger.warning(
+                        f"Failed to get server time: {e}, proceeding with connection"
+                    )
 
                 self.connected = True
                 self.reconnect_attempts = 0
@@ -160,9 +185,10 @@ class BinanceWebSocketHandler:
             except Exception as e:
                 self.logger.error(f"Error with health monitoring cleanup: {e!s}")
             finally:
+                # Always clear task reference regardless of cancellation success
                 self._health_check_task = None
 
-            # Cancel all stream handlers
+            # Cancel all stream handlers with proper resource cleanup
             try:
                 for task in stream_tasks:
                     if task and not task.done():
@@ -175,6 +201,12 @@ class BinanceWebSocketHandler:
                             self.logger.error(f"Error canceling stream task: {e!s}")
             except Exception as e:
                 self.logger.error(f"Error canceling stream handlers: {e!s}")
+            finally:
+                # Clear all stream handler references
+                try:
+                    self.stream_handlers.clear()
+                except Exception as e:
+                    self.logger.error(f"Error clearing stream handlers: {e}")
 
             # Close all active streams
             try:
@@ -186,13 +218,12 @@ class BinanceWebSocketHandler:
             except Exception as e:
                 self.logger.error(f"Error closing streams: {e!s}")
             finally:
-                # Clear state regardless of errors
+                # Clear remaining state references
                 try:
-                    self.stream_handlers.clear()
                     self.callbacks.clear()
                     self.active_streams.clear()
-                except Exception:
-                    pass
+                except Exception as e:
+                    self.logger.warning(f"Error clearing stream data: {e}")
 
                 self.connected = False
                 self.logger.info("Successfully disconnected Binance WebSocket streams")
@@ -338,11 +369,22 @@ class BinanceWebSocketHandler:
             if stream_name in self.active_streams:
                 # Cancel stream handler
                 if stream_name in self.stream_handlers:
-                    self.stream_handlers[stream_name].cancel()
+                    task = self.stream_handlers[stream_name]
+                    if task and not task.done():
+                        task.cancel()
+                        try:
+                            await task
+                        except asyncio.CancelledError:
+                            pass
+                        except Exception as e:
+                            self.logger.error(f"Error waiting for stream task cancellation: {e}")
                     del self.stream_handlers[stream_name]
 
-                # Close stream
-                await self._close_stream(stream_name)
+                # Close stream with proper error handling
+                try:
+                    await self._close_stream(stream_name)
+                except Exception as e:
+                    self.logger.error(f"Error closing stream {stream_name}: {e}")
 
                 self.logger.info(f"Unsubscribed from stream: {stream_name}")
                 return True
@@ -371,16 +413,26 @@ class BinanceWebSocketHandler:
                         # Convert to Ticker format
                         ticker_data = self._convert_ticker_message(msg)
 
-                        # Call registered callbacks
+                        # Call registered callbacks with proper concurrency
                         if stream_name in self.callbacks:
+                            callback_tasks = []
                             for callback in self.callbacks[stream_name]:
                                 try:
                                     if asyncio.iscoroutinefunction(callback):
-                                        await callback(ticker_data)
+                                        callback_tasks.append(callback(ticker_data))
                                     else:
-                                        callback(ticker_data)
+                                        # Run sync callback in executor to avoid blocking
+                                        callback_tasks.append(
+                                            asyncio.get_event_loop().run_in_executor(
+                                                None, callback, ticker_data
+                                            )
+                                        )
                                 except Exception as e:
-                                    self.logger.error(f"Error in ticker callback: {e!s}")
+                                    self.logger.error(f"Error preparing ticker callback: {e!s}")
+
+                            # Execute all callbacks concurrently
+                            if callback_tasks:
+                                await asyncio.gather(*callback_tasks, return_exceptions=True)
 
                     except Exception as e:
                         self.logger.error(f"Error processing ticker message: {e!s}")
@@ -513,24 +565,40 @@ class BinanceWebSocketHandler:
         """Convert Binance ticker message to Ticker format."""
         return Ticker(
             symbol=msg["s"],
-            bid=Decimal(str(msg["b"])),
-            ask=Decimal(str(msg["a"])),
+            bid_price=Decimal(str(msg["b"])),
+            bid_quantity=Decimal(str(msg.get("B", "0"))),  # Binance uses "B" for bid quantity
+            ask_price=Decimal(str(msg["a"])),
+            ask_quantity=Decimal(str(msg.get("A", "0"))),  # Binance uses "A" for ask quantity
             last_price=Decimal(str(msg["c"])),
-            volume_24h=Decimal(str(msg["v"])),
-            price_change_24h=Decimal(str(msg["p"])),
+            last_quantity=Decimal(str(msg.get("Q", "0"))) if msg.get("Q") else None,
+            open_price=Decimal(str(msg.get("o", msg["c"]))),  # Use "o" or fallback to close
+            high_price=Decimal(str(msg.get("h", msg["c"]))),  # Use "h" or fallback to close
+            low_price=Decimal(str(msg.get("l", msg["c"]))),  # Use "l" or fallback to close
+            volume=Decimal(str(msg["v"])),
+            quote_volume=Decimal(str(msg.get("q", "0"))) if msg.get("q") else None,
             timestamp=datetime.fromtimestamp(msg["E"] / 1000, tz=timezone.utc),
+            exchange="binance",
+            price_change=Decimal(str(msg["p"])) if msg.get("p") else None,
+            price_change_percent=Decimal(str(msg.get("P", "0"))) if msg.get("P") else None,
         )
 
     def _convert_orderbook_message(self, msg: dict) -> OrderBook:
         """Convert Binance order book message to OrderBook format."""
-        bids = [[Decimal(str(price)), Decimal(str(qty))] for price, qty in msg["b"]]
-        asks = [[Decimal(str(price)), Decimal(str(qty))] for price, qty in msg["a"]]
+        bids = [
+            OrderBookLevel(price=Decimal(str(price)), quantity=Decimal(str(qty)))
+            for price, qty in msg["b"]
+        ]
+        asks = [
+            OrderBookLevel(price=Decimal(str(price)), quantity=Decimal(str(qty)))
+            for price, qty in msg["a"]
+        ]
 
         return OrderBook(
             symbol=msg["s"],
             bids=bids,
             asks=asks,
             timestamp=datetime.fromtimestamp(msg["E"] / 1000, tz=timezone.utc),
+            exchange="binance",
         )
 
     def _convert_trade_message(self, msg: dict) -> Trade:
@@ -538,12 +606,12 @@ class BinanceWebSocketHandler:
         return Trade(
             id=str(msg["t"]),
             symbol=msg["s"],
-            # m=True means maker is seller
-            side=OrderSide.BUY if msg["m"] else OrderSide.SELL,
-            amount=Decimal(str(msg["q"])),
+            exchange="binance",
+            side=OrderSide.BUY.value if not msg["m"] else OrderSide.SELL.value,
             price=Decimal(str(msg["p"])),
+            quantity=Decimal(str(msg["q"])),
             timestamp=datetime.fromtimestamp(msg["T"] / 1000, tz=timezone.utc),
-            fee=Decimal("0"),  # Fee not available in trade stream
+            maker=msg["m"],
         )
 
     # User data handlers
@@ -594,23 +662,42 @@ class BinanceWebSocketHandler:
     # Utility methods
 
     async def _close_stream(self, stream_name: str) -> None:
-        """Close a WebSocket stream."""
+        """Close a WebSocket stream with proper resource cleanup."""
         stream = None
         try:
             stream = self.active_streams.get(stream_name)
             if stream:
-                await stream.close()
+                # Ensure proper async context manager closing
+                if hasattr(stream, "__aexit__"):
+                    try:
+                        await stream.__aexit__(None, None, None)
+                    except Exception as e:
+                        self.logger.debug(f"Stream context manager exit error: {e}")
+                elif hasattr(stream, "close"):
+                    try:
+                        await stream.close()
+                    except Exception as e:
+                        self.logger.debug(f"Stream close error: {e}")
         except Exception as e:
             self.logger.error(f"Error closing stream {stream_name}: {e!s}")
         finally:
-            # Clean up references regardless of close success
+            # Clean up references regardless of close success - use finally to ensure cleanup
             try:
                 if stream_name in self.active_streams:
                     del self.active_streams[stream_name]
+            except Exception as e:
+                self.logger.warning(f"Error removing stream {stream_name} from active_streams: {e}")
+
+            try:
                 if stream_name in self.callbacks:
                     del self.callbacks[stream_name]
+            except Exception as e:
+                self.logger.warning(f"Error removing callbacks for stream {stream_name}: {e}")
+
+            try:
                 self.logger.info(f"Closed stream: {stream_name}")
             except Exception:
+                # Even logging can fail in edge cases
                 pass
 
     async def _handle_stream_error(self, stream_name: str) -> None:
@@ -709,7 +796,9 @@ class BinanceWebSocketHandler:
         """Monitor connection health and trigger reconnection if needed."""
         while not self._shutdown and self.connected:
             try:
-                await asyncio.sleep(30)  # Check every 30 seconds
+                await asyncio.sleep(
+                    self.ws_config.get("health_check_interval", 30.0)
+                )  # Health check interval
 
                 if self._shutdown:
                     break

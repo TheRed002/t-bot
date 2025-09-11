@@ -1,5 +1,6 @@
 """Database configuration for the T-Bot trading system."""
 
+
 from pydantic import AliasChoices, Field, field_validator
 
 from .base import BaseConfig

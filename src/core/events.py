@@ -115,33 +115,56 @@ class EventPublisher:
                 h for h in self._handlers[event_type] if h != handler
             ]
 
-    async def publish(self, event: BotEvent) -> None:
-        """Publish an event to all subscribed handlers."""
+    async def publish(self, event: BotEvent, processing_mode: str = "stream") -> None:
+        """
+        Publish an event to all subscribed handlers with consistent processing patterns aligned with state module.
+        
+        Args:
+            event: Bot event to publish
+            processing_mode: Processing mode ("stream" for real-time, "batch" for grouped processing)
+        """
         try:
+            # Apply consistent data transformation aligned with state module patterns
+            transformed_event = self._transform_event_data_consistent(event, processing_mode)
+
             # Add to history
-            self._event_history.append(event)
+            self._event_history.append(transformed_event)
             if len(self._event_history) > self._max_history:
                 self._event_history.pop(0)
 
             self.logger.debug(
-                f"Publishing event {event.event_type.value}",
-                bot_id=event.bot_id,
-                event_id=event.event_id
+                f"Publishing event {transformed_event.event_type.value} with processing mode {processing_mode}",
+                bot_id=transformed_event.bot_id,
+                event_id=transformed_event.event_id,
+                processing_mode=processing_mode
             )
 
-            # Get handlers for this event type
-            handlers = []
-            if event.event_type in self._handlers:
-                handlers.extend(self._handlers[event.event_type])
-            handlers.extend(self._global_handlers)
+            # Get handlers for this event type using consistent pub/sub pattern aligned with state
+            handlers = self._collect_handlers_by_priority(transformed_event.event_type)
 
-            # Execute handlers concurrently
+            # Execute handlers based on processing mode with consistent message patterns
             if handlers:
-                tasks = [self._safe_handle(handler, event) for handler in handlers]
-                await asyncio.gather(*tasks, return_exceptions=True)
+                # Add message pattern metadata for consistency with state module
+                if transformed_event.data is None:
+                    transformed_event.data = {}
+
+                transformed_event.data.update({
+                    "message_pattern": "pub_sub",  # Consistent with state module
+                    "boundary_crossed": True,  # Cross-module event
+                    "data_format": "bot_event_v1"  # Consistent versioning
+                })
+
+                if processing_mode == "batch":
+                    # Process in batches for better throughput
+                    await self._process_handlers_batch(handlers, transformed_event)
+                else:
+                    # Process as stream for real-time requirements
+                    await self._process_handlers_stream(handlers, transformed_event)
 
         except Exception as e:
             self.logger.error(f"Failed to publish event {event.event_type.value}: {e}")
+            # Apply consistent error propagation
+            self._propagate_event_error_consistently(e, "publish", event.event_type.value)
 
     async def _safe_handle(self, handler: EventHandler, event: BotEvent) -> None:
         """Safely execute handler with error isolation."""
@@ -174,6 +197,161 @@ class EventPublisher:
         # Return most recent events
         return events[-limit:] if events else []
 
+    # Helper methods for consistent data flow patterns
+
+    def _transform_event_data_consistent(self, event: BotEvent, processing_mode: str) -> BotEvent:
+        """Transform event data to ensure consistency with core module patterns."""
+        # Apply consistent data transformations aligned with BaseEventEmitter
+        if event.data and isinstance(event.data, dict):
+            # Ensure processing metadata consistency
+            if "processing_mode" not in event.data:
+                event.data["processing_mode"] = processing_mode
+            if "data_format" not in event.data:
+                event.data["data_format"] = "bot_event_v1"
+
+            # Apply consistent financial data transformations
+            financial_fields = ["price", "quantity", "volume"]
+            for field in financial_fields:
+                if field in event.data and event.data[field] is not None:
+                    try:
+                        from src.utils.decimal_utils import to_decimal
+                        event.data[field] = to_decimal(event.data[field])
+                    except (ValueError, TypeError, ImportError):
+                        # Log warning but continue processing
+                        self.logger.warning(f"Failed to convert {field} to decimal in event {event.event_id}")
+
+        return event
+
+    def _collect_handlers_by_priority(self, event_type: BotEventType) -> list[EventHandler]:
+        """Collect handlers using consistent pub/sub patterns with priority sorting."""
+        handlers = []
+
+        # Direct event type handlers
+        if event_type in self._handlers:
+            handlers.extend(self._handlers[event_type])
+
+        # Global handlers (subscribe to all events)
+        handlers.extend(self._global_handlers)
+
+        # Sort by priority if handlers have priority attribute, otherwise maintain order
+        handlers.sort(key=lambda h: getattr(h, "priority", 0), reverse=True)
+
+        return handlers
+
+    async def _process_handlers_batch(self, handlers: list[EventHandler], event: BotEvent) -> None:
+        """Process handlers in batch mode for better throughput aligned with state processing paradigms."""
+        # Apply consistent batch processing matching state module patterns
+        batch_size = 10  # Process handlers in small batches
+
+        # Apply batch metadata for consistency with state module processing
+        if event.data is None:
+            event.data = {}
+
+        event.data.update({
+            "batch_processing": True,
+            "batch_size": min(batch_size, len(handlers)),
+            "total_handlers": len(handlers),
+            "processing_paradigm": "batch"
+        })
+
+        for i in range(0, len(handlers), batch_size):
+            batch = handlers[i:i + batch_size]
+            # Add batch position metadata
+            for handler in batch:
+                if hasattr(handler, "set_batch_context"):
+                    handler.set_batch_context({
+                        "batch_id": f"batch_{i//batch_size}",
+                        "batch_position": i,
+                        "processing_mode": "batch"
+                    })
+
+            tasks = [self._safe_handle(handler, event) for handler in batch]
+            await asyncio.gather(*tasks, return_exceptions=True)
+            # Small delay between batches to prevent overwhelming
+            if i + batch_size < len(handlers):
+                await asyncio.sleep(0.001)
+
+    async def _process_handlers_stream(self, handlers: list[EventHandler], event: BotEvent) -> None:
+        """Process handlers in stream mode for real-time requirements aligned with state processing paradigms."""
+        # Apply consistent stream processing matching state module patterns
+        if event.data is None:
+            event.data = {}
+
+        event.data.update({
+            "stream_processing": True,
+            "stream_id": event.event_id,
+            "handler_count": len(handlers),
+            "processing_paradigm": "stream"
+        })
+
+        # Add stream context to handlers that support it
+        for handler in handlers:
+            if hasattr(handler, "set_stream_context"):
+                handler.set_stream_context({
+                    "stream_id": event.event_id,
+                    "processing_mode": "stream",
+                    "real_time": True
+                })
+
+        # Process all handlers concurrently for minimal latency
+        tasks = [self._safe_handle(handler, event) for handler in handlers]
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+    def _propagate_event_error_consistently(self, error: Exception, operation: str, event_type: str) -> None:
+        """Propagate event errors with consistent patterns aligned with state module."""
+        from src.core.exceptions import EventError, ValidationError
+
+        # Apply consistent error data structure matching state module patterns
+        error_metadata = {
+            "error_type": type(error).__name__,
+            "operation": operation,
+            "event_type": event_type,
+            "component": "EventPublisher",
+            "processing_mode": "stream",  # Match state module default
+            "data_format": "event_data_v1",  # Match state module format
+            "message_pattern": "pub_sub",  # Consistent messaging pattern
+            "boundary_crossed": True,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+        # Apply consistent error propagation patterns similar to state module
+        if isinstance(error, ValidationError):
+            # Validation errors are re-raised as-is for consistency
+            self.logger.debug(
+                f"Validation error in events.{operation} for {event_type} - propagating as validation error",
+                extra=error_metadata
+            )
+            # Add propagation metadata to error if supported
+            if hasattr(error, "__dict__"):
+                try:
+                    error.__dict__.update({
+                        "propagation_metadata": error_metadata,
+                        "boundary_validation_applied": True
+                    })
+                except (AttributeError, TypeError):
+                    # Some exception types don't allow attribute modification
+                    pass
+        elif isinstance(error, EventError):
+            # Event errors get additional context
+            self.logger.warning(
+                f"Event error in events.{operation} for {event_type} - adding context",
+                extra=error_metadata
+            )
+        else:
+            # Generic errors get event-level error propagation with boundary validation
+            self.logger.error(
+                f"Event service error in events.{operation} for {event_type} - wrapping in EventError",
+                extra=error_metadata
+            )
+
+            # Apply boundary validation for consistency
+            try:
+                from src.utils.messaging_patterns import BoundaryValidator
+                # Use existing boundary validation for error data
+                BoundaryValidator.validate_error_to_monitoring_boundary(error_metadata)
+            except Exception as validation_error:
+                self.logger.warning(f"Event error boundary validation failed: {validation_error}")
+
 
 class AnalyticsEventHandler(EventHandler):
     """Event handler for analytics integration."""
@@ -183,47 +361,76 @@ class AnalyticsEventHandler(EventHandler):
         self.analytics_service = analytics_service
 
     async def handle(self, event: BotEvent) -> None:
-        """Handle events for analytics recording."""
+        """Handle events for analytics recording with consistent data validation."""
         if not self.analytics_service:
             return
 
         try:
-            # Record different types of events in analytics
+            # Validate event data at boundary
+            processing_mode = "stream"  # Use stream for consistency with core patterns
+            if event.data and isinstance(event.data, dict):
+                processing_mode = event.data.get("processing_mode", "stream")
+
+            # Record different types of events in analytics with consistent patterns
             if event.event_type in [
                 BotEventType.BOT_CREATED,
                 BotEventType.BOT_STARTED,
                 BotEventType.BOT_STOPPED
             ]:
-                if hasattr(self.analytics_service, "record_bot_lifecycle_event"):
-                    await self.analytics_service.record_bot_lifecycle_event(
+                if hasattr(self.analytics_service, "record_strategy_event"):
+                    # Use existing record_strategy_event method for bot lifecycle events
+                    event_data = event.data or {}
+                    event_data.update({
+                        "processing_mode": processing_mode,
+                        "data_format": "bot_lifecycle_event_v1"
+                    })
+                    self.analytics_service.record_strategy_event(
                         event_type=event.event_type.value,
                         bot_id=event.bot_id,
-                        timestamp=event.timestamp,
-                        data=event.data
+                        data=event_data
                     )
 
             elif event.event_type == BotEventType.BOT_METRICS_UPDATE:
-                if hasattr(self.analytics_service, "record_bot_metrics"):
-                    await self.analytics_service.record_bot_metrics(
-                        bot_id=event.bot_id,
-                        metrics=event.data,
-                        timestamp=event.timestamp
+                if hasattr(self.analytics_service, "record_market_data_event"):
+                    # Use record_market_data_event for metrics data
+                    metrics_data = event.data or {}
+                    metrics_data.update({
+                        "processing_mode": processing_mode,
+                        "data_format": "bot_metrics_v1"
+                    })
+                    self.analytics_service.record_market_data_event(
+                        data_type="bot_metrics",
+                        data=metrics_data
                     )
 
             elif event.event_type in [
                 BotEventType.BOT_RISK_ALERT,
                 BotEventType.BOT_RISK_LIMIT_EXCEEDED
             ]:
-                if hasattr(self.analytics_service, "record_risk_event"):
-                    await self.analytics_service.record_risk_event(
-                        event_type=event.event_type.value,
-                        bot_id=event.bot_id,
-                        risk_data=event.data,
-                        timestamp=event.timestamp
+                if hasattr(self.analytics_service, "record_system_error"):
+                    # Use record_system_error for risk events
+                    risk_data = event.data or {}
+                    risk_data.update({
+                        "processing_mode": processing_mode,
+                        "data_format": "risk_event_v1"
+                    })
+                    self.analytics_service.record_system_error(
+                        error_type=event.event_type.value,
+                        component="risk_management",
+                        details=risk_data
                     )
 
         except Exception as e:
             self.logger.warning(f"Failed to record analytics event: {e}")
+            # Apply consistent error propagation
+            from src.core.exceptions import ValidationError
+            if not isinstance(e, ValidationError):
+                # Only log generic errors, validation errors should be re-raised
+                self.logger.error(
+                    f"Analytics handler error for {event.event_type.value}: {e!s}",
+                    event_id=event.event_id,
+                    bot_id=event.bot_id
+                )
 
 
 class RiskMonitoringEventHandler(EventHandler):
@@ -234,12 +441,17 @@ class RiskMonitoringEventHandler(EventHandler):
         self.risk_service = risk_service
 
     async def handle(self, event: BotEvent) -> None:
-        """Handle events for risk monitoring."""
+        """Handle events for risk monitoring with consistent data validation."""
         if not self.risk_service:
             return
 
         try:
-            # Monitor risk-related events
+            # Validate event data at boundary for risk monitoring
+            processing_mode = "stream"  # Risk monitoring typically needs real-time processing
+            if event.data and isinstance(event.data, dict):
+                processing_mode = event.data.get("processing_mode", "stream")
+
+            # Monitor risk-related events with consistent data patterns
             if event.event_type == BotEventType.BOT_STARTED:
                 # Validate initial risk on bot start
                 if hasattr(self.risk_service, "validate_bot_startup"):
@@ -248,21 +460,43 @@ class RiskMonitoringEventHandler(EventHandler):
             elif event.event_type == BotEventType.BOT_TRADE_EXECUTED:
                 # Check risk after each trade
                 if hasattr(self.risk_service, "post_trade_risk_check"):
+                    # Ensure trade data has consistent format
+                    trade_data = event.data or {}
+                    trade_data.update({
+                        "processing_mode": processing_mode,
+                        "data_format": "trade_data_v1"
+                    })
                     await self.risk_service.post_trade_risk_check(
                         bot_id=event.bot_id,
-                        trade_data=event.data
+                        trade_data=trade_data
                     )
 
             elif event.event_type == BotEventType.BOT_RISK_ALERT:
                 # Handle risk alerts
                 if hasattr(self.risk_service, "handle_risk_alert"):
+                    # Ensure alert data has consistent format
+                    alert_data = event.data or {}
+                    alert_data.update({
+                        "processing_mode": processing_mode,
+                        "data_format": "risk_alert_v1",
+                        "priority": "high"  # Risk alerts are high priority
+                    })
                     await self.risk_service.handle_risk_alert(
                         bot_id=event.bot_id,
-                        alert_data=event.data
+                        alert_data=alert_data
                     )
 
         except Exception as e:
             self.logger.warning(f"Risk monitoring event handling failed: {e}")
+            # Apply consistent error propagation
+            from src.core.exceptions import ValidationError
+            if not isinstance(e, ValidationError):
+                # Only log generic errors, validation errors should be re-raised
+                self.logger.error(
+                    f"Risk handler error for {event.event_type.value}: {e!s}",
+                    event_id=event.event_id,
+                    bot_id=event.bot_id
+                )
 
 
 # Global event publisher instance
