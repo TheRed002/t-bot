@@ -8,9 +8,11 @@ from datetime import datetime, timezone
 from decimal import Decimal
 
 from src.core.base.component import BaseComponent
+from src.core.types import Position
 from src.core.types.market import MarketData
 from src.core.types.risk import RiskLevel, RiskMetrics
-from src.core.types.trading import Position
+from src.utils.decimal_utils import to_decimal
+from src.utils.messaging_patterns import ErrorPropagationMixin
 from src.utils.risk_calculations import (
     calculate_calmar_ratio,
     calculate_current_drawdown,
@@ -24,12 +26,13 @@ from src.utils.risk_calculations import (
 )
 
 
-class RiskCalculator(BaseComponent):
+class RiskCalculator(BaseComponent, ErrorPropagationMixin):
     """
     Centralized risk calculator with caching.
 
     This eliminates duplication of risk calculations across modules
     by providing a single source of truth for all risk metrics.
+    Uses ErrorPropagationMixin for consistent error handling across modules.
     """
 
     def __init__(self):
@@ -76,7 +79,9 @@ class RiskCalculator(BaseComponent):
         """
         return calculate_expected_shortfall(returns, confidence_level)
 
-    def calculate_sharpe_ratio(self, returns: list[Decimal], risk_free_rate: Decimal = Decimal("0.02")) -> Decimal:
+    def calculate_sharpe_ratio(
+        self, returns: list[Decimal], risk_free_rate: Decimal = Decimal("0.02")
+    ) -> Decimal:
         """
         Calculate Sharpe ratio using centralized utility.
 
@@ -121,7 +126,9 @@ class RiskCalculator(BaseComponent):
         """
         return calculate_max_drawdown(values)
 
-    def calculate_calmar_ratio(self, returns: list[Decimal], period_years: Decimal = Decimal("1.0")) -> Decimal:
+    def calculate_calmar_ratio(
+        self, returns: list[Decimal], period_years: Decimal = Decimal("1.0")
+    ) -> Decimal:
         """
         Calculate Calmar ratio using centralized utility.
 
@@ -169,16 +176,20 @@ class RiskCalculator(BaseComponent):
                 self.portfolio_returns.append(current_return)
 
         # Calculate all metrics using centralized utilities
-        var_1d = calculate_var(self.portfolio_returns, Decimal("0.95"), 1)
-        var_5d = calculate_var(self.portfolio_returns, Decimal("0.95"), 5)
+        var_1d = calculate_var(self.portfolio_returns, to_decimal("0.95"), 1)
+        var_5d = calculate_var(self.portfolio_returns, to_decimal("0.95"), 5)
         expected_shortfall = calculate_expected_shortfall(self.portfolio_returns)
         sharpe = calculate_sharpe_ratio(self.portfolio_returns)
         sortino = calculate_sortino_ratio(self.portfolio_returns)
-        max_dd, _, _ = calculate_max_drawdown(self.portfolio_returns)
+        max_dd, _, _ = calculate_max_drawdown(
+            self.portfolio_values
+        )  # Use portfolio values, not returns
         calmar = calculate_calmar_ratio(self.portfolio_returns)
 
         # Determine risk level using centralized utility
-        risk_level = determine_risk_level(var_1d, self._calculate_current_drawdown(), sharpe, portfolio_value)
+        risk_level = determine_risk_level(
+            var_1d, self._calculate_current_drawdown(), sharpe, portfolio_value
+        )
 
         return RiskMetrics(
             timestamp=datetime.now(timezone.utc),
@@ -187,11 +198,11 @@ class RiskCalculator(BaseComponent):
             var_1d=Decimal(str(var_1d)),
             var_5d=Decimal(str(var_5d)),
             expected_shortfall=Decimal(str(expected_shortfall)),
-            sharpe_ratio=float(sharpe) if sharpe is not None else None,
-            sortino_ratio=float(sortino) if sortino is not None else None,
+            sharpe_ratio=sharpe if sharpe is not None else None,
+            sortino_ratio=sortino if sortino is not None else None,
             max_drawdown=Decimal(str(max_dd)),
             current_drawdown=Decimal(str(self._calculate_current_drawdown())),
-            calmar_ratio=float(calmar) if calmar is not None else None,
+            calmar_ratio=calmar if calmar is not None else None,
             risk_level=risk_level,
             position_count=len(positions),
             correlation_risk=self._calculate_correlation_risk(positions),
@@ -206,16 +217,54 @@ class RiskCalculator(BaseComponent):
         return calculate_current_drawdown(current_value, self.portfolio_values[:-1])
 
     def _calculate_correlation_risk(self, positions: list[Position]) -> Decimal:
-        """Calculate correlation risk between positions."""
+        """Calculate correlation risk using centralized utilities."""
+        from src.utils.decimal_utils import to_decimal
+        from src.utils.risk_validation import validate_correlation_risk
+
         if len(positions) < 2:
-            return Decimal("0")
+            return to_decimal("0")
 
-        # Simplified correlation risk calculation
-        # In production, this would use actual correlation matrices
-        unique_symbols = len(set(pos.symbol for pos in positions))
-        concentration = Decimal("1") / Decimal(str(unique_symbols)) if unique_symbols > 0 else Decimal("1")
+        try:
+            # Create simplified correlation matrix
+            symbols = [pos.symbol for pos in positions]
+            correlation_matrix = {}
 
-        return Decimal("1") - concentration
+            # Calculate position-based correlation estimate
+            for i, symbol1 in enumerate(symbols):
+                for j, symbol2 in enumerate(symbols[i + 1 :], i + 1):
+                    # Simple concentration-based correlation estimate
+                    correlation = to_decimal("0.3")  # Default moderate correlation
+                    correlation_matrix[(symbol1, symbol2)] = correlation
+
+            # Validate correlation risk using centralized utility
+            is_valid, message = validate_correlation_risk(correlation_matrix)
+            if not is_valid:
+                self.logger.warning(f"High correlation risk detected: {message}")
+                return to_decimal("0.8")  # High risk indicator
+
+            # Return concentration-based risk measure
+            unique_symbols = len(set(symbols))
+            concentration = (
+                to_decimal("1") / to_decimal(str(unique_symbols))
+                if unique_symbols > 0
+                else to_decimal("1")
+            )
+            return to_decimal("1") - concentration
+
+        except Exception as e:
+            # Log error with consistent metadata for cross-module alignment
+            self.logger.error(
+                f"Correlation risk calculation failed: {e}",
+                extra={
+                    "error_type": type(e).__name__,
+                    "context": "correlation_risk_calculation",
+                    "processing_mode": "stream",  # Align with capital_management
+                    "data_format": "error_context_v1",  # Consistent format version
+                    "component": "RiskCalculator",
+                    "fallback_applied": True,
+                },
+            )
+            return to_decimal("0.5")  # Default moderate risk
 
     def _determine_risk_level(self, var: Decimal, max_dd: Decimal, sharpe: Decimal) -> RiskLevel:
         """
@@ -237,7 +286,9 @@ class RiskCalculator(BaseComponent):
         self._cache.clear()
         self.logger.info("Risk calculation cache cleared")
 
-    def update_history(self, symbol: str, price: Decimal, return_value: float | None = None) -> None:
+    def update_history(
+        self, symbol: str, price: Decimal, return_value: float | None = None
+    ) -> None:
         """
         Update historical data for a symbol.
 
@@ -257,7 +308,9 @@ class RiskCalculator(BaseComponent):
             symbol = symbol.strip().upper()  # Normalize symbol
 
             if not isinstance(price, Decimal | int | float):
-                raise ValueError(f"Price must be Decimal, int, or float, got {type(price).__name__}")
+                raise ValueError(
+                    f"Price must be Decimal, int, or float, got {type(price).__name__}"
+                )
 
             # Convert to Decimal for validation
             if not isinstance(price, Decimal):
@@ -275,7 +328,8 @@ class RiskCalculator(BaseComponent):
             max_price = Decimal("1000000")
             if not (min_price <= price <= max_price):
                 self.logger.warning(
-                    f"Price for {symbol} outside reasonable bounds: {price} " f"(bounds: {min_price} - {max_price})"
+                    f"Price for {symbol} outside reasonable bounds: {price} "
+                    f"(bounds: {min_price} - {max_price})"
                 )
                 return
 

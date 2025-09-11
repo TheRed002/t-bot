@@ -14,7 +14,7 @@ CRITICAL: Tests must achieve 90% coverage for P-009 implementation.
 
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
@@ -49,6 +49,8 @@ class TestBaseCircuitBreaker:
         config.risk.breaker_evaluation_timeout = 30.0
         config.risk.max_daily_loss_pct = 0.05
         config.risk.max_drawdown = 0.15
+        config.risk.circuit_breaker_recovery_timeout_minutes = 30
+        config.risk.circuit_breaker_test_interval_minutes = 5
         return config
 
     @pytest.fixture
@@ -66,8 +68,7 @@ class TestBaseCircuitBreaker:
     @pytest.fixture
     def circuit_breaker(self, mock_config, mock_risk_manager):
         """Create test circuit breaker instance."""
-        with patch("src.risk_management.circuit_breakers.ErrorHandler", return_value=Mock()):
-            return DailyLossLimitBreaker(mock_config, mock_risk_manager)
+        return DailyLossLimitBreaker(mock_config, mock_risk_manager)
 
     def test_circuit_breaker_initialization(self, circuit_breaker):
         """Test circuit breaker initialization."""
@@ -121,6 +122,8 @@ class TestDailyLossLimitBreaker:
         config.risk.volatility_lookback_period = 20
         config.risk.breaker_evaluation_timeout = 30.0
         config.risk.max_daily_loss_pct = 0.05  # 5%
+        config.risk.circuit_breaker_recovery_timeout_minutes = 30
+        config.risk.circuit_breaker_test_interval_minutes = 5
         return config
 
     @pytest.fixture
@@ -131,8 +134,7 @@ class TestDailyLossLimitBreaker:
     @pytest.fixture
     def breaker(self, mock_config, mock_risk_manager):
         """Create daily loss limit breaker."""
-        with patch("src.risk_management.circuit_breakers.ErrorHandler", return_value=Mock()):
-            return DailyLossLimitBreaker(mock_config, mock_risk_manager)
+        return DailyLossLimitBreaker(mock_config, mock_risk_manager)
 
     @pytest.mark.asyncio
     async def test_get_threshold_value(self, breaker):
@@ -223,6 +225,8 @@ class TestDrawdownLimitBreaker:
         config = Mock(spec=Config)
         config.risk = Mock()
         config.risk.max_drawdown = 0.15  # 15%
+        config.risk.circuit_breaker_recovery_timeout_minutes = 30
+        config.risk.circuit_breaker_test_interval_minutes = 5
         return config
 
     @pytest.fixture
@@ -233,8 +237,7 @@ class TestDrawdownLimitBreaker:
     @pytest.fixture
     def breaker(self, mock_config, mock_risk_manager):
         """Create drawdown limit breaker."""
-        with patch("src.risk_management.circuit_breakers.ErrorHandler", return_value=Mock()):
-            return DrawdownLimitBreaker(mock_config, mock_risk_manager)
+        return DrawdownLimitBreaker(mock_config, mock_risk_manager)
 
     @pytest.mark.asyncio
     async def test_get_threshold_value(self, breaker):
@@ -297,6 +300,8 @@ class TestVolatilitySpikeBreaker:
         config.risk = Mock()
         config.risk.volatility_spike_threshold = 0.05
         config.risk.volatility_lookback_period = 20
+        config.risk.circuit_breaker_recovery_timeout_minutes = 30
+        config.risk.circuit_breaker_test_interval_minutes = 5
         return config
 
     @pytest.fixture
@@ -307,8 +312,7 @@ class TestVolatilitySpikeBreaker:
     @pytest.fixture
     def breaker(self, mock_config, mock_risk_manager):
         """Create volatility spike breaker."""
-        with patch("src.risk_management.circuit_breakers.ErrorHandler", return_value=Mock()):
-            return VolatilitySpikeBreaker(mock_config, mock_risk_manager)
+        return VolatilitySpikeBreaker(mock_config, mock_risk_manager)
 
     @pytest.mark.asyncio
     async def test_get_threshold_value(self, breaker):
@@ -365,6 +369,9 @@ class TestModelConfidenceBreaker:
         """Create mock configuration."""
         config = Mock(spec=Config)
         config.risk = Mock()
+        config.risk.circuit_breaker_recovery_timeout_minutes = 30
+        config.risk.circuit_breaker_test_interval_minutes = 5
+        config.risk.model_confidence_threshold = 0.3
         return config
 
     @pytest.fixture
@@ -375,8 +382,7 @@ class TestModelConfidenceBreaker:
     @pytest.fixture
     def breaker(self, mock_config, mock_risk_manager):
         """Create model confidence breaker."""
-        with patch("src.risk_management.circuit_breakers.ErrorHandler", return_value=Mock()):
-            return ModelConfidenceBreaker(mock_config, mock_risk_manager)
+        return ModelConfidenceBreaker(mock_config, mock_risk_manager)
 
     @pytest.mark.asyncio
     async def test_get_threshold_value(self, breaker):
@@ -425,6 +431,10 @@ class TestSystemErrorRateBreaker:
         """Create mock configuration."""
         config = Mock(spec=Config)
         config.risk = Mock()
+        config.risk.circuit_breaker_recovery_timeout_minutes = 30
+        config.risk.circuit_breaker_test_interval_minutes = 5
+        config.risk.system_error_rate_threshold = 0.1
+        config.risk.system_error_window_minutes = 15
         return config
 
     @pytest.fixture
@@ -435,8 +445,7 @@ class TestSystemErrorRateBreaker:
     @pytest.fixture
     def breaker(self, mock_config, mock_risk_manager):
         """Create system error rate breaker."""
-        with patch("src.risk_management.circuit_breakers.ErrorHandler", return_value=Mock()):
-            return SystemErrorRateBreaker(mock_config, mock_risk_manager)
+        return SystemErrorRateBreaker(mock_config, mock_risk_manager)
 
     @pytest.mark.asyncio
     async def test_get_threshold_value(self, breaker):
@@ -509,6 +518,11 @@ class TestCircuitBreakerManager:
         config.risk.breaker_evaluation_timeout = 30.0
         config.risk.max_daily_loss_pct = 0.05
         config.risk.max_drawdown = 0.15
+        config.risk.circuit_breaker_recovery_timeout_minutes = 30
+        config.risk.circuit_breaker_test_interval_minutes = 5
+        config.risk.model_confidence_threshold = 0.3
+        config.risk.system_error_rate_threshold = 0.1
+        config.risk.system_error_window_minutes = 15
         return config
 
     @pytest.fixture
@@ -519,8 +533,7 @@ class TestCircuitBreakerManager:
     @pytest.fixture
     def manager(self, mock_config, mock_risk_manager):
         """Create circuit breaker manager."""
-        with patch("src.risk_management.circuit_breakers.ErrorHandler", return_value=Mock()):
-            return CircuitBreakerManager(mock_config, mock_risk_manager)
+        return CircuitBreakerManager(mock_config, mock_risk_manager)
 
     def test_initialization(self, manager):
         """Test manager initialization."""
@@ -631,6 +644,11 @@ class TestCircuitBreakerIntegration:
         config.risk.breaker_evaluation_timeout = 30.0
         config.risk.max_daily_loss_pct = 0.05
         config.risk.max_drawdown = 0.15
+        config.risk.circuit_breaker_recovery_timeout_minutes = 30
+        config.risk.circuit_breaker_test_interval_minutes = 5
+        config.risk.model_confidence_threshold = 0.3
+        config.risk.system_error_rate_threshold = 0.1
+        config.risk.system_error_window_minutes = 15
         return config
 
     @pytest.fixture
@@ -641,61 +659,59 @@ class TestCircuitBreakerIntegration:
     @pytest.mark.asyncio
     async def test_circuit_breaker_recovery_cycle(self, mock_config, mock_risk_manager):
         """Test complete circuit breaker recovery cycle."""
-        with patch("src.risk_management.circuit_breakers.ErrorHandler", return_value=Mock()):
-            breaker = DailyLossLimitBreaker(mock_config, mock_risk_manager)
+        breaker = DailyLossLimitBreaker(mock_config, mock_risk_manager)
 
-            # Initial state
-            assert breaker.state == CircuitBreakerState.ACTIVE
+        # Initial state
+        assert breaker.state == CircuitBreakerState.ACTIVE
 
-            # Trigger circuit breaker
-            data = {
-                "portfolio_value": Decimal("10000"),
-                "daily_pnl": Decimal("-600"),  # 6% loss
-            }
+        # Trigger circuit breaker
+        data = {
+            "portfolio_value": Decimal("10000"),
+            "daily_pnl": Decimal("-600"),  # 6% loss
+        }
 
-            with pytest.raises(CircuitBreakerTriggeredError):
-                await breaker.evaluate(data)
+        with pytest.raises(CircuitBreakerTriggeredError):
+            await breaker.evaluate(data)
 
-            assert breaker.state == CircuitBreakerState.TRIGGERED
-            assert breaker.trigger_count == 1
+        assert breaker.state == CircuitBreakerState.TRIGGERED
+        assert breaker.trigger_count == 1
 
-            # Simulate recovery timeout
-            breaker.trigger_time = datetime.now(timezone.utc) - timedelta(
-                minutes=35
-            )  # Past 30-minute timeout
+        # Simulate recovery timeout
+        breaker.trigger_time = datetime.now(timezone.utc) - timedelta(
+            minutes=35
+        )  # Past 30-minute timeout
 
-            # Test recovery
-            data = {
-                "portfolio_value": Decimal("10000"),
-                "daily_pnl": Decimal("100"),  # Positive PnL
-            }
+        # Test recovery
+        data = {
+            "portfolio_value": Decimal("10000"),
+            "daily_pnl": Decimal("100"),  # Positive PnL
+        }
 
-            triggered = await breaker.evaluate(data)
-            assert triggered is False
-            assert breaker.state == CircuitBreakerState.ACTIVE
+        triggered = await breaker.evaluate(data)
+        assert triggered is False
+        assert breaker.state == CircuitBreakerState.ACTIVE
 
     @pytest.mark.asyncio
     async def test_multiple_circuit_breakers(self, mock_config, mock_risk_manager):
         """Test multiple circuit breakers working together."""
-        with patch("src.risk_management.circuit_breakers.ErrorHandler", return_value=Mock()):
-            manager = CircuitBreakerManager(mock_config, mock_risk_manager)
+        manager = CircuitBreakerManager(mock_config, mock_risk_manager)
 
-            # Test data that should trigger multiple breakers
-            data = {
-                "portfolio_value": Decimal("10000"),
-                "daily_pnl": Decimal("-600"),  # 6% loss
-                "current_portfolio_value": Decimal("8000"),  # 20% drawdown
-                "peak_portfolio_value": Decimal("10000"),
-                "price_history": [100, 90, 110, 80, 120],  # High volatility
-                "model_confidence": Decimal("0.2"),  # Low confidence
-                "total_requests": 100,
-                "error_occurred": False,
-            }
+        # Test data that should trigger multiple breakers
+        data = {
+            "portfolio_value": Decimal("10000"),
+            "daily_pnl": Decimal("-600"),  # 6% loss
+            "current_portfolio_value": Decimal("8000"),  # 20% drawdown
+            "peak_portfolio_value": Decimal("10000"),
+            "price_history": [100, 90, 110, 80, 120],  # High volatility
+            "model_confidence": Decimal("0.2"),  # Low confidence
+            "total_requests": 100,
+            "error_occurred": False,
+        }
 
-            # This should trigger multiple breakers
-            with pytest.raises(CircuitBreakerTriggeredError):
-                await manager.evaluate_all(data)
+        # This should trigger multiple breakers
+        with pytest.raises(CircuitBreakerTriggeredError):
+            await manager.evaluate_all(data)
 
-            # Check that multiple breakers are triggered
-            triggered = manager.get_triggered_breakers()
-            assert len(triggered) > 0
+        # Check that multiple breakers are triggered
+        triggered = manager.get_triggered_breakers()
+        assert len(triggered) > 0

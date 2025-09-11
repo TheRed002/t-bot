@@ -27,8 +27,6 @@ from src.core.types.trading import (
     OrderRequest,
     OrderSide,
     OrderType,
-    PositionSide,
-    PositionStatus,
 )
 
 # Import from P-003+
@@ -86,7 +84,7 @@ class TestEmergencyControls:
     @pytest.fixture
     def emergency_controls(self, mock_config, mock_risk_manager, mock_circuit_breaker_manager):
         """Create emergency controls instance."""
-        with patch("src.risk_management.emergency_controls.ErrorHandler", return_value=Mock()):
+        with patch("src.error_handling.ErrorHandler", return_value=Mock()):
             return EmergencyControls(mock_config, mock_risk_manager, mock_circuit_breaker_manager)
 
     def test_initialization(self, emergency_controls):
@@ -455,7 +453,7 @@ class TestEmergencyControlsIntegration:
         self, mock_config, mock_risk_manager, mock_circuit_breaker_manager
     ):
         """Test complete emergency cycle from activation to recovery."""
-        with patch("src.risk_management.emergency_controls.ErrorHandler", return_value=Mock()):
+        with patch("src.error_handling.ErrorHandler", return_value=Mock()):
             emergency_controls = EmergencyControls(
                 mock_config, mock_risk_manager, mock_circuit_breaker_manager
             )
@@ -489,7 +487,7 @@ class TestEmergencyControlsIntegration:
         self, mock_config, mock_risk_manager, mock_circuit_breaker_manager
     ):
         """Test emergency procedures with registered exchanges."""
-        with patch("src.risk_management.emergency_controls.ErrorHandler", return_value=Mock()):
+        with patch("src.error_handling.ErrorHandler", return_value=Mock()):
             emergency_controls = EmergencyControls(
                 mock_config, mock_risk_manager, mock_circuit_breaker_manager
             )
@@ -530,7 +528,7 @@ class TestEmergencyControlsIntegration:
         self, mock_config, mock_risk_manager, mock_circuit_breaker_manager
     ):
         """Test manual override cycle."""
-        with patch("src.risk_management.emergency_controls.ErrorHandler", return_value=Mock()):
+        with patch("src.error_handling.ErrorHandler", return_value=Mock()):
             emergency_controls = EmergencyControls(
                 mock_config, mock_risk_manager, mock_circuit_breaker_manager
             )

@@ -13,16 +13,13 @@ It handles:
 
 from typing import TYPE_CHECKING
 
-from src.core.config.main import Config, get_config
-from src.core.dependency_injection import DependencyInjector, get_container
+from src.core.dependency_injection import DependencyInjector
 from src.core.exceptions import DependencyError
 from src.core.logging import get_logger
 
 # Type checking imports to avoid circular dependencies
 if TYPE_CHECKING:
-    from src.database.service import DatabaseService
-    from src.monitoring.metrics import MetricsCollector
-    from src.state import StateService
+    pass
 
 from .controller import RiskManagementController
 from .interfaces import RiskManagementFactoryInterface, RiskServiceInterface
@@ -42,60 +39,25 @@ class RiskManagementFactory(RiskManagementFactoryInterface):
     with automatic dependency injection and configuration management.
     """
 
-    def __init__(
-        self,
-        injector: DependencyInjector | None = None,
-        config: Config | None = None,
-        database_service: "DatabaseService | None" = None,
-        state_service: "StateService | None" = None,
-        metrics_collector: "MetricsCollector | None" = None,
-    ):
+    def __init__(self, injector: DependencyInjector | None = None):
         """
-        Initialize risk management factory.
+        Initialize risk management factory using dependency injection.
 
         Args:
-            injector: Dependency injector instance
-            config: Application configuration
-            database_service: Database service for data access
-            state_service: State service for state management
-            metrics_collector: Metrics collector service
+            injector: Dependency injector instance (required)
         """
-        # Initialize dependency injector
         if injector is None:
-            from .di_registration import configure_risk_management_dependencies
-
-            injector = configure_risk_management_dependencies()
+            raise DependencyError(
+                "Injector must be provided to factory",
+                dependency_name="DependencyInjector",
+                error_code="FAC_001",
+                suggested_action="Provide configured dependency injector to factory constructor",
+            )
 
         self.injector = injector
 
-        # Register explicit dependencies if provided
-        if config is not None:
-            self.injector.register_factory("Config", lambda: config, singleton=True)
-        if database_service is not None:
-            self.injector.register_factory("DatabaseService", lambda: database_service, singleton=True)
-        if state_service is not None:
-            self.injector.register_factory("StateService", lambda: state_service, singleton=True)
-        if metrics_collector is not None:
-            self.injector.register_factory("MetricsCollector", lambda: metrics_collector, singleton=True)
-
-        # Fallback config resolution for backward compatibility
-        if config is None:
-            try:
-                config_service = get_container().get("ConfigService")
-                # Create legacy Config object from ConfigService
-                config = Config()
-                config.risk = config_service.get_risk_config()
-                config.database = config_service.get_database_config()
-                config.exchange = config_service.get_exchange_config()
-                self.injector.register_factory("Config", lambda: config, singleton=True)
-            except (KeyError, AttributeError):
-                # Fallback to legacy method for backward compatibility
-                config = get_config()
-                self.injector.register_factory("Config", lambda: config, singleton=True)
-
         logger.info(
             "RiskManagementFactory initialized with dependency injection",
-            has_injector=injector is not None,
             has_config_service=self.injector.has_service("Config"),
             has_database_service=self.injector.has_service("DatabaseService"),
             has_state_service=self.injector.has_service("StateService"),
@@ -135,82 +97,100 @@ class RiskManagementFactory(RiskManagementFactoryInterface):
 
     def create_legacy_risk_manager(self) -> RiskManager:
         """
-        Create a legacy RiskManager with optional service integration.
-
-        DEPRECATED: Use create_risk_service() instead.
+        Create a RiskManager using dependency injection.
 
         Returns:
             RiskManager instance
         """
-        logger.warning("Creating DEPRECATED RiskManager - consider using RiskService instead")
 
         try:
             config = self.injector.resolve("Config")
             database_service = (
-                self.injector.resolve("DatabaseService") if self.injector.has_service("DatabaseService") else None
+                self.injector.resolve("DatabaseService")
+                if self.injector.has_service("DatabaseService")
+                else None
             )
-            state_service = self.injector.resolve("StateService") if self.injector.has_service("StateService") else None
+            state_service = (
+                self.injector.resolve("StateService")
+                if self.injector.has_service("StateService")
+                else None
+            )
+
+            return RiskManager(
+                config=config,
+                database_service=database_service,
+                state_service=state_service,
+            )
         except Exception as e:
             logger.error(f"Failed to resolve services from DI container: {e}")
-            raise DependencyError("Failed to resolve required dependencies for legacy RiskManager") from e
-
-        return RiskManager(
-            config=config,
-            database_service=database_service,
-            state_service=state_service,
-        )
+            raise DependencyError(
+                "Failed to resolve required dependencies for legacy RiskManager",
+                dependency_name="RiskManager",
+                error_code="FAC_002",
+                suggested_action="Ensure Config, DatabaseService and StateService are registered",
+            ) from e
 
     def create_legacy_position_sizer(self) -> PositionSizer:
         """
-        Create a legacy PositionSizer.
-
-        DEPRECATED: Use RiskService.calculate_position_size() instead.
+        Create a PositionSizer using dependency injection.
 
         Returns:
             PositionSizer instance
         """
-        logger.warning("Creating DEPRECATED PositionSizer - use RiskService.calculate_position_size() instead")
 
         try:
             config = self.injector.resolve("Config")
             database_service = (
-                self.injector.resolve("DatabaseService") if self.injector.has_service("DatabaseService") else None
+                self.injector.resolve("DatabaseService")
+                if self.injector.has_service("DatabaseService")
+                else None
+            )
+
+            return PositionSizer(
+                config=config,
+                database_service=database_service,
             )
         except Exception as e:
             logger.error(f"Failed to resolve services from DI container: {e}")
-            raise DependencyError("Failed to resolve required dependencies for legacy PositionSizer") from e
-
-        return PositionSizer(
-            config=config,
-            database_service=database_service,
-        )
+            raise DependencyError(
+                "Failed to resolve required dependencies for legacy PositionSizer",
+                dependency_name="PositionSizer",
+                error_code="FAC_003",
+                suggested_action="Ensure Config and DatabaseService are registered",
+            ) from e
 
     def create_legacy_risk_calculator(self) -> RiskCalculator:
         """
-        Create a legacy RiskCalculator.
-
-        DEPRECATED: Use RiskService.calculate_risk_metrics() instead.
+        Create a RiskCalculator using dependency injection.
 
         Returns:
             RiskCalculator instance
         """
-        logger.warning("Creating DEPRECATED RiskCalculator - use RiskService.calculate_risk_metrics() instead")
 
         try:
             config = self.injector.resolve("Config")
             database_service = (
-                self.injector.resolve("DatabaseService") if self.injector.has_service("DatabaseService") else None
+                self.injector.resolve("DatabaseService")
+                if self.injector.has_service("DatabaseService")
+                else None
+            )
+
+            return RiskCalculator(
+                config=config,
+                database_service=database_service,
             )
         except Exception as e:
             logger.error(f"Failed to resolve services from DI container: {e}")
-            raise DependencyError("Failed to resolve required dependencies for legacy RiskCalculator") from e
+            raise DependencyError(
+                "Failed to resolve required dependencies for legacy RiskCalculator",
+                dependency_name="RiskCalculator",
+                error_code="FAC_004",
+                suggested_action="Ensure Config and DatabaseService are registered",
+            ) from e
 
-        return RiskCalculator(
-            config=config,
-            database_service=database_service,
-        )
-
-    def create_risk_management_controller(self, correlation_id: str | None = None) -> RiskManagementController:
+    def create_risk_management_controller(
+        self, correlation_id: str | None = None
+    ) -> RiskManagementController:
         """
         Create a new risk management controller using dependency injection.
 
@@ -249,7 +229,12 @@ class RiskManagementFactory(RiskManagementFactoryInterface):
 
         except Exception as e:
             logger.error(f"Failed to create RiskManagementController via dependency injection: {e}")
-            raise DependencyError(f"Failed to create RiskManagementController: {e}") from e
+            raise DependencyError(
+                "Failed to create RiskManagementController",
+                dependency_name="RiskManagementController",
+                error_code="FAC_005",
+                suggested_action="Ensure all required services are registered in DI container",
+            ) from e
 
     def get_recommended_component(self) -> RiskService | RiskManager:
         """
@@ -274,7 +259,8 @@ class RiskManagementFactory(RiskManagementFactoryInterface):
                     missing_services.append("StateService")
 
                 logger.warning(
-                    f"Missing services {missing_services} in DI container - " "falling back to legacy RiskManager"
+                    f"Missing services {missing_services} in DI container - "
+                    "falling back to legacy RiskManager"
                 )
                 return self.create_legacy_risk_manager()
 
@@ -293,13 +279,25 @@ class RiskManagementFactory(RiskManagementFactoryInterface):
         validation = {
             "injector_available": self.injector is not None,
             "config": self.injector.has_service("Config") if self.injector else False,
-            "database_service": self.injector.has_service("DatabaseService") if self.injector else False,
+            "database_service": self.injector.has_service("DatabaseService")
+            if self.injector
+            else False,
             "state_service": self.injector.has_service("StateService") if self.injector else False,
-            "risk_service_available": (self.injector.has_service("RiskService") if self.injector else False),
-            "position_sizing_service": self.injector.has_service("PositionSizingService") if self.injector else False,
-            "risk_validation_service": self.injector.has_service("RiskValidationService") if self.injector else False,
-            "risk_metrics_service": self.injector.has_service("RiskMetricsService") if self.injector else False,
-            "risk_monitoring_service": self.injector.has_service("RiskMonitoringService") if self.injector else False,
+            "risk_service_available": (
+                self.injector.has_service("RiskService") if self.injector else False
+            ),
+            "position_sizing_service": self.injector.has_service("PositionSizingService")
+            if self.injector
+            else False,
+            "risk_validation_service": self.injector.has_service("RiskValidationService")
+            if self.injector
+            else False,
+            "risk_metrics_service": self.injector.has_service("RiskMetricsService")
+            if self.injector
+            else False,
+            "risk_monitoring_service": self.injector.has_service("RiskMonitoringService")
+            if self.injector
+            else False,
         }
 
         logger.info("Dependency validation via DI container", **validation)
@@ -345,13 +343,17 @@ class RiskManagementFactory(RiskManagementFactoryInterface):
             "New: Risk alerts": "RiskService.get_risk_alerts()",
             "New: Portfolio metrics": "RiskService.get_portfolio_metrics()",
             "New: Risk summary": "RiskService.get_risk_summary()",
-            "New: Emergency controls": ("RiskService.trigger_emergency_stop() / reset_emergency_stop()"),
+            "New: Emergency controls": (
+                "RiskService.trigger_emergency_stop() / reset_emergency_stop()"
+            ),
             "New: Enhanced caching": "Built into RiskService methods",
             "New: Circuit breakers": "Built into RiskService operations",
             "New: State management": "Integrated with StateService",
             "New: Database integration": "Integrated with DatabaseService",
             # RECOMMENDED: Controller pattern with service delegation
-            "RECOMMENDED: Use RiskManagementController": ("factory.create_risk_management_controller()"),
+            "RECOMMENDED: Use RiskManagementController": (
+                "factory.create_risk_management_controller()"
+            ),
             "RECOMMENDED: Service delegation": "Controller -> Service -> Repository pattern",
             "RECOMMENDED: Dependency injection": "All services injected through constructor",
         }
@@ -361,95 +363,64 @@ class RiskManagementFactory(RiskManagementFactoryInterface):
 _global_factory: RiskManagementFactory | None = None
 
 
-def get_risk_factory(
-    injector: DependencyInjector | None = None,
-    config: Config | None = None,
-    database_service: "DatabaseService | None" = None,
-    state_service: "StateService | None" = None,
-) -> RiskManagementFactory:
+def get_risk_factory(injector: DependencyInjector | None = None) -> RiskManagementFactory:
     """
-    Get or create global risk management factory using dependency injection.
+    Create risk management factory using dependency injection.
 
     Args:
-        injector: Dependency injector instance
-        config: Application configuration (for backward compatibility)
-        database_service: Database service (for backward compatibility)
-        state_service: State service (for backward compatibility)
+        injector: Dependency injector instance (required)
 
     Returns:
         RiskManagementFactory instance
-    """
-    global _global_factory
 
-    if _global_factory is None:
-        _global_factory = RiskManagementFactory(
-            injector=injector,
-            config=config,
-            database_service=database_service,
-            state_service=state_service,
+    Raises:
+        DependencyError: If injector not provided
+    """
+    if injector is None:
+        raise DependencyError(
+            "Dependency injector must be provided to create factory",
+            dependency_name="DependencyInjector",
+            error_code="FAC_006",
+            suggested_action="Provide configured dependency injector",
         )
 
-    return _global_factory
+    return RiskManagementFactory(injector=injector)
 
 
 def create_risk_service(
-    injector: DependencyInjector | None = None,
-    config: Config | None = None,
-    database_service: "DatabaseService | None" = None,
-    state_service: "StateService | None" = None,
+    injector: DependencyInjector,
     correlation_id: str | None = None,
 ) -> RiskServiceInterface:
     """
     Convenience function to create RiskService using dependency injection.
 
     Args:
-        injector: Dependency injector instance
-        config: Application configuration (for backward compatibility)
-        database_service: Database service (for backward compatibility)
-        state_service: State service (for backward compatibility)
+        injector: Dependency injector instance (required)
         correlation_id: Request correlation ID
 
     Returns:
         RiskServiceInterface instance
     """
-    factory = get_risk_factory(
-        injector=injector,
-        config=config,
-        database_service=database_service,
-        state_service=state_service,
-    )
+    factory = get_risk_factory(injector=injector)
     return factory.create_risk_service(correlation_id=correlation_id)
 
 
-def create_recommended_risk_component(
-    injector: DependencyInjector | None = None,
-    config: Config | None = None,
-    database_service: "DatabaseService | None" = None,
-    state_service: "StateService | None" = None,
-) -> RiskService | RiskManager:
+def create_recommended_risk_component(injector: DependencyInjector) -> RiskService | RiskManager:
     """
     Convenience function to create the recommended risk component.
 
-    DEPRECATED: Use create_risk_management_controller() for new implementations.
-
     Args:
-        injector: Dependency injector instance
-        config: Application configuration (for backward compatibility)
-        database_service: Database service (for backward compatibility)
-        state_service: State service (for backward compatibility)
+        injector: Dependency injector instance (required)
 
     Returns:
         RiskService if dependencies are available, otherwise RiskManager
     """
-    factory = get_risk_factory(injector, config, database_service, state_service)
+    factory = get_risk_factory(injector)
     return factory.get_recommended_component()
 
 
 def create_risk_management_controller(
-    injector: DependencyInjector | None = None,
-    config: Config | None = None,
-    database_service: "DatabaseService | None" = None,
-    state_service: "StateService | None" = None,
+    injector: DependencyInjector,
     correlation_id: str | None = None,
 ) -> RiskManagementController:
     """
@@ -458,14 +429,11 @@ def create_risk_management_controller(
     This follows proper controller->service->repository patterns with dependency injection.
 
     Args:
-        injector: Dependency injector instance
-        config: Application configuration (for backward compatibility)
-        database_service: Database service (for backward compatibility)
-        state_service: State service (for backward compatibility)
+        injector: Dependency injector instance (required)
         correlation_id: Request correlation ID
 
     Returns:
         RiskManagementController instance
     """
-    factory = get_risk_factory(injector, config, database_service, state_service)
+    factory = get_risk_factory(injector)
     return factory.create_risk_management_controller(correlation_id)

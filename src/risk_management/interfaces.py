@@ -19,6 +19,46 @@ from src.core.types import (
 )
 
 
+class CacheServiceInterface(Protocol):
+    """Protocol for cache service implementations."""
+
+    async def get(self, key: str) -> Any:
+        """Get value from cache."""
+        ...
+
+    async def set(self, key: str, value: Any, ttl: int | None = None) -> None:
+        """Set value in cache with optional TTL."""
+        ...
+
+    async def delete(self, key: str) -> None:
+        """Delete key from cache."""
+        ...
+
+    async def clear(self) -> None:
+        """Clear all cache entries."""
+        ...
+
+    async def close(self) -> None:
+        """Close cache connections."""
+        ...
+
+
+class ExchangeServiceInterface(Protocol):
+    """Protocol for exchange service implementations to avoid direct coupling."""
+
+    async def cancel_all_orders(self, symbol: str | None = None) -> int:
+        """Cancel all orders for symbol or all orders if symbol is None."""
+        ...
+
+    async def close_all_positions(self) -> int:
+        """Close all open positions."""
+        ...
+
+    async def get_account_balance(self) -> Decimal:
+        """Get current account balance."""
+        ...
+
+
 class RiskServiceInterface(Protocol):
     """Protocol for risk management service implementations."""
 
@@ -40,7 +80,9 @@ class RiskServiceInterface(Protocol):
         """Validate order against risk constraints."""
         ...
 
-    async def calculate_risk_metrics(self, positions: list[Position], market_data: list[MarketData]) -> RiskMetrics:
+    async def calculate_risk_metrics(
+        self, positions: list[Position], market_data: list[MarketData]
+    ) -> RiskMetrics:
         """Calculate comprehensive risk metrics."""
         ...
 
@@ -82,11 +124,15 @@ class PositionSizingServiceInterface(Protocol):
 class RiskMetricsServiceInterface(Protocol):
     """Protocol for risk metrics service implementations."""
 
-    async def calculate_metrics(self, positions: list[Position], market_data: list[MarketData]) -> RiskMetrics:
+    async def calculate_metrics(
+        self, positions: list[Position], market_data: list[MarketData]
+    ) -> RiskMetrics:
         """Calculate risk metrics."""
         ...
 
-    async def get_portfolio_value(self, positions: list[Position], market_data: list[MarketData]) -> Decimal:
+    async def get_portfolio_value(
+        self, positions: list[Position], market_data: list[MarketData]
+    ) -> Decimal:
         """Calculate portfolio value."""
         ...
 
@@ -122,6 +168,10 @@ class RiskMonitoringServiceInterface(Protocol):
         """Check for emergency stop conditions."""
         ...
 
+    async def get_risk_summary(self) -> dict[str, Any]:
+        """Get comprehensive risk summary."""
+        ...
+
 
 class AbstractRiskService(ABC):
     """Abstract base class for risk services."""
@@ -153,7 +203,9 @@ class AbstractRiskService(ABC):
         pass
 
     @abstractmethod
-    async def calculate_risk_metrics(self, positions: list[Position], market_data: list[MarketData]) -> RiskMetrics:
+    async def calculate_risk_metrics(
+        self, positions: list[Position], market_data: list[MarketData]
+    ) -> RiskMetrics:
         """Calculate risk metrics."""
         pass
 

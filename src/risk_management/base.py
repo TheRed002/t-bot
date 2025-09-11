@@ -11,7 +11,10 @@ P-002A (error handling), and P-007A (utils) components.
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Any
+from typing import TYPE_CHECKING, Any, Optional
+
+if TYPE_CHECKING:
+    from src.monitoring.interfaces import MetricsServiceInterface
 
 from src.core.base.component import BaseComponent
 from src.core.config.main import Config
@@ -30,12 +33,6 @@ from src.core.types import (
     RiskMetrics,
     Signal,
 )
-
-# MANDATORY: Import from P-002A
-from src.error_handling import ErrorHandler
-
-# Monitoring integration
-from src.monitoring.metrics import MetricsCollector
 from src.utils.decimal_utils import ZERO, format_decimal
 
 # MANDATORY: Import from P-003+
@@ -53,17 +50,17 @@ class BaseRiskManager(BaseComponent, ABC):
     CRITICAL: All implementations must follow the exact interface defined here.
     """
 
-    def __init__(self, config: Config):
+    def __init__(self, config: Config, metrics_service: Optional["MetricsServiceInterface"] = None):
         """
         Initialize the risk manager with configuration.
 
         Args:
             config: Application configuration containing risk settings
+            metrics_service: Optional metrics service for monitoring integration
         """
         super().__init__()  # Initialize BaseComponent
         self.config = config
         self.risk_config = config.risk
-        self.error_handler = ErrorHandler(config)
 
         # Risk state tracking
         self.current_risk_level = RiskLevel.LOW
@@ -77,18 +74,14 @@ class BaseRiskManager(BaseComponent, ABC):
         self.current_drawdown = Decimal("0")
         self.max_drawdown = Decimal("0")
 
-        # Initialize monitoring integration
-        try:
-            self.metrics_collector: MetricsCollector | None = MetricsCollector()
-        except Exception as e:
-            self.logger.warning(f"Failed to initialize metrics collector: {e}")
-            self.metrics_collector = None
+        # Store metrics service (use service interface instead of direct collector)
+        self.metrics_service = metrics_service
 
         # Mark as initialized
         self.logger.info(
             "Risk manager initialized",
             risk_config=dict(self.risk_config),
-            monitoring_enabled=self.metrics_collector is not None,
+            monitoring_enabled=self.metrics_service is not None,
         )
 
     @abstractmethod
@@ -148,7 +141,9 @@ class BaseRiskManager(BaseComponent, ABC):
 
     @abstractmethod
     @time_execution
-    async def calculate_risk_metrics(self, positions: list[Position], market_data: list[MarketData]) -> RiskMetrics:
+    async def calculate_risk_metrics(
+        self, positions: list[Position], market_data: list[MarketData]
+    ) -> RiskMetrics:
         """
         Calculate comprehensive risk metrics for the portfolio.
 
@@ -198,7 +193,9 @@ class BaseRiskManager(BaseComponent, ABC):
 
     # Standard methods that can be overridden
     @time_execution
-    async def update_portfolio_state(self, positions: list[Position], portfolio_value: Decimal) -> None:
+    async def update_portfolio_state(
+        self, positions: list[Position], portfolio_value: Decimal
+    ) -> None:
         """
         Update internal portfolio state for risk calculations.
 
@@ -253,12 +250,16 @@ class BaseRiskManager(BaseComponent, ABC):
         self.current_risk_level = RiskLevel.CRITICAL
         self.logger.critical("Emergency stop triggered", reason=reason)
 
-        # Create error context and handle error
+        # Log error instead of using complex error handling to avoid dependencies
         error = RiskManagementError(f"Emergency stop: {reason}")
-        error_context = self.error_handler.create_error_context(
-            error=error, component="risk_manager", operation="emergency_stop"
+        self.logger.error(
+            "Emergency stop error",
+            error=str(error),
+            error_type=type(error).__name__,
+            component="risk_manager",
+            operation="emergency_stop",
+            reason=reason,
         )
-        await self.error_handler.handle_error(error, error_context)
 
     @time_execution
     async def validate_risk_parameters(self) -> bool:
@@ -313,7 +314,9 @@ class BaseRiskManager(BaseComponent, ABC):
                 return Decimal("0")
 
             total_exposure = sum(
-                abs(pos.quantity * pos.current_price) if pos.quantity and pos.current_price else ZERO
+                abs(pos.quantity * pos.current_price)
+                if pos.quantity and pos.current_price
+                else ZERO
                 for pos in positions
             )
 
@@ -367,14 +370,19 @@ class BaseRiskManager(BaseComponent, ABC):
             risk_level=self.current_risk_level.value,
         )
 
-        # Update monitoring metrics
-        if self.metrics_collector:
+        # Update monitoring metrics using service interface
+        if self.metrics_service:
             try:
+                from src.monitoring.services import MetricRequest
+
                 severity = self._determine_violation_severity(violation_type, details)
-                self.metrics_collector.increment_counter(
-                    "risk_limit_violations_total",
+                metric_request = MetricRequest(
+                    name="risk_limit_violations_total",
+                    value=1,  # Counter increment
                     labels={"limit_type": violation_type, "severity": severity},
+                    namespace="risk_management",
                 )
+                self.metrics_service.record_counter(metric_request)
             except Exception as e:
                 self.logger.warning(f"Failed to update violation metric: {e}")
 
@@ -415,17 +423,9 @@ class BaseRiskManager(BaseComponent, ABC):
             self.risk_metrics = None
             self.position_limits = None
 
-            # Clear metrics collector reference to prevent memory leaks
-            if hasattr(self, "metrics_collector") and self.metrics_collector:
-                try:
-                    if hasattr(self.metrics_collector, "close"):
-                        await self.metrics_collector.close()
-                    elif hasattr(self.metrics_collector, "cleanup"):
-                        await self.metrics_collector.cleanup()
-                except Exception as e:
-                    self.logger.warning(f"Error cleaning up metrics collector: {e}")
-                finally:
-                    self.metrics_collector = None
+            # Clear metrics service reference to prevent memory leaks
+            # Note: Service cleanup is managed by DI container, just clear reference
+            self.metrics_service = None
 
             self.logger.info("Risk manager cleanup completed")
         except Exception as e:

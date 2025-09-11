@@ -12,7 +12,13 @@ import pytest
 
 from src.core.exceptions import RiskManagementError, ValidationError
 from src.core.types.strategy import MarketRegime
-from src.core.types.trading import OrderSide, Position, PositionSide, PositionStatus, Signal, SignalDirection
+from src.core.types.trading import (
+    Position,
+    PositionSide,
+    PositionStatus,
+    Signal,
+    SignalDirection,
+)
 
 # Import the modules to test
 from src.risk_management.adaptive_risk import AdaptiveRiskManager

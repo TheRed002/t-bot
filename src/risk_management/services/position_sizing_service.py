@@ -11,7 +11,19 @@ from typing import TYPE_CHECKING
 from src.core.base.service import BaseService
 from src.core.exceptions import RiskManagementError, ValidationError
 from src.core.types import PositionSizeMethod, Signal
-from src.utils.decimal_utils import ONE, ZERO, format_decimal, safe_divide, to_decimal
+from src.utils.decimal_utils import (
+    ONE,
+    ZERO,
+    decimal_to_float,
+    format_decimal,
+    safe_divide,
+    to_decimal,
+)
+from src.utils.messaging_patterns import (
+    BoundaryValidator,
+    ErrorPropagationMixin,
+)
+from src.utils.position_sizing import calculate_position_size, validate_position_size
 
 if TYPE_CHECKING:
     from src.database.service import DatabaseService
@@ -55,7 +67,7 @@ class PositionSizingService(BaseService):
         method: PositionSizeMethod | None = None,
     ) -> Decimal:
         """
-        Calculate position size using specified method.
+        Calculate position size using centralized utilities.
 
         Args:
             signal: Trading signal
@@ -71,29 +83,94 @@ class PositionSizingService(BaseService):
             ValidationError: If inputs are invalid
         """
         try:
-            # Validate inputs
+            # Create error handler with consistent propagation
+            error_handler = ErrorPropagationMixin()
+
+            # Apply boundary validation for data consistency
+            try:
+                signal_dict = {
+                    "symbol": signal.symbol,
+                    "price": format_decimal(current_price),
+                    "quantity": format_decimal(available_capital),
+                    "timestamp": signal.timestamp.isoformat()
+                    if hasattr(signal, "timestamp")
+                    else None,
+                }
+                BoundaryValidator.validate_database_entity(signal_dict, "validate")
+            except Exception as e:
+                error_handler.propagate_validation_error(e, "position_sizing_boundary_validation")
+                return ZERO
+
+            # Validate inputs using consistent pattern
             self._validate_inputs(signal, available_capital, current_price)
 
             # Use default method if not specified
             if method is None:
                 method = PositionSizeMethod.FIXED_PERCENTAGE
 
-            # Calculate based on method
-            if method == PositionSizeMethod.FIXED_PERCENTAGE:
-                position_size = await self._fixed_percentage_sizing(signal, available_capital)
-            elif method == PositionSizeMethod.KELLY_CRITERION:
-                position_size = await self._kelly_criterion_sizing(signal, available_capital)
-            elif method == PositionSizeMethod.VOLATILITY_ADJUSTED:
-                position_size = await self._volatility_adjusted_sizing(signal, available_capital)
-            elif method == PositionSizeMethod.CONFIDENCE_WEIGHTED:
-                position_size = await self._confidence_weighted_sizing(signal, available_capital)
-            else:
-                raise ValidationError(f"Unsupported position sizing method: {method}")
+            # Get risk per trade from config with data transformation consistency
+            risk_per_trade = to_decimal("0.02")  # Default 2%
+            if self.config and hasattr(self.config, "risk"):
+                config_risk = to_decimal(str(getattr(self.config.risk, "risk_per_trade", "0.02")))
 
-            # Apply limits
-            position_size = self._apply_limits(position_size, available_capital)
+                # Apply consistent data transformation patterns matching monitoring module
+                from src.utils.messaging_patterns import (
+                    MessagingCoordinator,
+                    ProcessingParadigmAligner,
+                )
 
-            self._logger.info(
+                coordinator = MessagingCoordinator("PositionSizingTransform")
+                transformed_config = coordinator._apply_data_transformation(
+                    {"risk_per_trade": config_risk}
+                )
+
+                # Align processing modes for consistency with monitoring module
+                aligned_config = ProcessingParadigmAligner.align_processing_modes(
+                    source_mode="sync", target_mode="batch", data=transformed_config
+                )
+                risk_per_trade = aligned_config.get("risk_per_trade", risk_per_trade)
+
+            # Use centralized position sizing utility
+            try:
+                position_size = calculate_position_size(
+                    method=method,
+                    signal=signal,
+                    portfolio_value=available_capital,
+                    risk_per_trade=risk_per_trade,
+                    current_price=current_price,
+                    atr=to_decimal("0.02"),  # Default ATR if not available
+                )
+
+                # Validate using centralized utility
+                is_valid, validated_size = validate_position_size(position_size, available_capital)
+                if not is_valid:
+                    self.logger.warning("Position size failed validation, returning zero")
+                    return ZERO
+
+                position_size = validated_size
+
+            except Exception as e:
+                self.logger.error(f"Centralized position sizing error: {e}")
+                # Fall back to local calculation
+                if method == PositionSizeMethod.FIXED_PERCENTAGE:
+                    position_size = await self._fixed_percentage_sizing(signal, available_capital)
+                elif method == PositionSizeMethod.KELLY_CRITERION:
+                    position_size = await self._kelly_criterion_sizing(signal, available_capital)
+                elif method == PositionSizeMethod.VOLATILITY_ADJUSTED:
+                    position_size = await self._volatility_adjusted_sizing(
+                        signal, available_capital
+                    )
+                elif method == PositionSizeMethod.CONFIDENCE_WEIGHTED:
+                    position_size = await self._confidence_weighted_sizing(
+                        signal, available_capital
+                    )
+                else:
+                    raise ValidationError(f"Unsupported position sizing method: {method}")
+
+                # Apply limits
+                position_size = self._apply_limits(position_size, available_capital)
+
+            self.logger.info(
                 "Position size calculated",
                 symbol=signal.symbol,
                 method=method.value if method else "default",
@@ -103,12 +180,12 @@ class PositionSizingService(BaseService):
             return position_size
 
         except Exception as e:
-            self._logger.error(f"Position size calculation failed: {e}")
+            self.logger.error(f"Position size calculation failed: {e}")
             raise RiskManagementError(f"Position size calculation failed: {e}") from e
 
     async def validate_size(self, position_size: Decimal, available_capital: Decimal) -> bool:
         """
-        Validate calculated position size.
+        Validate calculated position size using centralized utilities.
 
         Args:
             position_size: Calculated position size
@@ -118,21 +195,45 @@ class PositionSizingService(BaseService):
             True if size is valid
         """
         try:
+            # Use centralized validation utility
+            is_valid, validated_size = validate_position_size(position_size, available_capital)
+
+            if not is_valid:
+                self.logger.warning(
+                    "Position size validation failed",
+                    position_size=format_decimal(position_size),
+                    available_capital=format_decimal(available_capital),
+                )
+                return False
+
+            # Additional local checks for backward compatibility
             min_size = available_capital * to_decimal("0.01")
             if position_size < min_size:
+                self.logger.warning(
+                    "Position size below minimum threshold",
+                    position_size=format_decimal(position_size),
+                    min_size=format_decimal(min_size),
+                )
                 return False
 
             max_size = available_capital * to_decimal("0.25")
             if position_size > max_size:
+                self.logger.warning(
+                    "Position size exceeds maximum threshold",
+                    position_size=format_decimal(position_size),
+                    max_size=format_decimal(max_size),
+                )
                 return False
 
             return True
 
         except Exception as e:
-            self._logger.error(f"Position size validation failed: {e}")
+            self.logger.error(f"Position size validation failed: {e}")
             return False
 
-    def _validate_inputs(self, signal: Signal, available_capital: Decimal, current_price: Decimal) -> None:
+    def _validate_inputs(
+        self, signal: Signal, available_capital: Decimal, current_price: Decimal
+    ) -> None:
         """Validate calculation inputs."""
         if not signal or not signal.symbol:
             raise ValidationError("Invalid signal")
@@ -163,7 +264,7 @@ class PositionSizingService(BaseService):
             returns = await self._get_historical_returns(signal.symbol)
 
             if len(returns) < 30:
-                self._logger.warning(
+                self.logger.warning(
                     "Insufficient data for Kelly, using fixed percentage",
                     symbol=signal.symbol,
                     data_points=len(returns),
@@ -186,10 +287,12 @@ class PositionSizingService(BaseService):
             return available_capital * strength_adjusted
 
         except Exception as e:
-            self._logger.error(f"Kelly calculation failed: {e}")
+            self.logger.error(f"Kelly calculation failed: {e}")
             return await self._fixed_percentage_sizing(signal, available_capital)
 
-    async def _volatility_adjusted_sizing(self, signal: Signal, available_capital: Decimal) -> Decimal:
+    async def _volatility_adjusted_sizing(
+        self, signal: Signal, available_capital: Decimal
+    ) -> Decimal:
         """Calculate position size using volatility adjustment."""
         try:
             # Get price history from database
@@ -212,10 +315,12 @@ class PositionSizingService(BaseService):
             return base_size * vol_adjustment * to_decimal(signal.strength)
 
         except Exception as e:
-            self._logger.error(f"Volatility adjustment failed: {e}")
+            self.logger.error(f"Volatility adjustment failed: {e}")
             return await self._fixed_percentage_sizing(signal, available_capital)
 
-    async def _confidence_weighted_sizing(self, signal: Signal, available_capital: Decimal) -> Decimal:
+    async def _confidence_weighted_sizing(
+        self, signal: Signal, available_capital: Decimal
+    ) -> Decimal:
         """Calculate position size using confidence weighting."""
         base_size = available_capital * to_decimal("0.05")
 
@@ -270,7 +375,9 @@ class PositionSizingService(BaseService):
         """Calculate price volatility using Decimal precision."""
         import numpy as np
 
-        price_array = np.array([float(p) for p in prices])
+        price_array = np.array(
+            [decimal_to_float(p) for i, p in enumerate(prices)]
+        )
         returns = np.diff(price_array) / price_array[:-1]
         volatility = np.std(returns)
         return to_decimal(str(volatility))
@@ -282,7 +389,7 @@ class PositionSizingService(BaseService):
             # This is a placeholder - actual implementation would depend on database schema
             return []  # Historical data retrieval not implemented
         except Exception as e:
-            self._logger.error(f"Failed to get historical returns for {symbol}: {e}")
+            self.logger.error(f"Failed to get historical returns for {symbol}: {e}")
             return []
 
     async def _get_price_history(self, symbol: str) -> list[Decimal]:
@@ -292,5 +399,5 @@ class PositionSizingService(BaseService):
             # This is a placeholder - actual implementation would depend on database schema
             return []  # Price history retrieval not implemented
         except Exception as e:
-            self._logger.error(f"Failed to get price history for {symbol}: {e}")
+            self.logger.error(f"Failed to get price history for {symbol}: {e}")
             return []

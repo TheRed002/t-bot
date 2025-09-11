@@ -8,7 +8,6 @@ CRITICAL: This module integrates with existing risk management framework from P-
 """
 
 from datetime import datetime, timezone
-from decimal import Decimal
 from typing import Any
 
 import numpy as np
@@ -19,6 +18,7 @@ from src.core.exceptions import RiskManagementError
 
 # MANDATORY: Import from P-001
 from src.core.types import MarketData, MarketRegime, RegimeChangeEvent
+from src.utils.decimal_utils import decimal_to_float
 
 # MANDATORY: Import from P-008/P-009
 # MANDATORY: Import from P-007A
@@ -191,10 +191,13 @@ class MarketRegimeDetector(BaseComponent):
 
             # Calculate returns for all symbols
             returns_dict = {}
-            min_length = float("inf")
+            min_length = 999999  # Use large integer instead of float('inf')
 
             for symbol in symbols:
-                if symbol in price_data_dict and len(price_data_dict[symbol]) >= self.correlation_window:
+                if (
+                    symbol in price_data_dict
+                    and len(price_data_dict[symbol]) >= self.correlation_window
+                ):
                     returns = np.diff(np.log(price_data_dict[symbol]))
                     returns_dict[symbol] = returns
                     min_length = min(min_length, len(returns))
@@ -224,7 +227,9 @@ class MarketRegimeDetector(BaseComponent):
             else:
                 regime = MarketRegime.LOW_CORRELATION
 
-            self.logger.info("Correlation regime detected", avg_correlation=avg_correlation, regime=regime.value)
+            self.logger.info(
+                "Correlation regime detected", avg_correlation=avg_correlation, regime=regime.value
+            )
 
             return regime
 
@@ -253,7 +258,9 @@ class MarketRegimeDetector(BaseComponent):
             for data in market_data:
                 if data.symbol not in symbol_data:
                     symbol_data[data.symbol] = []
-                symbol_data[data.symbol].append(float(data.price))
+                symbol_data[data.symbol].append(
+                    decimal_to_float(data.price)
+                )
 
             # Detect individual regimes
             volatility_regimes = []
@@ -267,10 +274,14 @@ class MarketRegimeDetector(BaseComponent):
                     trend_regimes.append(trend_regime)
 
             # Detect correlation regime
-            correlation_regime = await self.detect_correlation_regime(list(symbol_data.keys()), symbol_data)
+            correlation_regime = await self.detect_correlation_regime(
+                list(symbol_data.keys()), symbol_data
+            )
 
             # Combine regimes for comprehensive classification
-            comprehensive_regime = self._combine_regimes(volatility_regimes, trend_regimes, correlation_regime)
+            comprehensive_regime = self._combine_regimes(
+                volatility_regimes, trend_regimes, correlation_regime
+            )
 
             # Check for regime change
             self._check_regime_change(comprehensive_regime)
@@ -362,7 +373,11 @@ class MarketRegimeDetector(BaseComponent):
                         "trend_window": self.trend_window,
                         "correlation_window": self.correlation_window,
                     },
-                    metadata={"description": (f"Regime change from {self.current_regime.value} to {new_regime.value}")},
+                    metadata={
+                        "description": (
+                            f"Regime change from {self.current_regime.value} to {new_regime.value}"
+                        )
+                    },
                 )
 
                 self.regime_history.append(event)
@@ -392,7 +407,9 @@ class MarketRegimeDetector(BaseComponent):
             return 0.8  # High confidence for first change
 
         # Check if this is a reversal or continuation
-        recent_changes = self.regime_history[-3:] if len(self.regime_history) >= 3 else self.regime_history
+        recent_changes = (
+            self.regime_history[-3:] if len(self.regime_history) >= 3 else self.regime_history
+        )
 
         # Higher confidence if this is a new regime type
         if new_regime not in [event.new_regime for event in recent_changes]:
@@ -441,7 +458,9 @@ class MarketRegimeDetector(BaseComponent):
             }
 
         total_changes = len(self.regime_history)
-        regime_duration = (datetime.now(timezone.utc) - self.regime_history[-1].timestamp).total_seconds() / 3600
+        regime_duration = (
+            datetime.now(timezone.utc) - self.regime_history[-1].timestamp
+        ).total_seconds() / 3600
 
         stats = {
             "total_changes": total_changes,

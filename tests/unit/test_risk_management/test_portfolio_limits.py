@@ -12,7 +12,7 @@ import pytest
 
 from src.core.config import Config
 from src.core.exceptions import PositionLimitError
-from src.core.types.trading import OrderSide, Position, PositionSide, PositionStatus
+from src.core.types.trading import Position, PositionSide, PositionStatus
 from src.risk_management.portfolio_limits import PortfolioLimits
 
 
@@ -127,7 +127,7 @@ class TestPortfolioLimits:
                 current_price=Decimal("0.52"),
                 unrealized_pnl=Decimal("2"),
                 side=PositionSide.LONG,
-            status=PositionStatus.OPEN,
+                status=PositionStatus.OPEN,
                 opened_at=datetime.now(timezone.utc),
                 exchange="binance",
                 metadata={},
@@ -150,7 +150,7 @@ class TestPortfolioLimits:
                 current_price=Decimal("51000"),
                 unrealized_pnl=Decimal("100"),
                 side=PositionSide.LONG,
-            status=PositionStatus.OPEN,
+                status=PositionStatus.OPEN,
                 opened_at=datetime.now(timezone.utc),
                 exchange="binance",
                 metadata={},
@@ -177,7 +177,7 @@ class TestPortfolioLimits:
                 current_price=Decimal("51000"),
                 unrealized_pnl=Decimal("100"),
                 side=PositionSide.LONG,
-            status=PositionStatus.OPEN,
+                status=PositionStatus.OPEN,
                 opened_at=datetime.now(timezone.utc),
                 exchange="binance",
                 metadata={},
@@ -189,7 +189,7 @@ class TestPortfolioLimits:
                 current_price=Decimal("3100"),
                 unrealized_pnl=Decimal("100"),
                 side=PositionSide.LONG,
-            status=PositionStatus.OPEN,
+                status=PositionStatus.OPEN,
                 opened_at=datetime.now(timezone.utc),
                 exchange="binance",
                 metadata={},
@@ -216,7 +216,7 @@ class TestPortfolioLimits:
                 current_price=Decimal("51000"),
                 unrealized_pnl=Decimal("100"),
                 side=PositionSide.LONG,
-            status=PositionStatus.OPEN,
+                status=PositionStatus.OPEN,
                 opened_at=datetime.now(timezone.utc),
                 exchange="binance",
                 metadata={},
@@ -310,7 +310,7 @@ class TestPortfolioLimits:
         assert symbol in portfolio_limits.return_history
         assert len(portfolio_limits.return_history[symbol]) == 1
         # (51000-50000)/50000
-        assert portfolio_limits.return_history[symbol][0] == Decimal('0.02')
+        assert portfolio_limits.return_history[symbol][0] == Decimal("0.02")
 
     @pytest.mark.asyncio
     async def test_update_return_history_max_history(self, portfolio_limits):
@@ -356,8 +356,8 @@ class TestPortfolioLimits:
 
         assert isinstance(summary, dict)
         assert summary["total_positions"] == 0
-        assert summary["portfolio_value"] == 0.0
-        assert summary["exposure_percentage"] == 0.0
+        assert summary["portfolio_value"] == "0"
+        assert summary["exposure_percentage"] == "0"
 
     @pytest.mark.asyncio
     async def test_log_risk_violation(self, portfolio_limits):

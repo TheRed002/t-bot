@@ -20,7 +20,7 @@ import asyncio
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from enum import Enum
-from typing import Any
+from typing import TYPE_CHECKING, Any, Optional
 
 from pydantic import BaseModel, Field
 
@@ -31,13 +31,16 @@ from src.core.exceptions import EmergencyStopError, ValidationError
 # MANDATORY: Import from P-001
 from src.core.types import CircuitBreakerType, OrderRequest, OrderSide, OrderType, RiskLevel
 
-# MANDATORY: Import from P-002A
-from src.error_handling import ErrorHandler
-from src.exchanges.interfaces import IExchange
+# Use TYPE_CHECKING to avoid potential circular imports
+if TYPE_CHECKING:
+    # MANDATORY: Import from P-008
+    from src.risk_management.base import BaseRiskManager
+    from src.risk_management.circuit_breakers import CircuitBreakerManager
 
-# MANDATORY: Import from P-008
-from src.risk_management.base import BaseRiskManager
-from src.risk_management.circuit_breakers import CircuitBreakerManager
+    # Note: Removed ErrorHandler import to avoid dependency issues
+    # Complex error handling should be done at service layer
+    # Use abstraction instead of direct exchange dependency
+    from src.risk_management.interfaces import ExchangeServiceInterface
 
 # MANDATORY: Import from P-007A
 from src.utils.decorators import time_execution
@@ -86,8 +89,8 @@ class EmergencyControls(BaseComponent):
     def __init__(
         self,
         config: Config,
-        risk_manager: BaseRiskManager | None = None,
-        circuit_breaker_manager: CircuitBreakerManager | None = None,
+        risk_manager: Optional["BaseRiskManager"] = None,
+        circuit_breaker_manager: Optional["CircuitBreakerManager"] = None,
     ):
         """
         Initialize emergency controls.
@@ -101,7 +104,6 @@ class EmergencyControls(BaseComponent):
         self.config = config
         self.risk_manager = risk_manager
         self.circuit_breaker_manager = circuit_breaker_manager
-        self.error_handler = ErrorHandler(config)
 
         # Emergency state
         self.state = EmergencyState.NORMAL
@@ -122,14 +124,14 @@ class EmergencyControls(BaseComponent):
         self.recovery_validation_required = True
 
         # Exchange connections for emergency actions
-        self.exchanges: dict[str, IExchange] = {}
+        self.exchanges: dict[str, ExchangeServiceInterface] = {}
 
         # Track recovery tasks for proper cleanup
         self._recovery_tasks: set[asyncio.Task] = set()
 
         self.logger.info("Emergency controls initialized")
 
-    def register_exchange(self, exchange_name: str, exchange: IExchange) -> None:
+    def register_exchange(self, exchange_name: str, exchange: "ExchangeServiceInterface") -> None:
         """Register exchange for emergency control actions."""
         self.exchanges[exchange_name] = exchange
         self.logger.info("Exchange registered for emergency controls", exchange_name=exchange_name)
@@ -159,7 +161,9 @@ class EmergencyControls(BaseComponent):
             if len(self.emergency_events) > self.max_events:
                 self.emergency_events.pop(0)
 
-            self.logger.critical("Emergency stop activated", reason=reason, trigger_type=trigger_type.value)
+            self.logger.critical(
+                "Emergency stop activated", reason=reason, trigger_type=trigger_type.value
+            )
 
             # Execute emergency procedures
             await self._execute_emergency_procedures()
@@ -167,13 +171,14 @@ class EmergencyControls(BaseComponent):
         except Exception as e:
             self.logger.error("Failed to activate emergency stop", error=str(e), reason=reason)
             # Handle error properly with ErrorContext
-            try:
-                error_context = self.error_handler.create_error_context(
-                    error=e, component="emergency_controls", operation="activate_emergency_stop"
-                )
-                await self.error_handler.handle_error(e, error_context)
-            except Exception as handler_error:
-                self.logger.error("Error handler failed", error=str(handler_error))
+            # Log error details for monitoring instead of using complex error handling
+            self.logger.error(
+                "Emergency stop activation error",
+                error=str(e),
+                error_type=type(e).__name__,
+                component="emergency_controls",
+                operation="activate_emergency_stop",
+            )
             raise EmergencyStopError(f"Failed to activate emergency stop: {e!s}") from e
 
     @time_execution
@@ -198,15 +203,14 @@ class EmergencyControls(BaseComponent):
         except Exception as e:
             self.logger.error("Emergency procedures failed", error=str(e))
             # Handle error properly with ErrorContext
-            try:
-                error_context = self.error_handler.create_error_context(
-                    error=e,
-                    component="emergency_controls",
-                    operation="_execute_emergency_procedures",
-                )
-                await self.error_handler.handle_error(e, error_context)
-            except Exception as handler_error:
-                self.logger.error("Error handler failed", error=str(handler_error))
+            # Log error details for monitoring instead of using complex error handling
+            self.logger.error(
+                "Emergency procedures execution error",
+                error=str(e),
+                error_type=type(e).__name__,
+                component="emergency_controls",
+                operation="_execute_emergency_procedures",
+            )
             raise
 
     @time_execution
@@ -243,7 +247,9 @@ class EmergencyControls(BaseComponent):
                         raise
 
             except Exception as e:
-                self.logger.error("Failed to cancel orders for exchange", exchange=exchange_name, error=str(e))
+                self.logger.error(
+                    "Failed to cancel orders for exchange", exchange=exchange_name, error=str(e)
+                )
                 raise
 
         if not self.emergency_events:
@@ -281,7 +287,11 @@ class EmergencyControls(BaseComponent):
                             # Create market order to close position
                             close_order = OrderRequest(
                                 symbol=position.symbol,
-                                side=(OrderSide.SELL if position.side == OrderSide.BUY else OrderSide.BUY),
+                                side=(
+                                    OrderSide.SELL
+                                    if position.side == OrderSide.BUY
+                                    else OrderSide.BUY
+                                ),
                                 order_type=OrderType.MARKET,
                                 quantity=abs(position.quantity),
                                 client_order_id=(
@@ -311,7 +321,9 @@ class EmergencyControls(BaseComponent):
                             raise
 
             except Exception as e:
-                self.logger.error("Failed to close positions for exchange", exchange=exchange_name, error=str(e))
+                self.logger.error(
+                    "Failed to close positions for exchange", exchange=exchange_name, error=str(e)
+                )
                 raise
 
         if not self.emergency_events:
@@ -423,7 +435,9 @@ class EmergencyControls(BaseComponent):
         allowed_types = [OrderType.MARKET, OrderType.LIMIT]
 
         if order.order_type not in allowed_types:
-            self.logger.warning("Order type not allowed during recovery", order_type=order.order_type.value)
+            self.logger.warning(
+                "Order type not allowed during recovery", order_type=order.order_type.value
+            )
             return False
 
         return True
@@ -463,7 +477,9 @@ class EmergencyControls(BaseComponent):
         try:
             if self.state == EmergencyState.EMERGENCY:
                 self.state = EmergencyState.RECOVERY
-                self.logger.info("Emergency state deactivated, entering recovery mode", reason=reason)
+                self.logger.info(
+                    "Emergency state deactivated, entering recovery mode", reason=reason
+                )
 
                 # Start recovery validation timer with proper tracking
                 recovery_task = asyncio.create_task(self._recovery_validation_timer())
@@ -471,23 +487,31 @@ class EmergencyControls(BaseComponent):
                 self._recovery_tasks.add(recovery_task)
                 # Remove task when done with safe cleanup
                 recovery_task.add_done_callback(
-                    lambda t: self._recovery_tasks.discard(t) if hasattr(self, "_recovery_tasks") else None
+                    lambda t: self._recovery_tasks.discard(t)
+                    if hasattr(self, "_recovery_tasks")
+                    else None
                 )
 
             elif self.state == EmergencyState.RECOVERY:
                 self.state = EmergencyState.NORMAL
                 self.emergency_start_time = None
                 self.emergency_reason = None
-                self.logger.info("Recovery completed, returning to normal operations", reason=reason)
+                self.logger.info(
+                    "Recovery completed, returning to normal operations", reason=reason
+                )
 
         except Exception as e:
             self.logger.error("Failed to deactivate emergency stop", error=str(e), reason=reason)
             # Handle error properly with ErrorContext
             try:
-                error_context = self.error_handler.create_error_context(
-                    error=e, component="emergency_controls", operation="deactivate_emergency_stop"
+                # Log error details for monitoring instead of using complex error handling
+                self.logger.error(
+                    "Emergency stop deactivation error",
+                    error=str(e),
+                    error_type=type(e).__name__,
+                    component="emergency_controls",
+                    operation="deactivate_emergency_stop",
                 )
-                await self.error_handler.handle_error(e, error_context)
             except Exception as handler_error:
                 self.logger.error("Error handler failed", error=str(handler_error))
             raise
@@ -568,7 +592,9 @@ class EmergencyControls(BaseComponent):
             raise ValidationError("Only the user who activated override can deactivate it")
 
     @time_execution
-    async def deactivate_circuit_breaker(self, reason: str = "Manual circuit breaker deactivation") -> None:
+    async def deactivate_circuit_breaker(
+        self, reason: str = "Manual circuit breaker deactivation"
+    ) -> None:
         """
         Deactivate circuit breaker and return to normal operations.
 
@@ -610,7 +636,11 @@ class EmergencyControls(BaseComponent):
         """
         try:
             # Extract trigger type from event - check metadata first for custom trigger types
-            if hasattr(event, "metadata") and isinstance(event.metadata, dict) and "trigger_type" in event.metadata:
+            if (
+                hasattr(event, "metadata")
+                and isinstance(event.metadata, dict)
+                and "trigger_type" in event.metadata
+            ):
                 trigger_name = event.metadata["trigger_type"]
             elif hasattr(event, "trigger_type"):
                 trigger_name = str(event.trigger_type)
@@ -652,7 +682,9 @@ class EmergencyControls(BaseComponent):
 
             circuit_breaker_type = trigger_mapping.get(trigger_name, CircuitBreakerType.MANUAL)
 
-            self.logger.info("Circuit breaker activation requested", trigger_type=trigger_name, reason=reason)
+            self.logger.info(
+                "Circuit breaker activation requested", trigger_type=trigger_name, reason=reason
+            )
 
             # Use the existing emergency stop activation logic
             await self.activate_emergency_stop(reason, circuit_breaker_type)
@@ -665,12 +697,17 @@ class EmergencyControls(BaseComponent):
         """Get current emergency controls status."""
         return {
             "state": self.state.value,
-            "emergency_start_time": (self.emergency_start_time.isoformat() if self.emergency_start_time else None),
+            "emergency_start_time": (
+                self.emergency_start_time.isoformat() if self.emergency_start_time else None
+            ),
             "emergency_reason": self.emergency_reason,
             "manual_override_user": self.manual_override_user,
-            "manual_override_time": (self.manual_override_time.isoformat() if self.manual_override_time else None),
+            "manual_override_time": (
+                self.manual_override_time.isoformat() if self.manual_override_time else None
+            ),
             "events_count": len(self.emergency_events),
-            "trading_allowed": self.state in [EmergencyState.NORMAL, EmergencyState.MANUAL_OVERRIDE],
+            "trading_allowed": self.state
+            in [EmergencyState.NORMAL, EmergencyState.MANUAL_OVERRIDE],
         }
 
     def is_trading_allowed(self) -> bool:
@@ -701,7 +738,7 @@ class EmergencyControls(BaseComponent):
         the active trigger information.
 
         Returns:
-            str | None: The active trigger type name, or None if no trigger is active
+            Optional[str]: The active trigger type name, or None if no trigger is active
         """
         return self._active_trigger
 

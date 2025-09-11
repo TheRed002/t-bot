@@ -220,10 +220,14 @@ class CorrelationMonitor(BaseComponent):
                 return correlation
 
             except Exception as e:
-                self.logger.warning("Correlation calculation failed", symbol1=symbol1, symbol2=symbol2, error=str(e))
+                self.logger.warning(
+                    "Correlation calculation failed", symbol1=symbol1, symbol2=symbol2, error=str(e)
+                )
                 return None
 
-    async def calculate_portfolio_correlation(self, positions: list[Position]) -> CorrelationMetrics:
+    async def calculate_portfolio_correlation(
+        self, positions: list[Position]
+    ) -> CorrelationMetrics:
         """
         Calculate comprehensive correlation metrics for portfolio.
 
@@ -261,7 +265,9 @@ class CorrelationMonitor(BaseComponent):
                     correlation = await self.calculate_pairwise_correlation(symbol1, symbol2)
 
                     if correlation is not None:
-                        key: tuple[str, str] = (symbol1, symbol2) if symbol1 < symbol2 else (symbol2, symbol1)
+                        key: tuple[str, str] = (
+                            (symbol1, symbol2) if symbol1 < symbol2 else (symbol2, symbol1)
+                        )
                         correlation_matrix[key] = correlation
                         correlations.append(abs(correlation))  # Use absolute value
 
@@ -283,7 +289,9 @@ class CorrelationMonitor(BaseComponent):
             # Calculate metrics using Decimal precision
             if correlations:
                 # Calculate average using Decimal arithmetic
-                avg_correlation = sum(Decimal(str(c)) for c in correlations) / Decimal(str(len(correlations)))
+                avg_correlation = sum(Decimal(str(c)) for c in correlations) / Decimal(
+                    str(len(correlations))
+                )
                 max_correlation = max(Decimal(str(c)) for c in correlations)
             else:
                 avg_correlation = Decimal("0.0")
@@ -308,7 +316,9 @@ class CorrelationMonitor(BaseComponent):
                 for i, pos1 in enumerate(positions):
                     for pos2 in positions[i + 1 :]:
                         weight_key: tuple[str, str] = (
-                            (pos1.symbol, pos2.symbol) if pos1.symbol < pos2.symbol else (pos2.symbol, pos1.symbol)
+                            (pos1.symbol, pos2.symbol)
+                            if pos1.symbol < pos2.symbol
+                            else (pos2.symbol, pos1.symbol)
                         )
                         if weight_key in correlation_matrix:
                             # Use Decimal for all weight calculations with null checks
@@ -351,7 +361,9 @@ class CorrelationMonitor(BaseComponent):
                 error_code="CORRELATION_CALCULATION_FAILED",
             ) from e
 
-    async def get_position_limits_for_correlation(self, correlation_metrics: CorrelationMetrics) -> dict[str, Any]:
+    async def get_position_limits_for_correlation(
+        self, correlation_metrics: CorrelationMetrics
+    ) -> dict[str, Any]:
         """
         Calculate position limits based on current correlation levels.
 
@@ -454,7 +466,9 @@ class CorrelationMonitor(BaseComponent):
             # Create new cache with only recent entries
             new_cache = {}
             for key, (correlation, cache_time) in self._correlation_cache.items():
-                if current_time - cache_time < self._cache_timeout * 2:  # Keep entries for 2x timeout
+                if (
+                    current_time - cache_time < self._cache_timeout * 2
+                ):  # Keep entries for 2x timeout
                     new_cache[key] = (correlation, cache_time)
                 else:
                     entries_removed += 1
@@ -510,14 +524,20 @@ class CorrelationMonitor(BaseComponent):
                     "lookback_periods": self.thresholds.lookback_periods,
                     "min_periods": self.thresholds.min_periods,
                 },
-                "data_points_per_symbol": {symbol: len(history) for symbol, history in self.return_history.items()},
+                "data_points_per_symbol": {
+                    symbol: len(history) for symbol, history in self.return_history.items()
+                },
                 "resource_usage": {
                     "estimated_memory_mb": (total_price_points + total_return_points)
                     * 8
                     / 1024
                     / 1024,  # Rough estimate
                     "symbols_with_insufficient_data": len(
-                        [s for s, h in self.return_history.items() if len(h) < self.thresholds.min_periods]
+                        [
+                            s
+                            for s, h in self.return_history.items()
+                            if len(h) < self.thresholds.min_periods
+                        ]
                     ),
                 },
             }

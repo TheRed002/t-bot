@@ -14,7 +14,25 @@ import numpy as np
 from src.core.base.service import BaseService
 from src.core.exceptions import RiskManagementError
 from src.core.types import MarketData, Position, RiskLevel, RiskMetrics
-from src.utils.decimal_utils import ONE, ZERO, format_decimal, safe_divide, to_decimal
+from src.utils.decimal_utils import (
+    ONE,
+    ZERO,
+    decimal_to_float,
+    format_decimal,
+    safe_divide,
+    to_decimal,
+)
+from src.utils.messaging_patterns import BoundaryValidator, ErrorPropagationMixin
+from src.utils.risk_calculations import (
+    calculate_current_drawdown,
+    calculate_expected_shortfall,
+    calculate_max_drawdown,
+    calculate_portfolio_value,
+    calculate_sharpe_ratio,
+    calculate_var,
+    determine_risk_level,
+    validate_risk_inputs,
+)
 
 if TYPE_CHECKING:
     from src.database.service import DatabaseService
@@ -50,9 +68,11 @@ class RiskMetricsService(BaseService):
         self.state_service = state_service
         self.config = config
 
-    async def calculate_metrics(self, positions: list[Position], market_data: list[MarketData]) -> RiskMetrics:
+    async def calculate_metrics(
+        self, positions: list[Position], market_data: list[MarketData]
+    ) -> RiskMetrics:
         """
-        Calculate comprehensive risk metrics.
+        Calculate comprehensive risk metrics with consistent boundary validation.
 
         Args:
             positions: Current portfolio positions
@@ -65,11 +85,76 @@ class RiskMetricsService(BaseService):
             RiskManagementError: If calculation fails
         """
         try:
+            # Create error handler with consistent propagation
+            error_handler = ErrorPropagationMixin()
+
+            # Validate inputs at module boundary with batch processing alignment
+            try:
+                # Convert positions to batch format for consistent validation
+                position_batch = []
+                for position in positions:
+                    position_dict = {
+                        "symbol": position.symbol,
+                        "quantity": format_decimal(position.quantity)
+                        if hasattr(position, "quantity")
+                        else "0",
+                        "current_price": format_decimal(position.current_price)
+                        if hasattr(position, "current_price") and position.current_price
+                        else "0",
+                        "timestamp": position.timestamp.isoformat()
+                        if hasattr(position, "timestamp")
+                        else None,
+                    }
+                    position_batch.append(position_dict)
+
+                # Validate using batch processing paradigm for consistency with monitoring
+                from src.utils.messaging_patterns import ProcessingParadigmAligner
+
+                batch_data = ProcessingParadigmAligner.create_batch_from_stream(position_batch)
+                for position_dict in batch_data["items"]:
+                    BoundaryValidator.validate_database_entity(position_dict, "validate")
+
+                # Convert market data to batch format for consistent processing
+                market_batch = []
+                for data in market_data:
+                    market_dict = {
+                        "symbol": data.symbol,
+                        "price": format_decimal(data.close) if hasattr(data, "close") else "0",
+                        "volume": format_decimal(data.volume)
+                        if hasattr(data, "volume") and data.volume
+                        else 0,
+                        "timestamp": data.timestamp.isoformat()
+                        if hasattr(data, "timestamp")
+                        else None,
+                    }
+                    market_batch.append(market_dict)
+
+                # Validate using batch processing paradigm
+                market_batch_data = ProcessingParadigmAligner.create_batch_from_stream(market_batch)
+                for market_dict in market_batch_data["items"]:
+                    BoundaryValidator.validate_database_entity(market_dict, "validate")
+
+            except Exception as e:
+                # Check if it's a validation error and propagate accordingly
+                if hasattr(e, "__class__") and (
+                    "ValidationError" in e.__class__.__name__
+                    or "DataValidationError" in e.__class__.__name__
+                ):
+                    error_handler.propagate_validation_error(e, "risk_metrics_boundary_validation")
+                else:
+                    error_handler.propagate_service_error(e, "risk_metrics_boundary_validation")
+                return await self._create_empty_metrics()
+
             if not positions:
                 return await self._create_empty_metrics()
 
-            # Calculate portfolio value
-            portfolio_value = await self.get_portfolio_value(positions, market_data)
+            # Calculate portfolio value using centralized utility with validation
+            portfolio_value = calculate_portfolio_value(positions, market_data)
+
+            # Validate risk calculation inputs using centralized utility
+            if not validate_risk_inputs(portfolio_value, positions, market_data):
+                self.logger.warning("Risk input validation failed, using default metrics")
+                return await self._create_empty_metrics()
 
             # Update portfolio history
             await self._update_portfolio_history(portfolio_value)
@@ -77,45 +162,81 @@ class RiskMetricsService(BaseService):
             # Get historical data for calculations
             portfolio_history = await self._get_portfolio_history()
 
-            # Calculate individual risk components
-            var_1d = await self._calculate_var(1, portfolio_value, portfolio_history)
-            var_5d = await self._calculate_var(5, portfolio_value, portfolio_history)
-            expected_shortfall = await self._calculate_expected_shortfall(portfolio_value, portfolio_history)
-            max_drawdown = await self._calculate_max_drawdown(portfolio_history)
-            current_drawdown = await self._calculate_current_drawdown(portfolio_value, portfolio_history)
-            sharpe_ratio = await self._calculate_sharpe_ratio(portfolio_history)
+            # Calculate individual risk components using centralized utilities
+            returns = await self._calculate_returns_from_history(portfolio_history)
+
+            var_1d = calculate_var(returns, to_decimal("0.95"), 1)
+            var_5d = calculate_var(returns, to_decimal("0.95"), 5)
+            expected_shortfall = calculate_expected_shortfall(returns)
+            max_dd, _, _ = calculate_max_drawdown(portfolio_history)
+            current_drawdown = calculate_current_drawdown(portfolio_value, portfolio_history)
+            sharpe_ratio = calculate_sharpe_ratio(returns)
 
             # Calculate additional metrics
             total_exposure = await self._calculate_total_exposure(positions, market_data)
             correlation_risk = await self._calculate_correlation_risk(positions)
             beta = await self._calculate_portfolio_beta(positions)
 
-            # Determine risk level
-            risk_level = await self._determine_risk_level(var_1d, current_drawdown, sharpe_ratio, portfolio_value)
+            # Determine risk level using centralized utility
+            risk_level = determine_risk_level(
+                var_1d, current_drawdown, sharpe_ratio, portfolio_value
+            )
 
-            # Create risk metrics
+            # Create risk metrics with consistent Decimal types
+            # Apply consistent data transformation for financial fields
+            from src.utils.messaging_patterns import DataTransformationHandler
+
+            # Create transformation handler for financial consistency
+            _ = DataTransformationHandler()
+
+            # Prepare metrics data with financial transformations
+            metrics_data = {
+                "portfolio_value": portfolio_value,
+                "total_exposure": total_exposure,
+                "var_1d": var_1d,
+                "var_95": var_1d,  # Same as var_1d for 95% confidence
+                "var_99": var_5d,  # Approximation for 99% confidence
+                "expected_shortfall": expected_shortfall,
+                "max_drawdown": max_dd,  # Use proper variable
+                "current_drawdown": current_drawdown,
+                "correlation_risk": correlation_risk,
+                "leverage": safe_divide(total_exposure, portfolio_value, ONE),
+            }
+
+            # Apply consistent data transformation patterns matching monitoring module
+            from src.utils.messaging_patterns import MessagingCoordinator, ProcessingParadigmAligner
+
+            coordinator = MessagingCoordinator("RiskMetricsTransform")
+            transformed_data = coordinator._apply_data_transformation(metrics_data)
+
+            # Align processing modes for consistency with monitoring module
+            transformed_data = ProcessingParadigmAligner.align_processing_modes(
+                source_mode="batch", target_mode="batch", data=transformed_data
+            )
+
+            # Create risk metrics with consistent Decimal precision
             metrics = RiskMetrics(
                 timestamp=datetime.now(timezone.utc),
-                portfolio_value=portfolio_value,
-                total_exposure=total_exposure,
-                var_1d=var_1d,
-                var_95=var_1d,  # Same as var_1d for 95% confidence
-                var_99=var_5d,  # Approximation for 99% confidence
-                expected_shortfall=expected_shortfall,
-                max_drawdown=max_drawdown,
-                current_drawdown=current_drawdown,
-                sharpe_ratio=float(sharpe_ratio) if sharpe_ratio else None,
-                beta=float(beta) if beta else None,
-                correlation_risk=correlation_risk,
+                portfolio_value=transformed_data["portfolio_value"],
+                total_exposure=transformed_data["total_exposure"],
+                var_1d=transformed_data["var_1d"],
+                var_95=transformed_data["var_95"],
+                var_99=transformed_data["var_99"],
+                expected_shortfall=transformed_data["expected_shortfall"],
+                max_drawdown=transformed_data["max_drawdown"],
+                current_drawdown=transformed_data["current_drawdown"],
+                sharpe_ratio=sharpe_ratio,  # Keep as Decimal for precision
+                beta=beta,  # Keep as Decimal for precision
+                correlation_risk=transformed_data["correlation_risk"],
                 risk_level=risk_level,
                 position_count=len(positions),
-                leverage=float(safe_divide(total_exposure, portfolio_value, ONE)),
+                leverage=transformed_data["leverage"],  # Keep as Decimal for precision
             )
 
             # Store metrics in state
             await self._store_metrics(metrics)
 
-            self._logger.info(
+            self.logger.info(
                 "Risk metrics calculated",
                 portfolio_value=format_decimal(portfolio_value),
                 var_1d=format_decimal(var_1d),
@@ -125,12 +246,14 @@ class RiskMetricsService(BaseService):
             return metrics
 
         except Exception as e:
-            self._logger.error(f"Risk metrics calculation failed: {e}")
+            self.logger.error(f"Risk metrics calculation failed: {e}")
             raise RiskManagementError(f"Risk metrics calculation failed: {e}") from e
 
-    async def get_portfolio_value(self, positions: list[Position], market_data: list[MarketData]) -> Decimal:
+    async def get_portfolio_value(
+        self, positions: list[Position], market_data: list[MarketData]
+    ) -> Decimal:
         """
-        Calculate current portfolio value.
+        Calculate current portfolio value using centralized utility.
 
         Args:
             positions: Current positions
@@ -139,18 +262,8 @@ class RiskMetricsService(BaseService):
         Returns:
             Current portfolio value
         """
-        portfolio_value = ZERO
-
-        # Create price lookup
-        price_lookup = {data.symbol: data.close for data in market_data}
-
-        for position in positions:
-            current_price = price_lookup.get(position.symbol, position.current_price)
-            if current_price and current_price > ZERO:
-                position_value = position.quantity * current_price
-                portfolio_value += position_value
-
-        return portfolio_value
+        # Use centralized utility for portfolio value calculation
+        return calculate_portfolio_value(positions, market_data)
 
     async def _create_empty_metrics(self) -> RiskMetrics:
         """Create empty risk metrics for portfolios with no positions."""
@@ -176,7 +289,11 @@ class RiskMetricsService(BaseService):
         """Update portfolio value history."""
         try:
             # Store portfolio value in state service
-            history_data = await self.state_service.get_state("risk", "portfolio_history") or []
+            from src.core.types import StateType
+
+            history_data = (
+                await self.state_service.get_state(StateType.RISK_STATE, "portfolio_history") or []
+            )
             history_data.append(
                 {
                     "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -187,21 +304,56 @@ class RiskMetricsService(BaseService):
             if len(history_data) > 252:
                 history_data = history_data[-252:]
 
-            await self.state_service.set_state("risk", "portfolio_history", history_data)
+            from src.core.types import StateType
+
+            await self.state_service.set_state(
+                state_type=StateType.RISK_STATE,
+                state_id="portfolio_history",
+                state_data=history_data,
+                source_component="RiskMetricsService",
+                reason="Portfolio history update",
+            )
 
         except Exception as e:
-            self._logger.error(f"Error updating portfolio history: {e}")
+            self.logger.error(f"Error updating portfolio history: {e}")
 
     async def _get_portfolio_history(self) -> list[Decimal]:
         """Get portfolio value history."""
         try:
-            history_data = await self.state_service.get_state("risk", "portfolio_history") or []
+            from src.core.types import StateType
+
+            history_data = (
+                await self.state_service.get_state(StateType.RISK_STATE, "portfolio_history") or []
+            )
             return [to_decimal(item["value"]) for item in history_data if "value" in item]
         except Exception as e:
-            self._logger.error(f"Error getting portfolio history: {e}")
+            self.logger.error(f"Error getting portfolio history: {e}")
             return []
 
-    async def _calculate_var(self, days: int, portfolio_value: Decimal, history: list[Decimal]) -> Decimal:
+    async def _calculate_returns_from_history(self, history: list[Decimal]) -> list[Decimal]:
+        """
+        Calculate returns from portfolio value history.
+
+        Args:
+            history: Portfolio value history
+
+        Returns:
+            List of portfolio returns
+        """
+        if len(history) < 2:
+            return []
+
+        returns = []
+        for i in range(1, len(history)):
+            if history[i - 1] > ZERO:
+                return_val = safe_divide(history[i] - history[i - 1], history[i - 1], ZERO)
+                returns.append(return_val)
+
+        return returns
+
+    async def _calculate_var(
+        self, days: int, portfolio_value: Decimal, history: list[Decimal]
+    ) -> Decimal:
         """Calculate Value at Risk."""
         if len(history) < 30:
             # Conservative estimate for insufficient data
@@ -214,7 +366,9 @@ class RiskMetricsService(BaseService):
         for i in range(1, len(history)):
             if history[i - 1] > ZERO:
                 return_val = safe_divide(history[i] - history[i - 1], history[i - 1], ZERO)
-                returns.append(float(return_val))  # Convert to float only for numpy operations
+                returns.append(
+                    decimal_to_float(return_val)
+                )  # Convert to float only for numpy operations
 
         if len(returns) < 10:
             return portfolio_value * to_decimal("0.02")
@@ -229,7 +383,9 @@ class RiskMetricsService(BaseService):
 
         return portfolio_value * abs(scaled_var)
 
-    async def _calculate_expected_shortfall(self, portfolio_value: Decimal, history: list[Decimal]) -> Decimal:
+    async def _calculate_expected_shortfall(
+        self, portfolio_value: Decimal, history: list[Decimal]
+    ) -> Decimal:
         """Calculate Expected Shortfall (Conditional VaR)."""
         if len(history) < 30:
             return portfolio_value * to_decimal("0.025")
@@ -239,7 +395,9 @@ class RiskMetricsService(BaseService):
         for i in range(1, len(history)):
             if history[i - 1] > ZERO:
                 return_val = (history[i] - history[i - 1]) / history[i - 1]
-                returns.append(float(return_val))  # Convert to float only for numpy operations
+                returns.append(
+                    decimal_to_float(return_val)
+                )  # Convert to float only for numpy operations
 
         if not returns:
             return portfolio_value * to_decimal("0.025")
@@ -262,14 +420,16 @@ class RiskMetricsService(BaseService):
         if len(history) < 2:
             return ZERO
 
-        values = [float(val) for val in history]
+        values = [decimal_to_float(val) for i, val in enumerate(history)]
         running_max = np.maximum.accumulate(values)
         drawdowns = (running_max - values) / running_max
 
         max_drawdown = np.max(drawdowns) if len(drawdowns) > 0 else 0.0
         return to_decimal(str(max_drawdown))
 
-    async def _calculate_current_drawdown(self, portfolio_value: Decimal, history: list[Decimal]) -> Decimal:
+    async def _calculate_current_drawdown(
+        self, portfolio_value: Decimal, history: list[Decimal]
+    ) -> Decimal:
         """Calculate current drawdown from peak."""
         if len(history) < 2:
             return ZERO
@@ -291,7 +451,9 @@ class RiskMetricsService(BaseService):
         for i in range(1, len(history)):
             if history[i - 1] > ZERO:
                 return_val = (history[i] - history[i - 1]) / history[i - 1]
-                returns.append(float(return_val))  # Convert to float only for numpy operations
+                returns.append(
+                    decimal_to_float(return_val)
+                )  # Convert to float only for numpy operations
 
         if len(returns) < 30:
             return None
@@ -308,7 +470,9 @@ class RiskMetricsService(BaseService):
         sharpe_ratio = safe_divide(mean_return, volatility, ZERO)
         return sharpe_ratio
 
-    async def _calculate_total_exposure(self, positions: list[Position], market_data: list[MarketData]) -> Decimal:
+    async def _calculate_total_exposure(
+        self, positions: list[Position], market_data: list[MarketData]
+    ) -> Decimal:
         """Calculate total portfolio exposure."""
         total_exposure = ZERO
         price_lookup = {data.symbol: data.close for data in market_data}
@@ -395,7 +559,15 @@ class RiskMetricsService(BaseService):
                 "position_count": metrics.position_count,
             }
 
-            await self.state_service.set_state("risk", "latest_metrics", metrics_data)
+            from src.core.types import StateType
+
+            await self.state_service.set_state(
+                state_type=StateType.RISK_STATE,
+                state_id="latest_metrics",
+                state_data=metrics_data,
+                source_component="RiskMetricsService",
+                reason="Latest risk metrics update",
+            )
 
         except Exception as e:
-            self._logger.error(f"Error storing risk metrics: {e}")
+            self.logger.error(f"Error storing risk metrics: {e}")

@@ -6,7 +6,7 @@ This module tests the abstract base class for risk management implementations.
 
 from datetime import datetime, timezone
 from decimal import Decimal
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -218,15 +218,11 @@ class TestBaseRiskManager:
     @pytest.mark.asyncio
     async def test_emergency_stop(self, risk_manager):
         """Test emergency stop functionality."""
-        # Mock the error handler to avoid SecurityRateLimiter dependency
-        with patch.object(risk_manager, 'error_handler') as mock_error_handler:
-            mock_error_handler.handle_error = AsyncMock()
-            
-            reason = "Test emergency stop"
+        reason = "Test emergency stop"
 
-            await risk_manager.emergency_stop(reason)
+        await risk_manager.emergency_stop(reason)
 
-            assert risk_manager.current_risk_level == RiskLevel.CRITICAL
+        assert risk_manager.current_risk_level == RiskLevel.CRITICAL
 
     @pytest.mark.asyncio
     async def test_validate_risk_parameters(self, risk_manager):

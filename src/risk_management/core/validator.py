@@ -1,47 +1,54 @@
 """Risk validation using centralized utilities to eliminate duplication."""
 
-import logging
 from decimal import Decimal
 from typing import Any
 
 from src.core.base.component import BaseComponent
 from src.core.dependency_injection import injectable
 from src.core.exceptions import PositionLimitError, ValidationError
-from src.core.types.risk import RiskLevel, RiskLimits
-from src.core.types.trading import OrderRequest, Position, Signal
+from src.core.logging import get_logger
+from src.core.types import OrderRequest, Position, RiskLevel, RiskLimits, Signal
 from src.core.validator_registry import ValidatorInterface, register_validator
 from src.utils.decimal_utils import format_decimal
 from src.utils.decorators import UnifiedDecorator as dec
+from src.utils.messaging_patterns import (
+    BoundaryValidator,
+    ErrorPropagationMixin,
+    MessagingCoordinator,
+)
 from src.utils.risk_validation import UnifiedRiskValidator
 from src.utils.validation.core import ValidationFramework
 
-# Module level logger
-logger = logging.getLogger(__name__)
 
-
-class RiskValidator(BaseComponent, ValidatorInterface):
+class RiskValidator(BaseComponent, ValidatorInterface, ErrorPropagationMixin):
     """
     Risk validation using centralized ValidationFramework.
 
-    This eliminates duplication of risk validation logic.
+    This eliminates duplication of risk validation logic and ensures consistent
+    error propagation and data flow patterns.
     """
 
-    def __init__(self, risk_limits: RiskLimits | None = None):
+    def __init__(
+        self,
+        risk_limits: RiskLimits | None = None,
+        messaging_coordinator: MessagingCoordinator | None = None,
+    ):
         """
         Initialize risk validator using centralized utilities.
 
         Args:
             risk_limits: Risk limits configuration
+            messaging_coordinator: Messaging coordinator for consistent data flow
         """
         super().__init__()  # Initialize BaseComponent
         self.base_validator = ValidationFramework()
         self.risk_limits = risk_limits or self._default_limits()
-        # Use the logger from BaseComponent instead of overriding
-        if logger:
-            self.logger.bind(**{"component": "risk_validator"})
+        # Use the logger from BaseComponent
+        self.logger.bind(component="risk_validator")
 
         # Use centralized risk validator
         self.unified_validator = UnifiedRiskValidator(self.risk_limits)
+        self._messaging_coordinator = messaging_coordinator or MessagingCoordinator("RiskValidator")
 
     def _default_limits(self) -> RiskLimits:
         """Get default risk limits."""
@@ -103,28 +110,38 @@ class RiskValidator(BaseComponent, ValidatorInterface):
             ValidationError: If order validation fails
             PositionLimitError: If position limits exceeded
         """
-        # Use base validator for order fields
-        self.base_validator.validate_order(
-            {
+        try:
+            # Validate at boundary
+            order_data = {
                 "symbol": order.symbol,
                 "side": order.side,
                 "type": getattr(order, "type", None) or getattr(order, "order_type", None),
                 "quantity": format_decimal(order.quantity),
                 "price": format_decimal(order.price) if order.price else None,
+                "portfolio_value": str(portfolio_value),
             }
-        )
+            BoundaryValidator.validate_database_entity(order_data, "validate_order")
 
-        # Use centralized validator
-        is_valid, error_message = self.unified_validator.validate_order(order, portfolio_value, current_positions)
+            # Use base validator for order fields
+            self.base_validator.validate_order(order_data)
 
-        if not is_valid:
-            # Determine appropriate exception type based on error
-            if "position" in error_message.lower() and "limit" in error_message.lower():
-                raise PositionLimitError(error_message)
-            else:
-                raise ValidationError(error_message)
+            # Use centralized validator
+            is_valid, error_message = self.unified_validator.validate_order(
+                order, portfolio_value, current_positions
+            )
 
-        return True
+            if not is_valid:
+                # Determine appropriate exception type based on error
+                if "position" in error_message.lower() and "limit" in error_message.lower():
+                    raise PositionLimitError(error_message)
+                else:
+                    raise ValidationError(error_message)
+
+            return True
+
+        except Exception as e:
+            self.propagate_validation_error(e, "validate_order")
+            raise
 
     @dec.enhance(log=True)
     def validate_signal(self, signal: Signal, current_risk_level: RiskLevel | None = None) -> bool:
@@ -141,15 +158,24 @@ class RiskValidator(BaseComponent, ValidatorInterface):
         Raises:
             ValidationError: If signal validation fails
         """
-        # Use centralized validator
-        is_valid, error_message = self.unified_validator.validate_signal(
-            signal, current_risk_level, emergency_stop_active=False
-        )
+        try:
+            # Validate at boundary
+            signal_data = signal.model_dump()
+            BoundaryValidator.validate_database_entity(signal_data, "validate_signal")
 
-        if not is_valid:
-            raise ValidationError(error_message)
+            # Use centralized validator
+            is_valid, error_message = self.unified_validator.validate_signal(
+                signal, current_risk_level, emergency_stop_active=False
+            )
 
-        return True
+            if not is_valid:
+                raise ValidationError(error_message)
+
+            return True
+
+        except Exception as e:
+            self.propagate_validation_error(e, "validate_signal")
+            raise
 
     def validate_position(self, position: Position, portfolio_value: Decimal) -> bool:
         """
@@ -166,7 +192,9 @@ class RiskValidator(BaseComponent, ValidatorInterface):
             ValidationError: If position validation fails
         """
         # Use centralized validator
-        is_valid, error_message = self.unified_validator.validate_position(position, portfolio_value)
+        is_valid, error_message = self.unified_validator.validate_position(
+            position, portfolio_value
+        )
 
         if not is_valid:
             raise ValidationError(error_message)
@@ -204,21 +232,23 @@ class RiskValidator(BaseComponent, ValidatorInterface):
         """
         self.risk_limits = new_limits
         self.unified_validator.update_limits(new_limits)
-        self._logger.info("Risk limits updated")
+        self.logger.info("Risk limits updated")
 
 
 @injectable(singleton=True)
-class RiskValidationService:
+class RiskValidationUtility:
     """
-    Service for risk validation across the system.
+    Utility for risk validation across the system.
 
     Provides centralized access to risk validation.
+    Note: Renamed from RiskValidationService to avoid conflict with
+    the proper service layer implementation.
     """
 
     def __init__(self):
-        """Initialize risk validation service."""
+        """Initialize risk validation utility."""
         self.validator = RiskValidator()
-        self._logger = logger
+        self.logger = get_logger(__name__)
 
         # Register with global validator registry
         register_validator("risk", self.validator)

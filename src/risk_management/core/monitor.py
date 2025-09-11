@@ -1,50 +1,57 @@
 """Risk monitoring using centralized utilities to eliminate duplication."""
 
 import asyncio
-import logging
 from typing import Any
 
-from src.core.dependency_injection import injectable
+from src.core.base.component import BaseComponent
 from src.core.types.risk import RiskAlert, RiskMetrics
+from src.utils.decimal_utils import format_decimal
 from src.utils.decorators import UnifiedDecorator as dec
+from src.utils.messaging_patterns import (
+    BoundaryValidator,
+    ErrorPropagationMixin,
+    MessagingCoordinator,
+)
 from src.utils.risk_monitoring import get_unified_risk_monitor
-
-# Module level logger
-logger = logging.getLogger(__name__)
-
 
 # Removed: RiskObserver classes - now using centralized utilities
 
 
-@injectable(singleton=True)
-class RiskMonitor:
+class RiskMonitor(BaseComponent, ErrorPropagationMixin):
     """
     Legacy risk monitor that delegates to centralized utilities.
 
     This maintains backward compatibility while using the centralized
     UnifiedRiskMonitor for actual functionality.
+    Uses ErrorPropagationMixin for consistent error handling across modules.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, messaging_coordinator: MessagingCoordinator | None = None) -> None:
         """Initialize risk monitor using centralized utilities."""
+        super().__init__()
         self._unified_monitor = get_unified_risk_monitor()
         self._monitoring_task: asyncio.Task | None = None
         self._running = False
-        self._logger = logger
         self._metrics_history: list[RiskMetrics] = []
         self._observers: list[Any] = []
+        self._messaging_coordinator = messaging_coordinator or MessagingCoordinator("RiskMonitor")
+
+        # Initialize logger from BaseComponent
+        self._logger = self.logger
 
     # Removed: _set_default_thresholds - now handled by UnifiedRiskMonitor
 
     # Observer management now delegated to UnifiedRiskMonitor
     def add_observer(self, observer) -> None:
         """Add observer (legacy compatibility)."""
-        self._logger.warning("Using legacy add_observer - consider migrating to UnifiedRiskMonitor")
+        self.logger.warning("Using legacy add_observer - consider migrating to UnifiedRiskMonitor")
         # Could add compatibility layer here if needed
 
     def remove_observer(self, observer) -> None:
         """Remove observer (legacy compatibility)."""
-        self._logger.warning("Using legacy remove_observer - consider migrating to UnifiedRiskMonitor")
+        self.logger.warning(
+            "Using legacy remove_observer - consider migrating to UnifiedRiskMonitor"
+        )
         # Could add compatibility layer here if needed
 
     @dec.enhance(log=True, monitor=True)
@@ -55,6 +62,21 @@ class RiskMonitor:
         Args:
             metrics: Current risk metrics
         """
+        # Align processing modes for consistent data flow
+        _ = {
+            "portfolio_value": str(metrics.portfolio_value),
+            "risk_level": metrics.risk_level.value,
+            "timestamp": metrics.timestamp.isoformat() if metrics.timestamp else None,
+        }
+
+        # Use stream processing pattern for alignment with execution module
+        from src.risk_management.data_transformer import RiskDataTransformer
+
+        # Transform metrics for stream processing consistency
+        _ = RiskDataTransformer.transform_risk_metrics_to_event_data(
+            metrics, {"monitor_id": str(id(metrics))}
+        )
+
         # Delegate to centralized monitor
         await self._unified_monitor.monitor_metrics(metrics)
 
@@ -67,6 +89,19 @@ class RiskMonitor:
         Args:
             portfolio_data: Portfolio data
         """
+        # Validate portfolio data at boundary
+        BoundaryValidator.validate_database_entity(portfolio_data, "monitor_portfolio")
+
+        # Use stream processing pattern for alignment with execution module
+        from src.risk_management.data_transformer import RiskDataTransformer
+
+        # Transform portfolio data for consistent stream processing
+        _ = RiskDataTransformer.transform_for_pub_sub(
+            event_type="risk.portfolio_monitoring",
+            data=portfolio_data,
+            metadata={"monitor_id": str(id(portfolio_data))},
+        )
+
         # Delegate to centralized monitor
         await self._unified_monitor.monitor_portfolio(portfolio_data)
 
@@ -84,7 +119,7 @@ class RiskMonitor:
 
     def get_thresholds(self) -> dict[str, Any]:
         """Get current thresholds from centralized monitor."""
-        return {k: float(v) for k, v in self._unified_monitor.get_thresholds().items()}
+        return {k: format_decimal(v) for k, v in self._unified_monitor.get_thresholds().items()}
 
     async def start_monitoring(self, interval: int = 60) -> None:
         """
@@ -98,7 +133,7 @@ class RiskMonitor:
 
         self._running = True
         self._monitoring_task = asyncio.create_task(self._monitoring_loop(interval))
-        self._logger.info(f"Started legacy risk monitoring with {interval}s interval")
+        self.logger.info(f"Started legacy risk monitoring with {interval}s interval")
 
     async def stop_monitoring(self) -> None:
         """Stop continuous monitoring with proper resource cleanup."""
@@ -113,9 +148,9 @@ class RiskMonitor:
                     # Wait for task to be cancelled with timeout
                     await asyncio.wait_for(task, timeout=5.0)
                 except (asyncio.CancelledError, asyncio.TimeoutError):
-                    self._logger.info("Monitoring task cancelled")
+                    self.logger.info("Monitoring task cancelled")
                 except Exception as e:
-                    self._logger.warning(f"Error cancelling monitoring task: {e}")
+                    self.logger.warning(f"Error cancelling monitoring task: {e}")
                 finally:
                     self._monitoring_task = None
                     task = None
@@ -123,7 +158,7 @@ class RiskMonitor:
             # Clean up resources
             await self._cleanup_resources()
 
-            self._logger.info("Stopped risk monitoring")
+            self.logger.info("Stopped risk monitoring")
 
         finally:
             # Ensure task reference is cleared
@@ -137,7 +172,7 @@ class RiskMonitor:
                 # For now, it's a placeholder
                 await asyncio.sleep(interval)
             except Exception as e:
-                self._logger.error(f"Monitoring error: {e}")
+                self.logger.error(f"Monitoring error: {e}")
 
     async def _cleanup_resources(self) -> None:
         """Clean up all resources used by the risk monitor."""
@@ -152,10 +187,10 @@ class RiskMonitor:
                     if len(observer.alerts) > 1000:  # Prevent excessive memory usage
                         observer.alerts = observer.alerts[-100:]  # Keep last 100 alerts
 
-            self._logger.info("Risk monitor resources cleaned up")
+            self.logger.info("Risk monitor resources cleaned up")
 
         except Exception as e:
-            self._logger.error(f"Error cleaning up risk monitor resources: {e}")
+            self.logger.error(f"Error cleaning up risk monitor resources: {e}")
 
     def get_alerts(self) -> list[RiskAlert]:
         """Get recent risk alerts from centralized monitor."""

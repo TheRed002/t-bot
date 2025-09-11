@@ -1,10 +1,9 @@
 """
 Risk Management Module - Enterprise-Grade Risk Management System.
 
-This module provides comprehensive risk management functionality with both
-legacy components (deprecated) and the new RiskService architecture.
+This module provides comprehensive risk management functionality including:
 
-## New Architecture (RECOMMENDED):
+## Core Architecture:
 - RiskService: Enterprise-grade risk management service with full integration
 - RiskManagementFactory: Factory for creating and managing risk components
 - DatabaseService integration: No direct database access
@@ -12,14 +11,14 @@ legacy components (deprecated) and the new RiskService architecture.
 - Real-time monitoring and alerting
 - Comprehensive caching and circuit breakers
 
-## Legacy Components (DEPRECATED):
-- RiskManager: Legacy risk manager (now wrapper around RiskService)
-- PositionSizer: Legacy position sizing (use RiskService.calculate_position_size())
-- RiskCalculator: Legacy risk metrics (use RiskService.calculate_risk_metrics())
+## Available Components:
+- RiskManager: Full-featured risk manager with service integration
+- PositionSizer: Advanced position sizing with multiple strategies
+- RiskCalculator: Comprehensive risk metrics calculation
 
 ## Quick Start:
 
-### RECOMMENDED: Using RiskManagementController:
+### Using RiskManagementController:
 ```python
 from src.risk_management.factory import create_risk_management_controller
 
@@ -61,7 +60,7 @@ CRITICAL: This module integrates with P-001 (types, exceptions, config),
 P-002A (error handling), and P-007A (utils) components.
 """
 
-# New Architecture - RECOMMENDED
+# Core Architecture
 from .base import BaseRiskManager
 from .controller import RiskManagementController
 
@@ -88,7 +87,7 @@ from .interfaces import (
 from .portfolio_limits import PortfolioLimits
 from .position_sizing import PositionSizer
 
-# Legacy Components - DEPRECATED (maintained for backward compatibility)
+# Risk Management Components
 from .risk_manager import RiskManager
 from .risk_metrics import RiskCalculator
 from .service import RiskService
@@ -99,7 +98,7 @@ from .services import (
     RiskValidationService,
 )
 
-# Legacy circuit breakers and emergency controls (if they exist)
+# Circuit breakers and emergency controls
 try:
     from .circuit_breakers import BaseCircuitBreaker, CircuitBreakerManager
     from .emergency_controls import EmergencyControls
@@ -111,7 +110,7 @@ except ImportError:
     CircuitBreakerManager = None  # type: ignore
     EmergencyControls = None  # type: ignore
 
-# Public API - prioritizes new service architecture
+# Public API
 __all__ = [
     "AbstractRiskService",
     # Core components
@@ -121,12 +120,12 @@ __all__ = [
     "PositionSizingService",
     "PositionSizingServiceInterface",
     "RiskCalculator",
-    # RECOMMENDED Architecture
+    # Risk Management Architecture
     "RiskManagementController",
     "RiskManagementFactory",
     "RiskService",
     "RiskServiceInterface",
-    # Legacy Components (DEPRECATED)
+    # Risk Management Components
     "RiskManager",
     "RiskMetricsService",
     "RiskMetricsServiceInterface",
@@ -137,13 +136,13 @@ __all__ = [
     # Dependency injection
     "configure_risk_management_dependencies",
     "create_recommended_risk_component",
-    "create_risk_management_controller",  # RECOMMENDED
+    "create_risk_management_controller",
     "create_risk_service",
     "get_risk_factory",
     "register_risk_management_services",
 ]
 
-# Add legacy controls if available
+# Add circuit breakers if available
 if _has_legacy_controls:
     __all__.extend(
         [
@@ -156,4 +155,6 @@ if _has_legacy_controls:
 # Version information
 __version__ = "2.1.0"
 __author__ = "Trading Bot Framework"
-__description__ = "Enterprise Risk Management System with Controller-Service-Repository Architecture " "(P-008, P-009)"
+__description__ = (
+    "Enterprise Risk Management System with Controller-Service-Repository Architecture"
+)

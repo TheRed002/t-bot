@@ -18,7 +18,7 @@ from src.core.config import Config
 from src.core.exceptions import CircuitBreakerTriggeredError
 from src.core.types.market import MarketData
 from src.core.types.risk import CircuitBreakerStatus, CircuitBreakerType
-from src.core.types.trading import OrderSide, Position, PositionSide, PositionStatus
+from src.core.types.trading import Position, PositionSide, PositionStatus
 from src.risk_management.base import BaseRiskManager
 from src.risk_management.circuit_breakers import CircuitBreakerManager, CorrelationSpikeBreaker
 
@@ -122,7 +122,7 @@ def correlated_market_data():
                     low=Decimal(str(btc_price)),
                     close=Decimal(str(btc_price)),
                     volume=Decimal("1000.0"),
-                    exchange="test_exchange"
+                    exchange="test_exchange",
                 ),
                 MarketData(
                     symbol="ETH/USD",
@@ -132,7 +132,7 @@ def correlated_market_data():
                     low=Decimal(str(eth_price)),
                     close=Decimal(str(eth_price)),
                     volume=Decimal("2000.0"),
-                    exchange="test_exchange"
+                    exchange="test_exchange",
                 ),
                 MarketData(
                     symbol="ADA/USD",
@@ -142,7 +142,7 @@ def correlated_market_data():
                     low=Decimal(str(ada_price)),
                     close=Decimal(str(ada_price)),
                     volume=Decimal("5000.0"),
-                    exchange="test_exchange"
+                    exchange="test_exchange",
                 ),
             ]
         )

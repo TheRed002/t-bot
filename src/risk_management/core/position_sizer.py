@@ -9,8 +9,8 @@ from decimal import Decimal
 from src.core.dependency_injection import injectable
 from src.core.exceptions import RiskManagementError, ValidationError
 from src.core.logging import get_logger
-from src.core.types.risk import PositionSizeMethod
-from src.core.types.trading import Signal
+from src.core.types import PositionSizeMethod, Signal
+from src.utils.decimal_utils import format_decimal
 from src.utils.decorators import UnifiedDecorator as dec
 from src.utils.position_sizing import (
     calculate_position_metrics,
@@ -36,7 +36,7 @@ class PositionSizer:
 
     def __init__(self) -> None:
         """Initialize position sizer."""
-        self._logger = logger
+        self.logger = logger
 
         # Position history for volatility calculations
         self.position_history: dict[str, list[Decimal]] = {}
@@ -85,17 +85,19 @@ class PositionSizer:
                 kwargs.update(position_metrics)
 
             # Calculate size using centralized utility
-            position_size = calculate_position_size(method, signal, portfolio_value, risk_per_trade, **kwargs)
+            position_size = calculate_position_size(
+                method, signal, portfolio_value, risk_per_trade, **kwargs
+            )
 
             # Apply custom limits if set
             if self.max_position_size or self.min_position_size:
                 position_size = self._apply_limits(position_size, portfolio_value)
 
-            self._logger.info(
+            self.logger.info(
                 "Position size calculated",
                 method=method.value,
-                size=float(position_size),
-                portfolio_value=float(portfolio_value),
+                size=format_decimal(position_size),
+                portfolio_value=format_decimal(portfolio_value),
             )
 
             return position_size
@@ -122,7 +124,7 @@ class PositionSizer:
             return Decimal("0")
 
         if validated_size != original_size:
-            self._logger.info(f"Position size adjusted from {original_size} to {validated_size}")
+            self.logger.info(f"Position size adjusted from {original_size} to {validated_size}")
 
         return validated_size
 

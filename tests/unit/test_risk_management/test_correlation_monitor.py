@@ -15,7 +15,7 @@ import pytest
 
 from src.core.config import Config
 from src.core.types.market import MarketData
-from src.core.types.trading import OrderSide, Position, PositionSide, PositionStatus
+from src.core.types.trading import Position, PositionSide, PositionStatus
 from src.risk_management.correlation_monitor import (
     CorrelationMetrics,
     CorrelationMonitor,
@@ -462,7 +462,7 @@ class TestCorrelationMonitor:
         """Test cleanup of old price data."""
         # Create data with old timestamps
         base_time = datetime.now(timezone.utc) - timedelta(hours=2)
-        
+
         # Add 3 old data points
         for i in range(3):
             data = MarketData(
@@ -652,7 +652,7 @@ class TestCorrelationDecimalPrecision:
                 current_price=Decimal("50005.123456789"),
                 unrealized_pnl=Decimal("5.0"),
                 side=PositionSide.LONG,
-            status=PositionStatus.OPEN,
+                status=PositionStatus.OPEN,
                 opened_at=datetime.now(timezone.utc),
                 exchange="binance",
                 metadata={},
@@ -664,7 +664,7 @@ class TestCorrelationDecimalPrecision:
                 current_price=Decimal("3005.987654321"),
                 unrealized_pnl=Decimal("55.0"),
                 side=PositionSide.LONG,
-            status=PositionStatus.OPEN,
+                status=PositionStatus.OPEN,
                 opened_at=datetime.now(timezone.utc),
                 exchange="binance",
                 metadata={},

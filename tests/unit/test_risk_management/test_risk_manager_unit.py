@@ -11,7 +11,7 @@ from unittest.mock import patch
 import pytest
 
 from src.core.config import Config
-from src.core.exceptions import PositionLimitError, RiskManagementError, ValidationError
+from src.core.exceptions import RiskManagementError, ValidationError
 from src.core.types.market import MarketData
 from src.core.types.risk import RiskLevel, RiskMetrics
 from src.core.types.trading import (
@@ -138,7 +138,9 @@ class TestRiskManager:
         )
 
         with pytest.raises(RiskManagementError):
-            await risk_manager.calculate_position_size(invalid_signal, available_capital, current_price)
+            await risk_manager.calculate_position_size(
+                invalid_signal, available_capital, current_price
+            )
 
     @pytest.mark.asyncio
     async def test_validate_signal_valid(self, risk_manager, sample_signal):
@@ -165,7 +167,7 @@ class TestRiskManager:
     async def test_validate_signal_critical_risk_level(self, risk_manager):
         """Test signal validation with critical risk level."""
         risk_manager.current_risk_level = RiskLevel.CRITICAL
-        
+
         valid_signal = Signal(
             symbol="BTC/USDT",
             direction=SignalDirection.BUY,
@@ -271,7 +273,7 @@ class TestRiskManager:
             # The RiskManager doesn't automatically call emergency_stop on CRITICAL risk level
             # in the metrics calculation. Let's check the actual risk level update instead.
             risk_metrics = await risk_manager.calculate_risk_metrics(positions, market_data)
-            
+
             # Check that the risk level is updated correctly
             assert risk_metrics.risk_level == RiskLevel.CRITICAL
             # Risk level should also be updated in risk manager
@@ -282,7 +284,7 @@ class TestRiskManager:
         """Test portfolio limits checking."""
         # The check_portfolio_limits method is on the RiskManager itself, not on portfolio_limits
         result = await risk_manager.check_portfolio_limits(sample_position)
-        
+
         # Since this is the actual implementation being tested, we check it returns boolean
         assert isinstance(result, bool)
 
@@ -294,9 +296,10 @@ class TestRiskManager:
         # Create new market data with large loss (from 50000 to 40000)
         # We need to modify the 'close' field since 'price' is a read-only property
         from copy import deepcopy
+
         modified_market_data = deepcopy(sample_market_data)
         modified_market_data.close = Decimal("40000")
-        
+
         # Update position to have a significant loss that exceeds the max_position_loss_pct (default 10%)
         # Loss from 50000 to 40000 = 20% loss, which exceeds 10%
         modified_position = deepcopy(sample_position)
@@ -367,10 +370,10 @@ class TestRiskManager:
     async def test_update_portfolio_state(self, risk_manager, sample_position):
         """Test portfolio state update."""
         positions = [sample_position]
-        
+
         # The RiskManager doesn't have update_portfolio_state method, but has update_positions
         risk_manager.update_positions(positions)
-        
+
         # Check that positions were updated correctly
         assert len(risk_manager.active_positions) > 0
         assert sample_position.symbol in risk_manager.active_positions
@@ -382,8 +385,10 @@ class TestRiskManager:
         # so risk_service will be None and it will use the legacy implementation
         # Mock the risk_calculator.get_risk_summary method which is called in the legacy path
         from unittest.mock import AsyncMock
-        
-        with patch.object(risk_manager.risk_calculator, "get_risk_summary", new_callable=AsyncMock) as mock_risk:
+
+        with patch.object(
+            risk_manager.risk_calculator, "get_risk_summary", new_callable=AsyncMock
+        ) as mock_risk:
             mock_risk.return_value = {"risk": "summary"}
 
             summary = await risk_manager.get_comprehensive_risk_summary()
@@ -393,7 +398,7 @@ class TestRiskManager:
             assert "risk_calculator" in summary
             assert "position_sizer_methods" in summary
             assert "risk_config" in summary
-            
+
             # Verify the async method was properly awaited
             mock_risk.assert_awaited_once()
 
@@ -426,7 +431,9 @@ class TestRiskManager:
 
             with pytest.raises(RiskManagementError):
                 await risk_manager.calculate_position_size(
-                    sample_signal, portfolio_value, Decimal("50000")  # current_price
+                    sample_signal,
+                    portfolio_value,
+                    Decimal("50000"),  # current_price
                 )
 
     @pytest.mark.asyncio
@@ -435,9 +442,9 @@ class TestRiskManager:
         # Create a position that would violate limits by making total positions exceed max
         # Set max positions to 0 to force a limit violation
         risk_manager.position_limits.max_positions = 0
-        
+
         result = await risk_manager.check_portfolio_limits(sample_position)
-        
+
         # Should return False when limits are violated
         assert result is False
 
@@ -460,16 +467,20 @@ class TestRiskManager:
         """Test that position limits are properly initialized."""
         assert risk_manager.position_limits is not None
         # Test the actual PositionLimits model fields
-        assert risk_manager.position_limits.max_position_size == Decimal(str(config.risk.max_position_size))
+        assert risk_manager.position_limits.max_position_size == Decimal(
+            str(config.risk.max_position_size)
+        )
         assert risk_manager.position_limits.max_positions == config.risk.max_total_positions
         assert risk_manager.position_limits.max_leverage == Decimal(str(config.risk.max_leverage))
-        assert risk_manager.position_limits.min_position_size == Decimal(str(config.risk.max_position_size)) * Decimal("0.01")
-        
+        assert risk_manager.position_limits.min_position_size == Decimal(
+            str(config.risk.max_position_size)
+        ) * Decimal("0.01")
+
         # Test that config values are accessible for fields not in PositionLimits model
         assert config.risk.max_positions_per_symbol == 1  # Default value
-        assert hasattr(config.risk, 'max_portfolio_exposure')
-        assert hasattr(config.risk, 'max_sector_exposure')
-        assert hasattr(config.risk, 'max_correlation_exposure')
+        assert hasattr(config.risk, "max_portfolio_exposure")
+        assert hasattr(config.risk, "max_sector_exposure")
+        assert hasattr(config.risk, "max_correlation_exposure")
 
     @pytest.mark.asyncio
     async def test_component_integration(
@@ -503,7 +514,9 @@ class TestRiskManager:
 
                     # Calculate position size
                     position_size = await risk_manager.calculate_position_size(
-                        sample_signal, portfolio_value, Decimal("50000")  # current_price
+                        sample_signal,
+                        portfolio_value,
+                        Decimal("50000"),  # current_price
                     )
                     assert position_size == Decimal("1000")
 

@@ -17,9 +17,11 @@ Circuit Breaker Types:
 
 import asyncio
 from abc import ABC, abstractmethod
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from typing import Any
+from typing import TYPE_CHECKING, Any, Optional
 
 from src.core.config.main import Config
 from src.core.exceptions import (
@@ -34,19 +36,18 @@ from src.core.types import (
     CircuitBreakerType,
 )
 
-# MANDATORY: Import from P-002A
-from src.error_handling import ErrorHandler
+# Use TYPE_CHECKING to avoid potential circular imports
+if TYPE_CHECKING:
+    # Note: Removed ErrorHandler import to avoid dependency issues
+    # Complex error handling should be done at service layer
+    # Monitoring integration - use service interface not direct implementation
+    from src.monitoring.interfaces import MetricsServiceInterface
 
-# Monitoring integration
-from src.monitoring.metrics import MetricsCollector
-
-# MANDATORY: Import from P-008
-from src.risk_management.base import BaseRiskManager
-from src.risk_management.correlation_monitor import (
-    CorrelationMetrics,
-    CorrelationMonitor,
-    CorrelationThresholds,
-)
+    # MANDATORY: Import from P-008
+    from src.risk_management.base import BaseRiskManager
+    from src.risk_management.correlation_monitor import (
+        CorrelationMetrics,
+    )
 
 # MANDATORY: Import from P-007A
 from src.utils.decorators import time_execution
@@ -75,7 +76,7 @@ class BaseCircuitBreaker(ABC):
     behavior across different risk monitoring scenarios.
     """
 
-    def __init__(self, config: Config, risk_manager: BaseRiskManager):
+    def __init__(self, config: Config, risk_manager: "BaseRiskManager"):
         """
         Initialize circuit breaker with configuration and risk manager.
 
@@ -86,7 +87,6 @@ class BaseCircuitBreaker(ABC):
         self.config = config
         self.risk_config = config.risk
         self.risk_manager = risk_manager
-        self.error_handler = ErrorHandler(config)
         self.logger = logger.bind(component="circuit_breaker")
 
         # Circuit breaker state
@@ -100,9 +100,13 @@ class BaseCircuitBreaker(ABC):
         self.events: list[CircuitBreakerEvent] = []
         self.max_events = 100
 
-        # Recovery settings
-        self.recovery_timeout = timedelta(minutes=30)  # 30 minutes default
-        self.test_interval = timedelta(minutes=5)  # Test every 5 minutes
+        # Recovery settings - configurable with defaults
+        recovery_timeout_minutes = getattr(
+            config.risk, "circuit_breaker_recovery_timeout_minutes", 30
+        )
+        test_interval_minutes = getattr(config.risk, "circuit_breaker_test_interval_minutes", 5)
+        self.recovery_timeout = timedelta(minutes=recovery_timeout_minutes)
+        self.test_interval = timedelta(minutes=test_interval_minutes)
 
         self.logger.info("Circuit breaker initialized", breaker_type=self.__class__.__name__)
 
@@ -157,7 +161,10 @@ class BaseCircuitBreaker(ABC):
         try:
             if self.state == CircuitBreakerStatus.TRIGGERED:
                 # Check if recovery timeout has passed
-                if self.trigger_time and datetime.now(timezone.utc) - self.trigger_time > self.recovery_timeout:
+                if (
+                    self.trigger_time
+                    and datetime.now(timezone.utc) - self.trigger_time > self.recovery_timeout
+                ):
                     self.state = CircuitBreakerStatus.COOLDOWN
                     self.logger.info(
                         "Circuit breaker transitioning to cooldown state",
@@ -179,18 +186,13 @@ class BaseCircuitBreaker(ABC):
             self.logger.error(
                 "Circuit breaker evaluation failed",
                 error=str(e),
+                error_type=type(e).__name__,
                 breaker_type=self.__class__.__name__,
+                component="circuit_breaker",
+                operation="evaluate",
             )
-            # Route through central error handler with context
-            try:
-                context = self.error_handler.create_error_context(
-                    error=e, component="circuit_breaker", operation="evaluate"
-                )
-                await self.error_handler.handle_error(e, context)
-            except Exception as handler_error:
-                self.logger.error("Error handler failed", error=str(handler_error))
 
-            # Re-raise CircuitBreakerTriggeredError to allow tests to catch it
+            # Re-raise CircuitBreakerTriggeredError to maintain circuit breaker functionality
             if isinstance(e, CircuitBreakerTriggeredError):
                 raise
             return False
@@ -293,9 +295,9 @@ class DailyLossLimitBreaker(BaseCircuitBreaker):
 
     breaker_type = CircuitBreakerType.DAILY_LOSS_LIMIT
 
-    def __init__(self, config: Config, risk_manager: BaseRiskManager):
+    def __init__(self, config: Config, risk_manager: "BaseRiskManager"):
         super().__init__(config, risk_manager)
-        threshold_value = getattr(config.risk, 'daily_loss_limit_pct', 0.05) or 0.05
+        threshold_value = getattr(config.risk, "daily_loss_limit_pct", 0.05) or 0.05
         # Handle both real values and mock values safely
         try:
             if isinstance(threshold_value, Decimal):
@@ -340,7 +342,7 @@ class DrawdownLimitBreaker(BaseCircuitBreaker):
 
     breaker_type = CircuitBreakerType.DRAWDOWN_LIMIT
 
-    def __init__(self, config: Config, risk_manager: BaseRiskManager):
+    def __init__(self, config: Config, risk_manager: "BaseRiskManager"):
         super().__init__(config, risk_manager)
         self.threshold_pct = Decimal(str(self.risk_config.max_drawdown))
         self.logger = logger.bind(breaker_type="drawdown_limit")
@@ -382,18 +384,22 @@ class VolatilitySpikeBreaker(BaseCircuitBreaker):
 
     breaker_type = CircuitBreakerType.VOLATILITY_SPIKE
 
-    def __init__(self, config: Config, risk_manager: BaseRiskManager):
+    def __init__(self, config: Config, risk_manager: "BaseRiskManager"):
         super().__init__(config, risk_manager)
-        volatility_value = getattr(config.risk, 'volatility_spike_threshold', 0.05) or 0.05
+        volatility_value = getattr(config.risk, "volatility_spike_threshold", 0.05) or 0.05
         # Handle both real values and mock values safely
         try:
             if isinstance(volatility_value, Decimal):
                 self.volatility_threshold = volatility_value  # Daily volatility threshold
             else:
-                self.volatility_threshold = Decimal(str(volatility_value))  # Daily volatility threshold
+                self.volatility_threshold = Decimal(
+                    str(volatility_value)
+                )  # Daily volatility threshold
         except (TypeError, ValueError):
             self.volatility_threshold = Decimal("0.05")  # Default fallback
-        self.lookback_period = config.risk.volatility_lookback_period or 20  # Days for volatility calculation
+        self.lookback_period = (
+            config.risk.volatility_lookback_period or 20
+        )  # Days for volatility calculation
         self.logger = logger.bind(breaker_type="volatility_spike")
 
     async def get_threshold_value(self) -> Decimal:
@@ -473,9 +479,11 @@ class ModelConfidenceBreaker(BaseCircuitBreaker):
 
     breaker_type = CircuitBreakerType.MODEL_CONFIDENCE
 
-    def __init__(self, config: Config, risk_manager: BaseRiskManager):
+    def __init__(self, config: Config, risk_manager: "BaseRiskManager"):
         super().__init__(config, risk_manager)
-        self.confidence_threshold = Decimal("0.3")  # 30% minimum confidence
+        # Configurable confidence threshold with fallback
+        confidence_threshold = getattr(config.risk, "model_confidence_threshold", 0.3)
+        self.confidence_threshold = Decimal(str(confidence_threshold))
         self.logger = logger.bind(breaker_type="model_confidence")
 
     async def get_threshold_value(self) -> Decimal:
@@ -506,10 +514,13 @@ class SystemErrorRateBreaker(BaseCircuitBreaker):
 
     breaker_type = CircuitBreakerType.SYSTEM_ERROR_RATE
 
-    def __init__(self, config: Config, risk_manager: BaseRiskManager):
+    def __init__(self, config: Config, risk_manager: "BaseRiskManager"):
         super().__init__(config, risk_manager)
-        self.error_rate_threshold = Decimal("0.1")  # 10% error rate
-        self.error_window = timedelta(minutes=15)  # 15-minute window
+        # Configurable error rate settings
+        error_rate_threshold = getattr(config.risk, "system_error_rate_threshold", 0.1)
+        error_window_minutes = getattr(config.risk, "system_error_window_minutes", 15)
+        self.error_rate_threshold = Decimal(str(error_rate_threshold))
+        self.error_window = timedelta(minutes=error_window_minutes)
         self.logger = logger.bind(breaker_type="system_error_rate")
 
         # Error tracking
@@ -573,7 +584,9 @@ class SystemErrorRateBreaker(BaseCircuitBreaker):
             )
             return Decimal("0")
         except Exception as e:
-            self.logger.error("Unexpected error calculating error rate", error=str(e), error_type=type(e).__name__)
+            self.logger.error(
+                "Unexpected error calculating error rate", error=str(e), error_type=type(e).__name__
+            )
             return Decimal("0")
 
     @time_execution
@@ -596,10 +609,12 @@ class CorrelationSpikeBreaker(BaseCircuitBreaker):
 
     breaker_type = CircuitBreakerType.CORRELATION_SPIKE
 
-    def __init__(self, config: Config, risk_manager: BaseRiskManager):
+    def __init__(self, config: Config, risk_manager: "BaseRiskManager"):
         super().__init__(config, risk_manager)
 
         # Initialize correlation monitor with configuration
+        from src.risk_management.correlation_monitor import CorrelationThresholds
+
         correlation_thresholds = CorrelationThresholds(
             warning_threshold=Decimal("0.6"),  # 60% warning threshold
             critical_threshold=Decimal("0.8"),  # 80% critical threshold
@@ -608,6 +623,8 @@ class CorrelationSpikeBreaker(BaseCircuitBreaker):
             lookback_periods=50,  # 50 periods for correlation calculation
             min_periods=10,  # Minimum 10 periods required
         )
+
+        from src.risk_management.correlation_monitor import CorrelationMonitor
 
         self.correlation_monitor = CorrelationMonitor(config, correlation_thresholds)
         self.thresholds = correlation_thresholds
@@ -636,7 +653,9 @@ class CorrelationSpikeBreaker(BaseCircuitBreaker):
         # Calculate current correlation metrics
         if positions:
             try:
-                correlation_metrics = await self.correlation_monitor.calculate_portfolio_correlation(positions)
+                correlation_metrics = (
+                    await self.correlation_monitor.calculate_portfolio_correlation(positions)
+                )
                 self.last_correlation_metrics = correlation_metrics
                 return correlation_metrics.max_pairwise_correlation
             except Exception as e:
@@ -716,7 +735,10 @@ class CorrelationSpikeBreaker(BaseCircuitBreaker):
                 )
                 # Don't trigger immediately but increase sensitivity
                 # Reduce the consecutive period requirement
-                if abs(current_correlation) >= warning_threshold and self.consecutive_high_correlation_periods >= 2:
+                if (
+                    abs(current_correlation) >= warning_threshold
+                    and self.consecutive_high_correlation_periods >= 2
+                ):
                     return True
 
         return False
@@ -731,7 +753,9 @@ class CorrelationSpikeBreaker(BaseCircuitBreaker):
             "max_pairwise_correlation": str(self.last_correlation_metrics.max_pairwise_correlation),
             "correlation_spike": self.last_correlation_metrics.correlation_spike,
             "correlated_pairs_count": self.last_correlation_metrics.correlated_pairs_count,
-            "portfolio_concentration_risk": str(self.last_correlation_metrics.portfolio_concentration_risk),
+            "portfolio_concentration_risk": str(
+                self.last_correlation_metrics.portfolio_concentration_risk
+            ),
             "timestamp": self.last_correlation_metrics.timestamp.isoformat(),
         }
 
@@ -741,7 +765,9 @@ class CorrelationSpikeBreaker(BaseCircuitBreaker):
             return {"max_positions": None, "reduction_factor": Decimal("1.0")}
 
         # Use the correlation monitor's position limit calculation
-        limits = await self.correlation_monitor.get_position_limits_for_correlation(self.last_correlation_metrics)
+        limits = await self.correlation_monitor.get_position_limits_for_correlation(
+            self.last_correlation_metrics
+        )
         return limits
 
     async def cleanup_old_data(self, cutoff_time) -> None:
@@ -764,24 +790,26 @@ class CircuitBreakerManager:
     for circuit breaker management and monitoring.
     """
 
-    def __init__(self, config: Config, risk_manager: BaseRiskManager):
+    def __init__(
+        self,
+        config: Config,
+        risk_manager: "BaseRiskManager",
+        metrics_service: Optional["MetricsServiceInterface"] = None,
+    ):
         """
         Initialize circuit breaker manager.
 
         Args:
             config: Application configuration
             risk_manager: Risk manager for calculations
+            metrics_service: Optional metrics service for monitoring integration
         """
         self.config = config
         self.risk_manager = risk_manager
         self.logger = logger.bind(component="circuit_breaker_manager")
 
-        # Initialize monitoring integration
-        try:
-            self.metrics_collector = MetricsCollector()
-        except Exception as e:
-            self.logger.warning(f"Failed to initialize metrics collector: {e}")
-            self.metrics_collector = None
+        # Store metrics service (use service interface instead of direct collector)
+        self.metrics_service = metrics_service
 
         # Initialize all circuit breakers
         self.circuit_breakers: dict[str, BaseCircuitBreaker] = {
@@ -796,7 +824,7 @@ class CircuitBreakerManager:
         self.logger.info(
             "Circuit breaker manager initialized",
             breaker_count=len(self.circuit_breakers),
-            monitoring_enabled=self.metrics_collector is not None,
+            monitoring_enabled=self.metrics_service is not None,
         )
 
     @time_execution
@@ -815,18 +843,28 @@ class CircuitBreakerManager:
 
         # Use asyncio.gather for concurrent evaluation with timeout
         async def evaluate_breaker(name: str, breaker):
+            """Evaluate individual breaker with proper error handling and connection management."""
             try:
-                triggered = await asyncio.wait_for(breaker.evaluate(data), timeout=self.config.risk.breaker_evaluation_timeout or 30.0)
+                # Use async context manager for connection resource safety
+                async with self._evaluation_context(name):
+                    triggered = await asyncio.wait_for(
+                        breaker.evaluate(data),
+                        timeout=self.config.risk.breaker_evaluation_timeout or 30.0,
+                    )
                 return name, triggered, None
             except (CircuitBreakerTriggeredError, asyncio.TimeoutError) as e:
                 return name, True, e
             except Exception as e:
+                self.logger.error(f"Circuit breaker {name} evaluation error: {e}")
                 return name, False, e
 
         try:
-            # Run all circuit breaker evaluations concurrently
-            evaluation_tasks = [evaluate_breaker(name, breaker) for name, breaker in self.circuit_breakers.items()]
+            # Run all circuit breaker evaluations concurrently with proper resource management
+            evaluation_tasks = [
+                evaluate_breaker(name, breaker) for name, breaker in self.circuit_breakers.items()
+            ]
 
+            # Use asyncio.gather with return_exceptions=True for proper error handling
             evaluation_results = await asyncio.gather(*evaluation_tasks, return_exceptions=True)
 
             # Process results
@@ -841,25 +879,34 @@ class CircuitBreakerManager:
                 if triggered:
                     triggered_breakers.append(name)
                     if error:
-                        self.logger.error("Circuit breaker triggered", breaker_name=name, error=str(error))
+                        self.logger.error(
+                            "Circuit breaker triggered", breaker_name=name, error=str(error)
+                        )
                     else:
                         self.logger.warning("Circuit breaker triggered", breaker_name=name)
 
-                    # Update monitoring metrics
-                    if self.metrics_collector:
+                    # Update monitoring metrics using service interface
+                    if self.metrics_service:
                         try:
-                            self.metrics_collector.increment_counter(
-                                "risk_circuit_breaker_triggers_total",
+                            from src.monitoring.services import MetricRequest
+
+                            metric_request = MetricRequest(
+                                name="risk_circuit_breaker_triggers_total",
+                                value=1,  # Counter increment
                                 labels={
                                     "trigger_type": name,
                                     "exchange": data.get("exchange", "unknown"),
                                 },
+                                namespace="risk_management",
                             )
+                            self.metrics_service.record_counter(metric_request)
                         except Exception as e:
                             self.logger.warning(f"Failed to update circuit breaker metric: {e}")
 
                 elif error and not triggered:
-                    self.logger.error("Circuit breaker evaluation failed", breaker_name=name, error=str(error))
+                    self.logger.error(
+                        "Circuit breaker evaluation failed", breaker_name=name, error=str(error)
+                    )
 
         except Exception as e:
             self.logger.error(f"Circuit breaker concurrent evaluation failed: {e}")
@@ -868,7 +915,9 @@ class CircuitBreakerManager:
 
         # If any circuit breakers were triggered, raise an exception
         if triggered_breakers:
-            raise CircuitBreakerTriggeredError(f"Circuit breakers triggered: {', '.join(triggered_breakers)}")
+            raise CircuitBreakerTriggeredError(
+                f"Circuit breakers triggered: {', '.join(triggered_breakers)}"
+            )
 
         return results
 
@@ -902,3 +951,44 @@ class CircuitBreakerManager:
     def is_trading_allowed(self) -> bool:
         """Check if trading is allowed (no circuit breakers triggered)."""
         return len(self.get_triggered_breakers()) == 0
+
+    @asynccontextmanager
+    async def _evaluation_context(self, breaker_name: str) -> AsyncIterator[None]:
+        """Async context manager for circuit breaker evaluation with proper resource management."""
+        evaluation_resources = []
+
+        try:
+            # Initialize evaluation resources (placeholder for connection resources)
+            # In a real implementation, this might set up connections for real-time data
+
+            yield
+
+        except Exception as e:
+            self.logger.error(f"Error in evaluation context for {breaker_name}: {e}")
+            raise
+        finally:
+            # Clean up evaluation resources
+            for resource in evaluation_resources:
+                try:
+                    if hasattr(resource, "close"):
+                        await resource.close()
+                except Exception as cleanup_error:
+                    self.logger.warning(
+                        f"Error cleaning up evaluation resource for {breaker_name}: {cleanup_error}"
+                    )
+
+    async def cleanup_resources(self) -> None:
+        """Clean up all circuit breaker resources and connections."""
+        try:
+            # Reset all circuit breakers to clear any connection state
+            self.reset_all()
+
+            # Clear internal state to prevent memory leaks
+            for breaker in self.circuit_breakers.values():
+                if hasattr(breaker, "reset"):
+                    breaker.reset()
+
+            self.logger.info("Circuit breaker resources cleaned up successfully")
+
+        except Exception as e:
+            self.logger.error(f"Error cleaning up circuit breaker resources: {e}")

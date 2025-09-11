@@ -30,109 +30,155 @@ logger = get_logger(__name__)
 def register_risk_management_services(injector: DependencyInjector) -> None:
     """Register all risk management services with the dependency injector."""
 
-    # Register service implementations using proper factory pattern
+    # Register service implementations using proper factory pattern with dependency injection
     def position_sizing_service_factory() -> "PositionSizingService":
-        database_service = injector.resolve("DatabaseService")
-        state_service = injector.resolve("StateService")
-        config = injector.resolve("Config") if injector.has_service("Config") else None
+        try:
+            database_service = injector.resolve("DatabaseService")
+            state_service = injector.resolve("StateService")
+            config = injector.resolve("Config") if injector.has_service("Config") else None
 
-        return PositionSizingService(
-            database_service=database_service,
-            state_service=state_service,
-            config=config,
-        )
+            return PositionSizingService(
+                database_service=database_service,
+                state_service=state_service,
+                config=config,
+            )
+        except Exception as e:
+            logger.error(f"Failed to create PositionSizingService: {e}")
+            raise
 
     def risk_validation_service_factory() -> "RiskValidationService":
-        database_service = injector.resolve("DatabaseService")
-        state_service = injector.resolve("StateService")
-        config = injector.resolve("Config") if injector.has_service("Config") else None
+        try:
+            database_service = injector.resolve("DatabaseService")
+            state_service = injector.resolve("StateService")
+            config = injector.resolve("Config") if injector.has_service("Config") else None
 
-        return RiskValidationService(
-            database_service=database_service,
-            state_service=state_service,
-            config=config,
-        )
+            return RiskValidationService(
+                database_service=database_service,
+                state_service=state_service,
+                config=config,
+            )
+        except Exception as e:
+            logger.error(f"Failed to create RiskValidationService: {e}")
+            raise
 
     def risk_metrics_service_factory() -> "RiskMetricsService":
-        database_service = injector.resolve("DatabaseService")
-        state_service = injector.resolve("StateService")
-        config = injector.resolve("Config") if injector.has_service("Config") else None
+        try:
+            database_service = injector.resolve("DatabaseService")
+            state_service = injector.resolve("StateService")
+            config = injector.resolve("Config") if injector.has_service("Config") else None
 
-        return RiskMetricsService(
-            database_service=database_service,
-            state_service=state_service,
-            config=config,
-        )
+            return RiskMetricsService(
+                database_service=database_service,
+                state_service=state_service,
+                config=config,
+            )
+        except Exception as e:
+            logger.error(f"Failed to create RiskMetricsService: {e}")
+            raise
 
     def risk_monitoring_service_factory() -> "RiskMonitoringService":
-        database_service = injector.resolve("DatabaseService")
-        state_service = injector.resolve("StateService")
-        config = injector.resolve("Config") if injector.has_service("Config") else None
+        try:
+            database_service = injector.resolve("DatabaseService")
+            state_service = injector.resolve("StateService")
+            config = injector.resolve("Config") if injector.has_service("Config") else None
 
-        return RiskMonitoringService(
-            database_service=database_service,
-            state_service=state_service,
-            config=config,
-        )
+            return RiskMonitoringService(
+                database_service=database_service,
+                state_service=state_service,
+                config=config,
+            )
+        except Exception as e:
+            logger.error(f"Failed to create RiskMonitoringService: {e}")
+            raise
 
     def risk_service_factory() -> "RiskService":
-        database_service = injector.resolve("DatabaseService")
-        state_service = injector.resolve("StateService")
-        analytics_service = injector.resolve("AnalyticsService") if injector.has_service("AnalyticsService") else None
-        metrics_service = injector.resolve("MetricsService") if injector.has_service("MetricsService") else None
-        config = injector.resolve("Config") if injector.has_service("Config") else None
+        try:
+            database_service = injector.resolve("DatabaseService")
+            state_service = injector.resolve("StateService")
+            # Use interface to avoid circular dependency
+            analytics_service = (
+                injector.resolve("AnalyticsService")
+                if injector.has_service("AnalyticsService")
+                else None
+            )
+            metrics_service = (
+                injector.resolve("MetricsService")
+                if injector.has_service("MetricsService")
+                else None
+            )
+            cache_service = (
+                injector.resolve("CacheService") if injector.has_service("CacheService") else None
+            )
+            config = injector.resolve("Config") if injector.has_service("Config") else None
 
-        return RiskService(
-            database_service=database_service,
-            state_service=state_service,
-            analytics_service=analytics_service,
-            config=config,
-            metrics_service=metrics_service,
-        )
+            return RiskService(
+                database_service=database_service,
+                state_service=state_service,
+                analytics_service=analytics_service,
+                config=config,
+                metrics_service=metrics_service,
+                cache_service=cache_service,
+            )
+        except Exception as e:
+            logger.error(f"Failed to create RiskService: {e}")
+            raise
 
     # Register service factories as singletons
-    injector.register_factory("PositionSizingService", position_sizing_service_factory, singleton=True)
-    injector.register_factory("RiskValidationService", risk_validation_service_factory, singleton=True)
+    injector.register_factory(
+        "PositionSizingService", position_sizing_service_factory, singleton=True
+    )
+    injector.register_factory(
+        "RiskValidationService", risk_validation_service_factory, singleton=True
+    )
     injector.register_factory("RiskMetricsService", risk_metrics_service_factory, singleton=True)
-    injector.register_factory("RiskMonitoringService", risk_monitoring_service_factory, singleton=True)
+    injector.register_factory(
+        "RiskMonitoringService", risk_monitoring_service_factory, singleton=True
+    )
     injector.register_factory("RiskService", risk_service_factory, singleton=True)
 
-    # Register factory
+    # Register factory using proper dependency injection pattern
     def risk_management_factory() -> "RiskManagementFactoryInterface":
         from .factory import RiskManagementFactory
 
-        return RiskManagementFactory(injector=injector)
+        try:
+            # Pass the injector instance - circular dependency is resolved by lazy loading
+            return RiskManagementFactory(injector=injector)
+        except Exception as e:
+            logger.error(f"Failed to create RiskManagementFactory: {e}")
+            raise
 
     injector.register_factory("RiskManagementFactory", risk_management_factory, singleton=True)
 
-    # Register interface implementations
-    injector.register_service(
+    # Register interface implementations using factory pattern
+    injector.register_factory(
         "PositionSizingServiceInterface",
         lambda: injector.resolve("PositionSizingService"),
         singleton=True,
     )
 
-    injector.register_service(
+    injector.register_factory(
         "RiskValidationServiceInterface",
         lambda: injector.resolve("RiskValidationService"),
         singleton=True,
     )
 
-    injector.register_service(
+    injector.register_factory(
         "RiskMetricsServiceInterface",
         lambda: injector.resolve("RiskMetricsService"),
         singleton=True,
     )
 
-    injector.register_service(
+    injector.register_factory(
         "RiskMonitoringServiceInterface",
         lambda: injector.resolve("RiskMonitoringService"),
         singleton=True,
     )
 
-    injector.register_service("RiskServiceInterface", lambda: injector.resolve("RiskService"), singleton=True)
+    injector.register_factory(
+        "RiskServiceInterface", lambda: injector.resolve("RiskService"), singleton=True
+    )
 
-    injector.register_service(
+    injector.register_factory(
         "RiskManagementFactoryInterface",
         lambda: injector.resolve("RiskManagementFactory"),
         singleton=True,

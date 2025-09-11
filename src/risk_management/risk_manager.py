@@ -1,17 +1,15 @@
 """
-Unified Risk Manager Implementation - DEPRECATED.
+Legacy Risk Manager Implementation.
 
-DEPRECATED: This module is deprecated in favor of the new RiskService.
-The new RiskService (src/risk_management/service.py) provides all risk management
-functionality with enterprise-grade features including:
-- DatabaseService integration (no direct DB access)
-- StateService integration for state management
-- Comprehensive caching layer
-- Enhanced error handling with circuit breakers
-- Real-time risk monitoring
+This module provides backward compatibility for existing risk management implementations.
+For production deployments, use the RiskService (src/risk_management/service.py) which offers:
+- Enterprise-grade service architecture
+- Comprehensive database integration
+- Advanced state management
+- Real-time monitoring capabilities
+- Enhanced error handling
 
-This manager is maintained for backward compatibility only.
-New implementations should use RiskService directly.
+This implementation remains stable for existing integrations.
 """
 
 from datetime import datetime, timezone
@@ -35,7 +33,8 @@ from src.core.types import (
     Signal,
 )
 from src.core.types.trading import OrderType
-from src.error_handling import ErrorHandler
+
+# Note: Removed ErrorHandler import to avoid dependency issues
 
 # Type checking imports to avoid circular dependencies
 if TYPE_CHECKING:
@@ -64,25 +63,17 @@ logger = get_logger(__name__)
 @injectable(singleton=True)
 class RiskManager(BaseRiskManager):
     """
-    DEPRECATED: Unified Risk Manager implementation.
+    Legacy Risk Manager implementation for backward compatibility.
 
-    This class is deprecated in favor of RiskService which provides:
-    - Enterprise-grade service architecture
-    - DatabaseService integration (no direct DB access)
-    - StateService integration
-    - Comprehensive caching
-    - Enhanced error handling
-    - Real-time monitoring
+    This implementation provides stable risk management functionality including:
+    - Position sizing strategies with multiple methods
+    - Portfolio limits enforcement and monitoring
+    - Comprehensive risk metrics calculation
+    - Emergency controls and circuit breakers
+    - Integrated error handling and recovery
 
-    This class now acts as a wrapper around RiskService for backward compatibility.
-    New code should use RiskService directly.
-
-    Components (DEPRECATED):
-    - Position sizing strategies -> Use RiskService.calculate_position_size()
-    - Portfolio limits enforcement -> Use RiskService.validate_order()
-    - Risk metrics calculation -> Use RiskService.calculate_risk_metrics()
-    - Emergency controls -> Use RiskService.trigger_emergency_stop()
-    - Error handling integration -> Built into RiskService
+    For new implementations, consider using RiskService for enhanced features.
+    This class maintains API compatibility for existing integrations.
     """
 
     def __init__(
@@ -90,16 +81,16 @@ class RiskManager(BaseRiskManager):
         config: Config | None = None,
         database_service: "DatabaseService | None" = None,
         state_service: "StateService | None" = None,
+        risk_service: RiskService | None = None,
     ):
         """
-        Initialize DEPRECATED risk manager with all components.
-
-        DEPRECATED: Use RiskService directly instead of this wrapper.
+        Initialize risk manager with all components.
 
         Args:
             config: Application configuration (uses global config if None)
-            database_service: Database service for data access (required for new functionality)
-            state_service: State service for state management (required for new functionality)
+            database_service: Database service for data access
+            state_service: State service for state management
+            risk_service: Optional injected RiskService for enhanced functionality
         """
         # Use provided config or get default config
         if config is None:
@@ -107,18 +98,18 @@ class RiskManager(BaseRiskManager):
 
         super().__init__(config)
 
-        # DEPRECATED: Legacy components for backward compatibility
-        # New implementations should use RiskService directly
+        # Initialize core risk management components
         self.position_sizer = PositionSizer(config)
         self.portfolio_limits = PortfolioLimits(config)
         self.risk_calculator = RiskCalculator(config)
 
-        # Initialize error handler for proper error management
-        self.error_handler = ErrorHandler(config)
-
-        # NEW: Initialize RiskService if services are provided
-        self.risk_service: RiskService | None = None
-        if database_service and state_service:
+        # Initialize RiskService integration if available
+        if risk_service is not None:
+            # Use injected RiskService for enhanced functionality
+            self.risk_service = risk_service
+            logger.info("RiskManager initialized with injected RiskService")
+        elif database_service and state_service:
+            # Create RiskService for enhanced features
             try:
                 self.risk_service = RiskService(
                     database_service=database_service, state_service=state_service, config=config
@@ -126,20 +117,19 @@ class RiskManager(BaseRiskManager):
                 logger.info("RiskManager initialized with RiskService integration")
             except Exception as e:
                 logger.error(f"Failed to initialize RiskService: {e}")
-                raise
+                self.risk_service = None
         else:
-            logger.warning(
-                "RiskManager initialized in DEPRECATED mode - "
-                "DatabaseService and StateService not provided. "
-                "Consider migrating to RiskService directly."
-            )
+            self.risk_service = None
+            logger.info("RiskManager initialized in standalone mode")
 
         # Initialize position limits
         self.position_limits = PositionLimits(
             max_position_size=to_decimal(config.risk.max_position_size),
             max_positions=config.risk.max_total_positions,
             max_leverage=to_decimal(config.risk.max_leverage),
-            min_position_size=to_decimal(config.risk.max_position_size * Decimal("0.01")),  # 1% of max
+            min_position_size=to_decimal(
+                config.risk.max_position_size * Decimal("0.01")
+            ),  # 1% of max
         )
 
         # Initialize tracking
@@ -147,8 +137,8 @@ class RiskManager(BaseRiskManager):
         self.total_exposure = ZERO
         self.current_risk_level = RiskLevel.LOW
 
-        logger.warning(
-            "DEPRECATED Risk Manager initialized - consider migrating to RiskService",
+        logger.info(
+            "Risk Manager initialized successfully",
             position_sizing_method=config.risk.position_sizing_method,
             max_position_size=format_decimal(self.position_limits.max_position_size),
             max_positions=self.position_limits.max_positions,
@@ -162,8 +152,6 @@ class RiskManager(BaseRiskManager):
         """
         Calculate position size based on signal and risk parameters.
 
-        DEPRECATED: Use RiskService.calculate_position_size() directly.
-
         Args:
             signal: Trading signal
             available_capital: Available capital for position
@@ -173,7 +161,12 @@ class RiskManager(BaseRiskManager):
             Position size in base currency
         """
         try:
-            # NEW: Delegate to RiskService if available
+            # Validate signal first
+            is_valid = await self.validate_signal(signal)
+            if not is_valid:
+                raise RiskManagementError(f"Signal validation failed for {signal.symbol}")
+            
+            # Use RiskService if available for enhanced functionality
             if self.risk_service is not None:
                 return await self.risk_service.calculate_position_size(
                     signal=signal,
@@ -181,8 +174,7 @@ class RiskManager(BaseRiskManager):
                     current_price=current_price,
                 )
 
-            # DEPRECATED: Fallback to legacy implementation
-            logger.warning("Using DEPRECATED position sizing - migrate to RiskService")
+            # Fallback to direct implementation
 
             # Calculate base position size
             position_size = await self.position_sizer.calculate_position_size(
@@ -234,8 +226,6 @@ class RiskManager(BaseRiskManager):
         """
         Validate trading signal against risk constraints.
 
-        DEPRECATED: Use RiskService.validate_signal() directly.
-
         Args:
             signal: Signal to validate
 
@@ -243,15 +233,13 @@ class RiskManager(BaseRiskManager):
             True if signal passes risk validation
         """
         try:
-            # NEW: Delegate to RiskService if available
+            # Use RiskService if available for enhanced validation
             if self.risk_service is not None:
                 return await self.risk_service.validate_signal(signal)
 
-            # DEPRECATED: Fallback to legacy implementation
-            logger.warning("Using DEPRECATED signal validation - migrate to RiskService")
-            # Check confidence threshold
-            # Use configurable minimum signal strength threshold
-            min_signal_strength = 0.3  # 30% minimum strength
+            # Direct implementation fallback
+            # Check confidence threshold using configurable minimum signal strength
+            min_signal_strength = getattr(self.config.risk, "min_signal_strength", 0.3)
             if signal.strength < min_signal_strength:
                 logger.warning(
                     "Signal strength too low",
@@ -303,8 +291,6 @@ class RiskManager(BaseRiskManager):
         """
         Validate order against risk constraints.
 
-        DEPRECATED: Use RiskService.validate_order() directly.
-
         Args:
             order: Order to validate
 
@@ -312,12 +298,11 @@ class RiskManager(BaseRiskManager):
             True if order passes risk validation
         """
         try:
-            # NEW: Delegate to RiskService if available
+            # Use RiskService if available for enhanced validation
             if self.risk_service is not None:
                 return await self.risk_service.validate_order(order)
 
-            # DEPRECATED: Fallback to legacy implementation
-            logger.warning("Using DEPRECATED order validation - migrate to RiskService")
+            # Direct implementation fallback
             # Check order size limits
             if order.quantity > self.position_limits.max_position_size:
                 logger.warning(
@@ -329,12 +314,15 @@ class RiskManager(BaseRiskManager):
                 return False
 
             order_value = (
-                order.quantity * order.price if hasattr(order, "price") and order.price is not None else order.quantity
+                order.quantity * order.price
+                if hasattr(order, "price") and order.price is not None
+                else order.quantity
             )
             potential_exposure = self.total_exposure + order_value
             max_portfolio_exposure = (
                 to_decimal(self.config.risk.available_capital)
-                if hasattr(self.config.risk, "available_capital") and self.config.risk.available_capital
+                if hasattr(self.config.risk, "available_capital")
+                and self.config.risk.available_capital
                 else to_decimal(100000)
             )
             if potential_exposure > max_portfolio_exposure:
@@ -373,8 +361,6 @@ class RiskManager(BaseRiskManager):
         """
         Calculate comprehensive risk metrics for positions.
 
-        DEPRECATED: Use RiskService.calculate_risk_metrics() directly.
-
         Args:
             positions: Current positions
             market_data: Current market data
@@ -384,12 +370,11 @@ class RiskManager(BaseRiskManager):
             Calculated risk metrics
         """
         try:
-            # NEW: Delegate to RiskService if available
+            # Use RiskService if available for enhanced metrics
             if self.risk_service is not None:
                 return await self.risk_service.calculate_risk_metrics(positions, market_data)
 
-            # DEPRECATED: Fallback to legacy implementation
-            logger.warning("Using DEPRECATED risk metrics calculation - migrate to RiskService")
+            # Direct implementation fallback
 
             metrics = await self.risk_calculator.calculate_risk_metrics(
                 positions=positions,
@@ -462,7 +447,8 @@ class RiskManager(BaseRiskManager):
             # Check total exposure
             max_portfolio_exposure = (
                 to_decimal(self.config.risk.available_capital)
-                if hasattr(self.config.risk, "available_capital") and self.config.risk.available_capital
+                if hasattr(self.config.risk, "available_capital")
+                and self.config.risk.available_capital
                 else to_decimal(100000)
             )
             if self.total_exposure > max_portfolio_exposure:
@@ -476,7 +462,10 @@ class RiskManager(BaseRiskManager):
             # Check position count
             total_positions = sum(len(pos) for pos in self.active_positions.values())
             if total_positions > self.position_limits.max_positions:
-                message = f"Total positions {total_positions} " f"exceeds limit {self.position_limits.max_positions}"
+                message = (
+                    f"Total positions {total_positions} "
+                    f"exceeds limit {self.position_limits.max_positions}"
+                )
                 logger.warning(message)
                 return False, message
 
@@ -590,7 +579,11 @@ class RiskManager(BaseRiskManager):
     # Additional helper methods for compatibility
     def _calculate_signal_score(self, signal: Signal) -> Decimal:
         """Calculate signal score for position sizing."""
-        return signal.strength if isinstance(signal.strength, Decimal) else Decimal(str(signal.strength))
+        return (
+            signal.strength
+            if isinstance(signal.strength, Decimal)
+            else Decimal(str(signal.strength))
+        )
 
     def _apply_portfolio_constraints(self, size: Decimal, symbol: str) -> Decimal:
         """Apply portfolio-level constraints to position size."""
@@ -609,8 +602,6 @@ class RiskManager(BaseRiskManager):
         """
         Check if adding a new position would violate portfolio limits.
 
-        DEPRECATED: Use RiskService.validate_order() directly.
-
         Args:
             new_position: Position to be added
 
@@ -618,19 +609,18 @@ class RiskManager(BaseRiskManager):
             bool: True if position addition is allowed
         """
         try:
-            # NEW: Delegate to RiskService if available
+            # Use RiskService if available for enhanced validation
             if self.risk_service is not None:
                 # Convert position to order for validation
                 order = OrderRequest(
                     symbol=new_position.symbol,
                     side=new_position.side,
-                    order_type=OrderType.MARKET,  # Default type
+                    order_type=OrderType.MARKET,
                     quantity=new_position.quantity,
                 )
                 return await self.risk_service.validate_order(order)
 
-            # DEPRECATED: Fallback to legacy implementation
-            logger.warning("Using DEPRECATED portfolio limit check - migrate to RiskService")
+            # Direct implementation fallback
 
             # Check if adding position would exceed portfolio limits
             position_value = new_position.quantity * new_position.current_price
@@ -638,7 +628,8 @@ class RiskManager(BaseRiskManager):
 
             max_portfolio_exposure = (
                 to_decimal(self.config.risk.available_capital)
-                if hasattr(self.config.risk, "available_capital") and self.config.risk.available_capital
+                if hasattr(self.config.risk, "available_capital")
+                and self.config.risk.available_capital
                 else to_decimal(100000)
             )
             if potential_exposure > max_portfolio_exposure:
@@ -682,8 +673,6 @@ class RiskManager(BaseRiskManager):
         """
         Determine if a position should be closed based on risk criteria.
 
-        DEPRECATED: Use RiskService.should_exit_position() directly.
-
         Args:
             position: Position to evaluate
             market_data: Current market data for the position
@@ -692,12 +681,11 @@ class RiskManager(BaseRiskManager):
             bool: True if position should be closed
         """
         try:
-            # NEW: Delegate to RiskService if available
+            # Use RiskService if available for enhanced exit logic
             if self.risk_service is not None:
                 return await self.risk_service.should_exit_position(position, market_data)
 
-            # DEPRECATED: Fallback to legacy implementation
-            logger.warning("Using DEPRECATED exit decision logic - migrate to RiskService")
+            # Direct implementation fallback
 
             # Check stop-loss conditions
             if hasattr(position, "stop_loss") and position.stop_loss:
@@ -720,7 +708,9 @@ class RiskManager(BaseRiskManager):
 
             # Check if position loss exceeds risk limits
             if position.unrealized_pnl:
-                position_loss_pct = safe_divide(abs(position.unrealized_pnl), position.quantity * position.entry_price)
+                position_loss_pct = safe_divide(
+                    abs(position.unrealized_pnl), position.quantity * position.entry_price
+                )
 
                 max_position_loss = to_decimal(
                     self.config.risk.max_position_loss_pct
@@ -762,25 +752,24 @@ class RiskManager(BaseRiskManager):
         """
         Get comprehensive risk summary including all components.
 
-        DEPRECATED: Use RiskService.get_comprehensive_summary() directly.
-
         Returns:
             dict: Comprehensive risk summary
         """
         try:
-            # NEW: Delegate to RiskService if available
+            # Use RiskService if available for enhanced summary
             if self.risk_service is not None:
                 return await self.risk_service.get_comprehensive_summary()
 
-            # DEPRECATED: Fallback to legacy implementation
-            logger.warning("Using DEPRECATED comprehensive risk summary - migrate to RiskService")
+            # Direct implementation fallback
 
             # Aggregate summaries from all components
             summary: dict[str, Any] = {
                 "risk_level": self.current_risk_level.value,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "total_exposure": format_decimal(self.total_exposure),
-                "active_positions_count": sum(len(positions) for positions in self.active_positions.values()),
+                "active_positions_count": sum(
+                    len(positions) for positions in self.active_positions.values()
+                ),
                 "unique_symbols": len(self.active_positions),
             }
 
@@ -797,7 +786,9 @@ class RiskManager(BaseRiskManager):
                     else None
                 ),
                 "max_daily_loss": (
-                    format_decimal(self.position_limits.max_daily_loss) if self.position_limits.max_daily_loss else None
+                    format_decimal(self.position_limits.max_daily_loss)
+                    if self.position_limits.max_daily_loss
+                    else None
                 ),
                 "concentration_limit": self.position_limits.concentration_limit,
             }
