@@ -25,17 +25,14 @@ import aiofiles
 
 from src.core.base.component import BaseComponent
 from src.core.config.main import Config
-from src.core.exceptions import StateCorruptionError, StateError
+from src.core.exceptions import ErrorSeverity, StateConsistencyError, StateCorruptionError
 from src.core.types import BotPriority, BotState, BotStatus
-from src.core.exceptions import ErrorSeverity
 from src.error_handling import ErrorContext, ErrorHandler, with_retry
 from src.utils.checksum_utilities import calculate_state_checksum
-from src.utils.serialization_utilities import serialize_state_data, deserialize_state_data
+from src.utils.serialization_utilities import deserialize_state_data, serialize_state_data
 
 # Import utilities through centralized import handler
 from .utils_imports import ensure_directory_exists
-
-
 
 
 @dataclass
@@ -95,7 +92,7 @@ class CheckpointManager(BaseComponent):
     - Recovery planning and execution
     - Checkpoint lifecycle management (creation, validation, archival, cleanup)
     - Performance optimization for large state objects
-    
+
     This acts as a controller that delegates to business services for actual operations.
     """
 
@@ -166,7 +163,7 @@ class CheckpointManager(BaseComponent):
                 ensure_directory_exists(str(self.checkpoint_dir))
             except Exception as e:
                 self.logger.error(f"Failed to create checkpoint directory: {e}")
-                raise StateError(f"Cannot create checkpoint directory: {e}") from e
+                raise StateConsistencyError(f"Cannot create checkpoint directory: {e}") from e
 
             # Load existing checkpoints
             await self._load_existing_checkpoints()
@@ -186,10 +183,10 @@ class CheckpointManager(BaseComponent):
                 operation="start",
                 severity=ErrorSeverity.HIGH,
             )
-            error_context.details = {"error": str(e), "error_code": "CHECKPOINT_START_FAILED"}
+            error_context.details = {"error": str(e)}
             handler = self.error_handler
             await handler.handle_error(e, error_context)
-            raise StateError(f"Failed to start CheckpointManager: {e}") from e
+            raise StateConsistencyError(f"Failed to start CheckpointManager: {e}") from e
 
     async def _do_stop(self) -> None:
         """Stop checkpoint manager (BaseComponent lifecycle method)."""
@@ -244,7 +241,9 @@ class CheckpointManager(BaseComponent):
             # Task references already cleared above to prevent resource leaks
             pass
 
-    @with_retry(max_attempts=3, base_delay=0.1, backoff_factor=2.0, exceptions=(StateError,))
+    @with_retry(
+        max_attempts=3, base_delay=0.1, backoff_factor=2.0, exceptions=(StateConsistencyError,)
+    )
     async def create_checkpoint(
         self,
         bot_id: str | dict[str, Any],
@@ -265,7 +264,7 @@ class CheckpointManager(BaseComponent):
             Checkpoint ID
 
         Raises:
-            StateError: If checkpoint creation fails
+            StateConsistencyError: If checkpoint creation fails
         """
         start_time = datetime.now(timezone.utc)
 
@@ -281,29 +280,26 @@ class CheckpointManager(BaseComponent):
             checkpoint_data = {
                 "bot_id": bot_id,
                 "timestamp": start_time.isoformat(),
-                "bot_state": bot_state.model_dump(mode='json'),
+                "bot_state": bot_state.model_dump(mode="json"),
                 "checkpoint_type": checkpoint_type,
                 "version": "1.0",
             }
 
             # Serialize and optionally compress data
-            should_compress = (
-                compress
-                if compress is not None
-                else self.compression_enabled
-            )
-            
+            should_compress = compress if compress is not None else self.compression_enabled
+
             import json
+
             # Calculate original size before compression
-            original_data = json.dumps(checkpoint_data, sort_keys=True, default=str).encode('utf-8')
+            original_data = json.dumps(checkpoint_data, sort_keys=True, default=str).encode("utf-8")
             original_size = len(original_data)
-            
+
             final_data = serialize_state_data(
-                checkpoint_data, 
+                checkpoint_data,
                 compress=should_compress,
-                compression_threshold=self.compression_threshold
+                compression_threshold=self.compression_threshold,
             )
-            
+
             # Calculate integrity hash
             integrity_hash = calculate_state_checksum(checkpoint_data)
 
@@ -332,7 +328,10 @@ class CheckpointManager(BaseComponent):
                 await file_handle.write(final_data)
             finally:
                 if file_handle:
-                    await file_handle.close()
+                    try:
+                        await file_handle.close()
+                    except Exception as close_error:
+                        self.logger.warning(f"Error closing checkpoint file handle: {close_error}")
 
             # Validate if enabled
             if self.integrity_check_enabled:
@@ -379,7 +378,7 @@ class CheckpointManager(BaseComponent):
             self.logger.error(
                 f"Failed to create checkpoint: {e}", bot_id=bot_id, traceback=traceback.format_exc()
             )
-            raise StateError(f"Checkpoint creation failed: {e}") from e
+            raise StateConsistencyError(f"Checkpoint creation failed: {e}") from e
 
     async def create_compressed_checkpoint(self, data: dict[str, Any]) -> str:
         """
@@ -527,7 +526,9 @@ class CheckpointManager(BaseComponent):
             bot_id, bot_state, checkpoint_type=checkpoint_type, compress=compress
         )
 
-    @with_retry(max_attempts=3, base_delay=0.5, backoff_factor=2.0, exceptions=(StateError,))
+    @with_retry(
+        max_attempts=3, base_delay=0.5, backoff_factor=2.0, exceptions=(StateConsistencyError,)
+    )
     async def restore_checkpoint(self, checkpoint_id: str) -> tuple[str, BotState]:
         """
         Restore bot state from a checkpoint.
@@ -539,7 +540,7 @@ class CheckpointManager(BaseComponent):
             Tuple of (bot_id, restored_bot_state)
 
         Raises:
-            StateError: If restoration fails
+            StateConsistencyError: If restoration fails
         """
         start_time = datetime.now(timezone.utc)
 
@@ -547,12 +548,12 @@ class CheckpointManager(BaseComponent):
             # Get checkpoint metadata
             metadata = self.checkpoint_metadata.get(checkpoint_id)
             if not metadata:
-                raise StateError(f"Checkpoint {checkpoint_id} not found")
+                raise StateConsistencyError(f"Checkpoint {checkpoint_id} not found")
 
             # Read checkpoint file with proper resource management
             checkpoint_path = self.checkpoint_dir / f"{checkpoint_id}.checkpoint"
             if not checkpoint_path.exists():
-                raise StateError(f"Checkpoint file not found: {checkpoint_path}")
+                raise StateConsistencyError(f"Checkpoint file not found: {checkpoint_path}")
 
             file_handle = None
             try:
@@ -560,7 +561,10 @@ class CheckpointManager(BaseComponent):
                 file_data = await file_handle.read()
             finally:
                 if file_handle:
-                    await file_handle.close()
+                    try:
+                        await file_handle.close()
+                    except Exception as close_error:
+                        self.logger.warning(f"Error closing checkpoint file handle: {close_error}")
 
             # Verify integrity
             if self.integrity_check_enabled:
@@ -598,7 +602,7 @@ class CheckpointManager(BaseComponent):
 
         except Exception as e:
             self.logger.error(f"Failed to restore checkpoint: {e}", checkpoint_id=checkpoint_id)
-            raise StateError(f"Checkpoint restoration failed: {e}") from e
+            raise StateConsistencyError(f"Checkpoint restoration failed: {e}") from e
 
     async def restore_from_checkpoint(self, checkpoint_id: str) -> dict[str, Any] | None:
         """
@@ -621,7 +625,7 @@ class CheckpointManager(BaseComponent):
             return {
                 "bot_id": bot_id,
                 "portfolio": (
-                    bot_state.model_dump(mode='json')
+                    bot_state.model_dump(mode="json")
                     if hasattr(bot_state, "model_dump")
                     else bot_state.__dict__
                 ),
@@ -632,7 +636,7 @@ class CheckpointManager(BaseComponent):
                 ),
                 "version": "1.0",
             }
-        except StateError:
+        except StateConsistencyError:
             # For test compatibility - return None if checkpoint not found
             return None
 
@@ -653,7 +657,7 @@ class CheckpointManager(BaseComponent):
             # Find best checkpoint for recovery
             best_checkpoint = await self._find_best_checkpoint(bot_id, target_time)
             if not best_checkpoint:
-                raise StateError(f"No suitable checkpoint found for bot {bot_id}")
+                raise StateConsistencyError(f"No suitable checkpoint found for bot {bot_id}")
 
             # Create recovery plan
             plan = RecoveryPlan(
@@ -697,7 +701,7 @@ class CheckpointManager(BaseComponent):
 
         except Exception as e:
             self.logger.error(f"Failed to create recovery plan: {e}", bot_id=bot_id)
-            raise StateError(f"Recovery plan creation failed: {e}") from e
+            raise StateConsistencyError(f"Recovery plan creation failed: {e}") from e
 
     async def execute_recovery_plan(self, plan: RecoveryPlan) -> bool:
         """
@@ -710,7 +714,7 @@ class CheckpointManager(BaseComponent):
             True if recovery successful
 
         Raises:
-            StateError: If recovery fails
+            StateConsistencyError: If recovery fails
         """
         try:
             self.logger.info(f"Executing recovery plan for bot {plan.bot_id}")
@@ -726,7 +730,7 @@ class CheckpointManager(BaseComponent):
                             step["checkpoint_id"], metadata
                         )
                         if not validation_result["valid"]:
-                            raise StateError(
+                            raise StateConsistencyError(
                                 f"Checkpoint validation failed: {validation_result['errors']}"
                             )
 
@@ -742,7 +746,7 @@ class CheckpointManager(BaseComponent):
 
         except Exception as e:
             self.logger.error(f"Recovery plan execution failed: {e}", bot_id=plan.bot_id)
-            raise StateError(f"Recovery execution failed: {e}") from e
+            raise StateConsistencyError(f"Recovery execution failed: {e}") from e
 
     async def schedule_checkpoint(self, bot_id: str, interval_minutes: int | None = None) -> None:
         """
@@ -887,7 +891,10 @@ class CheckpointManager(BaseComponent):
                 file_data = await file_handle.read()
             finally:
                 if file_handle:
-                    await file_handle.close()
+                    try:
+                        await file_handle.close()
+                    except Exception as close_error:
+                        self.logger.warning(f"Error closing validation file handle: {close_error}")
 
             file_hash = hashlib.sha256(file_data).hexdigest()
             if file_hash != metadata.integrity_hash:

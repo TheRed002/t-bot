@@ -6,22 +6,21 @@ to maintain compatibility with existing tests while the codebase
 transitions to the new StateService architecture.
 """
 
-import logging
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
 from src.core.base.component import BaseComponent
 from src.core.config.main import Config
 from src.core.types import BotState
 
 if TYPE_CHECKING:
-    from .state_service import StatePriority, StateService, StateType
+    from .state_service import StateService
 
 
 def get_cache_manager():
     """Get cache manager instance (stub for backward compatibility)."""
     from src.core.caching.cache_manager import CacheManager
 
-    return CacheManager.get_instance()
+    return CacheManager()
 
 
 class StateManager(BaseComponent):
@@ -37,27 +36,26 @@ class StateManager(BaseComponent):
         super().__init__()
         self.config = config
         # State service will be created using factory in initialize()
-        self.state_service: Optional[StateService] = None
+        self.state_service: StateService | None = None
 
     async def initialize(self) -> None:
         """Initialize the state manager using factory pattern with dependency injection."""
         # Use dependency injection container to get factory
         from src.core.dependency_injection import get_container
         from src.core.exceptions import DependencyError, ServiceError
+
         from .factory import StateServiceFactory
-        
+
         container = get_container()
         try:
             # Use dependency injection to get factory
             factory = container.get("StateServiceFactory")
         except (DependencyError, ServiceError):
-            # Fallback to direct factory creation
-            factory = StateServiceFactory()
-        
-        self.state_service = await factory.create_state_service(
-            config=self.config, 
-            auto_start=True
-        )
+            # Fallback to direct factory creation with None injector
+            # This allows testing mode to work properly
+            factory = StateServiceFactory(injector=None)
+
+        self.state_service = await factory.create_state_service(config=self.config, auto_start=True)
 
     async def shutdown(self) -> None:
         """Shutdown the state manager."""
@@ -70,9 +68,10 @@ class StateManager(BaseComponent):
         """Save bot state and optionally create a snapshot."""
         if not self.state_service:
             raise RuntimeError("StateManager not initialized. Call initialize() first.")
-            
+
         # Save the state - late import to avoid circular dependency
         from .state_service import StatePriority, StateType
+
         success = await self.state_service.set_state(
             StateType.BOT_STATE, bot_id, state, priority=StatePriority.HIGH
         )
@@ -97,9 +96,10 @@ class StateManager(BaseComponent):
         """Load bot state."""
         if not self.state_service:
             raise RuntimeError("StateManager not initialized. Call initialize() first.")
-            
+
         # Late import to avoid circular dependency
         from .state_service import StateType
+
         result = await self.state_service.get_state(StateType.BOT_STATE, bot_id)
 
         if result is None:
@@ -128,12 +128,21 @@ class StateManager(BaseComponent):
 
         # For any other type, try to convert or return None
         if hasattr(result, "data"):
-            return await self.load_bot_state(bot_id)  # Recursive call with extracted data
+            # Extract the data and process it directly instead of recursive call
+            extracted_data = result.data
+            if isinstance(extracted_data, BotState):
+                return extracted_data
+            elif isinstance(extracted_data, dict):
+                try:
+                    return BotState(**extracted_data)
+                except Exception as e:
+                    self.logger.warning(f"BotState construction from extracted data failed: {e}")
+                    return None
 
         # If we can't convert to BotState, return None
         if isinstance(result, BotState):
             return result
-        
+
         return None
 
     async def create_checkpoint(
@@ -142,7 +151,7 @@ class StateManager(BaseComponent):
         """Create a checkpoint."""
         if not self.state_service:
             raise RuntimeError("StateManager not initialized. Call initialize() first.")
-            
+
         checkpoint_id = await self.state_service.create_snapshot(bot_id)
         return checkpoint_id
 
@@ -150,7 +159,7 @@ class StateManager(BaseComponent):
         """Restore from checkpoint."""
         if not self.state_service:
             raise RuntimeError("StateManager not initialized. Call initialize() first.")
-            
+
         # StateService.restore_snapshot only expects snapshot_id parameter
         return await self.state_service.restore_snapshot(checkpoint_id)
 
@@ -158,7 +167,7 @@ class StateManager(BaseComponent):
         """Get state metrics."""
         if not self.state_service:
             raise RuntimeError("StateManager not initialized. Call initialize() first.")
-            
+
         metrics = self.state_service.get_metrics()
 
         # Base result with bot_id and period_hours
@@ -212,16 +221,18 @@ class StateManager(BaseComponent):
     def __getattr__(self, name: str) -> Any:
         """
         Delegate unknown attributes to state_service.
-        
+
         Args:
             name: Attribute name to retrieve
-            
+
         Returns:
             The requested attribute from the state service
-            
+
         Raises:
             AttributeError: If the attribute doesn't exist on the state service
         """
         if self.state_service is None:
-            raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{name}' and no state service is available")
+            raise AttributeError(
+                f"'{self.__class__.__name__}' object has no attribute '{name}' and no state service is available"
+            )
         return getattr(self.state_service, name)

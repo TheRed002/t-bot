@@ -5,6 +5,10 @@ This module provides service layer abstractions for state management,
 separating business logic from components and infrastructure concerns.
 """
 
+from .quality_service import (
+    QualityService,
+    QualityServiceProtocol,
+)
 from .state_business_service import (
     StateBusinessService,
     StateBusinessServiceProtocol,
@@ -27,6 +31,8 @@ from .trade_lifecycle_service import (
 )
 
 __all__ = [
+    "QualityService",
+    "QualityServiceProtocol",
     "StateBusinessService",
     "StateBusinessServiceProtocol",
     "StatePersistenceService",

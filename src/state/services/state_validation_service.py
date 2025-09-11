@@ -7,28 +7,11 @@ implementation details.
 """
 
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any, Protocol, Union
+from decimal import Decimal
+from typing import TYPE_CHECKING, Any, Protocol
 
 from src.core.base.service import BaseService
-from src.core.validator_registry import ValidatorRegistry, validate
-from src.utils.state_validation_utils import (
-    validate_required_fields_with_details,
-    validate_string_field_with_details,
-    validate_decimal_field_with_details,
-    validate_positive_value_with_details,
-    validate_non_negative_value_with_details,
-    validate_bot_id_format,
-    validate_bot_status,
-    validate_order_side,
-    validate_order_type,
-    validate_symbol_format,
-    validate_capital_allocation,
-    validate_order_price_logic,
-    validate_cash_balance,
-    validate_var_limits,
-    validate_trade_execution,
-    validate_strategy_params
-)
+from src.core.validator_registry import ValidatorRegistry
 
 if TYPE_CHECKING:
     from ..state_service import StateType
@@ -69,7 +52,7 @@ class StateValidationService(BaseService):
     def __init__(self, validation_service: Any = None):
         """
         Initialize the state validation service.
-        
+
         Args:
             validation_service: Injected validation service dependency
         """
@@ -80,7 +63,7 @@ class StateValidationService(BaseService):
         if not validation_service:
             self.validator_registry = ValidatorRegistry()
             self.logger.info("StateValidationService using ValidatorRegistry fallback")
-        
+
         # Validation configuration
         self.strict_validation = True
         self.enable_business_rules = True
@@ -95,7 +78,9 @@ class StateValidationService(BaseService):
         self._validation_failures = 0
         self._cache_hits = 0
 
-        self.logger.info(f"StateValidationService initialized with validation_service: {type(validation_service).__name__ if validation_service else 'ValidatorRegistry'}")
+        self.logger.info(
+            f"StateValidationService initialized with validation_service: {type(validation_service).__name__ if validation_service else 'ValidatorRegistry'}"
+        )
 
     async def validate_state_data(
         self,
@@ -400,7 +385,7 @@ class StateValidationService(BaseService):
 
         try:
             # Define expected field types for each state type
-            type_specs: dict[str, dict[str, Union[type, tuple[type, ...]]]] = {
+            type_specs: dict[str, dict[str, type | tuple[type, ...]]] = {
                 "bot_state": {
                     "bot_id": str,
                     "status": str,
@@ -464,12 +449,12 @@ class StateValidationService(BaseService):
 
         if "quantity" in state_data:
             quantity = state_data["quantity"]
-            if not isinstance(quantity, (int, float)) or quantity <= 0:
+            if not isinstance(quantity, (int, float, Decimal)) or quantity <= 0:
                 errors.append("quantity must be a positive number")
 
         if "entry_price" in state_data:
             entry_price = state_data["entry_price"]
-            if not isinstance(entry_price, (int, float)) or entry_price <= 0:
+            if not isinstance(entry_price, (int, float, Decimal)) or entry_price <= 0:
                 errors.append("entry_price must be a positive number")
 
         if "side" in state_data:
@@ -492,7 +477,7 @@ class StateValidationService(BaseService):
 
         if "quantity" in state_data:
             quantity = state_data["quantity"]
-            if not isinstance(quantity, (int, float)) or quantity <= 0:
+            if not isinstance(quantity, (int, float, Decimal)) or quantity <= 0:
                 errors.append("order quantity must be a positive number")
 
         # Validate price requirements based on order type
@@ -502,7 +487,7 @@ class StateValidationService(BaseService):
         if order_type in ["limit", "stop", "stop_limit"]:
             if price is None:
                 errors.append(f"{order_type} orders require a price")
-            elif not isinstance(price, (int, float)) or price <= 0:
+            elif not isinstance(price, (int, float, Decimal)) or price <= 0:
                 errors.append("order price must be a positive number")
         elif order_type == "market" and price is not None:
             errors.append("market orders should not specify a price")
@@ -515,12 +500,12 @@ class StateValidationService(BaseService):
 
         if "exposure" in state_data:
             exposure = state_data["exposure"]
-            if not isinstance(exposure, (int, float)) or exposure < 0:
+            if not isinstance(exposure, (int, float, Decimal)) or exposure < 0:
                 errors.append("exposure must be a non-negative number")
 
         if "var" in state_data:
             var = state_data["var"]
-            if not isinstance(var, (int, float)):
+            if not isinstance(var, (int, float, Decimal)):
                 errors.append("VaR must be a number")
             elif var < 0:
                 errors.append("VaR cannot be negative")
@@ -536,7 +521,7 @@ class StateValidationService(BaseService):
         # Capital allocation limits
         if "capital_allocation" in state_data:
             allocation = state_data["capital_allocation"]
-            if isinstance(allocation, (int, float)):
+            if isinstance(allocation, (int, float, Decimal)):
                 if allocation <= 0:
                     violations.append("Capital allocation must be positive")
                 elif allocation > 1000000:  # $1M limit
@@ -574,7 +559,7 @@ class StateValidationService(BaseService):
 
         # Order size limits
         quantity = state_data.get("quantity")
-        if isinstance(quantity, (int, float)):
+        if isinstance(quantity, (int, float, Decimal)):
             if quantity > 1000000:  # Large order limit
                 violations.append("Order quantity exceeds maximum limit")
 
@@ -587,14 +572,14 @@ class StateValidationService(BaseService):
         # VaR limits
         var = state_data.get("var")
         max_var = state_data.get("max_var", 0.05)  # 5% default
-        if isinstance(var, (int, float)) and isinstance(max_var, (int, float)):
+        if isinstance(var, (int, float, Decimal)) and isinstance(max_var, (int, float, Decimal)):
             if var > max_var:
                 violations.append(f"VaR {var:.3f} exceeds maximum {max_var:.3f}")
 
         # Exposure limits
         exposure = state_data.get("exposure")
         max_exposure = state_data.get("max_exposure")
-        if isinstance(exposure, (int, float)) and isinstance(max_exposure, (int, float)):
+        if isinstance(exposure, (int, float, Decimal)) and isinstance(max_exposure, (int, float, Decimal)):
             if exposure > max_exposure:
                 violations.append(f"Exposure {exposure} exceeds maximum {max_exposure}")
 

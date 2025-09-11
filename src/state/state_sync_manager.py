@@ -8,16 +8,13 @@ transitions to the new architecture.
 
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Union
+from typing import Any
 
 from src.core.base.component import BaseComponent
 from src.core.config.main import Config
-from src.database.service import DatabaseService
 
-try:
-    from src.database.redis_client import RedisClient
-except ImportError:
-    RedisClient = None  # type: ignore
+# Use service layer instead of direct database access
+from .services import StatePersistenceServiceProtocol, StateSynchronizationServiceProtocol
 
 
 class SyncEventType(Enum):
@@ -38,13 +35,17 @@ class StateSyncManager(BaseComponent):
     while delegating most operations to the new StateSynchronizer implementation.
     """
 
-    def __init__(self, config: Config, database_service: Union[DatabaseService, None] = None):
-        """Initialize StateSyncManager with StateSynchronizer delegation."""
+    def __init__(
+        self,
+        config: Config,
+        sync_service: StateSynchronizationServiceProtocol | None = None,
+        persistence_service: StatePersistenceServiceProtocol | None = None,
+    ):
+        """Initialize StateSyncManager with service layer dependencies."""
         super().__init__()
         self.config = config
-        self.database_service = database_service
-        self.db_manager = database_service  # Alias for backward compatibility
-        self.redis_client = None
+        self.sync_service = sync_service
+        self.persistence_service = persistence_service
 
         # StateService and Synchronizer are injected or mocked during testing
         self.state_service = None
@@ -84,8 +85,8 @@ class StateSyncManager(BaseComponent):
 
             # Custom JSON encoder to handle enums and other complex objects
             def custom_encoder(obj):
+                from datetime import date, datetime
                 from decimal import Decimal
-                from datetime import datetime, date
 
                 if isinstance(obj, Enum):
                     return obj.value

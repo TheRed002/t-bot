@@ -7,18 +7,12 @@ coupling to infrastructure concerns.
 """
 
 import asyncio
+from collections.abc import Callable
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any, Callable, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 from src.core.base.service import BaseService
-from src.core.exceptions import StateError
-from src.utils.state_utils import (
-    create_state_change_record,
-    detect_state_changes,
-    format_cache_key,
-    store_in_redis_with_timeout,
-    get_from_redis_with_timeout
-)
+from src.core.exceptions import StateConsistencyError
 
 if TYPE_CHECKING:
     from ..state_service import StateChange, StateType
@@ -56,7 +50,7 @@ class StateSynchronizationService(BaseService):
     def __init__(self, event_service: Any = None):
         """
         Initialize the state synchronization service.
-        
+
         Args:
             event_service: Injected event service dependency for broadcasting
         """
@@ -64,9 +58,11 @@ class StateSynchronizationService(BaseService):
 
         # Injected dependency for event broadcasting
         self.event_service = event_service
-        
+
         if event_service is None:
-            self.logger.info("StateSynchronizationService initialized without event_service - broadcasting will be limited")
+            self.logger.info(
+                "StateSynchronizationService initialized without event_service - broadcasting will be limited"
+            )
 
         # Synchronization configuration
         self.enable_conflict_resolution = True
@@ -74,10 +70,10 @@ class StateSynchronizationService(BaseService):
         self.max_retry_attempts = 3
 
         # Synchronization state
-        self._pending_syncs: dict[str, "StateChange"] = {}
+        self._pending_syncs: dict[str, StateChange] = {}
         self._sync_locks: dict[str, asyncio.Lock] = {}
         self._subscribers: dict[str, set[Callable]] = {}
-        
+
         # Backpressure handling
         self._sync_semaphore = asyncio.Semaphore(50)  # Limit concurrent syncs
         self._sync_queue: asyncio.Queue = asyncio.Queue(maxsize=1000)  # Bounded queue
@@ -89,7 +85,9 @@ class StateSynchronizationService(BaseService):
         self._conflicts_resolved = 0
         self._queue_full_errors = 0
 
-        self.logger.info(f"StateSynchronizationService initialized with event_service: {type(event_service).__name__ if event_service else 'None'}")
+        self.logger.info(
+            f"StateSynchronizationService initialized with event_service: {type(event_service).__name__ if event_service else 'None'}"
+        )
 
     async def synchronize_state_change(self, state_change: "StateChange") -> bool:
         """
@@ -109,11 +107,11 @@ class StateSynchronizationService(BaseService):
 
                 # Queue state change based on priority to prevent overwhelming
                 target_queue = (
-                    self._high_priority_queue 
+                    self._high_priority_queue
                     if state_change.priority.value in ["critical", "high"]
                     else self._sync_queue
                 )
-                
+
                 try:
                     target_queue.put_nowait(state_change)
                 except asyncio.QueueFull:
@@ -129,14 +127,13 @@ class StateSynchronizationService(BaseService):
                     # Process from queue
                     try:
                         queued_change = await asyncio.wait_for(
-                            target_queue.get(),
-                            timeout=self.sync_timeout_seconds
+                            target_queue.get(), timeout=self.sync_timeout_seconds
                         )
                     except asyncio.TimeoutError:
                         self.logger.warning(f"Sync queue timeout for {sync_key}")
                         self._sync_failures += 1
                         return False
-                    
+
                     # Check for conflicts
                     if await self._detect_conflicts(queued_change):
                         if self.enable_conflict_resolution:
@@ -171,7 +168,7 @@ class StateSynchronizationService(BaseService):
                         self.logger.debug(f"State change synchronized: {sync_key}")
                     else:
                         self._sync_failures += 1
-                    
+
                     target_queue.task_done()
                     return success
 
@@ -237,7 +234,7 @@ class StateSynchronizationService(BaseService):
         """
         try:
             if not conflicting_changes:
-                raise StateError("No conflicting changes provided")
+                raise StateConsistencyError("No conflicting changes provided")
 
             if len(conflicting_changes) == 1:
                 return conflicting_changes[0]
@@ -369,10 +366,10 @@ class StateSynchronizationService(BaseService):
         """Validate the state change before applying."""
         # Basic validation
         if not state_change.state_id:
-            raise StateError("State ID is required")
+            raise StateConsistencyError("State ID is required")
 
         if not state_change.new_value:
-            raise StateError("New state value is required")
+            raise StateConsistencyError("New state value is required")
 
     async def _apply_change(self, state_change: "StateChange") -> None:
         """Apply the state change."""

@@ -4,28 +4,25 @@ Unit tests for state versioning functionality (simplified).
 Tests the versioning system for state schema management and migrations.
 """
 
-from datetime import datetime, timezone
-from unittest.mock import Mock, patch, MagicMock
 import os
 import sys
+from unittest.mock import Mock
 
-import pytest
 # Optimize: Set testing environment variables
-os.environ['TESTING'] = '1'
-os.environ['PYTHONHASHSEED'] = '0'
-os.environ['DISABLE_TELEMETRY'] = '1'
+# os.environ["TESTING"] = "1"  # Commented out - let tests control this
+os.environ["PYTHONHASHSEED"] = "0"
+os.environ["DISABLE_TELEMETRY"] = "1"
 
 # Mock modules before import
-sys.modules['src.monitoring.telemetry'] = Mock(get_tracer=Mock(return_value=Mock()))
-sys.modules['src.error_handling.service'] = Mock(ErrorHandlingService=Mock())
-sys.modules['src.database.service'] = Mock(DatabaseService=Mock())
-sys.modules['src.database.redis_client'] = Mock(RedisClient=Mock())
+sys.modules["src.monitoring.telemetry"] = Mock(get_tracer=Mock(return_value=Mock()))
+sys.modules["src.error_handling.service"] = Mock(ErrorHandlingService=Mock())
+sys.modules["src.database.service"] = Mock(DatabaseService=Mock())
+sys.modules["src.database.redis_client"] = Mock(RedisClient=Mock())
 
 from src.state.versioning import (
     MigrationRecord,
     MigrationStatus,
     MigrationType,
-    StateVersioningSystem,
 )
 
 
@@ -83,19 +80,19 @@ class TestMigrationTypes:
     def test_migration_type_values(self):
         """Test migration type enumeration values."""
         # Check enum values exist
-        assert hasattr(MigrationType, 'SCHEMA_UPGRADE')
-        assert hasattr(MigrationType, 'DATA_TRANSFORM')
-        assert hasattr(MigrationType, 'INDEX_UPDATE')
-        assert hasattr(MigrationType, 'CLEANUP')
+        assert hasattr(MigrationType, "SCHEMA_UPGRADE")
+        assert hasattr(MigrationType, "DATA_TRANSFORM")
+        assert hasattr(MigrationType, "INDEX_UPDATE")
+        assert hasattr(MigrationType, "CLEANUP")
 
     def test_migration_status_values(self):
         """Test migration status enumeration values."""
         # Check enum values exist
-        assert hasattr(MigrationStatus, 'PENDING')
-        assert hasattr(MigrationStatus, 'RUNNING')
-        assert hasattr(MigrationStatus, 'COMPLETED')
-        assert hasattr(MigrationStatus, 'FAILED')
-        assert hasattr(MigrationStatus, 'ROLLED_BACK')
+        assert hasattr(MigrationStatus, "PENDING")
+        assert hasattr(MigrationStatus, "RUNNING")
+        assert hasattr(MigrationStatus, "COMPLETED")
+        assert hasattr(MigrationStatus, "FAILED")
+        assert hasattr(MigrationStatus, "ROLLED_BACK")
 
     def test_migration_type_categorization(self):
         """Test categorizing migration types."""
@@ -190,12 +187,12 @@ class TestVersioningUtilities:
                 # Simple string comparison for compatibility
                 base_major = base_version.split(".")[0]
                 test_major = test_version.split(".")[0]
-                
+
                 if base_major == test_major:
                     # Same major version - check minor
                     base_minor = base_version.split(".")[1]
                     test_minor = test_version.split(".")[1]
-                    
+
                     if base_minor == test_minor:
                         # Compatible within same minor version
                         assert test_version in compatible_versions

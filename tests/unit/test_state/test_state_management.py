@@ -11,70 +11,71 @@ Note: Tests updated for consolidated StateService architecture.
 Some legacy tests commented out during consolidation.
 """
 
-from datetime import datetime, timedelta, timezone
+import os
+from datetime import datetime
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
-import pytest_asyncio
-import os
-# Optimize: Set testing environment variables
-os.environ['TESTING'] = '1'
-os.environ['PYTHONHASHSEED'] = '0'
-os.environ['DISABLE_TELEMETRY'] = '1'
+
+# Don't set environment variables globally - let conftest.py handle it
+
 
 # ULTRA-AGGRESSIVE session-level mocking to prevent ALL overhead
-@pytest.fixture(autouse=True, scope='session')
+@pytest.fixture(autouse=False, scope="function")
 def ultra_aggressive_mocking():
     """Ultra-aggressive mocking to eliminate ALL initialization overhead."""
     # Mock ALL modules that could cause delays
     mock_modules = {
-        'src.core.logging': Mock(get_logger=Mock(return_value=Mock())),
-        'src.error_handling.service': Mock(ErrorHandlingService=Mock()),
-        'src.error_handling.handler_pool': Mock(HandlerPool=Mock()),
-        'src.error_handling.decorators': Mock(with_error_handling=lambda f: f),
-        'src.database.service': Mock(DatabaseService=Mock()),
-        'src.database.redis_client': Mock(RedisClient=Mock()),
-        'src.database.manager': Mock(DatabaseManager=Mock()),
-        'src.database.influxdb_client': Mock(InfluxDBClient=Mock()),
-        'src.monitoring.telemetry': Mock(get_tracer=Mock(return_value=Mock())),
-        'src.monitoring.metrics': Mock(MetricsCollector=Mock()),
-        'src.utils.validation.service': Mock(ValidationService=Mock()),
-        'src.utils.validation.core': Mock(ValidatorRegistry=Mock()),
-        'src.state.di_registration': Mock(),
-        'src.state.utils_imports': Mock(ValidationService=Mock, ensure_directory_exists=Mock()),
-        'src.state.monitoring_integration': Mock(create_integrated_monitoring_service=Mock()),
-        'src.core.dependency_injection': Mock(DependencyContainer=Mock()),
-        'src.state.factory': Mock(),
-        'src.utils.file_utils': Mock(),
-        'redis': Mock(),
-        'influxdb_client': Mock(),
-        'structlog': Mock(get_logger=Mock(return_value=Mock())),
+        "src.core.logging": Mock(get_logger=Mock(return_value=Mock())),
+        "src.error_handling.service": Mock(ErrorHandlingService=Mock()),
+        "src.error_handling.handler_pool": Mock(HandlerPool=Mock()),
+        "src.error_handling.decorators": Mock(with_error_handling=lambda f: f),
+        "src.database.service": Mock(DatabaseService=Mock()),
+        "src.database.redis_client": Mock(RedisClient=Mock()),
+        "src.database.manager": Mock(DatabaseManager=Mock()),
+        "src.database.influxdb_client": Mock(InfluxDBClient=Mock()),
+        "src.monitoring.telemetry": Mock(get_tracer=Mock(return_value=Mock())),
+        "src.monitoring.metrics": Mock(MetricsCollector=Mock()),
+        "src.utils.validation.service": Mock(ValidationService=Mock()),
+        "src.utils.validation.core": Mock(ValidatorRegistry=Mock()),
+        "src.state.di_registration": Mock(),
+        "src.state.utils_imports": Mock(ValidationService=Mock, ensure_directory_exists=Mock()),
+        "src.state.monitoring_integration": Mock(create_integrated_monitoring_service=Mock()),
+        "src.core.dependency_injection": Mock(DependencyContainer=Mock()),
+        "src.state.factory": Mock(),
+        "src.utils.file_utils": Mock(),
+        "redis": Mock(),
+        "influxdb_client": Mock(),
+        "structlog": Mock(get_logger=Mock(return_value=Mock())),
     }
-    
-    with patch.dict('sys.modules', mock_modules), \
-         patch('src.core.logging.get_logger', return_value=Mock()), \
-         patch('structlog.get_logger', return_value=Mock()), \
-         patch('logging.getLogger', return_value=Mock(level=50)), \
-         patch('time.sleep'), \
-         patch('asyncio.sleep', return_value=None), \
-         patch('asyncio.create_task', side_effect=lambda x: Mock()), \
-         patch('asyncio.gather', return_value=Mock()), \
-         patch('pathlib.Path.mkdir'), \
-         patch('pathlib.Path.exists', return_value=True), \
-         patch('os.makedirs'), \
-         patch('tempfile.mkdtemp', return_value='/tmp/test'), \
-         patch('json.dump'), \
-         patch('json.load', return_value={}), \
-         patch('pickle.dump'), \
-         patch('pickle.load', return_value=Mock()):
+
+    with (
+        patch.dict("sys.modules", mock_modules),
+        patch("src.core.logging.get_logger", return_value=Mock()),
+        patch("structlog.get_logger", return_value=Mock()),
+        patch("logging.getLogger", return_value=Mock(level=50)),
+        patch("time.sleep"),
+        patch("asyncio.sleep", return_value=None),
+        patch("asyncio.create_task", side_effect=lambda x: Mock()),
+        patch("asyncio.gather", return_value=Mock()),
+        patch("pathlib.Path.mkdir"),
+        patch("pathlib.Path.exists", return_value=True),
+        patch("os.makedirs"),
+        patch("tempfile.mkdtemp", return_value="/tmp/test"),
+        patch("json.dump"),
+        patch("json.load", return_value={}),
+        patch("pickle.dump"),
+        patch("pickle.load", return_value=Mock()),
+    ):
         # Disable ALL logging during tests
         import logging
+
         logging.disable(logging.CRITICAL)
         yield
         logging.disable(logging.NOTSET)
 
-from src.core.config import Config
+
 from src.core.types import (
     BotPriority,
     BotState,
@@ -88,12 +89,9 @@ from src.core.types import (
 )
 from src.state.checkpoint_manager import CheckpointManager
 from src.state.quality_controller import (
-    PostTradeAnalysis,
-    PreTradeValidation,
     QualityController,
     ValidationResult,
 )
-from src.state.state_service import StateService, StateType, StatePriority
 from src.state.state_manager import StateManager
 from src.state.state_sync_manager import StateSyncManager, SyncEventType
 from src.state.trade_lifecycle_manager import TradeLifecycleManager, TradeLifecycleState
@@ -108,7 +106,7 @@ def ultra_fast_config():
     config.state_management = {
         "max_snapshots_per_bot": 1,  # Minimal
         "snapshot_interval_minutes": 0.001,  # Ultra-fast
-        "redis_ttl_seconds": 0.1,  # Ultra-minimal TTL  
+        "redis_ttl_seconds": 0.1,  # Ultra-minimal TTL
         "enable_compression": False,  # Disabled for speed
     }
     config.quality_controls = {
@@ -201,9 +199,10 @@ def minimal_execution_result():
 
 
 # Optimize: Session-scoped mock factory for maximum reuse
-@pytest.fixture(scope='session')
+@pytest.fixture(scope="session")
 def ultra_fast_state_manager_factory(ultra_fast_config):
     """Ultra-fast mock factory for StateManager instances."""
+
     def _create_mock_manager():
         # Return a fully mocked StateManager instead of real one
         manager = Mock(spec=StateManager)
@@ -212,17 +211,21 @@ def ultra_fast_state_manager_factory(ultra_fast_config):
         manager.load_bot_state = AsyncMock(return_value=None)
         manager.create_checkpoint = AsyncMock(return_value="checkpoint-123")
         manager.restore_from_checkpoint = AsyncMock(return_value=True)
-        manager.get_state_metrics = AsyncMock(return_value={
-            "bot_id": "test",
-            "period_hours": 24,
-            "state_updates": 10,  # Reduced for speed
-            "successful_operations": 9,
-            "failed_operations": 1,
-        })
+        manager.get_state_metrics = AsyncMock(
+            return_value={
+                "bot_id": "test",
+                "period_hours": 24,
+                "state_updates": 10,  # Reduced for speed
+                "successful_operations": 9,
+                "failed_operations": 1,
+            }
+        )
         manager._initialized = True
         manager.state_service = Mock()
         return manager
+
     return _create_mock_manager
+
 
 @pytest.mark.unit
 class TestStateManager:
@@ -238,20 +241,24 @@ class TestStateManager:
         """Test saving bot state with ultra-fast mocks."""
         # Use minimal test data
         state_data = {"bot_id": "test", "status": "running"}
-        
-        version_id = await mock_state_manager.save_bot_state("test", state_data, create_snapshot=True)
-        
+
+        version_id = await mock_state_manager.save_bot_state(
+            "test", state_data, create_snapshot=True
+        )
+
         # Optimize: Simple assertions
         assert version_id == "version-123"
-        mock_state_manager.save_bot_state.assert_called_once_with("test", state_data, create_snapshot=True)
+        mock_state_manager.save_bot_state.assert_called_once_with(
+            "test", state_data, create_snapshot=True
+        )
 
     @pytest.mark.asyncio
     async def test_load_bot_state(self, mock_state_manager, minimal_bot_state):
         """Test loading bot state with ultra-fast mocks."""
         mock_state_manager.load_bot_state.return_value = minimal_bot_state
-        
+
         loaded_state = await mock_state_manager.load_bot_state("test")
-        
+
         assert loaded_state == minimal_bot_state
         mock_state_manager.load_bot_state.assert_called_once_with("test")
 
@@ -259,7 +266,7 @@ class TestStateManager:
     async def test_create_checkpoint(self, mock_state_manager):
         """Test checkpoint creation with ultra-fast mocks."""
         checkpoint_id = await mock_state_manager.create_checkpoint("test")
-        
+
         assert checkpoint_id == "checkpoint-123"
         mock_state_manager.create_checkpoint.assert_called_once_with("test")
 
@@ -267,15 +274,17 @@ class TestStateManager:
     async def test_restore_from_checkpoint(self, mock_state_manager):
         """Test restoring from checkpoint with ultra-fast mocks."""
         success = await mock_state_manager.restore_from_checkpoint("test", "test-checkpoint")
-        
+
         assert success is True
-        mock_state_manager.restore_from_checkpoint.assert_called_once_with("test", "test-checkpoint")
+        mock_state_manager.restore_from_checkpoint.assert_called_once_with(
+            "test", "test-checkpoint"
+        )
 
     @pytest.mark.asyncio
     async def test_get_state_metrics(self, mock_state_manager):
         """Test getting state metrics with ultra-fast mocks."""
         metrics = await mock_state_manager.get_state_metrics("test", 24)
-        
+
         assert metrics["bot_id"] == "test"
         assert metrics["period_hours"] == 24
         assert metrics["state_updates"] == 10
@@ -297,25 +306,31 @@ class TestCheckpointManager:
         manager.restore_checkpoint = AsyncMock(return_value=("test", Mock()))
         manager.create_recovery_plan = AsyncMock()
         manager.schedule_checkpoint = AsyncMock()
-        manager.get_checkpoint_stats = AsyncMock(return_value={"total_checkpoints": 2, "bot_stats": {}, "performance_stats": {}})
+        manager.get_checkpoint_stats = AsyncMock(
+            return_value={"total_checkpoints": 2, "bot_stats": {}, "performance_stats": {}}
+        )
         return manager
 
     @pytest.mark.asyncio
     async def test_create_checkpoint(self, mock_checkpoint_manager, minimal_bot_state):
         """Test checkpoint creation with ultra-fast mocks."""
         await mock_checkpoint_manager.initialize()
-        
-        checkpoint_id = await mock_checkpoint_manager.create_checkpoint("test", minimal_bot_state, checkpoint_type="manual")
+
+        checkpoint_id = await mock_checkpoint_manager.create_checkpoint(
+            "test", minimal_bot_state, checkpoint_type="manual"
+        )
 
         assert checkpoint_id == "checkpoint-123"
         assert checkpoint_id in mock_checkpoint_manager.checkpoints
-        mock_checkpoint_manager.create_checkpoint.assert_called_once_with("test", minimal_bot_state, checkpoint_type="manual")
+        mock_checkpoint_manager.create_checkpoint.assert_called_once_with(
+            "test", minimal_bot_state, checkpoint_type="manual"
+        )
 
     @pytest.mark.asyncio
     async def test_restore_checkpoint(self, mock_checkpoint_manager, minimal_bot_state):
         """Test checkpoint restoration with ultra-fast mocks."""
         mock_checkpoint_manager.restore_checkpoint.return_value = ("test", minimal_bot_state)
-        
+
         bot_id, restored_state = await mock_checkpoint_manager.restore_checkpoint("checkpoint-123")
 
         assert bot_id == "test"
@@ -331,7 +346,7 @@ class TestCheckpointManager:
         mock_plan.steps = ["step1"]
         mock_plan.estimated_duration_seconds = 10
         mock_checkpoint_manager.create_recovery_plan.return_value = mock_plan
-        
+
         plan = await mock_checkpoint_manager.create_recovery_plan("test")
 
         assert plan.bot_id == "test"
@@ -343,7 +358,7 @@ class TestCheckpointManager:
     async def test_schedule_checkpoint(self, mock_checkpoint_manager):
         """Test checkpoint scheduling with ultra-fast mocks."""
         mock_checkpoint_manager.checkpoint_schedules["test"] = datetime(2023, 1, 2)  # Future date
-        
+
         await mock_checkpoint_manager.schedule_checkpoint("test", 30)
 
         assert "test" in mock_checkpoint_manager.checkpoint_schedules
@@ -366,79 +381,90 @@ class TestTradeLifecycleManager:
     @pytest.fixture
     def lifecycle_manager(self, ultra_fast_config):
         """Create TradeLifecycleManager instance for testing."""
-        with (
-            patch("src.state.trade_lifecycle_manager.DatabaseManager"),
-            patch("src.state.trade_lifecycle_manager.RedisClient"),
-        ):
-            # Mock the required services
-            mock_persistence_service = AsyncMock()
-            mock_lifecycle_service = AsyncMock()
-            
-            manager = Mock(spec=TradeLifecycleManager)
-            manager.config = ultra_fast_config
-            manager.persistence_service = mock_persistence_service
-            manager.lifecycle_service = mock_lifecycle_service
-            manager.active_trades = {}
-            manager.trade_history = []
-            manager.initialize = AsyncMock()
-            # Use a side_effect to ensure consistent return value
-            async def mock_start_trade_lifecycle(*args, **kwargs):
-                return "trade-123"
-            manager.start_trade_lifecycle = AsyncMock(side_effect=mock_start_trade_lifecycle)
-            # Use a side_effect to ensure consistent return value
-            async def mock_transition_trade_state(*args, **kwargs):
-                return True
-            manager.transition_trade_state = AsyncMock(side_effect=mock_transition_trade_state)
-            manager.update_trade_execution = AsyncMock()
-            # Use a side_effect to ensure consistent return value
-            async def mock_calculate_trade_performance(*args, **kwargs):
-                return {
-                    "trade_id": "trade-123",
-                    "filled_quantity": Decimal("0.1"),
-                    "average_fill_price": Decimal("50010.0"),
-                    "fees_paid": Decimal("5.0")
-                }
-            manager.calculate_trade_performance = AsyncMock(side_effect=mock_calculate_trade_performance)
-            # Use a side_effect that returns the actual trade_history as dictionaries
-            async def mock_get_trade_history(bot_id=None, limit=50):
-                # Return the trade_history that was added by the test, converted to dict
-                filtered_records = manager.trade_history
-                if bot_id:
-                    filtered_records = [record for record in manager.trade_history 
-                                      if getattr(record, 'bot_id', None) == bot_id]
-                
-                # Convert TradeHistoryRecord objects to dictionaries
-                result = []
-                for record in filtered_records[:limit]:
-                    if hasattr(record, '__dict__'):
-                        result.append(record.__dict__)
-                    elif hasattr(record, '_asdict'):  # if it's a namedtuple
-                        result.append(record._asdict())
-                    else:
-                        # If it's already a dict or has dict-like attributes
-                        result.append({
-                            'trade_id': getattr(record, 'trade_id', None),
-                            'bot_id': getattr(record, 'bot_id', None),
-                            'strategy_name': getattr(record, 'strategy_name', None),
-                            'symbol': getattr(record, 'symbol', None),
-                            'side': getattr(record, 'side', None),
-                            'quantity': getattr(record, 'quantity', None),
-                            'average_price': getattr(record, 'average_price', None),
-                        })
-                return result
-            manager.get_trade_history = AsyncMock(side_effect=mock_get_trade_history)
-            
-            # Mock database clients for backward compatibility
-            manager.db_manager = AsyncMock()
-            manager.redis_client = AsyncMock()
+        # Mock the required services
+        mock_persistence_service = AsyncMock()
+        mock_lifecycle_service = AsyncMock()
 
-            return manager
+        manager = Mock(spec=TradeLifecycleManager)
+        manager.config = ultra_fast_config
+        manager.persistence_service = mock_persistence_service
+        manager.lifecycle_service = mock_lifecycle_service
+        manager.active_trades = {}
+        manager.trade_history = []
+        manager.initialize = AsyncMock()
+
+        # Use a side_effect to ensure consistent return value
+        async def mock_start_trade_lifecycle(*args, **kwargs):
+            return "trade-123"
+
+        manager.start_trade_lifecycle = AsyncMock(side_effect=mock_start_trade_lifecycle)
+
+        # Use a side_effect to ensure consistent return value
+        async def mock_transition_trade_state(*args, **kwargs):
+            return True
+
+        manager.transition_trade_state = AsyncMock(side_effect=mock_transition_trade_state)
+        manager.update_trade_execution = AsyncMock()
+
+        # Use a side_effect to ensure consistent return value
+        async def mock_calculate_trade_performance(*args, **kwargs):
+            return {
+                "trade_id": "trade-123",
+                "filled_quantity": Decimal("0.1"),
+                "average_fill_price": Decimal("50010.0"),
+                "fees_paid": Decimal("5.0"),
+            }
+
+        manager.calculate_trade_performance = AsyncMock(
+            side_effect=mock_calculate_trade_performance
+        )
+
+        # Use a side_effect that returns the actual trade_history as dictionaries
+        async def mock_get_trade_history(bot_id=None, limit=50):
+            # Return the trade_history that was added by the test, converted to dict
+            filtered_records = manager.trade_history
+            if bot_id:
+                filtered_records = [
+                    record
+                    for record in manager.trade_history
+                    if getattr(record, "bot_id", None) == bot_id
+                ]
+
+            # Convert TradeHistoryRecord objects to dictionaries
+            result = []
+            for record in filtered_records[:limit]:
+                if hasattr(record, "__dict__"):
+                    result.append(record.__dict__)
+                elif hasattr(record, "_asdict"):  # if it's a namedtuple
+                    result.append(record._asdict())
+                else:
+                    # If it's already a dict or has dict-like attributes
+                    result.append(
+                        {
+                            "trade_id": getattr(record, "trade_id", None),
+                            "bot_id": getattr(record, "bot_id", None),
+                            "strategy_name": getattr(record, "strategy_name", None),
+                            "symbol": getattr(record, "symbol", None),
+                            "side": getattr(record, "side", None),
+                            "quantity": getattr(record, "quantity", None),
+                            "average_price": getattr(record, "average_price", None),
+                        }
+                    )
+            return result
+
+        manager.get_trade_history = AsyncMock(side_effect=mock_get_trade_history)
+
+        # Mock database clients for backward compatibility
+        manager.db_manager = AsyncMock()
+        manager.redis_client = AsyncMock()
+
+        return manager
 
     @pytest.mark.asyncio
     async def test_start_trade_lifecycle(self, lifecycle_manager, minimal_order_request):
         """Test starting trade lifecycle."""
         await lifecycle_manager.initialize()
-        
+
         # Mock the start_trade_lifecycle to return a trade_id and populate active_trades
         trade_id = "trade-123"
         mock_trade_context = Mock()
@@ -446,10 +472,10 @@ class TestTradeLifecycleManager:
         mock_trade_context.strategy_name = "momentum_strategy"
         mock_trade_context.current_state = Mock()
         mock_trade_context.current_state.value = "SIGNAL_GENERATED"
-        
+
         lifecycle_manager.active_trades[trade_id] = mock_trade_context
         lifecycle_manager.start_trade_lifecycle.return_value = trade_id
-        
+
         result_trade_id = await lifecycle_manager.start_trade_lifecycle(
             "test-bot-123", "momentum_strategy", minimal_order_request
         )
@@ -573,32 +599,30 @@ class TestTradeLifecycleManager:
 class TestQualityController:
     """Test cases for QualityController."""
 
-    @pytest.fixture(scope='class')
+    @pytest.fixture(scope="class")
     def quality_controller(self, ultra_fast_config):
         """Create QualityController instance for testing."""
-        with (
-            patch("src.state.quality_controller.DatabaseManager"),
-            patch("src.state.quality_controller.InfluxDBClient"),
-        ):
-            controller = Mock(spec=QualityController)
-            controller.config = ultra_fast_config
-            controller.validation_history = []
-            controller.analysis_history = []
-            controller.initialize = AsyncMock()
-            controller.validate_pre_trade = AsyncMock(return_value=Mock())
-            controller.analyze_post_trade = AsyncMock(return_value=Mock())
-            controller.get_quality_summary = AsyncMock(return_value={
+        controller = Mock(spec=QualityController)
+        controller.config = ultra_fast_config
+        controller.validation_history = []
+        controller.analysis_history = []
+        controller.initialize = AsyncMock()
+        controller.validate_pre_trade = AsyncMock(return_value=Mock())
+        controller.analyze_post_trade = AsyncMock(return_value=Mock())
+        controller.get_quality_summary = AsyncMock(
+            return_value={
                 "validation_summary": {},
                 "analysis_summary": {},
-                "quality_trends": {}
-            })
-            controller.get_quality_trend_analysis = AsyncMock(return_value=Mock())
+                "quality_trends": {},
+            }
+        )
+        controller.get_quality_trend_analysis = AsyncMock(return_value=Mock())
 
-            # Mock database clients
-            controller.db_manager = AsyncMock()
-            controller.influxdb_client = AsyncMock()
+        # Mock database clients
+        controller.db_manager = AsyncMock()
+        controller.influxdb_client = AsyncMock()
 
-            return controller
+        return controller
 
     @pytest.mark.asyncio
     async def test_validate_pre_trade(
@@ -606,7 +630,7 @@ class TestQualityController:
     ):
         """Test pre-trade validation."""
         await quality_controller.initialize()
-        
+
         # Mock validation result
         mock_validation = Mock()
         mock_validation.validation_id = "val-123"
@@ -614,7 +638,7 @@ class TestQualityController:
         mock_validation.overall_score = 85.0
         mock_validation.checks = [Mock()]
         quality_controller.validate_pre_trade.return_value = mock_validation
-        
+
         portfolio_context = {"total_value": 1000.0, "symbol_exposure": {"BTC/USDT": 100.0}}
 
         validation = await quality_controller.validate_pre_trade(
@@ -639,7 +663,7 @@ class TestQualityController:
         mock_analysis.overall_quality_score = 90.0
         mock_analysis.execution_time_seconds = 1.0
         quality_controller.analyze_post_trade.return_value = mock_analysis
-        
+
         analysis = await quality_controller.analyze_post_trade(
             "test-trade-123",
             minimal_execution_result,
@@ -686,7 +710,7 @@ class TestQualityController:
         mock_trend.current_value = 82.0
         mock_trend.mean = 81.0
         quality_controller.get_quality_trend_analysis.return_value = mock_trend
-        
+
         trend = await quality_controller.get_quality_trend_analysis("overall_quality_score", 7)
 
         assert trend.metric_name == "overall_quality_score"
@@ -700,66 +724,80 @@ class TestStateSyncManager:
     @pytest.fixture
     def sync_manager(self, ultra_fast_config):
         """Create StateSyncManager instance for testing."""
-        with (
-            patch("src.state.state_sync_manager.DatabaseService") as mock_db_service,
-            patch("src.state.state_sync_manager.RedisClient") as mock_redis,
-        ):
-            # Mock DatabaseService and RedisClient
-            mock_db_instance = AsyncMock()
-            mock_redis_instance = AsyncMock()
-            mock_db_service.return_value = mock_db_instance
-            mock_redis.return_value = mock_redis_instance
+        # Mock DatabaseService and RedisClient
+        mock_db_instance = AsyncMock()
+        mock_redis_instance = AsyncMock()
 
-            manager = Mock(spec=StateSyncManager)
-            manager.config = ultra_fast_config
-            manager.sync_metrics = Mock()
-            manager.sync_metrics.total_sync_operations = 10
-            manager.sync_metrics.successful_syncs = 9
-            manager.sync_metrics.failed_syncs = 1
-            manager.event_subscribers = {}
-            manager.custom_resolvers = {}
-            manager.initialize = AsyncMock()
-            # Use a side_effect that actually calls redis client
-            async def mock_sync_state(entity_type, entity_id, state_data, source_component):
-                # Call the redis client setex method to satisfy test expectations
-                await manager.redis_client.setex(f"{entity_type}:{entity_id}", 3600, str(state_data))
-                return True
-            manager.sync_state = AsyncMock(side_effect=mock_sync_state)
-            manager.force_sync = AsyncMock(return_value=True)
-            manager.get_sync_status = AsyncMock(return_value={"entity_type": "test", "entity_id": "test", "consistency_status": "consistent"})
-            # Mock get_sync_metrics to match test expectations
-            async def mock_get_sync_metrics():
-                return {
-                    "total_sync_operations": manager.sync_metrics.total_sync_operations,
-                    "successful_syncs": manager.sync_metrics.successful_syncs, 
-                    "success_rate": (manager.sync_metrics.successful_syncs / manager.sync_metrics.total_sync_operations) * 100
-                }
-            manager.get_sync_metrics = AsyncMock(side_effect=mock_get_sync_metrics)
-            
-            # Mock subscribe_to_events to actually modify the event_subscribers dict
-            async def mock_subscribe_to_events(event_type, callback):
-                if event_type not in manager.event_subscribers:
-                    manager.event_subscribers[event_type] = []
-                manager.event_subscribers[event_type].append(callback)
-            manager.subscribe_to_events = AsyncMock(side_effect=mock_subscribe_to_events)
-            
-            # Mock register_conflict_resolver to actually modify the custom_resolvers dict  
-            async def mock_register_conflict_resolver(entity_type, resolver):
-                manager.custom_resolvers[entity_type] = resolver
-            manager.register_conflict_resolver = AsyncMock(side_effect=mock_register_conflict_resolver)
+        manager = Mock(spec=StateSyncManager)
+        manager.config = ultra_fast_config
+        manager.sync_metrics = Mock()
+        manager.sync_metrics.total_sync_operations = 10
+        manager.sync_metrics.successful_syncs = 9
+        manager.sync_metrics.failed_syncs = 1
+        manager.event_subscribers = {}
+        manager.custom_resolvers = {}
+        manager.initialize = AsyncMock()
 
-            # Mock attributes that will be set during initialization - handle inconsistent naming
-            manager.db_manager = mock_db_instance  # Inconsistent naming in source
-            manager.database_service = mock_db_instance
-            manager.redis_client = mock_redis_instance
+        # Use a side_effect that actually calls redis client
+        async def mock_sync_state(entity_type, entity_id, state_data, source_component):
+            # Call the redis client setex method to satisfy test expectations
+            await manager.redis_client.setex(
+                f"{entity_type}:{entity_id}", 3600, str(state_data)
+            )
+            return True
 
-            return manager
+        manager.sync_state = AsyncMock(side_effect=mock_sync_state)
+        manager.force_sync = AsyncMock(return_value=True)
+        manager.get_sync_status = AsyncMock(
+        return_value={
+                "entity_type": "test",
+                "entity_id": "test",
+                "consistency_status": "consistent",
+            }
+        )
+
+        # Mock get_sync_metrics to match test expectations
+        async def mock_get_sync_metrics():
+            return {
+                "total_sync_operations": manager.sync_metrics.total_sync_operations,
+                "successful_syncs": manager.sync_metrics.successful_syncs,
+                "success_rate": (
+                    manager.sync_metrics.successful_syncs
+                    / manager.sync_metrics.total_sync_operations
+                )
+                * 100,
+            }
+
+        manager.get_sync_metrics = AsyncMock(side_effect=mock_get_sync_metrics)
+
+        # Mock subscribe_to_events to actually modify the event_subscribers dict
+        async def mock_subscribe_to_events(event_type, callback):
+            if event_type not in manager.event_subscribers:
+                manager.event_subscribers[event_type] = []
+            manager.event_subscribers[event_type].append(callback)
+
+        manager.subscribe_to_events = AsyncMock(side_effect=mock_subscribe_to_events)
+
+        # Mock register_conflict_resolver to actually modify the custom_resolvers dict
+        async def mock_register_conflict_resolver(entity_type, resolver):
+            manager.custom_resolvers[entity_type] = resolver
+
+        manager.register_conflict_resolver = AsyncMock(
+            side_effect=mock_register_conflict_resolver
+        )
+
+        # Mock attributes that will be set during initialization - handle inconsistent naming
+        manager.db_manager = mock_db_instance  # Inconsistent naming in source
+        manager.database_service = mock_db_instance
+        manager.redis_client = mock_redis_instance
+
+        return manager
 
     @pytest.mark.asyncio
     async def test_sync_state(self, sync_manager, minimal_bot_state):
         """Test state synchronization."""
         await sync_manager.initialize()
-        
+
         # Mock Redis and PostgreSQL operations
         sync_manager.redis_client.setex = AsyncMock()
 
@@ -846,12 +884,6 @@ class TestIntegration:
             patch("src.state.factory.StateServiceFactory") as mock_factory,
             patch("src.state.state_manager.get_cache_manager"),
             patch("src.utils.file_utils.ensure_directory_exists"),
-            patch("src.state.trade_lifecycle_manager.DatabaseManager"),
-            patch("src.state.trade_lifecycle_manager.RedisClient"),
-            patch("src.state.quality_controller.DatabaseManager"),
-            patch("src.state.quality_controller.InfluxDBClient"),
-            patch("src.state.state_sync_manager.DatabaseService"),
-            patch("src.state.state_sync_manager.RedisClient"),
             patch("tempfile.mkdtemp", return_value="/tmp/test_checkpoints"),
             patch("os.makedirs"),
             patch("pathlib.Path.mkdir"),
@@ -859,19 +891,19 @@ class TestIntegration:
         ):
             # Use a mock checkpoint directory
             checkpoint_dir = "/tmp/test_checkpoints"
-            
-            mock_config.state_management = {
-                "checkpoints": {"directory": str(checkpoint_dir)}
-            }
+
+            mock_config.state_management = {"checkpoints": {"directory": str(checkpoint_dir)}}
 
             # Mock StateService for StateManager
             mock_service_instance = AsyncMock()
             mock_service_instance.subscribe = MagicMock()  # Not async
             mock_service_instance.cleanup = AsyncMock()
-            
+
             # Mock factory to return our service
             mock_factory_instance = AsyncMock()
-            mock_factory_instance.create_state_service = AsyncMock(return_value=mock_service_instance)
+            mock_factory_instance.create_state_service = AsyncMock(
+                return_value=mock_service_instance
+            )
             mock_factory.return_value = mock_factory_instance
 
             # Create ALL components as mocks for ultra-fast tests
@@ -888,15 +920,17 @@ class TestIntegration:
             checkpoint_manager.config = mock_config
             checkpoint_manager.initialize = AsyncMock()
             checkpoint_manager.create_checkpoint = AsyncMock(return_value="checkpoint-123")
-            checkpoint_manager.create_recovery_plan = AsyncMock(return_value=Mock(bot_id="test-bot-123", steps=["step1"]))
-            
+            checkpoint_manager.create_recovery_plan = AsyncMock(
+                return_value=Mock(bot_id="test-bot-123", steps=["step1"])
+            )
+
             lifecycle_manager = Mock(spec=TradeLifecycleManager)
             lifecycle_manager.config = mock_config
             lifecycle_manager.initialize = AsyncMock()
-            
+
             # Mock active_trades and start_trade_lifecycle to work together
             lifecycle_manager.active_trades = {}
-            
+
             async def mock_start_trade_lifecycle(bot_id, strategy_name, order_request):
                 trade_id = "trade-123"
                 # Add the trade to active_trades
@@ -904,19 +938,25 @@ class TestIntegration:
                     current_state=Mock(value="INITIATED"),
                     bot_id=bot_id,
                     strategy_name=strategy_name,
-                    order_request=order_request
+                    order_request=order_request,
                 )
                 return trade_id
-                
-            lifecycle_manager.start_trade_lifecycle = AsyncMock(side_effect=mock_start_trade_lifecycle)
+
+            lifecycle_manager.start_trade_lifecycle = AsyncMock(
+                side_effect=mock_start_trade_lifecycle
+            )
             lifecycle_manager.transition_trade_state = AsyncMock(return_value=True)
             lifecycle_manager.update_trade_execution = AsyncMock(return_value=True)
-            
+
             quality_controller = Mock(spec=QualityController)
             quality_controller.config = mock_config
             quality_controller.initialize = AsyncMock()
-            quality_controller.validate_pre_trade = AsyncMock(return_value=Mock(overall_result=ValidationResult.PASSED))
-            quality_controller.analyze_post_trade = AsyncMock(return_value=Mock(overall_quality_score=90.0))
+            quality_controller.validate_pre_trade = AsyncMock(
+                return_value=Mock(overall_result=ValidationResult.PASSED)
+            )
+            quality_controller.analyze_post_trade = AsyncMock(
+                return_value=Mock(overall_quality_score=90.0)
+            )
 
             sync_manager = Mock(spec=StateSyncManager)
             sync_manager.config = mock_config
@@ -935,13 +975,17 @@ class TestIntegration:
 
     @pytest.mark.asyncio
     async def test_complete_trade_workflow(
-        self, integrated_system, minimal_order_request, minimal_market_data, minimal_execution_result
+        self,
+        integrated_system,
+        minimal_order_request,
+        minimal_market_data,
+        minimal_execution_result,
     ):
         """Test complete trade workflow through all components."""
         # Initialize all components first
         for component in integrated_system.values():
             await component.initialize()
-            
+
         lifecycle_manager = integrated_system["lifecycle_manager"]
         quality_controller = integrated_system["quality_controller"]
         sync_manager = integrated_system["sync_manager"]
@@ -994,7 +1038,7 @@ class TestIntegration:
         # Initialize all components first
         for component in integrated_system.values():
             await component.initialize()
-            
+
         state_manager = integrated_system["state_manager"]
         checkpoint_manager = integrated_system["checkpoint_manager"]
 
@@ -1005,7 +1049,9 @@ class TestIntegration:
         assert version_id is not None
 
         # 2. Create checkpoint
-        checkpoint_id = await checkpoint_manager.create_checkpoint("test-bot-123", minimal_bot_state)
+        checkpoint_id = await checkpoint_manager.create_checkpoint(
+            "test-bot-123", minimal_bot_state
+        )
         assert checkpoint_id is not None
 
         # 3. Simulate recovery scenario

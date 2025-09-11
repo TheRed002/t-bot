@@ -10,7 +10,8 @@ from typing import TYPE_CHECKING, Any, Protocol, Union
 
 if TYPE_CHECKING:
     from src.core.config.main import Config
-    from .state_service import StateChange, StateMetadata, StateSnapshot, StateType, StateService
+
+    from .state_service import StateChange, StateMetadata, StateService, StateSnapshot, StateType
 
 
 class StateControllerProtocol(Protocol):
@@ -186,9 +187,7 @@ class CheckpointServiceInterface(ABC):
         pass
 
     @abstractmethod
-    async def restore_checkpoint(
-        self, checkpoint_id: str
-    ) -> tuple[str, dict[str, Any]] | None:
+    async def restore_checkpoint(self, checkpoint_id: str) -> tuple[str, dict[str, Any]] | None:
         """Restore state from a checkpoint."""
         pass
 
@@ -209,23 +208,17 @@ class StateEventServiceInterface(ABC):
     """Abstract interface for state event services."""
 
     @abstractmethod
-    async def emit_state_event(
-        self, event_type: str, event_data: dict[str, Any]
-    ) -> None:
+    async def emit_state_event(self, event_type: str, event_data: dict[str, Any]) -> None:
         """Emit a state change event."""
         pass
 
     @abstractmethod
-    def subscribe_to_events(
-        self, event_type: str, callback: Any
-    ) -> None:
+    def subscribe_to_events(self, event_type: str, callback: Any) -> None:
         """Subscribe to state change events."""
         pass
 
     @abstractmethod
-    def unsubscribe_from_events(
-        self, event_type: str, callback: Any
-    ) -> None:
+    def unsubscribe_from_events(self, event_type: str, callback: Any) -> None:
         """Unsubscribe from state change events."""
         pass
 
@@ -237,7 +230,7 @@ class StateServiceFactoryInterface(ABC):
     async def create_state_service(
         self,
         config: "Config",
-        database_service: Union[Any, None] = None,
+        database_service: Any | None = None,
         auto_start: bool = True,
     ) -> "StateService":
         """Create a StateService instance with dependency injection."""

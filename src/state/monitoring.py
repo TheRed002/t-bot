@@ -17,11 +17,11 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from enum import Enum
-from typing import Any, Optional
+from typing import Any
 from uuid import uuid4
 
 from src.core.base.component import BaseComponent
-from src.core.exceptions import StateError
+from src.core.exceptions import StateConsistencyError
 
 from .utils_imports import time_execution
 
@@ -38,16 +38,17 @@ class HealthStatus(Enum):
 
 # Import consistent AlertSeverity from core types
 from src.core.types import AlertSeverity
+
 # Import constants through centralized utils import to avoid circular dependencies
 try:
     from src.utils.state_constants import (
+        ALERT_COOLDOWN_MINUTES,
         DEFAULT_CACHE_TTL,
         HEALTH_CHECK_INTERVAL,
-        METRICS_COLLECTION_INTERVAL,
-        ALERT_COOLDOWN_MINUTES,
-        METRICS_RETENTION_HOURS,
+        MEMORY_CRITICAL_THRESHOLD,
         MEMORY_WARNING_THRESHOLD,
-        MEMORY_CRITICAL_THRESHOLD
+        METRICS_COLLECTION_INTERVAL,
+        METRICS_RETENTION_HOURS,
     )
 except ImportError:
     # Fallback constants in case of circular import
@@ -56,8 +57,8 @@ except ImportError:
     METRICS_COLLECTION_INTERVAL = 60
     ALERT_COOLDOWN_MINUTES = 10
     METRICS_RETENTION_HOURS = 24
-    MEMORY_WARNING_THRESHOLD = 0.8
-    MEMORY_CRITICAL_THRESHOLD = 0.9
+    MEMORY_WARNING_THRESHOLD = 1000  # MB
+    MEMORY_CRITICAL_THRESHOLD = 2000  # MB
 
 
 class MetricType(Enum):
@@ -76,7 +77,7 @@ class HealthCheck:
     check_id: str = field(default_factory=lambda: str(uuid4()))
     name: str = ""
     description: str = ""
-    check_function: Optional[Callable[[], Any]] = None
+    check_function: Callable[[], Any] | None = None
 
     # Configuration
     enabled: bool = True
@@ -93,7 +94,7 @@ class HealthCheck:
     # Results
     last_result: dict[str, Any] = field(default_factory=dict)
     last_error: str = ""
-    response_time_ms: float = 0.0
+    response_time_ms: Decimal = Decimal("0.0")
 
 
 @dataclass
@@ -103,7 +104,7 @@ class Metric:
     metric_id: str = field(default_factory=lambda: str(uuid4()))
     name: str = ""
     metric_type: MetricType = MetricType.GAUGE
-    value: float = 0.0
+    value: Decimal = Decimal("0.0")
     timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
     # Metadata
@@ -128,8 +129,8 @@ class Alert:
 
     # Context
     metric_name: str = ""
-    current_value: float = 0.0
-    threshold_value: float = 0.0
+    current_value: Decimal = Decimal("0.0")
+    threshold_value: Decimal = Decimal("0.0")
 
     # Status
     active: bool = True
@@ -151,38 +152,38 @@ class PerformanceReport:
 
     # Overall metrics
     overall_health: HealthStatus = HealthStatus.UNKNOWN
-    uptime_percentage: float = 100.0
+    uptime_percentage: Decimal = Decimal("100.0")
     availability_sla_met: bool = True
 
     # Performance metrics
-    average_response_time_ms: float = 0.0
-    peak_response_time_ms: float = 0.0
+    average_response_time_ms: Decimal = Decimal("0.0")
+    peak_response_time_ms: Decimal = Decimal("0.0")
     total_operations: int = 0
     successful_operations: int = 0
     failed_operations: int = 0
-    error_rate_percentage: float = 0.0
+    error_rate_percentage: Decimal = Decimal("0.0")
 
     # Resource utilization
-    peak_memory_usage_mb: float = 0.0
-    average_memory_usage_mb: float = 0.0
-    peak_cpu_usage_percentage: float = 0.0
-    average_cpu_usage_percentage: float = 0.0
+    peak_memory_usage_mb: Decimal = Decimal("0.0")
+    average_memory_usage_mb: Decimal = Decimal("0.0")
+    peak_cpu_usage_percentage: Decimal = Decimal("0.0")
+    average_cpu_usage_percentage: Decimal = Decimal("0.0")
 
     # State-specific metrics
-    state_operations_per_second: float = 0.0
-    cache_hit_rate_percentage: float = 0.0
-    sync_success_rate_percentage: float = 0.0
+    state_operations_per_second: Decimal = Decimal("0.0")
+    cache_hit_rate_percentage: Decimal = Decimal("0.0")
+    sync_success_rate_percentage: Decimal = Decimal("0.0")
     recovery_operations: int = 0
 
     # Alerts and incidents
     total_alerts: int = 0
     critical_alerts: int = 0
-    alert_resolution_time_minutes: float = 0.0
+    alert_resolution_time_minutes: Decimal = Decimal("0.0")
 
 
 class StateMonitoringService(BaseComponent):
     """
-    Comprehensive monitoring service for state management system.
+    Comprehensive monitoring service for state management system with central integration.
 
     Features:
     - Real-time health monitoring with configurable checks
@@ -190,18 +191,27 @@ class StateMonitoringService(BaseComponent):
     - Automated alerting and escalation
     - SLA compliance monitoring
     - Resource utilization tracking
-    - Predictive health analysis and recommendations
+    - Integration with central monitoring infrastructure
     """
 
-    def __init__(self, state_service: Any):  # Type is StateService
+    def __init__(self, state_service: Any, metrics_collector: Any = None):  # Type is StateService
         """
         Initialize the monitoring service.
 
         Args:
             state_service: Reference to the main state service
+            metrics_collector: Optional central metrics collector for integration
         """
         super().__init__()
         self.state_service = state_service
+
+        # Central monitoring integration
+        self.metrics_collector = metrics_collector
+        self._central_alert_manager = None
+
+        # Integration adapters - will be set by monitoring_integration module
+        self.metrics_adapter = None
+        self.alert_adapter = None
 
         # Health checks
         self._health_checks: dict[str, HealthCheck] = {}
@@ -225,8 +235,8 @@ class StateMonitoringService(BaseComponent):
         self.health_check_interval_seconds = HEALTH_CHECK_INTERVAL
         self.metrics_collection_interval_seconds = METRICS_COLLECTION_INTERVAL
         self.alert_cooldown_minutes = ALERT_COOLDOWN_MINUTES
-        self.sla_availability_target = 99.9  # 99.9% uptime SLA target
-        self.sla_response_time_target_ms = 100.0  # 100ms response time SLA
+        self.sla_availability_target = Decimal("99.9")  # 99.9% uptime SLA target
+        self.sla_response_time_target_ms = Decimal("100.0")  # 100ms response time SLA
 
         # Background tasks
         self._health_check_task: asyncio.Task | None = None
@@ -242,17 +252,22 @@ class StateMonitoringService(BaseComponent):
         # Initialize built-in metrics
         self._initialize_builtin_metrics()
 
+        # Setup central monitoring integration if available
+        if self.metrics_collector:
+            self._setup_central_integration()
+
         self.logger.info("StateMonitoringService initialized")
 
     async def initialize(self) -> None:
         """Initialize the monitoring service."""
         try:
-            # Start background tasks
+            # Start background tasks with proper connection monitoring
             self._running = True
             self._health_check_task = asyncio.create_task(self._health_check_loop())
             self._metrics_collection_task = asyncio.create_task(self._metrics_collection_loop())
             self._alert_processing_task = asyncio.create_task(self._alert_processing_loop())
             self._cleanup_task = asyncio.create_task(self._cleanup_loop())
+            self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
 
             # Initial health check
             await self._run_all_health_checks()
@@ -262,7 +277,7 @@ class StateMonitoringService(BaseComponent):
 
         except Exception as e:
             self.logger.error(f"StateMonitoringService initialization failed: {e}")
-            raise StateError(f"Failed to initialize StateMonitoringService: {e}") from e
+            raise StateConsistencyError(f"Failed to initialize StateMonitoringService: {e}") from e
 
     async def cleanup(self) -> None:
         """Cleanup monitoring service resources."""
@@ -275,37 +290,49 @@ class StateMonitoringService(BaseComponent):
                 self._metrics_collection_task,
                 self._alert_processing_task,
                 self._cleanup_task,
+                self._heartbeat_task,
             ]
-            
-            # Clear task references immediately  
+
+            # Clear task references immediately
             self._health_check_task = None
             self._metrics_collection_task = None
             self._alert_processing_task = None
             self._cleanup_task = None
-            
+            self._heartbeat_task = None
+
             for task in background_tasks:
                 if task and not task.done():
                     task.cancel()
                     try:
-                        await task
+                        await asyncio.wait_for(task, timeout=5.0)
                     except asyncio.CancelledError:
                         pass
+                    except asyncio.TimeoutError:
+                        self.logger.warning("Background task cleanup timeout")
                     except Exception as e:
                         self.logger.error(f"Error waiting for background task cleanup: {e}")
-                        
+                    finally:
+                        # Ensure task reference is cleared
+                        task = None
+
             # Cleanup alert tasks
             alert_tasks = self._alert_tasks.copy()
             self._alert_tasks.clear()
-            
+
             for task in alert_tasks:
                 if task and not task.done():
                     task.cancel()
                     try:
-                        await task
+                        await asyncio.wait_for(task, timeout=5.0)
                     except asyncio.CancelledError:
                         pass
+                    except asyncio.TimeoutError:
+                        self.logger.warning("Alert task cleanup timeout")
                     except Exception as e:
                         self.logger.error(f"Error waiting for alert task cleanup: {e}")
+                    finally:
+                        # Ensure task reference is cleared
+                        task = None
 
             # Generate final performance report
             await self.generate_performance_report()
@@ -432,7 +459,7 @@ class StateMonitoringService(BaseComponent):
         unit: str = "",
     ) -> None:
         """
-        Record a metric value.
+        Record a metric value to both local and central monitoring.
 
         Args:
             name: Metric name
@@ -453,6 +480,12 @@ class StateMonitoringService(BaseComponent):
 
             # Update aggregates
             self._update_metric_aggregates(name, value)
+
+            # Use adapter if available (for integrated services), otherwise use direct central monitoring
+            if self.metrics_adapter:
+                self.metrics_adapter.record_state_metric(metric)
+            else:
+                self._record_to_central_monitoring(metric)
 
             # Check for alerts (schedule task but don't wait for it)
             try:
@@ -478,15 +511,19 @@ class StateMonitoringService(BaseComponent):
         if len(self._operation_timers[operation_name]) > 1000:
             self._operation_timers[operation_name] = self._operation_timers[operation_name][-500:]
 
-        # Record as metric
-        self.record_metric(
-            f"operation_time_{operation_name}", duration_ms, MetricType.TIMER, unit="ms"
-        )
+        # Use adapter if available (for integrated services), otherwise record as metric
+        if self.metrics_adapter:
+            self.metrics_adapter.record_operation_time(operation_name, duration_ms)
+        else:
+            # Record as metric
+            self.record_metric(
+                f"operation_time_{operation_name}", duration_ms, MetricType.TIMER, unit="ms"
+            )
 
     def get_metrics(self) -> dict[str, Any]:
         """Get current component metrics (override of BaseComponent method)."""
         return super().get_metrics()
-    
+
     async def get_filtered_metrics(
         self,
         metric_names: list[str] | None = None,
@@ -685,75 +722,100 @@ class StateMonitoringService(BaseComponent):
         """Initialize built-in metrics and thresholds."""
 
         # Set default alert thresholds
-        self.set_alert_threshold("memory_usage_mb", warning_threshold=MEMORY_WARNING_THRESHOLD, critical_threshold=MEMORY_CRITICAL_THRESHOLD)
         self.set_alert_threshold(
-            "error_rate_percentage", warning_threshold=5.0, critical_threshold=10.0
+            "memory_usage_mb",
+            warning_threshold=MEMORY_WARNING_THRESHOLD,
+            critical_threshold=MEMORY_CRITICAL_THRESHOLD,
+        )
+        self.set_alert_threshold(
+            "error_rate_percentage", warning_threshold=Decimal("5.0"), critical_threshold=Decimal("10.0")
         )
         self.set_alert_threshold("response_time_ms", warning_threshold=200, critical_threshold=500)
         self.set_alert_threshold(
             "cache_hit_rate",
-            warning_threshold=80.0,
-            critical_threshold=50.0,
+            warning_threshold=Decimal("80.0"),
+            critical_threshold=Decimal("50.0"),
             comparison="less_than",
         )
 
     async def _check_state_service_connectivity(self) -> dict[str, Any]:
         """Check state service connectivity."""
         try:
-            # Try to get health status from state service with timeout
+            # Try to get health status from state service with timeout and backpressure handling
             if hasattr(self.state_service, "get_health_status"):
-                status = await asyncio.wait_for(
-                    self.state_service.get_health_status(),
-                    timeout=10.0
-                )
-                return {"status": "healthy", "response": status}
+                try:
+                    status = await asyncio.wait_for(
+                        self.state_service.get_health_status(), timeout=10.0
+                    )
+                    return {"status": "healthy", "response": status}
+                except asyncio.TimeoutError:
+                    return {"status": "degraded", "error": "Health check timeout - possible backpressure"}
+                except asyncio.CancelledError:
+                    return {"status": "degraded", "error": "Health check cancelled"}
             else:
                 return {"status": "healthy", "message": "State service accessible"}
 
         except asyncio.TimeoutError:
             return {"status": "unhealthy", "error": "State service health check timeout"}
+        except asyncio.CancelledError:
+            return {"status": "degraded", "error": "State service health check cancelled"}
         except Exception as e:
             return {"status": "unhealthy", "error": str(e)}
 
     async def _check_database_connectivity(self) -> dict[str, Any]:
-        """Check database connectivity."""
+        """Check database connectivity with proper async error handling."""
         try:
             if self.state_service.database_service:
-                # Add timeout to prevent hanging on database health check
-                health_status = await asyncio.wait_for(
-                    self.state_service.database_service._service_health_check(),
-                    timeout=15.0
-                )
-                return {"status": "healthy" if health_status.value == "healthy" else "degraded"}
+                try:
+                    # Add timeout to prevent hanging on database health check
+                    health_status = await asyncio.wait_for(
+                        self.state_service.database_service._service_health_check(), timeout=15.0
+                    )
+                    return {"status": "healthy" if health_status.value == "healthy" else "degraded"}
+                except asyncio.TimeoutError:
+                    return {"status": "degraded", "error": "Database health check timeout - possible connection pool exhaustion"}
+                except asyncio.CancelledError:
+                    return {"status": "degraded", "error": "Database health check cancelled"}
+                except ConnectionError as e:
+                    return {"status": "unhealthy", "error": f"Database connection error: {e}"}
             else:
                 return {"status": "degraded", "message": "Database service not available"}
 
         except asyncio.TimeoutError:
             return {"status": "unhealthy", "error": "Database health check timeout"}
+        except asyncio.CancelledError:
+            return {"status": "degraded", "error": "Database health check cancelled"}
         except Exception as e:
             return {"status": "unhealthy", "error": str(e)}
 
     async def _check_cache_connectivity(self) -> dict[str, Any]:
-        """Check Redis cache connectivity."""
+        """Check Redis cache connectivity with proper async error handling."""
         redis_client = None
         try:
             redis_client = self.state_service.redis_client
             if not redis_client:
                 return {"status": "unhealthy", "error": "Redis client not available"}
-            
-            # Use timeout to prevent hanging on Redis ping
-            await asyncio.wait_for(
-                redis_client.ping(),
-                timeout=5.0
-            )
-            return {"status": "healthy"}
+
+            try:
+                # Use timeout to prevent hanging on Redis ping with backpressure detection
+                await asyncio.wait_for(redis_client.ping(), timeout=5.0)
+                return {"status": "healthy"}
+            except asyncio.TimeoutError:
+                return {"status": "degraded", "error": "Redis ping timeout - possible network congestion"}
+            except asyncio.CancelledError:
+                return {"status": "degraded", "error": "Redis ping cancelled"}
+            except ConnectionError as e:
+                return {"status": "unhealthy", "error": f"Redis connection error: {e}"}
 
         except asyncio.TimeoutError:
             return {"status": "unhealthy", "error": "Redis ping timeout"}
+        except asyncio.CancelledError:
+            return {"status": "degraded", "error": "Redis connectivity check cancelled"}
         except Exception as e:
             return {"status": "unhealthy", "error": str(e)}
         finally:
-            # Redis client cleanup is handled by the StateService
+            # Redis client cleanup is handled by the StateService - no action needed
+            # Using async context managers would be ideal but not required here
             pass
 
     async def _check_memory_usage(self) -> dict[str, Any]:
@@ -829,7 +891,7 @@ class StateMonitoringService(BaseComponent):
                     check.status = HealthStatus.UNKNOWN
                     check.last_error = "No check function configured"
                     return
-                    
+
                 result = await asyncio.wait_for(
                     check.check_function(), timeout=check.timeout_seconds
                 )
@@ -887,22 +949,27 @@ class StateMonitoringService(BaseComponent):
             check.last_error = str(e)
             self.logger.error(f"Health check {check.name} failed: {e}")
 
+        # Record health check status via adapter if available
+        if self.metrics_adapter:
+            self.metrics_adapter.record_health_check(check.name, check.status)
+
     def _update_metric_aggregates(self, name: str, value: float) -> None:
         """Update metric aggregates for performance."""
         if name not in self._metric_aggregates:
             self._metric_aggregates[name] = {
                 "count": 0,
-                "sum": 0.0,
-                "min": float("inf"),
-                "max": float("-inf"),
-                "avg": 0.0,
+                "sum": Decimal("0.0"),
+                "min": Decimal("inf"),
+                "max": Decimal("-inf"),
+                "avg": Decimal("0.0"),
             }
 
         agg = self._metric_aggregates[name]
+        decimal_value = Decimal(str(value))
         agg["count"] += 1
-        agg["sum"] += value
-        agg["min"] = min(agg["min"], value)
-        agg["max"] = max(agg["max"], value)
+        agg["sum"] += decimal_value
+        agg["min"] = min(agg["min"], decimal_value)
+        agg["max"] = max(agg["max"], decimal_value)
         agg["avg"] = agg["sum"] / agg["count"]
 
     async def _check_metric_alerts(self, metric_name: str, value: float) -> None:
@@ -917,7 +984,7 @@ class StateMonitoringService(BaseComponent):
             # Check critical threshold
             critical_threshold = thresholds.get("critical")
             if critical_threshold is not None and isinstance(critical_threshold, (int, float)):
-                triggered = self._evaluate_threshold(value, float(critical_threshold), comparison)
+                triggered = self._evaluate_threshold(value, Decimal(str(critical_threshold)), comparison)
                 if triggered:
                     await self._create_alert(
                         AlertSeverity.CRITICAL,
@@ -933,7 +1000,7 @@ class StateMonitoringService(BaseComponent):
             # Check warning threshold
             warning_threshold = thresholds.get("warning")
             if warning_threshold is not None and isinstance(warning_threshold, (int, float)):
-                triggered = self._evaluate_threshold(value, float(warning_threshold), comparison)
+                triggered = self._evaluate_threshold(value, Decimal(str(warning_threshold)), comparison)
                 if triggered:
                     await self._create_alert(
                         AlertSeverity.MEDIUM,
@@ -955,7 +1022,7 @@ class StateMonitoringService(BaseComponent):
         elif comparison == "less_than":
             return value < threshold
         elif comparison == "equals":
-            return abs(value - threshold) < 0.001
+            return abs(value - threshold) < Decimal("0.001")
         else:
             return False
 
@@ -1037,8 +1104,8 @@ class StateMonitoringService(BaseComponent):
                 if state_metrics:
                     key_metrics["state_service"] = {
                         "active_states": getattr(state_metrics, "active_states_count", 0),
-                        "cache_hit_rate": getattr(state_metrics, "cache_hit_rate", 0.0),
-                        "error_rate": getattr(state_metrics, "error_rate", 0.0),
+                        "cache_hit_rate": getattr(state_metrics, "cache_hit_rate", Decimal("0.0")),
+                        "error_rate": getattr(state_metrics, "error_rate", Decimal("0.0")),
                     }
             except Exception as e:
                 self.logger.error(f"Failed to get state service metrics: {e}")
@@ -1065,11 +1132,11 @@ class StateMonitoringService(BaseComponent):
                     unhealthy_seconds += check.consecutive_failures * 60
 
             uptime_seconds = max(0, total_seconds - unhealthy_seconds)
-            return (uptime_seconds / total_seconds) * 100 if total_seconds > 0 else 100.0
+            return (Decimal(str(uptime_seconds)) / Decimal(str(total_seconds))) * Decimal("100") if total_seconds > 0 else Decimal("100.0")
 
         except Exception as e:
             self.logger.error(f"Failed to calculate uptime: {e}")
-            return 100.0
+            return Decimal("100.0")
 
     async def _calculate_performance_metrics(
         self, report: PerformanceReport, start_time: datetime, end_time: datetime
@@ -1125,7 +1192,7 @@ class StateMonitoringService(BaseComponent):
             state_metrics = await self.state_service.get_metrics()
             if state_metrics:
                 report.cache_hit_rate_percentage = (
-                    getattr(state_metrics, "cache_hit_rate", 0.0) * 100
+                    getattr(state_metrics, "cache_hit_rate", Decimal("0.0")) * Decimal("100")
                 )
 
                 # Calculate operations per second
@@ -1153,7 +1220,9 @@ class StateMonitoringService(BaseComponent):
             resolved_alerts = [a for a in period_alerts if a.resolved and a.resolved_at]
             if resolved_alerts:
                 resolution_times = [
-                    (a.resolved_at - a.timestamp).total_seconds() / 60 for a in resolved_alerts if a.resolved_at is not None
+                    (a.resolved_at - a.timestamp).total_seconds() / 60
+                    for a in resolved_alerts
+                    if a.resolved_at is not None
                 ]
                 report.alert_resolution_time_minutes = sum(resolution_times) / len(resolution_times)
 
@@ -1278,7 +1347,7 @@ class StateMonitoringService(BaseComponent):
 
                             if threshold is not None and isinstance(threshold, (int, float)):
                                 triggered = self._evaluate_threshold(
-                                    current_value, float(threshold), comparison
+                                    current_value, Decimal(str(threshold)), comparison
                                 )
                                 if not triggered:
                                     alert.resolved = True
@@ -1297,7 +1366,8 @@ class StateMonitoringService(BaseComponent):
             self._alerts = [
                 alert
                 for alert in self._alerts
-                if not alert.resolved or (alert.resolved_at is not None and alert.resolved_at > cutoff_time)
+                if not alert.resolved
+                or (alert.resolved_at is not None and alert.resolved_at > cutoff_time)
             ]
 
         except Exception as e:
@@ -1332,7 +1402,160 @@ class StateMonitoringService(BaseComponent):
             # Clean up resource usage - keep only last 1000 entries
             for resource_name in list(self._resource_usage.keys()):
                 if len(self._resource_usage[resource_name]) > 1000:
-                    self._resource_usage[resource_name] = self._resource_usage[resource_name][-1000:]
+                    self._resource_usage[resource_name] = self._resource_usage[resource_name][
+                        -1000:
+                    ]
 
         except Exception as e:
             self.logger.error(f"Metrics cleanup failed: {e}")
+
+    async def _heartbeat_loop(self) -> None:
+        """Background heartbeat loop for connection monitoring."""
+        heartbeat_interval = 30  # 30 seconds heartbeat
+        while self._running:
+            try:
+                # Send heartbeat to all monitored connections
+                await self._send_heartbeat()
+                await asyncio.sleep(heartbeat_interval)
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                self.logger.error(f"Heartbeat loop error: {e}")
+                await asyncio.sleep(heartbeat_interval)
+
+    async def _send_heartbeat(self) -> None:
+        """Send heartbeat signals to monitored connections."""
+        try:
+            # Heartbeat for database connection
+            if self.state_service.database_service:
+                try:
+                    await asyncio.wait_for(
+                        self.state_service.database_service._service_health_check(),
+                        timeout=5.0
+                    )
+                except (asyncio.TimeoutError, Exception) as e:
+                    self.logger.debug(f"Database heartbeat failed: {e}")
+
+            # Heartbeat for Redis connection
+            if self.state_service.redis_client:
+                try:
+                    await asyncio.wait_for(
+                        self.state_service.redis_client.ping(),
+                        timeout=3.0
+                    )
+                except (asyncio.TimeoutError, Exception) as e:
+                    self.logger.debug(f"Redis heartbeat failed: {e}")
+
+        except Exception as e:
+            self.logger.debug(f"Heartbeat operation failed: {e}")
+
+    # Central Monitoring Integration Methods
+
+    def _record_to_central_monitoring(self, metric: Metric) -> None:
+        """Record metric to central monitoring system if available."""
+        try:
+            if not self.metrics_collector:
+                return
+
+            # Map metric type to central monitoring format
+            metric_type_map = {
+                MetricType.COUNTER: "counter",
+                MetricType.GAUGE: "gauge",
+                MetricType.HISTOGRAM: "histogram",
+                MetricType.TIMER: "histogram",
+            }
+
+            # Validate metric data
+            if metric.value is None or not isinstance(metric.value, (int, float)):
+                return
+
+            import math
+            if math.isnan(metric.value) or math.isinf(metric.value):
+                return
+
+            # Add state-specific labels
+            labels = {"component": "state", "metric_name": metric.name, **metric.tags}
+            central_type = metric_type_map.get(metric.metric_type, "gauge")
+
+            # Record to central metrics
+            if central_type == "counter":
+                self.metrics_collector.increment_counter(f"state.{metric.name}", labels, metric.value)
+            elif central_type == "gauge":
+                self.metrics_collector.set_gauge(f"state.{metric.name}", metric.value, labels)
+            elif central_type == "histogram":
+                self.metrics_collector.observe_histogram(f"state.{metric.name}", metric.value, labels)
+
+        except Exception as e:
+            self.logger.warning(f"Failed to record to central monitoring: {e}")
+
+    async def _send_alert_to_central(self, alert: Alert) -> None:
+        """Send alert to central alerting system."""
+        try:
+            if not self._central_alert_manager:
+                # Try to get alert manager if not already set
+                try:
+                    from src.monitoring.alerting import get_alert_manager
+                    self._central_alert_manager = get_alert_manager()
+                except ImportError:
+                    return
+
+            if not self._central_alert_manager:
+                return
+
+            # Convert to central alert format
+            from src.monitoring.alerting import (
+                Alert as CentralAlert,
+                AlertSeverity as CentralSeverity,
+                AlertStatus,
+            )
+
+            severity_map = {
+                AlertSeverity.LOW: CentralSeverity.LOW,
+                AlertSeverity.MEDIUM: CentralSeverity.MEDIUM,
+                AlertSeverity.HIGH: CentralSeverity.HIGH,
+                AlertSeverity.CRITICAL: CentralSeverity.CRITICAL,
+            }
+
+            central_alert = CentralAlert(
+                rule_name=f"state.{alert.source}",
+                severity=severity_map.get(alert.severity, CentralSeverity.MEDIUM),
+                status=AlertStatus.FIRING,
+                message=alert.message,
+                labels={
+                    "source": "state",
+                    "category": alert.category,
+                    "alert_id": alert.alert_id,
+                },
+                annotations={
+                    "title": alert.title,
+                    "metric_name": alert.metric_name,
+                    "current_value": str(alert.current_value),
+                    "threshold_value": str(alert.threshold_value),
+                },
+                starts_at=alert.timestamp,
+            )
+
+            await self._central_alert_manager.fire_alert(central_alert)
+
+        except Exception as e:
+            self.logger.warning(f"Failed to send alert to central system: {e}")
+
+    def _setup_central_integration(self) -> None:
+        """Setup integration with central monitoring systems."""
+        # Register alert handler to forward to central system
+        self.register_alert_handler(self._forward_alert_handler)
+
+    async def _forward_alert_handler(self, alert: Alert) -> None:
+        """Forward alert to central system."""
+        try:
+            await self._send_alert_to_central(alert)
+        except Exception as e:
+            self.logger.warning(f"Failed to forward alert to central system: {e}")
+
+    async def _forward_alert_to_central(self, alert: Alert) -> None:
+        """Forward alert to central system via adapter."""
+        try:
+            if self.alert_adapter:
+                await self.alert_adapter.send_alert(alert)
+        except Exception as e:
+            self.logger.warning(f"Failed to forward alert via adapter: {e}")

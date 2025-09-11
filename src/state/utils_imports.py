@@ -9,6 +9,7 @@ utils features are unavailable.
 import functools
 import logging
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -23,12 +24,14 @@ except ImportError as e:
     # Provide a fallback no-op decorator
     def time_execution(func: Callable) -> Callable:
         """Fallback time_execution decorator."""
+
         @functools.wraps(func)
         def wrapper(*args: Any, **kwargs: Any) -> Any:
             if not hasattr(wrapper, "_warned"):
                 logger.debug(f"Performance monitoring not available for {func.__name__}")
                 wrapper._warned = True
             return func(*args, **kwargs)
+
         return wrapper
 
 
@@ -49,9 +52,9 @@ try:
     from src.utils.state_utils import ensure_directory_exists
 except ImportError as e:
     logger.error(f"Failed to import state utilities: {e}")
-    
+
     # Provide a fallback implementation that uses standard library
-    def ensure_directory_exists(directory_path: str) -> None:
+    def ensure_directory_exists(directory_path: str | Path) -> None:
         """Fallback ensure_directory_exists using standard library."""
         from pathlib import Path
 
@@ -61,13 +64,16 @@ except ImportError as e:
             logger.error(f"Failed to create directory {directory_path}: {mkdir_error}")
             raise
 
+
 # Import state constants
 try:
     from src.utils.state_constants import (
+        CHECKPOINT_FILE_EXTENSION,
         DEFAULT_CACHE_TTL,
+        DEFAULT_CLEANUP_INTERVAL,
         DEFAULT_COMPRESSION_THRESHOLD,
         DEFAULT_MAX_CHECKPOINTS,
-        CHECKPOINT_FILE_EXTENSION
+        DEFAULT_TRADE_STALENESS_THRESHOLD,
     )
 except ImportError as e:
     logger.warning(f"Failed to import state constants: {e}")
@@ -76,15 +82,20 @@ except ImportError as e:
     DEFAULT_COMPRESSION_THRESHOLD = 1024
     DEFAULT_MAX_CHECKPOINTS = 50
     CHECKPOINT_FILE_EXTENSION = ".checkpoint"
+    DEFAULT_CLEANUP_INTERVAL = 3600  # 1 hour
+    DEFAULT_TRADE_STALENESS_THRESHOLD = 3600  # 1 hour
 
 
 # Export all imported utilities
 __all__ = [
-    "ValidationService", 
-    "ensure_directory_exists", 
-    "time_execution",
+    "CHECKPOINT_FILE_EXTENSION",
     "DEFAULT_CACHE_TTL",
-    "DEFAULT_COMPRESSION_THRESHOLD", 
+    "DEFAULT_COMPRESSION_THRESHOLD",
     "DEFAULT_MAX_CHECKPOINTS",
-    "CHECKPOINT_FILE_EXTENSION"
+    "DEFAULT_CLEANUP_INTERVAL",
+    "DEFAULT_TRADE_STALENESS_THRESHOLD",
+    "ValidationService",
+    "ensure_directory_exists",
+    "logger",
+    "time_execution",
 ]

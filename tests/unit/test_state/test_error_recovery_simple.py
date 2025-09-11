@@ -9,14 +9,13 @@ from unittest.mock import Mock
 
 import pytest
 
-from src.core.exceptions import DatabaseError, DatabaseConnectionError, DatabaseQueryError
 from src.state.error_recovery import (
-    ErrorType,
+    RecoveryCheckpoint,
     RecoveryStrategy,
     StateErrorContext,
     StateErrorRecovery,
-    RecoveryCheckpoint,
 )
+from src.utils.error_recovery_utilities import ErrorType
 
 
 class TestErrorType:
@@ -37,30 +36,27 @@ class TestErrorType:
         database_errors = [
             ErrorType.DATABASE_CONNECTION,
             ErrorType.DATABASE_INTEGRITY,
-            ErrorType.DATABASE_TIMEOUT
+            ErrorType.DATABASE_TIMEOUT,
         ]
-        
-        redis_errors = [
-            ErrorType.REDIS_CONNECTION,
-            ErrorType.REDIS_TIMEOUT
-        ]
-        
+
+        redis_errors = [ErrorType.REDIS_CONNECTION, ErrorType.REDIS_TIMEOUT]
+
         # Verify categories are distinct
         assert len(set(database_errors) & set(redis_errors)) == 0
 
     def test_error_type_coverage(self):
         """Test error type coverage for common scenarios."""
         all_types = list(ErrorType)
-        
+
         # Should have at least these basic categories
         required_types = {
             ErrorType.DATABASE_CONNECTION,
             ErrorType.DATABASE_INTEGRITY,
             ErrorType.REDIS_CONNECTION,
             ErrorType.VALIDATION,
-            ErrorType.UNKNOWN
+            ErrorType.UNKNOWN,
         }
-        
+
         assert required_types.issubset(set(all_types))
 
 
@@ -79,15 +75,15 @@ class TestRecoveryStrategy:
     def test_recovery_strategy_completeness(self):
         """Test recovery strategy completeness."""
         all_strategies = list(RecoveryStrategy)
-        
+
         # Should have at least these basic strategies
         required_strategies = {
             RecoveryStrategy.RETRY,
             RecoveryStrategy.ROLLBACK,
             RecoveryStrategy.FALLBACK,
-            RecoveryStrategy.ABORT
+            RecoveryStrategy.ABORT,
         }
-        
+
         assert required_strategies.issubset(set(all_strategies))
 
     def test_recovery_strategy_risk_levels(self):
@@ -96,9 +92,9 @@ class TestRecoveryStrategy:
         low_risk = [RecoveryStrategy.SKIP]
         medium_risk = [RecoveryStrategy.RETRY, RecoveryStrategy.FALLBACK]
         high_risk = [RecoveryStrategy.ROLLBACK, RecoveryStrategy.ABORT, RecoveryStrategy.MANUAL]
-        
+
         all_strategies = low_risk + medium_risk + high_risk
-        
+
         # Verify we have comprehensive coverage
         assert len(all_strategies) == len(set(all_strategies))  # No duplicates
 
@@ -112,9 +108,9 @@ class TestStateErrorContext:
             error_type=ErrorType.DATABASE_CONNECTION,
             error_message="Connection failed",
             operation="save_state",
-            retry_count=0
+            retry_count=0,
         )
-        
+
         assert error_context.error_type == ErrorType.DATABASE_CONNECTION
         assert error_context.error_message == "Connection failed"
         assert error_context.operation == "save_state"
@@ -123,10 +119,9 @@ class TestStateErrorContext:
     def test_state_error_context_with_minimal_data(self):
         """Test StateErrorContext with minimal required data."""
         error_context = StateErrorContext(
-            error_type=ErrorType.VALIDATION,
-            error_message="Validation failed"
+            error_type=ErrorType.VALIDATION, error_message="Validation failed"
         )
-        
+
         assert error_context.error_type == ErrorType.VALIDATION
         assert error_context.error_message == "Validation failed"
         # Optional fields should have defaults or None
@@ -135,12 +130,11 @@ class TestStateErrorContext:
     def test_state_error_context_timestamp(self):
         """Test StateErrorContext timestamp handling."""
         error_context = StateErrorContext(
-            error_type=ErrorType.DATABASE_TIMEOUT,
-            error_message="Timeout occurred"
+            error_type=ErrorType.DATABASE_TIMEOUT, error_message="Timeout occurred"
         )
-        
+
         # Should have timestamp set automatically
-        assert hasattr(error_context, 'timestamp')
+        assert hasattr(error_context, "timestamp")
         if error_context.timestamp:
             assert isinstance(error_context.timestamp, datetime)
 
@@ -152,9 +146,9 @@ class TestStateErrorContext:
             error_message="Query timeout",
             operation="query_state",
             session_id="conn_123",
-            transaction_id="txn_456"
+            transaction_id="txn_456",
         )
-        
+
         assert error_context.session_id == "conn_123"
         assert error_context.transaction_id == "txn_456"
         assert error_context.operation == "query_state"
@@ -166,37 +160,30 @@ class TestRecoveryCheckpoint:
     def test_recovery_checkpoint_initialization(self):
         """Test RecoveryCheckpoint initialization."""
         checkpoint = RecoveryCheckpoint(
-            checkpoint_id="recovery_001",
-            timestamp=datetime.now(timezone.utc)
+            checkpoint_id="recovery_001", timestamp=datetime.now(timezone.utc)
         )
-        
+
         assert checkpoint.checkpoint_id == "recovery_001"
         assert checkpoint.timestamp is not None
-        assert hasattr(checkpoint, 'can_rollback')
+        assert hasattr(checkpoint, "can_rollback")
         assert checkpoint.can_rollback is True
 
     def test_recovery_checkpoint_state_data(self):
         """Test RecoveryCheckpoint with state data."""
         state_data = {"bot_id": "test_bot", "status": "running", "capital": "100000.00"}
-        
-        checkpoint = RecoveryCheckpoint(
-            checkpoint_id="recovery_002",
-            state_before=state_data
-        )
-        
+
+        checkpoint = RecoveryCheckpoint(checkpoint_id="recovery_002", state_before=state_data)
+
         assert checkpoint.checkpoint_id == "recovery_002"
-        assert hasattr(checkpoint, 'state_before')
+        assert hasattr(checkpoint, "state_before")
         assert checkpoint.state_before == state_data
 
     def test_recovery_checkpoint_metadata(self):
         """Test RecoveryCheckpoint metadata handling."""
         metadata = {"operation": "save_state", "context": "test"}
-        
-        checkpoint = RecoveryCheckpoint(
-            checkpoint_id="recovery_003",
-            metadata_before=metadata
-        )
-        
+
+        checkpoint = RecoveryCheckpoint(checkpoint_id="recovery_003", metadata_before=metadata)
+
         # Should have basic metadata
         assert checkpoint.checkpoint_id == "recovery_003"
         assert checkpoint.metadata_before == metadata
@@ -215,7 +202,8 @@ def state_error_recovery():
     """Create StateErrorRecovery instance for testing."""
     # StateErrorRecovery takes logger, not state_service
     import logging
-    logger = logging.getLogger('test')
+
+    logger = logging.getLogger("test")
     return StateErrorRecovery(logger)
 
 
@@ -224,25 +212,27 @@ class TestStateErrorRecovery:
 
     def test_state_error_recovery_initialization(self, state_error_recovery):
         """Test StateErrorRecovery initialization."""
-        assert hasattr(state_error_recovery, 'logger')
-        assert hasattr(state_error_recovery, '_error_handlers')
-        assert hasattr(state_error_recovery, 'error_counts')
+        assert hasattr(state_error_recovery, "logger")
+        assert hasattr(state_error_recovery, "_error_handlers")
+        assert hasattr(state_error_recovery, "error_counts")
 
     def test_classify_error_database_errors(self, state_error_recovery):
         """Test error classification for database errors."""
         # Test SQLAlchemy IntegrityError (maps to DATABASE_INTEGRITY)
         from sqlalchemy.exc import IntegrityError
+
         integrity_error = IntegrityError("statement", "params", "orig")
         error_type = state_error_recovery.classify_error(integrity_error)
         assert error_type == ErrorType.DATABASE_INTEGRITY
-        
+
         # Test ConnectionError (maps to DATABASE_CONNECTION)
         connection_error = ConnectionError("Connection lost")
         error_type = state_error_recovery.classify_error(connection_error)
         assert error_type == ErrorType.DATABASE_CONNECTION
-        
+
         # Test asyncio.TimeoutError (maps to DATABASE_TIMEOUT)
         import asyncio
+
         timeout_error = asyncio.TimeoutError("Operation timed out")
         error_type = state_error_recovery.classify_error(timeout_error)
         assert error_type == ErrorType.DATABASE_TIMEOUT
@@ -253,7 +243,7 @@ class TestStateErrorRecovery:
         generic_error = Exception("Unknown error")
         error_type = state_error_recovery.classify_error(generic_error)
         assert error_type == ErrorType.UNKNOWN
-        
+
         # Test value error
         value_error = ValueError("Invalid value")
         error_type = state_error_recovery.classify_error(value_error)
@@ -263,22 +253,20 @@ class TestStateErrorRecovery:
     def test_create_error_context(self, state_error_recovery):
         """Test creating error context from exception."""
         from sqlalchemy.exc import IntegrityError
-        
+
         orig_error = Exception("Constraint violation")
         exception = IntegrityError("INSERT INTO table", {}, orig_error)
-        
+
         # StateErrorRecovery doesn't have create_error_context method, test classify_error instead
         error_type = state_error_recovery.classify_error(exception)
-        
+
         assert error_type == ErrorType.DATABASE_INTEGRITY
-        
+
         # Test creating context manually
         context = StateErrorContext(
-            error_type=error_type,
-            error_message="Constraint violation",
-            operation="save_state"
+            error_type=error_type, error_message="Constraint violation", operation="save_state"
         )
-        
+
         assert isinstance(context, StateErrorContext)
         assert context.error_type == ErrorType.DATABASE_INTEGRITY
         assert "Constraint violation" in context.error_message
@@ -288,14 +276,14 @@ class TestStateErrorRecovery:
     async def test_create_recovery_checkpoint(self, state_error_recovery):
         """Test creating recovery checkpoint."""
         state_data = {"bot_id": "test_bot", "status": "running"}
-        
+
         checkpoint_id = await state_error_recovery.create_recovery_checkpoint(
             operation="save_state",
             state_type="bot_state",
             state_id="test_bot",
-            current_state=state_data
+            current_state=state_data,
         )
-        
+
         assert isinstance(checkpoint_id, str)
         assert checkpoint_id is not None
 
@@ -306,7 +294,7 @@ class TestStateErrorRecovery:
         db_error = ConnectionError("Database connection lost")
         error_type = state_error_recovery.classify_error(db_error)
         assert error_type == ErrorType.DATABASE_CONNECTION
-        
+
         # Test that handlers exist for different error types
         assert ErrorType.DATABASE_CONNECTION in state_error_recovery._error_handlers
         assert ErrorType.DATA_CORRUPTION in state_error_recovery._error_handlers
@@ -317,14 +305,11 @@ class TestStateErrorRecovery:
         # StateErrorRecovery doesn't have validate_recovery_preconditions method
         # Test error handling instead which includes validation
         exception = ConnectionError("Connection failed")
-        
+
         context = await state_error_recovery.handle_error(
-            exception=exception,
-            operation="save_state",
-            state_type="bot_state",
-            state_id="test_bot"
+            exception=exception, operation="save_state", state_type="bot_state", state_id="test_bot"
         )
-        
+
         assert isinstance(context, StateErrorContext)
         assert context.error_type == ErrorType.DATABASE_CONNECTION
 
@@ -332,8 +317,8 @@ class TestStateErrorRecovery:
         """Test retry delay calculation."""
         # StateErrorRecovery doesn't have calculate_retry_delay method
         # Test that retry configuration is available
-        assert hasattr(state_error_recovery, 'default_retry_delay')
-        assert hasattr(state_error_recovery, 'exponential_backoff')
+        assert hasattr(state_error_recovery, "default_retry_delay")
+        assert hasattr(state_error_recovery, "exponential_backoff")
         assert state_error_recovery.default_retry_delay >= 0
         assert isinstance(state_error_recovery.exponential_backoff, bool)
 
@@ -343,11 +328,11 @@ class TestStateErrorRecovery:
         # Test that logging is available and statistics work
         stats = state_error_recovery.get_error_statistics()
         assert isinstance(stats, dict)
-        assert 'error_counts_by_type' in stats
-        assert 'recovery_success_rate' in stats
-        
+        assert "error_counts_by_type" in stats
+        assert "recovery_success_rate" in stats
+
         # Test that logger exists
-        assert hasattr(state_error_recovery, 'logger')
+        assert hasattr(state_error_recovery, "logger")
         assert state_error_recovery.logger is not None
 
     def test_recovery_metrics_collection(self, state_error_recovery):
@@ -355,13 +340,13 @@ class TestStateErrorRecovery:
         # Test available metrics functionality
         stats = state_error_recovery.get_error_statistics()
         assert isinstance(stats, dict)
-        assert 'error_counts_by_type' in stats
-        assert 'total_errors' in stats
-        assert 'recovery_success_rate' in stats
-        
+        assert "error_counts_by_type" in stats
+        assert "total_errors" in stats
+        assert "recovery_success_rate" in stats
+
         # Test that error counts tracking works
-        initial_total = stats['total_errors']
-        
+        initial_total = stats["total_errors"]
+
         # Simulate error classification which increments counters
         test_error = ValueError("Test error")
         error_type = state_error_recovery.classify_error(test_error)
@@ -376,27 +361,27 @@ class TestErrorRecoveryIntegration:
         """Test complete error recovery workflow."""
         # Step 1: Error occurs
         exception = ConnectionError("Database connection lost")
-        
+
         # Step 2: Classify error
         error_type = state_error_recovery.classify_error(exception)
         assert error_type == ErrorType.DATABASE_CONNECTION
-        
+
         # Step 3: Create recovery checkpoint
         checkpoint_id = await state_error_recovery.create_recovery_checkpoint(
             operation="save_state",
             state_type="bot_state",
             state_id="test_bot",
-            current_state={"bot_id": "test_bot", "status": "running"}
+            current_state={"bot_id": "test_bot", "status": "running"},
         )
         assert isinstance(checkpoint_id, str)
-        
+
         # Step 4: Handle error with recovery
         context = await state_error_recovery.handle_error(
             exception=exception,
             operation="save_state",
             state_type="bot_state",
             state_id="test_bot",
-            checkpoint_id=checkpoint_id
+            checkpoint_id=checkpoint_id,
         )
         assert isinstance(context, StateErrorContext)
 
@@ -405,7 +390,7 @@ class TestErrorRecoveryIntegration:
         # Test retry configuration and logic
         assert state_error_recovery.default_retry_count >= 1
         assert state_error_recovery.default_retry_delay >= 0
-        
+
         # Test that we can create contexts with different retry counts
         for retry_count in range(3):
             context = StateErrorContext(
@@ -413,18 +398,18 @@ class TestErrorRecoveryIntegration:
                 error_message="Query timeout",
                 operation="load_state",
                 retry_count=retry_count,
-                max_retries=3
+                max_retries=3,
             )
-            
+
             assert context.retry_count == retry_count
             assert context.max_retries == 3
-            
+
             # Test retry logic within bounds
             if state_error_recovery.exponential_backoff:
-                expected_delay = state_error_recovery.default_retry_delay * (2 ** retry_count)
+                expected_delay = state_error_recovery.default_retry_delay * (2**retry_count)
             else:
                 expected_delay = state_error_recovery.default_retry_delay
-            
+
             # Delay should be reasonable
             assert expected_delay < 60  # 1 minute max for tests
 
@@ -433,12 +418,12 @@ class TestErrorRecoveryIntegration:
         # Test that error handlers exist for all error types
         for error_type in ErrorType:
             assert error_type in state_error_recovery._error_handlers
-            
+
         # Test error statistics tracking
         stats = state_error_recovery.get_error_statistics()
         assert isinstance(stats, dict)
-        assert 'error_counts_by_type' in stats
-        
+        assert "error_counts_by_type" in stats
+
         # Test that error counts are initialized for all types
         for error_type in ErrorType:
             assert error_type in state_error_recovery.error_counts

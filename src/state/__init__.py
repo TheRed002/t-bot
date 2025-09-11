@@ -29,9 +29,12 @@ Key Features:
 
 from typing import TYPE_CHECKING
 
-# Core state management services
 # Legacy components (backward compatibility)
 from .checkpoint_manager import CheckpointManager
+
+# Core state management services
+# Controller layer
+from .controller import StateController
 
 # Enterprise components
 from .factory import (
@@ -73,16 +76,17 @@ if TYPE_CHECKING:
     from .state_validator import StateValidator
 
 # Trading-specific components
-from .trade_lifecycle_manager import TradeEvent, TradeLifecycleManager
-
 # Dependency injection registration
 from .di_registration import register_state_services
+from .trade_lifecycle_manager import TradeEvent, TradeLifecycleManager
+
 
 # Runtime imports for backward compatibility
 def __getattr__(name: str):
     """Lazy import for circular dependency resolution."""
     if name in ("StatePriority", "StateService", "StateType"):
         from .state_service import StatePriority, StateService, StateType
+
         if name == "StatePriority":
             return StatePriority
         elif name == "StateService":
@@ -91,8 +95,10 @@ def __getattr__(name: str):
             return StateType
     elif name == "StateValidator":
         from .state_validator import StateValidator
+
         return StateValidator
     raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
+
 
 # Public API exports
 __all__ = [
@@ -111,12 +117,13 @@ __all__ = [
     "RecoveryOperation",
     "RecoveryPoint",
     "RecoveryStatus",
+    "StateController",
     "StateManager",
     "StateMonitoringService",
     "StatePriority",
     "StateRecoveryManager",
     "StateService",
-    "StateServiceFactory", 
+    "StateServiceFactory",
     "StateServiceRegistry",
     "StateSyncManager",
     "StateType",

@@ -18,7 +18,7 @@ from packaging import version
 # LegacyVersion is deprecated in newer packaging versions
 LegacyVersion = None
 
-from src.core.exceptions import StateError
+from src.core.exceptions import StateConsistencyError
 
 
 class MigrationType(Enum):
@@ -219,35 +219,35 @@ class StateVersioningSystem:
 
     Handles state schema evolution, migration execution, and version compatibility.
 
-    Repository Interface:
-        The metadata_repository parameter should implement:
-        - get_all() -> AsyncIterable: Returns all state metadata records
+    Service Interface:
+        The metadata_service parameter should implement:
+        - get_all_metadata() -> AsyncIterable: Returns all state metadata records
 
         Each metadata record should support either:
         - Attribute access: record.schema_version, record.state_type
         - Dict access: record['schema_version'], record['state_type']
 
-    This design allows integration with any repository implementation that
+    This design allows integration with any service implementation that
     provides the required interface without tight coupling to specific types.
     """
 
     def __init__(
         self,
         current_version: str = "1.0.0",
-        metadata_repository=None,
+        metadata_service=None,
     ):
         """
         Initialize versioning system.
 
         Args:
             current_version: Current system version
-            metadata_repository: Optional repository for state metadata operations.
-                                Must implement get_all() async method if provided.
-                                Can be any object with compatible interface.
+            metadata_service: Optional service for state metadata operations.
+                             Must implement get_all_metadata() async method if provided.
+                             Should be a service, not a repository.
         """
         self.current_version = StateVersion(current_version)
         self.logger = logging.getLogger(__name__)
-        self._metadata_repository = metadata_repository
+        self._metadata_service = metadata_service
 
         # Migration registry
         self._migrations: dict[str, StateMigration] = {}
@@ -270,7 +270,7 @@ class StateVersioningSystem:
     def register_migration(self, migration: StateMigration) -> None:
         """Register a migration."""
         if migration.migration_id in self._migrations:
-            raise StateError(f"Migration {migration.migration_id} already registered")
+            raise StateConsistencyError(f"Migration {migration.migration_id} already registered")
 
         self._migrations[migration.migration_id] = migration
         self._migration_order_cache = []  # Clear cache
@@ -329,7 +329,7 @@ class StateVersioningSystem:
                         queue.append((next_version, [*path, migration_id]))
 
         # No path found
-        raise StateError(f"No migration path from {from_version} to {to_version}")
+        raise StateConsistencyError(f"No migration path from {from_version} to {to_version}")
 
     async def migrate_state(
         self,
@@ -363,7 +363,9 @@ class StateVersioningSystem:
 
         # Check if versions are compatible
         if not self.is_version_compatible(current_version, target_version):
-            raise StateError(f"Version {current_version} is not compatible with {target_version}")
+            raise StateConsistencyError(
+                f"Version {current_version} is not compatible with {target_version}"
+            )
 
         # Get migration path
         migration_path = self.get_migration_path(from_version, to_version)
@@ -404,7 +406,9 @@ class StateVersioningSystem:
                 # Pre-migration validation
                 if self.validate_migrations:
                     if not await migration.validate_pre_migration(migrated_data, metadata):
-                        raise StateError(f"Pre-migration validation failed for {migration_id}")
+                        raise StateConsistencyError(
+                            f"Pre-migration validation failed for {migration_id}"
+                        )
 
                 # Execute migration
                 self.logger.info(f"Executing migration: {migration_id}")
@@ -418,7 +422,9 @@ class StateVersioningSystem:
                 # Post-migration validation
                 if self.validate_migrations:
                     if not await migration.validate_post_migration(migrated_data, metadata):
-                        raise StateError(f"Post-migration validation failed for {migration_id}")
+                        raise StateConsistencyError(
+                            f"Post-migration validation failed for {migration_id}"
+                        )
 
                 record.status = MigrationStatus.COMPLETED
                 record.completed_at = end_time
@@ -442,11 +448,11 @@ class StateVersioningSystem:
                         record.status = MigrationStatus.ROLLED_BACK
                     except Exception as rollback_error:
                         self.logger.error(f"Rollback failed: {migration_id}: {rollback_error}")
-                        raise StateError(
+                        raise StateConsistencyError(
                             f"Migration {migration_id} failed with rollback error: {e}"
                         ) from rollback_error
 
-                raise StateError(f"Migration {migration_id} failed: {e}") from e
+                raise StateConsistencyError(f"Migration {migration_id} failed: {e}") from e
 
             finally:
                 if migration_id in self._active_migrations:
@@ -552,25 +558,25 @@ class StateVersioningSystem:
         version_counts: dict[str, dict[str, int]] = {}
 
         try:
-            if not self._metadata_repository:
-                self.logger.warning("No metadata repository available for version statistics")
+            if not self._metadata_service:
+                self.logger.warning("No metadata service available for version statistics")
                 return {
-                    "error": "Repository not configured",
+                    "error": "Service not configured",
                     "version_distribution": {},
                     "total_states": 0,
                 }
 
-            # Check if repository has required method
-            if not hasattr(self._metadata_repository, "get_all"):
-                self.logger.error("Metadata repository does not implement get_all() method")
+            # Check if service has required method
+            if not hasattr(self._metadata_service, "get_all_metadata"):
+                self.logger.error("Metadata service does not implement get_all_metadata() method")
                 return {
-                    "error": "Repository method not available",
+                    "error": "Service method not available",
                     "version_distribution": {},
                     "total_states": 0,
                 }
 
-            # Use repository to get all metadata
-            all_metadata = await self._metadata_repository.get_all()
+            # Use service to get all metadata
+            all_metadata = await self._metadata_service.get_all_metadata()
 
             for metadata in all_metadata:
                 # Handle both attribute and dict-like access patterns

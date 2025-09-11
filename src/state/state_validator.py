@@ -30,8 +30,8 @@ from .utils_imports import time_execution
 if TYPE_CHECKING:
     from .state_service import StateService, StateType
 else:
-    # Use string annotations to avoid circular dependencies
-    StateType = "StateType"
+    # Import StateType from core.types to avoid circular dependencies
+    from src.core.types import StateType
 
 
 class ValidationLevel(Enum):
@@ -123,7 +123,7 @@ class StateValidator(BaseComponent):
 
     This controller provides backward compatibility while ensuring all
     business logic is properly separated into the service layer.
-    
+
     Features:
     - Delegates validation to StateValidationService
     - Provides backward compatibility interface
@@ -150,6 +150,7 @@ class StateValidator(BaseComponent):
         self.cache_validation_results = True
         self.cache_ttl_seconds = 300  # 5 minutes
         self._transition_rules: dict[StateType, dict[str, set[str]]] = {}
+        self._validation_rules: dict[StateType, list[ValidationRuleConfig]] = {}
 
         # Performance optimization
         self._validation_cache: dict[str, tuple[ValidationResult, datetime]] = {}
@@ -238,115 +239,49 @@ class StateValidator(BaseComponent):
                 service_result = await self._validation_service.validate_state_data(
                     state_type, state_data, level.value
                 )
-                
+
                 # Convert service result to ValidationResult format
                 result = ValidationResult(
                     is_valid=service_result.get("is_valid", True),
                     state_type=state_type,
                     state_id=state_data.get("state_id", "unknown"),
                     validation_time_ms=service_result.get("validation_time_ms", 0.0),
+                    rules_checked=service_result.get("rules_checked", 0),
+                    rules_passed=service_result.get("rules_passed", 0),
                 )
-                
+
                 # Convert error strings to ValidationError objects
                 for error_msg in service_result.get("errors", []):
-                    result.errors.append(ValidationError(
-                        rule_name="service_validation",
-                        field_name="unknown",
-                        error_message=error_msg,
-                        severity="error"
-                    ))
-                
+                    result.errors.append(
+                        StateValidationError(
+                            rule_type=ValidationRule.REQUIRED_FIELD,
+                            field_name="unknown",
+                            error_message=error_msg,
+                            severity="error",
+                        )
+                    )
+
                 return result
             else:
                 # Fallback to legacy validation if service not available
                 result = ValidationResult(
-                    state_type=state_type, 
-                    state_id=state_data.get("state_id", "unknown")
+                    state_type=state_type, state_id=state_data.get("state_id", "unknown")
                 )
-                
+
                 # Skip validation if disabled
                 if level == ValidationLevel.DISABLED:
                     result.validation_time_ms = (
                         datetime.now(timezone.utc) - start_time
                     ).total_seconds() * 1000
                     return result
-                
+
                 # Perform minimal fallback validation
                 result.is_valid = True
                 result.validation_time_ms = (
                     datetime.now(timezone.utc) - start_time
                 ).total_seconds() * 1000
-                
+
                 return result
-
-            result.rules_checked = len(enabled_rules)
-
-            # Apply validation rules
-            for rule_config in enabled_rules:
-                try:
-                    rule_result = await self._apply_validation_rule(
-                        rule_config, state_data, state_type
-                    )
-
-                    if rule_result["passed"]:
-                        result.rules_passed += 1
-                    else:
-                        if rule_config.severity == "error":
-                            error = StateValidationError(
-                                rule_type=rule_config.rule_type,
-                                field_name=rule_config.field_name,
-                                error_message=rule_result["message"],
-                                severity=rule_config.severity,
-                                current_value=rule_result.get("current_value"),
-                                expected_value=rule_result.get("expected_value"),
-                            )
-                            result.errors.append(error)
-                            result.is_valid = False
-                        else:
-                            warning = ValidationWarning(
-                                rule_type=rule_config.rule_type,
-                                field_name=rule_config.field_name,
-                                warning_message=rule_result["message"],
-                                current_value=rule_result.get("current_value"),
-                                recommendation=rule_result.get("recommendation", ""),
-                            )
-                            result.warnings.append(warning)
-
-                    # Update rule usage metrics
-                    rule_name = (
-                        f"{state_type.value}:{rule_config.field_name}:{rule_config.rule_type.value}"
-                    )
-                    self._validation_metrics.rules_triggered[rule_name] = (
-                        self._validation_metrics.rules_triggered.get(rule_name, 0) + 1
-                    )
-
-                except Exception as e:
-                    self.logger.error(f"Rule application failed: {rule_config.field_name}: {e}")
-                    # Add validation system error
-                    error = StateValidationError(
-                        rule_type=ValidationRule.TYPE_CHECK,
-                        field_name=rule_config.field_name,
-                        error_message=f"Validation system error: {e}",
-                        severity="error",
-                    )
-                    result.errors.append(error)
-                    result.is_valid = False
-
-            # Calculate validation time
-            result.validation_time_ms = (
-                datetime.now(timezone.utc) - start_time
-            ).total_seconds() * 1000
-
-            # Cache result if enabled
-            if use_cache and self.cache_validation_results:
-                cache_key = self._generate_cache_key(state_type, state_data, level)
-                self._cache_result(cache_key, result)
-                self._validation_metrics.cache_hit_rate = self._update_hit_rate(False)
-
-            # Update metrics
-            self._update_validation_metrics(result)
-
-            return result
 
         except Exception as e:
             self.logger.error(f"State validation failed: {e}")
@@ -928,21 +863,26 @@ class StateValidator(BaseComponent):
 
     def _validate_required_field(self, data: dict[str, Any], field_name: str | None = None) -> bool:
         """Validate that a required field is present and not None."""
-        if not field_name:
+        if data is None:
+            return False
+        if field_name is None:
             # If called without field_name, extract from rule
             return any(value is not None for value in data.values())
+        if field_name == "":
+            # Empty field name is invalid
+            return False
         return field_name in data and data[field_name] is not None
 
     def _validate_string_field(self, data: dict[str, Any], field_name: str) -> dict[str, Any]:
-        """Validate that a field is a string."""
+        """Validate that a field is a string and not empty."""
         value = data.get(field_name)
-        is_valid = isinstance(value, str)
+        is_valid = isinstance(value, str) and len(value.strip()) > 0
 
         return {
             "passed": is_valid,
-            "message": f"{field_name} must be a string",
+            "message": f"{field_name} must be a non-empty string",
             "current_value": value,
-            "expected_value": "string type",
+            "expected_value": "non-empty string",
         }
 
     def _validate_decimal_field(self, data: dict[str, Any], field_name: str) -> dict[str, Any]:
@@ -1018,27 +958,27 @@ class StateValidator(BaseComponent):
             }
 
     def _validate_list_field(self, data: dict[str, Any], field_name: str) -> dict[str, Any]:
-        """Validate that a field is a list."""
+        """Validate that a field is a list and not empty."""
         value = data.get(field_name)
-        is_list = isinstance(value, list)
+        is_valid = isinstance(value, list) and len(value) > 0
 
         return {
-            "passed": is_list,
-            "message": f"{field_name} must be a list",
+            "passed": is_valid,
+            "message": f"{field_name} must be a non-empty list",
             "current_value": type(value).__name__ if value is not None else None,
-            "expected_value": "list",
+            "expected_value": "non-empty list",
         }
 
     def _validate_dict_field(self, data: dict[str, Any], field_name: str) -> dict[str, Any]:
-        """Validate that a field is a dictionary."""
+        """Validate that a field is a dictionary and not empty."""
         value = data.get(field_name)
-        is_dict = isinstance(value, dict)
+        is_valid = isinstance(value, dict) and len(value) > 0
 
         return {
-            "passed": is_dict,
-            "message": f"{field_name} must be a dictionary",
+            "passed": is_valid,
+            "message": f"{field_name} must be a non-empty dictionary",
             "current_value": type(value).__name__ if value is not None else None,
-            "expected_value": "dict",
+            "expected_value": "non-empty dict",
         }
 
     # Business Logic Validation Functions
@@ -1088,7 +1028,7 @@ class StateValidator(BaseComponent):
 
         if isinstance(side, str):
             valid_sides = {s.value for s in OrderSide}
-            is_valid = side.upper() in valid_sides
+            is_valid = side.lower() in valid_sides
 
             return {
                 "passed": is_valid,
@@ -1110,7 +1050,7 @@ class StateValidator(BaseComponent):
 
         if isinstance(order_type, str):
             valid_types = {t.value for t in OrderType}
-            is_valid = order_type.upper() in valid_types
+            is_valid = order_type.lower() in valid_types
 
             return {
                 "passed": is_valid,
@@ -1126,270 +1066,39 @@ class StateValidator(BaseComponent):
         }
 
     def _validate_symbol_format(self, symbol: str) -> dict[str, Any]:
-        """Validate trading symbol format."""
-        if not symbol:
-            return {"passed": False, "message": "Symbol cannot be empty"}
-
-        # Symbol should be uppercase letters with optional separators
-        pattern = r"^[A-Z0-9]+([\/\-][A-Z0-9]+)*$"
-        is_valid = re.match(pattern, symbol.upper()) is not None
-
-        return {
-            "passed": is_valid,
-            "message": "Symbol must be in valid format (e.g., BTC/USD, BTCUSD)",
-            "current_value": symbol,
-            "expected_value": "Valid trading symbol format",
-        }
+        """Validate trading symbol format using centralized utilities."""
+        from src.utils.state_validation_utils import validate_symbol_format
+        return validate_symbol_format(symbol)
 
     def _validate_capital_allocation(self, data: dict[str, Any]) -> dict[str, Any]:
-        """Validate capital allocation limits."""
-        allocation = data.get("capital_allocation")
-        if allocation is None:
-            return {"passed": True, "message": "No capital allocation specified"}
-
-        try:
-            allocation_value = Decimal(str(allocation))
-
-            # Check if allocation is positive
-            if allocation_value <= 0:
-                return {
-                    "passed": False,
-                    "message": "Capital allocation must be positive",
-                    "current_value": allocation,
-                }
-
-            # Check against maximum allocation (example: $1M)
-            max_allocation = Decimal("1000000")
-            if allocation_value > max_allocation:
-                return {
-                    "passed": False,
-                    "message": f"Capital allocation exceeds maximum of ${max_allocation}",
-                    "current_value": allocation,
-                    "expected_value": f"<= {max_allocation}",
-                }
-
-            return {"passed": True, "message": "Valid capital allocation"}
-
-        except (ValueError, TypeError):
-            return {
-                "passed": False,
-                "message": "Capital allocation must be a valid number",
-                "current_value": allocation,
-            }
+        """Validate capital allocation limits using centralized utilities."""
+        from src.utils.state_validation_utils import validate_capital_allocation
+        return validate_capital_allocation(data)
 
     def _validate_order_price_logic(self, data: dict[str, Any]) -> dict[str, Any]:
-        """Validate order price logic based on order type."""
-        order_type = data.get("type")
-        price = data.get("price")
-
-        if not order_type:
-            return {"passed": True, "message": "No order type specified"}
-
-        # Market orders shouldn't have price
-        if order_type in ["MARKET", "market"]:
-            if price is not None:
-                return {
-                    "passed": False,
-                    "message": "Market orders should not specify price",
-                    "current_value": price,
-                    "recommendation": "Remove price for market orders",
-                }
-
-        # Limit and stop orders require price
-        elif order_type in ["LIMIT", "limit", "STOP", "stop", "STOP_LIMIT", "stop_limit"]:
-            if price is None:
-                return {
-                    "passed": False,
-                    "message": f"{order_type} orders require price",
-                    "current_value": price,
-                    "expected_value": "positive price value",
-                }
-
-            # Validate price is positive
-            try:
-                price_value = Decimal(str(price))
-                if price_value <= 0:
-                    return {
-                        "passed": False,
-                        "message": "Order price must be positive",
-                        "current_value": price,
-                    }
-            except (ValueError, TypeError):
-                return {
-                    "passed": False,
-                    "message": "Order price must be a valid number",
-                    "current_value": price,
-                }
-
-        return {"passed": True, "message": "Valid order price logic"}
+        """Validate order price logic based on order type using centralized utilities."""
+        from src.utils.state_validation_utils import validate_order_price_logic
+        return validate_order_price_logic(data)
 
     def _validate_cash_balance(self, data: dict[str, Any]) -> dict[str, Any]:
-        """Validate cash balance against positions."""
-        cash_balance = data.get("cash_balance")
-        positions = data.get("positions", [])
-
-        if cash_balance is None:
-            return {"passed": True, "message": "No cash balance specified"}
-
-        try:
-            cash_value = Decimal(str(cash_balance))
-
-            # Calculate total position value (simplified)
-            total_position_value = Decimal("0")
-            for position in positions:
-                if isinstance(position, dict):
-                    quantity = position.get("quantity", 0)
-                    price = position.get("current_price", position.get("entry_price", 0))
-                    if quantity and price:
-                        total_position_value += Decimal(str(quantity)) * Decimal(str(price))
-
-            # Warning if cash balance is too low relative to positions
-            min_cash_ratio = Decimal("0.1")  # 10% minimum cash
-            total_value = cash_value + total_position_value
-
-            if total_value > 0:
-                # Calculate cash ratio with proper Decimal precision
-                cash_ratio = cash_value / total_value
-                if cash_ratio < min_cash_ratio:
-                    # Calculate percentage with proper rounding
-                    cash_percentage = (cash_ratio * Decimal("100")).quantize(Decimal("0.1"))
-                    min_percentage = (min_cash_ratio * Decimal("100")).quantize(Decimal("0.1"))
-                    return {
-                        "passed": False,
-                        "message": f"Cash balance too low: {cash_value} ({cash_percentage}%)",
-                        "current_value": str(cash_value),
-                        "recommendation": f"Maintain at least {min_percentage}% cash",
-                    }
-
-            return {"passed": True, "message": "Adequate cash balance"}
-
-        except (ValueError, TypeError):
-            return {
-                "passed": False,
-                "message": "Cash balance must be a valid number",
-                "current_value": cash_balance,
-            }
+        """Validate cash balance against positions using centralized utilities."""
+        from src.utils.state_validation_utils import validate_cash_balance
+        return validate_cash_balance(data)
 
     def _validate_var_limits(self, data: dict[str, Any]) -> dict[str, Any]:
-        """Validate VaR against risk limits."""
-        var_value = data.get("var")
-        risk_limits = data.get("risk_limits", {})
-
-        if var_value is None:
-            return {"passed": True, "message": "No VaR specified"}
-
-        try:
-            var_decimal = Decimal(str(var_value))
-            max_var = risk_limits.get("max_var", "0.02")  # Default 2%
-            max_var_decimal = Decimal(str(max_var))
-
-            if var_decimal > max_var_decimal:
-                return {
-                    "passed": False,
-                    "message": f"VaR {var_decimal} exceeds limit {max_var_decimal}",
-                    "current_value": str(var_decimal),
-                    "expected_value": f"<= {max_var_decimal}",
-                }
-
-            return {"passed": True, "message": "VaR within limits"}
-
-        except (ValueError, TypeError):
-            return {
-                "passed": False,
-                "message": "VaR must be a valid number",
-                "current_value": var_value,
-            }
+        """Validate VaR against risk limits using centralized utilities."""
+        from src.utils.state_validation_utils import validate_var_limits
+        return validate_var_limits(data)
 
     def _validate_strategy_params(self, data: dict[str, Any]) -> dict[str, Any]:
-        """Validate strategy parameters."""
-        params = data.get("params", {})
-
-        if not isinstance(params, dict):
-            return {
-                "passed": False,
-                "message": "Strategy parameters must be a dictionary",
-                "current_value": type(params).__name__,
-            }
-
-        # Check for required strategy parameters
-        required_params = {"timeframe", "risk_per_trade"}
-        missing_params = required_params - set(params.keys())
-
-        if missing_params:
-            return {
-                "passed": False,
-                "message": f"Missing required strategy parameters: {missing_params}",
-                "current_value": list(params.keys()),
-                "expected_value": list(required_params),
-            }
-
-        # Validate risk_per_trade is reasonable
-        risk_per_trade = params.get("risk_per_trade")
-        if risk_per_trade:
-            try:
-                risk_value = Decimal(str(risk_per_trade))
-                if risk_value > Decimal("0.05"):  # 5% max risk per trade
-                    return {
-                        "passed": False,
-                        "message": f"Risk per trade too high: {risk_value}",
-                        "current_value": str(risk_value),
-                        "expected_value": "<= 0.05",
-                    }
-            except (ValueError, TypeError):
-                return {
-                    "passed": False,
-                    "message": "Risk per trade must be a valid number",
-                    "current_value": risk_per_trade,
-                }
-
-        return {"passed": True, "message": "Valid strategy parameters"}
+        """Validate strategy parameters using centralized utilities."""
+        from src.utils.state_validation_utils import validate_strategy_params
+        return validate_strategy_params(data)
 
     def _validate_trade_execution(self, data: dict[str, Any]) -> dict[str, Any]:
-        """Validate trade execution data."""
-        execution_data = data.get("execution", {})
-
-        if not isinstance(execution_data, dict):
-            return {"passed": True, "message": "No execution data provided"}
-
-        # Check for required execution fields
-        required_fields = ["filled_quantity", "average_price"]
-        missing_fields = [field for field in required_fields if field not in execution_data]
-
-        if missing_fields:
-            return {
-                "passed": False,
-                "message": f"Missing execution fields: {missing_fields}",
-                "current_value": list(execution_data.keys()),
-                "expected_value": required_fields,
-            }
-
-        # Validate execution values
-        try:
-            filled_qty = Decimal(str(execution_data["filled_quantity"]))
-            avg_price = Decimal(str(execution_data["average_price"]))
-
-            if filled_qty < 0:
-                return {
-                    "passed": False,
-                    "message": "Filled quantity cannot be negative",
-                    "current_value": str(filled_qty),
-                }
-
-            if avg_price <= 0:
-                return {
-                    "passed": False,
-                    "message": "Average price must be positive",
-                    "current_value": str(avg_price),
-                }
-
-            return {"passed": True, "message": "Valid trade execution"}
-
-        except (ValueError, TypeError):
-            return {
-                "passed": False,
-                "message": "Execution data must contain valid numbers",
-                "current_value": execution_data,
-            }
+        """Validate trade execution data using centralized utilities."""
+        from src.utils.state_validation_utils import validate_trade_execution
+        return validate_trade_execution(data)
 
     # Business Transition Validation
 
@@ -1398,7 +1107,6 @@ class StateValidator(BaseComponent):
     ) -> bool:
         """Validate business-specific transition rules."""
         try:
-    
             if state_type == StateType.BOT_STATE:
                 return await self._validate_bot_transition_rules(current_state, new_state)
             elif state_type == StateType.ORDER_STATE:

@@ -19,10 +19,9 @@ from typing import Any
 from uuid import uuid4
 
 from src.core.base.component import BaseComponent
-from src.core.exceptions import StateError
+from src.core.exceptions import ErrorSeverity, StateConsistencyError
 from src.error_handling import (
     ErrorContext,
-    ErrorSeverity,
     with_circuit_breaker,
     with_retry,
 )
@@ -250,10 +249,10 @@ class StateRecoveryManager(BaseComponent):
                 operation="initialize",
                 severity=ErrorSeverity.CRITICAL,
             )
-            error_context.details = {"error": str(e), "error_code": "RECOVERY_INIT_FAILED"}
+            error_context.details = {"error": str(e)}
             handler = self.state_service.error_handler
             await handler.handle_error(e, error_context)
-            raise StateError(f"Failed to initialize StateRecoveryManager: {e}") from e
+            raise StateConsistencyError(f"Failed to initialize StateRecoveryManager: {e}") from e
 
     async def cleanup(self) -> None:
         """Cleanup recovery manager resources."""
@@ -266,35 +265,45 @@ class StateRecoveryManager(BaseComponent):
                 self._auto_recovery_task,
                 self._corruption_monitor_task,
             ]
-            
+
             # Clear task references immediately
             self._audit_cleanup_task = None
             self._auto_recovery_task = None
             self._corruption_monitor_task = None
-            
+
             for task in background_tasks:
                 if task and not task.done():
                     task.cancel()
                     try:
-                        await task
+                        await asyncio.wait_for(task, timeout=5.0)
                     except asyncio.CancelledError:
                         pass
+                    except asyncio.TimeoutError:
+                        self.logger.warning("Background task cleanup timeout")
                     except Exception as e:
                         self.logger.error(f"Error waiting for background task cleanup: {e}")
-            
+                    finally:
+                        # Ensure task reference is cleared
+                        task = None
+
             # Cleanup recovery tasks
             recovery_tasks = self._recovery_tasks.copy()
             self._recovery_tasks.clear()
-            
+
             for task in recovery_tasks:
                 if task and not task.done():
                     task.cancel()
                     try:
-                        await task
+                        await asyncio.wait_for(task, timeout=5.0)
                     except asyncio.CancelledError:
                         pass
+                    except asyncio.TimeoutError:
+                        self.logger.warning("Recovery task cleanup timeout")
                     except Exception as e:
                         self.logger.error(f"Error waiting for recovery task cleanup: {e}")
+                    finally:
+                        # Ensure task reference is cleared
+                        task = None
 
             # Create final recovery point
             await self.create_recovery_point("System shutdown")
@@ -374,7 +383,7 @@ class StateRecoveryManager(BaseComponent):
 
         except Exception as e:
             self.logger.error(f"Failed to record state change: {e}")
-            raise StateError(f"Audit recording failed: {e}") from e
+            raise StateConsistencyError(f"Audit recording failed: {e}") from e
 
     async def get_audit_trail(
         self,
@@ -429,8 +438,12 @@ class StateRecoveryManager(BaseComponent):
     # Recovery Point Operations
 
     @time_execution
-    @with_retry(max_attempts=3, base_delay=0.5, backoff_factor=2.0, exceptions=(StateError,))
-    @with_circuit_breaker(failure_threshold=3, recovery_timeout=60, expected_exception=StateError)
+    @with_retry(
+        max_attempts=3, base_delay=0.5, backoff_factor=2.0, exceptions=(StateConsistencyError,)
+    )
+    @with_circuit_breaker(
+        failure_threshold=3, recovery_timeout=60, expected_exception=StateConsistencyError
+    )
     async def create_recovery_point(self, description: str = "") -> str:
         """
         Create a point-in-time recovery point.
@@ -477,7 +490,7 @@ class StateRecoveryManager(BaseComponent):
 
         except Exception as e:
             self.logger.error(f"Failed to create recovery point: {e}")
-            raise StateError(f"Recovery point creation failed: {e}") from e
+            raise StateConsistencyError(f"Recovery point creation failed: {e}") from e
 
     async def list_recovery_points(
         self, start_time: datetime | None = None, end_time: datetime | None = None, limit: int = 100
@@ -514,8 +527,12 @@ class StateRecoveryManager(BaseComponent):
     # Recovery Operations
 
     @time_execution
-    @with_retry(max_attempts=3, base_delay=0.5, backoff_factor=2.0, exceptions=(StateError,))
-    @with_circuit_breaker(failure_threshold=3, recovery_timeout=60, expected_exception=StateError)
+    @with_retry(
+        max_attempts=3, base_delay=0.5, backoff_factor=2.0, exceptions=(StateConsistencyError,)
+    )
+    @with_circuit_breaker(
+        failure_threshold=3, recovery_timeout=60, expected_exception=StateConsistencyError
+    )
     async def recover_to_point(
         self,
         recovery_point_id: str,
@@ -541,7 +558,7 @@ class StateRecoveryManager(BaseComponent):
             # Get recovery point
             recovery_point = self._recovery_points.get(recovery_point_id)
             if not recovery_point:
-                raise StateError(f"Recovery point not found: {recovery_point_id}")
+                raise StateConsistencyError(f"Recovery point not found: {recovery_point_id}")
 
             # Create recovery operation
             operation = RecoveryOperation(
@@ -578,7 +595,7 @@ class StateRecoveryManager(BaseComponent):
 
         except Exception as e:
             self.logger.error(f"Failed to start recovery: {e}")
-            raise StateError(f"Recovery initiation failed: {e}") from e
+            raise StateConsistencyError(f"Recovery initiation failed: {e}") from e
 
     async def get_recovery_status(self, operation_id: str) -> RecoveryOperation | None:
         """Get status of a recovery operation."""
@@ -633,8 +650,12 @@ class StateRecoveryManager(BaseComponent):
             self.logger.error(f"Corruption detection failed: {e}")
             return []
 
-    @with_retry(max_attempts=2, base_delay=0.5, backoff_factor=2.0, exceptions=(StateError,))
-    @with_circuit_breaker(failure_threshold=3, recovery_timeout=60, expected_exception=StateError)
+    @with_retry(
+        max_attempts=2, base_delay=0.5, backoff_factor=2.0, exceptions=(StateConsistencyError,)
+    )
+    @with_circuit_breaker(
+        failure_threshold=3, recovery_timeout=60, expected_exception=StateConsistencyError
+    )
     async def repair_corruption(self, report_id: str, repair_method: str = "auto") -> bool:
         """
         Repair detected state corruption.
@@ -655,7 +676,7 @@ class StateRecoveryManager(BaseComponent):
                     break
 
             if not report:
-                raise StateError(f"Corruption report not found: {report_id}")
+                raise StateConsistencyError(f"Corruption report not found: {report_id}")
 
             # Execute repair based on method
             success = False
@@ -708,7 +729,6 @@ class StateRecoveryManager(BaseComponent):
                 changed.add(key)
 
         return changed
-
 
     async def _capture_state_snapshot(self, recovery_point: RecoveryPoint) -> None:
         """Capture current state for recovery point."""

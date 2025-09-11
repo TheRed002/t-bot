@@ -6,11 +6,10 @@ handling save/load operations with the database service.
 """
 
 import asyncio
-import json
 from typing import TYPE_CHECKING, Any
 
 from src.core.base.component import BaseComponent
-from src.core.exceptions import DataError, ServiceError, StateError
+from src.core.exceptions import StateConsistencyError
 
 # Service layer imports instead of direct repository access
 from .services import StatePersistenceServiceProtocol
@@ -69,8 +68,7 @@ class StatePersistence(BaseComponent):
             self._running = True
             try:
                 self._persistence_task = asyncio.create_task(
-                    self._persistence_loop(), 
-                    name="state_persistence_loop"
+                    self._persistence_loop(), name="state_persistence_loop"
                 )
             except TypeError:
                 # Fallback for mocked or older asyncio versions
@@ -81,7 +79,7 @@ class StatePersistence(BaseComponent):
 
         except Exception as e:
             self.logger.error(f"StatePersistence initialization failed: {e}")
-            raise StateError(f"Failed to initialize StatePersistence: {e}") from e
+            raise StateConsistencyError(f"Failed to initialize StatePersistence: {e}") from e
 
     async def cleanup(self) -> None:
         """Cleanup persistence resources."""
@@ -94,15 +92,20 @@ class StatePersistence(BaseComponent):
             # Cancel and cleanup background task
             persistence_task = self._persistence_task
             self._persistence_task = None
-            
+
             if persistence_task and not persistence_task.done():
                 persistence_task.cancel()
                 try:
-                    await persistence_task
+                    await asyncio.wait_for(persistence_task, timeout=5.0)
                 except asyncio.CancelledError:
                     pass
+                except asyncio.TimeoutError:
+                    self.logger.warning("Persistence task cleanup timeout")
                 except Exception as e:
                     self.logger.error(f"Error waiting for persistence task cleanup: {e}")
+                finally:
+                    # Ensure task reference is cleared
+                    persistence_task = None
 
             await super().cleanup()
             self.logger.info("StatePersistence cleanup completed")
@@ -273,13 +276,21 @@ class StatePersistence(BaseComponent):
                 states = []
                 if state_types:
                     for state_type in state_types:
-                        type_states = await self._persistence_service.list_states(state_type, limit=limit)
+                        type_states = await self._persistence_service.list_states(
+                            state_type, limit=limit
+                        )
                         # Apply criteria filtering
-                        filtered_states = [s for s in type_states if self._matches_criteria(s.get("data", s), criteria)]
+                        filtered_states = [
+                            s
+                            for s in type_states
+                            if self._matches_criteria(s.get("data", s), criteria)
+                        ]
                         states.extend(filtered_states)
                 else:
                     # This would need service enhancement to support cross-type search
-                    self.logger.warning("Cross-type search not fully supported through service layer")
+                    self.logger.warning(
+                        "Cross-type search not fully supported through service layer"
+                    )
                 return states[:limit] if limit else states
             else:
                 self.logger.warning("No persistence service available for search_states operation")
@@ -339,13 +350,15 @@ class StatePersistence(BaseComponent):
             # Use service layer for persistence operations
             if self._persistence_service:
                 self.logger.info("Loading states from persistence service...")
-                
+
                 # This is a simplified implementation - would need service enhancement
                 # for comprehensive state loading across all types
                 # For now, log that operation was delegated to service
                 self.logger.info("State loading delegated to persistence service layer")
             else:
-                self.logger.warning("No persistence service available for load_all_states_to_cache operation")
+                self.logger.warning(
+                    "No persistence service available for load_all_states_to_cache operation"
+                )
 
         except Exception as e:
             self.logger.error(f"Failed to load states to cache: {e}")
@@ -357,7 +370,7 @@ class StatePersistence(BaseComponent):
         save_batch = []
         delete_batch = []
         batch_size = 10  # Process in batches to improve efficiency
-        
+
         while self._running:
             try:
                 # Collect save operations into batches
@@ -365,7 +378,7 @@ class StatePersistence(BaseComponent):
                     save_item = await asyncio.wait_for(self._save_queue.get(), timeout=1.0)
                     save_batch.append(save_item)
                     self._save_queue.task_done()
-                    
+
                     # Continue collecting until batch is full or timeout
                     while len(save_batch) < batch_size and not self._save_queue.empty():
                         try:
@@ -374,7 +387,7 @@ class StatePersistence(BaseComponent):
                             self._save_queue.task_done()
                         except asyncio.TimeoutError:
                             break
-                            
+
                 except asyncio.TimeoutError:
                     pass  # No items to process
 
@@ -383,36 +396,37 @@ class StatePersistence(BaseComponent):
                     delete_item = await asyncio.wait_for(self._delete_queue.get(), timeout=0.1)
                     delete_batch.append(delete_item)
                     self._delete_queue.task_done()
-                    
+
                     # Continue collecting until batch is full or timeout
                     while len(delete_batch) < batch_size and not self._delete_queue.empty():
                         try:
-                            delete_item = await asyncio.wait_for(self._delete_queue.get(), timeout=0.05)
+                            delete_item = await asyncio.wait_for(
+                                self._delete_queue.get(), timeout=0.05
+                            )
                             delete_batch.append(delete_item)
                             self._delete_queue.task_done()
                         except asyncio.TimeoutError:
                             break
-                            
+
                 except asyncio.TimeoutError:
                     pass  # No items to process
 
                 # Process batches concurrently if we have items
                 if save_batch or delete_batch:
                     tasks = []
-                    
+
                     if save_batch:
                         tasks.append(self._process_save_batch(save_batch.copy()))
                         save_batch.clear()
-                        
+
                     if delete_batch:
                         tasks.append(self._process_delete_batch(delete_batch.copy()))
                         delete_batch.clear()
-                    
+
                     # Execute batches concurrently with timeout
                     if tasks:
                         await asyncio.wait_for(
-                            asyncio.gather(*tasks, return_exceptions=True),
-                            timeout=30.0
+                            asyncio.gather(*tasks, return_exceptions=True), timeout=30.0
                         )
                 else:
                     # No work to do, sleep briefly
@@ -427,7 +441,7 @@ class StatePersistence(BaseComponent):
             except Exception as e:
                 self.logger.error(f"Persistence loop error: {e}")
                 # Clear batches on error to prevent memory leaks
-                save_batch.clear() 
+                save_batch.clear()
                 delete_batch.clear()
                 await asyncio.sleep(1.0)  # Wait before retrying on error
 
@@ -443,29 +457,26 @@ class StatePersistence(BaseComponent):
                     save_item["metadata"],
                 )
                 save_tasks.append(task)
-            
+
             # Execute save operations concurrently
             if save_tasks:
                 await asyncio.gather(*save_tasks, return_exceptions=True)
-                
+
         except Exception as e:
             self.logger.error(f"Save batch processing error: {e}")
-            
+
     async def _process_delete_batch(self, batch: list[dict[str, Any]]) -> None:
         """Process a batch of delete operations concurrently."""
         try:
             delete_tasks = []
             for delete_item in batch:
-                task = self.delete_state(
-                    delete_item["state_type"], 
-                    delete_item["state_id"]
-                )
+                task = self.delete_state(delete_item["state_type"], delete_item["state_id"])
                 delete_tasks.append(task)
-            
+
             # Execute delete operations concurrently
             if delete_tasks:
                 await asyncio.gather(*delete_tasks, return_exceptions=True)
-                
+
         except Exception as e:
             self.logger.error(f"Delete batch processing error: {e}")
 

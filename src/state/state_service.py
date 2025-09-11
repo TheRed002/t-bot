@@ -14,7 +14,6 @@ and provides a unified interface for all state operations.
 """
 
 import asyncio
-import hashlib
 import json
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -27,35 +26,30 @@ from src.core.base.component import BaseComponent
 from src.core.base.events import BaseEventEmitter
 from src.core.base.interfaces import HealthCheckResult
 from src.core.config.main import Config
-from src.core.exceptions import DependencyError, ServiceError, StateError, ValidationError
-from src.utils.checksum_utilities import calculate_state_checksum
+from src.core.exceptions import (
+    DependencyError,
+    ErrorSeverity,
+    ServiceError,
+    StateConsistencyError,
+    ValidationError,
+)
+from src.core.types import StateType
 from src.error_handling import (
     ErrorContext,
     ErrorHandler,
-    ErrorSeverity,
     with_circuit_breaker,
     with_retry,
 )
 from src.monitoring.telemetry import get_tracer
+from src.utils.checksum_utilities import calculate_state_checksum
+from src.utils.messaging_patterns import BoundaryValidator, ErrorPropagationMixin
 
-# Import consistency patterns for aligned data flow
-from .consistency import (
-    ConsistentEventPattern,
-    ConsistentProcessingPattern,
-    ConsistentValidationPattern,
-    emit_state_event,
-    validate_state_data,
-)
-
+# Import simple consistency utilities
 # Service layer imports
 from .services import (
-    StateBusinessService,
     StateBusinessServiceProtocol,
-    StatePersistenceService,
     StatePersistenceServiceProtocol,
-    StateSynchronizationService,
     StateSynchronizationServiceProtocol,
-    StateValidationService,
     StateValidationServiceProtocol,
 )
 from .utils_imports import time_execution
@@ -99,21 +93,6 @@ if TYPE_CHECKING:
     from .state_validator import StateValidator
 
 T = TypeVar("T")
-
-
-class StateType(str, Enum):
-    """State type enumeration for type safety."""
-
-    BOT_STATE = "bot_state"
-    POSITION_STATE = "position_state"
-    ORDER_STATE = "order_state"
-    PORTFOLIO_STATE = "portfolio_state"
-    RISK_STATE = "risk_state"
-    STRATEGY_STATE = "strategy_state"
-    MARKET_STATE = "market_state"
-    TRADE_STATE = "trade_state"
-    EXECUTION = "execution"
-    SYSTEM_STATE = "system_state"  # Added to match interface
 
 
 class StateOperation(Enum):
@@ -255,7 +234,7 @@ class StateMetrics:
         }
 
 
-class StateService(BaseComponent):
+class StateService(BaseComponent, ErrorPropagationMixin):
     """
     Comprehensive state management service providing enterprise-grade
     state handling with synchronization, validation, persistence, and recovery.
@@ -268,44 +247,55 @@ class StateService(BaseComponent):
     - State recovery and rollback capabilities
     - Event broadcasting and subscription system
     - Performance monitoring and health checks
+    - Consistent error propagation patterns across module boundaries
     """
 
-    def __init__(self, config: Config, database_service: DatabaseServiceProtocol | None = None):
+    def __init__(
+        self,
+        config: Config,
+        business_service: StateBusinessServiceProtocol | None = None,
+        persistence_service: StatePersistenceServiceProtocol | None = None,
+        validation_service: StateValidationServiceProtocol | None = None,
+        synchronization_service: StateSynchronizationServiceProtocol | None = None,
+    ):
         """
-        Initialize the state service.
+        Initialize the state service with service layer dependencies only.
 
         Args:
             config: Application configuration
-            database_service: Database service instance (injected dependency)
+            business_service: Business service for business logic (injected dependency)
+            persistence_service: Persistence service for data storage (injected dependency)
+            validation_service: Validation service for data validation (injected dependency)
+            synchronization_service: Synchronization service for state sync (injected dependency)
         """
-        # Convert Config object to dict for BaseComponent
+        # BaseComponent expects config dict, not Config object
         config_dict = {}
         if config:
-            try:
-                # Check if it's a mock object to avoid _mock_methods issues
-                if hasattr(config, '_mock_methods'):
-                    # For mock objects, just use empty dict
-                    config_dict = {}
-                else:
+            # Try to get config as dict first
+            if hasattr(config, "__dict__"):
+                config_dict = getattr(config, "__dict__", {})
+            elif hasattr(config, "_mock_methods"):
+                # Mock object in tests
+                config_dict = {}
+            else:
+                # Fallback to safe attribute extraction
+                try:
                     config_dict = {
                         key: getattr(config, key)
                         for key in dir(config)
-                        if not key.startswith("_") and not callable(getattr(config, key))
+                        if not key.startswith("_") and not callable(getattr(config, key, None))
                     }
-            except (AttributeError, TypeError):
-                # Fallback to empty dict if dir() fails
-                config_dict = {}
+                except Exception as e:
+                    # Log the error but don't raise to avoid breaking initialization
+                    import logging
+                    logger = logging.getLogger(__name__)
+                    logger.warning(f"Failed to extract config attributes: {e}")
+                    config_dict = {}
         super().__init__(name="StateService", config=config_dict)
         self.config = config
 
-        # Database service (dependency injection with protocol)
-        self.database_service = database_service
-        self.redis_client: RedisClientProtocol | None = None
-        self.influxdb_client: InfluxDBClientProtocol | None = None
-
-        # Client initialization deferred to initialize() method
-        self._redis_initialized = False
-        self._influxdb_initialized = False
+        # Database service REMOVED - StateService should not have direct database access
+        # All database operations delegated to service layer
 
         # State storage layers
         self._memory_cache: dict[str, dict[str, Any]] = {}
@@ -313,10 +303,10 @@ class StateService(BaseComponent):
         self._change_log: list[StateChange] = []
 
         # Service layer components (dependency injection)
-        self._business_service: StateBusinessServiceProtocol | None = None
-        self._persistence_service: StatePersistenceServiceProtocol | None = None
-        self._validation_service: StateValidationServiceProtocol | None = None
-        self._synchronization_service: StateSynchronizationServiceProtocol | None = None
+        self._business_service = business_service
+        self._persistence_service = persistence_service
+        self._validation_service = validation_service
+        self._synchronization_service = synchronization_service
 
         # Legacy components (backward compatibility)
         self._synchronizer: StateSynchronizer | None = None
@@ -325,58 +315,64 @@ class StateService(BaseComponent):
 
         # Event system - use consistent event-driven pattern only
         self._subscribers: dict[StateType, set[Callable]] = {}
-        self._event_emitter = BaseEventEmitter(name="StateService", config=config)
-
-        # Initialize consistency patterns for aligned data flow
-        self._consistent_event_pattern = ConsistentEventPattern("StateService")
-        self._consistent_validation_pattern = ConsistentValidationPattern()
-        self._consistent_processing_pattern = ConsistentProcessingPattern("StateService")
+        self._event_emitter = BaseEventEmitter(name="StateService", config=config_dict)
 
         # Synchronization primitives
         self._locks: dict[str, asyncio.Lock] = {}
         self._global_lock = asyncio.Lock()
         self._connection_lock = asyncio.Lock()  # Lock for connection operations
-        
-        # Connection health monitoring with heartbeat  
-        from .utils_imports import DEFAULT_CACHE_TTL
-        
+
         # Configuration - handle both Pydantic model and dict configs
+        from .utils_imports import DEFAULT_CACHE_TTL
+
         if hasattr(config, "state_management"):
             state_config = config.state_management
         elif hasattr(config, "__dict__"):
             state_config = config.__dict__.get("state_management", {})
         else:
             state_config = {}
-        
+
         # Helper function to get config values from either Pydantic model or dict
         def get_config_value(key: str, default: Any) -> Any:
             """Helper to get config values from either Pydantic model or dict."""
             if hasattr(state_config, key):
-                return getattr(state_config, key)
+                value = getattr(state_config, key)
+                # Check if it's a Mock object or invalid value
+                if hasattr(value, "_mock_methods") or not isinstance(
+                    value, (int, float, str, bool)
+                ):
+                    return default
+                return value
             elif isinstance(state_config, dict):
-                return state_config.get(key, default)
+                value = state_config.get(key, default)
+                if hasattr(value, "_mock_methods") or not isinstance(
+                    value, (int, float, str, bool)
+                ):
+                    return default
+                return value
             else:
                 return default
-        
-        self._redis_health_check_interval = get_config_value("redis_health_check_interval", 30)
-        self._influx_health_check_interval = get_config_value("influx_health_check_interval", 60)
-        self._last_redis_health_check: datetime | None = None
-        self._last_influx_health_check: datetime | None = None
-        self._redis_heartbeat_interval = get_config_value("redis_heartbeat_interval", 10)
-        self._influx_heartbeat_interval = get_config_value("influx_heartbeat_interval", 30)
-        self._last_redis_heartbeat: datetime | None = None
-        self._last_influx_heartbeat: datetime | None = None
-        self._connection_retry_count = 0
-        self._max_connection_retries = get_config_value("max_connection_retries", 3)
-        
+
         # Set max_concurrent_operations early for semaphore creation
+        max_concurrent_default = 100
         if hasattr(state_config, "max_concurrent_operations"):
-            self.max_concurrent_operations = state_config.max_concurrent_operations
+            max_concurrent_value = state_config.max_concurrent_operations
+            # Ensure it's a valid integer, not a Mock
+            if isinstance(max_concurrent_value, int):
+                self.max_concurrent_operations = max_concurrent_value
+            else:
+                self.max_concurrent_operations = max_concurrent_default
         elif isinstance(state_config, dict):
-            self.max_concurrent_operations = state_config.get("max_concurrent_operations", 100)
+            max_concurrent_value = state_config.get(
+                "max_concurrent_operations", max_concurrent_default
+            )
+            if isinstance(max_concurrent_value, int):
+                self.max_concurrent_operations = max_concurrent_value
+            else:
+                self.max_concurrent_operations = max_concurrent_default
         else:
-            self.max_concurrent_operations = 100
-        
+            self.max_concurrent_operations = max_concurrent_default
+
         # Backpressure handling for high-frequency updates
         self._operation_semaphore = asyncio.Semaphore(self.max_concurrent_operations)
         self._update_rate_limiter: dict[str, list[datetime]] = {}
@@ -387,19 +383,28 @@ class StateService(BaseComponent):
         self._operation_times: list[float] = []
 
         # Core configuration values using constants
-        from .utils_imports import DEFAULT_CACHE_TTL
-        
+
         # Safely handle DEFAULT_CACHE_TTL in case it's a Mock object during testing
         default_ttl = DEFAULT_CACHE_TTL
-        if hasattr(default_ttl, '_mock_methods'):
+        if hasattr(default_ttl, "_mock_methods"):
             # It's a Mock object, use a safe default
             default_ttl = 300  # 5 minutes default
-        
-        self.cache_ttl_seconds = get_config_value("state_ttl_seconds", default_ttl * 288)  # 24 hours default
-        self.sync_interval_seconds = get_config_value("sync_interval_seconds", 60)  # 1 minute default
-        self.cleanup_interval_seconds = get_config_value("cleanup_interval_seconds", 3600)  # 1 hour default  
-        self.validation_interval_seconds = get_config_value("validation_interval_seconds", 300)  # 5 minutes default
-        self.snapshot_interval_seconds = get_config_value("snapshot_interval_seconds", 1800)  # 30 minutes default
+
+        self.cache_ttl_seconds = get_config_value(
+            "state_ttl_seconds", default_ttl * 288
+        )  # 24 hours default
+        self.sync_interval_seconds = get_config_value(
+            "sync_interval_seconds", 60
+        )  # 1 minute default
+        self.cleanup_interval_seconds = get_config_value(
+            "cleanup_interval_seconds", 3600
+        )  # 1 hour default
+        self.validation_interval_seconds = get_config_value(
+            "validation_interval_seconds", 300
+        )  # 5 minutes default
+        self.snapshot_interval_seconds = get_config_value(
+            "snapshot_interval_seconds", 1800
+        )  # 30 minutes default
         self.max_state_versions = get_config_value("max_state_versions", 10)
 
         # Legacy configuration values
@@ -411,7 +416,7 @@ class StateService(BaseComponent):
         self._cleanup_task: asyncio.Task | None = None
         self._metrics_task: asyncio.Task | None = None
         self._backup_task: asyncio.Task | None = None
-        self._heartbeat_task: asyncio.Task | None = None  # Added heartbeat task
+        # Removed heartbeat task - services manage their own connections
         self._running = False
 
         # Backup configuration
@@ -429,47 +434,15 @@ class StateService(BaseComponent):
         self.logger.info("StateService initialized")
 
     async def initialize(self) -> None:
-        """Initialize the state service and all components."""
+        """Initialize the state service with service layer only."""
         try:
-            # Initialize database service if available with proper error handling
-            if self.database_service:
-                try:
-                    if not self.database_service.initialized:
-                        await self.database_service.start()
-
-                    # Verify database service health
-                    health_result = await self.database_service.health_check()
-                    if health_result.status.value != "healthy":
-                        self.logger.warning(
-                            f"Database service health check failed: {health_result.message}"
-                        )
-
-                except Exception as e:
-                    error_context = ErrorContext.from_exception(
-                        e,
-                        component="StateService",
-                        operation="initialize_database_service",
-                        severity=ErrorSeverity.HIGH,
-                    )
-                    handler = self.error_handler
-                    await handler.handle_error(e, error_context)
-                    self.logger.error(f"Database service initialization failed: {e}")
-                    # Continue without database service - graceful degradation
-                    self.database_service = None
-
-            # Initialize Redis client through database service factory if available
-            await self._initialize_redis_client()
-
-            # Initialize InfluxDB client through database service factory if available
-            await self._initialize_influxdb_client()
-
-            # Initialize service layer components
+            # Initialize service layer components only - no direct database access
             await self._initialize_service_components()
 
-            # Initialize state management components with lazy imports to avoid circular deps
+            # Initialize legacy state management components if needed
             await self._initialize_state_components()
 
-            # Initialize components with error handling
+            # Initialize legacy components with error handling (backward compatibility)
             if self._synchronizer:
                 try:
                     await self._synchronizer.initialize()
@@ -488,7 +461,7 @@ class StateService(BaseComponent):
                 except Exception as e:
                     self.logger.warning(f"Persistence initialization failed: {e}")
 
-            # Load existing states from persistence
+            # Load existing states through service layer
             await self._load_existing_states()
 
             # Start background tasks
@@ -496,10 +469,8 @@ class StateService(BaseComponent):
             self._sync_task = asyncio.create_task(self._synchronization_loop())
             self._cleanup_task = asyncio.create_task(self._cleanup_loop())
             self._metrics_task = asyncio.create_task(self._metrics_loop())
-            self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())  # Add heartbeat task
             if self.auto_backup_enabled:
                 self._backup_task = asyncio.create_task(self._backup_loop())
-
 
             self.logger.info("StateService initialization completed")
 
@@ -510,7 +481,7 @@ class StateService(BaseComponent):
             handler = self.error_handler
             await handler.handle_error(e, error_context)
             self.logger.error(f"StateService initialization failed: {e}")
-            raise StateError(f"Failed to initialize StateService: {e}") from e
+            raise StateConsistencyError(f"Failed to initialize StateService: {e}") from e
 
     async def cleanup(self) -> None:
         """Cleanup state service resources."""
@@ -523,25 +494,30 @@ class StateService(BaseComponent):
                 self._cleanup_task,
                 self._metrics_task,
                 self._backup_task,
-                self._heartbeat_task,  # Include heartbeat task in cleanup
+                # Removed heartbeat task - services manage their own connections
             ]
-            
+
             # Clear task references immediately
             self._sync_task = None
             self._cleanup_task = None
             self._metrics_task = None
             self._backup_task = None
-            self._heartbeat_task = None  # Clear heartbeat task reference
-            
+            # Removed heartbeat task reference
+
             for task in background_tasks:
                 if task and not task.done():
                     task.cancel()
                     try:
-                        await task
+                        await asyncio.wait_for(task, timeout=5.0)
                     except asyncio.CancelledError:
                         pass
+                    except asyncio.TimeoutError:
+                        self.logger.warning("Background task cleanup timeout")
                     except Exception as e:
                         self.logger.error(f"Error waiting for background task cleanup: {e}")
+                    finally:
+                        # Ensure task reference is cleared
+                        task = None
 
             # Final synchronization
             if self._synchronizer:
@@ -573,20 +549,8 @@ class StateService(BaseComponent):
             self._metadata_cache.clear()
             self._change_log.clear()
 
-            # Cleanup Redis client connection with proper resource management
-            if self.redis_client:
-                client = self.redis_client
-                self.redis_client = None
-                self._redis_initialized = False
-                try:
-                    if hasattr(client, "close"):
-                        await client.close()
-                    elif hasattr(client, "disconnect"):
-                        await client.disconnect()
-                    self.logger.info("Redis client connection closed")
-                except Exception as redis_error:
-                    self.logger.error(f"Error closing Redis connection: {redis_error}")
-                    # Connection is already set to None above, so resource is cleaned up
+            # Database connections managed by service layer only
+            # StateService has no direct database resources to clean
 
             self.logger.info("StateService cleanup completed")
 
@@ -597,7 +561,9 @@ class StateService(BaseComponent):
     # Core State Operations
 
     @time_execution
-    @with_retry(max_attempts=3, base_delay=0.1, backoff_factor=2.0, exceptions=(StateError,))
+    @with_retry(
+        max_attempts=3, base_delay=0.1, backoff_factor=2.0, exceptions=(StateConsistencyError,)
+    )
     async def get_state(
         self, state_type: StateType, state_id: str, include_metadata: bool = False
     ) -> dict[str, Any] | None:
@@ -634,61 +600,43 @@ class StateService(BaseComponent):
                             return {"data": state_data, "metadata": metadata}
                         return state_data
 
-                    # Try Redis cache with timeout and health check
+                    # Try persistence layer cache through service layer
                     cached_data = None
-                    if self.redis_client and await self._check_redis_connection_health():
-                        redis_key = f"state:{cache_key}"
+                    if self._persistence_service:
                         try:
-                            cached_data = await asyncio.wait_for(
-                                self.redis_client.get(redis_key),
-                                timeout=3.0
+                            cached_data = await self._persistence_service.load_state(
+                                state_type, state_id
                             )
-                        except asyncio.TimeoutError:
-                            self.logger.warning(f"Redis get timeout for key: {redis_key}")
-                            cached_data = None
-                            # Mark Redis as unhealthy to trigger reconnection
-                            self._redis_initialized = False
                         except Exception as e:
-                            self.logger.warning(f"Redis get error for key {redis_key}: {e}")
+                            self.logger.warning(
+                                f"Service layer cache get error for {cache_key}: {e}"
+                            )
                             cached_data = None
-                            self._redis_initialized = False
+
                     if cached_data:
-                        state_data = json.loads(cached_data)
                         # Warm memory cache
-                        self._memory_cache[cache_key] = state_data
+                        self._memory_cache[cache_key] = cached_data
                         self._state_metrics.cache_hit_rate = self._update_hit_rate(True)
 
                         if include_metadata:
-                            metadata = await self._load_metadata(cache_key)
-                            return {"data": state_data, "metadata": metadata}
-                        return state_data
+                            metadata = await self._load_metadata_through_service(
+                                cache_key, state_type, state_id
+                            )
+                            return {"data": cached_data, "metadata": metadata}
+                        return cached_data
 
                     # Try database persistence
                     if self._persistence:
                         state_data = await self._persistence.load_state(state_type, state_id)
                         if state_data:
-                            # Warm both caches
+                            # Warm memory cache
                             self._memory_cache[cache_key] = state_data
-                            if self.redis_client and await self._check_redis_connection_health():
-                                try:
-                                    await asyncio.wait_for(
-                                        self.redis_client.setex(
-                                            redis_key,
-                                            self.cache_ttl_seconds,
-                                            json.dumps(state_data, default=str),
-                                        ),
-                                        timeout=3.0
-                                    )
-                                except asyncio.TimeoutError:
-                                    self.logger.warning(f"Redis setex timeout for key: {redis_key}")
-                                    self._redis_initialized = False
-                                except Exception as e:
-                                    self.logger.warning(f"Redis setex error for key {redis_key}: {e}")
-                                    self._redis_initialized = False
                             self._state_metrics.cache_hit_rate = self._update_hit_rate(False)
 
                             if include_metadata:
-                                metadata = await self._load_metadata(cache_key)
+                                metadata = await self._load_metadata_through_service(
+                                    cache_key, state_type, state_id
+                                )
                                 return {"data": state_data, "metadata": metadata}
                             return state_data
 
@@ -697,26 +645,77 @@ class StateService(BaseComponent):
                     return None
 
                 except Exception as e:
-                    error_context = ErrorContext.from_exception(
-                        e,
-                        component="StateService",
-                        operation="get_state",
-                        severity=ErrorSeverity.MEDIUM,
-                    )
-                    error_context.details = {
-                        "error_code": "STATE_001",
-                        "cache_key": cache_key,
-                        "state_type": state_type.value,
-                        "state_id": state_id,
-                    }
-                    handler = self.error_handler
-                    await handler.handle_error(e, error_context)
-                    self._state_metrics.failed_operations += 1
-                    raise StateError(f"State retrieval failed: {e}") from e
+                    # Use consistent error propagation with boundary validation aligned with risk_management
+                    try:
+                        # Apply consistent error data structure aligned with capital_management module
+                        raw_error_data = {
+                            "cache_key": cache_key,
+                            "state_type": state_type.value,
+                            "state_id": state_id,
+                            "error_type": type(e).__name__,
+                            "error_message": str(e),
+                            "component": "StateService",
+                            "operation": "get_state",
+                            "severity": "medium",
+                            "processing_mode": "stream",  # Align with capital_management processing
+                            "data_format": "event_data_v1",  # Match capital_management data format
+                            "message_pattern": "pub_sub",  # Consistent messaging pattern
+                            "boundary_crossed": True,
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                            "error_id": str(uuid4())
+                            if hasattr(__builtins__, "uuid4")
+                            else "state_error",
+                        }
+
+                        # Apply boundary validation for capital_management-state consistency
+                        from src.utils.messaging_patterns import ProcessingParadigmAligner
+                        error_data = ProcessingParadigmAligner.align_processing_modes(
+                            "stream",
+                            "stream",
+                            raw_error_data,
+                        )
+
+                        # Validate at state-to-capital boundary with consistent patterns
+                        try:
+                            BoundaryValidator.validate_risk_to_state_boundary(error_data)
+                        except ValidationError as validation_error:
+                            self.logger.warning(
+                                f"State-to-capital boundary validation failed: {validation_error}"
+                            )
+
+                        self.propagate_service_error(e, f"get_state:{cache_key}")
+                    except Exception as propagation_error:
+                        # Fallback to existing error handling if propagation fails
+                        self.logger.warning(f"Error propagation failed: {propagation_error}")
+                        error_context = ErrorContext.from_exception(
+                            e,
+                            component="StateService",
+                            operation="get_state",
+                            severity=ErrorSeverity.MEDIUM,
+                        )
+                        error_context.details = (
+                            error_data
+                            if "error_data" in locals()
+                            else {
+                                "cache_key": cache_key,
+                                "state_type": state_type.value,
+                                "state_id": state_id,
+                            }
+                        )
+                        handler = self.error_handler
+                        await handler.handle_error(e, error_context)
+                        self._state_metrics.failed_operations += 1
+                        raise StateConsistencyError(
+                            f"State retrieval failed: {e}", error_code="STATE_000"
+                        ) from e
 
     @time_execution
-    @with_retry(max_attempts=3, base_delay=0.1, backoff_factor=2.0, exceptions=(StateError,))
-    @with_circuit_breaker(failure_threshold=5, recovery_timeout=30, expected_exception=StateError)
+    @with_retry(
+        max_attempts=3, base_delay=0.1, backoff_factor=2.0, exceptions=(StateConsistencyError,)
+    )
+    @with_circuit_breaker(
+        failure_threshold=5, recovery_timeout=30, expected_exception=StateConsistencyError
+    )
     async def set_state(
         self,
         state_type: StateType,
@@ -728,10 +727,10 @@ class StateService(BaseComponent):
         reason: str = "",
     ) -> bool:
         """
-        Set state with validation, synchronization, and persistence.
-        
-        This acts as a controller that coordinates between services with proper
-        transaction boundaries and consistency guarantees.
+        Coordinate state setting with proper service delegation.
+
+        This method handles only infrastructure concerns and delegates all business logic
+        to the appropriate service layers.
 
         Args:
             state_type: Type of state
@@ -757,74 +756,62 @@ class StateService(BaseComponent):
         ):
             cache_key = f"{state_type.value}:{state_id}"
 
-            # Apply rate limiting and backpressure control (controller concern)
+            # Infrastructure concern - rate limiting
             if not await self._check_rate_limit(cache_key):
-                raise StateError(f"Rate limit exceeded for state: {cache_key}")
+                raise StateConsistencyError(f"Rate limit exceeded for state: {cache_key}")
 
-            # Use semaphore for concurrent operation control (controller concern)
+            # Infrastructure concern - concurrency control
             async with self._operation_semaphore:
                 async with self._get_state_lock(cache_key):
-                    # Transaction-like operation with proper boundaries
-                    transaction_started = False
-                    original_state = None
-                    
                     try:
                         start_time = datetime.now(timezone.utc)
-                        transaction_started = True
 
-                        # Get current state through service layer (for rollback)
-                        original_state = await self.get_state(state_type, state_id)
+                        # Delegate ALL validation to validation service
+                        if validate and self._validation_service:
+                            validation_result = await self._validation_service.validate_state_data(
+                                state_type, state_data
+                            )
+                            if not validation_result["is_valid"]:
+                                raise ValidationError(
+                                    f"State validation failed: {validation_result['errors']}"
+                                )
 
-                        # Delegate all business logic to service layers
-                        if validate:
-                            await self._validate_through_services(state_type, original_state, state_data)
+                        # Delegate ALL business processing to business service
+                        state_change = None
+                        if self._business_service:
+                            state_change = await self._business_service.process_state_update(
+                                state_type, state_id, state_data, source_component, reason
+                            )
 
-                        # Process state update through business service
-                        state_change = await self._process_state_update_through_service(
-                            state_type, state_id, state_data, source_component, reason
+                        # Delegate ALL metadata calculation to business service
+                        metadata = None
+                        if self._business_service:
+                            metadata = await self._business_service.calculate_state_metadata(
+                                state_type, state_id, state_data, source_component
+                            )
+                            if metadata:
+                                metadata.version = self._get_next_version(cache_key)
+
+                        # Infrastructure-only state storage
+                        await self._store_state_through_services(
+                            state_type, state_id, state_data, metadata, cache_key
                         )
 
-                        # Calculate metadata through business service  
-                        metadata = await self._calculate_metadata_through_service(
-                            state_type, state_id, state_data, source_component
-                        )
-                        metadata.version = self._get_next_version(cache_key)
+                        # Delegate synchronization to synchronization service
+                        if state_change and self._synchronization_service:
+                            await self._synchronization_service.synchronize_state_change(
+                                state_change
+                            )
 
-                        # Store state through infrastructure services (transaction-like)
-                        await self._store_state_through_services(cache_key, state_data, metadata, state_type, state_id)
-
-                        # Coordinate post-storage activities
-                        await self._coordinate_post_storage_activities(state_change, state_type, state_id, state_data)
-
-                        # Update controller metrics
-                        operation_time = (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
+                        # Infrastructure concern - metrics
+                        operation_time = (
+                            datetime.now(timezone.utc) - start_time
+                        ).total_seconds() * 1000
                         self._update_operation_metrics(operation_time, True)
-
-                        self.logger.debug(
-                            f"State set successfully: {cache_key}",
-                            extra={
-                                "state_type": state_type.value,
-                                "state_id": state_id,
-                                "operation": state_change.operation.value,
-                                "priority": priority.value,
-                                "source": source_component,
-                                "transaction_id": state_change.change_id,
-                            },
-                        )
 
                         return True
 
                     except Exception as e:
-                        # Rollback transaction if possible
-                        if transaction_started and original_state is not None:
-                            try:
-                                # Attempt to restore original state
-                                self._memory_cache[cache_key] = original_state
-                                # Note: Redis and persistence rollback would need more complex logic
-                                self.logger.warning(f"Partial rollback performed for {cache_key}")
-                            except Exception as rollback_error:
-                                self.logger.error(f"Rollback failed: {rollback_error}")
-                        
                         error_context = ErrorContext.from_exception(
                             e,
                             component="StateService",
@@ -832,16 +819,16 @@ class StateService(BaseComponent):
                             severity=ErrorSeverity.HIGH,
                         )
                         error_context.details = {
-                            "error_code": "STATE_002",
                             "cache_key": cache_key,
                             "state_type": state_type.value,
                             "state_id": state_id,
-                            "transaction_started": transaction_started,
                         }
                         handler = self.error_handler
                         await handler.handle_error(e, error_context)
                         self._update_operation_metrics(0, False)
-                        raise StateError(f"State update failed: {e}") from e
+                        raise StateConsistencyError(
+                            f"State update failed: {e}", error_code="STATE_001"
+                        ) from e
 
     async def delete_state(
         self, state_type: StateType, state_id: str, source_component: str = "", reason: str = ""
@@ -883,21 +870,12 @@ class StateService(BaseComponent):
                 self._memory_cache.pop(cache_key, None)
                 self._metadata_cache.pop(cache_key, None)
 
-                # Remove from Redis with timeout
-                if self.redis_client:
-                    redis_key = f"state:{cache_key}"
-                    metadata_key = f"metadata:{cache_key}"
+                # Remove from persistent cache through service layer
+                if self._persistence_service:
                     try:
-                        await asyncio.wait_for(
-                            self.redis_client.delete(redis_key),
-                            timeout=2.0
-                        )
-                        await asyncio.wait_for(
-                            self.redis_client.delete(metadata_key),
-                            timeout=2.0
-                        )
-                    except asyncio.TimeoutError:
-                        self.logger.warning(f"Redis delete timeout for keys: {redis_key}, {metadata_key}")
+                        await self._persistence_service.delete_state(state_type, state_id)
+                    except Exception as e:
+                        self.logger.warning(f"Service layer cache delete failed: {e}")
 
                 # Queue for database deletion
                 if self._persistence:
@@ -922,7 +900,7 @@ class StateService(BaseComponent):
 
             except Exception as e:
                 self.logger.error(f"Failed to delete state {cache_key}: {e}")
-                raise StateError(f"State deletion failed: {e}") from e
+                raise StateConsistencyError(f"State deletion failed: {e}") from e
 
     # State Query Operations
 
@@ -968,10 +946,10 @@ class StateService(BaseComponent):
 
         except Exception as e:
             self.logger.error(f"Failed to get states by type {state_type.value}: {e}")
-            raise StateError(f"Query failed: {e}") from e
+            raise StateConsistencyError(f"Query failed: {e}") from e
 
     async def search_states(
-        self, criteria: dict[str, Any], state_types: list[StateType] | None = None, limit: int = 100
+        self, criteria: dict[str, Any] | None = None, state_types: list[StateType] | None = None, limit: int = 100
     ) -> list[dict[str, Any]]:
         """
         Search states based on criteria.
@@ -1004,7 +982,7 @@ class StateService(BaseComponent):
 
         except Exception as e:
             self.logger.error(f"State search failed: {e}")
-            raise StateError(f"Search failed: {e}") from e
+            raise StateConsistencyError(f"Search failed: {e}") from e
 
     # State Management Operations
 
@@ -1051,7 +1029,7 @@ class StateService(BaseComponent):
 
         except Exception as e:
             self.logger.error(f"Failed to create snapshot: {e}")
-            raise StateError(f"Snapshot creation failed: {e}") from e
+            raise StateConsistencyError(f"Snapshot creation failed: {e}") from e
 
     async def restore_snapshot(self, snapshot_id: str) -> bool:
         """
@@ -1065,11 +1043,11 @@ class StateService(BaseComponent):
         """
         try:
             if not self._persistence:
-                raise StateError("Persistence layer not available")
+                raise StateConsistencyError("Persistence layer not available")
 
             snapshot = await self._persistence.load_snapshot(snapshot_id)
             if not snapshot:
-                raise StateError(f"Snapshot {snapshot_id} not found")
+                raise StateConsistencyError(f"Snapshot {snapshot_id} not found")
 
             # Clear current state
             self._memory_cache.clear()
@@ -1092,14 +1070,14 @@ class StateService(BaseComponent):
 
         except Exception as e:
             self.logger.error(f"Failed to restore snapshot {snapshot_id}: {e}")
-            raise StateError(f"Snapshot restore failed: {e}") from e
+            raise StateConsistencyError(f"Snapshot restore failed: {e}") from e
 
     # Event System
 
     def subscribe(
         self,
         state_type: StateType,
-        callback: Callable[[StateType, str, dict[str, Any] | None, StateChange], None],
+        callback: Callable[[StateType, str, dict[str, Any]], StateChange] | None,
     ) -> None:
         """
         Subscribe to state change events.
@@ -1208,122 +1186,35 @@ class StateService(BaseComponent):
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             }
 
-    # Connection Health Management Methods
-
-    async def _check_redis_connection_health(self) -> bool:
-        """Check Redis connection health with proper locking."""
-        async with self._connection_lock:
-            try:
-                if not self.redis_client or not self._redis_initialized:
-                    return False
-                
-                current_time = datetime.now(timezone.utc)
-                
-                # Check if we need to perform health check
-                if (self._last_redis_health_check and 
-                    (current_time - self._last_redis_health_check).total_seconds() < self._redis_health_check_interval):
-                    return True
-                    
-                # Perform health check with timeout
-                await asyncio.wait_for(
-                    self.redis_client.ping(),
-                    timeout=3.0
-                )
-                
-                self._last_redis_health_check = current_time
-                return True
-                
-            except Exception as e:
-                self.logger.warning(f"Redis health check failed: {e}")
-                # Mark as uninitialized to trigger reconnection
-                self._redis_initialized = False
-                return False
-
-    async def _check_influx_connection_health(self) -> bool:
-        """Check InfluxDB connection health with proper locking."""
-        async with self._connection_lock:
-            try:
-                if not self.influxdb_client or not self._influxdb_initialized:
-                    return False
-                
-                current_time = datetime.now(timezone.utc)
-                
-                # Check if we need to perform health check
-                if (self._last_influx_health_check and 
-                    (current_time - self._last_influx_health_check).total_seconds() < self._influx_health_check_interval):
-                    return True
-                    
-                # Perform health check with timeout
-                await asyncio.wait_for(
-                    asyncio.get_event_loop().run_in_executor(
-                        None, self.influxdb_client.ping
-                    ),
-                    timeout=5.0
-                )
-                
-                self._last_influx_health_check = current_time
-                return True
-                
-            except Exception as e:
-                self.logger.warning(f"InfluxDB health check failed: {e}")
-                # Mark as uninitialized to trigger reconnection
-                self._influxdb_initialized = False
-                return False
+    # Connection health is managed by service layer - removed direct connection management
 
     async def _check_rate_limit(self, cache_key: str) -> bool:
         """Check if operation is within rate limits to prevent overwhelming the system with proper locking."""
         # Use lock to prevent race conditions in rate limiting
         async with self._get_state_lock(f"rate_limit:{cache_key}"):
             current_time = datetime.now(timezone.utc)
-            
+
             if cache_key not in self._update_rate_limiter:
                 self._update_rate_limiter[cache_key] = []
-            
+
             # Clean old entries (older than 1 second)
             cutoff_time = current_time - timedelta(seconds=1)
             self._update_rate_limiter[cache_key] = [
                 t for t in self._update_rate_limiter[cache_key] if t > cutoff_time
             ]
-            
+
             # Check if we're over the limit
             if len(self._update_rate_limiter[cache_key]) >= self._max_updates_per_second:
                 self.logger.warning(f"Rate limit exceeded for {cache_key}")
                 return False
-            
+
             # Add current request
             self._update_rate_limiter[cache_key].append(current_time)
             return True
 
     # Private Helper Methods
 
-    async def _load_from_database(
-        self, state_type: StateType, state_id: str
-    ) -> dict[str, Any] | None:
-        """Load state from database - used by tests."""
-        try:
-            if self._persistence:
-                return await self._persistence.load_state(state_type, state_id)
-            return None
-        except Exception as e:
-            self.logger.warning(f"Failed to load from database: {e}")
-            return None
-
-    async def _save_to_database(
-        self, state_type: StateType, state_id: str, state_data: dict[str, Any]
-    ) -> None:
-        """Save state to database - used by tests."""
-        try:
-            if self._persistence:
-                metadata = StateMetadata(
-                    state_id=state_id,
-                    state_type=state_type,
-                    version=1,
-                    checksum=calculate_state_checksum(state_data),
-                    size_bytes=len(json.dumps(state_data, default=str).encode()),
-                )
-                await self._persistence.queue_state_save(state_type, state_id, state_data, metadata)
-        except Exception as e:
-            self.logger.warning(f"Failed to save to database: {e}")
+    # Removed direct database access methods - use service layer instead
 
     def _get_state_lock(self, state_key: str) -> asyncio.Lock:
         """Get or create a lock for state operations with thread-safe initialization."""
@@ -1334,20 +1225,19 @@ class StateService(BaseComponent):
                 # Quick check first without global lock
                 if state_key in self._locks:
                     return self._locks[state_key]
-                
+
                 # If not found, acquire global lock and check again
                 # Note: In async context, we can't use traditional double-checked locking
                 # but we can minimize the critical section
                 if state_key not in self._locks:
                     self._locks[state_key] = asyncio.Lock()
-                    
+
             except Exception as e:
                 self.logger.error(f"Error creating lock for {state_key}: {e}")
                 # Fallback to a temporary lock
                 return asyncio.Lock()
-                
-        return self._locks[state_key]
 
+        return self._locks[state_key]
 
     def _detect_changed_fields(
         self, old_state: dict[str, Any] | None, new_state: dict[str, Any]
@@ -1428,31 +1318,29 @@ class StateService(BaseComponent):
                 return False
         return True
 
-    async def _load_metadata(self, cache_key: str) -> StateMetadata | None:
-        """Load metadata for a state."""
+    async def _load_metadata_through_service(
+        self, cache_key: str, state_type: StateType, state_id: str
+    ) -> StateMetadata | None:
+        """Load metadata for a state through service layer."""
         try:
-            if not self.redis_client:
-                return None
+            # Check memory cache first
+            metadata = self._metadata_cache.get(cache_key)
+            if metadata:
+                return metadata
 
-            metadata_key = f"metadata:{cache_key}"
-            try:
-                metadata_data = await asyncio.wait_for(
-                    self.redis_client.get(metadata_key),
-                    timeout=2.0  # 2 second timeout for Redis get
-                )
-            except asyncio.TimeoutError:
-                self.logger.warning(f"Redis get timeout for metadata key: {metadata_key}")
-                return None
-
-            if metadata_data:
-                metadata_dict = json.loads(metadata_data)
-                # Convert back to StateMetadata object
-                return StateMetadata(**metadata_dict)
+            # Use business service to calculate metadata if persistence doesn't have it
+            if self._business_service:
+                # For loading, we need state data to calculate metadata
+                state_data = self._memory_cache.get(cache_key, {})
+                if state_data:
+                    return await self._business_service.calculate_state_metadata(
+                        state_type, state_id, state_data, "StateService"
+                    )
 
             return None
 
         except Exception as e:
-            self.logger.warning(f"Failed to load metadata for {cache_key}: {e}")
+            self.logger.warning(f"Failed to load metadata through service for {cache_key}: {e}")
             return None
 
     async def _load_existing_states(self) -> None:
@@ -1472,18 +1360,46 @@ class StateService(BaseComponent):
         state_data: dict[str, Any] | None,
         state_change: StateChange,
     ) -> None:
-        """Broadcast state change to subscribers using consistent event-driven pattern."""
+        """Broadcast state change to subscribers using consistent event-driven pattern aligned with risk_management."""
         try:
-            event_data = {
-                "state_type": state_type,
+            # Apply consistent data transformation matching capital_management patterns
+            from src.utils.messaging_patterns import MessagingCoordinator, ProcessingParadigmAligner
+
+            coordinator = MessagingCoordinator("StateService")
+
+            # Transform data using consistent patterns aligned with capital_management module
+            raw_event_data = {
+                "state_type": state_type.value,
                 "state_id": state_id,
                 "state_data": state_data,
-                "state_change": state_change,
+                "operation": state_change.operation.value,
+                "source_component": state_change.source_component,
+                "processing_mode": "stream",  # Align with capital_management processing
+                "message_pattern": "pub_sub",  # Consistent messaging pattern
+                "data_format": "event_data_v1",  # Match capital_management data format
+                "component": "StateService",
+                "boundary_crossed": True,  # Cross-module event
+                "timestamp": datetime.now(timezone.utc).isoformat(),
             }
 
-            # Use unified event system for consistent message patterns only
+            # Apply processing paradigm alignment for cross-module consistency
+            aligned_data = ProcessingParadigmAligner.align_processing_modes(
+                "stream", "stream", raw_event_data
+            )
+
+            # Apply consistent transformation pattern from messaging_patterns
+            transformed_data = coordinator._apply_data_transformation(aligned_data)
+
+            # Apply boundary validation to ensure consistency across state-capital boundaries
+            try:
+                BoundaryValidator.validate_risk_to_state_boundary(transformed_data)
+            except Exception as validation_error:
+                self.logger.warning(f"State event boundary validation failed: {validation_error}")
+                # Continue with event emission despite validation failure
+
+            # Use unified event system for consistent message patterns aligned with risk_management
             await self._event_emitter.emit_async(
-                f"state.{state_type.value}.changed", event_data, source="StateService"
+                f"state.{state_type.value}.changed", transformed_data, source="StateService"
             )
 
             # Process legacy subscribers synchronously to avoid queue pattern
@@ -1552,38 +1468,17 @@ class StateService(BaseComponent):
         """Background metrics collection loop."""
         while self._running:
             try:
-                # Log metrics to InfluxDB with health check
+                # Collect metrics - storage is handled by service layer
                 metrics = await self.get_state_metrics()
 
-                if self.influxdb_client and await self._check_influx_connection_health():
-                    try:
-                        # Create Point object for InfluxDB
-                        from influxdb_client import Point
-
-                        point = Point("state_service_metrics")
-                        point.tag("service", "state_service")
-                        point.field("total_operations", metrics.total_operations)
-                        point.field("successful_operations", metrics.successful_operations)
-                        point.field("failed_operations", metrics.failed_operations)
-                        point.field("cache_hit_rate", metrics.cache_hit_rate)
-                        point.field("active_states", metrics.active_states_count)
-                        point.field("memory_usage_mb", metrics.memory_usage_mb)
-                        point.field("error_rate", metrics.error_rate)
-                        point.time(datetime.now(timezone.utc))
-
-                        # Run blocking InfluxDB operation in executor with timeout
-                        await asyncio.wait_for(
-                            asyncio.get_event_loop().run_in_executor(
-                                None, self.influxdb_client.write_point, point
-                            ),
-                            timeout=5.0  # 5 second timeout for InfluxDB write
-                        )
-                    except ImportError:
-                        self.logger.warning(
-                            "InfluxDB client not available, skipping metrics logging"
-                        )
-                    except Exception as e:
-                        self.logger.error(f"Failed to write metrics to InfluxDB: {e}")
+                # Log metrics locally (service layer will handle persistence)
+                self.logger.debug(
+                    f"State service metrics: operations={metrics.total_operations}, "
+                    f"success_rate={metrics.successful_operations / max(metrics.total_operations, 1):.2%}, "
+                    f"cache_hit_rate={metrics.cache_hit_rate:.2%}, "
+                    f"active_states={metrics.active_states_count}, "
+                    f"memory_mb={metrics.memory_usage_mb:.2f}"
+                )
 
                 await asyncio.sleep(
                     self.validation_interval_seconds
@@ -1593,7 +1488,6 @@ class StateService(BaseComponent):
                 self.logger.error(f"Metrics loop error: {e}")
                 await asyncio.sleep(self.validation_interval_seconds)
 
-
     async def _backup_loop(self) -> None:
         """Background automatic backup loop."""
         while self._running:
@@ -1601,10 +1495,8 @@ class StateService(BaseComponent):
                 current_time = datetime.now(timezone.utc)
 
                 # Check if backup is needed
-                if (
-                    not self._last_backup_time
-                    or current_time - self._last_backup_time
-                    >= timedelta(hours=self.backup_interval_hours)
+                if not self._last_backup_time or current_time - self._last_backup_time >= timedelta(
+                    hours=self.backup_interval_hours
                 ):
                     # Create automatic backup
                     description = f"Automatic backup - {current_time.isoformat()}"
@@ -1623,265 +1515,45 @@ class StateService(BaseComponent):
                 self.logger.error(f"Backup loop error: {e}")
                 await asyncio.sleep(self.cleanup_interval_seconds)
 
-    async def _heartbeat_loop(self) -> None:
-        """Background heartbeat loop for connection health monitoring."""
-        while self._running:
-            try:
-                current_time = datetime.now(timezone.utc)
-                
-                # Redis heartbeat
-                if (self.redis_client and self._redis_initialized and
-                    (not self._last_redis_heartbeat or 
-                     (current_time - self._last_redis_heartbeat).total_seconds() >= self._redis_heartbeat_interval)):
-                    
-                    try:
-                        await asyncio.wait_for(
-                            self.redis_client.ping(),
-                            timeout=2.0
-                        )
-                        self._last_redis_heartbeat = current_time
-                        self._connection_retry_count = 0  # Reset retry count on success
-                    except Exception as e:
-                        self.logger.warning(f"Redis heartbeat failed: {e}")
-                        self._redis_initialized = False
-                        await self._attempt_redis_reconnection()
-                
-                # InfluxDB heartbeat  
-                if (self.influxdb_client and self._influxdb_initialized and
-                    (not self._last_influx_heartbeat or 
-                     (current_time - self._last_influx_heartbeat).total_seconds() >= self._influx_heartbeat_interval)):
-                    
-                    try:
-                        await asyncio.wait_for(
-                            asyncio.get_event_loop().run_in_executor(
-                                None, self.influxdb_client.ping
-                            ),
-                            timeout=5.0
-                        )
-                        self._last_influx_heartbeat = current_time
-                    except Exception as e:
-                        self.logger.warning(f"InfluxDB heartbeat failed: {e}")
-                        self._influxdb_initialized = False
-                        await self._attempt_influx_reconnection()
-                
-                # Sleep until next heartbeat
-                await asyncio.sleep(min(self._redis_heartbeat_interval, self._influx_heartbeat_interval))
-                
-            except Exception as e:
-                self.logger.error(f"Heartbeat loop error: {e}")
-                await asyncio.sleep(self._redis_heartbeat_interval)
-
-    async def _attempt_redis_reconnection(self) -> None:
-        """Attempt to reconnect to Redis with exponential backoff."""
-        if self._connection_retry_count >= self._max_connection_retries:
-            self.logger.error("Max Redis reconnection attempts exceeded")
-            return
-            
-        self._connection_retry_count += 1
-        backoff_delay = min(2 ** self._connection_retry_count, 30)  # Cap at 30 seconds
-        
-        self.logger.info(f"Attempting Redis reconnection (attempt {self._connection_retry_count}) in {backoff_delay}s")
-        await asyncio.sleep(backoff_delay)
-        
-        try:
-            await self._initialize_redis_client()
-        except Exception as e:
-            self.logger.error(f"Redis reconnection attempt {self._connection_retry_count} failed: {e}")
-
-    async def _attempt_influx_reconnection(self) -> None:
-        """Attempt to reconnect to InfluxDB with exponential backoff."""
-        if self._connection_retry_count >= self._max_connection_retries:
-            self.logger.error("Max InfluxDB reconnection attempts exceeded")
-            return
-            
-        backoff_delay = min(2 ** self._connection_retry_count, 60)  # Cap at 60 seconds
-        
-        self.logger.info(f"Attempting InfluxDB reconnection in {backoff_delay}s")
-        await asyncio.sleep(backoff_delay)
-        
-        try:
-            await self._initialize_influxdb_client()
-        except Exception as e:
-            self.logger.error(f"InfluxDB reconnection failed: {e}")
-
-    # Database Client Initialization Helper Methods
-
-    async def _initialize_redis_client(self) -> None:
-        """Initialize Redis client through database service factory or fallback."""
-        if self._redis_initialized:
-            return
-
-        try:
-            # Try to use database service factory method if available
-            if self.database_service and hasattr(self.database_service, "create_redis_client"):
-                # Safely get database config with fallback
-                database_config = getattr(self.config, "database", {})
-
-                redis_config = {
-                    "host": getattr(database_config, "redis_host", "localhost"),
-                    "port": getattr(database_config, "redis_port", 6379),
-                    "password": getattr(database_config, "redis_password", None),
-                    "db": getattr(database_config, "redis_db", 0),
-                    "decode_responses": True,
-                    "max_connections": 100,
-                    "retry_on_timeout": True,
-                    "health_check_interval": 30,
-                }
-
-                self.redis_client = await self.database_service.create_redis_client(redis_config)
-
-            else:
-                # Fallback: Create Redis client through connection manager
-                from src.database.connection import get_redis_client
-
-                try:
-                        # Get Redis client from connection manager
-                    redis_client_concrete = await get_redis_client()
-                    self.redis_client = redis_client_concrete  # type: ignore[assignment]
-                except Exception as e:
-                    self.logger.warning(f"Failed to get Redis client from connection manager: {e}")
-                    self.redis_client = None
-                    return
-
-            # Test connection with timeout
-            if self.redis_client:
-                try:
-                    if hasattr(self.redis_client, "connect"):
-                        await asyncio.wait_for(
-                            self.redis_client.connect(),
-                            timeout=10.0  # 10 second connection timeout
-                        )
-                    if hasattr(self.redis_client, "ping"):
-                        await asyncio.wait_for(
-                            self.redis_client.ping(),
-                            timeout=5.0  # 5 second ping timeout
-                        )
-                    self._redis_initialized = True
-                    self.logger.info("Redis client initialized successfully")
-                except Exception as e:
-                    self.logger.warning(f"Redis connection test failed: {e}")
-                    # Properly cleanup Redis connection on failure
-                    if self.redis_client:
-                        client = self.redis_client
-                        self.redis_client = None
-                        try:
-                            if hasattr(client, "close"):
-                                await client.close()
-                            elif hasattr(client, "disconnect"):
-                                await client.disconnect()
-                        except Exception as cleanup_error:
-                            self.logger.error(
-                                f"Error cleaning up Redis connection: {cleanup_error}"
-                            )
-
-        except Exception as e:
-            error_context = ErrorContext.from_exception(
-                e,
-                component="StateService",
-                operation="initialize_redis_client",
-                severity=ErrorSeverity.MEDIUM,
-            )
-            handler = self.error_handler
-            await handler.handle_error(e, error_context)
-            self.logger.warning(f"Redis client initialization failed: {e}")
-            self.redis_client = None
-
-    async def _initialize_influxdb_client(self) -> None:
-        """Initialize InfluxDB client through database service factory or fallback."""
-        if self._influxdb_initialized:
-            return
-
-        try:
-            # Check if InfluxDB is configured
-            influxdb_config = getattr(self.config, "influxdb", {})
-            if not influxdb_config or not isinstance(influxdb_config, dict):
-                # Safely get database config with fallback
-                database_config = getattr(self.config, "database", {})
-                influxdb_config = getattr(database_config, "influxdb", {})
-
-            if not influxdb_config:
-                self.logger.debug("InfluxDB not configured, skipping initialization")
-                return
-
-            # Try to use database service factory method if available
-            if self.database_service and hasattr(self.database_service, "create_influxdb_client"):
-                influx_client_config = {
-                    "url": influxdb_config.get("url", "http://localhost:8086"),
-                    "token": influxdb_config.get("token", ""),
-                    "org": influxdb_config.get("org", "default"),
-                    "bucket": influxdb_config.get("bucket", "trading"),
-                }
-
-                self.influxdb_client = await self.database_service.create_influxdb_client(
-                    influx_client_config
-                )
-
-            else:
-                # Fallback: Create InfluxDB client through connection manager
-                from src.database.connection import get_influxdb_client
-
-                try:
-                        # Get InfluxDB client from connection manager
-                    influxdb_client_concrete = get_influxdb_client()
-                    self.influxdb_client = influxdb_client_concrete  # type: ignore[assignment]
-                except Exception as e:
-                    self.logger.warning(
-                        f"Failed to get InfluxDB client from connection manager: {e}"
-                    )
-                    self.influxdb_client = None
-                    return
-
-            # Test connection with timeout
-            if self.influxdb_client:
-                try:
-                    if hasattr(self.influxdb_client, "connect"):
-                        # InfluxDB connect is synchronous according to protocol
-                        await asyncio.wait_for(
-                            asyncio.get_event_loop().run_in_executor(
-                                None, self.influxdb_client.connect
-                            ),
-                            timeout=15.0  # 15 second connection timeout
-                        )
-                    if hasattr(self.influxdb_client, "ping"):
-                        # ping is synchronous, run in executor to avoid blocking
-                        await asyncio.wait_for(
-                            asyncio.get_event_loop().run_in_executor(
-                                None, self.influxdb_client.ping
-                            ),
-                            timeout=10.0  # 10 second ping timeout
-                        )
-                    self._influxdb_initialized = True
-                    self.logger.info("InfluxDB client initialized successfully")
-                except Exception as e:
-                    self.logger.warning(f"InfluxDB connection test failed: {e}")
-                    self.influxdb_client = None
-
-        except Exception as e:
-            error_context = ErrorContext.from_exception(
-                e,
-                component="StateService",
-                operation="initialize_influxdb_client",
-                severity=ErrorSeverity.MEDIUM,
-            )
-            handler = self.error_handler
-            await handler.handle_error(e, error_context)
-            self.logger.warning(f"InfluxDB client initialization failed: {e}")
-            self.influxdb_client = None
+    # Connection management and database client initialization removed -
+    # Services manage their own connections and infrastructure
 
     async def _initialize_service_components(self) -> None:
-        """Initialize service layer components with proper dependency injection."""
+        """Initialize service layer components without database dependencies."""
         try:
-            # Services should be injected via DI container, but initialize them if needed
-            if self._business_service is not None and hasattr(self._business_service, "start"):
+            # Initialize services if they weren't injected - use DI container
+            if self._business_service is None:
+                self._business_service = self._resolve_service_dependency(
+                    "StateBusinessService",
+                    lambda: self._create_business_service_fallback()
+                )
+
+            if self._persistence_service is None:
+                self._persistence_service = self._resolve_service_dependency(
+                    "StatePersistenceService",
+                    lambda: self._create_persistence_service_fallback()
+                )
+
+            if self._validation_service is None:
+                self._validation_service = self._resolve_service_dependency(
+                    "StateValidationService",
+                    lambda: self._create_validation_service_fallback()
+                )
+
+            if self._synchronization_service is None:
+                self._synchronization_service = self._resolve_service_dependency(
+                    "StateSynchronizationService",
+                    lambda: self._create_synchronization_service_fallback()
+                )
+
+            # Start services if they have a start method
+            if hasattr(self._business_service, "start"):
                 await self._business_service.start()
-
-            if self._persistence_service is not None and hasattr(self._persistence_service, "start"):
+            if hasattr(self._persistence_service, "start"):
                 await self._persistence_service.start()
-
-            if self._validation_service is not None and hasattr(self._validation_service, "start"):
+            if hasattr(self._validation_service, "start"):
                 await self._validation_service.start()
-
-            if self._synchronization_service is not None and hasattr(self._synchronization_service, "start"):
+            if hasattr(self._synchronization_service, "start"):
                 await self._synchronization_service.start()
 
             # Log which services are available
@@ -1889,13 +1561,15 @@ class StateService(BaseComponent):
             if self._business_service:
                 available_services.append("business")
             if self._persistence_service:
-                available_services.append("persistence") 
+                available_services.append("persistence")
             if self._validation_service:
                 available_services.append("validation")
             if self._synchronization_service:
                 available_services.append("synchronization")
-                
-            self.logger.info(f"Service layer components initialized - available: {available_services}")
+
+            self.logger.info(
+                f"Service layer components initialized - available: {available_services}"
+            )
 
         except Exception as e:
             error_context = ErrorContext.from_exception(
@@ -1958,290 +1632,109 @@ class StateService(BaseComponent):
             # Try to get from DI container first to avoid circular dependency
             try:
                 from src.core.dependency_injection import get_container
+
                 container = get_container()
                 self._error_handler = container.get("ErrorHandler")
-            except (DependencyError, ServiceError) as e:
-                # Fallback to direct creation
+            except (DependencyError, ServiceError):
+                # Fallback to direct creation with config
+                from src.error_handling.error_handler import ErrorHandler
+
                 self._error_handler = ErrorHandler(self.config)
         return self._error_handler
 
-    # Service layer integration methods
-
-    async def _validate_through_services(
-        self, state_type: StateType, current_state: dict[str, Any] | None, state_data: dict[str, Any]
-    ) -> None:
-        """Validate state through service layer with proper error handling."""
-        # Validate state data
-        if self._validation_service:
-            validation_result = await self._validation_service.validate_state_data(
-                state_type, state_data
-            )
-            if not validation_result["is_valid"]:
-                raise ValidationError(
-                    f"State validation failed: {validation_result['errors']}"
-                )
-        else:
-            # Fallback validation using consistent pattern
-            validation_result = await validate_state_data(
-                f"{state_type.value}_data", state_data
-            )
-            if not validation_result["is_valid"]:
-                raise ValidationError(
-                    f"State validation failed: {validation_result['errors']}"
-                )
-
-        # Validate state transition
-        if current_state:
-            transition_valid = await self._validate_state_transition_through_service(
-                state_type, current_state, state_data
-            )
-            if not transition_valid:
-                raise ValidationError("Invalid state transition")
+    # Service layer integration methods - removed complex validation logic
 
     async def _store_state_through_services(
-        self, cache_key: str, state_data: dict[str, Any], metadata: StateMetadata, 
-        state_type: StateType, state_id: str
+        self,
+        state_type: StateType,
+        state_id: str,
+        state_data: dict[str, Any],
+        metadata: StateMetadata | None,
+        cache_key: str,
     ) -> None:
-        """Store state through all storage layers via services with transaction-like consistency."""
-        # Use transaction-like pattern to ensure consistency across storage layers
-        storage_operations = []
-        
+        """Store state through service layers only."""
         try:
-            # Store in memory cache (controller infrastructure concern)
-            old_memory_state = self._memory_cache.get(cache_key)
-            old_metadata = self._metadata_cache.get(cache_key)
-            
+            # Store in memory cache (infrastructure layer)
             self._memory_cache[cache_key] = state_data.copy()
-            self._metadata_cache[cache_key] = metadata
-            storage_operations.append(("memory", old_memory_state, old_metadata))
+            if metadata:
+                self._metadata_cache[cache_key] = metadata
 
-            # Store in Redis cache (infrastructure concern)
-            await self._store_in_redis_cache(cache_key, state_data, metadata)
-            storage_operations.append(("redis", None, None))
+            # Store through persistence service only
+            if self._persistence_service and metadata:
+                await self._persistence_service.save_state(
+                    state_type, state_id, state_data, metadata
+                )
 
-            # Store through persistence service (service layer)
-            await self._persist_state_through_service(
-                state_type, state_id, state_data, metadata
-            )
-            storage_operations.append(("persistence", None, None))
-            
         except Exception as e:
-            # Rollback memory changes on failure
-            if storage_operations and storage_operations[0][0] == "memory":
-                if storage_operations[0][1] is not None:
-                    self._memory_cache[cache_key] = storage_operations[0][1]
-                    self._metadata_cache[cache_key] = storage_operations[0][2]
-                else:
-                    self._memory_cache.pop(cache_key, None)
-                    self._metadata_cache.pop(cache_key, None)
-            
-            self.logger.error(f"State storage transaction failed: {e}")
-            raise StateError(f"Failed to store state consistently: {e}") from e
+            # Clean up memory cache on failure
+            self._memory_cache.pop(cache_key, None)
+            self._metadata_cache.pop(cache_key, None)
+
+            self.logger.error(f"Service storage failed: {e}")
+            raise StateConsistencyError(f"Failed to store state through services: {e}") from e
 
     async def _coordinate_post_storage_activities(
-        self, state_change: StateChange, state_type: StateType, state_id: str, state_data: dict[str, Any]
+        self,
+        state_change: StateChange | None,
+        state_type: StateType,
+        state_id: str,
+        state_data: dict[str, Any],
     ) -> None:
-        """Coordinate activities after state storage."""
-        # Add to change log (controller concern)
-        self._change_log.append(state_change)
-        if len(self._change_log) > self.max_change_log_size:
-            self._change_log = self._change_log[-self.max_change_log_size // 2 :]
+        """Coordinate activities after state storage through services."""
+        try:
+            # Add to change log if state_change exists
+            if state_change:
+                self._change_log.append(state_change)
+                if len(self._change_log) > self.max_change_log_size:
+                    self._change_log = self._change_log[-self.max_change_log_size // 2 :]
 
-        # Delegate synchronization to service layer
-        await self._synchronize_state_change_through_service(state_change)
+                # Delegate synchronization to service layer
+                if self._synchronization_service:
+                    await self._synchronization_service.synchronize_state_change(state_change)
 
-        # Delegate event broadcasting to service layer
-        await self._broadcast_state_change_through_service(
-            state_type, state_id, state_data, state_change
-        )
-
-    async def _validate_state_through_service(
-        self, state_type: StateType, state_data: dict[str, Any]
-    ) -> dict[str, Any]:
-        """Validate state through service layer or fall back to legacy."""
-        if self._validation_service:
-            return await self._validation_service.validate_state_data(state_type, state_data)
-        elif self._validator:
-            # Fall back to legacy validator
-            result = await self._validator.validate_state(state_type, state_data)
-            return {
-                "is_valid": result.is_valid,
-                "errors": [e.error_message for e in result.errors],
-                "warnings": [w.warning_message for w in result.warnings],
-            }
-        else:
-            # No validation available
-            return {"is_valid": True, "errors": [], "warnings": []}
-
-    async def _validate_state_transition_through_service(
-        self,
-        state_type: StateType,
-        current_state: dict[str, Any],
-        new_state: dict[str, Any],
-    ) -> bool:
-        """Validate state transition through service layer or fall back to legacy."""
-        if self._validation_service:
-            return await self._validation_service.validate_state_transition(
-                state_type, current_state, new_state
-            )
-        elif self._validator:
-            # Fall back to legacy validator
-            return await self._validator.validate_state_transition(
-                state_type, current_state, new_state
-            )
-        else:
-            # No validation available - allow transition
-            return True
-
-    async def _process_state_update_through_service(
-        self,
-        state_type: StateType,
-        state_id: str,
-        state_data: dict[str, Any],
-        source_component: str,
-        reason: str,
-    ) -> StateChange:
-        """Process state update through business service or fall back to legacy."""
-        if self._business_service:
-            return await self._business_service.process_state_update(
-                state_type, state_id, state_data, source_component, reason
-            )
-        else:
-            # Fall back to creating state change directly
-            return StateChange(
-                state_id=state_id,
-                state_type=state_type,
-                operation=StateOperation.UPDATE,
-                priority=StatePriority.MEDIUM,
-                new_value=state_data,
-                source_component=source_component,
-                reason=reason,
-            )
-
-    async def _calculate_metadata_through_service(
-        self,
-        state_type: StateType,
-        state_id: str,
-        state_data: dict[str, Any],
-        source_component: str,
-    ) -> StateMetadata:
-        """Calculate metadata through business service or fall back to legacy."""
-        if self._business_service:
-            return await self._business_service.calculate_state_metadata(
-                state_type, state_id, state_data, source_component
-            )
-        else:
-            # Fall back to direct metadata calculation
-            return StateMetadata(
-                state_id=state_id,
-                state_type=state_type,
-                version=1,
-                checksum=calculate_state_checksum(state_data),
-                size_bytes=len(json.dumps(state_data, default=str).encode()),
-                source_component=source_component,
-            )
-
-    async def _persist_state_through_service(
-        self,
-        state_type: StateType,
-        state_id: str,
-        state_data: dict[str, Any],
-        metadata: StateMetadata,
-    ) -> None:
-        """Persist state through service layer or fall back to legacy."""
-        if self._persistence_service:
-            await self._persistence_service.save_state(state_type, state_id, state_data, metadata)
-        elif self._persistence:
-            # Fall back to legacy persistence
-            await self._persistence.queue_state_save(state_type, state_id, state_data, metadata)
-        # If no persistence is available, data is only stored in memory
-
-    async def _synchronize_state_change_through_service(self, state_change: StateChange) -> None:
-        """Synchronize state change through service layer or fall back to legacy."""
-        if self._synchronization_service:
-            await self._synchronization_service.synchronize_state_change(state_change)
-        elif self._synchronizer:
-            # Fall back to legacy synchronizer
-            await self._synchronizer.queue_state_sync(state_change)
-        # If no synchronization is available, change is not synchronized
-
-    async def _store_in_redis_cache(self, cache_key: str, state_data: dict[str, Any], metadata: StateMetadata) -> None:
-        """Store state and metadata in Redis cache (infrastructure concern)."""
-        if self.redis_client:
-            redis_key = f"state:{cache_key}"
-            # Use consistent JSON serialization pattern
-            serialized_data = (
-                await (
-                    self._consistent_processing_pattern.process_item_consistent(
+                # Delegate event broadcasting to service layer
+                if self._synchronization_service:
+                    await self._synchronization_service.broadcast_state_change(
+                        state_type,
+                        state_id,
                         state_data,
-                        lambda data: json.dumps(data, default=str, sort_keys=True),
+                        {
+                            "operation": state_change.operation.value,
+                            "source_component": state_change.source_component,
+                            "reason": state_change.reason,
+                        },
                     )
-                )
-            )
-            try:
-                await asyncio.wait_for(
-                    self.redis_client.setex(
-                        redis_key, self.cache_ttl_seconds, serialized_data
-                    ),
-                    timeout=2.0  # 2 second timeout for Redis setex
-                )
-            except asyncio.TimeoutError:
-                self.logger.warning(f"Redis setex timeout for state key: {redis_key}")
 
-            # Store metadata in Redis using consistent pattern
-            metadata_key = f"metadata:{cache_key}"
-            serialized_metadata = (
-                await (
-                    self._consistent_processing_pattern.process_item_consistent(
-                        metadata.__dict__,
-                        lambda data: json.dumps(data, default=str, sort_keys=True),
-                    )
-                )
-            )
-            try:
-                await asyncio.wait_for(
-                    self.redis_client.setex(
-                        metadata_key,
-                        self.cache_ttl_seconds,
-                        serialized_metadata,
-                    ),
-                    timeout=2.0  # 2 second timeout for Redis setex
-                )
-            except asyncio.TimeoutError:
-                self.logger.warning(f"Redis setex timeout for metadata key: {metadata_key}")
+        except Exception as e:
+            self.logger.warning(f"Post-storage activities failed: {e}")
+            # Don't fail the main operation for post-storage issues
 
-    async def _broadcast_state_change_through_service(
-        self,
-        state_type: StateType,
-        state_id: str,
-        state_data: dict[str, Any],
-        state_change: StateChange,
-    ) -> None:
-        """Broadcast state change through service layer or fall back to legacy."""
-        # Use service layer for broadcasting if available
-        if self._synchronization_service:
-            await self._synchronization_service.broadcast_state_change(
-                state_type, state_id, state_data, {
-                    "operation": state_change.operation.value,
-                    "source_component": state_change.source_component,
-                    "reason": state_change.reason,
-                }
-            )
-        else:
-            # Fall back to legacy broadcasting
-            await emit_state_event(
-                "changed",
-                {
-                    "state_type": state_type.value,
-                    "state_id": state_id,
-                    "state_data": state_data,
-                    "operation": state_change.operation.value,
-                    "source_component": state_change.source_component,
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
-                },
-            )
+    # Service dependency resolution methods
 
-            # Also broadcast to legacy subscribers
-            await self._broadcast_state_change(
-                state_type, state_id, state_data, state_change
-            )
+    def _resolve_service_dependency(self, service_name: str, fallback_factory):
+        """Resolve service dependency from DI container with fallback."""
+        try:
+            from src.core.dependency_injection import get_container
+            container = get_container()
+            return container.get(service_name)
+        except Exception:
+            # Use fallback factory
+            return fallback_factory()
+
+    def _create_business_service_fallback(self):
+        """Create business service fallback."""
+        return None
+
+    def _create_persistence_service_fallback(self):
+        """Create persistence service fallback."""
+        return None
+
+    def _create_validation_service_fallback(self):
+        """Create validation service fallback."""
+        return None
+
+    def _create_synchronization_service_fallback(self):
+        """Create synchronization service fallback."""
+        return None
+
+    # All complex business logic methods removed - delegating to service layer only

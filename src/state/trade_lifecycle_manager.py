@@ -25,30 +25,17 @@ from uuid import uuid4
 from src.core.base.component import BaseComponent
 from src.core.caching import CacheKeys, cache_invalidate, cached, get_cache_manager
 from src.core.config.main import Config
-from src.core.exceptions import StateError
+from src.core.exceptions import StateConsistencyError
 from src.core.types import ExecutionResult, OrderRequest, OrderSide, OrderType
-from src.database.service import DatabaseService
 
-# Service layer imports instead of direct database access
+# Service layer imports only - no direct database access
 from .services import StatePersistenceServiceProtocol
 from .services.trade_lifecycle_service import (
-    TradeLifecycleServiceProtocol, 
-    TradeContext, 
-    TradeHistoryRecord, 
-    TradeLifecycleState
+    TradeContext,
+    TradeHistoryRecord,
+    TradeLifecycleServiceProtocol,
+    TradeLifecycleState,
 )
-
-# Backward compatibility imports for tests
-try:
-    from src.database.manager import DatabaseManager
-except ImportError:
-    DatabaseManager = None  # type: ignore
-
-try:
-    from src.database.redis_client import RedisClient
-except ImportError:
-    RedisClient = None  # type: ignore
-
 from .utils_imports import time_execution
 
 
@@ -89,9 +76,9 @@ class PerformanceAttribution:
     volatility_contribution: Decimal = Decimal("0")
 
     # Quality factors
-    timing_quality: float = 0.0
-    execution_quality: float = 0.0
-    strategy_quality: float = 0.0
+    timing_quality: Decimal = Decimal("0.0")
+    execution_quality: Decimal = Decimal("0.0")
+    strategy_quality: Decimal = Decimal("0.0")
 
     # Period
     attribution_date: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
@@ -147,8 +134,8 @@ class TradeLifecycleManager(BaseComponent):
             "total_trades": 0,
             "successful_trades": 0,
             "failed_trades": 0,
-            "average_execution_time": 0.0,
-            "average_quality_score": 0.0,
+            "average_execution_time": Decimal("0.0"),
+            "average_quality_score": Decimal("0.0"),
             "total_pnl": Decimal("0"),
             "total_fees": Decimal("0"),
         }
@@ -214,7 +201,7 @@ class TradeLifecycleManager(BaseComponent):
 
         except Exception as e:
             self.logger.error(f"TradeLifecycleManager initialization failed: {e}")
-            raise StateError(f"Failed to initialize TradeLifecycleManager: {e}") from e
+            raise StateConsistencyError(f"Failed to initialize TradeLifecycleManager: {e}") from e
 
     async def cleanup(self) -> None:
         """Cleanup trade lifecycle manager resources."""
@@ -274,7 +261,7 @@ class TradeLifecycleManager(BaseComponent):
             Trade ID
 
         Raises:
-            StateError: If lifecycle start fails
+            StateConsistencyError: If lifecycle start fails
         """
         try:
             # Create trade context through service layer
@@ -314,7 +301,7 @@ class TradeLifecycleManager(BaseComponent):
 
         except Exception as e:
             self.logger.error(f"Failed to start trade lifecycle: {e}")
-            raise StateError(f"Trade lifecycle start failed: {e}") from e
+            raise StateConsistencyError(f"Trade lifecycle start failed: {e}") from e
 
     async def transition_trade_state(
         self,
@@ -334,12 +321,12 @@ class TradeLifecycleManager(BaseComponent):
             True if transition successful
 
         Raises:
-            StateError: If transition is invalid
+            StateConsistencyError: If transition is invalid
         """
         try:
             trade_context = self.active_trades.get(trade_id)
             if not trade_context:
-                raise StateError(f"Trade {trade_id} not found")
+                raise StateConsistencyError(f"Trade {trade_id} not found")
 
             # Validate transition through service layer
             current_state = trade_context.current_state
@@ -347,7 +334,7 @@ class TradeLifecycleManager(BaseComponent):
                 current_state, new_state
             )
             if not transition_valid:
-                raise StateError(
+                raise StateConsistencyError(
                     f"Invalid transition from {current_state.value} to {new_state.value}"
                 )
 
@@ -392,7 +379,7 @@ class TradeLifecycleManager(BaseComponent):
 
         except Exception as e:
             self.logger.error(f"Failed to transition trade state: {e}", trade_id=trade_id)
-            raise StateError(f"Trade state transition failed: {e}") from e
+            raise StateConsistencyError(f"Trade state transition failed: {e}") from e
 
     async def update_trade_execution(
         self, trade_id: str, execution_result: ExecutionResult
@@ -405,12 +392,12 @@ class TradeLifecycleManager(BaseComponent):
             execution_result: Execution result details
 
         Raises:
-            StateError: If update fails
+            StateConsistencyError: If update fails
         """
         try:
             trade_context = self.active_trades.get(trade_id)
             if not trade_context:
-                raise StateError(f"Trade {trade_id} not found")
+                raise StateConsistencyError(f"Trade {trade_id} not found")
 
             # Update execution details
             trade_context.execution_results.append(execution_result)
@@ -464,7 +451,7 @@ class TradeLifecycleManager(BaseComponent):
 
         except Exception as e:
             self.logger.error(f"Failed to update trade execution: {e}", trade_id=trade_id)
-            raise StateError(f"Trade execution update failed: {e}") from e
+            raise StateConsistencyError(f"Trade execution update failed: {e}") from e
 
     async def update_trade_event(
         self, trade_id: str, event: TradeEvent, event_data: dict[str, Any]
@@ -478,12 +465,12 @@ class TradeLifecycleManager(BaseComponent):
             event_data: Additional event data
 
         Raises:
-            StateError: If update fails
+            StateConsistencyError: If update fails
         """
         try:
             trade_context = self.active_trades.get(trade_id)
             if not trade_context:
-                raise StateError(f"Trade {trade_id} not found")
+                raise StateConsistencyError(f"Trade {trade_id} not found")
 
             # Log the event
             await self._log_trade_event(trade_id, event, event_data)
@@ -531,7 +518,7 @@ class TradeLifecycleManager(BaseComponent):
 
         except Exception as e:
             self.logger.error(f"Failed to update trade event: {e}", trade_id=trade_id)
-            raise StateError(f"Trade event update failed: {e}") from e
+            raise StateConsistencyError(f"Trade event update failed: {e}") from e
 
     async def calculate_trade_performance(self, trade_id: str) -> dict[str, Any]:
         """
@@ -544,7 +531,7 @@ class TradeLifecycleManager(BaseComponent):
             Performance metrics dictionary
 
         Raises:
-            StateError: If calculation fails
+            StateConsistencyError: If calculation fails
         """
         try:
             trade_context = self.active_trades.get(trade_id)
@@ -553,7 +540,7 @@ class TradeLifecycleManager(BaseComponent):
                 for record in self.trade_history:
                     if record.trade_id == trade_id:
                         return self._history_record_to_performance(record)
-                raise StateError(f"Trade {trade_id} not found")
+                raise StateConsistencyError(f"Trade {trade_id} not found")
 
             performance = {
                 "trade_id": trade_id,
@@ -574,13 +561,13 @@ class TradeLifecycleManager(BaseComponent):
                 signal_to_submission = (
                     trade_context.order_submission_timestamp - trade_context.signal_timestamp
                 ).total_seconds()
-                performance["signal_to_submission_seconds"] = signal_to_submission
+                performance["signal_to_submission_seconds"] = Decimal(str(signal_to_submission))
 
             if trade_context.final_fill_timestamp and trade_context.order_submission_timestamp:
                 execution_duration = (
                     trade_context.final_fill_timestamp - trade_context.order_submission_timestamp
                 ).total_seconds()
-                performance["execution_duration_seconds"] = execution_duration
+                performance["execution_duration_seconds"] = Decimal(str(execution_duration))
 
             # Calculate slippage (if market order with expected price)
             if (
@@ -604,7 +591,7 @@ class TradeLifecycleManager(BaseComponent):
 
         except Exception as e:
             self.logger.error(f"Failed to calculate trade performance: {e}", trade_id=trade_id)
-            raise StateError(f"Trade performance calculation failed: {e}") from e
+            raise StateConsistencyError(f"Trade performance calculation failed: {e}") from e
 
     @cached(
         ttl=60,
@@ -751,7 +738,7 @@ class TradeLifecycleManager(BaseComponent):
             # Try persistence service first (more reliable)
             if self._persistence_service:
                 # Create a pseudo-state for the trade context
-                from .state_service import StateMetadata, StateType
+                from .state_service import StateType as _StateType
 
                 context_data = {
                     "trade_id": trade_context.trade_id,
@@ -767,17 +754,19 @@ class TradeLifecycleManager(BaseComponent):
                     "signal_timestamp": trade_context.signal_timestamp.isoformat(),
                 }
 
-                # Create metadata
-                metadata = StateMetadata(
+                # Create metadata using centralized utility
+                from src.utils.state_utils import create_state_metadata
+
+                metadata = create_state_metadata(
                     state_id=trade_context.trade_id,
-                    state_type=StateType.TRADE_STATE,
-                    version=1,
+                    state_type=_StateType.TRADE_STATE,
                     source_component="TradeLifecycleManager",
+                    state_data=context_data
                 )
 
                 # Save through persistence service
                 await self._persistence_service.save_state(
-                    StateType.TRADE_STATE, trade_context.trade_id, context_data, metadata
+                    _StateType.TRADE_STATE, trade_context.trade_id, context_data, metadata
                 )
 
             # Fall back to cache service if available
@@ -801,7 +790,7 @@ class TradeLifecycleManager(BaseComponent):
                     cache_key,
                     context_data,
                     namespace="state",
-                    ttl=3600,  # 1 hour TTL
+                    ttl=self._get_state_ttl(),
                     data_type="state",
                 )
             # If neither service is available, context is only stored in memory
@@ -823,20 +812,20 @@ class TradeLifecycleManager(BaseComponent):
 
             # Use persistence service if available
             if self._persistence_service:
-                from .state_service import StateMetadata, StateType
+                from .state_service import StateType as _StateType
 
                 # Create event state for logging
                 event_state_id = f"{trade_id}_{event.value}_{datetime.now().timestamp()}"
-                metadata = StateMetadata(
+                metadata = create_state_metadata(
                     state_id=event_state_id,
-                    state_type=StateType.TRADE_STATE,  # Use trade state type for events
-                    version=1,
+                    state_type=_StateType.TRADE_STATE,  # Use trade state type for events
                     source_component="TradeLifecycleManager",
+                    state_data=event_record
                 )
 
                 # Save event through service layer
                 await self._persistence_service.save_state(
-                    StateType.TRADE_STATE, event_state_id, event_record, metadata
+                    _StateType.TRADE_STATE, event_state_id, event_record, metadata
                 )
             else:
                 # Fall back to logging only
@@ -874,7 +863,7 @@ class TradeLifecycleManager(BaseComponent):
 
             # Persist history record through service layer
             if self._persistence_service:
-                from .state_service import StateMetadata, StateType
+                from .state_service import StateType as _StateType
 
                 # Convert history record to dict for persistence
                 history_data = {
@@ -896,15 +885,15 @@ class TradeLifecycleManager(BaseComponent):
                     "status": "finalized",
                 }
 
-                metadata = StateMetadata(
+                metadata = create_state_metadata(
                     state_id=f"{trade_id}_history",
-                    state_type=StateType.TRADE_STATE,
-                    version=1,
+                    state_type=_StateType.TRADE_STATE,
                     source_component="TradeLifecycleManager",
+                    state_data=history_data
                 )
 
                 await self._persistence_service.save_state(
-                    StateType.TRADE_STATE, f"{trade_id}_history", history_data, metadata
+                    _StateType.TRADE_STATE, f"{trade_id}_history", history_data, metadata
                 )
 
             # Add to in-memory history
@@ -965,11 +954,11 @@ class TradeLifecycleManager(BaseComponent):
     async def _load_active_trades(self) -> None:
         """Load active trades from persistence layer."""
         try:
-            from .state_service import StateType
+            from .state_service import StateType as _StateType
 
             # Load all trade states from persistence
             states = await self._persistence_service.list_states(
-                StateType.TRADE_STATE,
+                _StateType.TRADE_STATE,
                 limit=1000,  # Reasonable limit for active trades
             )
 
@@ -995,9 +984,7 @@ class TradeLifecycleManager(BaseComponent):
                             original_quantity=Decimal(
                                 str(trade_data.get("original_quantity", "0"))
                             ),
-                            filled_quantity=Decimal(
-                                str(trade_data.get("filled_quantity", "0"))
-                            ),
+                            filled_quantity=Decimal(str(trade_data.get("filled_quantity", "0"))),
                         )
 
                         self.active_trades[trade_id] = context
@@ -1020,7 +1007,7 @@ class TradeLifecycleManager(BaseComponent):
 
                 for trade_id, trade_context in list(self.active_trades.items()):
                     # Check for stale trades (older than 1 hour without updates)
-                    if (current_time - trade_context.signal_timestamp).total_seconds() > 3600:
+                    if (current_time - trade_context.signal_timestamp).total_seconds() > self._get_staleness_threshold():
                         self.logger.warning(f"Stale trade detected: {trade_id}")
                         # Could trigger alerts or automatic cleanup
 
@@ -1065,7 +1052,7 @@ class TradeLifecycleManager(BaseComponent):
 
         except Exception as e:
             self.logger.error(f"Failed to create trade state: {e}")
-            raise StateError(f"Trade state creation failed: {e}") from e
+            raise StateConsistencyError(f"Trade state creation failed: {e}") from e
 
     async def validate_trade_state(self, trade: Any) -> bool:
         """
@@ -1169,7 +1156,7 @@ class TradeLifecycleManager(BaseComponent):
         try:
             trade_context = self.active_trades.get(trade_id)
             if not trade_context:
-                raise StateError(f"Trade {trade_id} not found")
+                raise StateConsistencyError(f"Trade {trade_id} not found")
 
             # Update final PnL
             trade_context.realized_pnl = final_pnl
@@ -1181,7 +1168,7 @@ class TradeLifecycleManager(BaseComponent):
 
         except Exception as e:
             self.logger.error(f"Failed to close trade {trade_id}: {e}")
-            raise StateError(f"Trade closure failed: {e}") from e
+            raise StateConsistencyError(f"Trade closure failed: {e}") from e
 
     async def update_trade_state(self, trade_id: str, trade_data: Any) -> None:
         """
@@ -1194,7 +1181,7 @@ class TradeLifecycleManager(BaseComponent):
         try:
             trade_context = self.active_trades.get(trade_id)
             if not trade_context:
-                raise StateError(f"Trade {trade_id} not found")
+                raise StateConsistencyError(f"Trade {trade_id} not found")
 
             # Update trade context with new data
             if hasattr(trade_data, "current_price"):
@@ -1216,4 +1203,24 @@ class TradeLifecycleManager(BaseComponent):
 
         except Exception as e:
             self.logger.error(f"Failed to update trade state {trade_id}: {e}")
-            raise StateError(f"Trade state update failed: {e}") from e
+            raise StateConsistencyError(f"Trade state update failed: {e}") from e
+
+    def _get_state_ttl(self) -> int:
+        """Get the TTL for state caching from configuration or use default."""
+        from .utils_imports import DEFAULT_CLEANUP_INTERVAL
+        try:
+            if hasattr(self.config, "state_management") and hasattr(self.config.state_management, "state_ttl_seconds"):
+                return self.config.state_management.state_ttl_seconds
+            return DEFAULT_CLEANUP_INTERVAL
+        except Exception:
+            return DEFAULT_CLEANUP_INTERVAL
+
+    def _get_staleness_threshold(self) -> int:
+        """Get the trade staleness threshold from configuration or use default."""
+        from .utils_imports import DEFAULT_TRADE_STALENESS_THRESHOLD
+        try:
+            if hasattr(self.config, "state_management") and hasattr(self.config.state_management, "trade_staleness_threshold"):
+                return self.config.state_management.trade_staleness_threshold
+            return DEFAULT_TRADE_STALENESS_THRESHOLD
+        except Exception:
+            return DEFAULT_TRADE_STALENESS_THRESHOLD

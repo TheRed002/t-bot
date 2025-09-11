@@ -5,27 +5,23 @@ This service provides business logic for trade lifecycle management,
 decoupled from infrastructure and presentation concerns.
 """
 
+# Import types directly to avoid circular dependencies
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from decimal import Decimal
+from enum import Enum
 from typing import Any, Protocol
 from uuid import uuid4
 
 from src.core.base.service import BaseService
-from src.core.exceptions import BusinessRuleValidationError, StateError
+from src.core.exceptions import StateConsistencyError, ValidationError
 from src.core.types import OrderSide, OrderType
-
-# Import types directly to avoid circular dependencies
-from datetime import datetime, timezone
-from dataclasses import dataclass, field
-from enum import Enum
-from typing import Any
-from decimal import Decimal
-from uuid import uuid4
 
 
 # Define the enums and dataclasses here to avoid circular import
 class TradeLifecycleState(Enum):
     """Trade lifecycle state enumeration."""
+
     SIGNAL_GENERATED = "signal_generated"
     PRE_TRADE_VALIDATION = "pre_trade_validation"
     ORDER_CREATED = "order_created"
@@ -41,6 +37,7 @@ class TradeLifecycleState(Enum):
 @dataclass
 class TradeContext:
     """Complete context for a trade throughout its lifecycle."""
+
     trade_id: str = field(default_factory=lambda: str(uuid4()))
     bot_id: str = ""
     strategy_name: str = ""
@@ -65,8 +62,8 @@ class TradeContext:
     unrealized_pnl: Decimal = Decimal("0")
     fees_paid: Decimal = Decimal("0")
     slippage: Decimal = Decimal("0")
-    quality_score: float | None = None
-    execution_quality: dict[str, float] = field(default_factory=dict)
+    quality_score: Decimal | None = None
+    execution_quality: dict[str, Decimal] = field(default_factory=dict)
     errors: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
@@ -77,6 +74,7 @@ class TradeContext:
 @dataclass
 class TradeHistoryRecord:
     """Historical trade record for analysis."""
+
     trade_id: str = ""
     bot_id: str = ""
     strategy_name: str = ""
@@ -88,9 +86,9 @@ class TradeHistoryRecord:
     return_percentage: Decimal = Decimal("0")
     fees: Decimal = Decimal("0")
     net_pnl: Decimal = Decimal("0")
-    quality_score: float = 0.0
-    execution_time_seconds: float = 0.0
-    slippage_bps: float = 0.0
+    quality_score: Decimal = Decimal("0.0")
+    execution_time_seconds: Decimal = Decimal("0.0")
+    slippage_bps: Decimal = Decimal("0.0")
     signal_time: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     execution_time: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     settlement_time: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
@@ -100,21 +98,23 @@ class TradeLifecycleServiceProtocol(Protocol):
     """Protocol defining the trade lifecycle service interface."""
 
     async def create_trade_context(
-        self, bot_id: str, strategy_name: str, symbol: str, side: OrderSide, 
-        order_type: OrderType, quantity: Decimal, price: Decimal | None
+        self,
+        bot_id: str,
+        strategy_name: str,
+        symbol: str,
+        side: OrderSide,
+        order_type: OrderType,
+        quantity: Decimal,
+        price: Decimal | None,
     ) -> TradeContext: ...
 
     async def validate_trade_transition(
         self, current_state: TradeLifecycleState, new_state: TradeLifecycleState
     ) -> bool: ...
 
-    async def calculate_trade_performance(
-        self, context: TradeContext
-    ) -> dict[str, Any]: ...
+    async def calculate_trade_performance(self, context: TradeContext) -> dict[str, Any]: ...
 
-    async def create_history_record(
-        self, context: TradeContext
-    ) -> TradeHistoryRecord: ...
+    async def create_history_record(self, context: TradeContext) -> TradeHistoryRecord: ...
 
 
 class TradeLifecycleService(BaseService):
@@ -128,7 +128,7 @@ class TradeLifecycleService(BaseService):
     def __init__(self, config: Any = None):
         """
         Initialize the trade lifecycle service.
-        
+
         Args:
             config: Optional configuration object for business rules
         """
@@ -166,8 +166,14 @@ class TradeLifecycleService(BaseService):
         self.logger.info("TradeLifecycleService initialized")
 
     async def create_trade_context(
-        self, bot_id: str, strategy_name: str, symbol: str, side: OrderSide, 
-        order_type: OrderType, quantity: Decimal, price: Decimal | None = None
+        self,
+        bot_id: str,
+        strategy_name: str,
+        symbol: str,
+        side: OrderSide,
+        order_type: OrderType,
+        quantity: Decimal,
+        price: Decimal | None = None,
     ) -> TradeContext:
         """
         Create a new trade context.
@@ -185,18 +191,20 @@ class TradeLifecycleService(BaseService):
             TradeContext instance
 
         Raises:
-            BusinessRuleValidationError: If trade parameters are invalid
+            ValidationError: If trade parameters are invalid
         """
         try:
             # Validate inputs
             if quantity <= 0:
-                raise BusinessRuleValidationError("Trade quantity must be positive")
-            
+                raise ValidationError("Trade quantity must be positive")
+
             if not symbol or not symbol.strip():
-                raise BusinessRuleValidationError("Trade symbol is required")
-            
+                raise ValidationError("Trade symbol is required")
+
             if order_type in [OrderType.LIMIT, OrderType.STOP_LOSS] and (not price or price <= 0):
-                raise BusinessRuleValidationError(f"{order_type.value} orders require a positive price")
+                raise ValidationError(
+                    f"{order_type.value} orders require a positive price"
+                )
 
             # Create trade context
             context = TradeContext(
@@ -218,14 +226,14 @@ class TradeLifecycleService(BaseService):
                     "symbol": symbol,
                     "side": side.value,
                     "quantity": str(quantity),
-                }
+                },
             )
 
             return context
 
         except Exception as e:
             self.logger.error(f"Failed to create trade context: {e}")
-            raise BusinessRuleValidationError(f"Trade context creation failed: {e}") from e
+            raise ValidationError(f"Trade context creation failed: {e}") from e
 
     async def validate_trade_transition(
         self, current_state: TradeLifecycleState, new_state: TradeLifecycleState
@@ -243,12 +251,12 @@ class TradeLifecycleService(BaseService):
         try:
             allowed_states = self.valid_transitions.get(current_state, [])
             is_valid = new_state in allowed_states
-            
+
             if not is_valid:
                 self.logger.warning(
                     f"Invalid state transition from {current_state.value} to {new_state.value}"
                 )
-            
+
             return is_valid
 
         except Exception as e:
@@ -285,13 +293,13 @@ class TradeLifecycleService(BaseService):
                 signal_to_submission = (
                     context.order_submission_timestamp - context.signal_timestamp
                 ).total_seconds()
-                performance["signal_to_submission_seconds"] = signal_to_submission
+                performance["signal_to_submission_seconds"] = Decimal(str(signal_to_submission))
 
             if context.final_fill_timestamp and context.order_submission_timestamp:
                 execution_duration = (
                     context.final_fill_timestamp - context.order_submission_timestamp
                 ).total_seconds()
-                performance["execution_duration_seconds"] = execution_duration
+                performance["execution_duration_seconds"] = Decimal(str(execution_duration))
 
             # Calculate slippage for market orders
             if (
@@ -315,7 +323,7 @@ class TradeLifecycleService(BaseService):
 
         except Exception as e:
             self.logger.error(f"Performance calculation failed: {e}")
-            raise StateError(f"Failed to calculate trade performance: {e}") from e
+            raise StateConsistencyError(f"Failed to calculate trade performance: {e}") from e
 
     async def create_history_record(self, context: TradeContext) -> TradeHistoryRecord:
         """
@@ -339,7 +347,7 @@ class TradeLifecycleService(BaseService):
             # Calculate slippage in basis points
             slippage_bps = 0.0
             if (
-                context.requested_price 
+                context.requested_price
                 and context.average_fill_price > 0
                 and context.order_type == OrderType.MARKET
             ):
@@ -351,7 +359,7 @@ class TradeLifecycleService(BaseService):
                     slippage = (
                         context.requested_price - context.average_fill_price
                     ) / context.requested_price
-                slippage_bps = slippage * 10000
+                slippage_bps = float(slippage * 10000)
 
             # Create history record
             record = TradeHistoryRecord(
@@ -365,9 +373,9 @@ class TradeLifecycleService(BaseService):
                 pnl=context.realized_pnl,
                 fees=context.fees_paid,
                 net_pnl=context.realized_pnl - context.fees_paid,
-                quality_score=context.quality_score or 0.0,
-                execution_time_seconds=execution_time_seconds,
-                slippage_bps=slippage_bps,
+                quality_score=context.quality_score or Decimal("0.0"),
+                execution_time_seconds=Decimal(str(execution_time_seconds)),
+                slippage_bps=Decimal(str(slippage_bps)),
                 signal_time=context.signal_timestamp,
                 execution_time=context.final_fill_timestamp or context.signal_timestamp,
                 settlement_time=context.settlement_timestamp or datetime.now(timezone.utc),
@@ -377,7 +385,7 @@ class TradeLifecycleService(BaseService):
 
         except Exception as e:
             self.logger.error(f"Failed to create history record: {e}")
-            raise StateError(f"History record creation failed: {e}") from e
+            raise StateConsistencyError(f"History record creation failed: {e}") from e
 
     async def apply_business_rules(self, context: TradeContext) -> list[str]:
         """
@@ -395,17 +403,17 @@ class TradeLifecycleService(BaseService):
             # Validate quantities
             if context.original_quantity <= 0:
                 issues.append("Original quantity must be positive")
-            
+
             if context.filled_quantity < 0:
                 issues.append("Filled quantity cannot be negative")
-            
+
             if context.filled_quantity > context.original_quantity:
                 issues.append("Filled quantity cannot exceed original quantity")
 
             # Validate prices
             if context.requested_price is not None and context.requested_price <= 0:
                 issues.append("Requested price must be positive")
-            
+
             if context.average_fill_price < 0:
                 issues.append("Average fill price cannot be negative")
 
@@ -416,7 +424,7 @@ class TradeLifecycleService(BaseService):
 
             # Validate timestamps
             if (
-                context.order_submission_timestamp 
+                context.order_submission_timestamp
                 and context.signal_timestamp
                 and context.order_submission_timestamp < context.signal_timestamp
             ):

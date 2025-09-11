@@ -9,9 +9,8 @@ from datetime import datetime
 from typing import Any
 
 from src.core.base.component import BaseComponent
-from src.core.exceptions import StateError
+from src.core.exceptions import StateConsistencyError
 from src.error_handling.context import ErrorContext
-from src.error_handling.decorators import with_retry
 from src.monitoring import MetricsCollector
 from src.monitoring.alerting import (
     Alert as MonitoringAlert,
@@ -108,9 +107,7 @@ class StateMetricsAdapter(BaseComponent):
             self.logger.error(f"Invalid value for metric {metric.name}: {e}")
         except Exception as e:
             self.logger.error(f"Failed to record state metric {metric.name}: {e}")
-            # Re-raise critical errors but not data validation errors
-            if not isinstance(e, AttributeError | ValueError):
-                raise
+            # Don't re-raise - metric recording failures should not crash the system
 
     def record_operation_time(self, operation: str, duration_ms: float) -> None:
         """Record state operation timing to central metrics."""
@@ -150,8 +147,9 @@ class StateAlertAdapter(BaseComponent):
         # Now properly aligned with monitoring module's severity levels
         self._severity_map = {
             AlertSeverity.INFO: MonitoringAlertSeverity.LOW,
-            AlertSeverity.WARNING: MonitoringAlertSeverity.MEDIUM,
-            AlertSeverity.ERROR: MonitoringAlertSeverity.HIGH,
+            AlertSeverity.LOW: MonitoringAlertSeverity.LOW,
+            AlertSeverity.MEDIUM: MonitoringAlertSeverity.MEDIUM,
+            AlertSeverity.HIGH: MonitoringAlertSeverity.HIGH,
             AlertSeverity.CRITICAL: MonitoringAlertSeverity.CRITICAL,
         }
 
@@ -164,7 +162,6 @@ class StateAlertAdapter(BaseComponent):
             self._alert_manager = get_alert_manager()
         return self._alert_manager
 
-    @with_retry(max_attempts=3, base_delay=0.5, backoff_factor=2.0)
     async def send_alert(self, alert: Alert) -> None:
         """
         Send a state alert through central alerting.
@@ -172,151 +169,103 @@ class StateAlertAdapter(BaseComponent):
         Args:
             alert: State module alert to send
         """
-        try:
-            if not self.alert_manager:
-                self.logger.warning("No alert manager available")
-                return
+        max_attempts = 3
+        base_delay = 0.5
+        backoff_factor = 2.0
+        last_error = None
 
-            # Validate alert data
-            if not alert.message:
-                self.logger.error("Alert missing required message field")
-                return
+        for attempt in range(max_attempts):
+            try:
+                if not self.alert_manager:
+                    self.logger.warning("No alert manager available")
+                    return
 
-            if alert.severity not in AlertSeverity:
-                self.logger.error(f"Invalid alert severity: {alert.severity}")
-                return
+                # Validate alert data
+                if not alert.message:
+                    self.logger.error("Alert missing required message field")
+                    return
 
-            if not isinstance(alert.timestamp, datetime):
-                self.logger.error(f"Invalid alert timestamp type: {type(alert.timestamp)}")
-                return
+                # Check if severity is valid (handle both string and enum values)
+                try:
+                    if isinstance(alert.severity, str):
+                        severity_values = [s.value for s in AlertSeverity] if hasattr(AlertSeverity, '__members__') else []
+                        if alert.severity not in severity_values and alert.severity not in AlertSeverity.__members__:
+                            self.logger.error(f"Invalid alert severity: {alert.severity}")
+                            return
+                    else:
+                        if alert.severity not in AlertSeverity:
+                            self.logger.error(f"Invalid alert severity: {alert.severity}")
+                            return
+                except (TypeError, AttributeError):
+                    # If severity checking fails, log warning but continue
+                    self.logger.warning(f"Could not validate alert severity: {alert.severity}")
 
-            # Convert state alert to monitoring alert
-            monitoring_alert = MonitoringAlert(
-                rule_name=f"state.{alert.source}",
-                severity=self._severity_map.get(alert.severity, MonitoringAlertSeverity.MEDIUM),
-                status=AlertStatus.FIRING,
-                message=alert.message,
-                labels={
-                    "source": "state",
-                    "category": alert.category,
-                    "alert_id": alert.alert_id,
-                },
-                annotations={
-                    "title": alert.title,
-                    "metric_name": alert.metric_name,
-                    # Keep numeric values as strings for Prometheus compatibility
-                    # but preserve precision and type information
-                    "current_value": str(alert.current_value),
-                    "threshold_value": str(alert.threshold_value),
-                    "current_value_type": type(alert.current_value).__name__,
-                    "threshold_value_type": type(alert.threshold_value).__name__,
-                },
-                starts_at=alert.timestamp,
-            )
+                if not isinstance(alert.timestamp, datetime):
+                    self.logger.error(f"Invalid alert timestamp type: {type(alert.timestamp)}")
+                    return
 
-            # Fire alert through central alerting
-            await self.alert_manager.fire_alert(monitoring_alert)
+                # Convert state alert to monitoring alert
+                monitoring_alert = MonitoringAlert(
+                    rule_name=f"state.{alert.source}",
+                    severity=self._severity_map.get(alert.severity, MonitoringAlertSeverity.MEDIUM),
+                    status=AlertStatus.FIRING,
+                    message=alert.message,
+                    labels={
+                        "source": "state",
+                        "category": alert.category,
+                        "alert_id": alert.alert_id,
+                    },
+                    annotations={
+                        "title": alert.title,
+                        "metric_name": alert.metric_name,
+                        # Keep numeric values as strings for Prometheus compatibility
+                        # but preserve precision and type information
+                        "current_value": str(alert.current_value),
+                        "threshold_value": str(alert.threshold_value),
+                        "current_value_type": type(alert.current_value).__name__,
+                        "threshold_value_type": type(alert.threshold_value).__name__,
+                    },
+                    starts_at=alert.timestamp,
+                )
 
-        except Exception as e:
+                # Fire alert through central alerting
+                await self.alert_manager.fire_alert(monitoring_alert)
+                return  # Success, exit retry loop
+
+            except Exception as e:
+                last_error = e
+                self.logger.warning(f"Alert send attempt {attempt + 1} failed: {e}")
+
+                # If this was the last attempt, break out to raise error
+                if attempt >= max_attempts - 1:
+                    break
+
+                # Wait before retry
+                import asyncio
+                delay = base_delay * (backoff_factor ** attempt)
+                await asyncio.sleep(delay)
+
+        # All retries failed, raise error
+        if last_error:
             # Create error context for proper error tracking
             error_context = ErrorContext(
+                error=last_error,
                 component="StateAlertAdapter",
                 operation="send_alert",
-                error_type=type(e).__name__,
-                error_message=str(e),
-                context_data={
-                    "alert_id": alert.alert_id,
-                    "alert_source": alert.source,
-                    "alert_severity": alert.severity.value if alert.severity else None,
-                    "alert_category": alert.category,
-                },
             )
 
             self.logger.error(
-                f"Failed to send state alert: {e}", extra={"error_context": error_context.to_dict()}
+                f"Failed to send state alert after {max_attempts} attempts: {last_error}",
+                extra={"error_context": error_context.to_dict()}
             )
 
             # Re-raise critical alerting failures with context
-            raise StateError(f"Alert delivery failed for {alert.alert_id}: {e}") from e
-
-
-class EnhancedStateMonitoringService(StateMonitoringService):
-    """
-    Enhanced state monitoring service with central monitoring integration.
-
-    This extends the existing StateMonitoringService to integrate with
-    the central monitoring infrastructure while maintaining backward compatibility.
-    """
-
-    def __init__(self, state_service: Any, metrics_collector: MetricsCollector | None = None):
-        """Initialize enhanced monitoring with central integration."""
-        super().__init__(state_service)
-
-        # Initialize adapters
-        self.metrics_adapter = StateMetricsAdapter(metrics_collector)
-        self.alert_adapter = StateAlertAdapter()
-
-        # Register alert handler to forward to central system
-        self.register_alert_handler(self._forward_alert_to_central)
-
-        # Enable OpenTelemetry tracing
-        self.tracer = get_tracer("state_monitoring")
-
-        self.logger.info("EnhancedStateMonitoringService initialized with central integration")
-
-    def record_metric(
-        self,
-        name: str,
-        value: float,
-        metric_type: MetricType = MetricType.GAUGE,
-        tags: dict[str, str] | None = None,
-        unit: str = "",
-    ) -> None:
-        """
-        Record metric to both state and central monitoring.
-
-        Overrides parent method to ensure metrics go to central system.
-        """
-        # Record to state monitoring (parent)
-        super().record_metric(name, value, metric_type, tags, unit)
-
-        # Also record to central monitoring
-        metric = Metric(name=name, metric_type=metric_type, value=value, tags=tags or {}, unit=unit)
-        self.metrics_adapter.record_state_metric(metric)
-
-    def record_operation_time(self, operation_name: str, duration_ms: float) -> None:
-        """
-        Record operation time to both systems.
-
-        Overrides parent method to ensure timing goes to central metrics.
-        """
-        # Record to state monitoring (parent)
-        super().record_operation_time(operation_name, duration_ms)
-
-        # Also record to central monitoring
-        self.metrics_adapter.record_operation_time(operation_name, duration_ms)
-
-    async def _forward_alert_to_central(self, alert: Alert) -> None:
-        """Forward state alerts to central alerting system."""
-        await self.alert_adapter.send_alert(alert)
-
-    async def _run_health_check(self, check: Any) -> None:
-        """
-        Run health check with OpenTelemetry tracing.
-
-        Overrides parent method to add distributed tracing.
-        """
-        with self.tracer.start_as_current_span(f"health_check.{check.name}"):
-            # Run the actual health check
-            await super()._run_health_check(check)
-
-            # Record result to central metrics
-            self.metrics_adapter.record_health_check(check.name, check.status)
+            raise StateConsistencyError(f"Alert delivery failed for {alert.alert_id}: {last_error}") from last_error
 
 
 def create_integrated_monitoring_service(
     state_service: Any, metrics_collector: MetricsCollector | None = None
-) -> EnhancedStateMonitoringService:
+) -> StateMonitoringService:
     """
     Factory function to create state monitoring with central integration.
 
@@ -325,6 +274,12 @@ def create_integrated_monitoring_service(
         metrics_collector: Optional central metrics collector
 
     Returns:
-        Enhanced monitoring service with central integration
+        State monitoring service with central integration
     """
-    return EnhancedStateMonitoringService(state_service, metrics_collector)
+    service = StateMonitoringService(state_service, metrics_collector)
+
+    # Set up integration adapters
+    service.metrics_adapter = StateMetricsAdapter(metrics_collector)
+    service.alert_adapter = StateAlertAdapter()
+
+    return service

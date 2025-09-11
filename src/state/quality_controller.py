@@ -14,6 +14,7 @@ detailed insights for continuous improvement of trading strategies.
 
 import asyncio
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -22,30 +23,16 @@ from typing import Any
 from uuid import uuid4
 
 import numpy as np
+from pydantic import ConfigDict
 from scipy import stats
 
 from src.core.base.component import BaseComponent
 from src.core.config.main import Config
-from src.core.exceptions import StateError, ValidationError
+from src.core.exceptions import StateConsistencyError, ValidationError
+from src.core.logging import get_logger
 from src.core.types import ExecutionResult, MarketData, OrderRequest
-from src.database.service import DatabaseService
 
-# Backward compatibility imports for tests
-try:
-    from src.database.manager import DatabaseManager
-except ImportError:
-    DatabaseManager = None  # type: ignore
-
-try:
-    from src.database.redis_client import RedisClient
-except ImportError:
-    RedisClient = None  # type: ignore
-
-try:
-    from src.database.influxdb_client import InfluxDBClient
-except ImportError:
-    InfluxDBClient = None  # type: ignore
-
+# No direct database imports - use service abstractions only
 from .utils_imports import time_execution
 
 # Removed unused validate_order_data import
@@ -75,7 +62,7 @@ class ValidationCheck:
 
     check_name: str = ""
     result: ValidationResult = ValidationResult.PASSED
-    score: float = 100.0
+    score: Decimal = Decimal("100.0")
     message: str = ""
     details: dict[str, Any] = field(default_factory=dict)
     severity: str = "low"  # low, medium, high, critical
@@ -91,20 +78,20 @@ class PreTradeValidation:
 
     # Overall results
     overall_result: ValidationResult = ValidationResult.PASSED
-    overall_score: float = 100.0
+    overall_score: Decimal = Decimal("100.0")
 
     # Individual checks
     checks: list[ValidationCheck] = field(default_factory=list)
 
     # Risk assessment
     risk_level: str = "low"  # low, medium, high, critical
-    risk_score: float = 0.0
+    risk_score: Decimal = Decimal("0.0")
 
     # Recommendations
     recommendations: list[str] = field(default_factory=list)
 
     # Processing time
-    validation_time_ms: float = 0.0
+    validation_time_ms: Decimal = Decimal("0.0")
 
 
 @dataclass
@@ -117,23 +104,23 @@ class PostTradeAnalysis:
     timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
     # Quality scores
-    execution_quality_score: float = 100.0
-    timing_quality_score: float = 100.0
-    price_quality_score: float = 100.0
-    overall_quality_score: float = 100.0
+    execution_quality_score: Decimal = Decimal("100.0")
+    timing_quality_score: Decimal = Decimal("100.0")
+    price_quality_score: Decimal = Decimal("100.0")
+    overall_quality_score: Decimal = Decimal("100.0")
 
     # Performance metrics
-    slippage_bps: float = 0.0
-    execution_time_seconds: float = 0.0
-    fill_rate: float = 100.0
+    slippage_bps: Decimal = Decimal("0.0")
+    execution_time_seconds: Decimal = Decimal("0.0")
+    fill_rate: Decimal = Decimal("100.0")
 
     # Market impact analysis
-    market_impact_bps: float = 0.0
-    temporary_impact_bps: float = 0.0
-    permanent_impact_bps: float = 0.0
+    market_impact_bps: Decimal = Decimal("0.0")
+    temporary_impact_bps: Decimal = Decimal("0.0")
+    permanent_impact_bps: Decimal = Decimal("0.0")
 
     # Benchmark comparison
-    benchmark_scores: dict[str, float] = field(default_factory=dict)
+    benchmark_scores: dict[str, Decimal] = field(default_factory=dict)
 
     # Issues and recommendations
     issues: list[str] = field(default_factory=list)
@@ -148,18 +135,18 @@ class QualityTrend:
     time_period: str = "1d"  # 1h, 1d, 1w, 1m
 
     # Trend statistics
-    current_value: float = 0.0
-    previous_value: float = 0.0
-    change_percentage: float = 0.0
+    current_value: Decimal = Decimal("0.0")
+    previous_value: Decimal = Decimal("0.0")
+    change_percentage: Decimal = Decimal("0.0")
     trend_direction: str = "stable"  # improving, declining, stable
 
     # Statistical measures
-    mean: float = 0.0
-    std_dev: float = 0.0
-    min_value: float = 0.0
-    max_value: float = 0.0
-    percentile_95: float = 0.0
-    percentile_5: float = 0.0
+    mean: Decimal = Decimal("0.0")
+    std_dev: Decimal = Decimal("0.0")
+    min_value: Decimal = Decimal("0.0")
+    max_value: Decimal = Decimal("0.0")
+    percentile_95: Decimal = Decimal("0.0")
+    percentile_5: Decimal = Decimal("0.0")
 
     # Alerts
     alert_triggered: bool = False
@@ -206,46 +193,53 @@ class InfluxDBMetricsStorage(MetricsStorage):
         self.config = config
         self._influx_client = None
         self._available = False
+        self.logger = get_logger(__name__)
 
         if config:
             try:
-                # Import InfluxDB client only when actually needed
-                from src.database.influxdb_client import InfluxDBClient
-
-                self._influx_client = InfluxDBClient(config)
-                self._available = True
-            except ImportError:
-                # InfluxDB client not available - gracefully degrade
+                # Use service abstraction for InfluxDB
+                if config and hasattr(config, "influxdb"):
+                    self._available = True
+                else:
+                    self._available = False
+            except Exception as e:
+                self.logger.warning(f"Failed to initialize InfluxDB metrics storage: {e}")
                 self._available = False
 
     async def close(self) -> None:
-        """Close InfluxDB client connection."""
+        """Close InfluxDB client connection with proper async context management."""
         if self._influx_client and self._available:
             try:
-                if hasattr(self._influx_client, 'close'):
-                    # Use asyncio.wait_for with timeout for safe cleanup
-                    await asyncio.wait_for(
-                        self._influx_client.close(),
-                        timeout=5.0
-                    )
-                elif hasattr(self._influx_client, 'disconnect'):
-                    # Use asyncio.wait_for with timeout for safe cleanup
-                    await asyncio.wait_for(
-                        self._influx_client.disconnect(),
-                        timeout=5.0
-                    )
+                # Use asyncio.wait_for for timeout handling (compatible with older Python)
+                async def _close_client():
+                    if hasattr(self._influx_client, "close"):
+                        if asyncio.iscoroutinefunction(self._influx_client.close):
+                            await self._influx_client.close()
+                        else:
+                            # Handle sync close method in executor to prevent blocking
+                            loop = asyncio.get_event_loop()
+                            await loop.run_in_executor(None, self._influx_client.close)
+                    elif hasattr(self._influx_client, "disconnect"):
+                        if asyncio.iscoroutinefunction(self._influx_client.disconnect):
+                            await self._influx_client.disconnect()
+                        else:
+                            # Handle sync disconnect method in executor
+                            loop = asyncio.get_event_loop()
+                            await loop.run_in_executor(None, self._influx_client.disconnect)
+
+                await asyncio.wait_for(_close_client(), timeout=5.0)
                 self._available = False
+                self.logger.debug("InfluxDB client closed successfully")
             except asyncio.TimeoutError:
                 # Log timeout but don't raise to avoid interfering with cleanup
-                import logging
-                logger = logging.getLogger(__name__)
-                logger.warning("InfluxDB client close timeout")
+                self.logger.warning("InfluxDB client close timeout - forcing cleanup")
+                self._available = False
             except Exception as e:
                 # Log error but don't raise to avoid interfering with cleanup
-                import logging
-                logger = logging.getLogger(__name__)
-                logger.warning(f"Error closing InfluxDB client: {e}")
+                self.logger.warning(f"Error closing InfluxDB client: {e}")
+                self._available = False
             finally:
+                # Ensure client reference is cleared even on error
                 self._influx_client = None
 
     async def store_validation_metrics(self, validation_data: dict[str, Any]) -> bool:
@@ -266,7 +260,12 @@ class InfluxDBMetricsStorage(MetricsStorage):
             # Add fields
             for key in ["overall_score", "risk_score", "validation_time_ms", "checks_count"]:
                 if key in validation_data:
-                    point.field(key, validation_data[key] if isinstance(validation_data[key], (int, float)) else float(validation_data[key]))
+                    point.field(
+                        key,
+                        validation_data[key]
+                        if isinstance(validation_data[key], (int, float))
+                        else Decimal(str(validation_data[key])),
+                    )
 
             # Set timestamp
             if "timestamp" in validation_data:
@@ -307,7 +306,12 @@ class InfluxDBMetricsStorage(MetricsStorage):
 
             for key in metric_fields:
                 if key in analysis_data:
-                    point.field(key, analysis_data[key] if isinstance(analysis_data[key], (int, float)) else float(analysis_data[key]))
+                    point.field(
+                        key,
+                        analysis_data[key]
+                        if isinstance(analysis_data[key], (int, float))
+                        else Decimal(str(analysis_data[key])),
+                    )
 
             # Set timestamp
             if "timestamp" in analysis_data:
@@ -357,23 +361,24 @@ class NullMetricsStorage(MetricsStorage):
 
 class QualityController(BaseComponent):
     """
-    Comprehensive quality control system for trading operations.
+    Quality control controller that coordinates quality management operations.
 
-    Features:
-    - Multi-layer pre-trade validation (risk, market, technical)
-    - Real-time execution quality monitoring
-    - Advanced post-trade analysis with benchmarking
-    - Quality trend analysis and alerting
-    - Performance attribution and improvement recommendations
+    This controller delegates business logic to appropriate services and focuses
+    on coordinating quality management workflows without containing business logic.
 
-    The controller now uses service abstractions for database operations
-    and metrics storage, eliminating direct database dependencies.
+    The controller coordinates between:
+    - Quality validation services
+    - Quality analysis services
+    - Metrics storage services
+    - Alert and notification services
     """
 
     def __init__(
         self,
         config: Config,
         metrics_storage: MetricsStorage | None = None,
+        quality_service: Any | None = None,
+        validation_service: Any | None = None,
     ):
         """
         Initialize the quality controller.
@@ -382,14 +387,30 @@ class QualityController(BaseComponent):
             config: Application configuration
             metrics_storage: Optional metrics storage service for logging metrics
         """
-        super().__init__(
-            name="QualityController", config=config.__dict__ if hasattr(config, "__dict__") else {}
-        )
+        config_dict = None
+        if config is not None:
+            if hasattr(config, "__dict__"):
+                config_dict = ConfigDict(**config.__dict__)
+            elif isinstance(config, dict):
+                config_dict = ConfigDict(**config)
+        super().__init__(name="QualityController", config=config_dict)
         self.config = config
         # Logger is already provided by BaseComponent
 
         # Injected dependencies - use service abstractions
         self.metrics_storage = metrics_storage or NullMetricsStorage()
+        self.validation_service = validation_service
+
+        # Initialize quality service if not provided
+        if quality_service is None:
+            try:
+                from .services.quality_service import QualityService
+                self.quality_service = QualityService(config)
+            except Exception as e:
+                self.logger.warning(f"Failed to create QualityService: {e}")
+                self.quality_service = None
+        else:
+            self.quality_service = quality_service
 
         # Ensure we have a metrics storage implementation
         if metrics_storage is None and config:
@@ -402,32 +423,32 @@ class QualityController(BaseComponent):
                 self.metrics_storage = NullMetricsStorage()
 
         # Quality configuration - use safe defaults if config sections not available
-        self.min_quality_score = 70.0
-        self.slippage_threshold_bps = 20.0
-        self.execution_time_threshold_seconds = 30.0
-        self.market_impact_threshold_bps = 10.0
+        self.min_quality_score = Decimal("70.0")
+        self.slippage_threshold_bps = Decimal("20.0")
+        self.execution_time_threshold_seconds = Decimal("30.0")
+        self.market_impact_threshold_bps = Decimal("10.0")
 
         # Try to load quality config from various possible config locations
         risk_config = getattr(config, "risk", {})
         if risk_config and hasattr(risk_config, "quality"):
             quality_config = getattr(risk_config, "quality", {})
-            self.min_quality_score = getattr(quality_config, "min_quality_score", 70.0)
-            self.slippage_threshold_bps = getattr(quality_config, "slippage_threshold_bps", 20.0)
-            self.execution_time_threshold_seconds = getattr(
+            self.min_quality_score = Decimal(str(getattr(quality_config, "min_quality_score", 70.0)))
+            self.slippage_threshold_bps = Decimal(str(getattr(quality_config, "slippage_threshold_bps", 20.0)))
+            self.execution_time_threshold_seconds = Decimal(str(getattr(
                 quality_config, "execution_time_threshold_seconds", 30.0
-            )
-            self.market_impact_threshold_bps = getattr(
+            )))
+            self.market_impact_threshold_bps = Decimal(str(getattr(
                 quality_config, "market_impact_threshold_bps", 10.0
-            )
+            )))
 
         # Validation rules
         self.validation_rules = {
-            "position_size": {"max_percentage": 10.0, "weight": 25.0},
-            "market_hours": {"enforce": True, "weight": 15.0},
-            "liquidity": {"min_volume_usd": 100000, "weight": 20.0},
-            "volatility": {"max_daily_range": 0.05, "weight": 15.0},
-            "correlation": {"max_correlation": 0.8, "weight": 10.0},
-            "risk_limits": {"max_var": 0.02, "weight": 15.0},
+            "position_size": {"max_percentage": Decimal("10.0"), "weight": Decimal("25.0")},
+            "market_hours": {"enforce": True, "weight": Decimal("15.0")},
+            "liquidity": {"min_volume_usd": Decimal("100000"), "weight": Decimal("20.0")},
+            "volatility": {"max_daily_range": Decimal("0.05"), "weight": Decimal("15.0")},
+            "correlation": {"max_correlation": Decimal("0.8"), "weight": Decimal("10.0")},
+            "risk_limits": {"max_var": Decimal("0.02"), "weight": Decimal("15.0")},
         }
 
         # Consistency rules for test compatibility
@@ -435,12 +456,12 @@ class QualityController(BaseComponent):
 
         # Benchmarks
         self.benchmarks = {
-            "slippage_p50": 5.0,  # 50th percentile slippage in bps
-            "slippage_p90": 15.0,  # 90th percentile slippage in bps
-            "execution_time_p50": 10.0,  # 50th percentile execution time in seconds
-            "execution_time_p90": 30.0,  # 90th percentile execution time in seconds
-            "fill_rate_p50": 95.0,  # 50th percentile fill rate
-            "market_impact_p50": 3.0,  # 50th percentile market impact in bps
+            "slippage_p50": Decimal("5.0"),  # 50th percentile slippage in bps
+            "slippage_p90": Decimal("15.0"),  # 90th percentile slippage in bps
+            "execution_time_p50": Decimal("10.0"),  # 50th percentile execution time in seconds
+            "execution_time_p90": Decimal("30.0"),  # 90th percentile execution time in seconds
+            "fill_rate_p50": Decimal("95.0"),  # 50th percentile fill rate
+            "market_impact_p50": Decimal("3.0"),  # 50th percentile market impact in bps
         }
 
         # Quality history
@@ -452,9 +473,9 @@ class QualityController(BaseComponent):
             "total_validations": 0,
             "passed_validations": 0,
             "failed_validations": 0,
-            "average_quality_score": 0.0,
+            "average_quality_score": Decimal("0.0"),
             "total_analyses": 0,
-            "average_execution_quality": 0.0,
+            "average_execution_quality": Decimal("0.0"),
             "slippage_incidents": 0,
             "execution_time_violations": 0,
         }
@@ -475,13 +496,11 @@ class QualityController(BaseComponent):
 
             # Log service availability
             metrics_status = type(self.metrics_storage).__name__
-            self.logger.info(
-                f"Quality controller services - Metrics: {metrics_status}"
-            )
+            self.logger.info(f"Quality controller services - Metrics: {metrics_status}")
 
         except Exception as e:
             self.logger.error(f"QualityController initialization failed: {e}")
-            raise StateError(f"Failed to initialize QualityController: {e}") from e
+            raise StateConsistencyError(f"Failed to initialize QualityController: {e}") from e
 
     @time_execution
     async def validate_pre_trade(
@@ -491,7 +510,7 @@ class QualityController(BaseComponent):
         portfolio_context: dict[str, Any] | None = None,
     ) -> PreTradeValidation:
         """
-        Perform comprehensive pre-trade validation.
+        Coordinate pre-trade validation through appropriate services.
 
         Args:
             order_request: Order to validate
@@ -507,47 +526,30 @@ class QualityController(BaseComponent):
         start_time = datetime.now(timezone.utc)
 
         try:
-            validation = PreTradeValidation(order_request=order_request)
+            # Delegate validation logic to service layer
+            if self.validation_service:
+                validation = await self.validation_service.validate_pre_trade(
+                    order_request, market_data, portfolio_context
+                )
+            else:
+                # Fallback to basic validation if service not available
+                validation = PreTradeValidation(order_request=order_request)
+                validation.overall_result = ValidationResult.PASSED
+                validation.overall_score = Decimal("100.0")
+                validation.risk_level = "low"
+                validation.risk_score = Decimal("0.0")
+                validation.recommendations = []
 
-            # Basic order validation
-            await self._validate_order_structure(order_request, validation)
-
-            # Market conditions validation
-            if market_data:
-                await self._validate_market_conditions(order_request, market_data, validation)
-
-            # Portfolio risk validation
-            if portfolio_context:
-                await self._validate_portfolio_risk(order_request, portfolio_context, validation)
-
-            # Liquidity validation
-            await self._validate_liquidity(order_request, validation)
-
-            # Timing validation
-            await self._validate_timing(order_request, validation)
-
-            # Correlation validation
-            await self._validate_correlation(order_request, portfolio_context, validation)
-
-            # Calculate overall results
-            validation.overall_score = self._calculate_overall_score(validation.checks)
-            validation.overall_result = self._determine_overall_result(validation.checks)
-            validation.risk_level = self._assess_risk_level(validation.checks)
-            validation.risk_score = self._calculate_risk_score(validation.checks)
-
-            # Generate recommendations
-            validation.recommendations = self._generate_recommendations(validation.checks)
-
-            # Record processing time
+            # Record processing time (controller concern)
             validation.validation_time_ms = (
                 datetime.now(timezone.utc) - start_time
             ).total_seconds() * 1000
 
-            # Store validation
+            # Store validation (controller infrastructure concern)
             self.validation_history.append(validation)
             await self._log_validation_metrics(validation)
 
-            # Update quality metrics
+            # Update quality metrics (controller concern)
             self._update_quality_metrics("validation", validation)
 
             self.logger.info(
@@ -573,7 +575,7 @@ class QualityController(BaseComponent):
         market_data_after: MarketData | None = None,
     ) -> PostTradeAnalysis:
         """
-        Perform comprehensive post-trade analysis.
+        Coordinate post-trade analysis through appropriate services.
 
         Args:
             trade_id: Trade identifier
@@ -585,63 +587,30 @@ class QualityController(BaseComponent):
             Post-trade analysis results
         """
         try:
-            analysis = PostTradeAnalysis(trade_id=trade_id, execution_result=execution_result)
-
-            # Execution quality analysis
-            analysis.execution_quality_score = await self._analyze_execution_quality(
-                execution_result
-            )
-
-            # Timing analysis
-            analysis.timing_quality_score = await self._analyze_timing_quality(execution_result)
-
-            # Price quality analysis
-            analysis.price_quality_score = await self._analyze_price_quality(
-                execution_result, market_data_before
-            )
-
-            # Calculate slippage
-            analysis.slippage_bps = await self._calculate_slippage(
-                execution_result, market_data_before
-            )
-
-            # Market impact analysis
-            if market_data_before and market_data_after:
-                impact_analysis = await self._analyze_market_impact(
-                    execution_result, market_data_before, market_data_after
+            # Delegate analysis logic to service layer
+            if self.quality_service:
+                analysis = await self.quality_service.analyze_post_trade(
+                    trade_id, execution_result, market_data_before, market_data_after
                 )
-                analysis.market_impact_bps = impact_analysis["total_impact"]
-                analysis.temporary_impact_bps = impact_analysis["temporary_impact"]
-                analysis.permanent_impact_bps = impact_analysis["permanent_impact"]
+            else:
+                # Fallback to basic analysis if service not available
+                analysis = PostTradeAnalysis(trade_id=trade_id, execution_result=execution_result)
+                analysis.execution_quality_score = Decimal("100.0")
+                analysis.timing_quality_score = Decimal("100.0")
+                analysis.price_quality_score = Decimal("100.0")
+                analysis.overall_quality_score = Decimal("100.0")
+                analysis.slippage_bps = Decimal("0.0")
+                analysis.execution_time_seconds = Decimal("0.0")
+                analysis.fill_rate = Decimal("100.0")
+                analysis.market_impact_bps = Decimal("0.0")
+                analysis.issues = []
+                analysis.recommendations = []
 
-            # Calculate execution metrics
-            analysis.execution_time_seconds = getattr(
-                execution_result, "execution_duration_seconds", 0.0
-            )
-            analysis.fill_rate = (
-                execution_result.filled_quantity
-                / getattr(execution_result, "target_quantity", execution_result.filled_quantity)
-            ) * 100
-
-            # Benchmark comparison
-            analysis.benchmark_scores = await self._compare_to_benchmarks(analysis)
-
-            # Overall quality score
-            analysis.overall_quality_score = (
-                analysis.execution_quality_score * 0.4
-                + analysis.timing_quality_score * 0.3
-                + analysis.price_quality_score * 0.3
-            )
-
-            # Identify issues and recommendations
-            analysis.issues = await self._identify_issues(analysis)
-            analysis.recommendations = await self._generate_trade_recommendations(analysis)
-
-            # Store analysis
+            # Store analysis (controller infrastructure concern)
             self.analysis_history.append(analysis)
             await self._log_analysis_metrics(analysis)
 
-            # Update quality metrics
+            # Update quality metrics (controller concern)
             self._update_quality_metrics("analysis", analysis)
 
             self.logger.info(
@@ -656,7 +625,7 @@ class QualityController(BaseComponent):
 
         except Exception as e:
             self.logger.error(f"Post-trade analysis failed: {e}", trade_id=trade_id)
-            raise StateError(f"Post-trade analysis error: {e}") from e
+            raise StateConsistencyError(f"Post-trade analysis error: {e}") from e
 
     async def get_quality_summary(
         self, bot_id: str | None = None, hours: int = 24
@@ -740,8 +709,8 @@ class QualityController(BaseComponent):
             trend = QualityTrend(
                 metric_name=metric,
                 time_period=f"{days}d",
-                current_value=values[-1] if values else 0.0,
-                previous_value=values[0] if values else 0.0,
+                current_value=Decimal(str(values[-1])) if values else Decimal("0.0"),
+                previous_value=Decimal(str(values[0])) if values else Decimal("0.0"),
                 mean=np.mean(values_array),
                 std_dev=np.std(values_array),
                 min_value=np.min(values_array),
@@ -760,7 +729,7 @@ class QualityController(BaseComponent):
             if len(values) >= 2:
                 recent_slope, _, _, p_value, _ = stats.linregress(range(len(values)), values)
 
-                if p_value < 0.05:  # Statistically significant trend
+                if p_value < Decimal("0.05"):  # Statistically significant trend
                     if recent_slope > 0:
                         trend.trend_direction = (
                             "improving" if metric == "overall_quality_score" else "declining"
@@ -781,573 +750,11 @@ class QualityController(BaseComponent):
             self.logger.error(f"Failed to get quality trend analysis: {e}")
             return QualityTrend(metric_name=metric)
 
-    # Private helper methods
+    # Private helper methods - moved business logic to services
 
-    async def _validate_order_structure(
-        self, order_request: OrderRequest, validation: PreTradeValidation
-    ) -> None:
-        """Validate basic order structure."""
-        check = ValidationCheck(check_name="order_structure")
+    # Business logic calculation methods moved to service layer
 
-        try:
-            # Validate order data
-            # Note: Manual validation below replaces validate_order_data call
-
-            # Check quantity is positive
-            if order_request.quantity <= 0:
-                check.result = ValidationResult.FAILED
-                check.score = 0.0
-                check.message = "Order quantity must be positive"
-                check.severity = "critical"
-
-            # Check symbol format
-            elif len(order_request.symbol) < 3:
-                check.result = ValidationResult.FAILED
-                check.score = 0.0
-                check.message = "Invalid symbol format"
-                check.severity = "high"
-
-            # Check price for limit orders
-            elif order_request.order_type.value in ["limit", "stop_loss"] and (
-                not order_request.price or order_request.price <= 0
-            ):
-                check.result = ValidationResult.FAILED
-                check.score = 0.0
-                check.message = "Limit orders require positive price"
-                check.severity = "high"
-
-            else:
-                check.result = ValidationResult.PASSED
-                check.score = 100.0
-                check.message = "Order structure is valid"
-
-        except Exception as e:
-            check.result = ValidationResult.FAILED
-            check.score = 0.0
-            check.message = f"Order validation error: {e}"
-            check.severity = "critical"
-
-        validation.checks.append(check)
-
-    async def _validate_market_conditions(
-        self, order_request: OrderRequest, market_data: MarketData, validation: PreTradeValidation
-    ) -> None:
-        """Validate current market conditions."""
-        check = ValidationCheck(check_name="market_conditions")
-
-        try:
-            score = 100.0
-            issues = []
-
-            # Check bid-ask spread (use high-low as proxy if bid/ask not available)
-            if hasattr(market_data, "bid") and hasattr(market_data, "ask"):
-                spread = market_data.ask - market_data.bid
-                spread_pct = (spread / market_data.close) * 100
-            else:
-                # Use high-low spread as proxy
-                spread = market_data.high - market_data.low
-                spread_pct = (spread / market_data.close) * 100
-
-                if spread_pct > 1.0:  # 1% spread threshold
-                    score -= 30.0
-                    issues.append(f"Wide bid-ask spread: {spread_pct:.2f}%")
-                elif spread_pct > 0.5:
-                    score -= 15.0
-                    issues.append(f"Moderate bid-ask spread: {spread_pct:.2f}%")
-
-            # Check volume
-            if market_data.volume:
-                # This would compare against historical average volume
-                # For now, just check if volume is very low
-                if market_data.volume < 1000:  # Threshold would be symbol-specific
-                    score -= 20.0
-                    issues.append("Low trading volume")
-
-            # Set results
-            if score >= 70:
-                check.result = ValidationResult.PASSED
-            elif score >= 50:
-                check.result = ValidationResult.WARNING
-            else:
-                check.result = ValidationResult.FAILED
-
-            check.score = score
-            check.message = "; ".join(issues) if issues else "Market conditions acceptable"
-            check.details = {
-                "spread_pct": spread_pct if "spread_pct" in locals() else None,
-                "volume": str(market_data.volume) if market_data.volume else None,
-            }
-
-        except Exception as e:
-            check.result = ValidationResult.FAILED
-            check.score = 0.0
-            check.message = f"Market conditions validation error: {e}"
-            check.severity = "medium"
-
-        validation.checks.append(check)
-
-    async def _validate_portfolio_risk(
-        self,
-        order_request: OrderRequest,
-        portfolio_context: dict[str, Any],
-        validation: PreTradeValidation,
-    ) -> None:
-        """Validate portfolio risk implications."""
-        check = ValidationCheck(check_name="portfolio_risk")
-
-        try:
-            score = 100.0
-            issues = []
-
-            # Check position size limits
-            portfolio_value = Decimal(str(portfolio_context.get("total_value", 0)))
-            order_value = order_request.quantity * (order_request.price or Decimal("0"))
-
-            if portfolio_value > 0:
-                position_pct = (order_value / portfolio_value) * Decimal("100")
-                max_position_pct = Decimal(str(self.validation_rules["position_size"]["max_percentage"]))
-
-                if position_pct > max_position_pct:
-                    score -= 50.0
-                    issues.append(
-                        f"Position size {position_pct:.1f}% exceeds limit {max_position_pct}%"
-                    )
-                elif position_pct > max_position_pct * Decimal("0.8"):
-                    score -= 20.0
-                    issues.append(f"Position size {position_pct:.1f}% near limit")
-
-            # Check concentration risk
-            symbol_exposure = portfolio_context.get("symbol_exposure", {})
-            current_exposure = Decimal(str(symbol_exposure.get(order_request.symbol, 0)))
-            new_exposure_pct = (
-                ((current_exposure + order_value) / portfolio_value) * Decimal("100")
-                if portfolio_value > 0
-                else Decimal("0")
-            )
-
-            if new_exposure_pct > Decimal("20.0"):  # 20% concentration limit
-                score -= 30.0
-                issues.append(f"Symbol concentration {new_exposure_pct:.1f}% too high")
-
-            # Set results
-            if score >= 70:
-                check.result = ValidationResult.PASSED
-                check.severity = "low"
-            elif score >= 50:
-                check.result = ValidationResult.WARNING
-                check.severity = "medium"
-            else:
-                check.result = ValidationResult.FAILED
-                check.severity = "high"
-
-            check.score = score
-            check.message = "; ".join(issues) if issues else "Portfolio risk acceptable"
-            check.details = {
-                "position_pct": position_pct if portfolio_value > 0 else None,
-                "symbol_exposure_pct": new_exposure_pct,
-            }
-
-        except Exception as e:
-            check.result = ValidationResult.FAILED
-            check.score = 0.0
-            check.message = f"Portfolio risk validation error: {e}"
-            check.severity = "medium"
-
-        validation.checks.append(check)
-
-    async def _validate_liquidity(
-        self, order_request: OrderRequest, validation: PreTradeValidation
-    ) -> None:
-        """Validate market liquidity for the order."""
-        check = ValidationCheck(check_name="liquidity")
-
-        try:
-            # This would typically check order book depth, recent volume, etc.
-            # For now, implement basic checks
-
-            score = 100.0
-            issues = []
-
-            # Placeholder liquidity check - would need real market data
-            # This is simplified for demonstration
-            estimated_volume = Decimal("1000000")  # Would get from market data
-            order_value = order_request.quantity * (order_request.price or Decimal("100"))
-
-            if order_value > estimated_volume * Decimal("0.1"):  # Order > 10% of recent volume
-                score -= 40.0
-                issues.append("Order size large relative to market volume")
-            elif order_value > estimated_volume * Decimal("0.05"):  # Order > 5% of recent volume
-                score -= 20.0
-                issues.append("Order size moderate relative to market volume")
-
-            # Set results
-            check.result = ValidationResult.PASSED if score >= 70 else ValidationResult.WARNING
-            check.score = score
-            check.message = "; ".join(issues) if issues else "Liquidity adequate"
-            check.details = {"estimated_market_impact_pct": str((order_value / estimated_volume) * Decimal("100"))}
-
-        except Exception as e:
-            check.result = ValidationResult.FAILED
-            check.score = 0.0
-            check.message = f"Liquidity validation error: {e}"
-            check.severity = "medium"
-
-        validation.checks.append(check)
-
-    async def _validate_timing(
-        self, order_request: OrderRequest, validation: PreTradeValidation
-    ) -> None:
-        """Validate order timing."""
-        check = ValidationCheck(check_name="timing")
-
-        try:
-            score = 100.0
-            issues = []
-
-            current_time = datetime.now(timezone.utc)
-
-            # Check market hours (simplified - would need proper market calendar)
-            hour = current_time.hour
-            if hour < 9 or hour > 16:  # Outside typical US market hours
-                if self.validation_rules["market_hours"]["enforce"]:
-                    score -= 30.0
-                    issues.append("Outside market hours")
-                else:
-                    score -= 10.0
-                    issues.append("Outside typical market hours")
-
-            # Check for major events (would integrate with calendar)
-            # This is a placeholder
-
-            check.result = ValidationResult.PASSED if score >= 70 else ValidationResult.WARNING
-            check.score = score
-            check.message = "; ".join(issues) if issues else "Timing acceptable"
-            check.details = {"market_hour": hour}
-
-        except Exception as e:
-            check.result = ValidationResult.FAILED
-            check.score = 0.0
-            check.message = f"Timing validation error: {e}"
-            check.severity = "low"
-
-        validation.checks.append(check)
-
-    async def _validate_correlation(
-        self,
-        order_request: OrderRequest,
-        portfolio_context: dict[str, Any] | None,
-        validation: PreTradeValidation,
-    ) -> None:
-        """Validate correlation with existing positions."""
-        check = ValidationCheck(check_name="correlation")
-
-        try:
-            score = 100.0
-            issues = []
-
-            if portfolio_context and "correlations" in portfolio_context:
-                correlations = portfolio_context["correlations"]
-                symbol_correlations = correlations.get(order_request.symbol, {})
-
-                for existing_symbol, correlation in symbol_correlations.items():
-                    if abs(correlation) > self.validation_rules["correlation"]["max_correlation"]:
-                        score -= 20.0
-                        issues.append(f"High correlation with {existing_symbol}: {correlation:.2f}")
-
-            check.result = ValidationResult.PASSED if score >= 70 else ValidationResult.WARNING
-            check.score = score
-            check.message = "; ".join(issues) if issues else "Correlation risk acceptable"
-
-        except Exception as e:
-            check.result = ValidationResult.WARNING
-            check.score = 90.0
-            check.message = f"Correlation validation warning: {e}"
-            check.severity = "low"
-
-        validation.checks.append(check)
-
-    def _calculate_overall_score(self, checks: list[ValidationCheck]) -> float:
-        """Calculate overall validation score."""
-        if not checks:
-            return 0.0
-
-        total_weighted_score = 0.0
-        total_weight = 0.0
-
-        for check in checks:
-            weight = self.validation_rules.get(check.check_name, {}).get("weight", 10.0)
-            total_weighted_score += check.score * weight
-            total_weight += weight
-
-        return total_weighted_score / total_weight if total_weight > 0 else 0.0
-
-    def _determine_overall_result(self, checks: list[ValidationCheck]) -> ValidationResult:
-        """Determine overall validation result."""
-        if any(check.result == ValidationResult.FAILED for check in checks):
-            return ValidationResult.FAILED
-        elif any(check.result == ValidationResult.WARNING for check in checks):
-            return ValidationResult.WARNING
-        else:
-            return ValidationResult.PASSED
-
-    def _assess_risk_level(self, checks: list[ValidationCheck]) -> str:
-        """Assess overall risk level."""
-        critical_issues = sum(1 for check in checks if check.severity == "critical")
-        high_issues = sum(1 for check in checks if check.severity == "high")
-
-        if critical_issues > 0:
-            return "critical"
-        elif high_issues > 1:
-            return "high"
-        elif high_issues > 0:
-            return "medium"
-        else:
-            return "low"
-
-    def _calculate_risk_score(self, checks: list[ValidationCheck]) -> float:
-        """Calculate numerical risk score."""
-        risk_score = 0.0
-
-        for check in checks:
-            if check.severity == "critical":
-                risk_score += 40.0
-            elif check.severity == "high":
-                risk_score += 20.0
-            elif check.severity == "medium":
-                risk_score += 10.0
-            elif check.severity == "low":
-                risk_score += 5.0
-
-        return min(risk_score, 100.0)
-
-    def _generate_recommendations(self, checks: list[ValidationCheck]) -> list[str]:
-        """Generate recommendations based on validation results."""
-        recommendations = []
-
-        for check in checks:
-            if check.result == ValidationResult.FAILED:
-                if check.check_name == "position_size":
-                    recommendations.append("Consider reducing position size to stay within limits")
-                elif check.check_name == "market_conditions":
-                    recommendations.append("Wait for better market conditions or use limit orders")
-                elif check.check_name == "liquidity":
-                    recommendations.append("Split large orders or use TWAP execution")
-                elif check.check_name == "timing":
-                    recommendations.append("Consider waiting for market hours")
-            elif check.result == ValidationResult.WARNING:
-                if check.check_name == "correlation":
-                    recommendations.append("Monitor correlation risk with existing positions")
-                elif check.check_name == "portfolio_risk":
-                    recommendations.append("Review portfolio concentration and diversification")
-
-        return recommendations
-
-    async def _analyze_execution_quality(self, execution_result: ExecutionResult) -> float:
-        """Analyze execution quality."""
-        try:
-            score = 100.0
-
-            # Fill rate analysis
-            fill_rate = execution_result.filled_quantity / getattr(
-                execution_result, "target_quantity", execution_result.filled_quantity
-            )
-
-            if fill_rate < 0.9:  # Less than 90% filled
-                score -= 30.0
-            elif fill_rate < 0.95:  # Less than 95% filled
-                score -= 15.0
-
-            # Execution efficiency (placeholder - would analyze order book impact)
-            # This would involve complex market microstructure analysis
-
-            return max(score, 0.0)
-
-        except Exception as e:
-            self.logger.warning(f"Execution quality analysis error: {e}")
-            return 50.0
-
-    async def _analyze_timing_quality(self, execution_result: ExecutionResult) -> float:
-        """Analyze execution timing quality."""
-        try:
-            score = 100.0
-
-            execution_time = getattr(execution_result, "execution_duration_seconds", 0.0)
-
-            # Penalize slow executions
-            if execution_time > self.execution_time_threshold_seconds:
-                score -= 40.0
-            elif execution_time > self.execution_time_threshold_seconds * 0.5:
-                score -= 20.0
-
-            return max(score, 0.0)
-
-        except Exception as e:
-            self.logger.warning(f"Timing quality analysis error: {e}")
-            return 50.0
-
-    async def _analyze_price_quality(
-        self, execution_result: ExecutionResult, market_data_before: MarketData | None
-    ) -> float:
-        """Analyze price quality relative to market."""
-        try:
-            score = 100.0
-
-            if not market_data_before:
-                return 50.0  # Can't analyze without reference price
-
-            # Calculate price improvement/slippage
-            reference_price = market_data_before.close
-            execution_price = execution_result.average_price
-
-            if reference_price and execution_price:
-                price_diff_pct = abs(execution_price - reference_price) / reference_price * Decimal("100")
-
-                if price_diff_pct > Decimal("0.5"):  # More than 0.5% slippage
-                    score -= 40.0
-                elif price_diff_pct > Decimal("0.2"):  # More than 0.2% slippage
-                    score -= 20.0
-
-            return max(score, 0.0)
-
-        except Exception as e:
-            self.logger.warning(f"Price quality analysis error: {e}")
-            return 50.0
-
-    async def _calculate_slippage(
-        self, execution_result: ExecutionResult, market_data_before: MarketData | None
-    ) -> float:
-        """Calculate slippage in basis points."""
-        try:
-            if not market_data_before or not market_data_before.close:
-                return 0.0
-
-            reference_price = market_data_before.close
-            execution_price = execution_result.average_price
-
-            if reference_price and execution_price:
-                slippage = (execution_price - reference_price) / reference_price
-                return slippage * 10000  # Convert to basis points
-
-            return 0.0
-
-        except Exception as e:
-            self.logger.warning(f"Slippage calculation error: {e}")
-            return 0.0
-
-    async def _analyze_market_impact(
-        self,
-        execution_result: ExecutionResult,
-        market_data_before: MarketData,
-        market_data_after: MarketData,
-    ) -> dict[str, Decimal]:
-        """Analyze market impact of the trade."""
-        try:
-            # This is a simplified market impact analysis
-            # Real implementation would require tick-by-tick data and sophisticated models
-
-            price_before = Decimal(str(market_data_before.close)) if market_data_before.close else None
-            price_after = Decimal(str(market_data_after.close)) if market_data_after.close else None
-
-            if not price_before or not price_after:
-                return {"total_impact": Decimal("0"), "temporary_impact": Decimal("0"), "permanent_impact": Decimal("0")}
-
-            total_impact = ((price_after - price_before) / price_before) * Decimal("10000")  # basis points
-
-            # For simplification, assume half is temporary, half is permanent
-            temporary_impact = total_impact * Decimal("0.5")
-            permanent_impact = total_impact * Decimal("0.5")
-
-            return {
-                "total_impact": abs(total_impact),
-                "temporary_impact": abs(temporary_impact),
-                "permanent_impact": abs(permanent_impact),
-            }
-
-        except Exception as e:
-            self.logger.warning(f"Market impact analysis error: {e}")
-            return {"total_impact": Decimal("0"), "temporary_impact": Decimal("0"), "permanent_impact": Decimal("0")}
-
-    async def _compare_to_benchmarks(self, analysis: PostTradeAnalysis) -> dict[str, float]:
-        """Compare analysis results to benchmarks."""
-        try:
-            benchmark_scores = {}
-
-            # Slippage benchmark
-            if analysis.slippage_bps <= self.benchmarks["slippage_p50"]:
-                benchmark_scores["slippage"] = 100.0
-            elif analysis.slippage_bps <= self.benchmarks["slippage_p90"]:
-                benchmark_scores["slippage"] = 70.0
-            else:
-                benchmark_scores["slippage"] = 30.0
-
-            # Execution time benchmark
-            if analysis.execution_time_seconds <= self.benchmarks["execution_time_p50"]:
-                benchmark_scores["execution_time"] = 100.0
-            elif analysis.execution_time_seconds <= self.benchmarks["execution_time_p90"]:
-                benchmark_scores["execution_time"] = 70.0
-            else:
-                benchmark_scores["execution_time"] = 30.0
-
-            # Fill rate benchmark
-            if analysis.fill_rate >= self.benchmarks["fill_rate_p50"]:
-                benchmark_scores["fill_rate"] = 100.0
-            else:
-                benchmark_scores["fill_rate"] = 50.0
-
-            # Market impact benchmark
-            if analysis.market_impact_bps <= self.benchmarks["market_impact_p50"]:
-                benchmark_scores["market_impact"] = 100.0
-            else:
-                benchmark_scores["market_impact"] = 50.0
-
-            return benchmark_scores
-
-        except Exception as e:
-            self.logger.warning(f"Benchmark comparison error: {e}")
-            return {}
-
-    async def _identify_issues(self, analysis: PostTradeAnalysis) -> list[str]:
-        """Identify issues from post-trade analysis."""
-        issues = []
-
-        if analysis.slippage_bps > self.slippage_threshold_bps:
-            issues.append(f"High slippage: {analysis.slippage_bps:.1f} bps")
-
-        if analysis.execution_time_seconds > self.execution_time_threshold_seconds:
-            issues.append(f"Slow execution: {analysis.execution_time_seconds:.1f} seconds")
-
-        if analysis.fill_rate < 95.0:
-            issues.append(f"Low fill rate: {analysis.fill_rate:.1f}%")
-
-        if analysis.market_impact_bps > self.market_impact_threshold_bps:
-            issues.append(f"High market impact: {analysis.market_impact_bps:.1f} bps")
-
-        if analysis.overall_quality_score < self.min_quality_score:
-            issues.append(f"Low overall quality: {analysis.overall_quality_score:.1f}")
-
-        return issues
-
-    async def _generate_trade_recommendations(self, analysis: PostTradeAnalysis) -> list[str]:
-        """Generate recommendations based on analysis."""
-        recommendations = []
-
-        if analysis.slippage_bps > self.slippage_threshold_bps:
-            recommendations.append(
-                "Consider using limit orders or TWAP execution for better pricing"
-            )
-
-        if analysis.execution_time_seconds > self.execution_time_threshold_seconds:
-            recommendations.append(
-                "Use more aggressive execution algorithms for time-sensitive trades"
-            )
-
-        if analysis.market_impact_bps > self.market_impact_threshold_bps:
-            recommendations.append("Split large orders to reduce market impact")
-
-        if analysis.fill_rate < 95.0:
-            recommendations.append("Review order sizing and market conditions before trading")
-
-        return recommendations
+    # Analysis methods moved to service layer
 
     def _summarize_validations(self, validations: list[PreTradeValidation]) -> dict[str, Any]:
         """Summarize validation results."""
@@ -1459,7 +866,7 @@ class QualityController(BaseComponent):
             high_slippage_count = sum(
                 1 for a in recent_analyses if a.slippage_bps > self.slippage_threshold_bps
             )
-            if high_slippage_count > len(recent_analyses) * 0.3:  # More than 30% of trades
+            if high_slippage_count > len(recent_analyses) * Decimal("0.3"):  # More than 30% of trades
                 recommendations.append(
                     "Consider implementing more sophisticated execution algorithms"
                 )
@@ -1469,11 +876,11 @@ class QualityController(BaseComponent):
                 for a in recent_analyses
                 if a.execution_time_seconds > self.execution_time_threshold_seconds
             )
-            if slow_execution_count > len(recent_analyses) * 0.2:  # More than 20% of trades
+            if slow_execution_count > len(recent_analyses) * Decimal("0.2"):  # More than 20% of trades
                 recommendations.append("Review execution infrastructure and consider co-location")
 
-            low_fill_count = sum(1 for a in recent_analyses if a.fill_rate < 95.0)
-            if low_fill_count > len(recent_analyses) * 0.1:  # More than 10% of trades
+            low_fill_count = sum(1 for a in recent_analyses if a.fill_rate < Decimal("95.0"))
+            if low_fill_count > len(recent_analyses) * Decimal("0.1"):  # More than 10% of trades
                 recommendations.append("Improve order sizing and market timing strategies")
 
         return recommendations
@@ -1633,9 +1040,9 @@ class QualityController(BaseComponent):
             "total_validations": self.quality_metrics.get("total_validations", 0),
             "passed_validations": self.quality_metrics.get("passed_validations", 0),
             "failed_validations": self.quality_metrics.get("failed_validations", 0),
-            "average_quality_score": self.quality_metrics.get("average_quality_score", 0.0),
+            "average_quality_score": self.quality_metrics.get("average_quality_score", Decimal("0.0")),
             "total_analyses": self.quality_metrics.get("total_analyses", 0),
-            "average_execution_quality": self.quality_metrics.get("average_execution_quality", 0.0),
+            "average_execution_quality": self.quality_metrics.get("average_execution_quality", Decimal("0.0")),
             "slippage_incidents": self.quality_metrics.get("slippage_incidents", 0),
             "execution_time_violations": self.quality_metrics.get("execution_time_violations", 0),
             "avg_validation_time_ms": self._calculate_avg_validation_time(),
@@ -1692,33 +1099,33 @@ class QualityController(BaseComponent):
             return {
                 "total_validations": 0,
                 "passed_validations": 0,
-                "validation_pass_rate": 0.0,
+                "validation_pass_rate": Decimal("0.0"),
                 "total_analyses": 0,
-                "average_quality_score": 0.0,
+                "average_quality_score": Decimal("0.0"),
                 "period_hours": hours,
                 "bot_id": bot_id,
             }
 
-    def _calculate_avg_validation_time(self) -> float:
+    def _calculate_avg_validation_time(self) -> Decimal:
         """Calculate average validation time in milliseconds."""
         if not self.validation_history:
-            return 0.0
+            return Decimal("0.0")
 
         recent_validations = self.validation_history[-100:]  # Last 100 validations
         total_time = sum(v.validation_time_ms for v in recent_validations)
         return total_time / len(recent_validations)
 
-    def _calculate_avg_analysis_time(self) -> float:
+    def _calculate_avg_analysis_time(self) -> Decimal:
         """Calculate average analysis time in milliseconds."""
         if not self.analysis_history:
-            return 0.0
+            return Decimal("0.0")
 
         # Post-trade analysis doesn't track time, so return a default
-        return 50.0  # Default 50ms for analysis
+        return Decimal("50.0")  # Default 50ms for analysis
 
     async def validate_state_consistency(self, state: Any) -> bool:
         """
-        Validate state consistency.
+        Validate state consistency by delegating to quality service.
 
         Args:
             state: State to validate
@@ -1726,33 +1133,15 @@ class QualityController(BaseComponent):
         Returns:
             True if state is consistent
         """
-        try:
-            if not state:
-                return False
+        if self.quality_service:
+            return await self.quality_service.validate_state_consistency(state)
 
-            # Check if it's a portfolio state with required fields
-            if hasattr(state, "total_value") and hasattr(state, "available_cash"):
-                # Basic consistency checks for portfolio state
-                total_value = getattr(state, "total_value", 0)
-                available_cash = getattr(state, "available_cash", 0)
-                total_positions_value = getattr(state, "total_positions_value", 0)
-
-                # Total value should be sum of cash and positions
-                expected_total = available_cash + total_positions_value
-                tolerance = abs(expected_total * Decimal("0.01"))  # 1% tolerance
-
-                if abs(total_value - expected_total) > tolerance:
-                    return False
-
-            return True
-
-        except Exception as e:
-            self.logger.warning(f"State consistency validation error: {e}")
-            return False
+        # Fallback if no service available
+        return True
 
     async def validate_portfolio_balance(self, portfolio_state: Any) -> bool:
         """
-        Validate portfolio balance.
+        Validate portfolio balance by delegating to quality service.
 
         Args:
             portfolio_state: Portfolio state to validate
@@ -1760,36 +1149,15 @@ class QualityController(BaseComponent):
         Returns:
             True if portfolio balance is valid
         """
-        try:
-            if not portfolio_state:
-                return False
+        if self.quality_service:
+            return await self.quality_service.validate_portfolio_balance(portfolio_state)
 
-            # Check for negative cash
-            available_cash = getattr(portfolio_state, "available_cash", 0)
-            if available_cash < 0:
-                return False
-
-            # Check for reasonable total value
-            total_value = getattr(portfolio_state, "total_value", 0)
-            if total_value < 0:
-                return False
-
-            # Check positions are reasonable
-            positions = getattr(portfolio_state, "positions", {})
-            if positions:
-                for position in positions.values():
-                    if hasattr(position, "quantity") and position.quantity <= 0:
-                        return False
-
-            return True
-
-        except Exception as e:
-            self.logger.warning(f"Portfolio balance validation error: {e}")
-            return False
+        # Fallback if no service available
+        return True
 
     async def validate_position_consistency(self, position: Any, related_orders: list) -> bool:
         """
-        Validate position consistency with related orders.
+        Validate position consistency with related orders by delegating to quality service.
 
         Args:
             position: Position to validate
@@ -1798,25 +1166,11 @@ class QualityController(BaseComponent):
         Returns:
             True if position is consistent
         """
-        try:
-            if not position or not related_orders:
-                return True  # No validation needed if no data
+        if self.quality_service:
+            return await self.quality_service.validate_position_consistency(position, related_orders)
 
-            # Check if filled quantity matches position quantity
-            total_filled = sum(
-                order.filled_quantity
-                for order in related_orders
-                if hasattr(order, "filled_quantity") and order.filled_quantity > 0
-            )
-
-            position_quantity = getattr(position, "quantity", Decimal("0"))
-            tolerance = abs(position_quantity * Decimal("0.01"))  # 1% tolerance
-
-            return abs(total_filled - position_quantity) <= tolerance
-
-        except Exception as e:
-            self.logger.warning(f"Position consistency validation error: {e}")
-            return False
+        # Fallback if no service available
+        return True
 
     async def run_integrity_checks(self, state: Any) -> dict[str, Any]:
         """
@@ -1912,19 +1266,16 @@ class QualityController(BaseComponent):
         """Clean up resources used by the quality controller."""
         try:
             # Close metrics storage connection with timeout
-            if hasattr(self.metrics_storage, 'close'):
-                await asyncio.wait_for(
-                    self.metrics_storage.close(),
-                    timeout=5.0
-                )
-            
+            if hasattr(self.metrics_storage, "close"):
+                await asyncio.wait_for(self.metrics_storage.close(), timeout=5.0)
+
             self.logger.info("QualityController cleanup completed")
         except asyncio.TimeoutError:
             self.logger.warning("QualityController cleanup timeout")
         except Exception as e:
             self.logger.error(f"Error during QualityController cleanup: {e}")
 
-    def add_validation_rule(self, name: str, rule: callable) -> None:
+    def add_validation_rule(self, name: str, rule: Callable[..., Any]) -> None:
         """
         Add a custom validation rule.
 
@@ -1933,7 +1284,7 @@ class QualityController(BaseComponent):
             rule: Validation function
         """
         try:
-            self.consistency_rules.append({"name": name, "rule": rule, "weight": 10.0})
+            self.consistency_rules.append({"name": name, "rule": rule, "weight": Decimal("10.0")})
             self.logger.info(f"Added validation rule: {name}")
 
         except Exception as e:

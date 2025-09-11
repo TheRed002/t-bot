@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
 from src.core.base.component import BaseComponent
-from src.core.exceptions import StateConsistencyError, SynchronizationError
+from src.core.exceptions import StateConsistencyError
 
 # Service layer imports
 from .services import StateSynchronizationServiceProtocol
@@ -64,7 +64,7 @@ class StateSynchronizer(BaseComponent):
         """Initialize the synchronizer (avoiding circular dependency)."""
         try:
             await super().initialize()
-            
+
             # Get synchronization service from state service (avoid circular import)
             if hasattr(self.state_service, "_synchronization_service"):
                 self._synchronization_service = self.state_service._synchronization_service
@@ -92,18 +92,27 @@ class StateSynchronizer(BaseComponent):
             # Final sync attempt
             await self.force_sync()
 
-            # Cancel and cleanup background task
+            # Cancel and cleanup background task with proper reference management
             sync_task = self._sync_task
             self._sync_task = None
-            
+
             if sync_task and not sync_task.done():
                 sync_task.cancel()
                 try:
-                    await sync_task
+                    # Use shield to ensure cleanup completes even if cancelled
+                    await asyncio.shield(asyncio.wait_for(sync_task, timeout=5.0))
                 except asyncio.CancelledError:
-                    pass
+                    # Expected when task is cancelled
+                    self.logger.debug("Sync task cancelled successfully")
+                except asyncio.TimeoutError:
+                    self.logger.warning("Sync task cleanup timeout - task may be stuck")
+                    # Force clear the reference to prevent memory leak
+                    sync_task = None
                 except Exception as e:
                     self.logger.error(f"Error waiting for sync task cleanup: {e}")
+                finally:
+                    # Ensure task reference is cleared to prevent memory leaks
+                    del sync_task
 
             await super().cleanup()
             self.logger.info("StateSynchronizer cleanup completed")
@@ -127,7 +136,7 @@ class StateSynchronizer(BaseComponent):
             try:
                 await asyncio.wait_for(
                     self._synchronization_service.synchronize_state_change(state_change),
-                    timeout=30.0  # Prevent hanging on sync operations
+                    timeout=30.0,  # Prevent hanging on sync operations
                 )
             except asyncio.TimeoutError:
                 self.logger.warning(f"Sync service timeout for change {state_change.change_id}")
@@ -154,23 +163,32 @@ class StateSynchronizer(BaseComponent):
         Returns:
             True if all changes synchronized successfully
         """
-        # Use timeout to prevent deadlock
-        try:
-            # Acquire lock with timeout
-            await asyncio.wait_for(self._sync_lock.acquire(), timeout=10.0)
-        except asyncio.TimeoutError:
-            self.logger.warning("Sync lock acquisition timeout")
-            return False
-        
-        # Check if sync already in progress after acquiring lock
-        if self._sync_in_progress:
-            self.logger.debug("Sync already in progress, skipping")
-            self._sync_lock.release()
-            return True
+        # Use timeout to prevent deadlock with proper async context management
+        async def _sync_with_lock():
+            async with self._sync_lock:
+                # Check if sync already in progress after acquiring lock
+                if self._sync_in_progress:
+                    self.logger.debug("Sync already in progress, skipping")
+                    return True
 
-        self._sync_in_progress = True
-        
-        sync_successful = False
+                self._sync_in_progress = True
+                try:
+                    return await self._execute_sync_operation()
+                finally:
+                    self._sync_in_progress = False
+
+        try:
+            # Use asyncio.wait_for for compatibility with older Python versions
+            return await asyncio.wait_for(_sync_with_lock(), timeout=10.0)
+        except asyncio.TimeoutError:
+            self.logger.warning("Sync lock acquisition timeout - possible deadlock")
+            return False
+        except Exception as e:
+            self.logger.error(f"Sync operation failed: {e}")
+            return False
+
+    async def _execute_sync_operation(self) -> bool:
+        """Execute the actual sync operation with proper error handling."""
 
         try:
             self._total_syncs += 1
@@ -183,22 +201,19 @@ class StateSynchronizer(BaseComponent):
                         asyncio.get_event_loop().run_in_executor(
                             None, self._synchronization_service.get_synchronization_metrics
                         ),
-                        timeout=5.0
+                        timeout=5.0,
                     )
                     self._successful_syncs = metrics.get("total_syncs", 0) - metrics.get(
                         "sync_failures", 0
                     )
                     self._failed_syncs = metrics.get("sync_failures", 0)
                     self._last_sync_time = datetime.now(timezone.utc)
-                    sync_successful = True
                 except asyncio.TimeoutError:
                     self.logger.warning("Sync service metrics timeout")
-                    sync_successful = False
                 except Exception as e:
                     self.logger.error(f"Sync service error: {e}")
-                    sync_successful = False
             else:
-                sync_successful = await self._sync_legacy_changes()
+                await self._sync_legacy_changes()
 
             # Fall back to legacy synchronization logic
             changes_to_sync = []
@@ -223,22 +238,42 @@ class StateSynchronizer(BaseComponent):
             # Sort by priority and timestamp
             changes_to_sync.sort(key=lambda c: (c.priority.value, c.timestamp))
 
-            # Process each change
+            # Process changes concurrently for better performance
             all_successful = True
+            sync_tasks = []
+
+            # Create sync tasks for concurrent execution
             for change in changes_to_sync:
+                task = asyncio.create_task(self._sync_state_change_with_error_handling(change))
+                sync_tasks.append((task, change))
+
+            # Execute all sync tasks concurrently
+            if sync_tasks:
                 try:
-                    success = await self._sync_state_change(change)
-                    if success:
-                        change.synchronized = True
-                        change.persisted = True
-                    else:
-                        all_successful = False
-                        self._pending_changes.append(change)
+                    # Use asyncio.gather for concurrent execution with return_exceptions=True
+                    results = await asyncio.gather(
+                        *[task for task, _ in sync_tasks],
+                        return_exceptions=True
+                    )
+
+                    # Process results
+                    for i, (result, (_, change)) in enumerate(zip(results, sync_tasks, strict=False)):
+                        if isinstance(result, Exception):
+                            self.logger.error(f"Failed to sync change {change.change_id}: {result}")
+                            all_successful = False
+                            self._pending_changes.append(change)
+                        elif result:
+                            change.synchronized = True
+                            change.persisted = True
+                        else:
+                            all_successful = False
+                            self._pending_changes.append(change)
 
                 except Exception as e:
-                    self.logger.error(f"Failed to sync change {change.change_id}: {e}")
+                    self.logger.error(f"Concurrent sync operation failed: {e}")
                     all_successful = False
-                    self._pending_changes.append(change)
+                    # Add all changes back to pending
+                    self._pending_changes.extend([change for _, change in sync_tasks])
 
             # Update metrics
             if all_successful:
@@ -247,7 +282,6 @@ class StateSynchronizer(BaseComponent):
                 self._failed_syncs += 1
 
             self._last_sync_time = datetime.now(timezone.utc)
-
             return all_successful
 
         except Exception as e:
@@ -255,13 +289,13 @@ class StateSynchronizer(BaseComponent):
             self._failed_syncs += 1
             return False
 
-        finally:
-            self._sync_in_progress = False
-            # Ensure lock is always released
-            if self._sync_lock.locked():
-                self._sync_lock.release()
-                
-        return sync_successful
+    async def _sync_state_change_with_error_handling(self, change) -> bool:
+        """Sync a single state change with proper error handling."""
+        try:
+            return await self._sync_state_change(change)
+        except Exception as e:
+            self.logger.error(f"Error syncing change {change.change_id}: {e}")
+            return False
 
     async def _sync_legacy_changes(self) -> bool:
         """Synchronize changes using legacy queue-based approach."""
@@ -273,10 +307,7 @@ class StateSynchronizer(BaseComponent):
             queue_timeout = 0.1  # 100ms timeout for queue operations
             while not self._sync_queue.empty():
                 try:
-                    change = await asyncio.wait_for(
-                        self._sync_queue.get(),
-                        timeout=queue_timeout
-                    )
+                    change = await asyncio.wait_for(self._sync_queue.get(), timeout=queue_timeout)
                     changes_to_sync.append(change)
                     self._sync_queue.task_done()
                 except asyncio.TimeoutError:
@@ -301,7 +332,7 @@ class StateSynchronizer(BaseComponent):
                 try:
                     success = await asyncio.wait_for(
                         self._sync_state_change(change),
-                        timeout=10.0  # Timeout for individual change sync
+                        timeout=10.0,  # Timeout for individual change sync
                     )
                     if success:
                         change.synchronized = True
@@ -328,7 +359,7 @@ class StateSynchronizer(BaseComponent):
             self._last_sync_time = datetime.now(timezone.utc)
 
             return all_successful
-            
+
         except Exception as e:
             self.logger.error(f"Legacy sync operation failed: {e}")
             self._failed_syncs += 1
@@ -377,7 +408,9 @@ class StateSynchronizer(BaseComponent):
     async def sync_with_remotes(self, remotes: list[str]) -> bool:
         """Sync with remote endpoints (delegates to service layer if available)."""
         try:
-            if self._synchronization_service and hasattr(self._synchronization_service, 'sync_with_remotes'):
+            if self._synchronization_service and hasattr(
+                self._synchronization_service, "sync_with_remotes"
+            ):
                 return await self._synchronization_service.sync_with_remotes(remotes)
             else:
                 # Fallback: simplified sync operation - no actual remote endpoints in current implementation

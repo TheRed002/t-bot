@@ -6,28 +6,19 @@ and data integrity validation for all state persistence operations.
 """
 
 import asyncio
-import json
 import logging
-from collections.abc import Callable
-from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from enum import Enum
 from typing import Any
-from uuid import uuid4
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from sqlalchemy.exc import IntegrityError, OperationalError, TimeoutError as SQLTimeoutError
-
-from src.core.exceptions import StateError
+from src.core.exceptions import StateConsistencyError
 from src.utils.error_recovery_utilities import (
     BaseErrorRecovery,
     ErrorContext,
     RecoveryCheckpoint,
     RecoveryStrategy,
 )
-from src.utils.validation_utilities import ErrorType, classify_error_type
-
 
 # Note: ErrorType and RecoveryStrategy moved to src.utils.validation_utilities and error_recovery_utilities
 
@@ -57,10 +48,7 @@ class StateErrorRecovery(BaseErrorRecovery):
     async def create_recovery_checkpoint(
         self,
         operation: str,
-        state_type: str,
-        state_id: str,
-        current_state: dict[str, Any] | None = None,
-        session: AsyncSession | None = None,
+        state_data: dict[str, Any] | None = None,
         **context,
     ) -> str:
         """
@@ -68,23 +56,21 @@ class StateErrorRecovery(BaseErrorRecovery):
 
         Args:
             operation: Operation being performed
-            state_type: Type of state
-            state_id: State identifier
-            current_state: Current state data
-            session: Database session
-            **context: Additional context
+            state_data: Current state data
+            **context: Additional context (may include state_type, state_id, session)
 
         Returns:
             Checkpoint ID
         """
         checkpoint = RecoveryCheckpoint(
             timestamp=datetime.now(timezone.utc),
-            state_before=current_state.copy() if current_state else {},
+            state_before=state_data.copy() if state_data else {},
             transaction_id=context.get("transaction_id", ""),
             savepoint_name=context.get("savepoint_name", ""),
         )
 
         # Capture database state if session provided
+        session = context.get("session")
         if session:
             try:
                 # Could capture current transaction state, locks, etc.
@@ -104,8 +90,8 @@ class StateErrorRecovery(BaseErrorRecovery):
             f"Created recovery checkpoint: {checkpoint.checkpoint_id}",
             extra={
                 "operation": operation,
-                "state_type": state_type,
-                "state_id": state_id,
+                "state_type": context.get("state_type", ""),
+                "state_id": context.get("state_id", ""),
             },
         )
 
@@ -115,8 +101,6 @@ class StateErrorRecovery(BaseErrorRecovery):
         self,
         exception: Exception,
         operation: str,
-        state_type: str = "",
-        state_id: str = "",
         checkpoint_id: str | None = None,
         **context,
     ) -> StateErrorContext:
@@ -126,10 +110,8 @@ class StateErrorRecovery(BaseErrorRecovery):
         Args:
             exception: Exception that occurred
             operation: Operation that failed
-            state_type: State type involved
-            state_id: State ID involved
             checkpoint_id: Associated checkpoint ID
-            **context: Additional context
+            **context: Additional context (may include state_type, state_id)
 
         Returns:
             Error context with resolution info
@@ -159,15 +141,15 @@ class StateErrorRecovery(BaseErrorRecovery):
         if checkpoint_id:
             checkpoint = self._recovery_checkpoints.get(checkpoint_id)
             if checkpoint:
-                error_context.rollback_data = checkpoint.state_before.copy()
+                error_context.recovery_data = checkpoint.state_before.copy()
 
         self.logger.error(
             f"Error occurred in {operation}: {exception}",
             extra={
                 "error_id": error_context.error_id,
                 "error_type": error_context.error_type.value,
-                "state_type": state_type,
-                "state_id": state_id,
+                "state_type": context.get("state_type", ""),
+                "state_id": context.get("state_id", ""),
                 "checkpoint_id": checkpoint_id,
             },
             exc_info=True,
@@ -494,7 +476,7 @@ def with_error_recovery(
                         raise e
 
             # Should never reach here
-            raise StateError("Maximum retries exceeded")
+            raise StateConsistencyError("Maximum retries exceeded")
 
         return wrapper
 

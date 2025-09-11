@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 from uuid import uuid4
 
 from src.core.base.service import BaseService
-from src.core.exceptions import BusinessRuleValidationError, StateError, ValidationError
+from src.core.exceptions import StateConsistencyError, ValidationError
 
 if TYPE_CHECKING:
     from ..state_service import StateChange, StateMetadata, StateType
@@ -65,21 +65,21 @@ class StateBusinessService(BaseService):
     def __init__(self, config: Any = None):
         """
         Initialize the state business service.
-        
+
         Args:
             config: Optional configuration object for business rules
         """
         super().__init__(name="StateBusinessService")
 
         # Business rule configurations - use injected config or defaults
-        if config and hasattr(config, 'state_management'):
+        if config and hasattr(config, "state_management"):
             state_config = config.state_management
-            self.max_state_versions = getattr(state_config, 'max_state_versions', 10)
-            self.state_retention_days = getattr(state_config, 'state_retention_days', 90)
+            self.max_state_versions = getattr(state_config, "max_state_versions", 10)
+            self.state_retention_days = getattr(state_config, "state_retention_days", 90)
         else:
             self.max_state_versions = 10
             self.state_retention_days = 90
-            
+
         self.critical_state_types = {"bot_state", "risk_state", "position_state"}
 
         self.logger.info("StateBusinessService initialized")
@@ -149,7 +149,7 @@ class StateBusinessService(BaseService):
 
         except Exception as e:
             self.logger.error(f"State change validation failed: {e}")
-            raise BusinessRuleValidationError(f"Validation failed: {e}") from e
+            raise ValidationError(f"Validation failed: {e}") from e
 
     async def process_state_update(
         self,
@@ -173,33 +173,30 @@ class StateBusinessService(BaseService):
             StateChange record
 
         Raises:
-            StateError: If processing fails
+            StateConsistencyError: If processing fails
         """
         try:
-            from ..state_service import StateChange, StateOperation, StatePriority
+            # Import at runtime to avoid circular imports
+            from ..state_service import (
+                StateChange as _StateChange,
+                StateOperation as _StateOperation,
+                StatePriority as _StatePriority,
+            )
 
             # Determine operation type based on context
-            operation = StateOperation.UPDATE  # Default to update
-
-            # Map priority string to enum
-            priority_mapping = {
-                "critical": StatePriority.CRITICAL,
-                "high": StatePriority.HIGH,
-                "medium": StatePriority.MEDIUM,
-                "low": StatePriority.LOW,
-            }
+            operation = _StateOperation.UPDATE  # Default to update
 
             # Determine priority based on state type and context
             if state_type.value in self.critical_state_types:
-                priority = StatePriority.HIGH
+                priority = _StatePriority.HIGH
             else:
-                priority = StatePriority.MEDIUM
+                priority = _StatePriority.MEDIUM
 
             # Create state change record
             change_id = str(uuid4())
             timestamp = datetime.now(timezone.utc)
 
-            state_change = StateChange(
+            state_change = _StateChange(
                 change_id=change_id,
                 state_id=state_id,
                 state_type=state_type,
@@ -227,7 +224,7 @@ class StateBusinessService(BaseService):
 
         except Exception as e:
             self.logger.error(f"State update processing failed: {e}")
-            raise StateError(f"Failed to process state update: {e}") from e
+            raise StateConsistencyError(f"Failed to process state update: {e}") from e
 
     async def calculate_state_metadata(
         self,
@@ -249,36 +246,23 @@ class StateBusinessService(BaseService):
             StateMetadata record
         """
         try:
-            import hashlib
-            import json
+            # Use centralized metadata creation utility
+            from src.utils.state_utils import create_state_metadata
 
-            from ..state_service import StateMetadata
-
-            # Calculate checksum
-            data_str = json.dumps(state_data, sort_keys=True, default=str)
-            checksum = hashlib.sha256(data_str.encode()).hexdigest()
-
-            # Calculate size
-            size_bytes = len(data_str.encode())
-
-            # Create metadata
-            metadata = StateMetadata(
+            tags = self._generate_state_tags(state_type, state_data)
+            metadata = create_state_metadata(
                 state_id=state_id,
                 state_type=state_type,
-                version=1,  # Will be updated by persistence layer
-                created_at=datetime.now(timezone.utc),
-                updated_at=datetime.now(timezone.utc),
-                checksum=checksum,
-                size_bytes=size_bytes,
                 source_component=source_component,
-                tags=self._generate_state_tags(state_type, state_data),
+                state_data=state_data,
+                tags=tags
             )
 
             return metadata
 
         except Exception as e:
             self.logger.error(f"Metadata calculation failed: {e}")
-            raise StateError(f"Failed to calculate state metadata: {e}") from e
+            raise StateConsistencyError(f"Failed to calculate state metadata: {e}") from e
 
     async def validate_business_rules(
         self,
@@ -582,7 +566,9 @@ class StateBusinessService(BaseService):
 
             # Exposure limits
             exposure = state_data.get("exposure", 0)
-            max_exposure = state_data.get("max_exposure", Decimal("999999999999999999.99999999"))  # Large but finite limit
+            max_exposure = state_data.get(
+                "max_exposure", Decimal("999999999999999999.99999999")
+            )  # Large but finite limit
             if exposure > max_exposure:
                 issues.append(f"Exposure {exposure} exceeds maximum {max_exposure}")
 
