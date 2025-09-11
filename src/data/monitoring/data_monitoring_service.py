@@ -26,23 +26,15 @@ from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Any
 
-from src.core.base.component import BaseComponent
-from src.core.base.interfaces import HealthCheckResult, HealthStatus
+from src.core import BaseComponent, HealthCheckResult, HealthStatus
 from src.core.config import Config
+from src.core.types import AlertSeverity
+from src.data.events import DataEvent, DataEventSubscriber, DataEventType
 
 # Import from P-002A error handling
 from src.error_handling.error_handler import ErrorHandler
 
 # Import from P-007A utilities
-
-
-class AlertSeverity(Enum):
-    """Alert severity levels."""
-
-    INFO = "info"
-    WARNING = "warning"
-    ERROR = "error"
-    CRITICAL = "critical"
 
 
 class MetricType(Enum):
@@ -133,7 +125,7 @@ class DataQualityMonitor:
                     Alert(
                         alert_id=f"quality_score_{datetime.now(timezone.utc).timestamp()}",
                         severity=(
-                            AlertSeverity.WARNING if quality_score > 70 else AlertSeverity.ERROR
+                            AlertSeverity.MEDIUM if quality_score > 70 else AlertSeverity.HIGH
                         ),
                         message=f"Data quality score below threshold: {quality_score:.1f}%",
                         component="data_quality",
@@ -153,7 +145,7 @@ class DataQualityMonitor:
                         Alert(
                             alert_id=f"error_rate_{datetime.now(timezone.utc).timestamp()}",
                             severity=(
-                                AlertSeverity.ERROR if error_rate > 0.1 else AlertSeverity.WARNING
+                                AlertSeverity.HIGH if error_rate > 0.1 else AlertSeverity.MEDIUM
                             ),
                             message=f"Error rate above threshold: {error_rate:.2%}",
                             component="data_quality",
@@ -170,7 +162,7 @@ class DataQualityMonitor:
                 alerts.append(
                     Alert(
                         alert_id=f"throughput_{datetime.now(timezone.utc).timestamp()}",
-                        severity=AlertSeverity.WARNING,
+                        severity=AlertSeverity.MEDIUM,
                         message=f"Throughput below threshold: {throughput:.1f} records/sec",
                         component="performance",
                         metadata={
@@ -186,7 +178,7 @@ class DataQualityMonitor:
             return [
                 Alert(
                     alert_id=f"monitor_error_{datetime.now(timezone.utc).timestamp()}",
-                    severity=AlertSeverity.ERROR,
+                    severity=AlertSeverity.HIGH,
                     message=f"Data quality monitoring failed: {e}",
                     component="monitoring",
                     metadata={"error": str(e)},
@@ -228,9 +220,7 @@ class PerformanceMonitor:
                     Alert(
                         alert_id=f"response_time_{datetime.now(timezone.utc).timestamp()}",
                         severity=(
-                            AlertSeverity.WARNING
-                            if avg_response_time < 1000
-                            else AlertSeverity.ERROR
+                            AlertSeverity.MEDIUM if avg_response_time < 1000 else AlertSeverity.HIGH
                         ),
                         message=f"Response time above threshold: {avg_response_time:.1f}ms",
                         component="performance",
@@ -245,13 +235,13 @@ class PerformanceMonitor:
             queue_sizes = metrics.get("queue_sizes", {})
             for queue_name, size in queue_sizes.items():
                 if (
-                    isinstance(size, int | float)
+                    isinstance(size, (int, float))
                     and size > self.performance_thresholds["max_queue_size"]
                 ):
                     alerts.append(
                         Alert(
                             alert_id=f"queue_size_{queue_name}_{datetime.now(timezone.utc).timestamp()}",
-                            severity=AlertSeverity.WARNING if size < 15000 else AlertSeverity.ERROR,
+                            severity=AlertSeverity.MEDIUM if size < 15000 else AlertSeverity.HIGH,
                             message=f"Queue size above threshold: {queue_name} = {size}",
                             component="performance",
                             metadata={
@@ -268,7 +258,7 @@ class PerformanceMonitor:
             return [
                 Alert(
                     alert_id=f"perf_monitor_error_{datetime.now(timezone.utc).timestamp()}",
-                    severity=AlertSeverity.ERROR,
+                    severity=AlertSeverity.HIGH,
                     message=f"Performance monitoring failed: {e}",
                     component="monitoring",
                     metadata={"error": str(e)},
@@ -344,7 +334,7 @@ class SLAMonitor:
                         severity = AlertSeverity.CRITICAL
                     elif sla.current_value < sla.threshold_warning:
                         sla.status = SLAStatus.AT_RISK
-                        severity = AlertSeverity.WARNING
+                        severity = AlertSeverity.MEDIUM
                     else:
                         sla.status = SLAStatus.MEETING
                         continue
@@ -355,7 +345,7 @@ class SLAMonitor:
                         severity = AlertSeverity.CRITICAL
                     elif sla.current_value > sla.threshold_warning:
                         sla.status = SLAStatus.AT_RISK
-                        severity = AlertSeverity.WARNING
+                        severity = AlertSeverity.MEDIUM
                     else:
                         sla.status = SLAStatus.MEETING
                         continue
@@ -382,7 +372,7 @@ class SLAMonitor:
             return [
                 Alert(
                     alert_id=f"sla_monitor_error_{datetime.now(timezone.utc).timestamp()}",
-                    severity=AlertSeverity.ERROR,
+                    severity=AlertSeverity.HIGH,
                     message=f"SLA monitoring failed: {e}",
                     component="monitoring",
                     metadata={"error": str(e)},
@@ -390,7 +380,7 @@ class SLAMonitor:
             ]
 
 
-class DataMonitoringService(BaseComponent):
+class DataMonitoringService(BaseComponent, DataEventSubscriber):
     """
     Enterprise-grade Data Monitoring Service for comprehensive infrastructure monitoring.
 
@@ -402,11 +392,10 @@ class DataMonitoringService(BaseComponent):
     - Integration with external monitoring systems
     """
 
-    def __init__(self, config: Config, metrics_provider=None):
+    def __init__(self, config: Config):
         """Initialize the Data Monitoring Service."""
         super().__init__()
         self.config = config
-        self.metrics_provider = metrics_provider
         self.error_handler = ErrorHandler(config)
 
         # Configuration
@@ -421,9 +410,17 @@ class DataMonitoringService(BaseComponent):
         self.active_alerts: dict[str, Alert] = {}
         self.alert_handlers: list[Callable] = []
 
-        # Metrics storage
+        # Metrics storage - now populated from events
         self.metrics_history: list[dict[str, Any]] = []
         self.max_history_size = 10000
+
+        # Event-based metrics tracking
+        self.data_events_received = 0
+        self.cache_hit_count = 0
+        self.cache_miss_count = 0
+        self.validation_failure_count = 0
+        self.records_stored = 0
+        self.records_retrieved = 0
 
         # Background task management
         self._background_tasks: list[asyncio.Task] = []
@@ -453,12 +450,17 @@ class DataMonitoringService(BaseComponent):
 
             self.logger.info("Initializing Data Monitoring Service...")
 
+            # Subscribe to data events
+            await self._setup_event_subscriptions()
+
             # Start monitoring loops
             monitoring_task = asyncio.create_task(self._monitoring_loop())
             alert_cleanup_task = asyncio.create_task(self._alert_cleanup_loop())
             metrics_cleanup_task = asyncio.create_task(self._metrics_cleanup_loop())
 
-            self._background_tasks.extend([monitoring_task, alert_cleanup_task, metrics_cleanup_task])
+            self._background_tasks.extend(
+                [monitoring_task, alert_cleanup_task, metrics_cleanup_task]
+            )
 
             self._initialized = True
             self.logger.info("Data Monitoring Service initialized successfully")
@@ -467,55 +469,164 @@ class DataMonitoringService(BaseComponent):
             self.logger.error(f"Monitoring service initialization failed: {e}")
             raise
 
+    async def _setup_event_subscriptions(self) -> None:
+        """Setup event subscriptions to receive data events."""
+        try:
+            # Subscribe to data events
+            await self._subscribe_to_data_event(DataEventType.DATA_STORED, self._handle_data_stored)
+            await self._subscribe_to_data_event(
+                DataEventType.DATA_RETRIEVED, self._handle_data_retrieved
+            )
+            await self._subscribe_to_data_event(
+                DataEventType.DATA_VALIDATION_FAILED, self._handle_validation_failed
+            )
+            await self._subscribe_to_data_event(DataEventType.CACHE_HIT, self._handle_cache_hit)
+            await self._subscribe_to_data_event(DataEventType.CACHE_MISS, self._handle_cache_miss)
+
+            self.logger.info("Data event subscriptions setup completed")
+
+        except Exception as e:
+            self.logger.error(f"Failed to setup event subscriptions: {e}")
+            raise
+
+    async def _handle_data_stored(self, event: DataEvent) -> None:
+        """Handle data stored events."""
+        try:
+            self.data_events_received += 1
+            self.records_stored += event.data.get("records_count", 0)
+
+            # Check for performance issues based on event data
+            if "processing_time_ms" in event.metadata:
+                processing_time = event.metadata["processing_time_ms"]
+                if processing_time > 1000:  # Over 1 second
+                    await self._handle_alert(
+                        Alert(
+                            alert_id=f"slow_storage_{datetime.now(timezone.utc).timestamp()}",
+                            severity=AlertSeverity.MEDIUM,
+                            message=f"Slow data storage detected: {processing_time:.1f}ms",
+                            component="data_storage",
+                            metadata=event.metadata,
+                        )
+                    )
+
+        except Exception as e:
+            self.logger.error(f"Error handling data stored event: {e}")
+
+    async def _handle_data_retrieved(self, event: DataEvent) -> None:
+        """Handle data retrieved events."""
+        try:
+            self.data_events_received += 1
+            self.records_retrieved += event.data.get("records_count", 0)
+
+        except Exception as e:
+            self.logger.error(f"Error handling data retrieved event: {e}")
+
+    async def _handle_validation_failed(self, event: DataEvent) -> None:
+        """Handle data validation failed events."""
+        try:
+            self.data_events_received += 1
+            self.validation_failure_count += 1
+
+            # Generate quality alert
+            await self._handle_alert(
+                Alert(
+                    alert_id=f"validation_failed_{datetime.now(timezone.utc).timestamp()}",
+                    severity=AlertSeverity.ERROR,
+                    message=f"Data validation failed: {event.data.get('error', 'Unknown error')}",
+                    component="data_quality",
+                    metadata=event.data,
+                )
+            )
+
+        except Exception as e:
+            self.logger.error(f"Error handling validation failed event: {e}")
+
+    async def _handle_cache_hit(self, event: DataEvent) -> None:
+        """Handle cache hit events."""
+        try:
+            self.data_events_received += 1
+            self.cache_hit_count += 1
+
+        except Exception as e:
+            self.logger.error(f"Error handling cache hit event: {e}")
+
+    async def _handle_cache_miss(self, event: DataEvent) -> None:
+        """Handle cache miss events."""
+        try:
+            self.data_events_received += 1
+            self.cache_miss_count += 1
+
+            # Check cache hit rate and generate alert if too low
+            total_cache_requests = self.cache_hit_count + self.cache_miss_count
+            if total_cache_requests > 100:  # Only check after enough requests
+                hit_rate = self.cache_hit_count / total_cache_requests
+                if hit_rate < 0.5:  # Less than 50% hit rate
+                    await self._handle_alert(
+                        Alert(
+                            alert_id=f"low_cache_hit_rate_{datetime.now(timezone.utc).timestamp()}",
+                            severity=AlertSeverity.MEDIUM,
+                            message=f"Low cache hit rate: {hit_rate:.2%}",
+                            component="cache_performance",
+                            metadata={"hit_rate": hit_rate, "total_requests": total_cache_requests},
+                        )
+                    )
+
+        except Exception as e:
+            self.logger.error(f"Error handling cache miss event: {e}")
+
     async def _monitoring_loop(self) -> None:
         """Main monitoring loop."""
         while not self._shutdown_requested:
             try:
                 await asyncio.sleep(self.monitoring_config["check_interval"])
 
-                # Get metrics from metrics provider
-                if self.metrics_provider:
-                    try:
-                        metrics = await self._get_metrics_from_provider()
+                # Build metrics from event-based tracking
+                metrics = self._build_event_based_metrics()
 
-                        # Store metrics
-                        self.metrics_history.append(
-                            {
-                                "timestamp": datetime.now(timezone.utc).isoformat(),
-                                "metrics": metrics,
-                            }
-                        )
+                # Store metrics
+                self.metrics_history.append(
+                    {
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "metrics": metrics,
+                    }
+                )
 
-                        # Limit history size
-                        if len(self.metrics_history) > self.max_history_size:
-                            self.metrics_history = self.metrics_history[-self.max_history_size :]
+                # Limit history size
+                if len(self.metrics_history) > self.max_history_size:
+                    self.metrics_history = self.metrics_history[-self.max_history_size :]
 
-                        # Run monitoring checks
-                        await self._run_monitoring_checks(metrics)
-
-                    except Exception as e:
-                        self.logger.error(f"Failed to get metrics from metrics provider: {e}")
+                # Run monitoring checks
+                await self._run_monitoring_checks(metrics)
 
             except asyncio.CancelledError:
                 break
             except Exception as e:
                 self.logger.error(f"Monitoring loop error: {e}")
 
-    async def _get_metrics_from_provider(self) -> dict[str, Any]:
-        """Get metrics from the configured metrics provider."""
-        if hasattr(self.metrics_provider, "get_comprehensive_metrics"):
-            return self.metrics_provider.get_comprehensive_metrics()
-        elif hasattr(self.metrics_provider, "get_metrics"):
-            return await self.metrics_provider.get_metrics()
-        else:
-            # Fallback to calling it directly if it's callable
-            if callable(self.metrics_provider):
-                result = self.metrics_provider()
-                if hasattr(result, "__await__"):
-                    return await result
-                return result
-            else:
-                return {}
+    def _build_event_based_metrics(self) -> dict[str, Any]:
+        """Build metrics from event-based tracking."""
+        total_cache_requests = self.cache_hit_count + self.cache_miss_count
+        cache_hit_rate = (self.cache_hit_count / max(1, total_cache_requests)) * 100
+
+        return {
+            "data_events_received": self.data_events_received,
+            "records_stored": self.records_stored,
+            "records_retrieved": self.records_retrieved,
+            "validation_failures": self.validation_failure_count,
+            "cache_hit_count": self.cache_hit_count,
+            "cache_miss_count": self.cache_miss_count,
+            "cache_hit_rate": cache_hit_rate,
+            "data_quality_score": max(
+                0, 100 - (self.validation_failure_count * 10)
+            ),  # Simplified calculation
+            "successful_records": self.records_stored,
+            "failed_records": self.validation_failure_count,
+            "throughput_per_second": self.records_stored
+            / max(
+                1, (datetime.now(timezone.utc) - datetime.now(timezone.utc)).total_seconds() or 1
+            ),
+            "active_alerts": len(self.active_alerts),
+        }
 
     async def _run_monitoring_checks(self, metrics: dict[str, Any]) -> None:
         """Run all monitoring checks and handle alerts."""
@@ -571,10 +682,10 @@ class DataMonitoringService(BaseComponent):
             # Log alert
             if alert.severity == AlertSeverity.CRITICAL:
                 self.logger.critical(f"CRITICAL ALERT: {alert.message}")
-            elif alert.severity == AlertSeverity.ERROR:
-                self.logger.error(f"ERROR ALERT: {alert.message}")
-            elif alert.severity == AlertSeverity.WARNING:
-                self.logger.warning(f"WARNING ALERT: {alert.message}")
+            elif alert.severity == AlertSeverity.HIGH:
+                self.logger.error(f"HIGH ALERT: {alert.message}")
+            elif alert.severity == AlertSeverity.MEDIUM:
+                self.logger.warning(f"MEDIUM ALERT: {alert.message}")
             else:
                 self.logger.info(f"INFO ALERT: {alert.message}")
 
@@ -681,10 +792,10 @@ class DataMonitoringService(BaseComponent):
                     [a for a in self.active_alerts.values() if a.severity == AlertSeverity.CRITICAL]
                 ),
                 "errors": len(
-                    [a for a in self.active_alerts.values() if a.severity == AlertSeverity.ERROR]
+                    [a for a in self.active_alerts.values() if a.severity == AlertSeverity.HIGH]
                 ),
                 "warnings": len(
-                    [a for a in self.active_alerts.values() if a.severity == AlertSeverity.WARNING]
+                    [a for a in self.active_alerts.values() if a.severity == AlertSeverity.MEDIUM]
                 ),
             },
             "sla_status": {sla.name: sla.status.value for sla in self.sla_monitor.sla_targets},
@@ -739,6 +850,9 @@ class DataMonitoringService(BaseComponent):
 
             # Clear metrics history
             self.metrics_history.clear()
+
+            # Cleanup event subscriptions
+            await self._cleanup_event_subscriptions()
 
             self._initialized = False
             self.logger.info("Monitoring service cleanup completed")

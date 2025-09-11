@@ -20,8 +20,9 @@ from enum import Enum
 from typing import Any
 
 import aiohttp
+from aiohttp import ClientSession
 
-from src.core.base.component import BaseComponent
+from src.core import BaseComponent, get_logger
 from src.core.config import Config
 
 # Import from P-001 core components
@@ -109,7 +110,7 @@ class AlternativeDataSource(BaseComponent):
         )
 
         # HTTP session
-        self.session: aiohttp.ClientSession | None = None
+        self.session: ClientSession | None = None
 
         # Data storage
         self.indicators_cache: dict[str, list[EconomicIndicator]] = {}
@@ -160,8 +161,8 @@ class AlternativeDataSource(BaseComponent):
             if session:
                 try:
                     await session.close()
-                except Exception as e:
-                    logger.error(f"Failed to close session during cleanup: {e}")
+                except Exception as cleanup_e:
+                    logger.error(f"Failed to close session during cleanup: {cleanup_e}")
                     # Continue cleanup process
                 # Don't set self.session if initialization failed
                 if self.session == session:

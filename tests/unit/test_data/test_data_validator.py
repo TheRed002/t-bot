@@ -1,22 +1,24 @@
 """Test suite for data validator components."""
 
-import pytest
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from decimal import Decimal
-from unittest.mock import Mock, patch
+from unittest.mock import Mock
+
+import pytest
 
 from src.core.config import Config
 from src.core.types import MarketData
 from src.data.validation.data_validator import (
     DataValidator,
     MarketDataValidationResult,
+    _get_utc_now,
+)
+from src.utils.validation.validation_types import (
     QualityDimension,
     QualityScore,
     ValidationCategory,
     ValidationIssue,
-    ValidationRule,
     ValidationSeverity,
-    _get_utc_now,
 )
 
 
@@ -26,7 +28,7 @@ class TestUtilityFunctions:
     def test_get_utc_now(self):
         """Test getting current UTC datetime."""
         result = _get_utc_now()
-        
+
         assert isinstance(result, datetime)
         assert result.tzinfo == timezone.utc
 
@@ -36,51 +38,52 @@ class TestValidationIssue:
 
     def test_initialization_minimal(self):
         """Test minimal initialization."""
+        from src.core.types import ValidationLevel
         issue = ValidationIssue(
+            field="test_field",
+            value="test_value",
+            expected="expected_value",
+            message="Test message",
+            level=ValidationLevel.HIGH,
             category=ValidationCategory.SCHEMA,
-            severity=ValidationSeverity.ERROR,
-            dimension=QualityDimension.COMPLETENESS,
-            message="Test message"
         )
-        
+
         assert issue.category == ValidationCategory.SCHEMA
-        assert issue.severity == ValidationSeverity.ERROR
-        assert issue.dimension == QualityDimension.COMPLETENESS
+        assert issue.level == ValidationLevel.HIGH
         assert issue.message == "Test message"
-        assert issue.field_name is None
-        assert issue.value is None
-        assert issue.expected is None
-        assert issue.rule_name == ""
+        assert issue.field == "test_field"
+        assert issue.value == "test_value"
+        assert issue.expected == "expected_value"
         assert isinstance(issue.timestamp, datetime)
         assert issue.metadata == {}
+        assert issue.source == "Validator"
 
     def test_initialization_full(self):
         """Test full initialization."""
+        from src.core.types import ValidationLevel
         timestamp = datetime.now(timezone.utc)
-        metadata = {"source": "test", "count": 5}
-        
+        metadata = {"count": 5}
+
         issue = ValidationIssue(
-            category=ValidationCategory.BUSINESS,
-            severity=ValidationSeverity.WARNING,
-            dimension=QualityDimension.ACCURACY,
-            message="Business rule violation",
-            field_name="price",
+            field="price",
             value=Decimal("100.50"),
             expected=Decimal("95.00"),
-            rule_name="price_range_check",
+            message="Business rule violation",
+            level=ValidationLevel.MEDIUM,
             timestamp=timestamp,
-            metadata=metadata
+            source="test",
+            metadata=metadata,
+            category=ValidationCategory.BUSINESS,
         )
-        
+
         assert issue.category == ValidationCategory.BUSINESS
-        assert issue.severity == ValidationSeverity.WARNING
-        assert issue.dimension == QualityDimension.ACCURACY
+        assert issue.level == ValidationLevel.MEDIUM
         assert issue.message == "Business rule violation"
-        assert issue.field_name == "price"
+        assert issue.field == "price"
         assert issue.value == Decimal("100.50")
         assert issue.expected == Decimal("95.00")
-        assert issue.rule_name == "price_range_check"
         assert issue.timestamp == timestamp
+        assert issue.source == "test"
         assert issue.metadata == metadata
 
 
@@ -90,7 +93,7 @@ class TestQualityScore:
     def test_initialization_defaults(self):
         """Test default initialization."""
         score = QualityScore()
-        
+
         assert score.overall == 0.0
         assert score.completeness == 0.0
         assert score.accuracy == 0.0
@@ -108,9 +111,9 @@ class TestQualityScore:
             consistency=0.80,
             timeliness=0.75,
             validity=0.88,
-            uniqueness=0.92
+            uniqueness=0.92,
         )
-        
+
         assert score.overall == 0.85
         assert score.completeness == 0.90
         assert score.accuracy == 0.95
@@ -128,11 +131,11 @@ class TestQualityScore:
             consistency=0.80,
             timeliness=0.75,
             validity=0.88,
-            uniqueness=0.92
+            uniqueness=0.92,
         )
-        
+
         result = score.to_dict()
-        
+
         assert isinstance(result, dict)
         assert result["overall"] == 0.85
         assert result["completeness"] == 0.90
@@ -143,82 +146,6 @@ class TestQualityScore:
         assert result["uniqueness"] == 0.92
 
 
-class TestValidationRule:
-    """Test suite for ValidationRule."""
-
-    def test_initialization_minimal(self):
-        """Test minimal initialization."""
-        rule = ValidationRule(
-            name="test_rule",
-            category=ValidationCategory.SCHEMA,
-            severity=ValidationSeverity.ERROR,
-            dimension=QualityDimension.COMPLETENESS,
-            description="Test validation rule"
-        )
-        
-        assert rule.name == "test_rule"
-        assert rule.category == ValidationCategory.SCHEMA
-        assert rule.severity == ValidationSeverity.ERROR
-        assert rule.dimension == QualityDimension.COMPLETENESS
-        assert rule.description == "Test validation rule"
-        assert rule.enabled is True
-        assert rule.parameters == {}
-
-    def test_initialization_full(self):
-        """Test full initialization."""
-        parameters = {"min_value": 0, "max_value": 100}
-        
-        rule = ValidationRule(
-            name="price_range_rule",
-            category=ValidationCategory.BUSINESS,
-            severity=ValidationSeverity.WARNING,
-            dimension=QualityDimension.ACCURACY,
-            description="Price must be within range",
-            enabled=False,
-            parameters=parameters
-        )
-        
-        assert rule.name == "price_range_rule"
-        assert rule.category == ValidationCategory.BUSINESS
-        assert rule.severity == ValidationSeverity.WARNING
-        assert rule.dimension == QualityDimension.ACCURACY
-        assert rule.description == "Price must be within range"
-        assert rule.enabled is False
-        assert rule.parameters == parameters
-
-    def test_validation_name_length(self):
-        """Test name validation."""
-        # Test minimum length
-        with pytest.raises(ValueError):
-            ValidationRule(
-                name="",  # Too short
-                category=ValidationCategory.SCHEMA,
-                severity=ValidationSeverity.ERROR,
-                dimension=QualityDimension.COMPLETENESS,
-                description="Test rule"
-            )
-
-        # Test maximum length
-        with pytest.raises(ValueError):
-            ValidationRule(
-                name="a" * 101,  # Too long
-                category=ValidationCategory.SCHEMA,
-                severity=ValidationSeverity.ERROR,
-                dimension=QualityDimension.COMPLETENESS,
-                description="Test rule"
-            )
-
-    def test_validation_description_length(self):
-        """Test description validation."""
-        with pytest.raises(ValueError):
-            ValidationRule(
-                name="test_rule",
-                category=ValidationCategory.SCHEMA,
-                severity=ValidationSeverity.ERROR,
-                dimension=QualityDimension.COMPLETENESS,
-                description=""  # Too short
-            )
-
 
 class TestMarketDataValidationResult:
     """Test suite for MarketDataValidationResult."""
@@ -226,40 +153,35 @@ class TestMarketDataValidationResult:
     def test_initialization_minimal(self):
         """Test minimal initialization."""
         result = MarketDataValidationResult(
-            symbol="BTCUSDT",
-            is_valid=True,
-            quality_score=QualityScore(overall=0.95)
+            symbol="BTCUSDT", is_valid=True
         )
-        
+
         assert result.symbol == "BTCUSDT"
         assert result.is_valid is True
-        assert result.quality_score.overall == 0.95
-        assert result.issues == []
+        assert result.quality_score == 0.0
+        assert result.error_count == 0
+        assert result.errors == []
         assert result.metadata == {}
         assert isinstance(result.validation_timestamp, datetime)
 
-    def test_initialization_with_issues(self):
-        """Test initialization with validation issues."""
-        issue = ValidationIssue(
-            category=ValidationCategory.SCHEMA,
-            severity=ValidationSeverity.ERROR,
-            dimension=QualityDimension.COMPLETENESS,
-            message="Missing field"
-        )
-        
+    def test_initialization_with_errors(self):
+        """Test initialization with validation errors."""
         result = MarketDataValidationResult(
             symbol="ETHUSD",
             is_valid=False,
-            quality_score=QualityScore(overall=0.75),
-            issues=[issue],
-            metadata={"source": "test"}
+            quality_score=0.75,
+            error_count=2,
+            errors=["Missing field", "Invalid price"],
+            metadata={"source": "test"},
         )
-        
+
         assert result.symbol == "ETHUSD"
         assert result.is_valid is False
-        assert result.quality_score.overall == 0.75
-        assert len(result.issues) == 1
-        assert result.issues[0] is issue
+        assert result.quality_score == 0.75
+        assert result.error_count == 2
+        assert len(result.errors) == 2
+        assert "Missing field" in result.errors
+        assert "Invalid price" in result.errors
         assert result.metadata["source"] == "test"
 
 
@@ -274,7 +196,7 @@ class TestDataValidator:
             "strict_validation": True,
             "quality_threshold": 0.8,
             "outlier_detection": True,
-            "temporal_validation": True
+            "temporal_validation": True,
         }
         return config
 
@@ -296,23 +218,23 @@ class TestDataValidator:
             ask=Decimal("45000.50"),
             volume=Decimal("1000.5"),
             timestamp=datetime.now(timezone.utc),
-            exchange="binance"
+            exchange="binance",
         )
 
     def test_initialization(self, mock_config):
         """Test validator initialization."""
         validator = DataValidator(config=mock_config)
-        
+
         assert validator.config is mock_config
-        assert hasattr(validator, 'logger')
+        assert hasattr(validator, "logger")
 
     def test_initialization_with_default_config(self, mock_config):
         """Test validator initialization with default config values."""
         # Remove data_validator config to test defaults
         mock_config.data_validator = None
-        
+
         validator = DataValidator(config=mock_config)
-        
+
         assert validator.config is mock_config
 
 
@@ -321,9 +243,9 @@ class TestEnums:
 
     def test_validation_severity_values(self):
         """Test validation severity enum values."""
-        assert ValidationSeverity.INFO.value == "info"
-        assert ValidationSeverity.WARNING.value == "warning"
-        assert ValidationSeverity.ERROR.value == "error"
+        assert ValidationSeverity.LOW.value == "low"
+        assert ValidationSeverity.MEDIUM.value == "medium"
+        assert ValidationSeverity.HIGH.value == "high"
         assert ValidationSeverity.CRITICAL.value == "critical"
 
     def test_validation_category_values(self):

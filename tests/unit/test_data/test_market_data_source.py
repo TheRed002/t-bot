@@ -1,14 +1,13 @@
 """Test suite for market data source components."""
 
 import asyncio
-import pytest
 from datetime import datetime, timezone
-from decimal import Decimal
 from unittest.mock import AsyncMock, Mock, patch
+
+import pytest
 
 from src.core.config import Config
 from src.core.exceptions import DataSourceError
-from src.core.types import Ticker
 from src.data.sources.market_data import (
     DataStreamType,
     DataSubscription,
@@ -22,14 +21,14 @@ class TestDataSubscription:
     def test_initialization_minimal(self):
         """Test minimal initialization."""
         callback = Mock()
-        
+
         subscription = DataSubscription(
             exchange_name="binance",
             symbol="BTCUSDT",
             stream_type=DataStreamType.TICKER,
-            callback=callback
+            callback=callback,
         )
-        
+
         assert subscription.exchange_name == "binance"
         assert subscription.symbol == "BTCUSDT"
         assert subscription.stream_type == DataStreamType.TICKER
@@ -42,7 +41,7 @@ class TestDataSubscription:
         """Test full initialization."""
         callback = Mock()
         timestamp = datetime.now(timezone.utc)
-        
+
         subscription = DataSubscription(
             exchange_name="okx",
             symbol="ETHUSDT",
@@ -50,9 +49,9 @@ class TestDataSubscription:
             callback=callback,
             active=False,
             last_update=timestamp,
-            error_count=5
+            error_count=5,
         )
-        
+
         assert subscription.exchange_name == "okx"
         assert subscription.symbol == "ETHUSDT"
         assert subscription.stream_type == DataStreamType.ORDER_BOOK
@@ -89,34 +88,32 @@ class TestMarketDataSource:
     @pytest.fixture
     def market_data_source(self, mock_config, mock_exchange_factory):
         """Create market data source instance."""
-        with patch('src.data.sources.market_data.ErrorHandler') as mock_error_handler_class:
+        with patch("src.data.sources.market_data.ErrorHandler") as mock_error_handler_class:
             # Configure the ErrorHandler instance to have async methods
             mock_error_handler_instance = Mock()
             mock_error_handler_instance.handle_error = AsyncMock()
             mock_error_handler_instance.create_error_context = Mock()
             mock_error_handler_class.return_value = mock_error_handler_instance
-            
-            with patch('src.data.sources.market_data.NetworkDisconnectionRecovery'):
-                with patch('src.data.sources.market_data.APIRateLimitRecovery'):
-                    with patch('src.data.sources.market_data.ConnectionManager'):
-                        with patch('src.data.sources.market_data.ErrorPatternAnalytics'):
+
+            with patch("src.data.sources.market_data.NetworkDisconnectionRecovery"):
+                with patch("src.data.sources.market_data.APIRateLimitRecovery"):
+                    with patch("src.data.sources.market_data.ConnectionManager"):
+                        with patch("src.data.sources.market_data.ErrorPatternAnalytics"):
                             return MarketDataSource(
-                                config=mock_config,
-                                exchange_factory=mock_exchange_factory
+                                config=mock_config, exchange_factory=mock_exchange_factory
                             )
 
     def test_initialization(self, mock_config, mock_exchange_factory):
         """Test market data source initialization."""
-        with patch('src.data.sources.market_data.ErrorHandler'):
-            with patch('src.data.sources.market_data.NetworkDisconnectionRecovery'):
-                with patch('src.data.sources.market_data.APIRateLimitRecovery'):
-                    with patch('src.data.sources.market_data.ConnectionManager'):
-                        with patch('src.data.sources.market_data.ErrorPatternAnalytics'):
+        with patch("src.data.sources.market_data.ErrorHandler"):
+            with patch("src.data.sources.market_data.NetworkDisconnectionRecovery"):
+                with patch("src.data.sources.market_data.APIRateLimitRecovery"):
+                    with patch("src.data.sources.market_data.ConnectionManager"):
+                        with patch("src.data.sources.market_data.ErrorPatternAnalytics"):
                             source = MarketDataSource(
-                                config=mock_config,
-                                exchange_factory=mock_exchange_factory
+                                config=mock_config, exchange_factory=mock_exchange_factory
                             )
-        
+
         assert source.config is mock_config
         assert source.exchange_factory is mock_exchange_factory
         assert isinstance(source.exchanges, dict)
@@ -130,40 +127,44 @@ class TestMarketDataSource:
 
     def test_initialization_without_factory(self, mock_config):
         """Test initialization without exchange factory."""
-        with patch('src.data.sources.market_data.ErrorHandler'):
-            with patch('src.data.sources.market_data.NetworkDisconnectionRecovery'):
-                with patch('src.data.sources.market_data.APIRateLimitRecovery'):
-                    with patch('src.data.sources.market_data.ConnectionManager'):
-                        with patch('src.data.sources.market_data.ErrorPatternAnalytics'):
-                            with patch('src.data.sources.market_data.ExchangeFactory') as mock_factory_class:
+        with patch("src.data.sources.market_data.ErrorHandler"):
+            with patch("src.data.sources.market_data.NetworkDisconnectionRecovery"):
+                with patch("src.data.sources.market_data.APIRateLimitRecovery"):
+                    with patch("src.data.sources.market_data.ConnectionManager"):
+                        with patch("src.data.sources.market_data.ErrorPatternAnalytics"):
+                            with patch(
+                                "src.data.sources.market_data.ExchangeFactory"
+                            ) as mock_factory_class:
                                 mock_factory_instance = Mock()
                                 mock_factory_class.return_value = mock_factory_instance
-                                
+
                                 source = MarketDataSource(config=mock_config)
-        
+
         assert source.exchange_factory is mock_factory_instance
 
     @pytest.mark.asyncio
     async def test_initialize_success(self, market_data_source, mock_exchange):
         """Test successful initialization."""
         market_data_source.exchange_factory.create_exchange.return_value = mock_exchange
-        
+
         await market_data_source.initialize()
-        
+
         assert len(market_data_source.exchanges) > 0
         # Should have attempted to create exchanges for supported exchanges
-        assert market_data_source.exchange_factory.create_exchange.call_count == 3  # binance, okx, coinbase
+        assert (
+            market_data_source.exchange_factory.create_exchange.call_count == 3
+        )  # binance, okx, coinbase
 
     @pytest.mark.asyncio
     async def test_initialize_connection_timeout(self, market_data_source, mock_exchange):
         """Test initialization with connection timeout."""
         mock_exchange.connect.side_effect = asyncio.TimeoutError("Connection timeout")
         market_data_source.exchange_factory.create_exchange.return_value = mock_exchange
-        
+
         # Should raise DataSourceError when no exchanges are connected
         with pytest.raises(DataSourceError, match="No exchanges connected for market data"):
             await market_data_source.initialize()
-        
+
         assert len(market_data_source.exchanges) == 0
 
     @pytest.mark.asyncio
@@ -171,11 +172,11 @@ class TestMarketDataSource:
         """Test initialization with exchange connection failure."""
         mock_exchange.connect.return_value = False  # Connection failed
         market_data_source.exchange_factory.create_exchange.return_value = mock_exchange
-        
+
         # Should raise DataSourceError when no exchanges are connected
         with pytest.raises(DataSourceError, match="No exchanges connected for market data"):
             await market_data_source.initialize()
-        
+
         assert len(market_data_source.exchanges) == 0
 
     @pytest.mark.asyncio
@@ -184,7 +185,7 @@ class TestMarketDataSource:
         # Mock exchange that fails to connect
         mock_exchange.connect.return_value = False
         market_data_source.exchange_factory.create_exchange.return_value = mock_exchange
-        
+
         with pytest.raises(DataSourceError, match="No exchanges connected for market data"):
             await market_data_source.initialize()
 
@@ -193,19 +194,19 @@ class TestMarketDataSource:
         """Test successful ticker subscription."""
         market_data_source.exchanges["binance"] = mock_exchange
         callback = Mock()
-        
+
         # Mock the active_streams to prevent _ticker_stream from being called
         market_data_source.active_streams["binance_ticker"] = True
-        
-        with patch.object(market_data_source, '_ticker_stream') as mock_stream:
-            with patch('asyncio.create_task') as mock_create_task:
+
+        with patch.object(market_data_source, "_ticker_stream") as mock_stream:
+            with patch("asyncio.create_task") as mock_create_task:
                 subscription_id = await market_data_source.subscribe_to_ticker(
                     "binance", "BTCUSDT", callback
                 )
-        
+
         assert subscription_id == "binance_BTCUSDT_ticker"
         assert subscription_id in market_data_source.subscriptions
-        
+
         subscription = market_data_source.subscriptions[subscription_id]
         assert subscription.exchange_name == "binance"
         assert subscription.symbol == "BTCUSDT"
@@ -216,7 +217,7 @@ class TestMarketDataSource:
     async def test_subscribe_to_ticker_exchange_not_available(self, market_data_source):
         """Test ticker subscription with unavailable exchange."""
         callback = Mock()
-        
+
         with pytest.raises(DataSourceError, match="Exchange nonexistent not available"):
             await market_data_source.subscribe_to_ticker("nonexistent", "BTCUSDT", callback)
 
@@ -226,11 +227,11 @@ class TestMarketDataSource:
         market_data_source.exchanges["binance"] = mock_exchange
         market_data_source.active_streams["binance_ticker"] = True  # Stream already active
         callback = Mock()
-        
+
         subscription_id = await market_data_source.subscribe_to_ticker(
             "binance", "BTCUSDT", callback
         )
-        
+
         assert subscription_id == "binance_BTCUSDT_ticker"
         # Should not create new task since stream is already active
 
@@ -239,14 +240,14 @@ class TestMarketDataSource:
         """Test historical data retrieval with unavailable exchange."""
         start_time = datetime.now(timezone.utc)
         end_time = datetime.now(timezone.utc)
-        
+
         with pytest.raises(DataSourceError):
             await market_data_source.get_historical_data("test", "BTCUSDT", start_time, end_time)
 
     def test_stats_initialization(self, market_data_source):
         """Test statistics initialization."""
         stats = market_data_source.stats
-        
+
         assert stats["successful_updates"] == 0
         assert stats["failed_updates"] == 0
         assert stats["total_subscriptions"] == 0
@@ -268,14 +269,14 @@ class TestMarketDataSource:
         """Test that ticker stream task would be created properly."""
         market_data_source.exchanges["binance"] = mock_exchange
         callback = Mock()
-        
-        with patch.object(market_data_source, '_ticker_stream') as mock_stream:
-            with patch('asyncio.create_task') as mock_create_task:
+
+        with patch.object(market_data_source, "_ticker_stream") as mock_stream:
+            with patch("asyncio.create_task") as mock_create_task:
                 mock_task = Mock()
                 mock_create_task.return_value = mock_task
-                
+
                 await market_data_source.subscribe_to_ticker("binance", "BTCUSDT", callback)
-                
+
                 # Verify stream task would be created
                 assert "binance_ticker" in market_data_source.active_streams
                 assert market_data_source.active_streams["binance_ticker"] is True

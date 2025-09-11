@@ -16,10 +16,11 @@ Dependencies:
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal, getcontext
 from typing import Any
 
 # Import from P-002 database components
-from src.core.base.component import BaseComponent
+from src.core import BaseComponent
 from src.core.config import Config
 
 # Import from P-001 core components
@@ -164,22 +165,23 @@ class DataStorageManager(BaseComponent):
             if not self._initialized:
                 await self.initialize()
 
-            # Write market data to InfluxDB
+            # Write market data to InfluxDB with proper precision conversion
             # Prepare fields dict per client wrapper API
+            getcontext().prec = 28
             fields = {
-                "price": float(data.price),  # InfluxDB requires float for numeric fields
-                "volume": float(data.volume) if data.volume is not None else 0.0,
+                "price": float(Decimal(str(data.price)).quantize(Decimal("0.00000001"))),  # Convert with precision
+                "volume": float(Decimal(str(data.volume)).quantize(Decimal("0.00000001"))) if data.volume is not None else 0.0,
             }
             if data.bid is not None:
-                fields["bid"] = float(data.bid)  # InfluxDB requires float
+                fields["bid"] = float(Decimal(str(data.bid)).quantize(Decimal("0.00000001")))  # Convert with precision
             if data.ask is not None:
-                fields["ask"] = float(data.ask)  # InfluxDB requires float
+                fields["ask"] = float(Decimal(str(data.ask)).quantize(Decimal("0.00000001")))  # Convert with precision
             if data.high_price is not None:
-                fields["high"] = float(data.high_price)  # InfluxDB requires float
+                fields["high"] = float(Decimal(str(data.high_price)).quantize(Decimal("0.00000001")))  # Convert with precision
             if data.low_price is not None:
-                fields["low"] = float(data.low_price)  # InfluxDB requires float
+                fields["low"] = float(Decimal(str(data.low_price)).quantize(Decimal("0.00000001")))  # Convert with precision
             if data.open_price is not None:
-                fields["open"] = float(data.open_price)  # InfluxDB requires float
+                fields["open"] = float(Decimal(str(data.open_price)).quantize(Decimal("0.00000001")))  # Convert with precision
 
             await self.influx_client.write_market_data(
                 symbol=data.symbol, data=fields, timestamp=data.timestamp
@@ -236,20 +238,21 @@ class DataStorageManager(BaseComponent):
             if market_data_points:
                 # Write individually to ensure type safety and avoid missing API
                 for md in market_data_points:
+                    getcontext().prec = 28
                     fields = {
-                        "price": float(md.price),  # InfluxDB requires float
-                        "volume": float(md.volume) if md.volume is not None else 0.0,
+                        "price": float(Decimal(str(md.price)).quantize(Decimal("0.00000001"))),  # Convert with precision
+                        "volume": float(Decimal(str(md.volume)).quantize(Decimal("0.00000001"))) if md.volume is not None else 0.0,
                     }
                     if md.bid is not None:
-                        fields["bid"] = float(md.bid)  # InfluxDB requires float
+                        fields["bid"] = float(Decimal(str(md.bid)).quantize(Decimal("0.00000001")))  # Convert with precision
                     if md.ask is not None:
-                        fields["ask"] = float(md.ask)  # InfluxDB requires float
+                        fields["ask"] = float(Decimal(str(md.ask)).quantize(Decimal("0.00000001")))  # Convert with precision
                     if md.high_price is not None:
-                        fields["high"] = float(md.high_price)  # InfluxDB requires float
+                        fields["high"] = float(Decimal(str(md.high_price)).quantize(Decimal("0.00000001")))  # Convert with precision
                     if md.low_price is not None:
-                        fields["low"] = float(md.low_price)  # InfluxDB requires float
+                        fields["low"] = float(Decimal(str(md.low_price)).quantize(Decimal("0.00000001")))  # Convert with precision
                     if md.open_price is not None:
-                        fields["open"] = float(md.open_price)  # InfluxDB requires float
+                        fields["open"] = float(Decimal(str(md.open_price)).quantize(Decimal("0.00000001")))  # Convert with precision
                     await self.influx_client.write_market_data(md.symbol, fields, md.timestamp)
 
                 # Update metrics

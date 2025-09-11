@@ -24,9 +24,7 @@ from typing import Any
 import redis.asyncio as redis
 from pydantic import BaseModel, ConfigDict, Field
 
-from src.core.base.component import BaseComponent
-from src.core.base.interfaces import HealthCheckResult, HealthStatus
-from src.core.config import Config
+from src.core import BaseComponent, Config, HealthCheckResult, HealthStatus
 from src.utils.cache_utilities import (
     CacheEntry,
     CacheLevel,
@@ -209,9 +207,9 @@ class L1MemoryCache(BaseComponent):
         try:
             if isinstance(value, str):
                 return len(value.encode("utf-8"))
-            elif isinstance(value, int | float):
+            elif isinstance(value, (int, float)):
                 return sys.getsizeof(value)
-            elif isinstance(value, list | dict):
+            elif isinstance(value, (list, dict)):
                 return len(json.dumps(value, default=str).encode("utf-8"))
             else:
                 return sys.getsizeof(value)
@@ -462,8 +460,8 @@ class L2RedisCache(BaseComponent):
             if redis_client:
                 try:
                     await redis_client.connection_pool.disconnect()
-                except Exception:
-                    pass
+                except Exception as e:
+                    self.logger.debug(f"Error disconnecting Redis pool: {e}")
         except Exception as e:
             self.logger.warning(f"Redis cleanup error during primary close: {e}")
         finally:
@@ -475,8 +473,8 @@ class L2RedisCache(BaseComponent):
                     self.logger.warning("Redis final close timeout")
                     try:
                         await redis_client.connection_pool.disconnect()
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        self.logger.debug(f"Error disconnecting Redis pool during timeout cleanup: {e}")
                 except Exception as e:
                     self.logger.warning(f"Redis cleanup error during final close: {e}")
 
@@ -911,8 +909,8 @@ class DataCache(BaseComponent):
                             await task
                         except asyncio.CancelledError:
                             pass
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            self.logger.debug(f"Error waiting for background task completion: {e}")
 
                 # Force cleanup L2 cache
                 try:
@@ -923,8 +921,8 @@ class DataCache(BaseComponent):
                 # Force clear all caches
                 try:
                     await self._l1_cache.clear()
-                except Exception:
-                    pass
+                except Exception as e:
+                    self.logger.debug(f"Error clearing L1 cache: {e}")
 
                 self._background_tasks.clear()
                 self._initialized = False

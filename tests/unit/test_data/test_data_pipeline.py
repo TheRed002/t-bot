@@ -1,13 +1,12 @@
 """Test suite for data pipeline components."""
 
-import asyncio
-import pytest
 from datetime import datetime, timezone
 from decimal import Decimal
-from unittest.mock import AsyncMock, MagicMock, Mock, patch
+from unittest.mock import Mock
+
+import pytest
 
 from src.core.types import MarketData
-from src.core.exceptions import DataError, DataProcessingError, DataValidationError
 from src.data.pipeline.data_pipeline import (
     DataTransformation,
     DataValidationResult,
@@ -37,14 +36,14 @@ class TestDataTransformation:
             ask_price=Decimal("45001.87654"),
             volume=Decimal("1000.123456789"),
             timestamp=datetime.now(timezone.utc),
-            exchange="binance"
+            exchange="binance",
         )
 
     @pytest.mark.asyncio
     async def test_normalize_prices_success(self, sample_market_data):
         """Test successful price normalization."""
         result = await DataTransformation.normalize_prices(sample_market_data)
-        
+
         assert result is not None
         assert result.symbol == sample_market_data.symbol
         # Verify the result is MarketData with properly quantized decimals
@@ -63,11 +62,11 @@ class TestDataTransformation:
             bid_price=None,
             ask_price=None,
             timestamp=datetime.now(timezone.utc),
-            exchange="binance"
+            exchange="binance",
         )
-        
+
         result = await DataTransformation.normalize_prices(data)
-        
+
         assert result is not None
         # Should handle None values gracefully
         assert result.bid_price is None
@@ -90,7 +89,7 @@ class TestDataTransformation:
         invalid_data.ask = None
         invalid_data.volume = None
         invalid_data.model_dump.return_value = {}
-        
+
         with pytest.raises(Exception):  # Will raise DataProcessingError
             await DataTransformation.normalize_prices(invalid_data)
 
@@ -105,11 +104,11 @@ class TestDataTransformation:
             close=Decimal("45000"),
             volume=Decimal("1000"),
             timestamp=datetime.now(timezone.utc),
-            exchange="binance"
+            exchange="binance",
         )
-        
+
         result = await DataTransformation.validate_ohlc_consistency(data)
-        
+
         assert result is True
 
     @pytest.mark.asyncio
@@ -123,11 +122,11 @@ class TestDataTransformation:
             close=Decimal("45000"),
             volume=Decimal("1000"),
             timestamp=datetime.now(timezone.utc),
-            exchange="binance"
+            exchange="binance",
         )
-        
+
         result = await DataTransformation.validate_ohlc_consistency(data)
-        
+
         assert result is False
 
     @pytest.mark.asyncio
@@ -141,11 +140,11 @@ class TestDataTransformation:
             close=Decimal("45000"),
             volume=Decimal("1000"),
             timestamp=datetime.now(timezone.utc),
-            exchange="binance"
+            exchange="binance",
         )
-        
+
         result = await DataTransformation.validate_ohlc_consistency(data)
-        
+
         assert result is False
 
     @pytest.mark.asyncio
@@ -159,11 +158,11 @@ class TestDataTransformation:
             close=Decimal("45000"),
             volume=Decimal("1000"),
             timestamp=datetime.now(timezone.utc),
-            exchange="binance"
+            exchange="binance",
         )
-        
+
         result = await DataTransformation.validate_ohlc_consistency(data)
-        
+
         assert result is False
 
     @pytest.mark.asyncio
@@ -177,11 +176,11 @@ class TestDataTransformation:
             close=Decimal("45000"),
             volume=Decimal("1000"),
             timestamp=datetime.now(timezone.utc),
-            exchange="binance"
+            exchange="binance",
         )
-        
+
         result = await DataTransformation.validate_ohlc_consistency(data)
-        
+
         assert result is True  # Should skip validation if not all prices available
 
     @pytest.mark.asyncio
@@ -189,15 +188,16 @@ class TestDataTransformation:
         """Test OHLC validation exception handling."""
         # Create a mock object to simulate error during processing
         from unittest.mock import Mock
+
         data = Mock()
         data.open = None
-        data.high = None  
+        data.high = None
         data.low = None
         data.close = None
-        
+
         # This should return True because not all prices are available
         result = await DataTransformation.validate_ohlc_consistency(data)
-        
+
         # The method should handle the case gracefully by returning False on error
         assert result is False
 
@@ -208,7 +208,7 @@ class TestDataValidationResult:
     def test_initialization_defaults(self):
         """Test default initialization."""
         result = DataValidationResult(is_valid=True, quality_score=0.95)
-        
+
         assert result.is_valid is True
         assert result.quality_score == 0.95
         assert result.errors == []
@@ -222,9 +222,9 @@ class TestDataValidationResult:
             quality_score=0.65,
             errors=["Error 1", "Error 2"],
             warnings=["Warning 1"],
-            metadata={"source": "test", "count": 5}
+            metadata={"source": "test", "count": 5},
         )
-        
+
         assert result.is_valid is False
         assert result.quality_score == 0.65
         assert len(result.errors) == 2
@@ -238,7 +238,7 @@ class TestPipelineMetrics:
     def test_initialization_defaults(self):
         """Test default initialization."""
         metrics = PipelineMetrics()
-        
+
         assert metrics.total_records_processed == 0
         assert metrics.successful_records == 0
         assert metrics.failed_records == 0
@@ -261,9 +261,9 @@ class TestPipelineMetrics:
             throughput_per_second=50.0,
             data_quality_score=0.92,
             pipeline_uptime=99.5,
-            last_processed_time=timestamp
+            last_processed_time=timestamp,
         )
-        
+
         assert metrics.total_records_processed == 100
         assert metrics.successful_records == 95
         assert metrics.failed_records == 3
@@ -289,7 +289,7 @@ class TestPipelineRecord:
             close=Decimal("45000"),
             volume=Decimal("1000"),
             timestamp=datetime.now(timezone.utc),
-            exchange="binance"
+            exchange="binance",
         )
 
     def test_initialization(self, sample_market_data):
@@ -299,9 +299,9 @@ class TestPipelineRecord:
             record_id="test-id",
             data=sample_market_data,
             stage=PipelineStage.VALIDATION,
-            timestamp=timestamp
+            timestamp=timestamp,
         )
-        
+
         assert record.record_id == "test-id"
         assert record.data is sample_market_data
         assert record.stage == PipelineStage.VALIDATION
@@ -321,9 +321,9 @@ class TestPipelineRecord:
             timestamp=datetime.now(timezone.utc),
             validation_result=validation_result,
             processing_time_ms=25.5,
-            retry_count=1
+            retry_count=1,
         )
-        
+
         assert record.validation_result is validation_result
         assert record.processing_time_ms == 25.5
         assert record.retry_count == 1
@@ -336,9 +336,9 @@ class TestPipelineRecord:
             stage=PipelineStage.STORAGE,
             timestamp=datetime.now(timezone.utc),
             error_message="Storage failed",
-            retry_count=3
+            retry_count=3,
         )
-        
+
         assert record.error_message == "Storage failed"
         assert record.retry_count == 3
 

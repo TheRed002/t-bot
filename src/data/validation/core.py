@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from src.core.base.component import BaseComponent
+from src.core import BaseComponent
 from src.data.interfaces import DataValidatorInterface
 
 

@@ -22,6 +22,7 @@ Dependencies:
 import warnings
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from decimal import Decimal, getcontext
 from enum import Enum
 from typing import Any
 
@@ -30,7 +31,7 @@ import pandas as pd
 from scipy import stats
 from scipy.signal import periodogram
 
-from src.core.base.component import BaseComponent
+from src.core import BaseComponent
 from src.core.config import Config
 from src.core.exceptions import DataError
 
@@ -41,7 +42,7 @@ from src.core.types import MarketData
 from src.error_handling.error_handler import ErrorHandler
 
 # Import from P-007A utilities
-from src.utils.decorators import cache_result, time_execution
+from src.utils.decorators import cached, time_execution
 
 
 class StatFeatureType(Enum):
@@ -173,25 +174,28 @@ class StatisticalFeatures(BaseComponent):
                     ]
                 )
 
-            # Calculate returns
-            close_price = float(data.price)
+            # Calculate returns with Decimal precision
+            getcontext().prec = 28
+            close_price_decimal = Decimal(str(data.price))
+            close_price = float(close_price_decimal.quantize(Decimal("0.00000001")))
             returns = 0.0
             log_returns = 0.0
 
             if len(self.price_data[symbol]) > 0:
-                prev_close = self.price_data[symbol]["close"].iloc[-1]
-                if prev_close > 0:
-                    returns = (close_price - prev_close) / prev_close
-                    log_returns = np.log(close_price / prev_close)
+                prev_close_decimal = Decimal(str(self.price_data[symbol]["close"].iloc[-1]))
+                if prev_close_decimal > 0:
+                    returns_decimal = (close_price_decimal - prev_close_decimal) / prev_close_decimal
+                    returns = float(returns_decimal.quantize(Decimal("0.00000001")))
+                    log_returns = float(Decimal(str(np.log(float(close_price_decimal / prev_close_decimal)))).quantize(Decimal("0.00000001")))
 
-            # Add new data point
+            # Add new data point with Decimal precision conversion
             new_row = {
                 "timestamp": data.timestamp,
-                "open": float(data.open_price or data.price),
-                "high": float(data.high_price or data.price),
-                "low": float(data.low_price or data.price),
+                "open": float(Decimal(str(data.open_price or data.price)).quantize(Decimal("0.00000001"))),
+                "high": float(Decimal(str(data.high_price or data.price)).quantize(Decimal("0.00000001"))),
+                "low": float(Decimal(str(data.low_price or data.price)).quantize(Decimal("0.00000001"))),
                 "close": close_price,
-                "volume": float(data.volume),
+                "volume": float(Decimal(str(data.volume)).quantize(Decimal("0.00000001"))),
                 "returns": returns,
                 "log_returns": log_returns,
             }
@@ -214,7 +218,7 @@ class StatisticalFeatures(BaseComponent):
             raise DataError(f"Market data addition failed: {e!s}")
 
     @time_execution
-    @cache_result(ttl=300)
+    @cached(ttl=300)
     async def calculate_rolling_stats(
         self, symbol: str, window: int | None = None, field: str = "returns"
     ) -> StatisticalResult:
@@ -297,7 +301,7 @@ class StatisticalFeatures(BaseComponent):
             raise DataError(f"Rolling stats calculation failed: {e!s}")
 
     @time_execution
-    @cache_result(ttl=600)
+    @cached(ttl=600)
     async def calculate_autocorrelation(
         self, symbol: str, max_lags: int | None = None, field: str = "returns"
     ) -> StatisticalResult:
@@ -383,7 +387,7 @@ class StatisticalFeatures(BaseComponent):
             raise DataError(f"Autocorrelation calculation failed: {e!s}")
 
     @time_execution
-    @cache_result(ttl=600)
+    @cached(ttl=600)
     async def detect_regime(
         self, symbol: str, window: int | None = None, field: str = "returns"
     ) -> StatisticalResult:
@@ -495,7 +499,7 @@ class StatisticalFeatures(BaseComponent):
             raise DataError(f"Regime detection failed: {e!s}")
 
     @time_execution
-    @cache_result(ttl=900)
+    @cached(ttl=900)
     async def calculate_cross_correlation(
         self, symbol1: str, symbol2: str, max_lags: int = 20, field: str = "returns"
     ) -> StatisticalResult:
@@ -608,7 +612,7 @@ class StatisticalFeatures(BaseComponent):
             raise DataError(f"Cross-correlation calculation failed: {e!s}")
 
     @time_execution
-    @cache_result(ttl=1800)
+    @cached(ttl=1800)
     async def detect_seasonality(self, symbol: str, field: str = "returns") -> StatisticalResult:
         """
         Detect seasonal patterns in price data.

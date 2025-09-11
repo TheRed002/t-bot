@@ -21,6 +21,7 @@ Performance Targets:
 
 from __future__ import annotations
 
+import asyncio
 import threading
 import time
 from collections import deque
@@ -35,6 +36,7 @@ from numba import float64, jit, prange, vectorize
 from src.core.config import Config
 from src.core.exceptions import DataProcessingError
 from src.core.logging import get_logger
+from src.error_handling.decorators import FallbackConfig, FallbackStrategy, enhanced_error_handler
 from src.utils.technical_indicators import (
     calculate_bollinger_bands_vectorized,
     calculate_ema_vectorized,
@@ -46,7 +48,11 @@ from src.utils.technical_indicators import (
 
 @vectorize([float64(float64, float64)], nopython=True, target="parallel")
 def fast_ema_weight(price: float, alpha: float) -> float:
-    """Vectorized EMA weight calculation using SIMD."""
+    """Vectorized EMA weight calculation using SIMD.
+    
+    Note: Internal numpy operations use float64 for performance,
+    but input/output should use Decimal for financial precision.
+    """
     return price * alpha
 
 
@@ -104,30 +110,29 @@ class HighPerformanceDataBuffer:
         self.use_mmap = size > 1000000
         if self.use_mmap:
             self._setup_memory_map()
+            # Check if memory map was successfully set up
+            if not hasattr(self, "mmap_buffer"):
+                # Failed to setup memory map, fallback to regular buffer
+                self.use_mmap = False
 
+    @enhanced_error_handler(
+        fallback_config=FallbackConfig(strategy=FallbackStrategy.RETURN_NONE), enable_logging=True
+    )
     def _setup_memory_map(self) -> None:
         """Setup memory-mapped buffer for large datasets."""
-        try:
-            # Create memory-mapped array with secure filename
-            import os
-            import tempfile
+        # Create memory-mapped array with secure filename
+        import os
+        import tempfile
 
-            # Use secure temporary file creation
-            fd, self.mmap_file = tempfile.mkstemp(
-                prefix="market_data_buffer_", suffix=".dat", dir="/tmp"
-            )
-            os.close(fd)  # Close the file descriptor
-            self.mmap_buffer = np.memmap(
-                self.mmap_file, dtype=np.float64, mode="w+", shape=(self.size, self.num_fields)
-            )
-            self.buffer = self.mmap_buffer
-        except Exception as e:
-            # Fallback to regular array
-            from src.core.logging import get_logger
-
-            logger = get_logger(__name__)
-            logger.warning(f"Memory mapping failed, using regular array: {e}")
-            self.use_mmap = False
+        # Use secure temporary file creation
+        fd, self.mmap_file = tempfile.mkstemp(
+            prefix="market_data_buffer_", suffix=".dat", dir="/tmp"
+        )
+        os.close(fd)  # Close the file descriptor
+        self.mmap_buffer = np.memmap(
+            self.mmap_file, dtype=np.float64, mode="w+", shape=(self.size, self.num_fields)
+        )
+        self.buffer = self.mmap_buffer
 
     def append_batch(self, data: np.ndarray) -> None:
         """Append batch of data for better performance."""
@@ -329,14 +334,16 @@ class VectorizedProcessor:
 
         for i, record in enumerate(market_data):
             # Use Decimal precision for financial data conversion
-            getcontext().prec = 16
+            getcontext().prec = 28  # Higher precision for financial calculations
+            # Note: Converting to float64 for numpy vectorized operations
+            # but maintaining Decimal precision in the conversion process
             data_array[i] = [
                 record.get("timestamp", time.time()),
-                float(Decimal(str(record.get("open", 0)))),
-                float(Decimal(str(record.get("high", 0)))),
-                float(Decimal(str(record.get("low", 0)))),
-                float(Decimal(str(record.get("close", 0)))),
-                float(Decimal(str(record.get("volume", 0)))),
+                float(Decimal(str(record.get("open", 0))).quantize(Decimal("0.00000001"))),
+                float(Decimal(str(record.get("high", 0))).quantize(Decimal("0.00000001"))),
+                float(Decimal(str(record.get("low", 0))).quantize(Decimal("0.00000001"))),
+                float(Decimal(str(record.get("close", 0))).quantize(Decimal("0.00000001"))),
+                float(Decimal(str(record.get("volume", 0))).quantize(Decimal("0.00000001"))),
             ]
 
         return data_array
@@ -380,7 +387,7 @@ class VectorizedProcessor:
         indicators = {}
         for name, future in futures.items():
             try:
-                result = future.result(timeout=1.0)  # 1 second timeout
+                result = await asyncio.get_event_loop().run_in_executor(None, lambda: future.result(timeout=1.0))
                 if name == "bollinger":
                     indicators["bb_upper"], indicators["bb_middle"], indicators["bb_lower"] = result
                 elif name == "macd":
@@ -413,11 +420,13 @@ class VectorizedProcessor:
 
             prices = recent_data[:, 4]  # Close prices
 
-            # Add current price
-            all_prices = np.append(prices, float(current_price))
+            # Add current price with proper Decimal conversion
+            getcontext().prec = 28
+            current_price_float = float(current_price.quantize(Decimal("0.00000001")))
+            all_prices = np.append(prices, current_price_float)
 
-            # Calculate fast indicators
-            getcontext().prec = 16
+            # Calculate fast indicators with high precision
+            getcontext().prec = 28
             indicators = {
                 "ema_12": Decimal(str(calculate_ema_vectorized(all_prices, 12)[-1])).quantize(
                     Decimal("0.00000001")
@@ -454,6 +463,11 @@ class VectorizedProcessor:
             )
 
     def _update_metrics(self, batch_size: int, processing_time_us: float) -> None:
+        """Update processing metrics.
+        
+        Note: processing_time_us uses float for performance metrics only,
+        not for financial calculations.
+        """
         """Update processing metrics."""
         messages_processed: int = self.metrics["messages_processed"]  # type: ignore
         self.metrics["messages_processed"] = messages_processed + batch_size

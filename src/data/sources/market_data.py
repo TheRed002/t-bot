@@ -22,22 +22,29 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 
-from src.core.base.component import BaseComponent
+from src.core import BaseComponent
 from src.core.config import Config
 from src.core.exceptions import DataSourceError
 
 # Import from P-001 core components
 from src.core.types import MarketData, OrderBook, Ticker, Trade
+from src.data.constants import (
+    DEFAULT_RETRY_BASE_DELAY,
+    DEFAULT_RETRY_MAX_ATTEMPTS,
+    EXCHANGE_CONNECTION_TIMEOUT_SECONDS,
+    STREAM_ERROR_DELAY_SECONDS,
+    STREAM_TASK_CLEANUP_TIMEOUT_SECONDS,
+)
 from src.error_handling.connection_manager import ConnectionManager
 
 # Import from P-002A error handling
 from src.error_handling.error_handler import ErrorHandler
 from src.error_handling.pattern_analytics import ErrorPatternAnalytics
 from src.error_handling.recovery_scenarios import APIRateLimitRecovery, NetworkDisconnectionRecovery
+from src.exchanges.factory import ExchangeFactory
 
 # Import from P-003+ exchange interfaces
-from src.exchanges.base import BaseExchange
-from src.exchanges.factory import ExchangeFactory
+from src.exchanges.interfaces import IExchange
 
 # Import from P-007A utilities
 from src.utils.decorators import retry, time_execution
@@ -74,13 +81,13 @@ class MarketDataSource(BaseComponent):
     unified market data access for the trading system.
     """
 
-    def __init__(self, config: Config, exchange_factory: ExchangeFactory = None):
+    def __init__(self, config: Config, exchange_factory: ExchangeFactory | None = None):
         """
         Initialize market data source.
 
         Args:
             config: Application configuration
-            exchange_factory: Optional exchange factory for dependency injection
+            exchange_factory: Required exchange factory for dependency injection
         """
         super().__init__()  # Initialize BaseComponent
         self.config = config
@@ -90,9 +97,12 @@ class MarketDataSource(BaseComponent):
         self.connection_manager = ConnectionManager(config)
         self.pattern_analytics = ErrorPatternAnalytics(config)
 
-        # Exchange management with dependency injection support
-        self.exchange_factory = exchange_factory or ExchangeFactory(config)
-        self.exchanges: dict[str, BaseExchange] = {}
+        # Exchange management with dependency injection - create if not provided
+        if exchange_factory is None:
+            self.exchange_factory = ExchangeFactory(config)
+        else:
+            self.exchange_factory = exchange_factory
+        self.exchanges: dict[str, IExchange] = {}
 
         # Data subscription management
         self.subscriptions: dict[str, DataSubscription] = {}
@@ -128,7 +138,7 @@ class MarketDataSource(BaseComponent):
                 try:
                     exchange = await self.exchange_factory.create_exchange(exchange_name)
                     # Add timeout to exchange connection
-                    connected = await asyncio.wait_for(exchange.connect(), timeout=30.0)
+                    connected = await asyncio.wait_for(exchange.connect(), timeout=EXCHANGE_CONNECTION_TIMEOUT_SECONDS)
                     if connected:
                         self.exchanges[exchange_name] = exchange
                         connected_exchanges.append(exchange_name)
@@ -139,24 +149,24 @@ class MarketDataSource(BaseComponent):
                         if exchange:
                             try:
                                 await exchange.disconnect()
-                            except Exception:
-                                pass
+                            except Exception as e:
+                                self.logger.debug(f"Error disconnecting {exchange_name} during cleanup: {e}")
                 except asyncio.TimeoutError:
                     self.logger.error(f"Connection timeout for {exchange_name}")
                     # Clean up timed out connection
                     if exchange:
                         try:
                             await exchange.disconnect()
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            self.logger.debug(f"Error disconnecting {exchange_name} after timeout: {e}")
                 except Exception as e:
                     self.logger.error(f"Error initializing {exchange_name}: {e!s}")
                     # Clean up failed connection
                     if exchange:
                         try:
                             await exchange.disconnect()
-                        except Exception:
-                            pass
+                        except Exception as cleanup_e:
+                            self.logger.debug(f"Error disconnecting {exchange_name} after failed init: {cleanup_e}")
 
             if not self.exchanges:
                 # Clean up any partial connections before raising error
@@ -164,8 +174,8 @@ class MarketDataSource(BaseComponent):
                     if exchange in self.exchanges:
                         try:
                             await self.exchanges[exchange].disconnect()
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            self.logger.debug(f"Error disconnecting {exchange} during cleanup: {e}")
                 self.exchanges.clear()
                 raise DataSourceError("No exchanges connected for market data")
 
@@ -177,8 +187,8 @@ class MarketDataSource(BaseComponent):
                 try:
                     if exchange in self.exchanges:
                         await self.exchanges[exchange].disconnect()
-                except Exception:
-                    pass
+                except Exception as cleanup_e:
+                    self.logger.debug(f"Error disconnecting {exchange} during error cleanup: {cleanup_e}")
             self.exchanges.clear()
             self.logger.error(f"Failed to initialize MarketDataSource: {e!s}")
             raise DataSourceError(f"Market data source initialization failed: {e!s}")
@@ -228,7 +238,7 @@ class MarketDataSource(BaseComponent):
             self.logger.error(f"Failed to subscribe to ticker {exchange_name}: {symbol}: {e!s}")
             raise DataSourceError(f"Ticker subscription failed: {e!s}")
 
-    @retry(max_attempts=3, base_delay=1.0)
+    @retry(max_attempts=DEFAULT_RETRY_MAX_ATTEMPTS, base_delay=DEFAULT_RETRY_BASE_DELAY)
     async def get_historical_data(
         self,
         exchange_name: str,
@@ -367,7 +377,7 @@ class MarketDataSource(BaseComponent):
                     self.pattern_analytics.add_error_event(error_context.__dict__)
 
                     self.logger.error(f"Error in ticker stream {exchange_name}: {e!s}")
-                    await asyncio.sleep(5)  # Longer delay on error
+                    await asyncio.sleep(STREAM_ERROR_DELAY_SECONDS)  # Longer delay on error
 
         except Exception as e:
             # Use ErrorHandler for fatal stream errors
@@ -462,7 +472,7 @@ class MarketDataSource(BaseComponent):
             if stream_tasks:
                 try:
                     await asyncio.wait_for(
-                        asyncio.gather(*stream_tasks, return_exceptions=True), timeout=10.0
+                        asyncio.gather(*stream_tasks, return_exceptions=True), timeout=STREAM_TASK_CLEANUP_TIMEOUT_SECONDS
                     )
                 except asyncio.TimeoutError:
                     self.logger.warning("Timeout waiting for stream tasks to complete")
@@ -512,15 +522,15 @@ class MarketDataSource(BaseComponent):
                             await task
                         except asyncio.CancelledError:
                             pass
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            self.logger.debug(f"Error during task cleanup: {e}")
 
                 # Force disconnect any remaining exchanges
                 for exchange in exchanges:
                     try:
                         await exchange.disconnect()
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        self.logger.debug(f"Error disconnecting exchange during cleanup: {e}")
 
                 # Clear all data structures
                 self.ticker_cache.clear()

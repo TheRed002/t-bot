@@ -17,10 +17,10 @@ Dependencies:
 import statistics
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from decimal import Decimal
+from decimal import Decimal, getcontext
 from typing import Any
 
-from src.core.base.component import BaseComponent
+from src.core import BaseComponent
 from src.core.config import Config
 
 # Import from P-001 core components
@@ -186,7 +186,12 @@ class QualityMonitor(BaseComponent):
                 return 1.0, []
 
             # Calculate signal quality metrics
-            confidence_scores = [float(signal.strength) for signal in signals]
+            # Use Decimal precision for financial signal confidence
+            getcontext().prec = 28
+            confidence_scores = [
+                float(Decimal(str(signal.strength)).quantize(Decimal("0.0001")))
+                for signal in signals
+            ]
             avg_confidence = statistics.mean(confidence_scores)
 
             # Check for signal distribution drift
@@ -396,10 +401,17 @@ class QualityMonitor(BaseComponent):
         ):
             recent_prices = self.price_distributions[data.symbol][-10:]
             if data.close:
-                current_price = float(data.close)
-                recent_prices_float = [float(p) for p in recent_prices]
+                getcontext().prec = 28
+                current_price_decimal = Decimal(str(data.close))
+                current_price = float(current_price_decimal.quantize(Decimal("0.00000001")))
+                recent_prices_float = [
+                    float(Decimal(str(p)).quantize(Decimal("0.00000001")))
+                    for p in recent_prices
+                ]
                 mean_price = statistics.mean(recent_prices_float)
-                std_price = statistics.stdev(recent_prices_float) if len(recent_prices_float) > 1 else 0
+                std_price = (
+                    statistics.stdev(recent_prices_float) if len(recent_prices_float) > 1 else 0
+                )
 
                 if std_price > 0:
                     z_score = abs(current_price - mean_price) / std_price
@@ -456,11 +468,17 @@ class QualityMonitor(BaseComponent):
                                 timestamp=datetime.now(timezone.utc),
                                 metadata={
                                     "drift_score": drift_score,
-                                    "recent_mean": float(
-                                        statistics.mean([float(p) for p in recent_prices])
+                                    "recent_mean": str(
+                                        statistics.mean([
+                                            float(Decimal(str(p)).quantize(Decimal("0.00000001")))
+                                            for p in recent_prices
+                                        ])
                                     ),
-                                    "historical_mean": float(
-                                        statistics.mean([float(p) for p in historical_prices])
+                                    "historical_mean": str(
+                                        statistics.mean([
+                                            float(Decimal(str(p)).quantize(Decimal("0.00000001")))
+                                            for p in historical_prices
+                                        ])
                                     ),
                                 },
                             )
@@ -505,11 +523,17 @@ class QualityMonitor(BaseComponent):
                                 timestamp=datetime.now(timezone.utc),
                                 metadata={
                                     "drift_score": drift_score,
-                                    "recent_mean": float(
-                                        statistics.mean([float(v) for v in recent_volumes])
+                                    "recent_mean": str(
+                                        statistics.mean([
+                                            float(Decimal(str(v)).quantize(Decimal("0.00000001")))
+                                            for v in recent_volumes
+                                        ])
                                     ),
-                                    "historical_mean": float(
-                                        statistics.mean([float(v) for v in historical_volumes])
+                                    "historical_mean": str(
+                                        statistics.mean([
+                                            float(Decimal(str(v)).quantize(Decimal("0.00000001")))
+                                            for v in historical_volumes
+                                        ])
                                     ),
                                 },
                             )
@@ -532,7 +556,11 @@ class QualityMonitor(BaseComponent):
             return alerts
 
         # Analyze signal confidence distribution
-        confidences = [float(signal.strength) for signal in signals]
+        getcontext().prec = 28
+        confidences = [
+            float(Decimal(str(signal.strength)).quantize(Decimal("0.0001")))
+            for signal in signals
+        ]
 
         if len(confidences) >= 10:
             mean_confidence = statistics.mean(confidences)
@@ -585,8 +613,15 @@ class QualityMonitor(BaseComponent):
 
         try:
             # Calculate basic statistics - convert to float for statistics calculations
-            recent_floats = [float(r) for r in recent]
-            historical_floats = [float(h) for h in historical]
+            getcontext().prec = 28
+            recent_floats = [
+                float(Decimal(str(r)).quantize(Decimal("0.00000001")))
+                for r in recent
+            ]
+            historical_floats = [
+                float(Decimal(str(h)).quantize(Decimal("0.00000001")))
+                for h in historical
+            ]
             recent_mean = statistics.mean(recent_floats)
             historical_mean = statistics.mean(historical_floats)
             recent_std = statistics.stdev(recent_floats) if len(recent_floats) > 1 else 0

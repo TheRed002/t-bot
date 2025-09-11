@@ -9,8 +9,7 @@ from typing import Any
 
 import redis.asyncio as redis
 
-from src.core.base.component import BaseComponent
-from src.core.config import Config
+from src.core import BaseComponent, Config
 from src.data.interfaces import DataCacheInterface
 from src.utils.cache_utilities import CacheSerializationUtils
 

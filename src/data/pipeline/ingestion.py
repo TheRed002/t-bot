@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from src.core.base.component import BaseComponent
+from src.core import BaseComponent
 from src.core.config import Config
 from src.core.exceptions import DataSourceError
 
@@ -86,12 +86,13 @@ class DataIngestionPipeline(BaseComponent):
     market data, news, social media, and alternative data sources.
     """
 
-    def __init__(self, config: Config):
+    def __init__(self, config: Config, market_data_source: MarketDataSource | None = None):
         """
         Initialize data ingestion pipeline.
 
         Args:
             config: Application configuration
+            market_data_source: Optional market data source for dependency injection
         """
         super().__init__()  # Initialize BaseComponent
         self.config = config
@@ -126,8 +127,8 @@ class DataIngestionPipeline(BaseComponent):
                 retry_attempts=3,
             )
 
-        # Initialize data sources
-        self.market_data_source = None
+        # Initialize data sources - use injected or None
+        self.market_data_source = market_data_source
         self.news_data_source = None
         self.social_media_source = None
         self.alternative_data_source = None
@@ -164,9 +165,10 @@ class DataIngestionPipeline(BaseComponent):
     async def initialize(self) -> None:
         """Initialize data sources and connections."""
         try:
-            # Initialize market data source
+            # Initialize market data source if injected
             if "market_data" in self.ingestion_config.sources:
-                self.market_data_source = MarketDataSource(self.config)
+                if self.market_data_source is None:
+                    raise DataSourceError("MarketDataSource is required but not injected")
                 await self.market_data_source.initialize()
 
                 # Establish connection with connection manager
@@ -725,6 +727,13 @@ class DataIngestionPipeline(BaseComponent):
 
             self.logger.error(f"Failed to add data to buffer {source}: {e!s}")
 
+            # Use async version if we need proper error handling
+            try:
+                asyncio.create_task(self.error_handler.handle_error(e, error_context))
+            except RuntimeError:
+                # No event loop running, handle synchronously
+                self.logger.error(f"Cannot handle error asynchronously: {e}")
+
     async def _add_to_buffer_async(self, source: str, data: Any) -> None:
         """Add data to the appropriate buffer asynchronously."""
         try:
@@ -987,8 +996,8 @@ class DataIngestionPipeline(BaseComponent):
                         await task
                     except asyncio.CancelledError:
                         pass
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        self.logger.debug(f"Error during task cleanup: {e}")
 
                 # Force close connections
                 connection_ids = [
@@ -1000,8 +1009,8 @@ class DataIngestionPipeline(BaseComponent):
                 for conn_id in connection_ids:
                     try:
                         await self.connection_manager.close_connection(conn_id)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        self.logger.debug(f"Error closing connection {conn_id}: {e}")
 
                 # Force cleanup data sources
                 data_sources = [
@@ -1046,6 +1055,13 @@ class DataIngestionPipeline(BaseComponent):
             self.pattern_analytics.add_error_event(error_context.__dict__)
 
             self.logger.error(f"Failed to register callback for {data_type}: {e!s}")
+
+            # Use async version if we need proper error handling
+            try:
+                asyncio.create_task(self.error_handler.handle_error(e, error_context))
+            except RuntimeError:
+                # No event loop running, handle synchronously
+                self.logger.error(f"Cannot handle error asynchronously: {e}")
 
     def get_status(self) -> dict[str, Any]:
         """Get pipeline status and metrics."""
@@ -1102,6 +1118,14 @@ class DataIngestionPipeline(BaseComponent):
             self.pattern_analytics.add_error_event(error_context.__dict__)
 
             self.logger.error(f"Failed to get pipeline status: {e!s}")
+
+            # Use async version if we need proper error handling
+            try:
+                asyncio.create_task(self.error_handler.handle_error(e, error_context))
+            except RuntimeError:
+                # No event loop running, handle synchronously
+                self.logger.error(f"Cannot handle error asynchronously: {e}")
+
             return {
                 "error": str(e),
                 "error_id": error_context.error_id,
@@ -1162,8 +1186,8 @@ class DataIngestionPipeline(BaseComponent):
                             await task
                         except asyncio.CancelledError:
                             pass
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            self.logger.debug(f"Error during task cleanup: {e}")
 
                 # Force cleanup data sources
                 for source, source_name in data_sources:
@@ -1183,8 +1207,8 @@ class DataIngestionPipeline(BaseComponent):
                 for conn_id in connection_ids:
                     try:
                         await self.connection_manager.close_connection(conn_id)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        self.logger.debug(f"Error closing connection {conn_id}: {e}")
 
                 # Clear all data structures
                 self.data_buffers.clear()

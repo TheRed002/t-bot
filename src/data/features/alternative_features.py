@@ -36,7 +36,7 @@ from src.core.types import NewsSentiment, SocialSentiment
 from src.error_handling.error_handler import ErrorHandler
 
 # Import from P-007A utilities
-from src.utils.decorators import cache_result, time_execution
+from src.utils.decorators import cached, time_execution
 
 
 class AlternativeFeatureType(Enum):
@@ -190,7 +190,7 @@ class AlternativeFeatureCalculator:
             raise DataError(f"Alternative data source initialization failed: {e!s}")
 
     @time_execution
-    @cache_result(ttl=300)
+    @cached(ttl=300)
     async def calculate_news_sentiment(
         self, symbol: str, lookback_hours: int | None = None
     ) -> AlternativeResult:
@@ -311,7 +311,7 @@ class AlternativeFeatureCalculator:
             raise DataError(f"News sentiment calculation failed: {e!s}")
 
     @time_execution
-    @cache_result(ttl=300)
+    @cached(ttl=300)
     async def calculate_social_sentiment(
         self, symbol: str, lookback_hours: int | None = None
     ) -> AlternativeResult:
@@ -471,7 +471,7 @@ class AlternativeFeatureCalculator:
             raise DataError(f"Social sentiment calculation failed: {e!s}")
 
     @time_execution
-    @cache_result(ttl=1800)
+    @cached(ttl=1800)
     async def calculate_economic_indicators(
         self, symbol: str, lookback_hours: int | None = None
     ) -> AlternativeResult:

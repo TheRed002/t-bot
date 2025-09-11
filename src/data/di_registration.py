@@ -40,6 +40,7 @@ def _get_config(injector: DependencyInjector):
 
     # Fallback to default config
     from src.core.config import Config
+
     return Config()
 
 
@@ -84,26 +85,24 @@ def register_data_services(injector: DependencyInjector) -> None:
         "ServiceDataValidatorInterface", market_data_validator_factory, singleton=True
     )
 
-    # Register RefactoredDataService as the main DataService implementation
-    def refactored_data_service_factory() -> "DataServiceInterface":
-        from src.data.services.refactored_data_service import RefactoredDataService
+    # Register DataService as the main DataService implementation
+    def data_service_interface_factory() -> "DataServiceInterface":
+        from src.data.services.data_service import DataService
 
         config = _get_config(injector)
-        storage = injector.resolve("DataStorageInterface")
-        cache = injector.resolve("DataCacheInterface")
-        validator = injector.resolve("ServiceDataValidatorInterface")
+        database_service = injector.resolve("DatabaseService")  # Required dependency
+        cache_service = _resolve_optional_dependency(injector, "DataCacheInterface")
         metrics_collector = _resolve_optional_dependency(injector, "MetricsCollector")
 
-        return RefactoredDataService(
+        return DataService(
             config=config,
-            storage=storage,
-            cache=cache,
-            validator=validator,
+            database_service=database_service,
+            cache_service=cache_service,
             metrics_collector=metrics_collector,
         )
 
     injector.register_factory(
-        "DataServiceInterface", refactored_data_service_factory, singleton=True
+        "DataServiceInterface", data_service_interface_factory, singleton=True
     )
 
     # Register DataService (legacy service) with proper dependencies
@@ -111,13 +110,15 @@ def register_data_services(injector: DependencyInjector) -> None:
         from src.data.services.data_service import DataService
 
         config = _get_config(injector)
-        database_service = _resolve_optional_dependency(injector, "DatabaseService")
+        database_service = injector.resolve("DatabaseService")  # Required dependency
+        cache_service = _resolve_optional_dependency(injector, "DataCacheInterface")
         metrics_collector = _resolve_optional_dependency(injector, "MetricsCollector")
 
         return DataService(
             config=config,
-            metrics_collector=metrics_collector,
             database_service=database_service,
+            cache_service=cache_service,
+            metrics_collector=metrics_collector,
         )
 
     injector.register_factory("DataService", data_service_factory, singleton=True)
@@ -147,13 +148,47 @@ def register_data_services(injector: DependencyInjector) -> None:
 
     injector.register_factory("VectorizedProcessor", vectorized_processor_factory, singleton=True)
 
+    # Register DataPipelineIngestion factory
+    def data_pipeline_ingestion_factory():
+        """Factory function for creating DataPipelineIngestion service."""
+        from src.data.pipeline.ingestion import DataPipelineIngestion
+
+        config = _get_config(injector)
+        market_data_source = _resolve_optional_dependency(injector, "MarketDataSource")
+        return DataPipelineIngestion(config=config, market_data_source=market_data_source)
+
+    injector.register_factory("DataPipelineIngestion", data_pipeline_ingestion_factory, singleton=True)
+
+    # Register StreamingDataService factory
+    def streaming_data_service_factory():
+        """Factory function for creating StreamingDataService."""
+        from src.data.streaming.streaming_service import StreamingDataService
+
+        config = _get_config(injector)
+        data_service = _resolve_optional_dependency(injector, "DataServiceInterface")
+        validator = _resolve_optional_dependency(injector, "DataValidatorInterface")
+        return StreamingDataService(config=config, data_service=data_service, validator=validator)
+
+    injector.register_factory("StreamingDataService", streaming_data_service_factory, singleton=True)
+
     # Register DataServiceFactory itself for factory pattern access
     def data_service_factory_factory():
+        """Factory function for creating DataServiceFactory instance."""
         # Import inside function to avoid circular dependency
         from src.data.factory import DataServiceFactory
-        return DataServiceFactory(injector)
+
+        # Create factory with injector - use proper constructor now
+        return DataServiceFactory(injector=injector)
 
     injector.register_factory("DataServiceFactory", data_service_factory_factory, singleton=True)
+
+    # Register ServiceRegistry for data services
+    def data_service_registry_factory():
+        """Factory function for creating ServiceRegistry for data services."""
+        from src.data.registry import ServiceRegistry
+        return ServiceRegistry()
+
+    injector.register_factory("DataServiceRegistry", data_service_registry_factory, singleton=True)
 
     logger.info("Data services registered with dependency injector")
 
@@ -217,3 +252,18 @@ def get_service_data_validator(injector: DependencyInjector):
 def get_data_service_factory(injector: DependencyInjector):
     """Get DataServiceFactory from DI container."""
     return injector.resolve("DataServiceFactory")
+
+
+def get_data_pipeline_ingestion(injector: DependencyInjector):
+    """Get DataPipelineIngestion from DI container."""
+    return injector.resolve("DataPipelineIngestion")
+
+
+def get_streaming_data_service(injector: DependencyInjector):
+    """Get StreamingDataService from DI container."""
+    return injector.resolve("StreamingDataService")
+
+
+def get_data_service_registry(injector: DependencyInjector):
+    """Get DataServiceRegistry from DI container."""
+    return injector.resolve("DataServiceRegistry")

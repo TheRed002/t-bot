@@ -20,17 +20,19 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 
-from src.core.base.component import BaseComponent
+from src.core import BaseComponent
 from src.core.config import Config
 from src.core.exceptions import DataError, DataValidationError
 
 # Import from P-001 core components
 from src.core.types import MarketData, ProcessingStep
+from src.utils.decimal_utils import to_decimal
 
 # Import from P-002A error handling
 # Import from P-007A utilities
 from src.utils.decorators import time_execution
 from src.utils.helpers import calculate_percentage_change
+from src.utils.messaging_patterns import ErrorPropagationMixin
 from src.utils.validators import ValidationFramework
 
 # ProcessingStep is now imported from core.types
@@ -213,7 +215,7 @@ class DataProcessor(BaseComponent):
 
     @time_execution
     async def process_batch(
-        self, data_list: list[Any], data_type: str, steps: list[ProcessingStep] | None = None
+        self, data_list: list[Any] | None = None, data_type: str = "market_data", steps: list[ProcessingStep] | None = None
     ) -> list[ProcessingResult]:
         """
         Process a batch of data items.
@@ -323,16 +325,28 @@ class DataProcessor(BaseComponent):
         if not price:
             return price
 
-        # Use consistent 8 decimal places precision matching DECIMAL(20,8) in database
-        return Decimal(str(price)).quantize(Decimal("0.00000001"))
+        # Use consistent data transformation pattern from utils
+        try:
+            normalized = to_decimal(price)
+            # Use consistent 8 decimal places precision matching DECIMAL(20,8) in database
+            return normalized.quantize(Decimal("0.00000001"))
+        except (ImportError, Exception):
+            # Fallback to direct conversion if utility not available
+            return Decimal(str(price)).quantize(Decimal("0.00000001"))
 
     def _normalize_volume(self, volume: Decimal) -> Decimal:
         """Normalize volume values with consistent precision matching database schema."""
         if not volume:
             return volume
 
-        # Use consistent 8 decimal places precision matching DECIMAL(20,8) in database
-        return Decimal(str(volume)).quantize(Decimal("0.00000001"))
+        # Use consistent data transformation pattern from utils
+        try:
+            normalized = to_decimal(volume)
+            # Use consistent 8 decimal places precision matching DECIMAL(20,8) in database
+            return normalized.quantize(Decimal("0.00000001"))
+        except (ImportError, Exception):
+            # Fallback to direct conversion if utility not available
+            return Decimal(str(volume)).quantize(Decimal("0.00000001"))
 
     def _normalize_timestamp(self, timestamp: datetime) -> datetime:
         """Normalize timestamp to UTC timezone."""
@@ -516,16 +530,31 @@ class DataProcessor(BaseComponent):
                 elif data.timestamp.tzinfo is None:
                     validation_errors.append("Timestamp must have timezone information")
 
-                # Raise consistent validation error if validation fails
+                # Use consistent error propagation patterns from messaging_patterns
                 if validation_errors:
-                    raise DataValidationError(
-                        f"Market data validation failed: {'; '.join(validation_errors)}",
-                        error_code="PROCESSING_VALIDATION_001",
-                        validation_rule="market_data_processing_validation",
-                        invalid_fields=validation_errors,
-                        data_type="market_data",
-                        context={"symbol": getattr(data, "symbol", "unknown")},
-                    )
+                    try:
+                        error_propagator = ErrorPropagationMixin()
+                        error_propagator.propagate_validation_error(
+                            DataValidationError(
+                                f"Market data validation failed: {'; '.join(validation_errors)}",
+                                error_code="PROCESSING_VALIDATION_001",
+                                validation_rule="market_data_processing_validation",
+                                invalid_fields=validation_errors,
+                                data_type="market_data",
+                                context={"symbol": getattr(data, "symbol", "unknown")},
+                            ),
+                            "data_pipeline_validation",
+                        )
+                    except ImportError:
+                        # Fallback to direct raise if pattern not available
+                        raise DataValidationError(
+                            f"Market data validation failed: {'; '.join(validation_errors)}",
+                            error_code="PROCESSING_VALIDATION_001",
+                            validation_rule="market_data_processing_validation",
+                            invalid_fields=validation_errors,
+                            data_type="market_data",
+                            context={"symbol": getattr(data, "symbol", "unknown")},
+                        )
 
             return data
 

@@ -161,8 +161,7 @@ class TestDataValidator:
         assert len(issues) > 0
 
         # Check for bid/ask validation issue
-        bid_ask_issues = [
-            issue for issue in issues if issue.field == "bid_ask_spread"]
+        bid_ask_issues = [issue for issue in issues if issue.field == "bid_ask_spread"]
         assert len(bid_ask_issues) > 0
 
     @pytest.mark.asyncio
@@ -186,8 +185,7 @@ class TestDataValidator:
         assert len(issues) > 0
 
         # Check for future timestamp issue
-        timestamp_issues = [
-            issue for issue in issues if issue.field == "future_timestamp"]
+        timestamp_issues = [issue for issue in issues if issue.field == "future_timestamp"]
         assert len(timestamp_issues) > 0
 
     @pytest.mark.asyncio
@@ -211,8 +209,7 @@ class TestDataValidator:
         assert len(issues) > 0
 
         # Check for data freshness issue
-        freshness_issues = [
-            issue for issue in issues if issue.field == "data_freshness"]
+        freshness_issues = [issue for issue in issues if issue.field == "data_freshness"]
         assert len(freshness_issues) > 0
 
     @pytest.mark.asyncio
@@ -267,7 +264,7 @@ class TestDataValidator:
     async def test_validate_signal_invalid_symbol(self, validator: DataValidator):
         """Test validation with invalid symbol"""
         from src.core.exceptions import ValidationError
-        
+
         # Test that creating a Signal with empty symbol raises ValidationError
         with pytest.raises(ValidationError):
             Signal(
@@ -345,8 +342,7 @@ class TestDataValidator:
         assert len(issues) > 0
 
         # Check for symbol mismatch issue
-        symbol_issues = [
-            issue for issue in issues if issue.field == "symbol_mismatch"]
+        symbol_issues = [issue for issue in issues if issue.field == "symbol_mismatch"]
         assert len(symbol_issues) > 0
 
     @pytest.mark.asyncio
@@ -382,8 +378,7 @@ class TestDataValidator:
         assert len(issues) > 0
 
         # Check for price consistency issue
-        price_issues = [
-            issue for issue in issues if issue.field == "price_consistency"]
+        price_issues = [issue for issue in issues if issue.field == "price_consistency"]
         assert len(price_issues) > 0
 
     @pytest.mark.asyncio
@@ -421,7 +416,8 @@ class TestDataValidator:
 
         # Should detect outlier
         outlier_issues = [
-            issue for issue in issues if issue.field in ["price_outlier", "close_outlier"]]
+            issue for issue in issues if issue.field in ["price_outlier", "close_outlier"]
+        ]
         assert len(outlier_issues) > 0
 
     @pytest.mark.asyncio
@@ -433,7 +429,17 @@ class TestDataValidator:
             assert validator._is_valid_symbol_format(symbol) is True
 
         # Test invalid symbols
-        invalid_symbols = ["", "BTC", "BTC@USDT", "BTC USDT", "BTCUSDT", "BTC/", "/USDT", "B/USDT", "BTC/U"]
+        invalid_symbols = [
+            "",
+            "BTC",
+            "BTC@USDT",
+            "BTC USDT",
+            "BTCUSDT",
+            "BTC/",
+            "/USDT",
+            "B/USDT",
+            "BTC/U",
+        ]
         for symbol in invalid_symbols:
             assert validator._is_valid_symbol_format(symbol) is False
 

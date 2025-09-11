@@ -1,46 +1,39 @@
 """
 Data Validation Module
 
-Provides comprehensive data validation capabilities including:
-- Market data validation with quality scoring
-- Statistical validation and outlier detection
-- Temporal validation for data freshness
-- Regulatory compliance checks
+Provides comprehensive data validation capabilities using consolidated utilities.
+Consolidated validation logic is now available in src.utils.validation.
 
 Key Components:
-- DataValidator: Main validation class with comprehensive checks
-- ValidationRule: Configurable validation rule system
-- QualityScore: Data quality scoring metrics
+- DataValidator: Main validation class using consolidated utilities
+- MarketDataValidator: Specific market data validator using consolidated utilities  
+- DataValidationPipeline: Pipeline validation orchestration
 """
 
-from .core import DataValidationPipeline
-from .data_validator import (
-    DataValidator,
-    MarketDataValidationResult,
-    QualityDimension,
-    QualityScore,
+# Import consolidated validation types for backward compatibility
+from src.utils.validation.validation_types import (
     ValidationCategory,
     ValidationIssue,
-    ValidationRule,
-    ValidationSeverity,
+    ValidationLevel,
 )
+
+from .core import DataValidationPipeline
+from .data_validator import DataValidator, MarketDataValidationResult
 from .market_data_validator import MarketDataValidator
 from .validators import PriceValidator, VolumeValidator
 
 __all__ = [
-    # Main validator
+    # Main validators using consolidated utilities
     "DataValidator",
-    # Validation result types
-    "QualityScore",
-    "ValidationRule",
-    "ValidationSeverity",
-    "ValidationCategory",
-    "QualityDimension",
-    "ValidationIssue",
-    "MarketDataValidationResult",
-    # Specific validators
-    "DataValidationPipeline",
     "MarketDataValidator",
+    "DataValidationPipeline",
+    # Legacy validators
     "PriceValidator",
     "VolumeValidator",
+    # Validation result types
+    "MarketDataValidationResult",
+    # Validation types (from consolidated utilities)
+    "ValidationCategory",
+    "ValidationIssue",
+    "ValidationLevel",
 ]

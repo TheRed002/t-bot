@@ -6,8 +6,7 @@ Refactored to use consolidated validation utilities from src.utils.validation.
 
 from typing import Any
 
-from src.core.base.component import BaseComponent
-from src.core.types import MarketData
+from src.core import BaseComponent, MarketData
 from src.data.interfaces import DataValidatorInterface, ServiceDataValidatorInterface
 from src.utils.validation.market_data_validation import MarketDataValidator as ConsolidatedValidator
 
@@ -27,7 +26,7 @@ class MarketDataValidator(BaseComponent, DataValidatorInterface, ServiceDataVali
         self._validator = ConsolidatedValidator(
             enable_precision_validation=True,
             enable_consistency_validation=True,
-            enable_timestamp_validation=True
+            enable_timestamp_validation=True,
         )
 
     async def validate_market_data(self, data_list: list[MarketData]) -> list[MarketData]:
@@ -59,6 +58,7 @@ class MarketDataValidator(BaseComponent, DataValidatorInterface, ServiceDataVali
             if isinstance(data, dict):
                 # Convert dict to MarketData for validation
                 from src.core.types import MarketData as MD
+
                 market_data = MD(**data)
                 return self._validator.validate_market_data_record(market_data)
             elif isinstance(data, MarketData):
@@ -69,7 +69,8 @@ class MarketDataValidator(BaseComponent, DataValidatorInterface, ServiceDataVali
                 return self._validator.validate_market_data_record(market_data)
             else:
                 return False
-        except Exception:
+        except Exception as e:
+            self.logger.error(f"Market data validation failed: {e}")
             return False
 
     def get_errors(self) -> list[str]:
@@ -91,5 +92,5 @@ class MarketDataValidator(BaseComponent, DataValidatorInterface, ServiceDataVali
             "component": "market_data_validator",
             "last_error_count": error_count,
             "message": f"Market data validator: {status}",
-            "validator_type": "consolidated"
+            "validator_type": "consolidated",
         }

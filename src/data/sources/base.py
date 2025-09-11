@@ -94,7 +94,7 @@ class SimpleCache(DataCacheInterface):
         return {
             "status": "healthy",
             "cache_size": len(self._cache),
-            "timestamps_size": len(self._timestamps)
+            "timestamps_size": len(self._timestamps),
         }
 
     async def initialize(self) -> None:

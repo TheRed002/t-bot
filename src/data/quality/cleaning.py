@@ -23,11 +23,7 @@ from decimal import Decimal, getcontext
 from enum import Enum
 from typing import Any
 
-from src.core.base.component import BaseComponent
-from src.core.config import Config
-
-# Import from P-001 core components
-from src.core.types import MarketData, Signal
+from src.core import BaseComponent, Config, MarketData, Signal
 
 # Import from P-002A error handling
 from src.error_handling.error_handler import ErrorHandler
@@ -172,6 +168,45 @@ class DataCleaner(BaseComponent):
                 )
                 return None, cleaning_result
 
+            # Step 0: Check for duplicates first (before any modification)
+            data_hash = self._create_data_hash(data)
+            is_duplicate = hasattr(self, "_last_data_hash") and self._last_data_hash == data_hash
+
+            if is_duplicate:
+                # This is a duplicate, update stats and return immediately
+                self.cleaning_stats["total_processed"] += 1
+                self.cleaning_stats["duplicates_removed"] += 1
+
+                cleaning_result = CleaningResult(
+                    original_data=original_data,
+                    cleaned_data=None,
+                    applied_strategies=["duplicate_removal"],
+                    removed_count=1,
+                    adjusted_count=0,
+                    imputed_count=0,
+                    timestamp=datetime.now(timezone.utc),
+                    metadata={
+                        "symbol": data.symbol if data else "unknown",
+                        "duplicate_removed": True,
+                        "cleaning_stats": self.cleaning_stats.copy(),
+                    },
+                )
+
+                self.logger.info(
+                    "Duplicate market data removed",
+                    symbol=data.symbol if data else "unknown",
+                    applied_strategies=["duplicate_removal"],
+                )
+
+                return None, cleaning_result
+            else:
+                # Update hash for next comparison
+                self._last_data_hash = data_hash
+
+            # Create a copy to avoid modifying the original
+            from copy import deepcopy
+            data = deepcopy(data)
+
             # Step 1: Handle missing data
             data, imputed_count = await self._handle_missing_data(data)
             if imputed_count > 0:
@@ -188,13 +223,7 @@ class DataCleaner(BaseComponent):
             data = await self._smooth_data(data)
             applied_strategies.append("data_smoothing")
 
-            # Step 4: Remove duplicates
-            data, duplicate_removed = await self._remove_duplicates(data)
-            removed_count += duplicate_removed
-            if duplicate_removed > 0:
-                applied_strategies.append("duplicate_removal")
-
-            # Step 5: Normalize data
+            # Step 4: Normalize data
             data = await self._normalize_data(data)
             applied_strategies.append("data_normalization")
 
@@ -205,7 +234,6 @@ class DataCleaner(BaseComponent):
             self.cleaning_stats["outliers_removed"] += outlier_removed
             self.cleaning_stats["outliers_adjusted"] += outlier_adjusted
             self.cleaning_stats["missing_imputed"] += imputed_count
-            self.cleaning_stats["duplicates_removed"] += duplicate_removed
 
             # Create cleaning result
             cleaning_result = CleaningResult(
@@ -421,9 +449,12 @@ class DataCleaner(BaseComponent):
 
         # Outlier detection (need at least 10 data points)
         if len(price_history) >= 10:
-            # Convert to float for statistics calculations, maintain Decimal precision
-            history_floats = [float(p) for p in price_history[:-1]]  # Exclude current price
-            getcontext().prec = 16
+            # Convert to float for statistics calculations with high precision
+            getcontext().prec = 28
+            history_floats = [
+                float(Decimal(str(p)).quantize(Decimal("0.00000001")))
+                for p in price_history[:-1]  # Exclude current price
+            ]
             mean_price = Decimal(str(statistics.mean(history_floats)))
             std_price = (
                 Decimal(str(statistics.stdev(history_floats)))
@@ -476,7 +507,11 @@ class DataCleaner(BaseComponent):
 
             if len(volume_history) >= 10:
                 # Convert to float for statistics calculations, maintain Decimal precision
-                volume_floats = [float(v) for v in volume_history[:-1]]
+                getcontext().prec = 28
+                volume_floats = [
+                    float(Decimal(str(v)).quantize(Decimal("0.00000001")))
+                    for v in volume_history[:-1]
+                ]
                 getcontext().prec = 16
                 mean_volume = Decimal(str(statistics.mean(volume_floats)))
                 std_volume = (
@@ -524,7 +559,11 @@ class DataCleaner(BaseComponent):
         # Apply smoothing if enough data points
         if len(price_history) >= self.smoothing_window:
             # Simple moving average smoothing - maintain Decimal precision
-            recent_prices = [float(p) for p in price_history[-self.smoothing_window :]]
+            getcontext().prec = 28
+            recent_prices = [
+                float(Decimal(str(p)).quantize(Decimal("0.00000001")))
+                for p in price_history[-self.smoothing_window :]
+            ]
             getcontext().prec = 16
             smoothed_price = Decimal(str(statistics.mean(recent_prices)))
             data.close = smoothed_price.quantize(Decimal("0.00000001"))
@@ -534,7 +573,11 @@ class DataCleaner(BaseComponent):
                 volume_history = self.volume_history[data.symbol]
                 if len(volume_history) >= self.smoothing_window:
                     # Convert to float for statistics, maintain Decimal precision
-                    recent_volumes = [float(v) for v in volume_history[-self.smoothing_window :]]
+                    getcontext().prec = 28
+                    recent_volumes = [
+                        float(Decimal(str(v)).quantize(Decimal("0.00000001")))
+                        for v in volume_history[-self.smoothing_window :]
+                    ]
                     getcontext().prec = 16
                     smoothed_volume = Decimal(str(statistics.mean(recent_volumes)))
                     data.volume = smoothed_volume.quantize(Decimal("0.00000001"))
@@ -574,12 +617,14 @@ class DataCleaner(BaseComponent):
 
         # Ensure price precision
         if data.close:
-            # Round to 8 decimal places for crypto
-            data.close = Decimal(str(float(data.close))).quantize(Decimal("0.00000001"))
+            # Round to 8 decimal places for crypto with proper precision
+            getcontext().prec = 28
+            data.close = Decimal(str(data.close)).quantize(Decimal("0.00000001"))
 
         # Ensure volume precision
         if data.volume:
-            data.volume = Decimal(str(float(data.volume))).quantize(Decimal("0.00000001"))
+            getcontext().prec = 28
+            data.volume = Decimal(str(data.volume)).quantize(Decimal("0.00000001"))
 
         return data
 
@@ -593,7 +638,11 @@ class DataCleaner(BaseComponent):
         recent_prices = self.price_history[symbol][-10:]  # Last 10 prices
         if recent_prices:
             # Convert to float for statistics, maintain Decimal precision
-            price_floats = [float(p) for p in recent_prices]
+            getcontext().prec = 28
+            price_floats = [
+                float(Decimal(str(p)).quantize(Decimal("0.00000001")))
+                for p in recent_prices
+            ]
             getcontext().prec = 16
             median_price = Decimal(str(statistics.median(price_floats)))
             return median_price.quantize(Decimal("0.00000001"))
@@ -610,7 +659,11 @@ class DataCleaner(BaseComponent):
         recent_volumes = self.volume_history[symbol][-10:]  # Last 10 volumes
         if recent_volumes:
             # Convert to float for statistics, maintain Decimal precision
-            volume_floats = [float(v) for v in recent_volumes]
+            getcontext().prec = 28
+            volume_floats = [
+                float(Decimal(str(v)).quantize(Decimal("0.00000001")))
+                for v in recent_volumes
+            ]
             getcontext().prec = 16
             median_volume = Decimal(str(statistics.median(volume_floats)))
             return median_volume.quantize(Decimal("0.00000001"))
@@ -658,8 +711,8 @@ class DataCleaner(BaseComponent):
         # Create hash from key fields
         hash_data = {
             "symbol": data.symbol,
-            "price": float(data.close) if data.close else 0,
-            "volume": float(data.volume) if data.volume else 0,
+            "price": str(data.close) if data.close else "0",
+            "volume": str(data.volume) if data.volume else "0",
             "timestamp": data.timestamp.isoformat() if data.timestamp else "",
         }
 

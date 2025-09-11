@@ -20,8 +20,9 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import aiohttp
+from aiohttp import ClientSession
 
-from src.core.base.component import BaseComponent
+from src.core import BaseComponent, get_logger
 from src.core.config import Config
 from src.core.exceptions import DataSourceError
 from src.core.logging import get_logger
@@ -97,7 +98,7 @@ class SocialMediaDataSource(BaseComponent):
         self.reddit_config = social_media_config.get("reddit", {})
 
         # HTTP session
-        self.session: aiohttp.ClientSession | None = None
+        self.session: ClientSession | None = None
 
         # Data storage
         self.posts_cache: dict[str, list[SocialPost]] = {}
@@ -144,8 +145,8 @@ class SocialMediaDataSource(BaseComponent):
             if session:
                 try:
                     await session.close()
-                except Exception as e:
-                    logger.error(f"Failed to close session during cleanup: {e}")
+                except Exception as cleanup_e:
+                    logger.error(f"Failed to close session during cleanup: {cleanup_e}")
                     # Continue cleanup process
                 # Don't set self.session if initialization failed
                 if self.session == session:

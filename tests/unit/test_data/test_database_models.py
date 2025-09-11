@@ -3,7 +3,7 @@ Unit tests for new database models.
 
 These tests verify the new data management models:
 - MarketDataRecord
-- FeatureRecord  
+- FeatureRecord
 - DataQualityRecord
 - DataPipelineRecord
 """
@@ -13,8 +13,6 @@ from datetime import datetime, timezone
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 
 from src.database.models import (
     Base,
@@ -41,7 +39,7 @@ class TestMarketDataRecord:
             close_price=Decimal("50500.0"),
             volume=Decimal("100.0"),
             interval="1m",
-            source="exchange"
+            source="exchange",
         )
 
     def test_market_data_record_creation(self, sample_market_data):
@@ -63,18 +61,18 @@ class TestMarketDataRecord:
             exchange="coinbase",
             data_timestamp=datetime.now(timezone.utc),
             interval="1h",
-            source="exchange"
+            source="exchange",
         )
 
         # Test that defaults are properly configured in model (will be set when saved to DB)
-        assert hasattr(record, 'id')
+        assert hasattr(record, "id")
         assert record.source == "exchange"
-        assert hasattr(record, 'created_at')  # Will be set when saved to DB
-        assert hasattr(record, 'updated_at')  # Will be set when saved to DB
+        assert hasattr(record, "created_at")  # Will be set when saved to DB
+        assert hasattr(record, "updated_at")  # Will be set when saved to DB
 
     def test_market_data_record_id_generation(self, sample_market_data):
         """Test that ID field exists (will be generated on save)."""
-        assert hasattr(sample_market_data, 'id')
+        assert hasattr(sample_market_data, "id")
         # ID is generated on save to database, so it's None initially
         assert sample_market_data.id is None or isinstance(sample_market_data.id, uuid.UUID)
 
@@ -83,8 +81,8 @@ class TestMarketDataRecord:
         assert sample_market_data.data_timestamp is not None
         assert isinstance(sample_market_data.data_timestamp, datetime)
         # created_at and updated_at are set on save to database
-        assert hasattr(sample_market_data, 'created_at')
-        assert hasattr(sample_market_data, 'updated_at')
+        assert hasattr(sample_market_data, "created_at")
+        assert hasattr(sample_market_data, "updated_at")
 
     def test_market_data_record_optional_fields(self):
         """Test optional fields can be None."""
@@ -98,7 +96,7 @@ class TestMarketDataRecord:
             high_price=None,
             low_price=None,
             close_price=None,
-            volume=None
+            volume=None,
         )
 
         assert record.open_price is None
@@ -125,7 +123,7 @@ class TestFeatureRecord:
             parameters={"window": 20, "min_periods": 1},
             calculation_method="standard",
             source_data_start=datetime.now(timezone.utc),
-            source_data_end=datetime.now(timezone.utc)
+            source_data_end=datetime.now(timezone.utc),
         )
 
     def test_feature_record_creation(self, sample_feature):
@@ -146,7 +144,7 @@ class TestFeatureRecord:
             feature_type="statistical",
             feature_name="volatility",
             calculation_timestamp=datetime.now(timezone.utc),
-            feature_value=0.15
+            feature_value=0.15,
         )
 
         assert record.id is not None
@@ -166,7 +164,7 @@ class TestFeatureRecord:
             lookback_period=None,
             parameters=None,
             source_data_start=None,
-            source_data_end=None
+            source_data_end=None,
         )
 
         assert record.confidence_score is None
@@ -197,7 +195,7 @@ class TestDataQualityRecord:
             validation_errors=["missing_timestamp", "invalid_price"],
             check_type="comprehensive",
             data_period_start=datetime.now(timezone.utc),
-            data_period_end=datetime.now(timezone.utc)
+            data_period_end=datetime.now(timezone.utc),
         )
 
     def test_data_quality_record_creation(self, sample_quality_record):
@@ -225,7 +223,7 @@ class TestDataQualityRecord:
             accuracy_score=0.95,
             consistency_score=0.88,
             timeliness_score=0.97,
-            overall_score=0.93
+            overall_score=0.93,
         )
 
         assert record.id is not None
@@ -250,7 +248,7 @@ class TestDataQualityRecord:
             overall_score=0.88,
             validation_errors=None,
             data_period_start=None,
-            data_period_end=None
+            data_period_end=None,
         )
 
         assert record.validation_errors is None
@@ -278,7 +276,7 @@ class TestDataPipelineRecord:
             error_messages=["timeout_error", "connection_failed"],
             last_error="Connection timeout after 30 seconds",
             configuration={"batch_size": 100, "timeout": 30},
-            dependencies=["market_data_source", "validation_service"]
+            dependencies=["market_data_source", "validation_service"],
         )
 
     def test_data_pipeline_record_creation(self, sample_pipeline_record):
@@ -302,7 +300,7 @@ class TestDataPipelineRecord:
         record = DataPipelineRecord(
             pipeline_name="feature_calculation",
             execution_id="exec_002",
-            execution_timestamp=datetime.now(timezone.utc)
+            execution_timestamp=datetime.now(timezone.utc),
         )
 
         assert record.id is not None
@@ -332,7 +330,7 @@ class TestDataPipelineRecord:
             error_messages=None,
             last_error=None,
             configuration=None,
-            dependencies=None
+            dependencies=None,
         )
 
         assert record.processing_time_ms is None
@@ -369,36 +367,82 @@ class TestDatabaseModelRelationships:
         """Test that all expected columns exist."""
         market_data_columns = {col.name for col in MarketDataRecord.__table__.columns}
         expected_market_columns = {
-            "id", "symbol", "exchange", "data_timestamp", "open_price", "high_price",
-            "low_price", "close_price", "volume", "interval", "source", "created_at", "updated_at"
+            "id",
+            "symbol",
+            "exchange",
+            "data_timestamp",
+            "open_price",
+            "high_price",
+            "low_price",
+            "close_price",
+            "volume",
+            "interval",
+            "source",
+            "created_at",
+            "updated_at",
         }
         assert expected_market_columns.issubset(market_data_columns)
 
         feature_columns = {col.name for col in FeatureRecord.__table__.columns}
         expected_feature_columns = {
-            "id", "symbol", "feature_type", "feature_name", "calculation_timestamp",
-            "feature_value", "confidence_score", "lookback_period", "parameters",
-            "calculation_method", "source_data_start", "source_data_end", "created_at"
+            "id",
+            "symbol",
+            "feature_type",
+            "feature_name",
+            "calculation_timestamp",
+            "feature_value",
+            "confidence_score",
+            "lookback_period",
+            "parameters",
+            "calculation_method",
+            "source_data_start",
+            "source_data_end",
+            "created_at",
         }
         assert expected_feature_columns.issubset(feature_columns)
 
         quality_columns = {col.name for col in DataQualityRecord.__table__.columns}
         expected_quality_columns = {
-            "id", "symbol", "data_source", "quality_check_timestamp",
-            "completeness_score", "accuracy_score", "consistency_score",
-            "timeliness_score", "overall_score", "missing_data_count",
-            "outlier_count", "duplicate_count", "validation_errors",
-            "check_type", "data_period_start", "data_period_end", "created_at"
+            "id",
+            "symbol",
+            "data_source",
+            "quality_check_timestamp",
+            "completeness_score",
+            "accuracy_score",
+            "consistency_score",
+            "timeliness_score",
+            "overall_score",
+            "missing_data_count",
+            "outlier_count",
+            "duplicate_count",
+            "validation_errors",
+            "check_type",
+            "data_period_start",
+            "data_period_end",
+            "created_at",
         }
         assert expected_quality_columns.issubset(quality_columns)
 
         pipeline_columns = {col.name for col in DataPipelineRecord.__table__.columns}
         expected_pipeline_columns = {
-            "id", "pipeline_name", "pipeline_version", "execution_id", "execution_timestamp",
-            "status", "stage", "records_processed", "records_successful",
-            "records_failed", "processing_time_ms", "error_count",
-            "error_messages", "last_error", "configuration", "dependencies",
-            "created_at", "updated_at"
+            "id",
+            "pipeline_name",
+            "pipeline_version",
+            "execution_id",
+            "execution_timestamp",
+            "status",
+            "stage",
+            "records_processed",
+            "records_successful",
+            "records_failed",
+            "processing_time_ms",
+            "error_count",
+            "error_messages",
+            "last_error",
+            "configuration",
+            "dependencies",
+            "created_at",
+            "updated_at",
         }
         assert expected_pipeline_columns.issubset(pipeline_columns)
 
@@ -414,11 +458,11 @@ class TestDatabaseModelValidation:
             exchange="binance",
             data_timestamp=datetime.now(timezone.utc),
             interval="1m",
-            source="exchange"
+            source="exchange",
         )
         assert record.symbol == "BTCUSDT"
         assert record.exchange == "binance"
-        
+
         # Note: Database constraints are enforced at commit time, not object creation
         # Missing required fields would be caught when saving to database
 
@@ -430,11 +474,11 @@ class TestDatabaseModelValidation:
             feature_type="technical",
             feature_name="sma_20",
             calculation_timestamp=datetime.now(timezone.utc),
-            feature_value=49500.0
+            feature_value=49500.0,
         )
         assert record.symbol == "BTCUSDT"
         assert record.feature_type == "technical"
-        
+
         # Note: Database constraints are enforced at commit time, not object creation
         assert record.feature_name == "sma_20"
 
@@ -449,11 +493,11 @@ class TestDatabaseModelValidation:
             accuracy_score=0.98,
             consistency_score=0.92,
             timeliness_score=0.99,
-            overall_score=0.96
+            overall_score=0.96,
         )
         assert record.symbol == "BTCUSDT"
         assert record.data_source == "exchange"
-        
+
         # Note: Database constraints are enforced at commit time, not object creation
 
     def test_data_pipeline_record_constraints(self):
@@ -462,9 +506,9 @@ class TestDatabaseModelValidation:
         record = DataPipelineRecord(
             pipeline_name="test_pipeline",
             execution_id="exec_001",
-            execution_timestamp=datetime.now(timezone.utc)
+            execution_timestamp=datetime.now(timezone.utc),
         )
         assert record.pipeline_name == "test_pipeline"
         assert record.execution_id == "exec_001"
-        
+
         # Note: Database constraints are enforced at commit time, not object creation

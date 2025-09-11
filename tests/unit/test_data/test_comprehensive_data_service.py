@@ -1,66 +1,37 @@
 """
-Comprehensive test suite for data service.
+Test suite for DataService.
 
-This module contains comprehensive tests for the DataService
-including initialization, caching, data storage, validation, and pipeline processing.
+This module contains tests for the simplified DataService
+including initialization, caching, data storage, and retrieval.
 """
 
-import pytest
-import asyncio
-import json
 from datetime import datetime, timezone
 from decimal import Decimal
-from unittest.mock import Mock, AsyncMock, patch, MagicMock
-import uuid
+from unittest.mock import AsyncMock, Mock, patch
+
+import pytest
 
 from src.core.config import Config
-from src.core.exceptions import DataError, DataValidationError
 from src.core.types import MarketData
-from src.data.types import (
-    CacheLevel,
-    DataMetrics,
-    DataPipelineStage,
-    DataRequest,
-)
 from src.data.services.data_service import DataService
+from src.data.types import DataRequest
 from src.database.interfaces import DatabaseServiceInterface
 from src.database.models import MarketDataRecord
-from src.monitoring import MetricsCollector, Status, StatusCode
+from src.monitoring import MetricsCollector
 
 
 @pytest.fixture
 def mock_config():
     """Mock configuration for testing."""
     config = Mock(spec=Config)
-    
-    # Redis configuration
-    config.redis = Mock()
-    config.redis.host = "localhost"
-    config.redis.port = 6379
-    config.redis.db = 0
-    config.redis.password = None
-    config.redis.ssl = False
-    config.redis.max_connections = 20
-    config.redis.socket_timeout = 5
-    
+
     # Data service configuration - use dict for proper .get() behavior
     config.data_service = {
-        "cache_ttl": 300,
-        "batch_size": 1000,
-        "max_retries": 3,
-        "enable_stream_processing": True,
-        "enable_feature_store": True,
-        "enable_validation": True,
-        "max_financial_value": 1e15,
-        "decimal_precision": 8,
-        "processing_mode": "batch"
+        "l1_cache_max_size": 1000,
+        "l1_cache_ttl": 300,
+        "l2_cache_ttl": 600,
     }
-    
-    # Feature store configuration
-    config.feature_store = Mock()
-    config.feature_store.cache_size = 10000
-    config.feature_store.ttl = 300
-    
+
     return config
 
 
@@ -68,10 +39,9 @@ def mock_config():
 def mock_metrics_collector():
     """Mock metrics collector for testing."""
     collector = Mock(spec=MetricsCollector)
-    collector.record_counter = Mock()
+    collector.increment_counter = Mock()
     collector.record_histogram = Mock()
     collector.record_gauge = Mock()
-    collector.get_status = Mock(return_value=Status(StatusCode.OK, "OK"))
     return collector
 
 
@@ -79,9 +49,10 @@ def mock_metrics_collector():
 def mock_database_service():
     """Mock database service for testing."""
     service = Mock(spec=DatabaseServiceInterface)
-    service.store_market_data = AsyncMock()
-    service.get_market_data = AsyncMock()
-    service.health_check = AsyncMock(return_value={"status": "healthy"})
+    service.bulk_create = AsyncMock()
+    service.list_entities = AsyncMock()
+    service.count_entities = AsyncMock()
+    service.get_health_status = AsyncMock()
     return service
 
 
@@ -94,8 +65,8 @@ def sample_market_data():
             timestamp=datetime.now(timezone.utc),
             price=Decimal("50000.00"),
             volume=Decimal("1.5"),
-            bid=Decimal("49999.50"),
-            ask=Decimal("50000.50"),
+            bid_price=Decimal("49999.50"),
+            ask_price=Decimal("50000.50"),
             high=Decimal("50500.00"),
             low=Decimal("49500.00"),
             open=Decimal("50200.00"),
@@ -107,8 +78,8 @@ def sample_market_data():
             timestamp=datetime.now(timezone.utc),
             price=Decimal("3000.00"),
             volume=Decimal("2.0"),
-            bid=Decimal("2999.50"),
-            ask=Decimal("3000.50"),
+            bid_price=Decimal("2999.50"),
+            ask_price=Decimal("3000.50"),
             high=Decimal("3100.00"),
             low=Decimal("2950.00"),
             open=Decimal("3050.00"),
@@ -128,623 +99,409 @@ class TestDataServiceInitialization:
             metrics_collector=mock_metrics_collector,
             database_service=mock_database_service,
         )
-        
+
         assert service.config is mock_config
         assert service.database_service is mock_database_service
         assert isinstance(service._memory_cache, dict)
-        assert service._redis_client is None
-        assert hasattr(service, 'cache_manager')
+        assert service.cache_service is None
+        assert hasattr(service, "metrics_collector")
 
-    def test_initialization_minimal(self, mock_config):
+    def test_initialization_minimal(self, mock_config, mock_database_service):
         """Test initialization with minimal parameters."""
-        service = DataService(config=mock_config)
-        
+        service = DataService(config=mock_config, database_service=mock_database_service)
+
         assert service.config is mock_config
-        assert service.database_service is None
+        assert service.database_service is mock_database_service
         assert isinstance(service._memory_cache, dict)
 
-    def test_setup_configuration(self, mock_config):
+    def test_setup_configuration(self, mock_config, mock_database_service):
         """Test configuration setup."""
         # Mock missing attributes to test defaults
         mock_config.data_service = None
-        mock_config.redis = None
-        mock_config.feature_store = None
-        
-        service = DataService(config=mock_config)
-        
+
+        service = DataService(config=mock_config, database_service=mock_database_service)
+
         # Should not crash and should handle missing configuration gracefully
         assert service.config is mock_config
+
+    def test_initialization_without_database_service(self, mock_config):
+        """Test initialization fails without database service."""
+        with pytest.raises(ValueError, match="database_service is required"):
+            DataService(config=mock_config, database_service=None)
 
     @pytest.mark.asyncio
     async def test_initialize_success(self, mock_config, mock_database_service):
         """Test successful initialization."""
         service = DataService(config=mock_config, database_service=mock_database_service)
-        
-        # Mock the initialization methods
-        with patch.object(service, '_initialize_redis', new_callable=AsyncMock) as mock_redis, \
-             patch.object(service, '_initialize_feature_store', new_callable=AsyncMock) as mock_feature, \
-             patch.object(service, '_initialize_validators', new_callable=AsyncMock) as mock_validators, \
-             patch.object(service, '_setup_metrics_collection', new_callable=AsyncMock) as mock_metrics:
-            
-            await service.initialize()
-            
-            mock_redis.assert_called_once()
-            mock_feature.assert_called_once()
-            mock_validators.assert_called_once()
-            mock_metrics.assert_called_once()
+
+        await service.initialize()
+
+        assert service._initialized is True
 
     @pytest.mark.asyncio
-    async def test_initialize_redis_success(self, mock_config):
-        """Test Redis initialization."""
-        service = DataService(config=mock_config)
-        
-        # Mock Redis client creation
-        mock_redis_client = Mock()
-        mock_redis_client.ping = AsyncMock(return_value=True)
-        
-        with patch('src.data.services.data_service.redis.Redis') as mock_redis_class:
-            mock_redis_class.return_value = mock_redis_client
-            
-            await service._initialize_redis()
-            
-            assert service._redis_client is mock_redis_client
-            mock_redis_client.ping.assert_called_once()
+    async def test_initialize_redis_success(self, mock_config, mock_database_service):
+        """Test cache service initialization."""
+        mock_cache_service = Mock()
+        mock_cache_service.initialize = AsyncMock()
+
+        service = DataService(
+            config=mock_config,
+            database_service=mock_database_service,
+            cache_service=mock_cache_service
+        )
+
+        await service.initialize()
+
+        assert service.cache_service is mock_cache_service
+        mock_cache_service.initialize.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_initialize_redis_failure(self, mock_config):
-        """Test Redis initialization failure."""
-        service = DataService(config=mock_config)
-        
-        # Mock Redis client that fails ping
-        mock_redis_client = Mock()
-        mock_redis_client.ping = AsyncMock(side_effect=Exception("Redis connection failed"))
-        
-        with patch('src.data.services.data_service.redis.Redis') as mock_redis_class:
-            mock_redis_class.return_value = mock_redis_client
-            
-            # Should not raise exception, just log warning
-            await service._initialize_redis()
-            
-            # Redis client should be None on failure
-            assert service._redis_client is None
+    async def test_initialize_twice(self, mock_config, mock_database_service):
+        """Test that initialize can be called multiple times safely."""
+        service = DataService(config=mock_config, database_service=mock_database_service)
 
-    @pytest.mark.asyncio
-    async def test_initialize_feature_store(self, mock_config):
-        """Test feature store initialization."""
-        service = DataService(config=mock_config)
-        
-        # The actual implementation just logs initialization - no external class required
-        await service._initialize_feature_store()
-        
-        # Should not raise any exceptions and just complete successfully
-        assert service.config is mock_config
+        await service.initialize()
+        assert service._initialized is True
 
-    @pytest.mark.asyncio
-    async def test_initialize_validators(self, mock_config):
-        """Test validators initialization."""
-        service = DataService(config=mock_config)
-        
-        # The actual implementation just logs initialization - no external classes required
-        await service._initialize_validators()
-        
-        # Should not raise any exceptions and just complete successfully
-        assert service.config is mock_config
-
-    @pytest.mark.asyncio
-    async def test_setup_metrics_collection(self, mock_config, mock_metrics_collector):
-        """Test metrics collection setup."""
-        service = DataService(config=mock_config, metrics_collector=mock_metrics_collector)
-        
-        await service._setup_metrics_collection()
-        
-        # Should not raise any exceptions
-        assert service.config is mock_config
+        # Should not fail when called again
+        await service.initialize()
+        assert service._initialized is True
 
 
 class TestDataServiceCaching:
     """Test DataService caching functionality."""
 
-    def test_memory_cache_initialization(self, mock_config):
+    def test_memory_cache_initialization(self, mock_config, mock_database_service):
         """Test memory cache is initialized."""
-        service = DataService(config=mock_config)
-        
+        service = DataService(config=mock_config, database_service=mock_database_service)
+
         assert isinstance(service._memory_cache, dict)
         assert len(service._memory_cache) == 0
 
-    def test_cache_manager_integration(self, mock_config):
-        """Test cache manager integration."""
-        with patch('src.data.services.data_service.get_cache_manager') as mock_get_manager:
-            mock_manager = Mock()
-            mock_get_manager.return_value = mock_manager
-            
-            service = DataService(config=mock_config)
-            
-            assert service.cache_manager is mock_manager
-            mock_get_manager.assert_called_once_with(config=mock_config)
+    def test_cache_manager_integration(self, mock_config, mock_database_service):
+        """Test cache service integration."""
+        mock_cache_service = Mock()
+        service = DataService(
+            config=mock_config,
+            database_service=mock_database_service,
+            cache_service=mock_cache_service
+        )
+
+        assert service.cache_service is mock_cache_service
 
 
 class TestDataServiceStorage:
     """Test DataService storage functionality."""
 
     @pytest.mark.asyncio
-    async def test_store_market_data_success(self, mock_config, mock_database_service, sample_market_data):
+    async def test_store_market_data_success(
+        self, mock_config, mock_database_service, sample_market_data
+    ):
         """Test successful market data storage."""
         service = DataService(config=mock_config, database_service=mock_database_service)
-        
-        # Mock validation and pipeline execution
-        with patch.object(service, '_validate_market_data', new_callable=AsyncMock) as mock_validate, \
-             patch.object(service, '_execute_storage_pipeline', new_callable=AsyncMock) as mock_pipeline, \
-             patch.object(service, '_validate_data_at_boundary', new_callable=AsyncMock) as mock_boundary_validate, \
-             patch.object(service, '_update_caches', new_callable=AsyncMock) as mock_update_caches:
-            
-            mock_validate.return_value = sample_market_data
-            mock_pipeline.return_value = "pipeline_123"
-            mock_boundary_validate.return_value = None  # No return value
-            mock_update_caches.return_value = None
-            
-            result = await service.store_market_data(sample_market_data, "binance")
-            
-            assert result is True  # store_market_data returns bool
-            mock_validate.assert_called_once_with(sample_market_data)
-            mock_pipeline.assert_called_once_with(sample_market_data, "binance")
+
+        result = await service.store_market_data(sample_market_data, "binance", validate=False)
+
+        assert result is True
+        mock_database_service.bulk_create.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_store_market_data_empty_list(self, mock_config, mock_database_service):
         """Test storing empty market data list."""
         service = DataService(config=mock_config, database_service=mock_database_service)
-        
-        with pytest.raises(DataValidationError, match="Empty data list provided"):
-            await service.store_market_data([], "binance")
+
+        result = await service.store_market_data([], "binance")
+        assert result is False
 
     @pytest.mark.asyncio
-    async def test_store_market_data_validation_error(self, mock_config, mock_database_service, sample_market_data):
-        """Test market data storage with validation error."""
+    async def test_store_market_data_single_item(
+        self, mock_config, mock_database_service, sample_market_data
+    ):
+        """Test storing single market data item."""
         service = DataService(config=mock_config, database_service=mock_database_service)
-        
-        # Mock validation to raise error
-        with patch.object(service, '_validate_market_data', new_callable=AsyncMock) as mock_validate:
-            mock_validate.side_effect = DataValidationError("Validation failed")
-            
-            with pytest.raises(DataValidationError, match="Validation failed"):
-                await service.store_market_data(sample_market_data, "binance")
+
+        result = await service.store_market_data(sample_market_data[0], "binance", validate=False)
+
+        assert result is True
+        mock_database_service.bulk_create.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_validate_market_data_success(self, mock_config, sample_market_data):
-        """Test successful market data validation."""
-        service = DataService(config=mock_config)
-        
-        # Override the validation config with real values
-        service.validation_config = {
-            "max_financial_value": 1e15,
-            "decimal_precision": 8
-        }
-        
-        # Mock the validate_market_data utility function
-        with patch('src.data.services.data_service.validate_market_data') as mock_validate, \
-             patch('src.data.services.data_service.validate_decimal_precision') as mock_decimal_validate, \
-             patch('src.utils.decimal_utils.to_decimal') as mock_to_decimal:
-            
-            mock_validate.return_value = True
-            mock_decimal_validate.return_value = True
-            mock_to_decimal.side_effect = lambda x: Decimal(str(x))
-            
-            result = await service._validate_market_data(sample_market_data)
-            
-            assert result == sample_market_data
-            assert mock_validate.call_count == len(sample_market_data)
-
-    @pytest.mark.asyncio
-    async def test_validate_market_data_failure(self, mock_config, sample_market_data):
-        """Test market data validation failure."""
-        service = DataService(config=mock_config)
-        
-        # Mock validation to fail
-        with patch('src.data.services.data_service.validate_market_data') as mock_validate:
-            mock_validate.return_value = False
-            
-            # Should return empty list when all validation fails
-            result = await service._validate_market_data(sample_market_data)
-            assert result == []
-
-    @pytest.mark.asyncio
-    async def test_execute_storage_pipeline_batch(self, mock_config, mock_database_service, sample_market_data):
-        """Test storage pipeline execution with batch processing."""
+    async def test_store_market_data_database_error(
+        self, mock_config, mock_database_service, sample_market_data
+    ):
+        """Test market data storage with database error."""
         service = DataService(config=mock_config, database_service=mock_database_service)
-        service.config.data_service["batch_size"] = 1  # Force batch processing
-        service._setup_configuration()  # Re-read configuration
-        
-        # Mock pipeline methods
-        with patch.object(service, '_execute_batch_pipeline', new_callable=AsyncMock) as mock_batch:
-            mock_batch.return_value = "batch_pipeline_123"
-            
-            result = await service._execute_storage_pipeline(sample_market_data, "binance")
-            
-            assert result == "batch_pipeline_123"
-            mock_batch.assert_called_once()
+        mock_database_service.bulk_create.side_effect = Exception("Database error")
+
+        result = await service.store_market_data(sample_market_data, "binance", validate=False)
+
+        assert result is False
+
+
+class TestDataServiceRetrieval:
+    """Test DataService data retrieval functionality."""
 
     @pytest.mark.asyncio
-    async def test_execute_storage_pipeline_stream(self, mock_config, mock_database_service, sample_market_data):
-        """Test storage pipeline execution with stream processing."""
+    async def test_get_market_data_success(self, mock_config, mock_database_service):
+        """Test successful market data retrieval."""
         service = DataService(config=mock_config, database_service=mock_database_service)
-        service.config.data_service["processing_mode"] = "stream"
-        service.config.data_service["batch_size"] = 10000  # Large batch size to avoid batch mode
-        service._setup_configuration()  # Re-read configuration
-        
-        # Mock pipeline methods
-        with patch.object(service, '_execute_stream_pipeline', new_callable=AsyncMock) as mock_stream:
-            mock_stream.return_value = "stream_pipeline_123"
-            
-            result = await service._execute_storage_pipeline(sample_market_data, "binance")
-            
-            assert result == "stream_pipeline_123"
-            mock_stream.assert_called_once()
+
+        mock_records = [Mock(spec=MarketDataRecord) for _ in range(2)]
+        mock_database_service.list_entities.return_value = mock_records
+
+        request = DataRequest(symbol="BTCUSDT", exchange="binance", use_cache=False)
+        result = await service.get_market_data(request)
+
+        assert result == mock_records
+        mock_database_service.list_entities.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_execute_storage_pipeline_default(self, mock_config, mock_database_service, sample_market_data):
-        """Test storage pipeline execution with default processing."""
+    async def test_get_recent_data_success(self, mock_config, mock_database_service):
+        """Test get recent data."""
         service = DataService(config=mock_config, database_service=mock_database_service)
-        service.config.data_service["processing_mode"] = "default"  # This will hit the else clause
-        service.config.data_service["batch_size"] = 10000  # Large batch size to avoid batch mode
-        service._setup_configuration()  # Re-read configuration
-        
-        # Mock pipeline methods
-        with patch.object(service, '_execute_default_pipeline', new_callable=AsyncMock) as mock_default:
-            mock_default.return_value = "default_pipeline_123"
-            
-            result = await service._execute_storage_pipeline(sample_market_data, "binance")
-            
-            assert result == "default_pipeline_123"
-            mock_default.assert_called_once()
 
+        # Mock database records
+        mock_record = Mock(spec=MarketDataRecord)
+        mock_record.symbol = "BTCUSDT"
+        mock_record.exchange = "binance"
+        mock_record.timestamp = datetime.now(timezone.utc)
+        mock_record.data_timestamp = datetime.now(timezone.utc)
+        mock_record.open_price = Decimal("50000")
+        mock_record.high_price = Decimal("51000")
+        mock_record.low_price = Decimal("49000")
+        mock_record.close_price = Decimal("50500")
+        mock_record.volume = Decimal("1.0")
 
-class TestDataServicePipelines:
-    """Test DataService pipeline functionality."""
+        mock_database_service.list_entities.return_value = [mock_record]
+
+        result = await service.get_recent_data("BTCUSDT", limit=10, exchange="binance")
+
+        assert len(result) == 1
+        assert result[0].symbol == "BTCUSDT"
 
     @pytest.mark.asyncio
-    async def test_execute_batch_pipeline(self, mock_config, mock_database_service, sample_market_data):
-        """Test batch pipeline execution."""
+    async def test_get_data_count_success(self, mock_config, mock_database_service):
+        """Test get data count."""
         service = DataService(config=mock_config, database_service=mock_database_service)
-        
-        # Mock database and cache operations
-        with patch.object(service, '_transform_to_db_records', new_callable=AsyncMock) as mock_transform, \
-             patch.object(service, '_update_pipeline_stage', new_callable=AsyncMock) as mock_update, \
-             patch.object(service, '_store_to_database', new_callable=AsyncMock) as mock_store, \
-             patch.object(service, '_update_indexes', new_callable=AsyncMock) as mock_index:
-            
-            mock_db_records = [Mock(spec=MarketDataRecord) for _ in sample_market_data]
-            mock_transform.return_value = mock_db_records
-            mock_store.return_value = None
-            mock_index.return_value = None
-            
-            pipeline_id = await service._execute_batch_pipeline(sample_market_data, "binance", "test_pipeline_id")
-            
-            assert isinstance(pipeline_id, str)
-            mock_transform.assert_called_once_with(sample_market_data, "binance")
-            mock_store.assert_called_once_with(mock_db_records)
-            assert mock_update.call_count >= 2  # Should update stage multiple times
+        mock_database_service.count_entities.return_value = 100
+
+        result = await service.get_data_count("BTCUSDT", "binance")
+
+        assert result == 100
+        mock_database_service.count_entities.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_execute_stream_pipeline(self, mock_config, mock_database_service, sample_market_data):
-        """Test stream pipeline execution."""
+    async def test_get_data_count_error(self, mock_config, mock_database_service):
+        """Test get data count with error."""
         service = DataService(config=mock_config, database_service=mock_database_service)
-        
-        # Mock stream processing
-        with patch.object(service, '_transform_to_db_records', new_callable=AsyncMock) as mock_transform, \
-             patch.object(service, '_store_to_database', new_callable=AsyncMock) as mock_store, \
-             patch.object(service, '_update_pipeline_stage', new_callable=AsyncMock):
-            
-            mock_db_records = [Mock(spec=MarketDataRecord) for _ in sample_market_data]
-            mock_transform.return_value = mock_db_records
-            mock_store.return_value = None
-            
-            pipeline_id = await service._execute_stream_pipeline(sample_market_data, "binance", "test_pipeline_id")
-            
-            assert isinstance(pipeline_id, str)
-            mock_transform.assert_called()  # May be called multiple times depending on batching
-            mock_store.assert_called()  # May be called multiple times depending on batching
+        mock_database_service.count_entities.side_effect = Exception("Database error")
+
+        result = await service.get_data_count("BTCUSDT", "binance")
+
+        assert result == 0
+
+
+class TestDataServiceHealthCheck:
+    """Test DataService health check functionality."""
 
     @pytest.mark.asyncio
-    async def test_execute_default_pipeline(self, mock_config, mock_database_service, sample_market_data):
-        """Test default pipeline execution."""
+    async def test_health_check_healthy(self, mock_config, mock_database_service):
+        """Test healthy status."""
         service = DataService(config=mock_config, database_service=mock_database_service)
-        
-        # Mock database operations
-        with patch.object(service, '_transform_to_db_records', new_callable=AsyncMock) as mock_transform, \
-             patch.object(service, '_store_to_database', new_callable=AsyncMock) as mock_store, \
-             patch.object(service, '_update_pipeline_stage', new_callable=AsyncMock):
-            
-            mock_db_records = [Mock(spec=MarketDataRecord) for _ in sample_market_data]
-            mock_transform.return_value = mock_db_records
-            mock_store.return_value = None
-            
-            pipeline_id = await service._execute_default_pipeline(sample_market_data, "binance", "test_pipeline_id")
-            
-            assert isinstance(pipeline_id, str)
-            mock_transform.assert_called_once_with(sample_market_data, "binance")
-            mock_store.assert_called_once_with(mock_db_records)
+
+        # Mock healthy database
+        from src.core import HealthStatus
+        mock_health = Mock()
+        mock_health.name = "HEALTHY"
+        mock_database_service.get_health_status.return_value = mock_health
+
+        result = await service.health_check()
+
+        assert result.status == HealthStatus.HEALTHY
 
     @pytest.mark.asyncio
-    async def test_process_stream_batch(self, mock_config, mock_database_service, sample_market_data):
-        """Test stream batch processing."""
+    async def test_health_check_degraded(self, mock_config, mock_database_service):
+        """Test degraded status."""
         service = DataService(config=mock_config, database_service=mock_database_service)
-        
-        # Mock real-time processing
-        with patch.object(service, '_transform_to_db_records', new_callable=AsyncMock) as mock_transform, \
-             patch.object(service, '_store_to_database', new_callable=AsyncMock) as mock_store, \
-             patch.object(service, '_update_pipeline_stage', new_callable=AsyncMock):
-            
-            mock_db_records = [Mock(spec=MarketDataRecord) for _ in sample_market_data]
-            mock_transform.return_value = mock_db_records
-            mock_store.return_value = None
-            
-            await service._process_stream_batch(sample_market_data, "binance", "test_pipeline_id")
-            
-            mock_transform.assert_called_once_with(sample_market_data, "binance")
-            mock_store.assert_called_once_with(mock_db_records)
+
+        # Mock degraded database
+        from src.core import HealthStatus
+        mock_health = Mock()
+        mock_health.name = "DEGRADED"
+        mock_database_service.get_health_status.return_value = mock_health
+
+        result = await service.health_check()
+
+        assert result.status == HealthStatus.DEGRADED
 
     @pytest.mark.asyncio
-    async def test_update_pipeline_stage(self, mock_config):
-        """Test pipeline stage update."""
-        service = DataService(config=mock_config)
-        
-        # Should not raise any exceptions
-        await service._update_pipeline_stage("test_pipeline", DataPipelineStage.PROCESSING)
-        await service._update_pipeline_stage("test_pipeline", DataPipelineStage.INDEXING)
+    async def test_cleanup_success(self, mock_config, mock_database_service):
+        """Test successful cleanup."""
+        service = DataService(config=mock_config, database_service=mock_database_service)
 
+        # Add some data to cache
+        service._memory_cache["test"] = "data"
+        service._initialized = True
 
-class TestDataServiceTransformation:
-    """Test DataService data transformation."""
+        await service.cleanup()
 
-    @pytest.mark.asyncio
-    async def test_transform_to_db_records(self, mock_config, sample_market_data):
-        """Test transformation of market data to database records."""
-        service = DataService(config=mock_config)
-        
-        # Mock MarketDataRecord creation
-        with patch('src.data.services.data_service.MarketDataRecord') as mock_record_class:
-            mock_records = [Mock(spec=MarketDataRecord) for _ in sample_market_data]
-            mock_record_class.side_effect = mock_records
-            
-            result = await service._transform_to_db_records(sample_market_data, "binance")
-            
-            assert len(result) == len(sample_market_data)
-            assert all(isinstance(r, Mock) for r in result)
-            assert mock_record_class.call_count == len(sample_market_data)
+        assert len(service._memory_cache) == 0
+        assert service._initialized is False
 
 
 class TestDataServiceValidation:
     """Test DataService validation functionality."""
 
-    @pytest.mark.asyncio
-    async def test_validate_data_at_boundary_all_layers(self, mock_config):
-        """Test data validation at all boundary layers."""
-        service = DataService(config=mock_config)
-        
-        test_data = {"symbol": "BTCUSDT", "price": 50000.00}
-        
-        # Mock validation methods
-        with patch.object(service, '_validate_input_boundary') as mock_input, \
-             patch.object(service, '_validate_database_boundary') as mock_db, \
-             patch.object(service, '_validate_cache_boundary') as mock_cache:
+    def test_validate_market_data_success(self, mock_config, mock_database_service, sample_market_data):
+        """Test successful market data validation."""
+        service = DataService(config=mock_config, database_service=mock_database_service)
+
+        # Mock validation to return valid data
+        with patch("src.utils.validation.market_data_validation.MarketDataValidator") as mock_validator:
+            mock_validator_instance = mock_validator.return_value
+            mock_validator_instance.validate_market_data_batch.return_value = sample_market_data
             
-            await service._validate_data_at_boundary(test_data, validate_input=True, 
-                                                   validate_database=True, validate_cache=True)
-            
-            mock_input.assert_called_once_with(test_data)
-            mock_db.assert_called_once_with(test_data)
-            mock_cache.assert_called_once_with(test_data)
+            # Validation should not raise exceptions for valid data
+            result = service._validate_market_data(sample_market_data)
+
+            # Should return the same data or validated data
+            assert len(result) == len(sample_market_data)
+
+    def test_validate_market_data_fallback(self, mock_config, mock_database_service, sample_market_data):
+        """Test market data validation fallback on error."""
+        service = DataService(config=mock_config, database_service=mock_database_service)
+
+        # Mock validation to raise exception
+        with patch("src.utils.validation.market_data_validation.MarketDataValidator") as mock_validator:
+            mock_validator.side_effect = Exception("Validation error")
+
+            result = service._validate_market_data(sample_market_data)
+
+            # Should fallback to returning original data
+            assert result == sample_market_data
+
+
+class TestDataServiceTransformation:
+    """Test DataService data transformation functionality."""
+
+    def test_transform_to_db_records(self, mock_config, mock_database_service, sample_market_data):
+        """Test transformation of MarketData to database records."""
+        service = DataService(config=mock_config, database_service=mock_database_service)
+
+        records = service._transform_to_db_records(sample_market_data, "binance")
+
+        assert len(records) == len(sample_market_data)
+        for record in records:
+            assert isinstance(record, MarketDataRecord)
+            assert record.exchange == "binance"
+            assert record.symbol in ["BTCUSDT", "ETHUSDT"]
+
+    def test_build_cache_key(self, mock_config, mock_database_service):
+        """Test cache key building."""
+        service = DataService(config=mock_config, database_service=mock_database_service)
+
+        request = DataRequest(
+            symbol="BTCUSDT",
+            exchange="binance",
+            limit=100,
+            start_time=datetime(2023, 1, 1),
+            end_time=datetime(2023, 1, 2)
+        )
+
+        key = service._build_cache_key(request)
+
+        assert "BTCUSDT" in key
+        assert "binance" in key
+        assert "limit:100" in key
+
+
+class TestDataServiceCacheOperations:
+    """Test DataService cache operations."""
 
     @pytest.mark.asyncio
-    async def test_validate_data_at_boundary_selective(self, mock_config):
-        """Test selective data validation at boundaries."""
-        service = DataService(config=mock_config)
-        
-        test_data = {"symbol": "BTCUSDT", "price": 50000.00}
-        
-        # Mock validation methods
-        with patch.object(service, '_validate_input_boundary') as mock_input, \
-             patch.object(service, '_validate_database_boundary') as mock_db, \
-             patch.object(service, '_validate_cache_boundary') as mock_cache:
-            
-            await service._validate_data_at_boundary(test_data, validate_input=True, 
-                                                   validate_database=False, validate_cache=False)
-            
-            mock_input.assert_called_once_with(test_data)
-            mock_db.assert_not_called()
-            mock_cache.assert_not_called()
+    async def test_update_l1_cache(self, mock_config, mock_database_service, sample_market_data):
+        """Test L1 cache update."""
+        service = DataService(config=mock_config, database_service=mock_database_service)
 
-    def test_validate_input_boundary(self, mock_config):
-        """Test input boundary validation."""
-        service = DataService(config=mock_config)
-        
-        # Valid data should not raise
-        valid_data = {
-            "symbol": "BTCUSDT", 
-            "price": 50000.00, 
-            "timestamp": datetime.now(timezone.utc), 
-            "exchange": "binance"
-        }
-        service._validate_input_boundary(valid_data)
-        
-        # Test missing required field raises DataValidationError
-        invalid_data = {"symbol": "BTCUSDT", "price": 50000.00}
-        with pytest.raises(DataValidationError, match="Required field timestamp missing"):
-            service._validate_input_boundary(invalid_data)
+        await service._update_l1_cache(sample_market_data)
 
-    def test_validate_database_boundary(self, mock_config):
-        """Test database boundary validation."""
-        service = DataService(config=mock_config)
-        
-        # Override the validation config with real values
-        service.validation_config = {
-            "max_financial_value": 1e15,
-            "decimal_precision": 8
-        }
-        
-        # Valid data should not raise
-        valid_data = {"symbol": "BTCUSDT", "price": 50000.00}
-        with patch('src.utils.decimal_utils.to_decimal') as mock_to_decimal:
-            mock_to_decimal.side_effect = lambda x: Decimal(str(x))
-            service._validate_database_boundary(valid_data)
+        # Should have cache entries for both symbols
+        assert len(service._memory_cache) > 0
 
-    def test_validate_cache_boundary(self, mock_config):
-        """Test cache boundary validation."""
-        service = DataService(config=mock_config)
-        
-        # Valid data should not raise (must include cache key fields)
-        valid_data = {
-            "symbol": "BTCUSDT", 
-            "price": 50000.00,
-            "exchange": "binance",
-            "timestamp": datetime.now(timezone.utc)
+        # Check cache entries exist
+        btc_key = "market_data:BTCUSDT:latest"
+        eth_key = "market_data:ETHUSDT:latest"
+
+        if btc_key in service._memory_cache:
+            assert "data" in service._memory_cache[btc_key]
+            assert "timestamp" in service._memory_cache[btc_key]
+            assert "ttl" in service._memory_cache[btc_key]
+
+    def test_get_from_l1_cache_hit(self, mock_config, mock_database_service):
+        """Test L1 cache hit."""
+        service = DataService(config=mock_config, database_service=mock_database_service)
+
+        # Pre-populate cache
+        request = DataRequest(symbol="BTCUSDT", exchange="binance")
+        cache_key = service._build_cache_key(request)
+        test_data = [Mock(spec=MarketDataRecord)]
+
+        service._memory_cache[cache_key] = {
+            "data": test_data,
+            "timestamp": datetime.now(timezone.utc),
+            "ttl": 300
         }
-        service._validate_cache_boundary(valid_data)
+
+        result = service._get_from_l1_cache(request)
+
+        assert result == test_data
+
+    def test_get_from_l1_cache_miss(self, mock_config, mock_database_service):
+        """Test L1 cache miss."""
+        service = DataService(config=mock_config, database_service=mock_database_service)
+
+        request = DataRequest(symbol="BTCUSDT", exchange="binance")
+        result = service._get_from_l1_cache(request)
+
+        assert result is None
 
 
 class TestDataServiceErrorHandling:
     """Test DataService error handling."""
 
     @pytest.mark.asyncio
-    async def test_store_market_data_database_error(self, mock_config, mock_database_service, sample_market_data):
-        """Test handling database errors during storage."""
-        service = DataService(config=mock_config, database_service=mock_database_service)
-        
-        # Mock store_to_database to raise error since that's what actually gets called
-        with patch.object(service, '_validate_market_data', new_callable=AsyncMock) as mock_validate, \
-             patch.object(service, '_store_to_database', new_callable=AsyncMock) as mock_store:
-            
-            mock_validate.return_value = sample_market_data
-            mock_store.side_effect = Exception("Database error")
-            
-            # The method catches exceptions and returns False instead of re-raising
-            result = await service.store_market_data(sample_market_data, "binance")
-            assert result is False  # Should return False on database error
+    async def test_store_market_data_database_error(
+        self, mock_config, mock_database_service, sample_market_data, mock_metrics_collector
+    ):
+        """Test market data storage with database error."""
+        service = DataService(
+            config=mock_config,
+            database_service=mock_database_service,
+            metrics_collector=mock_metrics_collector
+        )
+
+        mock_database_service.bulk_create.side_effect = Exception("Database connection failed")
+
+        result = await service.store_market_data(sample_market_data, "binance", validate=False)
+
+        assert result is False
+        mock_metrics_collector.increment_counter.assert_called()
 
     @pytest.mark.asyncio
-    async def test_pipeline_execution_error_handling(self, mock_config, mock_database_service, sample_market_data):
-        """Test error handling in pipeline execution."""
-        service = DataService(config=mock_config, database_service=mock_database_service)
-        
-        # Mock transform method to raise error
-        with patch.object(service, '_transform_to_db_records') as mock_transform:
-            mock_transform.side_effect = Exception("Transform error")
-            
-            with pytest.raises(Exception, match="Transform error"):
-                await service._execute_default_pipeline(sample_market_data, "binance", "test_pipeline_id")
+    async def test_get_market_data_database_error(
+        self, mock_config, mock_database_service, mock_metrics_collector
+    ):
+        """Test market data retrieval with database error."""
+        service = DataService(
+            config=mock_config,
+            database_service=mock_database_service,
+            metrics_collector=mock_metrics_collector
+        )
 
+        mock_database_service.list_entities.side_effect = Exception("Database error")
 
-class TestDataServiceIntegration:
-    """Test DataService integration scenarios."""
+        request = DataRequest(symbol="BTCUSDT", exchange="binance")
+        result = await service.get_market_data(request)
 
-    @pytest.mark.asyncio
-    async def test_full_storage_workflow(self, mock_config, mock_database_service, sample_market_data):
-        """Test complete storage workflow."""
-        service = DataService(config=mock_config, database_service=mock_database_service)
-        
-        # Mock all dependencies
-        with patch.object(service, '_validate_market_data', new_callable=AsyncMock) as mock_validate, \
-             patch.object(service, '_transform_to_db_records', new_callable=AsyncMock) as mock_transform, \
-             patch.object(service, '_store_to_database', new_callable=AsyncMock) as mock_store, \
-             patch('src.data.services.data_service.validate_market_data') as mock_validate_util:
-            
-            mock_validate.return_value = sample_market_data
-            mock_db_records = [Mock(spec=MarketDataRecord) for _ in sample_market_data]
-            mock_transform.return_value = mock_db_records
-            mock_store.return_value = None
-            mock_validate_util.return_value = True
-            
-            result = await service.store_market_data(sample_market_data, "binance")
-            
-            # Should return True on success
-            assert result is True
-            
-            # Should have called validation
-            mock_validate.assert_called_once_with(sample_market_data)
-            
-            # Should have stored in database
-            mock_store.assert_called_once_with(mock_db_records)
-
-    @pytest.mark.asyncio
-    async def test_concurrent_storage_requests(self, mock_config, mock_database_service, sample_market_data):
-        """Test handling concurrent storage requests."""
-        service = DataService(config=mock_config, database_service=mock_database_service)
-        
-        # Mock validation and transformation
-        with patch.object(service, '_validate_market_data', new_callable=AsyncMock) as mock_validate, \
-             patch.object(service, '_transform_to_db_records', new_callable=AsyncMock) as mock_transform, \
-             patch.object(service, '_store_to_database', new_callable=AsyncMock) as mock_store, \
-             patch('src.data.services.data_service.validate_market_data') as mock_validate_util:
-            
-            mock_validate.return_value = sample_market_data
-            mock_db_records = [Mock(spec=MarketDataRecord) for _ in sample_market_data]
-            mock_transform.return_value = mock_db_records
-            mock_store.return_value = None
-            mock_validate_util.return_value = True
-            
-            # Make multiple concurrent requests
-            tasks = [
-                service.store_market_data(sample_market_data, f"exchange_{i}")
-                for i in range(3)
-            ]
-            
-            results = await asyncio.gather(*tasks)
-            
-            # All should succeed and return True
-            assert len(results) == 3
-            assert all(r is True for r in results)
-            
-            # All should have succeeded
-            assert len(results) == 3
-
-
-class TestDataServiceConfiguration:
-    """Test DataService configuration handling."""
-
-    def test_missing_configuration_sections(self):
-        """Test handling missing configuration sections."""
-        config = Mock(spec=Config)
-        # Remove all optional config sections
-        del config.redis
-        del config.data_service
-        del config.feature_store
-        
-        # Should not crash during initialization
-        service = DataService(config=config)
-        assert service.config is config
-
-    def test_partial_configuration(self, mock_config):
-        """Test handling partial configuration."""
-        # Remove some optional attributes
-        del mock_config.data_service["enable_stream_processing"]
-        del mock_config.redis.ssl
-        
-        # Should handle missing attributes gracefully
-        service = DataService(config=mock_config)
-        assert service.config is mock_config
-
-    def test_configuration_validation(self, mock_config):
-        """Test configuration validation during setup."""
-        service = DataService(config=mock_config)
-        
-        # Configuration should be set up during initialization
-        assert service.config is mock_config
-        # Cache manager should be initialized
-        assert hasattr(service, 'cache_manager')
-
-
-class TestDataServiceMetrics:
-    """Test DataService metrics collection."""
-
-    def test_metrics_collector_integration(self, mock_config, mock_metrics_collector):
-        """Test metrics collector integration."""
-        service = DataService(config=mock_config, metrics_collector=mock_metrics_collector)
-        
-        # Metrics collector should be available
-        # This would be used throughout the service for recording metrics
-
-    def test_metrics_without_collector(self, mock_config):
-        """Test service works without metrics collector."""
-        service = DataService(config=mock_config)
-        
-        # Should work fine without metrics collector
-        assert service.config is mock_config
+        assert result == []
+        mock_metrics_collector.increment_counter.assert_called()

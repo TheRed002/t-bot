@@ -17,7 +17,7 @@ from typing import Any
 
 import pytest
 
-from src.core.types import MarketData, Signal, SignalDirection
+from src.core.types import DriftType, MarketData, QualityLevel, Signal, SignalDirection
 
 # Import the components to test
 from src.data.quality.monitoring import (
@@ -25,7 +25,6 @@ from src.data.quality.monitoring import (
     QualityMetric,
     QualityMonitor,
 )
-from src.core.types import DriftType, QualityLevel
 
 
 class TestQualityMonitor:
@@ -265,8 +264,7 @@ class TestQualityMonitor:
 
         # Check drift alert properties
         for alert in drift_alerts:
-            assert alert.drift_type in [
-                DriftType.FEATURE, DriftType.CONCEPT]
+            assert alert.drift_type in [DriftType.FEATURE, DriftType.CONCEPT]
             assert alert.feature in ["price", "close", "volume"]
             assert alert.severity in [QualityLevel.ACCEPTABLE, QualityLevel.POOR]
             assert alert.timestamp is not None
@@ -311,8 +309,7 @@ class TestQualityMonitor:
 
         # Should detect concept drift
         assert len(drift_alerts) > 0
-        assert any(alert.drift_type ==
-                   DriftType.CONCEPT for alert in drift_alerts)
+        assert any(alert.drift_type == DriftType.CONCEPT for alert in drift_alerts)
 
     @pytest.mark.asyncio
     async def test_calculate_quality_score(self, monitor: QualityMonitor):

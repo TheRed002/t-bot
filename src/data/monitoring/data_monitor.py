@@ -23,18 +23,9 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from src.core.base.component import BaseComponent
-from src.core.base.interfaces import HealthCheckResult, HealthStatus
+from src.core import BaseComponent, HealthCheckResult, HealthStatus
 from src.core.config import Config
-
-
-class AlertSeverity(Enum):
-    """Alert severity levels."""
-
-    INFO = "info"
-    WARNING = "warning"
-    ERROR = "error"
-    CRITICAL = "critical"
+from src.core.types import AlertSeverity
 
 
 class AlertCategory(Enum):
@@ -130,7 +121,7 @@ class ThresholdRule(BaseModel):
     metric_name: str = Field(..., min_length=1)
     operator: str = Field(..., pattern="^(gt|gte|lt|lte|eq|ne)$")  # greater than, less than, etc.
     threshold: float
-    severity: AlertSeverity = AlertSeverity.WARNING
+    severity: AlertSeverity = AlertSeverity.MEDIUM
     category: AlertCategory = AlertCategory.PERFORMANCE
     enabled: bool = True
     cooldown_minutes: int = Field(15, ge=1, le=1440)
@@ -215,7 +206,7 @@ class DataMonitor(BaseComponent):
                 metric_name="response_time_ms",
                 operator="gt",
                 threshold=self.monitoring_config.response_time_threshold_ms,
-                severity=AlertSeverity.WARNING,
+                severity=AlertSeverity.MEDIUM,
                 category=AlertCategory.PERFORMANCE,
                 cooldown_minutes=15,
                 description="Response time exceeded threshold",
@@ -225,7 +216,7 @@ class DataMonitor(BaseComponent):
                 metric_name="error_rate",
                 operator="gt",
                 threshold=self.monitoring_config.error_rate_threshold,
-                severity=AlertSeverity.ERROR,
+                severity=AlertSeverity.HIGH,
                 category=AlertCategory.AVAILABILITY,
                 cooldown_minutes=15,
                 description="Error rate exceeded threshold",
@@ -235,7 +226,7 @@ class DataMonitor(BaseComponent):
                 metric_name="data_quality_score",
                 operator="lt",
                 threshold=self.monitoring_config.min_data_quality_score,
-                severity=AlertSeverity.WARNING,
+                severity=AlertSeverity.MEDIUM,
                 category=AlertCategory.DATA_QUALITY,
                 cooldown_minutes=15,
                 description="Data quality score below threshold",
@@ -245,7 +236,7 @@ class DataMonitor(BaseComponent):
                 metric_name="cpu_usage_percent",
                 operator="gt",
                 threshold=self.monitoring_config.cpu_usage_threshold * 100,
-                severity=AlertSeverity.WARNING,
+                severity=AlertSeverity.MEDIUM,
                 category=AlertCategory.CAPACITY,
                 cooldown_minutes=15,
                 description="CPU usage exceeded threshold",
@@ -255,7 +246,7 @@ class DataMonitor(BaseComponent):
                 metric_name="memory_usage_percent",
                 operator="gt",
                 threshold=self.monitoring_config.memory_usage_threshold * 100,
-                severity=AlertSeverity.WARNING,
+                severity=AlertSeverity.MEDIUM,
                 category=AlertCategory.CAPACITY,
                 cooldown_minutes=15,
                 description="Memory usage exceeded threshold",
@@ -692,8 +683,8 @@ class DataMonitor(BaseComponent):
         active_alerts = [alert for alert in self._alerts.values() if not alert.resolved]
         alert_counts = {
             "critical": len([a for a in active_alerts if a.severity == AlertSeverity.CRITICAL]),
-            "error": len([a for a in active_alerts if a.severity == AlertSeverity.ERROR]),
-            "warning": len([a for a in active_alerts if a.severity == AlertSeverity.WARNING]),
+            "high": len([a for a in active_alerts if a.severity == AlertSeverity.HIGH]),
+            "medium": len([a for a in active_alerts if a.severity == AlertSeverity.MEDIUM]),
             "info": len([a for a in active_alerts if a.severity == AlertSeverity.INFO]),
         }
 

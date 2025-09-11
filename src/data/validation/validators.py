@@ -37,10 +37,7 @@ class PriceValidator(BaseRecordValidator):
         try:
             # Use consolidated validation utilities
             MarketDataValidationUtils.validate_price_value(
-                record["price"],
-                "price",
-                self.min_price,
-                self.max_price
+                record["price"], "price", self.min_price, self.max_price
             )
             return True
         except ValidationError as e:
@@ -70,9 +67,7 @@ class VolumeValidator(BaseRecordValidator):
         try:
             # Use consolidated validation utilities
             MarketDataValidationUtils.validate_volume_value(
-                record["volume"],
-                "volume",
-                self.min_volume
+                record["volume"], "volume", self.min_volume
             )
             return True
         except ValidationError as e:
@@ -83,7 +78,12 @@ class VolumeValidator(BaseRecordValidator):
 class TimestampValidator(BaseRecordValidator):
     """Validator for timestamp data using consolidated utilities."""
 
-    def __init__(self, require_ordered: bool = False, max_future_seconds: int = 300, max_age_seconds: int = 3600):
+    def __init__(
+        self,
+        require_ordered: bool = False,
+        max_future_seconds: int = 300,
+        max_age_seconds: int = 3600,
+    ):
         """
         Initialize timestamp validator.
 
@@ -112,13 +112,14 @@ class TimestampValidator(BaseRecordValidator):
         timestamp = record["timestamp"]
 
         # Basic type validation
-        if not isinstance(timestamp, int | float | str):
+        if not isinstance(timestamp, (int, float, str)):
             self._add_error(f"Invalid timestamp type: {type(timestamp)}", index)
             return False
 
         # Convert to datetime if needed for consolidated validation
         try:
             from datetime import datetime, timezone
+
             if isinstance(timestamp, (int, float)):
                 timestamp_dt = datetime.fromtimestamp(timestamp, tz=timezone.utc)
             else:
@@ -126,10 +127,7 @@ class TimestampValidator(BaseRecordValidator):
 
             # Use consolidated validation utilities
             MarketDataValidationUtils.validate_timestamp_value(
-                timestamp_dt,
-                "timestamp",
-                self.max_future_seconds,
-                self.max_age_seconds
+                timestamp_dt, "timestamp", self.max_future_seconds, self.max_age_seconds
             )
 
         except (ValidationError, ValueError, OSError) as e:
@@ -164,7 +162,7 @@ class TimestampValidator(BaseRecordValidator):
 class SchemaValidator(BaseRecordValidator):
     """Validator for data schema."""
 
-    def __init__(self, required_fields: list[str], optional_fields: list[str] | None = None):
+    def __init__(self, required_fields: list[str] | None = None, optional_fields: list[str] | None = None):
         """
         Initialize schema validator.
 
@@ -174,7 +172,7 @@ class SchemaValidator(BaseRecordValidator):
         """
         super().__init__()
         self.required_fields = set(required_fields)
-        self.optional_fields = set(optional_fields or [])
+        self.optional_fields = set(optional_fields) if optional_fields is not None else set()
 
     def _validate_record(self, record: dict, index: int | None = None) -> bool:
         """Validate a single record."""
@@ -189,7 +187,7 @@ class SchemaValidator(BaseRecordValidator):
             return False
 
         # Check for unknown fields (optional)
-        all_fields = self.required_fields | self.optional_fields
+        all_fields = self.required_fields.union(self.optional_fields)
         unknown = set(record.keys()) - all_fields
         if unknown and len(all_fields) > 0:
             # Only warn about unknown fields if we have a defined schema

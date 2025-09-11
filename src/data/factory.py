@@ -11,7 +11,6 @@ from src.data.interfaces import DataServiceInterface
 
 if TYPE_CHECKING:
     from src.core.config import Config
-    from src.monitoring import MetricsCollector
 
 
 class DataServiceFactory:
@@ -24,11 +23,17 @@ class DataServiceFactory:
         Args:
             injector: Optional dependency injector instance
         """
+        # Don't create default injector - require injection
         if injector is None:
-            from src.data.di_registration import configure_data_dependencies
-            injector = configure_data_dependencies()
+            from src.core.exceptions import ComponentError
 
-        self.injector = injector
+            raise ComponentError(
+                "Injector must be provided to factory",
+                component="DataServiceFactory",
+                operation="__init__",
+                context={"missing_dependency": "injector"},
+            )
+        self._injector = injector
 
     def create_data_service(
         self,
@@ -45,7 +50,7 @@ class DataServiceFactory:
         Returns:
             DataServiceInterface: Configured data service
         """
-        return self.injector.resolve("DataServiceInterface")
+        return self._injector.resolve("DataServiceInterface")
 
     def create_minimal_data_service(self) -> DataServiceInterface:
         """
@@ -54,7 +59,7 @@ class DataServiceFactory:
         Returns:
             DataServiceInterface: Minimal data service
         """
-        return self.injector.resolve("DataServiceInterface")
+        return self._injector.resolve("DataServiceInterface")
 
     def create_testing_data_service(
         self,
@@ -92,36 +97,49 @@ class DataServiceFactory:
 
         return test_injector.resolve("DataServiceInterface")
 
-    @staticmethod
-    def create_data_service_from_config(
-        config: "Config",
-        use_cache: bool = True,
-        use_validator: bool = True,
-        metrics_collector: "MetricsCollector | None" = None,
-    ) -> DataServiceInterface:
-        """
-        Legacy method for backward compatibility.
+    def create_data_storage(self) -> "DataStorageInterface":
+        """Create data storage service using DI."""
+        return self._injector.resolve("DataStorageInterface")
 
-        Creates a data service with dependency injection patterns.
+    def create_data_cache(self) -> "DataCacheInterface":
+        """Create data cache service using DI."""
+        return self._injector.resolve("DataCacheInterface")
 
-        Args:
-            config: Service configuration
-            use_cache: Whether to enable caching
-            use_validator: Whether to enable validation
-            metrics_collector: Optional metrics collector
+    def create_data_validator(self) -> "DataValidatorInterface":
+        """Create data validator service using DI."""
+        return self._injector.resolve("DataValidatorInterface")
 
-        Returns:
-            DataServiceInterface: Configured data service
-        """
+    def create_market_data_source(self) -> "MarketDataSource":
+        """Create market data source using DI."""
+        return self._injector.resolve("MarketDataSource")
+
+    def create_vectorized_processor(self) -> "VectorizedProcessor":
+        """Create vectorized processor using DI."""
+        return self._injector.resolve("VectorizedProcessor")
+
+
+def create_default_data_service(
+    config: "Config | None" = None,
+    injector: DependencyInjector | None = None,
+) -> DataServiceInterface:
+    """
+    Create data service with default dependencies.
+
+    Args:
+        config: Service configuration
+        injector: Required dependency injector
+
+    Returns:
+        Configured data service
+    """
+    if injector is None:
         from src.data.di_registration import configure_data_dependencies
 
         injector = configure_data_dependencies()
 
-        # Register config if provided
+    # Register config if provided
+    if config:
         injector.register_factory("Config", lambda: config, singleton=True)
 
-        # Register metrics collector if provided
-        if metrics_collector:
-            injector.register_factory("MetricsCollector", lambda: metrics_collector, singleton=True)
-
-        return injector.resolve("DataServiceInterface")
+    factory = DataServiceFactory(injector=injector)
+    return factory.create_data_service()

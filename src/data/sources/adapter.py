@@ -6,7 +6,7 @@ from collections.abc import AsyncIterator
 from decimal import Decimal, getcontext
 from typing import Any
 
-from src.core.base.component import BaseComponent
+from src.core import BaseComponent
 from src.core.exceptions import ConfigurationError, DataError
 from src.data.interfaces import DataSourceInterface
 

@@ -7,7 +7,7 @@ multiple files to prevent circular import issues.
 
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Optional, Union
 
 if TYPE_CHECKING:
     from src.core.types import MarketData

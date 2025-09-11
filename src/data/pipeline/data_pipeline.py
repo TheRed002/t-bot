@@ -27,12 +27,12 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from src.core.base.component import BaseComponent
+from src.core import BaseComponent, get_logger
 from src.core.config import Config
 from src.core.exceptions import DataError, DataValidationError
 from src.core.logging import get_logger
 from src.core.types import MarketData
-from src.data.interfaces import DataServiceInterface, DataStorageInterface
+from src.data.interfaces import DataServiceInterface
 
 # Import from P-002A error handling
 from src.error_handling import ErrorHandler, with_circuit_breaker
@@ -94,25 +94,48 @@ class DataTransformation:
 
     @staticmethod
     async def normalize_prices(data: MarketData) -> MarketData:
-        """Normalize price data for consistency with database precision DECIMAL(20,8)."""
+        """Normalize price data using consistent financial transformation patterns from messaging coordinator."""
         try:
+            # Use consistent financial data transformation patterns
             from decimal import Decimal
+
+            from src.utils.decimal_utils import to_decimal
 
             # Use consistent 8 decimal place precision matching database schema
             precision_quantizer = Decimal("0.00000001")  # 8 decimal places
 
-            # Create new MarketData with normalized precision
+            # Apply consistent transformations from messaging coordinator
+            normalized_fields = {}
+            for field_name, field_value in [
+                ("open", getattr(data, "open", None)),
+                ("high", getattr(data, "high", None)),
+                ("low", getattr(data, "low", None)),
+                ("close", getattr(data, "close", None)),
+                ("price", getattr(data, "price", None)),
+                ("bid_price", getattr(data, "bid_price", None)),
+                ("ask_price", getattr(data, "ask_price", None)),
+                ("volume", getattr(data, "volume", None)),
+            ]:
+                if field_value is not None:
+                    # Use consistent decimal conversion and quantization
+                    decimal_value = to_decimal(field_value)
+                    normalized_fields[field_name] = decimal_value.quantize(precision_quantizer)
+                else:
+                    normalized_fields[field_name] = None
+
+            # Create new MarketData with consistent normalized precision
             normalized_data = MarketData(
                 symbol=data.symbol,
-                exchange=data.exchange,
+                exchange=getattr(data, "exchange", "unknown"),
                 timestamp=data.timestamp,
-                open=data.open.quantize(precision_quantizer) if data.open else None,
-                high=data.high.quantize(precision_quantizer) if data.high else None,
-                low=data.low.quantize(precision_quantizer) if data.low else None,
-                close=data.close.quantize(precision_quantizer) if data.close else None,
-                bid_price=data.bid_price.quantize(precision_quantizer) if data.bid_price else None,
-                ask_price=data.ask_price.quantize(precision_quantizer) if data.ask_price else None,
-                volume=data.volume.quantize(precision_quantizer) if data.volume else None,
+                open=normalized_fields.get("open"),
+                high=normalized_fields.get("high"),
+                low=normalized_fields.get("low"),
+                close=normalized_fields.get("close"),
+                price=normalized_fields.get("price"),
+                bid_price=normalized_fields.get("bid_price"),
+                ask_price=normalized_fields.get("ask_price"),
+                volume=normalized_fields.get("volume"),
                 metadata=getattr(data, "metadata", {}),
             )
 
@@ -120,42 +143,39 @@ class DataTransformation:
 
         except Exception as e:
             from src.core.exceptions import DataProcessingError
+            from src.utils.messaging_patterns import ErrorPropagationMixin
 
-            # Use consistent error propagation
-            raise DataProcessingError(
-                f"Price normalization failed for {data.symbol}",
+            # Use consistent error propagation from messaging patterns
+            error_mixin = ErrorPropagationMixin()
+
+            # Create consistent error context matching backtesting patterns
+            processing_error = DataProcessingError(
+                f"Price normalization failed for {getattr(data, 'symbol', 'unknown')}",
                 processing_step="normalize_prices",
-                input_data_sample=data.model_dump(),
-                data_source="market_data",
+                input_data_sample=data.model_dump() if hasattr(data, "model_dump") else str(data),
+                data_source="data_pipeline",
                 data_type="MarketData",
                 pipeline_stage="transformation",
-            ) from e
+                details={
+                    "processing_mode": "hybrid",  # Align with updated default mode
+                    "data_format": "market_data_v1",
+                    "boundary_crossed": True,
+                    "cross_module_error": True,
+                    "original_error": str(e)
+                }
+            )
+
+            # Apply consistent error propagation pattern
+            error_mixin.propagate_service_error(processing_error, "data_pipeline.normalize_prices")
 
     @staticmethod
     async def validate_ohlc_consistency(data: MarketData) -> bool:
-        """Validate OHLC price consistency."""
+        """Validate OHLC price consistency using consolidated validation utilities."""
         try:
-            if not all([data.open_price, data.high_price, data.low_price, data.price]):
-                return True  # Skip validation if not all prices available
+            from src.utils.validation.market_data_validation import MarketDataValidationUtils
 
-            open_price = float(data.open_price)
-            high_price = float(data.high_price)
-            low_price = float(data.low_price)
-            close_price = float(data.price)
-
-            # High should be >= max(open, close)
-            if high_price < max(open_price, close_price):
-                return False
-
-            # Low should be <= min(open, close)
-            if low_price > min(open_price, close_price):
-                return False
-
-            # Basic sanity checks
-            if high_price < low_price:
-                return False
-
-            return True
+            # Use consolidated validation utility
+            return MarketDataValidationUtils.validate_price_consistency(data)
 
         except Exception as e:
             logger.error(f"Market data validation failed: {e}")
@@ -324,16 +344,19 @@ class EnhancedDataPipeline(BaseComponent):
     def __init__(
         self,
         config: Config,
-        data_service: "DataServiceInterface | None" = None,
-        data_storage_interface: DataStorageInterface | None = None,
+        data_service: "DataServiceInterface",
         feature_store=None,
         metrics_collector: MetricsCollector | None = None,
     ):
         """Initialize the Enhanced Data Pipeline."""
         super().__init__()
         self.config = config
-        self.data_service = data_service  # Preferred - use service layer
-        self.data_storage = data_storage_interface  # Fallback - for legacy compatibility
+
+        # Required dependencies - must be injected
+        if data_service is None:
+            raise ValueError("data_service is required and must be injected")
+        self.data_service = data_service  # Required - use service layer only
+
         self.feature_store = feature_store
         self.error_handler = ErrorHandler(config)
 
@@ -371,8 +394,18 @@ class EnhancedDataPipeline(BaseComponent):
         """Setup pipeline configuration."""
         pipeline_config = getattr(self.config, "data_pipeline", {})
 
+        # Use consistent processing mode mapping aligned with backtesting patterns
+        mode_str = pipeline_config.get("processing_mode", "hybrid")  # Default to hybrid for compatibility
+        processing_mode = {
+            "batch": ProcessingMode.BATCH,
+            "stream": ProcessingMode.STREAM,
+            "hybrid": ProcessingMode.HYBRID,
+            "real_time": ProcessingMode.REAL_TIME,
+            "realtime": ProcessingMode.REAL_TIME,  # Alternative spelling
+        }.get(mode_str.lower(), ProcessingMode.HYBRID)  # Default to hybrid for backtesting compatibility
+
         self.processing_config = {
-            "processing_mode": ProcessingMode(pipeline_config.get("processing_mode", "batch")),
+            "processing_mode": processing_mode,
             "batch_size": pipeline_config.get("batch_size", 1000),
             "max_workers": pipeline_config.get("max_workers", 4),
             "queue_timeout": pipeline_config.get("queue_timeout", 30),
@@ -719,54 +752,62 @@ class EnhancedDataPipeline(BaseComponent):
 
     async def _process_storage(self, record: PipelineRecord) -> None:
         """Process data storage stage through service layer."""
-        # Pipeline should use a data service, not storage directly
-        # Create a temporary data service if needed for proper service layer architecture
         try:
+            # Apply consistent module boundary validation
+            from src.utils.messaging_patterns import BoundaryValidator
+
+            # Validate at module boundary before storage
+            if record.data:
+                data_dict = (
+                    record.data.model_dump()
+                    if hasattr(record.data, "model_dump")
+                    else record.data.__dict__
+                )
+                BoundaryValidator.validate_database_entity(data_dict, "create")
+
             # Validate record data at module boundary
             validation_result = record.validation_result
             if not validation_result or not validation_result.is_valid:
+                # Use consistent core exception patterns
                 raise DataError(
                     "Invalid data cannot be stored",
-                    error_code="PIPELINE_VALIDATION_001",
+                    error_code="DATA_004",
                     data_type="market_data",
+                    data_source="pipeline",
+                    pipeline_stage="storage",
                     context={"record_id": record.record_id},
                 )
 
-            # Use proper service layer - pipeline should not directly call storage
-            # Create a minimal data service instance for proper layering
-
-            # Use service layer architecture - prefer data service over storage
-            data_service = self.data_service
-            if not data_service and self.data_storage:
-                # Create a minimal data service using factory pattern
-                from src.data.di_registration import configure_data_dependencies
-
-                injector = configure_data_dependencies()
-                data_service = injector.resolve("DataServiceInterface")
-                await data_service.initialize()
-            elif not data_service:
+            # Use injected data service only - no direct storage access
+            if not self.data_service:
+                # Use consistent core exception patterns for dependency errors
                 raise DataError(
-                    "No data service or storage available for pipeline",
-                    error_code="PIPELINE_DEPENDENCY_001",
+                    "No data service available for pipeline - must be injected",
+                    error_code="DATA_002",
                     data_type="service_dependency",
+                    data_source="pipeline",
+                    pipeline_stage="storage",
                     context={
-                        "required_service": "DataService or DataStorage",
+                        "required_service": "DataServiceInterface",
                         "record_id": record.record_id,
                     },
                 )
 
             # Use service layer to store data
-            success = await data_service.store_market_data(
+            success = await self.data_service.store_market_data(
                 data=[record.data],
                 exchange=getattr(record.data, "exchange", "unknown"),
                 validate=False,  # Already validated in pipeline
             )
 
             if not success:
+                # Use consistent core exception patterns for storage failures
                 raise DataError(
                     "Pipeline data storage failed through service layer",
-                    error_code="PIPELINE_STORAGE_001",
+                    error_code="DATA_004",
                     data_type="market_data",
+                    data_source="pipeline",
+                    pipeline_stage="storage",
                     context={
                         "record_id": record.record_id,
                         "symbol": getattr(record.data, "symbol", "unknown"),
@@ -887,7 +928,7 @@ class EnhancedDataPipeline(BaseComponent):
             "components": {},
         }
 
-        # Check data service first, then storage
+        # Check data service
         if self.data_service:
             try:
                 data_health = await self.data_service.health_check()
@@ -895,15 +936,9 @@ class EnhancedDataPipeline(BaseComponent):
             except Exception as e:
                 health["components"]["data_service"] = f"unhealthy: {e}"
                 health["status"] = "degraded"
-        elif self.data_storage:
-            try:
-                data_health = await self.data_storage.health_check()
-                health["components"]["data_storage"] = data_health["status"]
-            except Exception as e:
-                health["components"]["data_storage"] = f"unhealthy: {e}"
-                health["status"] = "degraded"
         else:
-            health["components"]["data_layer"] = "not_configured"
+            health["components"]["data_service"] = "not_configured"
+            health["status"] = "degraded"
 
         # Check feature store
         if self.feature_store:
@@ -990,8 +1025,8 @@ class EnhancedDataPipeline(BaseComponent):
                             await worker
                         except asyncio.CancelledError:
                             pass
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            self.logger.debug(f"Error during worker cleanup: {e}")
 
                 # Force clear queues
                 try:
@@ -1000,10 +1035,11 @@ class EnhancedDataPipeline(BaseComponent):
                             self._ingestion_queue.get_nowait()
                         except asyncio.QueueEmpty:
                             break
-                        except Exception:
+                        except Exception as e:
+                            self.logger.debug(f"Error clearing ingestion queue: {e}")
                             break
-                except Exception:
-                    pass
+                except Exception as e:
+                    self.logger.debug(f"Error during queue cleanup: {e}")
 
                 for queue_name, queue in queues.items():
                     try:
@@ -1012,10 +1048,11 @@ class EnhancedDataPipeline(BaseComponent):
                                 queue.get_nowait()
                             except asyncio.QueueEmpty:
                                 break
-                            except Exception:
+                            except Exception as e:
+                                self.logger.debug(f"Error clearing queue {queue_name}: {e}")
                                 break
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        self.logger.debug(f"Error accessing queue {queue_name}: {e}")
 
                 # Clear all resources
                 self._active_records.clear()

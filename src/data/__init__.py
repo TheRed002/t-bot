@@ -46,12 +46,11 @@ from .interfaces import (
 from .quality.cleaning import DataCleaner
 from .quality.monitoring import QualityMonitor
 from .quality.validation import DataValidator
-from .services import DataIntegrationService, DataService
+from .services import DataService
 
 __all__ = [
     "DataCleaner",
     # Data Services
-    "DataIntegrationService",
     "DataService",
     "DataServiceFactory",
     # Data Interfaces

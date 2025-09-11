@@ -26,9 +26,10 @@ from typing import Any
 
 import websockets
 from pydantic import BaseModel, ConfigDict, Field
+from websockets.client import WebSocketClientProtocol
 from websockets.exceptions import ConnectionClosed, WebSocketException
 
-from src.core.base.component import BaseComponent
+from src.core import BaseComponent
 from src.core.config import Config
 from src.core.exceptions import (
     ConfigurationError,
@@ -39,6 +40,7 @@ from src.core.exceptions import (
 )
 from src.core.types import MarketData
 from src.data.interfaces import DataServiceInterface, DataValidatorInterface
+from src.utils.messaging_patterns import MessagingCoordinator
 
 
 class StreamState(Enum):
@@ -153,7 +155,7 @@ class StreamBuffer:
 
     async def get_batch(self, max_size: int, timeout: float = 1.0) -> list[Any]:
         """Get batch of items from buffer."""
-        items = []
+        items: list[Any] = []
         start_time = time.time()
 
         while len(items) < max_size and (time.time() - start_time) < timeout:
@@ -190,10 +192,12 @@ class WebSocketConnection:
     def __init__(self, config: StreamConfig, message_handler: Callable):
         self.config = config
         self.message_handler = message_handler
-        self.websocket: websockets.WebSocketServerProtocol | None = None
+        self.websocket: WebSocketClientProtocol | None = None
         self.state = StreamState.DISCONNECTED
         self.connection_start_time: datetime | None = None
         self.reconnect_count = 0
+        self._heartbeat_task: asyncio.Task | None = None
+        self._close_event = asyncio.Event()
 
     async def connect(self) -> bool:
         """Connect to WebSocket.
@@ -230,9 +234,13 @@ class WebSocketConnection:
             websocket = None  # Prevent cleanup of successfully assigned websocket
             self.state = StreamState.CONNECTED
             self.connection_start_time = datetime.now(timezone.utc)
+            self._close_event.clear()
 
             # Send subscription message
             await self._send_subscription()
+
+            # Start heartbeat task for connection monitoring
+            self._heartbeat_task = asyncio.create_task(self._heartbeat_monitor())
 
             return True
 
@@ -290,23 +298,41 @@ class WebSocketConnection:
                         yield data
                     except json.JSONDecodeError:
                         # Log invalid JSON but continue
+                        if hasattr(self, "logger"):
+                            self.logger.warning(f"Invalid JSON received: {message[:100]}")
                         continue
                 elif isinstance(message, bytes):
                     try:
                         data = json.loads(message.decode("utf-8"))
                         yield data
                     except (json.JSONDecodeError, UnicodeDecodeError):
+                        if hasattr(self, "logger"):
+                            self.logger.warning("Invalid bytes message received")
                         continue
 
         except ConnectionClosed:
             self.state = StreamState.DISCONNECTED
+            if hasattr(self, "logger"):
+                self.logger.info("WebSocket connection closed")
             raise
-        except WebSocketException:
+        except WebSocketException as e:
             self.state = StreamState.ERROR
+            if hasattr(self, "logger"):
+                self.logger.error(f"WebSocket exception: {e}")
             raise
 
     async def disconnect(self) -> None:
         """Disconnect from WebSocket."""
+        self._close_event.set()  # Signal connection to close
+
+        # Cancel heartbeat task
+        if self._heartbeat_task and not self._heartbeat_task.done():
+            self._heartbeat_task.cancel()
+            try:
+                await self._heartbeat_task
+            except asyncio.CancelledError:
+                pass
+
         websocket = None
         try:
             if self.websocket:
@@ -330,6 +356,37 @@ class WebSocketConnection:
                     if hasattr(self, "logger"):
                         self.logger.warning(f"Failed to close WebSocket in finally block: {e}")
             self.state = StreamState.DISCONNECTED
+
+    async def _heartbeat_monitor(self) -> None:
+        """Monitor WebSocket connection health with heartbeat."""
+        try:
+            while not self._close_event.is_set():
+                if self.websocket and not self.websocket.closed:
+                    try:
+                        # Send ping and wait for pong
+                        pong_waiter = await self.websocket.ping()
+                        await asyncio.wait_for(pong_waiter, timeout=10.0)
+                    except (asyncio.TimeoutError, ConnectionClosed, WebSocketException):
+                        if hasattr(self, "logger"):
+                            self.logger.warning("WebSocket heartbeat failed")
+                        self.state = StreamState.ERROR
+                        break
+                    except Exception as e:
+                        if hasattr(self, "logger"):
+                            self.logger.error(f"Heartbeat error: {e}")
+                        break
+
+                # Wait for next heartbeat interval or close signal
+                try:
+                    await asyncio.wait_for(
+                        self._close_event.wait(), timeout=self.config.heartbeat_interval
+                    )
+                    break  # Close event was set
+                except asyncio.TimeoutError:
+                    continue  # Normal timeout, continue heartbeat
+
+        except asyncio.CancelledError:
+            pass
 
     def is_connected(self) -> bool:
         """Check if WebSocket is connected."""
@@ -364,6 +421,8 @@ class StreamingDataService(BaseComponent):
         """Initialize streaming data service."""
         super().__init__()
         self.config = config
+
+        # Service dependencies should be injected
         self.data_service = data_service
         self.validator = validator
 
@@ -526,7 +585,9 @@ class StreamingDataService(BaseComponent):
         try:
             while connection.is_connected() and not shutdown_event.is_set():
                 try:
-                    async for message in connection.listen():
+                    # Use timeout to allow periodic shutdown checks
+                    listen_task = asyncio.create_task(self._listen_with_timeout(connection, shutdown_event))
+                    async for message in listen_task:
                         # Check for shutdown during message processing
                         if shutdown_event.is_set():
                             break
@@ -540,17 +601,23 @@ class StreamingDataService(BaseComponent):
                         elif isinstance(message, dict):
                             metrics.bytes_received += len(json.dumps(message).encode("utf-8"))
 
-                        # Add to buffer
-                        success = await buffer.put(message)
-                        if not success:
+                        # Add to buffer with timeout to prevent blocking
+                        try:
+                            success = await asyncio.wait_for(buffer.put(message), timeout=1.0)
+                            if not success:
+                                metrics.messages_dropped += 1
+                        except asyncio.TimeoutError:
                             metrics.messages_dropped += 1
+                            self.logger.warning(f"Buffer put timeout for {exchange}")
 
                         # Update buffer utilization
                         metrics.buffer_utilization = buffer.utilization()
 
                 except ConnectionClosed:
                     if not shutdown_event.is_set():
-                        self.logger.warning(f"Connection closed for {exchange}, attempting reconnect...")
+                        self.logger.warning(
+                            f"Connection closed for {exchange}, attempting reconnect..."
+                        )
                         await self._reconnect(exchange)
                     else:
                         break
@@ -565,6 +632,17 @@ class StreamingDataService(BaseComponent):
         finally:
             self.logger.info(f"Stream task stopped for {exchange}")
 
+    async def _listen_with_timeout(self, connection: WebSocketConnection, shutdown_event: asyncio.Event) -> AsyncGenerator[dict[str, Any], None]:
+        """Listen for messages with timeout to allow shutdown checks."""
+        try:
+            async for message in connection.listen():
+                if shutdown_event.is_set():
+                    break
+                yield message
+        except asyncio.CancelledError:
+            # Handle graceful cancellation
+            pass
+
     async def _processor_task(self, exchange: str) -> None:
         """Background task for processing buffered data."""
         buffer = self._buffers[exchange]
@@ -576,7 +654,9 @@ class StreamingDataService(BaseComponent):
             while not shutdown_event.is_set():
                 try:
                     # Get batch of messages with timeout to allow shutdown check
-                    messages = await buffer.get_batch(config.batch_size, timeout=config.flush_interval)
+                    messages = await buffer.get_batch(
+                        config.batch_size, timeout=config.flush_interval
+                    )
 
                     if messages:
                         # Process batch
@@ -606,12 +686,12 @@ class StreamingDataService(BaseComponent):
             self.logger.info(f"Processor task stopped for {exchange}")
 
     async def _process_message_batch(self, exchange: str, messages: list[dict[str, Any]]) -> None:
-        """Process batch of messages using consistent data flow patterns from pipeline."""
+        """Process batch of messages using consistent data flow patterns from pipeline and messaging coordinator."""
         config = self._stream_configs[exchange]
         handler = self._message_handlers.get(exchange, self._message_handlers["default"])
 
-        # Module boundary validation - ensure we have valid configuration
-        if not config or not handler:
+        # Module boundary validation using messaging patterns
+        if not config or handler is None:
             raise DataProcessingError(
                 f"Invalid streaming configuration for {exchange}",
                 error_code="STREAM_CONFIG_001",
@@ -620,29 +700,49 @@ class StreamingDataService(BaseComponent):
                 pipeline_stage="ingestion",
             )
 
-        # Use consistent transformation patterns from pipeline
+        # Use consistent processing paradigm alignment
+        from src.utils.messaging_patterns import ProcessingParadigmAligner
+
+        # Align stream to batch processing for consistency with pipeline
+        stream_items = [{"message": msg, "exchange": exchange} for msg in messages]
+        batch_data = ProcessingParadigmAligner.create_batch_from_stream(stream_items)
+
+        # Apply processing mode alignment for consistent flow
+        aligned_data = ProcessingParadigmAligner.align_processing_modes(
+            source_mode="stream", target_mode="batch", data=batch_data
+        )
+
+        # Use existing coordinator from processing paradigm alignment
+        coordinator = MessagingCoordinator("StreamingDataProcessing")
+
         market_data_list = []
         processing_errors = []
 
         for message in messages:
             try:
-                # Validate raw message at module boundary
+                # Validate raw message at module boundary using messaging patterns
                 if not isinstance(message, dict) or not message:
                     continue
 
                 market_data = await handler(message, exchange)
                 if market_data:
-                    # Apply consistent normalization using pipeline patterns
-                    from src.data.pipeline.data_pipeline import DataTransformation
+                    # Apply consistent data transformation from messaging coordinator
+                    market_data_dict = (
+                        market_data.model_dump()
+                        if hasattr(market_data, "model_dump")
+                        else market_data.__dict__
+                    )
+                    transformed_data = coordinator._apply_data_transformation(market_data_dict)
 
-                    normalized_data = await DataTransformation.normalize_prices(market_data)
+                    # Recreate MarketData with consistent transformed data
+                    market_data = MarketData(**transformed_data)
 
                     # Deduplication check with consistent pattern
                     if config.enable_deduplication:
-                        if await self._is_duplicate(exchange, normalized_data):
+                        if await self._is_duplicate(exchange, market_data):
                             continue
 
-                    market_data_list.append(normalized_data)
+                    market_data_list.append(market_data)
 
             except Exception as e:
                 # Use consistent error propagation pattern from pipeline
@@ -673,12 +773,23 @@ class StreamingDataService(BaseComponent):
                 )
             return
 
-        # Use consistent validation patterns from pipeline
+        # Use consistent validation patterns from pipeline at module boundary
         if config.enable_validation and self.validator:
             try:
+                # Apply boundary validation using consistent patterns
+                from src.utils.messaging_patterns import BoundaryValidator
+
+                for data in market_data_list:
+                    BoundaryValidator.validate_database_entity(data.model_dump(), "create")
+
                 # Validate at module boundary before storage
-                validated_data = await self.validator.validate_market_data(market_data_list)
-                market_data_list = validated_data
+                if hasattr(self.validator, "validate_market_data"):
+                    validated_data = await self.validator.validate_market_data(market_data_list)
+                    market_data_list = validated_data
+                else:
+                    # Use basic validation for each item
+                    for data in market_data_list:
+                        self.validator.validate(data.model_dump())
 
             except Exception as e:
                 raise DataValidationError(
@@ -690,7 +801,13 @@ class StreamingDataService(BaseComponent):
                 ) from e
 
         # Store data using consistent patterns with pipeline
-        if self.data_service and market_data_list:
+        if market_data_list:
+            if not self.data_service:
+                self.logger.warning(
+                    f"No data service available - discarding {len(market_data_list)} market data records for {exchange}"
+                )
+                return
+
             try:
                 # Use consistent storage interface with pipeline
                 success = await self.data_service.store_market_data(
@@ -803,9 +920,13 @@ class StreamingDataService(BaseComponent):
 
             return MarketData(
                 symbol=str(symbol).upper(),
-                price=Decimal(str(price)),
-                volume=Decimal(str(volume)) if volume else None,
+                open=Decimal(str(price)),
+                high=Decimal(str(price)),
+                low=Decimal(str(price)),
+                close=Decimal(str(price)),
+                volume=Decimal(str(volume)) if volume else Decimal("0"),
                 timestamp=timestamp,
+                exchange=exchange,
             )
 
         except Exception as e:
@@ -823,12 +944,13 @@ class StreamingDataService(BaseComponent):
 
                 return MarketData(
                     symbol=data.get("s", "").upper(),
-                    price=Decimal(str(data.get("c", 0))),  # Close price
+                    close=Decimal(str(data.get("c", 0))),  # Close price
                     volume=Decimal(str(data.get("v", 0))),  # Volume
-                    high_price=Decimal(str(data.get("h", 0))),  # High
-                    low_price=Decimal(str(data.get("l", 0))),  # Low
-                    open_price=Decimal(str(data.get("o", 0))),  # Open
+                    high=Decimal(str(data.get("h", 0))),  # High
+                    low=Decimal(str(data.get("l", 0))),  # Low
+                    open=Decimal(str(data.get("o", 0))),  # Open
                     timestamp=datetime.now(timezone.utc),
+                    exchange=exchange,
                 )
 
             return await self._handle_generic_message(message, exchange)
@@ -844,13 +966,16 @@ class StreamingDataService(BaseComponent):
         try:
             # Coinbase ticker format
             if message.get("type") == "ticker":
+                price = Decimal(str(message.get("price", 0)))
                 return MarketData(
                     symbol=message.get("product_id", "").replace("-", ""),
-                    price=Decimal(str(message.get("price", 0))),
+                    open=price,
+                    high=price,
+                    low=price,
+                    close=price,
                     volume=Decimal(str(message.get("volume_24h", 0))),
-                    bid=Decimal(str(message.get("best_bid", 0))),
-                    ask=Decimal(str(message.get("best_ask", 0))),
                     timestamp=datetime.now(timezone.utc),
+                    exchange=exchange,
                 )
 
             return await self._handle_generic_message(message, exchange)
@@ -867,13 +992,16 @@ class StreamingDataService(BaseComponent):
             # OKX ticker format
             if "data" in message:
                 for data in message["data"]:
+                    price = Decimal(str(data.get("last", 0)))
                     return MarketData(
                         symbol=data.get("instId", "").replace("-", ""),
-                        price=Decimal(str(data.get("last", 0))),
+                        open=price,
+                        high=Decimal(str(data.get("high24h", 0))),
+                        low=Decimal(str(data.get("low24h", 0))),
+                        close=price,
                         volume=Decimal(str(data.get("vol24h", 0))),
-                        high_price=Decimal(str(data.get("high24h", 0))),
-                        low_price=Decimal(str(data.get("low24h", 0))),
                         timestamp=datetime.now(timezone.utc),
+                        exchange=exchange,
                     )
 
             return await self._handle_generic_message(message, exchange)
@@ -906,28 +1034,30 @@ class StreamingDataService(BaseComponent):
                 status[exchange_name] = await self.get_stream_status(exchange_name)
             return status
 
-    async def get_metrics(self) -> dict[str, StreamMetrics]:
+    def get_metrics(self) -> dict[str, Any]:
         """Get streaming metrics for all exchanges."""
         return self._metrics.copy()
 
     async def health_check(self) -> dict[str, Any]:
         """Perform streaming service health check."""
-        health = {
-            "status": "healthy",
-            "initialized": self._initialized,
-            "active_streams": len(self._connections),
-            "configured_streams": len(self._stream_configs),
-            "streams": {},
-        }
+        status = "healthy"
+        streams_info = {}
 
         for exchange in self._stream_configs.keys():
             stream_status = await self.get_stream_status(exchange)
-            health["streams"][exchange] = stream_status
+            streams_info[exchange] = stream_status
 
             if not stream_status.get("connected", False):
-                health["status"] = "degraded"
+                status = "degraded"
 
-        return health
+        return {
+            "status": status,
+            "message": f"Streaming service: {status}",
+            "initialized": self._initialized,
+            "active_streams": len(self._connections),
+            "configured_streams": len(self._stream_configs),
+            "streams": streams_info,
+        }
 
     async def cleanup(self) -> None:
         """Cleanup streaming service resources."""
@@ -938,13 +1068,25 @@ class StreamingDataService(BaseComponent):
             background_tasks = list(self._background_tasks)
             connections = dict(self._connections)
 
-            # Cancel background tasks
+            # Signal shutdown to all exchanges first
+            for exchange in connections.keys():
+                if exchange in self._shutdown_events:
+                    self._shutdown_events[exchange].set()
+
+            # Cancel background tasks with timeout
+            cancel_tasks = []
             for task in background_tasks:
-                task.cancel()
+                if not task.done():
+                    task.cancel()
+                    cancel_tasks.append(task)
+
+            if cancel_tasks:
                 try:
-                    await task
-                except asyncio.CancelledError:
-                    pass
+                    await asyncio.wait_for(
+                        asyncio.gather(*cancel_tasks, return_exceptions=True), timeout=10.0
+                    )
+                except asyncio.TimeoutError:
+                    self.logger.warning("Timeout waiting for background tasks to cancel")
 
             # Disconnect all streams with timeout
             disconnect_tasks = [self.stop_stream(exchange) for exchange in list(connections.keys())]
@@ -964,6 +1106,7 @@ class StreamingDataService(BaseComponent):
             self._metrics.clear()
             self._dedup_cache.clear()
             self._background_tasks.clear()
+            self._shutdown_events.clear()
 
             self._initialized = False
             self.logger.info("StreamingDataService cleanup completed")
@@ -971,25 +1114,33 @@ class StreamingDataService(BaseComponent):
         except Exception as e:
             self.logger.error(f"StreamingDataService cleanup error: {e}")
         finally:
-            # Force cleanup any remaining resources
+            # Force cleanup any remaining resources with proper async context
             try:
                 # Force cancel any remaining background tasks
-                for task in background_tasks:
-                    if not task.done():
+                remaining_tasks = [task for task in background_tasks if not task.done()]
+                if remaining_tasks:
+                    for task in remaining_tasks:
                         task.cancel()
-                        try:
-                            await task
-                        except asyncio.CancelledError:
-                            pass
-                        except Exception:
-                            pass
-
-                # Force disconnect any remaining connections
-                for exchange, connection in connections.items():
                     try:
-                        await connection.disconnect()
-                    except Exception as e:
-                        self.logger.warning(f"Error force disconnecting {exchange}: {e}")
+                        await asyncio.wait_for(
+                            asyncio.gather(*remaining_tasks, return_exceptions=True), timeout=5.0
+                        )
+                    except asyncio.TimeoutError:
+                        self.logger.warning("Force cancel timeout - some tasks may remain")
+
+                # Force disconnect any remaining connections with async context managers
+                disconnect_coros = []
+                for exchange, connection in connections.items():
+                    if connection.is_connected():
+                        disconnect_coros.append(connection.disconnect())
+
+                if disconnect_coros:
+                    try:
+                        await asyncio.wait_for(
+                            asyncio.gather(*disconnect_coros, return_exceptions=True), timeout=10.0
+                        )
+                    except asyncio.TimeoutError:
+                        self.logger.warning("Force disconnect timeout")
 
                 # Clear all resources
                 self._connections.clear()
@@ -997,6 +1148,7 @@ class StreamingDataService(BaseComponent):
                 self._metrics.clear()
                 self._dedup_cache.clear()
                 self._background_tasks.clear()
+                self._shutdown_events.clear()
                 self._initialized = False
             except Exception as e:
                 self.logger.warning(f"Error in final streaming cleanup: {e}")

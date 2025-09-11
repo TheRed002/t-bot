@@ -1,6 +1,5 @@
 """Test suite for data types."""
 
-import pytest
 from datetime import datetime, timezone
 from decimal import Decimal
 from enum import Enum
@@ -67,7 +66,7 @@ class TestDataMetrics:
     def test_initialization_defaults(self):
         """Test default initialization."""
         metrics = DataMetrics()
-        
+
         assert metrics.records_processed == 0
         assert metrics.records_valid == 0
         assert metrics.records_invalid == 0
@@ -85,9 +84,9 @@ class TestDataMetrics:
             processing_time_ms=250,
             throughput_per_second=Decimal("100.0"),
             error_rate=Decimal("0.05"),
-            cache_hit_rate=Decimal("0.85")
+            cache_hit_rate=Decimal("0.85"),
         )
-        
+
         assert metrics.records_processed == 1000
         assert metrics.records_valid == 950
         assert metrics.records_invalid == 50
@@ -99,7 +98,7 @@ class TestDataMetrics:
     def test_metrics_are_numeric(self):
         """Test that all metrics are numeric types."""
         metrics = DataMetrics()
-        
+
         assert isinstance(metrics.records_processed, int)
         assert isinstance(metrics.records_valid, int)
         assert isinstance(metrics.records_invalid, int)
@@ -114,11 +113,8 @@ class TestDataRequest:
 
     def test_initialization_minimal(self):
         """Test minimal initialization."""
-        request = DataRequest(
-            symbol="BTCUSDT",
-            exchange="binance"
-        )
-        
+        request = DataRequest(symbol="BTCUSDT", exchange="binance")
+
         assert request.symbol == "BTCUSDT"
         assert request.exchange == "binance"
         assert request.start_time is None
@@ -131,7 +127,7 @@ class TestDataRequest:
         """Test full initialization."""
         start_time = datetime.now(timezone.utc)
         end_time = datetime.now(timezone.utc)
-        
+
         request = DataRequest(
             symbol="ETHUSD",
             exchange="coinbase",
@@ -139,9 +135,9 @@ class TestDataRequest:
             end_time=end_time,
             limit=100,
             use_cache=False,
-            cache_ttl=3600
+            cache_ttl=3600,
         )
-        
+
         assert request.symbol == "ETHUSD"
         assert request.exchange == "coinbase"
         assert request.start_time == start_time
@@ -167,7 +163,7 @@ class TestDataRequest:
         request1 = DataRequest(symbol="BTCUSDT", exchange="binance", use_cache=True, cache_ttl=7200)
         assert request1.use_cache is True
         assert request1.cache_ttl == 7200
-        
+
         # Test with cache disabled
         request2 = DataRequest(symbol="BTCUSDT", exchange="binance", use_cache=False)
         assert request2.use_cache is False
@@ -177,21 +173,16 @@ class TestDataRequest:
         """Test time range settings."""
         start = datetime(2023, 1, 1, tzinfo=timezone.utc)
         end = datetime(2023, 1, 2, tzinfo=timezone.utc)
-        
-        request = DataRequest(
-            symbol="BTCUSDT",
-            exchange="binance",
-            start_time=start,
-            end_time=end
-        )
-        
+
+        request = DataRequest(symbol="BTCUSDT", exchange="binance", start_time=start, end_time=end)
+
         assert request.start_time == start
         assert request.end_time == end
 
     def test_exchange_setting(self):
         """Test exchange setting."""
         exchanges = ["binance", "coinbase", "okx"]
-        
+
         for exchange in exchanges:
             request = DataRequest(symbol="BTCUSDT", exchange=exchange)
             assert request.exchange == exchange

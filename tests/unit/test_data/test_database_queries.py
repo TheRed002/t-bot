@@ -8,9 +8,9 @@ These tests verify the new query methods added to DatabaseQueries:
 - Data pipeline record operations
 """
 
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
-from contextlib import asynccontextmanager
 
 import pytest
 import pytest_asyncio
@@ -45,16 +45,17 @@ class TestMarketDataRecordQueries:
     @pytest_asyncio.fixture
     async def mock_db_queries(self, mock_session):
         """Create DatabaseQueries instance with properly mocked database."""
+
         # Create an async context manager for the mock session
         @asynccontextmanager
         async def mock_get_session():
             yield mock_session
-        
+
         # Pass the mock session directly to DatabaseQueries
         queries = DatabaseQueries(mock_session)
-        
+
         # Patch get_async_session in connection module
-        with patch('src.database.connection.get_async_session', mock_get_session):
+        with patch("src.database.connection.get_async_session", mock_get_session):
             yield queries
 
     @pytest.fixture
@@ -70,7 +71,7 @@ class TestMarketDataRecordQueries:
             close_price=50500.0,
             volume=100.0,
             interval="1h",
-            source="exchange"
+            source="exchange",
         )
 
     @pytest.mark.asyncio
@@ -85,7 +86,9 @@ class TestMarketDataRecordQueries:
         mock_db_queries.session.commit.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_bulk_create_market_data_records(self, mock_db_queries, sample_market_data_record):
+    async def test_bulk_create_market_data_records(
+        self, mock_db_queries, sample_market_data_record
+    ):
         """Test bulk creating market data records."""
         records = [sample_market_data_record, sample_market_data_record]
         mock_db_queries.session.add_all = MagicMock()
@@ -104,10 +107,7 @@ class TestMarketDataRecordQueries:
         mock_result.scalars.return_value.all.return_value = mock_records
         mock_db_queries.session.execute.return_value = mock_result
 
-        result = await mock_db_queries.get_market_data_records(
-            symbol="BTCUSDT",
-            exchange="binance"
-        )
+        result = await mock_db_queries.get_market_data_records(symbol="BTCUSDT", exchange="binance")
 
         assert result == mock_records
         mock_db_queries.session.execute.assert_called_once()
@@ -120,9 +120,7 @@ class TestMarketDataRecordQueries:
         mock_result.scalars.return_value.all.return_value = mock_records
         mock_db_queries.session.execute.return_value = mock_result
 
-        result = await mock_db_queries.get_market_data_by_quality(
-            min_quality_score=0.8
-        )
+        result = await mock_db_queries.get_market_data_by_quality(min_quality_score=0.8)
 
         assert result == mock_records
         mock_db_queries.session.execute.assert_called_once()
@@ -165,15 +163,16 @@ class TestFeatureRecordQueries:
     @pytest_asyncio.fixture
     async def mock_db_queries(self, mock_session):
         """Create DatabaseQueries instance with properly mocked database."""
+
         @asynccontextmanager
         async def mock_get_session():
             yield mock_session
-        
+
         # Pass the mock session directly to DatabaseQueries
         queries = DatabaseQueries(mock_session)
-        
+
         # Patch get_async_session in connection module
-        with patch('src.database.connection.get_async_session', mock_get_session):
+        with patch("src.database.connection.get_async_session", mock_get_session):
             yield queries
 
     @pytest.fixture
@@ -186,7 +185,7 @@ class TestFeatureRecordQueries:
             calculation_timestamp=datetime.now(timezone.utc),
             feature_value=49500.0,
             confidence_score=0.85,
-            calculation_method="standard"
+            calculation_method="standard",
         )
 
     @pytest.mark.asyncio
@@ -219,8 +218,7 @@ class TestFeatureRecordQueries:
         mock_db_queries.session.execute.return_value = mock_result
 
         result = await mock_db_queries.get_feature_records(
-            symbol="BTCUSDT",
-            feature_type="technical"
+            symbol="BTCUSDT", feature_type="technical"
         )
 
         assert result == mock_records
@@ -247,15 +245,16 @@ class TestDataQualityRecordQueries:
     @pytest_asyncio.fixture
     async def mock_db_queries(self, mock_session):
         """Create DatabaseQueries instance with properly mocked database."""
+
         @asynccontextmanager
         async def mock_get_session():
             yield mock_session
-        
+
         # Pass the mock session directly to DatabaseQueries
         queries = DatabaseQueries(mock_session)
-        
+
         # Patch get_async_session in connection module
-        with patch('src.database.connection.get_async_session', mock_get_session):
+        with patch("src.database.connection.get_async_session", mock_get_session):
             yield queries
 
     @pytest.fixture
@@ -273,7 +272,7 @@ class TestDataQualityRecordQueries:
             missing_data_count=5,
             outlier_count=2,
             duplicate_count=0,
-            check_type="comprehensive"
+            check_type="comprehensive",
         )
 
     @pytest.mark.asyncio
@@ -294,8 +293,7 @@ class TestDataQualityRecordQueries:
         mock_db_queries.session.execute.return_value = mock_result
 
         result = await mock_db_queries.get_data_quality_records(
-            symbol="BTCUSDT",
-            data_source="exchange"
+            symbol="BTCUSDT", data_source="exchange"
         )
 
         assert result == mock_records
@@ -322,15 +320,16 @@ class TestDataPipelineRecordQueries:
     @pytest_asyncio.fixture
     async def mock_db_queries(self, mock_session):
         """Create DatabaseQueries instance with properly mocked database."""
+
         @asynccontextmanager
         async def mock_get_session():
             yield mock_session
-        
+
         # Pass the mock session directly to DatabaseQueries
         queries = DatabaseQueries(mock_session)
-        
+
         # Patch get_async_session in connection module
-        with patch('src.database.connection.get_async_session', mock_get_session):
+        with patch("src.database.connection.get_async_session", mock_get_session):
             yield queries
 
     @pytest.fixture
@@ -341,7 +340,7 @@ class TestDataPipelineRecordQueries:
             execution_id="exec_001",
             execution_timestamp=datetime.now(timezone.utc),
             status="running",
-            stage="started"
+            stage="started",
         )
 
     @pytest.mark.asyncio
@@ -362,9 +361,7 @@ class TestDataPipelineRecordQueries:
         mock_db_queries.session.execute.return_value = mock_result
 
         result = await mock_db_queries.update_data_pipeline_status(
-            execution_id=execution_id,
-            status="completed",
-            stage="finished"
+            execution_id=execution_id, status="completed", stage="finished"
         )
 
         assert result is True
@@ -380,8 +377,7 @@ class TestDataPipelineRecordQueries:
         mock_db_queries.session.execute.return_value = mock_result
 
         result = await mock_db_queries.update_data_pipeline_status(
-            execution_id=execution_id,
-            status="completed"
+            execution_id=execution_id, status="completed"
         )
 
         assert result is False
@@ -422,16 +418,17 @@ class TestQueryErrorHandling:
     @pytest_asyncio.fixture
     async def mock_db_queries_with_error(self, mock_session_with_error):
         """Create DatabaseQueries instance with error-prone mock session."""
+
         # Create an async context manager for the mock session
         @asynccontextmanager
         async def mock_get_session():
             yield mock_session_with_error
-        
+
         # Pass the mock session directly to DatabaseQueries
         queries = DatabaseQueries(mock_session_with_error)
-        
+
         # Patch get_async_session in connection module
-        with patch('src.database.connection.get_async_session', mock_get_session):
+        with patch("src.database.connection.get_async_session", mock_get_session):
             yield queries
 
     @pytest.mark.asyncio
@@ -442,7 +439,7 @@ class TestQueryErrorHandling:
             exchange="binance",
             data_timestamp=datetime.now(timezone.utc),
             interval="1h",
-            source="exchange"
+            source="exchange",
         )
 
         with pytest.raises(Exception, match="Add error"):
@@ -457,7 +454,7 @@ class TestQueryErrorHandling:
                 exchange="binance",
                 data_timestamp=datetime.now(timezone.utc),
                 interval="1h",
-                source="exchange"
+                source="exchange",
             )
         ]
 
@@ -469,8 +466,7 @@ class TestQueryErrorHandling:
         """Test error handling when retrieving market data records fails."""
         with pytest.raises(Exception, match="Database error"):
             await mock_db_queries_with_error.get_market_data_records(
-                symbol="BTCUSDT",
-                exchange="binance"
+                symbol="BTCUSDT", exchange="binance"
             )
 
     @pytest.mark.asyncio
@@ -502,15 +498,16 @@ class TestQueryParameterHandling:
     @pytest_asyncio.fixture
     async def mock_db_queries(self, mock_session):
         """Create DatabaseQueries instance with properly mocked database."""
+
         @asynccontextmanager
         async def mock_get_session():
             yield mock_session
-        
+
         # Pass the mock session directly to DatabaseQueries
         queries = DatabaseQueries(mock_session)
-        
+
         # Patch get_async_session in connection module
-        with patch('src.database.connection.get_async_session', mock_get_session):
+        with patch("src.database.connection.get_async_session", mock_get_session):
             yield queries
 
     @pytest.mark.asyncio
@@ -527,7 +524,7 @@ class TestQueryParameterHandling:
             exchange="binance",
             start_time=datetime.now(timezone.utc),
             end_time=datetime.now(timezone.utc),
-            limit=100
+            limit=100,
         )
 
         assert result == mock_records
@@ -547,7 +544,7 @@ class TestQueryParameterHandling:
             feature_type="technical",
             feature_name="sma_20",
             start_time=datetime.now(timezone.utc),
-            end_time=datetime.now(timezone.utc)
+            end_time=datetime.now(timezone.utc),
         )
 
         assert result == mock_records
@@ -566,7 +563,7 @@ class TestQueryParameterHandling:
             symbol="BTCUSDT",
             data_source="exchange",
             start_time=datetime.now(timezone.utc),
-            end_time=datetime.now(timezone.utc)
+            end_time=datetime.now(timezone.utc),
         )
 
         assert result == mock_records
@@ -582,8 +579,7 @@ class TestQueryParameterHandling:
 
         # Test with all filters
         result = await mock_db_queries.get_data_pipeline_records(
-            pipeline_name="market_data_ingestion",
-            status="running"
+            pipeline_name="market_data_ingestion", status="running"
         )
 
         assert result == mock_records

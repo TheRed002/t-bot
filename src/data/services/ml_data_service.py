@@ -8,7 +8,7 @@ feature set storage, and prediction persistence.
 from datetime import datetime, timezone
 from typing import Any
 
-from src.core.base.interfaces import HealthStatus
+from src.core import HealthStatus
 from src.core.base.service import BaseService
 from src.core.exceptions import DataError
 from src.core.types.base import ConfigDict
@@ -56,6 +56,14 @@ class MLDataService(BaseService):
     @UnifiedDecorator.enhance(log=True, monitor=True)
     async def store_model_metadata(self, metadata: dict[str, Any]) -> None:
         """Store model metadata."""
+        # Apply consistent boundary validation at service boundary
+        from src.utils.messaging_patterns import BoundaryValidator
+
+        try:
+            BoundaryValidator.validate_database_entity(metadata, "create")
+        except Exception as e:
+            raise DataError(f"Metadata validation failed at service boundary: {e}")
+
         model_id = metadata.get("model_id")
         if not model_id:
             raise DataError("model_id is required")
@@ -160,6 +168,15 @@ class MLDataService(BaseService):
         version: str | None = None,
     ) -> None:
         """Store feature set."""
+        # Apply consistent boundary validation for feature data
+        from src.utils.messaging_patterns import BoundaryValidator
+
+        try:
+            # Validate feature data at service boundary
+            combined_data = {"feature_set_id": feature_set_id, "symbol": symbol, **feature_data}
+            BoundaryValidator.validate_database_entity(combined_data, "create")
+        except Exception as e:
+            raise DataError(f"Feature set validation failed at service boundary: {e}")
         key = f"{symbol}:{feature_set_id}:{version or 'latest'}"
         self._feature_sets[key] = {
             "feature_set_id": feature_set_id,

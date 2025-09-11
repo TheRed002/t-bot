@@ -31,7 +31,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from src.core.base.component import BaseComponent
+from src.core import BaseComponent
 from src.core.config import Config
 
 # Import from P-001 core components
@@ -344,7 +344,7 @@ class TechnicalIndicators(BaseComponent):
         prices_array = np.array([float(p) for p in prices], dtype=np.float64)
         return await self._calculate_rsi(prices_array, period)
 
-    async def macd(self, prices: list[Decimal]) -> dict[str, Decimal] | None:
+    async def macd(self, prices: list[Decimal] | None) -> dict[str, Decimal]:
         """DEPRECATED: Use calculate_indicators_batch instead."""
         warnings.warn(
             "macd() is deprecated. Use calculate_indicators_batch() instead.",

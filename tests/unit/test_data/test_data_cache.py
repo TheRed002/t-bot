@@ -1,10 +1,10 @@
 """Test suite for data cache components."""
 
 import asyncio
+from datetime import datetime, timedelta, timezone
+from unittest.mock import patch
+
 import pytest
-import sys
-from datetime import datetime, timezone, timedelta
-from unittest.mock import Mock, patch
 
 from src.data.cache.data_cache import (
     CacheConfig,
@@ -27,7 +27,7 @@ class TestCacheEntry:
         created_at = datetime.now(timezone.utc)
         last_accessed = datetime.now(timezone.utc)
         metadata = {"source": "test"}
-        
+
         entry = CacheEntry(
             key=key,
             value=value,
@@ -36,9 +36,9 @@ class TestCacheEntry:
             access_count=5,
             ttl_seconds=3600,
             size_bytes=100,
-            metadata=metadata
+            metadata=metadata,
         )
-        
+
         assert entry.key == key
         assert entry.value == value
         assert entry.created_at == created_at
@@ -54,9 +54,9 @@ class TestCacheEntry:
             key="test",
             value="data",
             created_at=datetime.now(timezone.utc),
-            last_accessed=datetime.now(timezone.utc)
+            last_accessed=datetime.now(timezone.utc),
         )
-        
+
         assert entry.access_count == 0
         assert entry.ttl_seconds is None
         assert entry.size_bytes == 0
@@ -65,43 +65,43 @@ class TestCacheEntry:
     def test_is_expired_with_ttl(self):
         """Test expiration check with TTL."""
         past_time = datetime.now(timezone.utc) - timedelta(seconds=7200)  # 2 hours ago
-        
+
         entry = CacheEntry(
             key="test",
             value="data",
             created_at=past_time,
             last_accessed=past_time,
-            ttl_seconds=3600  # 1 hour TTL
+            ttl_seconds=3600,  # 1 hour TTL
         )
-        
+
         assert entry.is_expired() is True
 
     def test_is_expired_without_ttl(self):
         """Test expiration check without TTL."""
         past_time = datetime.now(timezone.utc) - timedelta(seconds=7200)
-        
+
         entry = CacheEntry(
             key="test",
             value="data",
             created_at=past_time,
             last_accessed=past_time,
-            ttl_seconds=None
+            ttl_seconds=None,
         )
-        
+
         assert entry.is_expired() is False
 
     def test_is_expired_not_expired(self):
         """Test expiration check for non-expired entry."""
         recent_time = datetime.now(timezone.utc) - timedelta(seconds=1800)  # 30 minutes ago
-        
+
         entry = CacheEntry(
             key="test",
             value="data",
             created_at=recent_time,
             last_accessed=recent_time,
-            ttl_seconds=3600  # 1 hour TTL
+            ttl_seconds=3600,  # 1 hour TTL
         )
-        
+
         assert entry.is_expired() is False
 
     def test_update_access(self):
@@ -111,18 +111,19 @@ class TestCacheEntry:
             value="data",
             created_at=datetime.now(timezone.utc),
             last_accessed=datetime.now(timezone.utc),
-            access_count=5
+            access_count=5,
         )
-        
+
         original_access_time = entry.last_accessed
         original_count = entry.access_count
-        
+
         # Wait a small amount to ensure time difference
         import time
+
         time.sleep(0.01)
-        
+
         entry.update_access()
-        
+
         assert entry.access_count == original_count + 1
         assert entry.last_accessed > original_access_time
 
@@ -133,7 +134,7 @@ class TestCacheStats:
     def test_initialization_defaults(self):
         """Test cache stats initialization with defaults."""
         stats = CacheStats()
-        
+
         assert stats.hits == 0
         assert stats.misses == 0
         assert stats.evictions == 0
@@ -155,9 +156,9 @@ class TestCacheStats:
             size_bytes=1048576,
             entry_count=150,
             hit_rate=0.8,
-            memory_usage_mb=64.5
+            memory_usage_mb=64.5,
         )
-        
+
         assert stats.hits == 100
         assert stats.misses == 25
         assert stats.evictions == 5
@@ -172,21 +173,21 @@ class TestCacheStats:
         """Test hit rate calculation with data."""
         stats = CacheStats(hits=80, misses=20)
         stats.calculate_hit_rate()
-        
+
         assert stats.hit_rate == 0.8
 
     def test_calculate_hit_rate_no_data(self):
         """Test hit rate calculation with no data."""
         stats = CacheStats(hits=0, misses=0)
         stats.calculate_hit_rate()
-        
+
         assert stats.hit_rate == 0.0
 
     def test_calculate_hit_rate_only_misses(self):
         """Test hit rate calculation with only misses."""
         stats = CacheStats(hits=0, misses=50)
         stats.calculate_hit_rate()
-        
+
         assert stats.hit_rate == 0.0
 
 
@@ -196,7 +197,7 @@ class TestCacheConfig:
     def test_initialization_defaults(self):
         """Test cache config initialization with defaults."""
         config = CacheConfig(level=CacheLevel.L1_MEMORY)
-        
+
         assert config.level == CacheLevel.L1_MEMORY
         assert config.max_size == 10000
         assert config.max_memory_mb == 512
@@ -218,9 +219,9 @@ class TestCacheConfig:
             mode=CacheMode.WRITE_THROUGH,
             compression_enabled=True,
             serialization_format="pickle",
-            key_prefix="trading"
+            key_prefix="trading",
         )
-        
+
         assert config.level == CacheLevel.L2_REDIS
         assert config.max_size == 50000
         assert config.max_memory_mb == 1024
@@ -240,7 +241,7 @@ class TestCacheConfig:
         """Test max_memory_mb validation."""
         with pytest.raises(ValueError):
             CacheConfig(level=CacheLevel.L1_MEMORY, max_memory_mb=0)
-        
+
         with pytest.raises(ValueError):
             CacheConfig(level=CacheLevel.L1_MEMORY, max_memory_mb=10000)
 
@@ -248,7 +249,7 @@ class TestCacheConfig:
         """Test default_ttl validation."""
         with pytest.raises(ValueError):
             CacheConfig(level=CacheLevel.L1_MEMORY, default_ttl=0)
-        
+
         with pytest.raises(ValueError):
             CacheConfig(level=CacheLevel.L1_MEMORY, default_ttl=100000)
 
@@ -264,7 +265,7 @@ class TestL1MemoryCache:
             max_size=100,
             max_memory_mb=10,
             default_ttl=3600,
-            strategy=CacheStrategy.LRU
+            strategy=CacheStrategy.LRU,
         )
 
     @pytest.fixture
@@ -275,7 +276,7 @@ class TestL1MemoryCache:
     def test_initialization(self, cache_config):
         """Test L1 memory cache initialization."""
         cache = L1MemoryCache(config=cache_config)
-        
+
         assert cache.config is cache_config
         assert len(cache._cache) == 0
         assert isinstance(cache._stats, CacheStats)
@@ -285,7 +286,7 @@ class TestL1MemoryCache:
     async def test_get_nonexistent_key(self, memory_cache):
         """Test getting nonexistent key."""
         result = await memory_cache.get("nonexistent")
-        
+
         assert result is None
         assert memory_cache._stats.misses == 1
         assert memory_cache._stats.hits == 0
@@ -295,20 +296,20 @@ class TestL1MemoryCache:
         """Test successful set and get operations."""
         key = "test_key"
         value = {"data": "test_value"}
-        
+
         # Mock the methods that require implementation
-        with patch.object(memory_cache, '_calculate_size', return_value=100):
-            with patch.object(memory_cache, '_ensure_capacity', return_value=True):
+        with patch.object(memory_cache, "_calculate_size", return_value=100):
+            with patch.object(memory_cache, "_ensure_capacity", return_value=True):
                 set_result = await memory_cache.set(key, value)
-        
+
         assert set_result is True
         assert memory_cache._stats.writes == 1
         assert memory_cache._stats.entry_count == 1
         assert memory_cache._stats.size_bytes == 100
-        
+
         # Get the value
         get_result = await memory_cache.get(key)
-        
+
         assert get_result == value
         assert memory_cache._stats.hits == 1
         assert memory_cache._stats.misses == 0
@@ -319,11 +320,11 @@ class TestL1MemoryCache:
         key = "test_key"
         value = "test_value"
         custom_ttl = 7200
-        
-        with patch.object(memory_cache, '_calculate_size', return_value=50):
-            with patch.object(memory_cache, '_ensure_capacity', return_value=True):
+
+        with patch.object(memory_cache, "_calculate_size", return_value=50):
+            with patch.object(memory_cache, "_ensure_capacity", return_value=True):
                 await memory_cache.set(key, value, ttl=custom_ttl)
-        
+
         entry = memory_cache._cache[key]
         assert entry.ttl_seconds == custom_ttl
 
@@ -332,11 +333,11 @@ class TestL1MemoryCache:
         """Test set operation when capacity is exceeded."""
         key = "test_key"
         value = "test_value"
-        
-        with patch.object(memory_cache, '_calculate_size', return_value=100):
-            with patch.object(memory_cache, '_ensure_capacity', return_value=False):
+
+        with patch.object(memory_cache, "_calculate_size", return_value=100):
+            with patch.object(memory_cache, "_ensure_capacity", return_value=False):
                 result = await memory_cache.set(key, value)
-        
+
         assert result is False
         assert len(memory_cache._cache) == 0
 
@@ -345,7 +346,7 @@ class TestL1MemoryCache:
         """Test getting expired cache entry."""
         key = "test_key"
         value = "test_value"
-        
+
         # Create expired entry manually
         expired_time = datetime.now(timezone.utc) - timedelta(seconds=7200)
         entry = CacheEntry(
@@ -353,13 +354,13 @@ class TestL1MemoryCache:
             value=value,
             created_at=expired_time,
             last_accessed=expired_time,
-            ttl_seconds=3600  # 1 hour TTL, but created 2 hours ago
+            ttl_seconds=3600,  # 1 hour TTL, but created 2 hours ago
         )
         memory_cache._cache[key] = entry
-        
-        with patch.object(memory_cache, '_evict_entry') as mock_evict:
+
+        with patch.object(memory_cache, "_evict_entry") as mock_evict:
             result = await memory_cache.get(key)
-        
+
         assert result is None
         assert memory_cache._stats.misses == 1
         mock_evict.assert_called_once_with(key)
@@ -370,41 +371,41 @@ class TestL1MemoryCache:
         key = "test_key"
         old_value = "old_value"
         new_value = "new_value"
-        
+
         # Set initial value
-        with patch.object(memory_cache, '_calculate_size', return_value=50):
-            with patch.object(memory_cache, '_ensure_capacity', return_value=True):
+        with patch.object(memory_cache, "_calculate_size", return_value=50):
+            with patch.object(memory_cache, "_ensure_capacity", return_value=True):
                 await memory_cache.set(key, old_value)
-        
+
         assert memory_cache._stats.size_bytes == 50
         assert memory_cache._stats.entry_count == 1
-        
+
         # Replace with new value
-        with patch.object(memory_cache, '_calculate_size', return_value=100):
-            with patch.object(memory_cache, '_ensure_capacity', return_value=True):
+        with patch.object(memory_cache, "_calculate_size", return_value=100):
+            with patch.object(memory_cache, "_ensure_capacity", return_value=True):
                 await memory_cache.set(key, new_value)
-        
+
         assert memory_cache._stats.size_bytes == 100  # Old size removed, new added
-        assert memory_cache._stats.entry_count == 1   # Still one entry
-        assert memory_cache._stats.writes == 2        # Two write operations
+        assert memory_cache._stats.entry_count == 1  # Still one entry
+        assert memory_cache._stats.writes == 2  # Two write operations
 
     @pytest.mark.asyncio
     async def test_lru_strategy_access_ordering(self, memory_cache):
         """Test LRU strategy maintains access ordering."""
         # Set up cache with LRU strategy
         assert memory_cache.config.strategy == CacheStrategy.LRU
-        
+
         key1 = "key1"
         key2 = "key2"
-        
-        with patch.object(memory_cache, '_calculate_size', return_value=50):
-            with patch.object(memory_cache, '_ensure_capacity', return_value=True):
+
+        with patch.object(memory_cache, "_calculate_size", return_value=50):
+            with patch.object(memory_cache, "_ensure_capacity", return_value=True):
                 await memory_cache.set(key1, "value1")
                 await memory_cache.set(key2, "value2")
-        
+
         # Access key1 to move it to end
         await memory_cache.get(key1)
-        
+
         # Check that key1 was moved to end (most recent)
         keys = list(memory_cache._cache.keys())
         assert keys[-1] == key1  # key1 should be last (most recently accessed)

@@ -19,15 +19,11 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from src.core.base.component import BaseComponent
+from src.core import BaseComponent
 from src.core.config import Config
 from src.core.types import MarketData
 from src.data.pipeline.data_pipeline import EnhancedDataPipeline as DataPipeline
-from src.data.validation.data_validator import (
-    DataValidator,
-    MarketDataValidationResult,
-    ValidationSeverity,
-)
+from src.data.validation.data_validator import DataValidator, MarketDataValidationResult
 from src.utils.decorators import time_execution
 from src.utils.pipeline_utilities import (
     PipelineAction,
@@ -174,8 +170,14 @@ class DataValidationPipeline(BaseComponent):
             # DataValidator doesn't have initialize method, so skip
 
             # Create data pipeline for processing (uses config object)
-
-            self.data_pipeline = DataPipeline(self.config)
+            # DataPipeline requires data_service, but validation pipeline can work without it
+            try:
+                # Try to create DataPipeline if possible
+                self.data_pipeline = DataPipeline(config=self.config)
+                self.logger.info("DataPipeline created successfully")
+            except Exception as e:
+                self.logger.warning(f"Could not create DataPipeline: {e}. Validation pipeline will work without it.")
+                self.data_pipeline = None
 
             self._initialized = True
             self.logger.info("DataValidationPipeline initialized successfully")
@@ -267,7 +269,7 @@ class DataValidationPipeline(BaseComponent):
             self.logger.error(f"Validation pipeline execution failed: {e}")
 
             # Mark pipeline as failed (only if pipeline_id was created)
-            if 'pipeline_id' in locals() and pipeline_id in self._active_validations:
+            if "pipeline_id" in locals() and pipeline_id in self._active_validations:
                 self._active_validations[pipeline_id]["stage"] = "failed"
                 self._active_validations[pipeline_id]["error"] = str(e)
 
@@ -355,22 +357,13 @@ class DataValidationPipeline(BaseComponent):
         valid_records = sum(1 for r in validation_results if r.is_valid)
 
         # Calculate aggregate quality score
-        quality_scores = [r.quality_score.overall for r in validation_results]
+        quality_scores = [r.quality_score for r in validation_results]
         avg_quality_score = sum(quality_scores) / len(quality_scores)
 
-        # Count issues by severity
-        critical_issues = sum(
-            len([i for i in r.issues if i.severity == ValidationSeverity.CRITICAL])
-            for r in validation_results
-        )
-        error_issues = sum(
-            len([i for i in r.issues if i.severity == ValidationSeverity.ERROR])
-            for r in validation_results
-        )
-        warning_issues = sum(
-            len([i for i in r.issues if i.severity == ValidationSeverity.WARNING])
-            for r in validation_results
-        )
+        # Count issues by severity (treating all errors as ERROR level)
+        critical_issues = 0  # No critical issues in basic error structure
+        error_issues = sum(len(r.errors) for r in validation_results)
+        warning_issues = 0  # No warning issues in basic error structure
 
         # Determine action based on thresholds
         action = self._determine_action(
@@ -413,20 +406,14 @@ class DataValidationPipeline(BaseComponent):
         self, validation_result: MarketDataValidationResult
     ) -> ValidationDisposition:
         """Determine disposition for a single validation result."""
-        # Count issues by severity
-        critical_issues = len(
-            [i for i in validation_result.issues if i.severity == ValidationSeverity.CRITICAL]
-        )
-        error_issues = len(
-            [i for i in validation_result.issues if i.severity == ValidationSeverity.ERROR]
-        )
-        warning_issues = len(
-            [i for i in validation_result.issues if i.severity == ValidationSeverity.WARNING]
-        )
+        # Count issues by severity (treating all errors as ERROR level)
+        critical_issues = 0  # No critical issues in basic error structure
+        error_issues = len(validation_result.errors)
+        warning_issues = 0  # No warning issues in basic error structure
 
         # Determine action
         action = self._determine_action(
-            validation_result.quality_score.overall,
+            validation_result.quality_score,
             critical_issues,
             error_issues,
             warning_issues,
@@ -438,13 +425,12 @@ class DataValidationPipeline(BaseComponent):
         reasons = []
         if not validation_result.is_valid:
             reasons.append("Failed validation")
-        for issue in validation_result.issues:
-            if issue.severity in [ValidationSeverity.CRITICAL, ValidationSeverity.ERROR]:
-                reasons.append(f"{issue.severity.value}: {issue.message}")
+        for error in validation_result.errors:
+            reasons.append(f"ERROR: {error}")
 
         return ValidationDisposition(
             action=action,
-            quality_score=validation_result.quality_score.overall,
+            quality_score=validation_result.quality_score,
             critical_issues=critical_issues,
             error_issues=error_issues,
             warning_issues=warning_issues,

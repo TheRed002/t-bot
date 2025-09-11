@@ -23,8 +23,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
-from src.core.base.component import BaseComponent
-from src.core.base.interfaces import HealthCheckResult, HealthStatus
+from src.core import BaseComponent, HealthCheckResult, HealthStatus
 from src.core.config import Config
 from src.core.types import MarketData
 

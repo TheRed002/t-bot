@@ -6,9 +6,8 @@ Concrete implementation of DataStorageInterface for database operations.
 
 from typing import TYPE_CHECKING, Any
 
-from src.core.base.component import BaseComponent
-from src.core.config import Config
-from src.core.exceptions import DataError
+from src.core import BaseComponent, Config, DataError
+from src.core.exceptions import DatabaseError
 from src.data.interfaces import DataStorageInterface
 from src.data.types import DataRequest
 from src.database.models import MarketDataRecord
@@ -45,18 +44,15 @@ class DatabaseStorage(BaseComponent, DataStorageInterface):
             if not self.database_service:
                 raise DataError("Database service not available - must be injected")
 
-            # Use proper repository pattern through database service's transaction context
-            async with self.database_service.transaction() as session:
-                from src.database.repository.market_data import MarketDataRepository
-                repository = MarketDataRepository(session)
-
-                # Store records individually or in batch
-                for record in records:
-                    await repository.create(record)
+            # Use database service bulk_create method instead of direct repository access
+            await self.database_service.bulk_create(records)
 
             self.logger.debug(f"Stored {len(records)} records to database via repository")
             return True
 
+        except DatabaseError as e:
+            self.logger.error(f"Database storage failed: {e}")
+            raise DataError(f"Database storage failed: {e}") from e
         except Exception as e:
             self.logger.error(f"Database storage failed: {e}")
             raise DataError(f"Database storage failed: {e}") from e
@@ -67,32 +63,34 @@ class DatabaseStorage(BaseComponent, DataStorageInterface):
             if not self.database_service:
                 raise DataError("Database service not available - must be injected")
 
-            # Use proper repository pattern through database service's transaction context
-            async with self.database_service.session() as session:
-                from src.database.repository.market_data import MarketDataRepository
-                repository = MarketDataRepository(session)
+            # Use database service list_entities method instead of direct repository access
 
-                # Build filters for the query
-                filters = {}
-                if request.symbol:
-                    filters["symbol"] = request.symbol
-                if request.exchange:
-                    filters["exchange"] = request.exchange
-                if request.start_time or request.end_time:
-                    time_filter = {}
-                    if request.start_time:
-                        time_filter["gte"] = request.start_time
-                    if request.end_time:
-                        time_filter["lte"] = request.end_time
-                    filters["data_timestamp"] = time_filter
+            # Build filters for the query
+            filters = {}
+            if request.symbol:
+                filters["symbol"] = request.symbol
+            if request.exchange:
+                filters["exchange"] = request.exchange
+            if request.start_time or request.end_time:
+                time_filter = {}
+                if request.start_time:
+                    time_filter["gte"] = request.start_time
+                if request.end_time:
+                    time_filter["lte"] = request.end_time
+                filters["data_timestamp"] = time_filter
 
-                # Get records using repository
-                return await repository.get_all(
-                    filters=filters,
-                    order_by="-data_timestamp",
-                    limit=request.limit
-                )
+            # Get records using database service
+            return await self.database_service.list_entities(
+                model_class=MarketDataRecord,
+                filters=filters,
+                order_by="data_timestamp",
+                order_desc=True,
+                limit=request.limit,
+            )
 
+        except DatabaseError as e:
+            self.logger.error(f"Database retrieval failed: {e}")
+            raise DataError(f"Database retrieval failed: {e}") from e
         except Exception as e:
             self.logger.error(f"Database retrieval failed: {e}")
             raise DataError(f"Database retrieval failed: {e}") from e
@@ -103,16 +101,17 @@ class DatabaseStorage(BaseComponent, DataStorageInterface):
             if not self.database_service:
                 raise DataError("Database service not available - must be injected")
 
-            # Use proper repository pattern through database service's transaction context
-            async with self.database_service.session() as session:
-                from src.database.repository.market_data import MarketDataRepository
-                repository = MarketDataRepository(session)
+            # Use database service count_entities method instead of direct repository access
 
-                # Get count using repository
-                filters = {"symbol": symbol, "exchange": exchange}
-                records = await repository.get_all(filters=filters)
-                return len(records)
+            # Get count using database service
+            filters = {"symbol": symbol, "exchange": exchange}
+            return await self.database_service.count_entities(
+                model_class=MarketDataRecord, filters=filters
+            )
 
+        except DatabaseError as e:
+            self.logger.error(f"Database record count retrieval failed: {e}")
+            return 0
         except Exception as e:
             self.logger.error(f"Record count retrieval failed: {e}")
             return 0
@@ -124,7 +123,7 @@ class DatabaseStorage(BaseComponent, DataStorageInterface):
                 return {
                     "status": "unhealthy",
                     "component": "database_storage",
-                    "error": "Database service not available - must be injected"
+                    "error": "Database service not available - must be injected",
                 }
 
             # Use proper service layer method for health check
