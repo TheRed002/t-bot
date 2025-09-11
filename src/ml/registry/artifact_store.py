@@ -92,14 +92,14 @@ class ArtifactStore(BaseService):
         self.base_path = Path(self.artifact_config.artifact_store_path)
 
         # Add required dependencies
-        self.add_dependency("DataService")
+        self.add_dependency("DataServiceInterface")
 
     async def _do_start(self) -> None:
         """Start the artifact store service."""
         await super()._do_start()
 
         # Resolve dependencies
-        self.data_service = self.resolve_dependency("DataService")
+        self.data_service = self.resolve_dependency("DataServiceInterface")
 
         # Create necessary directories if persistence is enabled
         if self.artifact_config.enable_persistence:
@@ -676,7 +676,7 @@ class ArtifactStore(BaseService):
             file_extension = ".npy"
             artifact_path = artifact_dir / f"{base_filename}{file_extension}"
 
-            def save_numpy():
+            def save_numpy() -> None:
                 from src.core.exceptions import DataError
 
                 try:
@@ -715,13 +715,23 @@ class ArtifactStore(BaseService):
 
     def _save_json_data(self, data: dict, path: Path) -> None:
         """Save JSON data to file."""
-        with open(path, "w") as f:
+        f = None
+        try:
+            f = open(path, "w")
             json.dump(data, f, indent=2, default=str)
+        finally:
+            if f:
+                f.close()
 
     def _save_text_data(self, data: str, path: Path) -> None:
         """Save text data to file."""
-        with open(path, "w") as f:
+        f = None
+        try:
+            f = open(path, "w")
             f.write(data)
+        finally:
+            if f:
+                f.close()
 
     def _save_joblib_data(self, data: Any, path: Path) -> None:
         """Save object using joblib."""
@@ -755,8 +765,17 @@ class ArtifactStore(BaseService):
 
     def _compress_file(self, input_path: Path, output_path: Path) -> None:
         """Compress file using gzip."""
-        with open(input_path, "rb") as f_in, gzip.open(output_path, "wb") as f_out:
+        f_in = None
+        f_out = None
+        try:
+            f_in = open(input_path, "rb")
+            f_out = gzip.open(output_path, "wb")
             shutil.copyfileobj(f_in, f_out)
+        finally:
+            if f_out:
+                f_out.close()
+            if f_in:
+                f_in.close()
 
     async def _calculate_file_hash(self, file_path: Path) -> str:
         """Calculate SHA-256 hash of a file."""
@@ -766,10 +785,15 @@ class ArtifactStore(BaseService):
     def _calculate_hash_sync(self, file_path: Path) -> str:
         """Calculate SHA-256 hash synchronously."""
         sha256_hash = hashlib.sha256()
-        with open(file_path, "rb") as f:
+        f = None
+        try:
+            f = open(file_path, "rb")
             for chunk in iter(lambda: f.read(4096), b""):
                 sha256_hash.update(chunk)
             return sha256_hash.hexdigest()
+        finally:
+            if f:
+                f.close()
 
     async def _save_artifact_metadata(
         self, artifact_dir: Path, base_filename: str, metadata: dict[str, Any]
@@ -786,8 +810,13 @@ class ArtifactStore(BaseService):
 
     def _load_json_sync(self, file_path: Path) -> dict[str, Any]:
         """Load JSON file synchronously."""
-        with open(file_path) as f:
+        f = None
+        try:
+            f = open(file_path)
             return json.load(f)
+        finally:
+            if f:
+                f.close()
 
     async def _find_metadata_file(self, metadata_files: list[Path], data_file: Path) -> Path | None:
         """Find metadata file corresponding to data file."""
@@ -814,14 +843,24 @@ class ArtifactStore(BaseService):
                 original_suffix = file_path.suffix
 
             if compressed:
-                with gzip.open(file_path, "rb") as f:
+                f = None
+                try:
+                    f = gzip.open(file_path, "rb")
                     content = f.read()
+                finally:
+                    if f:
+                        f.close()
                 # Save to temporary file for processing
                 import tempfile
 
-                with tempfile.NamedTemporaryFile(suffix=f".{original_suffix}", delete=False) as tmp:
+                tmp = None
+                try:
+                    tmp = tempfile.NamedTemporaryFile(suffix=f".{original_suffix}", delete=False)
                     tmp.write(content)
                     temp_path = Path(tmp.name)
+                finally:
+                    if tmp:
+                        tmp.close()
 
                 try:
                     result = self._load_by_extension(temp_path)
@@ -853,11 +892,21 @@ class ArtifactStore(BaseService):
                     original_error=str(e),
                 ) from e
         elif suffix == ".json":
-            with open(file_path) as f:
+            f = None
+            try:
+                f = open(file_path)
                 return json.load(f)
+            finally:
+                if f:
+                    f.close()
         elif suffix == ".txt":
-            with open(file_path) as f:
+            f = None
+            try:
+                f = open(file_path)
                 return f.read()
+            finally:
+                if f:
+                    f.close()
         elif suffix == ".joblib":
             import joblib
 
@@ -875,8 +924,13 @@ class ArtifactStore(BaseService):
                 ) from e
         else:
             # Default to binary read
-            with open(file_path, "rb") as f:
+            f = None
+            try:
+                f = open(file_path, "rb")
                 return f.read()
+            finally:
+                if f:
+                    f.close()
 
     async def _scan_artifact_directory(
         self, type_dir: Path, model_id: str | None, version: str | None

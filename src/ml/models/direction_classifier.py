@@ -5,7 +5,6 @@ This module provides direction classification models that predict whether
 prices will move up, down, or remain stable in the next period.
 """
 
-from decimal import Decimal
 from typing import Any
 
 import numpy as np
@@ -16,12 +15,13 @@ from sklearn.metrics import (
     accuracy_score,
     classification_report,
     confusion_matrix,
-    f1_score,
-    precision_score,
-    recall_score,
 )
 from sklearn.svm import SVC
-from xgboost import XGBClassifier
+
+try:
+    from xgboost import XGBClassifier
+except ImportError:
+    XGBClassifier = None
 
 from src.core.exceptions import ValidationError
 from src.ml.models.base_model import BaseMLModel
@@ -106,27 +106,19 @@ class DirectionClassifier(BaseMLModel):
         return "direction_classifier"
 
     def _validate_features(self, X: pd.DataFrame) -> pd.DataFrame:
-        """Validate and preprocess features for the model."""
-        # Basic validation - ensure numeric data
-        X_clean = X.copy()
-        X_clean = X_clean.replace([np.inf, -np.inf], 0)
-        X_clean = X_clean.fillna(0)
-        return X_clean
+        """Validate and preprocess features using utilities."""
+        from src.utils.ml_validation import validate_features
+        return validate_features(X, self.model_name)
 
     def _validate_targets(self, y: pd.Series) -> pd.Series:
-        """Validate and preprocess targets for the model."""
-        return y.fillna(0)
+        """Validate and preprocess targets using utilities."""
+        from src.utils.ml_validation import validate_targets
+        return validate_targets(y, self.model_name)
 
     def _calculate_metrics(self, y_true: np.ndarray, y_pred: np.ndarray) -> dict[str, float]:
-        """Calculate model-specific performance metrics."""
-        return {
-            "accuracy": float(accuracy_score(y_true, y_pred)),
-            "precision": float(
-                precision_score(y_true, y_pred, average="weighted", zero_division=0)
-            ),
-            "recall": float(recall_score(y_true, y_pred, average="weighted", zero_division=0)),
-            "f1_score": float(f1_score(y_true, y_pred, average="weighted", zero_division=0)),
-        }
+        """Calculate model-specific performance metrics using utilities."""
+        from src.utils.ml_metrics import calculate_classification_metrics
+        return calculate_classification_metrics(y_true, y_pred)
 
     def _create_model(self) -> Any:
         """Create the underlying classification model."""
@@ -161,6 +153,8 @@ class DirectionClassifier(BaseMLModel):
                 )
 
             elif self.algorithm == "xgboost":
+                if XGBClassifier is None:
+                    raise ValidationError("XGBoost not installed. Please install xgboost package.")
                 return XGBClassifier(
                     n_estimators=100,
                     random_state=self.random_state,
@@ -418,46 +412,12 @@ class DirectionClassifier(BaseMLModel):
             raise ValidationError(f"Evaluation failed: {e}")
 
     def _convert_to_direction_classes(self, price_data: pd.Series) -> np.ndarray:
-        """Convert price data to direction classes."""
+        """Convert price data to direction classes using utilities."""
         try:
-            # Calculate returns with Decimal precision
-            returns = pd.Series(index=price_data.index, dtype=float)
+            from src.utils.ml_data_transforms import create_returns_series
 
-            for i in range(len(price_data)):
-                if self.prediction_horizon == 1:
-                    # Next period return
-                    if i + 1 < len(price_data):
-                        current_price = price_data.iloc[i]
-                        next_price = price_data.iloc[i + 1]
-
-                        if pd.notna(current_price) and pd.notna(next_price) and current_price != 0:
-                            current_decimal = Decimal(str(current_price))
-                            next_decimal = Decimal(str(next_price))
-                            return_decimal = (next_decimal / current_decimal) - Decimal("1")
-                            returns.iloc[i] = float(return_decimal)
-                        else:
-                            returns.iloc[i] = np.nan
-                    else:
-                        returns.iloc[i] = np.nan
-                else:
-                    # Multi-period return
-                    if i + self.prediction_horizon < len(price_data):
-                        current_price = price_data.iloc[i]
-                        future_price = price_data.iloc[i + self.prediction_horizon]
-
-                        if (
-                            pd.notna(current_price)
-                            and pd.notna(future_price)
-                            and current_price != 0
-                        ):
-                            current_decimal = Decimal(str(current_price))
-                            future_decimal = Decimal(str(future_price))
-                            return_decimal = (future_decimal / current_decimal) - Decimal("1")
-                            returns.iloc[i] = float(return_decimal)
-                        else:
-                            returns.iloc[i] = np.nan
-                    else:
-                        returns.iloc[i] = np.nan
+            # Calculate returns using utility function
+            returns = create_returns_series(price_data, self.prediction_horizon, "simple")
 
             # Convert to direction classes
             direction_classes = np.zeros(len(returns))
@@ -474,7 +434,7 @@ class DirectionClassifier(BaseMLModel):
             )
             direction_classes[neutral_mask] = 1
 
-            # Remove NaN values (last few observations)
+            # Remove NaN values
             valid_mask = ~np.isnan(returns)
 
             return direction_classes[valid_mask].astype(int)

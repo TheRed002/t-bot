@@ -70,7 +70,7 @@ class DriftDetectionService(BaseService):
         self.feature_statistics: dict[str, Any] = {}
 
         # Add dependencies for data and model services
-        self.add_dependency("DataService")
+        self.add_dependency("DataServiceInterface")
         self.add_dependency("ModelRegistryService")
 
         self._logger.info(
@@ -85,7 +85,7 @@ class DriftDetectionService(BaseService):
         """Start the drift detection service."""
         try:
             # Resolve dependencies
-            self.data_service = self.resolve_dependency("DataService")
+            self.data_service = self.resolve_dependency("DataServiceInterface")
             self.model_registry = self.resolve_dependency("ModelRegistryService")
 
             self._logger.info("Drift detection service started successfully")
@@ -717,7 +717,7 @@ class DriftDetectionService(BaseService):
             self._logger.error(f"Failed to get drift history: {e}")
             return []
 
-    def set_reference_data(self, reference_data: pd.DataFrame, data_type: str = "features"):
+    def set_reference_data(self, reference_data: pd.DataFrame, data_type: str = "features") -> None:
         """
         Set reference data for drift detection.
 
@@ -763,7 +763,7 @@ class DriftDetectionService(BaseService):
         """
         return self.reference_data.get(data_type, {}).get("data")
 
-    def clear_reference_data(self, data_type: str | None = None):
+    def clear_reference_data(self, data_type: str | None = None) -> None:
         """
         Clear reference data.
 

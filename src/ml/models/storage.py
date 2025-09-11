@@ -7,7 +7,7 @@ direct coupling to specific serialization libraries.
 
 import abc
 from pathlib import Path
-from typing import Any
+from typing import Any, Union
 
 import joblib
 
@@ -70,10 +70,11 @@ class PickleStorageBackend(ModelStorageBackend):
 
         from src.core.exceptions import ModelError
 
+        f = None
         try:
             filepath.parent.mkdir(parents=True, exist_ok=True)
-            with open(filepath, "wb") as f:
-                pickle.dump(model_data, f)
+            f = open(filepath, "wb")
+            pickle.dump(model_data, f)
         except Exception as e:
             raise ModelError(
                 f"Failed to save model to {filepath}",
@@ -81,6 +82,9 @@ class PickleStorageBackend(ModelStorageBackend):
                 model_path=str(filepath),
                 original_error=str(e),
             ) from e
+        finally:
+            if f:
+                f.close()
 
     def load(self, filepath: Path) -> dict[str, Any]:
         """Load model data using pickle."""
@@ -91,15 +95,19 @@ class PickleStorageBackend(ModelStorageBackend):
         if not filepath.exists():
             raise ModelLoadError(f"Model file not found: {filepath}", model_path=str(filepath))
 
+        f = None
         try:
-            with open(filepath, "rb") as f:
-                return pickle.load(f)
+            f = open(filepath, "rb")
+            return pickle.load(f)
         except Exception as e:
             raise ModelLoadError(
                 f"Failed to load model from {filepath}",
                 model_path=str(filepath),
                 original_error=str(e),
             ) from e
+        finally:
+            if f:
+                f.close()
 
 
 class ModelStorageManager:
@@ -124,7 +132,7 @@ class ModelStorageManager:
 
         self.backend = self._backends[backend]
 
-    def save_model(self, model_data: dict[str, Any], filepath: str | Path) -> Path:
+    def save_model(self, model_data: dict[str, Any], filepath: Union[str, Path]) -> Path:
         """
         Save model data.
 
@@ -139,7 +147,7 @@ class ModelStorageManager:
         self.backend.save(model_data, filepath)
         return filepath
 
-    def load_model(self, filepath: str | Path) -> dict[str, Any]:
+    def load_model(self, filepath: Union[str, Path]) -> dict[str, Any]:
         """
         Load model data.
 

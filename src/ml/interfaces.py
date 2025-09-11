@@ -219,6 +219,60 @@ class IBatchPredictionService(ABC):
         pass
 
 
+class IModelManagerService(ABC):
+    """Interface for model manager service."""
+
+    @abstractmethod
+    async def create_and_train_model(
+        self,
+        model_type: str,
+        model_name: str,
+        training_data: pd.DataFrame,
+        symbol: str,
+        model_params: dict[str, Any] | None = None,
+        training_params: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Create and train a new model."""
+        pass
+
+    @abstractmethod
+    async def deploy_model(
+        self, model_name: str, deployment_stage: str = "production"
+    ) -> dict[str, Any]:
+        """Deploy a model to a specific stage."""
+        pass
+
+    @abstractmethod
+    async def monitor_model_performance(
+        self,
+        model_name: str,
+        monitoring_data: pd.DataFrame,
+        true_labels: pd.Series | None = None,
+    ) -> dict[str, Any]:
+        """Monitor model performance and detect drift."""
+        pass
+
+    @abstractmethod
+    async def retire_model(self, model_name: str, reason: str = "replaced") -> dict[str, Any]:
+        """Retire a model from active service."""
+        pass
+
+    @abstractmethod
+    def get_active_models(self) -> dict[str, Any]:
+        """Get information about active models."""
+        pass
+
+    @abstractmethod
+    async def get_model_status(self, model_name: str) -> dict[str, Any] | None:
+        """Get status information for a specific model."""
+        pass
+
+    @abstractmethod
+    async def health_check(self) -> dict[str, Any]:
+        """Perform health check of the ML system."""
+        pass
+
+
 class IModelFactory(ABC):
     """Interface for model factory service."""
 
@@ -249,4 +303,60 @@ class IModelFactory(ABC):
         metadata: dict[str, Any] | None = None,
     ) -> None:
         """Register a custom model type."""
+        pass
+
+
+class IMLService(ABC):
+    """Interface for main ML service that coordinates all ML operations."""
+
+    @abstractmethod
+    async def process_pipeline(self, request: Any) -> Any:
+        """Process a complete ML pipeline from data to prediction."""
+        pass
+
+    @abstractmethod
+    async def train_model(self, request: Any) -> Any:
+        """Train a new ML model."""
+        pass
+
+    @abstractmethod
+    async def process_batch_pipeline(self, requests: list[Any]) -> list[Any]:
+        """Process multiple ML pipeline requests in batch."""
+        pass
+
+    @abstractmethod
+    async def enhance_strategy_signals(
+        self,
+        strategy_id: str,
+        signals: list,
+        market_context: dict[str, Any] | None = None,
+    ) -> list:
+        """Enhance strategy signals using ML predictions and confidence scoring."""
+        pass
+
+    @abstractmethod
+    async def list_available_models(
+        self, model_type: str | None = None, stage: str | None = None
+    ) -> list[dict[str, Any]]:
+        """List available models."""
+        pass
+
+    @abstractmethod
+    async def promote_model(self, model_id: str, stage: str, description: str = "") -> bool:
+        """Promote a model to a different stage."""
+        pass
+
+    @abstractmethod
+    async def get_model_info(self, model_id: str) -> dict[str, Any]:
+        """Get detailed model information."""
+        pass
+
+    @abstractmethod
+    async def clear_cache(self) -> dict[str, int]:
+        """Clear ML service caches."""
+        pass
+
+    @abstractmethod
+    def get_ml_service_metrics(self) -> dict[str, Any]:
+        """Get ML service metrics."""
         pass

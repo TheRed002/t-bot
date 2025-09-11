@@ -10,7 +10,7 @@ import asyncio
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import pandas as pd
@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field
 from src.core.base.service import BaseService
 from src.core.exceptions import ModelError, ValidationError
 from src.core.types.base import ConfigDict
+from src.utils.constants import ML_MODEL_CONSTANTS
 from src.utils.decorators import UnifiedDecorator
 from src.utils.ml_cache import generate_cache_key, generate_prediction_cache_key
 
@@ -284,7 +285,7 @@ class InferenceService(BaseService):
                 self.metrics.total_processing_time / self.metrics.total_requests
             )
 
-            self._logger.debug(
+            self._logger.info(
                 "Prediction completed",
                 request_id=request_id,
                 model_id=model_id,
@@ -535,8 +536,11 @@ class InferenceService(BaseService):
     ) -> InferencePredictionResponse:
         """Internal predict with features implementation."""
         try:
-            # Import the feature request model
-            from src.ml.feature_engineering import FeatureRequest
+            # Import the feature request model to avoid circular dependency
+            if TYPE_CHECKING:
+                from src.ml.feature_engineering import FeatureRequest
+            else:
+                from src.ml.feature_engineering import FeatureRequest
 
             # Create features using feature engineering service
             feature_request = FeatureRequest(
@@ -592,8 +596,12 @@ class InferenceService(BaseService):
 
             self.metrics.cache_misses += 1
 
-        # Load from registry service
-        from src.ml.registry.model_registry import ModelLoadRequest
+        # Load from registry service using TYPE_CHECKING import
+        if TYPE_CHECKING:
+            from src.ml.registry.model_registry import ModelLoadRequest
+        else:
+            # Import at runtime to avoid circular dependency
+            from src.ml.registry.model_registry import ModelLoadRequest
 
         load_request = ModelLoadRequest(model_id=model_id)
         model_info = await self.model_registry_service.load_model(load_request)
@@ -730,7 +738,7 @@ class InferenceService(BaseService):
             del self._model_cache[key]
 
         if expired_keys:
-            self._logger.debug(f"Cleaned {len(expired_keys)} expired model cache entries")
+            self._logger.info(f"Cleaned {len(expired_keys)} expired model cache entries")
 
     async def _clean_prediction_cache(self) -> None:
         """Clean expired prediction cache entries."""
@@ -744,7 +752,7 @@ class InferenceService(BaseService):
             del self._prediction_cache[key]
 
         if expired_keys:
-            self._logger.debug(f"Cleaned {len(expired_keys)} expired prediction cache entries")
+            self._logger.info(f"Cleaned {len(expired_keys)} expired prediction cache entries")
 
     # Batch Processing
     async def _batch_processor_loop(self) -> None:
@@ -774,7 +782,7 @@ class InferenceService(BaseService):
                     await self._process_batch(batch)
 
                 # Small sleep to prevent busy waiting
-                await asyncio.sleep(0.001)
+                await asyncio.sleep(ML_MODEL_CONSTANTS["async_warmup_delay_ms"] / 1000)
 
             except asyncio.CancelledError:
                 # Handle remaining requests
@@ -783,7 +791,7 @@ class InferenceService(BaseService):
                 break
             except Exception as e:
                 self._logger.error(f"Batch processor error: {e}")
-                await asyncio.sleep(0.1)
+                await asyncio.sleep(ML_MODEL_CONSTANTS["error_retry_delay_ms"] / 1000)
 
     async def _process_batch(
         self, batch: list[tuple[InferencePredictionRequest, asyncio.Future]]
@@ -864,7 +872,7 @@ class InferenceService(BaseService):
         try:
             # Load model into cache
             await self._get_model(model_id, use_cache=True)
-            self._logger.debug(f"Model {model_id} warmed up successfully")
+            self._logger.info(f"Model {model_id} warmed up successfully")
             return True
         except Exception as e:
             self._logger.warning(f"Failed to warm up model {model_id}: {e}")

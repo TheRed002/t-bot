@@ -5,9 +5,8 @@ Unit tests for ML model storage functionality.
 import pickle
 import tempfile
 from pathlib import Path
-from unittest.mock import Mock, mock_open, patch
+from unittest.mock import mock_open, patch
 
-import joblib
 import pytest
 
 from src.core.exceptions import ModelError, ModelLoadError
@@ -65,7 +64,7 @@ class TestJoblibStorageBackend:
         backend = JoblibStorageBackend()
         model_data = {"model": "test_model"}
         filepath = Path("/tmp/test_model.joblib")
-        
+
         mock_mkdir.side_effect = OSError("Permission denied")
 
         with pytest.raises(ModelError) as exc_info:
@@ -81,7 +80,7 @@ class TestJoblibStorageBackend:
         backend = JoblibStorageBackend()
         model_data = {"model": "test_model"}
         filepath = Path("/tmp/test_model.joblib")
-        
+
         mock_dump.side_effect = RuntimeError("Serialization failed")
 
         with pytest.raises(ModelError) as exc_info:
@@ -97,7 +96,7 @@ class TestJoblibStorageBackend:
         backend = JoblibStorageBackend()
         filepath = Path("/tmp/test_model.joblib")
         expected_data = {"model": "test_model", "metadata": {"version": "1.0"}}
-        
+
         mock_exists.return_value = True
         mock_load.return_value = expected_data
 
@@ -112,7 +111,7 @@ class TestJoblibStorageBackend:
         """Test load when file doesn't exist."""
         backend = JoblibStorageBackend()
         filepath = Path("/tmp/nonexistent.joblib")
-        
+
         mock_exists.return_value = False
 
         with pytest.raises(ModelLoadError) as exc_info:
@@ -126,7 +125,7 @@ class TestJoblibStorageBackend:
         """Test load when joblib.load fails."""
         backend = JoblibStorageBackend()
         filepath = Path("/tmp/test_model.joblib")
-        
+
         mock_exists.return_value = True
         mock_load.side_effect = RuntimeError("Deserialization failed")
 
@@ -166,7 +165,7 @@ class TestPickleStorageBackend:
         backend = PickleStorageBackend()
         model_data = {"model": "test_model"}
         filepath = Path("/tmp/test_model.pkl")
-        
+
         mock_mkdir.side_effect = OSError("Permission denied")
 
         with pytest.raises(ModelError) as exc_info:
@@ -175,7 +174,7 @@ class TestPickleStorageBackend:
         assert "Failed to save model to" in str(exc_info.value)
         assert exc_info.value.error_code == "MODEL_001"
 
-    @patch("builtins.open", side_effect=IOError("Write failed"))
+    @patch("builtins.open", side_effect=OSError("Write failed"))
     @patch("pathlib.Path.mkdir")
     def test_save_file_exception(self, mock_mkdir, mock_open):
         """Test save when file opening fails."""
@@ -197,7 +196,7 @@ class TestPickleStorageBackend:
         backend = PickleStorageBackend()
         filepath = Path("/tmp/test_model.pkl")
         expected_data = {"model": "test_model", "metadata": {"version": "1.0"}}
-        
+
         mock_exists.return_value = True
         mock_load.return_value = expected_data
 
@@ -212,7 +211,7 @@ class TestPickleStorageBackend:
         """Test load when file doesn't exist."""
         backend = PickleStorageBackend()
         filepath = Path("/tmp/nonexistent.pkl")
-        
+
         mock_exists.return_value = False
 
         with pytest.raises(ModelLoadError) as exc_info:
@@ -220,13 +219,13 @@ class TestPickleStorageBackend:
 
         assert "Model file not found" in str(exc_info.value)
 
-    @patch("builtins.open", side_effect=IOError("Read failed"))
+    @patch("builtins.open", side_effect=OSError("Read failed"))
     @patch("pathlib.Path.exists")
     def test_load_file_exception(self, mock_exists, mock_open):
         """Test load when file opening fails."""
         backend = PickleStorageBackend()
         filepath = Path("/tmp/test_model.pkl")
-        
+
         mock_exists.return_value = True
 
         with pytest.raises(ModelLoadError) as exc_info:
@@ -241,7 +240,7 @@ class TestPickleStorageBackend:
         """Test load when pickle.load fails."""
         backend = PickleStorageBackend()
         filepath = Path("/tmp/test_model.pkl")
-        
+
         mock_exists.return_value = True
 
         with pytest.raises(ModelLoadError) as exc_info:
@@ -342,7 +341,7 @@ class TestModelStorageManager:
     def test_backends_registry(self):
         """Test that backends registry is properly populated."""
         manager = ModelStorageManager()
-        
+
         assert "joblib" in manager._backends
         assert "pickle" in manager._backends
         assert isinstance(manager._backends["joblib"], JoblibStorageBackend)
@@ -355,7 +354,7 @@ class TestIntegration:
     def test_joblib_backend_integration(self):
         """Test joblib backend with real files."""
         backend = JoblibStorageBackend()
-        
+
         with tempfile.TemporaryDirectory() as tmpdir:
             filepath = Path(tmpdir) / "test_model.joblib"
             model_data = {"model": "test_data", "version": 1}
@@ -371,7 +370,7 @@ class TestIntegration:
     def test_pickle_backend_integration(self):
         """Test pickle backend with real files."""
         backend = PickleStorageBackend()
-        
+
         with tempfile.TemporaryDirectory() as tmpdir:
             filepath = Path(tmpdir) / "test_model.pkl"
             model_data = {"model": "test_data", "version": 1}
@@ -387,7 +386,7 @@ class TestIntegration:
     def test_storage_manager_integration(self):
         """Test storage manager with real files."""
         manager = ModelStorageManager(backend="joblib")
-        
+
         with tempfile.TemporaryDirectory() as tmpdir:
             filepath = Path(tmpdir) / "test_model.joblib"
             model_data = {"model": "test_data", "version": 1}

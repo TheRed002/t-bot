@@ -7,7 +7,7 @@ capabilities for ML models using the service layer pattern without direct databa
 
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from decimal import Decimal
 
 # Import for type annotations
@@ -31,11 +31,13 @@ from sklearn.preprocessing import (
 )
 
 from src.core.base.service import BaseService
-from src.core.exceptions import ModelError, ValidationError
+from src.core.exceptions import DataError, ModelError, ValidationError
 from src.core.types.base import ConfigDict
 from src.core.types.data import FeatureSet
 from src.utils.constants import ML_FEATURE_CONSTANTS, ML_MODEL_CONSTANTS
 from src.utils.decorators import UnifiedDecorator
+from src.utils.ml_cache import FeatureCache, generate_feature_cache_key
+from src.utils.ml_validation import validate_market_data
 
 if TYPE_CHECKING:
     from src.core.base.interfaces import HealthStatus
@@ -85,7 +87,7 @@ class FeatureEngineeringConfig(BaseModel):
 class FeatureRequest(BaseModel):
     """Request for feature computation."""
 
-    market_data: dict[str, Any]
+    market_data: dict[str, Any] | list[dict[str, Any]]
     symbol: str
     feature_types: list[str] | None = None
     enable_selection: bool = True
@@ -148,27 +150,44 @@ class FeatureEngineeringService(BaseService):
         # Internal state
         self._scalers: dict[str, Any] = {}
         self._selectors: dict[str, Any] = {}
-        self._feature_cache: dict[str, tuple[pd.DataFrame, datetime]] = {}
+        self._feature_cache: FeatureCache | None = None
 
         # Thread pool for CPU-intensive operations
         self._executor = ThreadPoolExecutor(max_workers=self.fe_config.computation_workers)
 
         # Add required dependencies
-        self.add_dependency("DataService")
+        self.add_dependency("DataServiceInterface")
+        self.add_dependency("TechnicalIndicatorService")
+        self.add_dependency("StatisticalFeatureService")
 
     async def _do_start(self) -> None:
         """Start the feature engineering service."""
         await super()._do_start()
 
         # Resolve dependencies
-        self.data_service = self.resolve_dependency("DataService")
+        self.data_service = self.resolve_dependency("DataServiceInterface")
 
-        # Initialize calculators directly instead of injecting them
-        from src.data.features.statistical_features import StatisticalFeatures
-        from src.data.features.technical_indicators import TechnicalIndicators
+        # Try to resolve feature calculators from DI, fallback to direct creation if not available
+        try:
+            self.technical_calculator = self.resolve_dependency("TechnicalIndicatorService")
+        except Exception as e:
+            self._logger.warning(f"TechnicalIndicatorService not available, creating directly: {e}")
+            from src.data.features.technical_indicators import TechnicalIndicators
+            self.technical_calculator = TechnicalIndicators()
 
-        self.technical_calculator = TechnicalIndicators()
-        self.statistical_calculator = StatisticalFeatures()
+        try:
+            self.statistical_calculator = self.resolve_dependency("StatisticalFeatureService")
+        except Exception as e:
+            self._logger.warning(f"StatisticalFeatureService not available, creating directly: {e}")
+            from src.data.features.statistical_features import StatisticalFeatures
+            self.statistical_calculator = StatisticalFeatures()
+
+        # Initialize feature cache
+        if self.fe_config.cache_ttl_hours > 0:
+            self._feature_cache = FeatureCache(
+                ttl_hours=self.fe_config.cache_ttl_hours,
+                max_feature_sets=self.fe_config.cache_max_size,
+            )
 
         self._logger.info(
             "Feature engineering service started successfully",
@@ -210,17 +229,86 @@ class FeatureEngineeringService(BaseService):
         warnings = []
 
         try:
-            # Convert market data to DataFrame
-            market_data = pd.DataFrame(request.market_data)
+            # Apply consistent boundary validation at ML module boundary
+            from src.utils.decimal_utils import to_decimal
+            from src.utils.messaging_patterns import BoundaryValidator
 
-            # Validate market data
-            if market_data.empty:
-                raise ValidationError("Market data cannot be empty")
+            # Validate request data at feature engineering boundary
+            if not request.market_data:
+                raise ValidationError("Market data is required for feature computation")
+            if not request.symbol:
+                raise ValidationError("Symbol is required for feature computation")
 
-            required_columns = ["open", "high", "low", "close", "volume"]
-            missing_columns = set(required_columns) - set(market_data.columns)
-            if missing_columns:
-                raise ValidationError(f"Missing required columns: {missing_columns}")
+            # Apply consistent data transformation aligned with data module
+            transformed_records = []
+            if isinstance(request.market_data, list):
+                for record in request.market_data:
+                    if isinstance(record, dict):
+                        transformed_record = {}
+                        for key, value in record.items():
+                            if (
+                                key
+                                in [
+                                    "price",
+                                    "close",
+                                    "open",
+                                    "high",
+                                    "low",
+                                    "open_price",
+                                    "high_price",
+                                    "low_price",
+                                    "close_price",
+                                    "volume",
+                                    "bid",
+                                    "ask",
+                                ]
+                                and value is not None
+                            ):
+                                transformed_record[key] = to_decimal(value)
+                            else:
+                                transformed_record[key] = value
+
+                        # Apply boundary validation
+                        try:
+                            BoundaryValidator.validate_database_entity(
+                                transformed_record, "validate"
+                            )
+                        except Exception as e:
+                            warnings.append(f"Feature engineering boundary validation warning: {e}")
+
+                        transformed_records.append(transformed_record)
+                    else:
+                        transformed_records.append(record)
+            else:
+                # Handle dict format
+                transformed_record = {}
+                for key, value in request.market_data.items():
+                    if (
+                        key
+                        in [
+                            "price",
+                            "close",
+                            "open",
+                            "high",
+                            "low",
+                            "open_price",
+                            "high_price",
+                            "low_price",
+                            "close_price",
+                            "volume",
+                            "bid",
+                            "ask",
+                        ]
+                        and value is not None
+                    ):
+                        transformed_record[key] = to_decimal(value)
+                    else:
+                        transformed_record[key] = value
+                transformed_records = [transformed_record]
+
+            # Convert and validate market data using utils
+            market_data = pd.DataFrame(transformed_records)
+            market_data = validate_market_data(market_data)
 
             # Determine feature types to compute
             feature_types = request.feature_types or self.fe_config.feature_types
@@ -240,25 +328,30 @@ class FeatureEngineeringService(BaseService):
                 warnings.append(f"Invalid feature types will be ignored: {invalid_types}")
                 feature_types = [ft for ft in feature_types if ft in valid_feature_types]
 
-            # Generate cache key
-            cache_key = self._generate_cache_key(request.symbol, feature_types, market_data)
+            # Generate cache key using utils
+            cache_key = generate_feature_cache_key(
+                request.symbol, feature_types, str(hash(str(market_data.values.tobytes())))[:ML_MODEL_CONSTANTS["hash_digest_length"]]
+            )
 
-            # Check cache
-            cached_features = await self._get_cached_features(cache_key)
-            if cached_features is not None:
-                computation_time = (
-                    datetime.now(timezone.utc) - computation_start
-                ).total_seconds() * ML_MODEL_CONSTANTS["time_to_milliseconds"]
-                return FeatureResponse(
-                    feature_set=FeatureSet(
-                        feature_set_id=cache_key,
-                        symbol=request.symbol,
-                        features=cached_features.to_dict("records"),
-                        feature_names=list(cached_features.columns),
-                        computation_time_ms=0.0,  # Cached
-                    ),
-                    computation_time_ms=computation_time,
-                )
+            # Check cache using utils
+            if self._feature_cache:
+                cached_features_dict = await self._feature_cache.get_features(cache_key)
+                if cached_features_dict is not None:
+                    computation_time = (
+                        datetime.now(timezone.utc) - computation_start
+                    ).total_seconds() * ML_MODEL_CONSTANTS["time_to_milliseconds"]
+
+                    cached_features_df = pd.DataFrame(cached_features_dict["features"])
+                    return FeatureResponse(
+                        feature_set=FeatureSet(
+                            feature_set_id=cache_key,
+                            symbol=request.symbol,
+                            features=cached_features_df.to_dict("records"),
+                            feature_names=list(cached_features_df.columns),
+                            computation_time_ms=ML_MODEL_CONSTANTS["cached_computation_time"],
+                        ),
+                        computation_time_ms=computation_time,
+                    )
 
             # Compute all requested features
             features_df = await self._compute_all_feature_types(
@@ -274,7 +367,7 @@ class FeatureEngineeringService(BaseService):
             if request.enable_selection and self.fe_config.enable_feature_selection:
                 # Note: For feature selection we'd need target data, which isn't provided
                 # This would need to be handled differently in practice
-                self._logger.debug("Feature selection skipped - no target data provided")
+                self._logger.info("Feature selection skipped - no target data provided")
 
             # Preprocessing if requested
             preprocessing_info: dict[str, Any] = {}
@@ -283,8 +376,19 @@ class FeatureEngineeringService(BaseService):
                     features_df, request.scaling_method
                 )
 
-            # Cache the results
-            await self._cache_features(cache_key, features_df)
+            # Cache the results using utils
+            if self._feature_cache:
+                await self._feature_cache.cache_features(
+                    cache_key,
+                    {
+                        "features": features_df.to_dict("records"),
+                        "feature_names": list(features_df.columns),
+                        "computation_time": (
+                            datetime.now(timezone.utc) - computation_start
+                        ).total_seconds()
+                        * ML_MODEL_CONSTANTS["time_to_milliseconds"],
+                    },
+                )
 
             # Create feature set
             feature_set = FeatureSet(
@@ -318,10 +422,32 @@ class FeatureEngineeringService(BaseService):
             )
 
         except Exception as e:
+            # Apply consistent error propagation patterns
+            from src.utils.messaging_patterns import ErrorPropagationMixin
+
             computation_time = (
                 datetime.now(timezone.utc) - computation_start
             ).total_seconds() * ML_MODEL_CONSTANTS["time_to_milliseconds"]
             error_msg = f"Feature computation failed for {request.symbol}: {e}"
+
+            # Use consistent error propagation
+            error_propagator = ErrorPropagationMixin()
+            try:
+                if isinstance(e, ValidationError):
+                    error_propagator.propagate_validation_error(
+                        e, "feature_engineering.compute_features"
+                    )
+                elif isinstance(e, DataError):
+                    error_propagator.propagate_service_error(
+                        e, "feature_engineering.compute_features"
+                    )
+                else:
+                    error_propagator.propagate_service_error(
+                        e, "feature_engineering.compute_features"
+                    )
+            except Exception as prop_error:
+                # Fallback if error propagation fails
+                self._logger.warning(f"Error propagation failed: {prop_error}")
 
             self._logger.error(
                 "Feature computation failed",
@@ -436,8 +562,8 @@ class FeatureEngineeringService(BaseService):
         # Multi-period returns with Decimal precision
         for period in ML_FEATURE_CONSTANTS["price_return_periods"]:
             # Calculate returns with Decimal precision
-            returns = pd.Series(index=data.index, dtype=float)
-            log_returns = pd.Series(index=data.index, dtype=float)
+            returns = pd.Series(index=data.index, dtype=object)
+            log_returns = pd.Series(index=data.index, dtype=object)
 
             for i in range(period, len(data)):
                 current_price = data["close"].iloc[i]
@@ -449,14 +575,14 @@ class FeatureEngineeringService(BaseService):
 
                     # Calculate return with Decimal precision
                     return_decimal = (current_decimal / past_decimal) - Decimal("1")
-                    returns.iloc[i] = float(return_decimal)
+                    returns.iloc[i] = return_decimal
 
-                    # Calculate log return
+                    # Calculate log return with Decimal precision
                     ratio = current_decimal / past_decimal
-                    log_returns.iloc[i] = float(np.log(float(ratio)))
+                    log_returns.iloc[i] = Decimal(str(np.log(float(ratio))))
                 else:
-                    returns.iloc[i] = np.nan
-                    log_returns.iloc[i] = np.nan
+                    returns.iloc[i] = None
+                    log_returns.iloc[i] = None
 
             features[f"return_{period}d"] = returns
             features[f"log_return_{period}d"] = log_returns
@@ -468,7 +594,43 @@ class FeatureEngineeringService(BaseService):
     ) -> pd.DataFrame:
         """Compute technical indicator features asynchronously."""
         try:
-            return await self.technical_calculator.calculate_all_indicators(market_data, symbol)
+            # Convert DataFrame to list of MarketData objects as expected by data module
+            market_data_list = []
+            for _, row in market_data.iterrows():
+                from src.core.types import MarketData
+
+                market_data_obj = MarketData(
+                    symbol=symbol,
+                    timestamp=row.get("timestamp", datetime.now(timezone.utc)),
+                    price=row.get("close", row.get("price", 0)),
+                    high_price=row.get("high", row.get("close", row.get("price", 0))),
+                    low_price=row.get("low", row.get("close", row.get("price", 0))),
+                    volume=row.get("volume", 0),
+                )
+                market_data_list.append(market_data_obj)
+
+            # Use the correct method signature from TechnicalIndicators
+            indicators = ["sma_20", "ema_20", "rsi_14", "macd", "bollinger_bands", "atr_14"]
+            result_dict = await self.technical_calculator.calculate_indicators_batch(
+                symbol=symbol, data=market_data_list, indicators=indicators
+            )
+
+            # Convert result dictionary to DataFrame format
+            features_dict = {}
+            for indicator, value in result_dict.items():
+                if isinstance(value, dict):
+                    # Handle MACD and Bollinger Bands which return dicts
+                    for sub_key, sub_value in value.items():
+                        # Convert to Decimal for financial precision
+                        decimal_value = Decimal(str(sub_value)) if not isinstance(sub_value, Decimal) else sub_value
+                        features_dict[f"{indicator}_{sub_key}"] = [decimal_value] * len(market_data)
+                else:
+                    # Handle single values - Convert to Decimal for financial precision
+                    decimal_value = Decimal(str(value)) if not isinstance(value, Decimal) else value
+                    features_dict[indicator] = [decimal_value] * len(market_data)
+
+            return pd.DataFrame(features_dict, index=market_data.index)
+
         except Exception as e:
             self._logger.warning(f"Technical features computation failed: {e}")
             return pd.DataFrame(index=market_data.index)
@@ -476,7 +638,48 @@ class FeatureEngineeringService(BaseService):
     async def _compute_statistical_features_async(self, market_data: pd.DataFrame) -> pd.DataFrame:
         """Compute statistical features asynchronously."""
         try:
-            return await self.statistical_calculator.calculate_all_features(market_data)
+            # Get a dummy symbol from the first row or use default
+            symbol = "STATS"
+
+            # Add market data to the statistical calculator first
+            for _, row in market_data.iterrows():
+                from src.core.types import MarketData
+
+                market_data_obj = MarketData(
+                    symbol=symbol,
+                    timestamp=row.get("timestamp", datetime.now(timezone.utc)),
+                    price=row.get("close", row.get("price", 0)),
+                    open_price=row.get("open", row.get("close", row.get("price", 0))),
+                    high_price=row.get("high", row.get("close", row.get("price", 0))),
+                    low_price=row.get("low", row.get("close", row.get("price", 0))),
+                    volume=row.get("volume", 0),
+                )
+                await self.statistical_calculator.add_market_data(market_data_obj)
+
+            # Use the correct method signature from StatisticalFeatures
+            features = ["ROLLING_STATS", "AUTOCORRELATION", "REGIME"]
+            result_dict = await self.statistical_calculator.calculate_batch_features(
+                symbol=symbol, features=features
+            )
+
+            # Convert result dictionary to DataFrame format
+            features_dict = {}
+            for feature_name, result in result_dict.items():
+                if result and result.value:
+                    if isinstance(result.value, dict):
+                        # Handle dict results like rolling stats
+                        for sub_key, sub_value in result.value.items():
+                            if isinstance(sub_value, (int, float, Decimal)):
+                                # Convert to Decimal for financial precision
+                                decimal_value = Decimal(str(sub_value)) if not isinstance(sub_value, Decimal) else sub_value
+                                features_dict[f"{feature_name.lower()}_{sub_key}"] = [decimal_value] * len(market_data)
+                    elif isinstance(result.value, (int, float, Decimal)):
+                        # Handle single numeric values - Convert to Decimal for financial precision
+                        decimal_value = Decimal(str(result.value)) if not isinstance(result.value, Decimal) else result.value
+                        features_dict[feature_name.lower()] = [decimal_value] * len(market_data)
+
+            return pd.DataFrame(features_dict, index=market_data.index)
+
         except Exception as e:
             self._logger.warning(f"Statistical features computation failed: {e}")
             return pd.DataFrame(index=market_data.index)
@@ -514,10 +717,15 @@ class FeatureEngineeringService(BaseService):
         features.loc[volume_sum_mask, "vwap"] = (
             data.loc[volume_sum_mask, "close"] * data.loc[volume_sum_mask, "volume"]
         ).rolling(vwap_period).sum() / volume_sum.loc[volume_sum_mask]
-        features["price_volume"] = data["close"] * data["volume"]
+        # Volume-price features - use Decimal for financial precision
+        close_decimal = data["close"].apply(lambda x: Decimal(str(x)) if pd.notna(x) else None)
+        volume_decimal = data["volume"].apply(lambda x: Decimal(str(x)) if pd.notna(x) else None)
+
+        features["price_volume"] = close_decimal * volume_decimal
+        price_volume_shift = features["price_volume"].shift(1)
         features["volume_price_trend"] = (
-            features["price_volume"] / features["price_volume"].shift(1)
-        ) - 1
+            features["price_volume"] / price_volume_shift - Decimal("1")
+        ).where(price_volume_shift.notna() & (price_volume_shift != 0))
 
         return features
 
@@ -652,17 +860,19 @@ class FeatureEngineeringService(BaseService):
         for period in ML_FEATURE_CONSTANTS["price_vs_ma_periods"]:
             if f"sma_{period}" in features.columns:
                 sma_mask = features[f"sma_{period}"] != 0
-                features[f"price_vs_sma_{period}"] = np.nan
-                features.loc[sma_mask, f"price_vs_sma_{period}"] = (
-                    data.loc[sma_mask, "close"] / features.loc[sma_mask, f"sma_{period}"]
-                )
+                features[f"price_vs_sma_{period}"] = None
+                # Use Decimal for financial precision
+                close_decimal = data.loc[sma_mask, "close"].apply(lambda x: Decimal(str(x)))
+                sma_decimal = features.loc[sma_mask, f"sma_{period}"].apply(lambda x: Decimal(str(x)) if pd.notna(x) else None)
+                features.loc[sma_mask, f"price_vs_sma_{period}"] = close_decimal / sma_decimal
 
             if f"ema_{period}" in features.columns:
                 ema_mask = features[f"ema_{period}"] != 0
-                features[f"price_vs_ema_{period}"] = np.nan
-                features.loc[ema_mask, f"price_vs_ema_{period}"] = (
-                    data.loc[ema_mask, "close"] / features.loc[ema_mask, f"ema_{period}"]
-                )
+                features[f"price_vs_ema_{period}"] = None
+                # Use Decimal for financial precision
+                close_decimal = data.loc[ema_mask, "close"].apply(lambda x: Decimal(str(x)))
+                ema_decimal = features.loc[ema_mask, f"ema_{period}"].apply(lambda x: Decimal(str(x)) if pd.notna(x) else None)
+                features.loc[ema_mask, f"price_vs_ema_{period}"] = close_decimal / ema_decimal
 
         # Trend strength
         short_ma_period = ML_FEATURE_CONSTANTS["trend_comparison_periods"]["short"]
@@ -768,7 +978,7 @@ class FeatureEngineeringService(BaseService):
             # Get feature scores
             scores = selector.scores_
             importance_scores = {
-                name: float(score)
+                name: Decimal(str(score))
                 for name, score in zip(
                     selected_feature_names, scores[selector.get_support()], strict=False
                 )
@@ -870,65 +1080,7 @@ class FeatureEngineeringService(BaseService):
 
         return features
 
-    def _generate_cache_key(
-        self, symbol: str, feature_types: list[str], market_data: pd.DataFrame
-    ) -> str:
-        """Generate cache key for feature computation."""
-        import hashlib
-
-        # Create hash from symbol, feature types, and data shape/checksum
-        feature_types_str = "_".join(sorted(feature_types))
-        data_shape = f"{len(market_data)}x{len(market_data.columns)}"
-        data_checksum = (
-            str(hash(tuple(market_data.iloc[-1].values))) if not market_data.empty else "empty"
-        )
-
-        cache_str = f"{symbol}_{feature_types_str}_{data_shape}_{data_checksum}"
-        digest_length = ML_MODEL_CONSTANTS["hash_digest_length"]
-        return hashlib.md5(cache_str.encode()).hexdigest()[:digest_length]
-
-    @dec.enhance(cache=True, cache_ttl=ML_MODEL_CONSTANTS["cache_ttl_seconds"])
-    async def _get_cached_features(self, cache_key: str) -> pd.DataFrame | None:
-        """Get cached features."""
-        if cache_key in self._feature_cache:
-            features_df, timestamp = self._feature_cache[cache_key]
-            ttl_hours = self.fe_config.cache_ttl_hours
-
-            if datetime.now(timezone.utc) - timestamp < timedelta(hours=ttl_hours):
-                return features_df
-
-        return None
-
-    async def _cache_features(self, cache_key: str, features_df: pd.DataFrame) -> None:
-        """Cache computed features."""
-        # Check cache size limit
-        if len(self._feature_cache) >= self.fe_config.cache_max_size:
-            # Remove oldest entries
-            sorted_items = sorted(self._feature_cache.items(), key=lambda x: x[1][1])
-            for key, _ in sorted_items[
-                : len(self._feature_cache) - self.fe_config.cache_max_size + 1
-            ]:
-                del self._feature_cache[key]
-
-        self._feature_cache[cache_key] = (features_df.copy(), datetime.now(timezone.utc))
-
-        # Clean old cache entries to prevent memory issues
-        await self._clean_feature_cache()
-
-    async def _clean_feature_cache(self) -> None:
-        """Clean expired feature cache entries."""
-        ttl_hours = self.fe_config.cache_ttl_hours
-        cutoff_time = datetime.now(timezone.utc) - timedelta(hours=ttl_hours)
-
-        expired_keys = [
-            key for key, (_, timestamp) in self._feature_cache.items() if timestamp < cutoff_time
-        ]
-
-        for key in expired_keys:
-            del self._feature_cache[key]
-
-        if expired_keys:
-            self._logger.debug(f"Cleaned {len(expired_keys)} expired feature cache entries")
+    # Cache management now handled by utils
 
     # Service Health and Metrics
     async def _service_health_check(self) -> "HealthStatus":
@@ -940,10 +1092,11 @@ class FeatureEngineeringService(BaseService):
             if not all([self.data_service, self.technical_calculator, self.statistical_calculator]):
                 return HealthStatus.UNHEALTHY
 
-            # Check cache size
-            cache_size = len(self._feature_cache)
-            if cache_size > self.fe_config.cache_max_size:  # Too many cached items
-                return HealthStatus.DEGRADED
+            # Check cache size using utils
+            if self._feature_cache:
+                cache_size = await self._feature_cache.size()
+                if cache_size > self.fe_config.cache_max_size:
+                    return HealthStatus.DEGRADED
 
             return HealthStatus.HEALTHY
 
@@ -951,10 +1104,14 @@ class FeatureEngineeringService(BaseService):
             self._logger.error("Feature engineering service health check failed", error=str(e))
             return HealthStatus.UNHEALTHY
 
-    def get_feature_engineering_metrics(self) -> dict[str, Any]:
+    async def get_feature_engineering_metrics(self) -> dict[str, Any]:
         """Get feature engineering service metrics."""
+        cache_size = 0
+        if self._feature_cache:
+            cache_size = await self._feature_cache.size()
+
         return {
-            "cached_features": len(self._feature_cache),
+            "cached_features": cache_size,
             "fitted_scalers": len(self._scalers),
             "fitted_selectors": len(self._selectors),
             "executor_workers": self.fe_config.computation_workers,
@@ -962,11 +1119,13 @@ class FeatureEngineeringService(BaseService):
 
     async def clear_cache(self) -> dict[str, int]:
         """Clear feature engineering cache."""
-        cache_size = len(self._feature_cache)
+        cache_size = 0
+        if self._feature_cache:
+            cache_size = await self._feature_cache.clear()
+
         scaler_count = len(self._scalers)
         selector_count = len(self._selectors)
 
-        self._feature_cache.clear()
         self._scalers.clear()
         self._selectors.clear()
 

@@ -142,14 +142,14 @@ class FeatureStoreService(BaseService):
         self._operation_semaphore = asyncio.Semaphore(self.fs_config.max_concurrent_operations)
 
         # Add required dependencies
-        self.add_dependency("DataService")
+        self.add_dependency("DataServiceInterface")
 
     async def _do_start(self) -> None:
         """Start the feature store service."""
         await super()._do_start()
 
         # Resolve dependencies
-        self.data_service = self.resolve_dependency("DataService")
+        self.data_service = self.resolve_dependency("DataServiceInterface")
 
         # Start background cleanup task
         if self.fs_config.background_cleanup_interval > 0:

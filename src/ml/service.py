@@ -8,28 +8,29 @@ ML operations in the trading system.
 
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
+from decimal import Decimal
 from typing import Any
 
 import pandas as pd
 from pydantic import BaseModel, Field
-from sklearn.metrics import (
-    accuracy_score,
-    f1_score,
-    mean_absolute_error,
-    mean_squared_error,
-    precision_score,
-    r2_score,
-    recall_score,
-)
 
 from src.core.base.service import BaseService
+from src.core.event_constants import InferenceEvents, TrainingEvents
 from src.core.exceptions import ModelError, ValidationError
 from src.core.types.base import ConfigDict
 from src.ml.feature_engineering import FeatureRequest
+from src.ml.interfaces import IMLService
 from src.ml.registry.model_registry import ModelLoadRequest, ModelRegistrationRequest
 from src.utils.constants import ML_MODEL_CONSTANTS
 from src.utils.decorators import UnifiedDecorator
+from src.utils.ml_cache import CacheManager, generate_cache_key
+from src.utils.ml_metrics import calculate_classification_metrics, calculate_regression_metrics
+from src.utils.ml_validation import (
+    check_data_quality,
+    validate_training_data,
+)
+from src.utils.messaging_patterns import MessagePattern, MessageType, StandardMessage
 
 # Initialize decorator instance
 dec = UnifiedDecorator()
@@ -133,7 +134,7 @@ class MLTrainingResponse(BaseModel):
     warnings: list[str] = Field(default_factory=list)
 
 
-class MLService(BaseService):
+class MLService(BaseService, IMLService):
     """
     Main ML service coordinating all machine learning operations.
 
@@ -175,8 +176,8 @@ class MLService(BaseService):
         self.feature_store_service: Any = None
 
         # Internal state
-        self._pipeline_cache: dict[str, tuple[MLPipelineResponse, datetime]] = {}
         self._active_operations: dict[str, asyncio.Task] = {}
+        self._cache_manager: CacheManager | None = None
 
         # Thread pool for CPU-intensive operations
         self._executor = ThreadPoolExecutor(max_workers=ML_MODEL_CONSTANTS["ml_executor_workers"])
@@ -200,7 +201,7 @@ class MLService(BaseService):
         await super()._do_start()
 
         # Resolve dependencies
-        self.data_service = self.resolve_dependency("DataService")
+        self.data_service = self.resolve_dependency("DataServiceInterface")
 
         if self.ml_config.enable_feature_engineering:
             self.feature_engineering_service = self.resolve_dependency("FeatureEngineeringService")
@@ -218,6 +219,21 @@ class MLService(BaseService):
                 self._logger.warning(f"Feature store dependency resolution failed: {e}")
                 # Feature store is optional
                 self.feature_store_service = None
+
+        # Initialize cache manager if caching is enabled
+        if self.ml_config.enable_pipeline_caching:
+            from src.utils.ml_cache import init_cache_manager
+
+            try:
+                self._cache_manager = await init_cache_manager(
+                    {
+                        "prediction_cache_ttl_minutes": self.ml_config.cache_ttl_minutes,
+                        "cleanup_interval_minutes": ML_MODEL_CONSTANTS["cache_cleanup_interval_minutes"],
+                    }
+                )
+            except Exception as e:
+                self._logger.warning(f"Cache manager initialization failed: {e}")
+                self._cache_manager = None
 
         self._logger.info(
             "ML service started successfully",
@@ -242,6 +258,10 @@ class MLService(BaseService):
                 await task
             except asyncio.CancelledError:
                 pass
+
+        # Stop cache manager
+        if self._cache_manager:
+            await self._cache_manager.stop()
 
         # Shutdown thread pool
         self._executor.shutdown(wait=True)
@@ -277,22 +297,80 @@ class MLService(BaseService):
             warnings = []
 
             try:
-                # Check cache first
-                if request.use_cache and self.ml_config.enable_pipeline_caching:
-                    cache_key = self._generate_pipeline_cache_key(request)
-                    cached_response = await self._get_cached_pipeline(cache_key)
+                # Apply consistent boundary validation at ML module boundaries
+                from src.utils.messaging_patterns import BoundaryValidator
+
+                # Validate input data at ML service boundary
+                if isinstance(request.market_data, dict):
+                    try:
+                        BoundaryValidator.validate_database_entity(request.market_data, "create")
+                    except Exception as e:
+                        warnings.append(f"Input boundary validation warning: {e}")
+                elif hasattr(request.market_data, "model_dump"):
+                    try:
+                        market_data_dict = request.market_data.model_dump()
+                        BoundaryValidator.validate_database_entity(market_data_dict, "create")
+                    except Exception as e:
+                        warnings.append(f"Input boundary validation warning: {e}")
+
+                # Validate required ML-specific fields at boundary
+                if not request.symbol:
+                    raise ModelError("Symbol is required for ML pipeline processing")
+                if not request.request_id:
+                    raise ModelError("Request ID is required for ML pipeline processing")
+                # Check cache first using utils cache manager
+                cache_key = None
+                if (
+                    request.use_cache
+                    and self.ml_config.enable_pipeline_caching
+                    and self._cache_manager
+                ):
+                    # Use utils function to generate cache key
+                    cache_key = generate_cache_key(
+                        request.symbol,
+                        request.model_id or request.model_name or "default",
+                        request.market_data,
+                    )
+                    cached_response = await self._cache_manager.prediction_cache.get_prediction(
+                        cache_key
+                    )
                     if cached_response is not None:
-                        cached_response.request_id = request.request_id  # Update request ID
-                        return cached_response
+                        # Convert cached response back to MLPipelineResponse
+                        cached_pipeline_response = MLPipelineResponse(**cached_response)
+                        cached_pipeline_response.request_id = request.request_id
+                        return cached_pipeline_response
 
                 # Track the operation
                 self._active_operations[request.request_id] = asyncio.current_task()
 
-                # Convert market data to DataFrame if needed
-                if isinstance(request.market_data, dict):
-                    market_data_df = pd.DataFrame(request.market_data)
-                else:
-                    market_data_df = request.market_data
+                # Use consistent pub/sub pattern for inference events aligned with data module
+
+                # Create standardized message for inference started event
+                inference_started_message = StandardMessage(
+                    pattern=MessagePattern.PUB_SUB,
+                    message_type=MessageType.EVENT,
+                    data={
+                        "event_type": "PREDICTION_REQUESTED",
+                        "request_id": request.request_id,
+                        "symbol": request.symbol,
+                        "model_id": request.model_id,
+                        "model_name": request.model_name,
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    },
+                    source="ml_service",
+                )
+
+                # Emit using consistent pattern
+                await self.emit_event(
+                    InferenceEvents.PREDICTION_REQUESTED,
+                    inference_started_message.to_dict(),
+                )
+
+                # Use consistent data transformation utilities
+                from src.utils.ml_data_transforms import prepare_dataframe_from_market_data
+
+                # Convert market data to DataFrame with consistent transformations
+                market_data_df = prepare_dataframe_from_market_data(request.market_data)
 
                 # Stage 1: Feature Engineering
                 stage_start = datetime.now(timezone.utc)
@@ -414,9 +492,38 @@ class MLService(BaseService):
                     },
                 )
 
-                # Cache the response
-                if request.use_cache and self.ml_config.enable_pipeline_caching:
-                    await self._cache_pipeline(cache_key, response)
+                # Cache the response using utils cache manager
+                if (
+                    request.use_cache
+                    and self.ml_config.enable_pipeline_caching
+                    and self._cache_manager
+                    and cache_key
+                ):
+                    await self._cache_manager.prediction_cache.cache_prediction(
+                        cache_key, response.dict()
+                    )
+
+                # Use consistent pub/sub pattern for inference completion event aligned with data module
+                inference_completed_message = StandardMessage(
+                    pattern=MessagePattern.PUB_SUB,
+                    message_type=MessageType.EVENT,
+                    data={
+                        "event_type": "PREDICTION_COMPLETED",
+                        "request_id": request.request_id,
+                        "symbol": request.symbol,
+                        "model_id": model_id,
+                        "prediction_count": len(predictions),
+                        "total_time_ms": total_processing_time,
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    },
+                    source="ml_service",
+                )
+
+                # Emit using consistent pattern
+                await self.emit_event(
+                    InferenceEvents.PREDICTION_COMPLETED,
+                    inference_completed_message.to_dict(),
+                )
 
                 self._logger.info(
                     "ML pipeline processed successfully",
@@ -431,9 +538,49 @@ class MLService(BaseService):
                 return response
 
             except Exception as e:
+                # Apply consistent error propagation patterns
+                from src.utils.messaging_patterns import ErrorPropagationMixin
+
                 total_processing_time = (
                     datetime.now(timezone.utc) - pipeline_start
                 ).total_seconds() * 1000
+
+                # Use consistent error propagation
+                error_propagator = ErrorPropagationMixin()
+                try:
+                    if isinstance(e, ValidationError):
+                        error_propagator.propagate_validation_error(
+                            e, "ml_service.process_pipeline"
+                        )
+                    elif isinstance(e, ModelError):
+                        error_propagator.propagate_service_error(e, "ml_service.process_pipeline")
+                    else:
+                        error_propagator.propagate_service_error(e, "ml_service.process_pipeline")
+                except Exception as prop_error:
+                    # Fallback if error propagation fails
+                    self._logger.warning(f"Error propagation failed: {prop_error}")
+
+                # Use consistent pub/sub pattern for error events aligned with data module
+                error_message = StandardMessage(
+                    pattern=MessagePattern.PUB_SUB,
+                    message_type=MessageType.ERROR,
+                    data={
+                        "event_type": "PREDICTION_FAILED",
+                        "request_id": request.request_id,
+                        "symbol": request.symbol,
+                        "error": str(e),
+                        "error_type": type(e).__name__,
+                        "total_time_ms": total_processing_time,
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    },
+                    source="ml_service",
+                )
+
+                # Emit using consistent pattern
+                await self.emit_event(
+                    InferenceEvents.PREDICTION_FAILED,
+                    error_message.to_dict(),
+                )
 
                 error_response = MLPipelineResponse(
                     request_id=request.request_id,
@@ -490,23 +637,40 @@ class MLService(BaseService):
                 # Track the operation
                 self._active_operations[request.request_id] = asyncio.current_task()
 
-                # Convert data to DataFrames if needed
-                if isinstance(request.training_data, dict):
-                    training_data_df = pd.DataFrame(request.training_data)
-                else:
-                    training_data_df = request.training_data
+                # Emit training started event
+                await self.emit_event(
+                    TrainingEvents.STARTED,
+                    {
+                        "request_id": request.request_id,
+                        "model_name": request.model_name,
+                        "model_type": request.model_type,
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    },
+                )
+
+                # Use consistent data transformation utilities for training data
+                from src.utils.ml_data_transforms import prepare_dataframe_from_market_data
+
+                # Convert training data to DataFrame with consistent transformations
+                training_data_df = prepare_dataframe_from_market_data(request.training_data)
 
                 if isinstance(request.target_data, list):
                     target_series = pd.Series(request.target_data)
                 else:
                     target_series = request.target_data
 
-                # Validate data
-                if training_data_df.empty or target_series.empty:
-                    raise ValidationError("Training data and target data cannot be empty")
+                # Use utils validation functions
+                training_data_df, target_series = validate_training_data(
+                    training_data_df, target_series, request.model_name or "MLService"
+                )
 
-                if len(training_data_df) != len(target_series):
-                    raise ValidationError("Training data and target data must have the same length")
+                # Check data quality using utils function
+                quality_report = check_data_quality(training_data_df, target_series)
+                if not quality_report["passed"]:
+                    warnings.extend(quality_report["warnings"])
+                    self._logger.warning(
+                        f"Data quality issues detected: {quality_report['warnings']}"
+                    )
 
                 # Feature engineering
                 features_df = training_data_df
@@ -602,6 +766,18 @@ class MLService(BaseService):
                     warnings=warnings,
                 )
 
+                # Emit training completed event
+                await self.emit_event(
+                    TrainingEvents.COMPLETED,
+                    {
+                        "request_id": request.request_id,
+                        "model_name": request.model_name,
+                        "model_id": model_id,
+                        "training_time_ms": training_time,
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    },
+                )
+
                 self._logger.info(
                     "Model training completed successfully",
                     request_id=request.request_id,
@@ -614,7 +790,45 @@ class MLService(BaseService):
                 return response
 
             except Exception as e:
+                # Apply consistent error propagation patterns for training
+                from src.utils.messaging_patterns import ErrorPropagationMixin
+
                 training_time = (datetime.now(timezone.utc) - training_start).total_seconds() * 1000
+
+                # Use consistent error propagation
+                error_propagator = ErrorPropagationMixin()
+                try:
+                    if isinstance(e, ValidationError):
+                        error_propagator.propagate_validation_error(e, "ml_service.train_model")
+                    elif isinstance(e, ModelError):
+                        error_propagator.propagate_service_error(e, "ml_service.train_model")
+                    else:
+                        error_propagator.propagate_service_error(e, "ml_service.train_model")
+                except Exception as prop_error:
+                    # Fallback if error propagation fails
+                    self._logger.warning(f"Error propagation failed: {prop_error}")
+
+                # Use consistent pub/sub pattern for training error events aligned with data module
+                training_error_message = StandardMessage(
+                    pattern=MessagePattern.PUB_SUB,
+                    message_type=MessageType.ERROR,
+                    data={
+                        "event_type": "TRAINING_FAILED",
+                        "request_id": request.request_id,
+                        "model_name": request.model_name,
+                        "error": str(e),
+                        "error_type": type(e).__name__,
+                        "training_time_ms": training_time,
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    },
+                    source="ml_service",
+                )
+
+                # Emit using consistent pattern
+                await self.emit_event(
+                    TrainingEvents.FAILED,
+                    training_error_message.to_dict(),
+                )
 
                 self._logger.error(
                     "Model training failed",
@@ -694,30 +908,37 @@ class MLService(BaseService):
             cv_scores = cross_val_score(
                 model, features_df, target_series, cv=request.cross_validation_folds
             )
-            validation_metrics["cv_score_mean"] = float(cv_scores.mean())
-            validation_metrics["cv_score_std"] = float(cv_scores.std())
+            validation_metrics["cv_score_mean"] = Decimal(str(cv_scores.mean()))
+            validation_metrics["cv_score_std"] = Decimal(str(cv_scores.std()))
 
         return model, training_metrics, validation_metrics
 
     def _calculate_metrics(
         self, y_true: Any, y_pred: Any, is_classification: bool
     ) -> dict[str, Any]:
-        """Calculate appropriate metrics."""
-        if is_classification:
-            return {
-                "accuracy": float(accuracy_score(y_true, y_pred)),
-                "precision": float(
-                    precision_score(y_true, y_pred, average="weighted", zero_division=0)
-                ),
-                "recall": float(recall_score(y_true, y_pred, average="weighted", zero_division=0)),
-                "f1_score": float(f1_score(y_true, y_pred, average="weighted", zero_division=0)),
-            }
-        else:
-            return {
-                "mse": float(mean_squared_error(y_true, y_pred)),
-                "mae": float(mean_absolute_error(y_true, y_pred)),
-                "r2_score": float(r2_score(y_true, y_pred)),
-            }
+        """Calculate appropriate metrics using utils functions."""
+        try:
+            # Use utils functions for consistent metric calculation
+            if is_classification:
+                return calculate_classification_metrics(y_true, y_pred)
+            else:
+                return calculate_regression_metrics(y_true, y_pred)
+        except Exception as e:
+            self._logger.error(f"Metrics calculation failed: {e}")
+            # Fallback to basic metrics
+            if is_classification:
+                return {
+                    "accuracy": 0.0,
+                    "precision": 0.0,
+                    "recall": 0.0,
+                    "f1_score": 0.0,
+                }
+            else:
+                return {
+                    "mae": float("inf"),
+                    "mse": float("inf"),
+                    "r2_score": -float("inf"),
+                }
 
     # Batch Processing
     @dec.enhance(log=True, monitor=True, log_level="info")
@@ -742,18 +963,43 @@ class MLService(BaseService):
     async def _process_batch_pipeline_impl(
         self, requests: list[MLPipelineRequest]
     ) -> list[MLPipelineResponse]:
-        """Internal batch pipeline processing implementation."""
+        """Internal batch pipeline processing implementation with consistent paradigm alignment."""
         if not requests:
             return []
 
         batch_start = datetime.now(timezone.utc)
 
         try:
-            # Process requests concurrently, but respect the semaphore limit
-            tasks = []
-            for request in requests:
-                task = asyncio.create_task(self.process_pipeline(request))
-                tasks.append(task)
+            # Apply consistent batch processing paradigm alignment with data module patterns
+            from src.utils.messaging_patterns import ProcessingParadigmAligner
+            from src.utils.ml_data_transforms import batch_transform_requests_to_aligned_format
+
+            # Convert requests to aligned batch format using utility function
+            request_items = batch_transform_requests_to_aligned_format(requests)
+
+            # Create batch with consistent format aligned with data module patterns
+            aligned_batch = ProcessingParadigmAligner.create_batch_from_stream(request_items)
+            batch_id = aligned_batch["batch_id"]
+            self._logger.info(
+                f"Processing aligned ML batch {batch_id} with {len(request_items)} requests"
+            )
+
+            # Determine optimal processing approach based on batch size and concurrency limits
+            max_concurrent = self.ml_config.max_concurrent_operations
+            if len(requests) <= max_concurrent:
+                # Small batch - process all concurrently like data module
+                tasks = []
+                for request in requests:
+                    task = asyncio.create_task(self.process_pipeline(request))
+                    tasks.append(task)
+            else:
+                # Large batch - process in chunks aligned with data module patterns
+                tasks = []
+                for i in range(0, len(requests), max_concurrent):
+                    batch_chunk = requests[i : i + max_concurrent]
+                    for request in batch_chunk:
+                        task = asyncio.create_task(self.process_pipeline(request))
+                        tasks.append(task)
 
             # Wait for all to complete
             responses = await asyncio.gather(*tasks, return_exceptions=True)
@@ -806,54 +1052,15 @@ class MLService(BaseService):
 
             return error_responses
 
-    # Cache Management
-    def _generate_pipeline_cache_key(self, request: MLPipelineRequest) -> str:
-        """Generate cache key for pipeline request."""
-        import hashlib
-
-        # Create hash from key request parameters
-        if isinstance(request.market_data, dict):
-            data_hash = str(hash(frozenset(request.market_data.items())))
+    # Cache Management using utils
+    async def clear_ml_cache(self) -> dict[str, int]:
+        """Clear ML service caches using utils cache manager."""
+        if self._cache_manager:
+            results = await self._cache_manager.clear_all()
+            self._logger.info("ML service caches cleared", **results)
+            return results
         else:
-            data_hash = str(hash(tuple(request.market_data.iloc[0].values)))
-
-        cache_str = f"{request.symbol}_{request.model_id or request.model_name}_{data_hash}_{request.return_probabilities}"
-        return hashlib.md5(cache_str.encode()).hexdigest()[:16]
-
-    async def _get_cached_pipeline(self, cache_key: str) -> MLPipelineResponse | None:
-        """Get cached pipeline response."""
-        if cache_key in self._pipeline_cache:
-            response, timestamp = self._pipeline_cache[cache_key]
-            ttl_minutes = self.ml_config.cache_ttl_minutes
-
-            if datetime.now(timezone.utc) - timestamp < timedelta(minutes=ttl_minutes):
-                return response
-            else:
-                del self._pipeline_cache[cache_key]
-
-        return None
-
-    async def _cache_pipeline(self, cache_key: str, response: MLPipelineResponse) -> None:
-        """Cache pipeline response."""
-        self._pipeline_cache[cache_key] = (response, datetime.now(timezone.utc))
-
-        # Clean old cache entries
-        await self._clean_pipeline_cache()
-
-    async def _clean_pipeline_cache(self) -> None:
-        """Clean expired pipeline cache entries."""
-        ttl_minutes = self.ml_config.cache_ttl_minutes
-        cutoff_time = datetime.now(timezone.utc) - timedelta(minutes=ttl_minutes)
-
-        expired_keys = [
-            key for key, (_, timestamp) in self._pipeline_cache.items() if timestamp < cutoff_time
-        ]
-
-        for key in expired_keys:
-            del self._pipeline_cache[key]
-
-        if expired_keys:
-            self._logger.debug(f"Cleaned {len(expired_keys)} expired pipeline cache entries")
+            return {"predictions_cleared": 0}
 
     # Model Management Operations
     async def list_available_models(
@@ -930,7 +1137,7 @@ class MLService(BaseService):
         """Get ML service metrics."""
         return {
             "active_operations": len(self._active_operations),
-            "cached_pipelines": len(self._pipeline_cache),
+            "cache_manager_available": bool(self._cache_manager),
             "max_concurrent_operations": self.ml_config.max_concurrent_operations,
             "feature_engineering_enabled": self.ml_config.enable_feature_engineering,
             "model_registry_enabled": self.ml_config.enable_model_registry,
@@ -947,18 +1154,132 @@ class MLService(BaseService):
 
     async def clear_cache(self) -> dict[str, int]:
         """Clear ML service caches."""
-        pipeline_cache_size = len(self._pipeline_cache)
+        return await self.clear_ml_cache()
 
-        self._pipeline_cache.clear()
+    # Strategy Integration Methods
+    @dec.enhance(log=True, monitor=True, log_level="info")
+    async def enhance_strategy_signals(
+        self,
+        strategy_id: str,
+        signals: list,
+        market_context: dict[str, Any] | None = None,
+    ) -> list:
+        """
+        Enhance strategy signals using ML predictions and confidence scoring.
 
-        self._logger.info(
-            "ML service caches cleared",
-            pipelines_removed=pipeline_cache_size,
+        Args:
+            strategy_id: Unique identifier for the strategy
+            signals: List of raw signals from the strategy
+            market_context: Optional market context for ML processing
+
+        Returns:
+            List of enhanced signals with ML-based adjustments
+
+        Raises:
+            ModelError: If signal enhancement fails
+        """
+        return await self.execute_with_monitoring(
+            "enhance_strategy_signals",
+            self._enhance_strategy_signals_impl,
+            strategy_id,
+            signals,
+            market_context,
         )
 
-        return {
-            "pipelines_removed": pipeline_cache_size,
-        }
+    async def _enhance_strategy_signals_impl(
+        self,
+        strategy_id: str,
+        signals: list,
+        market_context: dict[str, Any] | None = None,
+    ) -> list:
+        """Internal implementation for signal enhancement."""
+        if not signals:
+            return signals
+
+        enhanced_signals = []
+        try:
+            # Process each signal for enhancement
+            for signal in signals:
+                try:
+                    # Extract signal information
+                    symbol = getattr(signal, 'symbol', 'UNKNOWN')
+
+                    # Create ML pipeline request for signal enhancement
+                    pipeline_request = MLPipelineRequest(
+                        symbol=symbol,
+                        market_data=market_context or {},
+                        model_name=f"signal_enhancer_{strategy_id}",
+                        model_type="random_forest",  # Default to random forest
+                        return_probabilities=True,
+                        use_cache=True,
+                    )
+
+                    # Process through ML pipeline
+                    ml_response = await self.process_pipeline(pipeline_request)
+
+                    if ml_response.pipeline_success and ml_response.predictions:
+                        # Apply ML enhancement to signal strength
+                        original_strength = getattr(signal, 'strength', 0.5)
+
+                        # Use first prediction as confidence boost
+                        prediction_confidence = ml_response.predictions[0]
+
+                        # Calculate enhanced strength using weighted average
+                        enhanced_strength = (
+                            float(original_strength) * 0.7 +
+                            prediction_confidence * 0.3
+                        )
+
+                        # Create enhanced signal by copying original and updating strength
+                        enhanced_signal = signal
+                        if hasattr(signal, 'strength'):
+                            from decimal import Decimal
+                            enhanced_signal.strength = Decimal(str(min(max(enhanced_strength, 0.0), 1.0)))
+
+                        enhanced_signals.append(enhanced_signal)
+
+                        self._logger.info(
+                            "Enhanced signal with ML prediction",
+                            symbol=symbol,
+                            original_strength=original_strength,
+                            enhanced_strength=enhanced_strength,
+                            prediction_confidence=prediction_confidence,
+                        )
+                    else:
+                        # If ML processing fails, keep original signal
+                        enhanced_signals.append(signal)
+                        self._logger.warning(
+                            "ML enhancement failed, keeping original signal",
+                            symbol=symbol,
+                            error=ml_response.error,
+                        )
+
+                except Exception as e:
+                    # If individual signal processing fails, keep original
+                    enhanced_signals.append(signal)
+                    self._logger.warning(
+                        "Signal enhancement failed for individual signal",
+                        signal=str(signal),
+                        error=str(e),
+                    )
+
+            self._logger.info(
+                "Strategy signals enhanced via ML",
+                strategy_id=strategy_id,
+                original_count=len(signals),
+                enhanced_count=len(enhanced_signals),
+            )
+
+            return enhanced_signals
+
+        except Exception as e:
+            self._logger.error(
+                "Strategy signal enhancement failed completely",
+                strategy_id=strategy_id,
+                error=str(e),
+            )
+            # Return original signals if enhancement completely fails
+            return signals
 
     # Configuration validation
     def _validate_service_config(self, config: ConfigDict) -> bool:

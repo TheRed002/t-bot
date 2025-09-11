@@ -83,7 +83,7 @@ class ModelValidationService(BaseService):
         self.overfitting_alerts = []
 
         # Add dependencies
-        self.add_dependency("DataService")
+        self.add_dependency("DataServiceInterface")
         self.add_dependency("ModelRegistryService")
 
         self._logger.info(
@@ -99,7 +99,7 @@ class ModelValidationService(BaseService):
         """Start the model validation service."""
         try:
             # Resolve dependencies
-            self.data_service = self.resolve_dependency("DataService")
+            self.data_service = self.resolve_dependency("DataServiceInterface")
             self.model_registry = self.resolve_dependency("ModelRegistryService")
 
             self._logger.info("Model validation service started successfully")
@@ -1441,7 +1441,7 @@ class ModelValidationService(BaseService):
         """Get benchmark results."""
         return self.benchmark_results
 
-    def clear_validation_history(self):
+    def clear_validation_history(self) -> None:
         """Clear validation history."""
         self.validation_history.clear()
         self._logger.info("Validation history cleared")

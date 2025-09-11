@@ -15,6 +15,7 @@ if TYPE_CHECKING:
 from src.ml.factory import ModelFactory
 from src.ml.feature_engineering import FeatureEngineeringService
 from src.ml.inference.inference_engine import InferenceService
+from src.ml.inference.model_cache import ModelCacheService
 from src.ml.model_manager import ModelManagerService
 from src.ml.registry.model_registry import ModelRegistryService
 from src.ml.repository import MLRepository
@@ -25,6 +26,7 @@ from src.ml.services import (
     ModelValidationService,
     TrainingService,
 )
+from src.ml.store.feature_store import FeatureStoreService
 
 
 def register_ml_services(container: "DependencyContainer", config: ConfigDict) -> None:
@@ -35,45 +37,65 @@ def register_ml_services(container: "DependencyContainer", config: ConfigDict) -
         container: The DI container instance
         config: Application configuration
     """
-    # Register repository first as singleton
-    container.register("MLRepository", lambda: MLRepository(config=config), singleton=True)
+    # Register ML repository as singleton (uses DataService internally)
+    def create_ml_repository():
+        return MLRepository(config=config)
+    container.register("MLRepository", create_ml_repository, singleton=True)
 
     # Register model factory as singleton
-    container.register("ModelFactory", lambda: ModelFactory(config=config), singleton=True)
+    def create_model_factory():
+        factory = ModelFactory(config=config)
+        factory.set_container(container)  # Inject container for dependency resolution
+        return factory
+    container.register("ModelFactory", create_model_factory, singleton=True)
+
+    # Register cache service as singleton (stateful)
+    def create_model_cache_service():
+        return ModelCacheService(config=config)
+    container.register("ModelCacheService", create_model_cache_service, singleton=True)
+
+    # Register feature store service as singleton (stateful)
+    def create_feature_store_service():
+        return FeatureStoreService(config=config)
+    container.register("FeatureStoreService", create_feature_store_service, singleton=True)
 
     # Register core ML services as singletons (stateful services)
-    container.register(
-        "FeatureEngineeringService",
-        lambda: FeatureEngineeringService(config=config),
-        singleton=True,
-    )
+    def create_feature_engineering_service():
+        return FeatureEngineeringService(config=config)
+    container.register("FeatureEngineeringService", create_feature_engineering_service, singleton=True)
 
-    container.register(
-        "ModelRegistryService", lambda: ModelRegistryService(config=config), singleton=True
-    )
+    def create_model_registry_service():
+        return ModelRegistryService(config=config)
+    container.register("ModelRegistryService", create_model_registry_service, singleton=True)
 
-    container.register("InferenceService", lambda: InferenceService(config=config), singleton=True)
+    def create_inference_service():
+        return InferenceService(config=config)
+    container.register("InferenceService", create_inference_service, singleton=True)
 
-    container.register(
-        "ModelManagerService", lambda: ModelManagerService(config=config), singleton=True
-    )
+    def create_model_manager_service():
+        return ModelManagerService(config=config)
+    container.register("ModelManagerService", create_model_manager_service, singleton=True)
 
-    container.register("MLService", lambda: MLService(config=config), singleton=True)
+    def create_ml_service():
+        return MLService(config=config)
+    container.register("MLService", create_ml_service, singleton=True)
 
     # Register mock services as singletons
-    container.register(
-        "ModelValidationService", lambda: ModelValidationService(config=config), singleton=True
-    )
+    def create_model_validation_service():
+        return ModelValidationService(config=config)
+    container.register("ModelValidationService", create_model_validation_service, singleton=True)
 
-    container.register(
-        "DriftDetectionService", lambda: DriftDetectionService(config=config), singleton=True
-    )
+    def create_drift_detection_service():
+        return DriftDetectionService(config=config)
+    container.register("DriftDetectionService", create_drift_detection_service, singleton=True)
 
-    container.register("TrainingService", lambda: TrainingService(config=config), singleton=True)
+    def create_training_service():
+        return TrainingService(config=config)
+    container.register("TrainingService", create_training_service, singleton=True)
 
-    container.register(
-        "BatchPredictionService", lambda: BatchPredictionService(config=config), singleton=True
-    )
+    def create_batch_prediction_service():
+        return BatchPredictionService(config=config)
+    container.register("BatchPredictionService", create_batch_prediction_service, singleton=True)
 
     # Note: Service aliases would need to be handled by the container implementation
     # if such functionality is required
@@ -87,13 +109,15 @@ def get_ml_service_dependencies() -> dict[str, list[str]]:
         Dictionary mapping service names to their dependencies
     """
     return {
-        "MLRepository": [],
+        "MLRepository": ["DataService"],
         "ModelFactory": [],
+        "ModelCacheService": ["DataService"],
+        "FeatureStoreService": ["DataService"],
         "FeatureEngineeringService": [
             "DataService",
         ],
         "ModelRegistryService": ["DataService", "MLRepository"],
-        "InferenceService": ["ModelRegistryService", "FeatureEngineeringService"],
+        "InferenceService": ["ModelCacheService", "ModelRegistryService", "FeatureEngineeringService"],
         "ModelValidationService": [],
         "DriftDetectionService": [],
         "TrainingService": [],

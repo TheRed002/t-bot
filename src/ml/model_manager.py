@@ -6,7 +6,7 @@ including training, validation, deployment, monitoring, and retirement.
 """
 
 from datetime import datetime, timezone
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pandas as pd
 from pydantic import BaseModel as PydanticBaseModel, Field
@@ -15,6 +15,7 @@ from src.core.base.interfaces import HealthStatus
 from src.core.base.service import BaseService
 from src.core.exceptions import ValidationError
 from src.core.types.base import ConfigDict
+from src.ml.interfaces import IModelManagerService
 from src.utils.constants import ML_MODEL_CONSTANTS
 from src.utils.decorators import UnifiedDecorator
 
@@ -67,7 +68,7 @@ class ModelManagerConfig(PydanticBaseModel):
     )
 
 
-class ModelManagerService(BaseService):
+class ModelManagerService(BaseService, IModelManagerService):
     """
     Central manager for ML model lifecycle.
 
@@ -348,8 +349,11 @@ class ModelManagerService(BaseService):
             if not model_info:
                 raise ValidationError(f"Model {model_name} not found in registry")
 
-            # Load model
-            from src.ml.registry.model_registry import ModelLoadRequest
+            # Load model through service using TYPE_CHECKING import
+            if TYPE_CHECKING:
+                from src.ml.registry.model_registry import ModelLoadRequest
+            else:
+                from src.ml.registry.model_registry import ModelLoadRequest
 
             load_request = ModelLoadRequest(model_id=model_info["model_id"])
             model_data = await self.model_registry_service.load_model(load_request)
@@ -441,20 +445,24 @@ class ModelManagerService(BaseService):
                 monitoring_samples=len(monitoring_data),
             )
 
-            # Get model
+            # Get model info
             if model_name not in self.active_models:
                 models = await self.model_registry_service.list_models(active_only=True)
                 model_info = next((m for m in models if m.get("name") == model_name), None)
                 if not model_info:
                     raise ValidationError(f"Model {model_name} not found")
 
-                from src.ml.registry.model_registry import ModelLoadRequest
+                if TYPE_CHECKING:
+                    from src.ml.registry.model_registry import ModelLoadRequest
+                else:
+                    from src.ml.registry.model_registry import ModelLoadRequest
 
                 load_request = ModelLoadRequest(model_id=model_info["model_id"])
                 model_data = await self.model_registry_service.load_model(load_request)
                 model = model_data["model"]
             else:
                 model = self.active_models[model_name]["model"]
+                model_info = self.active_models[model_name]["model_info"]
 
             monitoring_results = {}
 
@@ -471,8 +479,15 @@ class ModelManagerService(BaseService):
             except Exception as e:
                 self._logger.warning(f"Feature drift detection failed: {e}")
 
-            # Prediction drift detection
-            predictions = model.predict(monitoring_data)
+            # Prediction drift detection through inference service
+            inference_response = await self.inference_service.predict(
+                model_id=model_info.get("model_id"),
+                features=monitoring_data,
+                return_probabilities=False,
+                use_cache=False,
+                request_id=f"monitor_{model_name}_{int(datetime.now(timezone.utc).timestamp())}",
+            )
+            predictions = inference_response.predictions
             try:
                 reference_predictions = await self.drift_detection_service.get_reference_data(
                     "predictions"
@@ -492,8 +507,15 @@ class ModelManagerService(BaseService):
 
             # Performance monitoring (if true labels available)
             if true_labels is not None:
-                performance_metrics = model.evaluate(monitoring_data, true_labels)
-                monitoring_results["current_performance"] = performance_metrics
+                # Calculate performance metrics through validation service
+                try:
+                    performance_result = await self.validation_service.validate_model_performance(
+                        model, (monitoring_data, true_labels)
+                    )
+                    monitoring_results["current_performance"] = performance_result
+                except Exception as e:
+                    self._logger.warning(f"Performance metric calculation failed: {e}")
+                    monitoring_results["current_performance"] = {"error": str(e)}
 
                 # Performance drift detection
                 try:
@@ -501,9 +523,10 @@ class ModelManagerService(BaseService):
                         "performance"
                     )
                     if reference_performance is not None:
+                        current_performance = monitoring_results.get("current_performance", {})
                         performance_drift = (
                             await self.drift_detection_service.detect_performance_drift(
-                                reference_performance, performance_metrics, model_name
+                                reference_performance, current_performance, model_name
                             )
                         )
                         monitoring_results["performance_drift"] = performance_drift
@@ -660,13 +683,13 @@ class ModelManagerService(BaseService):
                 model, training_result, {}, {}
             )
 
-            # Register in model registry
+            # Register in model registry through service
             from src.ml.registry.model_registry import ModelRegistrationRequest
 
             registration_request = ModelRegistrationRequest(
                 model=model,
-                name=model.model_name,
-                model_type=model.model_type,
+                name=getattr(model, "model_name", "unknown_model"),
+                model_type=getattr(model, "model_type", "unknown"),
                 description=f"Model trained for {symbol}",
                 metadata={
                     "symbol": symbol,
@@ -694,7 +717,7 @@ class ModelManagerService(BaseService):
         """Perform pre-deployment validation."""
         try:
             checks = {
-                "model_trained": model.is_trained,
+                "model_trained": getattr(model, "is_trained", False),
                 "has_required_methods": all(
                     hasattr(model, method) for method in ["predict", "evaluate", "prepare_data"]
                 ),
@@ -717,7 +740,8 @@ class ModelManagerService(BaseService):
 
             # Check minimum performance thresholds
             metrics = getattr(model, "metrics", {})
-            if model.model_type.endswith("classifier"):
+            model_type = getattr(model, "model_type", "unknown")
+            if model_type.endswith("classifier"):
                 checks["min_accuracy"] = (
                     metrics.get("val_accuracy", 0) >= self.mm_config.min_accuracy_threshold
                 )
@@ -801,7 +825,7 @@ class ModelManagerService(BaseService):
         """Get information about active models."""
         return {
             name: {
-                "model_type": info["model"].model_type,
+                "model_type": getattr(info["model"], "model_type", "unknown"),
                 "created_at": info["created_at"],
                 "symbol": info["symbol"],
                 "status": info["status"],

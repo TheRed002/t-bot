@@ -42,40 +42,52 @@ class ModelFactory(BaseFactory[BaseMLModel], IModelFactory):
             correlation_id=correlation_id,
         )
 
+        # Container for dependency injection
+        self._container = None
+
         # Register default model creators
         self._register_default_models()
+
+    def set_container(self, container: Any) -> None:
+        """
+        Set the dependency injection container.
+        
+        Args:
+            container: DI container for resolving dependencies
+        """
+        self._container = container
 
     def _register_default_models(self) -> None:
         """Register default ML model creators."""
         try:
-            # Register direction classifier
+            # Register direction classifier with dependency injection
             self.register(
                 "DirectionClassifier",
-                DirectionClassifier,
+                self._create_direction_classifier,
                 singleton=False,
                 metadata={"description": "Binary direction prediction model"},
             )
 
-            # Register price predictor
+            # Register price predictor with dependency injection
             self.register(
                 "PricePredictor",
-                PricePredictor,
+                self._create_price_predictor,
                 singleton=False,
                 metadata={"description": "Continuous price prediction model"},
             )
 
-            # Register volatility forecaster
+            # Register volatility forecaster with dependency injection
             self.register(
                 "VolatilityForecaster",
-                VolatilityForecaster,
+                self._create_volatility_forecaster,
                 singleton=False,
                 metadata={"description": "Volatility forecasting model"},
             )
 
-            # Register regime detector
+            # Register regime detector with dependency injection
             self.register(
                 "RegimeDetector",
-                RegimeDetector,
+                self._create_regime_detector,
                 singleton=False,
                 metadata={"description": "Market regime detection model"},
             )
@@ -89,6 +101,40 @@ class ModelFactory(BaseFactory[BaseMLModel], IModelFactory):
                 "Failed to register default models", factory=self._name, error=str(e)
             )
             raise RegistrationError(f"Failed to register default models: {e}") from e
+
+    def _create_direction_classifier(self, **kwargs: Any) -> DirectionClassifier:
+        """Create DirectionClassifier with dependency injection."""
+        config = self._get_injected_config(**kwargs)
+        return DirectionClassifier(config=config, **kwargs)
+
+    def _create_price_predictor(self, **kwargs: Any) -> PricePredictor:
+        """Create PricePredictor with dependency injection."""
+        config = self._get_injected_config(**kwargs)
+        return PricePredictor(config=config, **kwargs)
+
+    def _create_volatility_forecaster(self, **kwargs: Any) -> VolatilityForecaster:
+        """Create VolatilityForecaster with dependency injection."""
+        config = self._get_injected_config(**kwargs)
+        return VolatilityForecaster(config=config, **kwargs)
+
+    def _create_regime_detector(self, **kwargs: Any) -> RegimeDetector:
+        """Create RegimeDetector with dependency injection."""
+        config = self._get_injected_config(**kwargs)
+        return RegimeDetector(config=config, **kwargs)
+
+    def _get_injected_config(self, **kwargs: Any) -> Any:
+        """Get config with dependency injection."""
+        # Use provided config or get from container
+        if "config" in kwargs:
+            return kwargs.pop("config")
+
+        if self._container and hasattr(self._container, "get"):
+            try:
+                return self._container.get("Config", self._config)
+            except Exception:
+                pass
+
+        return self._config
 
     def create_model(
         self,
@@ -119,15 +165,14 @@ class ModelFactory(BaseFactory[BaseMLModel], IModelFactory):
             if model_name is None:
                 model_name = f"{model_type}_model"
 
-            # Merge configuration
-            creation_config = self._config.copy() if self._config else {}
+            # Add model metadata to kwargs
+            kwargs["model_name"] = model_name
+            kwargs["version"] = version
             if config:
-                creation_config.update(config)
+                kwargs["config"] = config
 
-            # Create model with proper parameters
-            model = self.create(
-                model_type, model_name=model_name, version=version, config=creation_config, **kwargs
-            )
+            # Use base factory create method with injected dependencies
+            model = self.create(model_type, **kwargs)
 
             self._logger.info(
                 "Model created successfully",
@@ -198,7 +243,12 @@ class ModelFactory(BaseFactory[BaseMLModel], IModelFactory):
                     f"Model class {model_class.__name__} must inherit from BaseMLModel"
                 )
 
-            self.register(name, model_class, config, singleton, metadata)
+            # Create injected creator function
+            def create_custom_model(**kwargs: Any) -> BaseMLModel:
+                injected_config = self._get_injected_config(**kwargs)
+                return model_class(config=injected_config, **kwargs)
+
+            self.register(name, create_custom_model, config, singleton, metadata)
 
             self._logger.info(
                 "Custom model registered",

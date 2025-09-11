@@ -13,10 +13,9 @@ import numpy as np
 import pandas as pd
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.linear_model import LinearRegression
-from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.preprocessing import StandardScaler
 
-from src.core.exceptions import DataValidationError, ModelError, ValidationError
+from src.core.exceptions import ValidationError
 from src.ml.models.base_model import BaseMLModel
 
 # Try to import GPU-accelerated libraries
@@ -206,127 +205,25 @@ class PricePredictor(BaseMLModel):
             raise ValidationError(f"Unknown algorithm: {self.algorithm}")
 
     def _validate_features(self, X: pd.DataFrame) -> pd.DataFrame:
-        """Validate and preprocess features for the model."""
-        if X.empty:
-            raise ValidationError("Features cannot be empty")
-
-        # Check for required columns (basic validation)
-        if len(X.columns) == 0:
-            raise ValidationError("No feature columns found")
-
-        # Handle missing values
-        if X.isnull().any().any():
-            self._logger.warning("Missing values found in features, filling with forward fill")
-            X = X.ffill().bfill().fillna(0)
-
-        # Handle infinite values
-        X = X.replace([np.inf, -np.inf], 0)
-
-        # Ensure all columns are numeric
-        for col in X.columns:
-            if not pd.api.types.is_numeric_dtype(X[col]):
-                try:
-                    X[col] = pd.to_numeric(X[col], errors="coerce")
-                except (ValueError, TypeError) as e:
-                    self._logger.warning(
-                        f"Could not convert column {col} to numeric: {e}, dropping column"
-                    )
-                    X = X.drop(columns=[col])
-                except Exception as e:
-                    self._logger.error(f"Unexpected error converting column {col}: {e}")
-                    raise DataValidationError(
-                        f"Failed to process column {col}",
-                        validation_rule="numeric_conversion",
-                        invalid_fields=[col],
-                    ) from e
-
-        # Fill any remaining NaN values from conversion
-        X = X.fillna(0)
-
-        return X
+        """Validate and preprocess features using utilities."""
+        from src.utils.ml_validation import validate_features
+        return validate_features(X, self.model_name)
 
     def _validate_targets(self, y: pd.Series) -> pd.Series:
-        """Validate and preprocess targets for the model."""
-        if y.empty:
-            raise ValidationError("Targets cannot be empty")
-
-        # Handle missing values
-        if y.isnull().any():
-            self._logger.warning("Missing values found in targets, filling with forward fill")
-            y = y.ffill().bfill().fillna(0)
-
-        # Handle infinite values
-        y = y.replace([np.inf, -np.inf], 0)
-
-        # Ensure targets are numeric
-        if not pd.api.types.is_numeric_dtype(y):
-            try:
-                y = pd.to_numeric(y, errors="coerce")
-                y = y.fillna(0)
-            except (ValueError, TypeError) as e:
-                raise DataValidationError(
-                    "Could not convert targets to numeric",
-                    validation_rule="target_numeric_conversion",
-                    invalid_fields=["targets"],
-                ) from e
-            except Exception as e:
-                self._logger.error(f"Unexpected error in target validation: {e}")
-                raise ModelError(
-                    "Critical error in target preprocessing",
-                    model_name=self.__class__.__name__,
-                ) from e
-
-        return y
+        """Validate and preprocess targets using utilities."""
+        from src.utils.ml_validation import validate_targets
+        return validate_targets(y, self.model_name)
 
     def _calculate_metrics(self, y_true: np.ndarray, y_pred: np.ndarray) -> dict[str, float]:
-        """Calculate model-specific performance metrics."""
-        try:
-            metrics = {
-                "mae": mean_absolute_error(y_true, y_pred),
-                "mse": mean_squared_error(y_true, y_pred),
-                "rmse": np.sqrt(mean_squared_error(y_true, y_pred)),
-                "r2": r2_score(y_true, y_pred),
-            }
-
-            # Calculate directional accuracy (important for trading)
-            y_true_diff = np.diff(y_true)
-            y_pred_diff = np.diff(y_pred)
-            directional_accuracy = np.mean(np.sign(y_true_diff) == np.sign(y_pred_diff))
-            metrics["directional_accuracy"] = directional_accuracy
-
-            # Calculate mean absolute percentage error
-            non_zero_mask = y_true != 0
-            if np.any(non_zero_mask):
-                mape = (
-                    np.mean(
-                        np.abs(
-                            (y_true[non_zero_mask] - y_pred[non_zero_mask]) / y_true[non_zero_mask]
-                        )
-                    )
-                    * 100
-                )
-                metrics["mape"] = mape
-            else:
-                metrics["mape"] = 0.0
-
-            return metrics
-
-        except Exception as e:
-            self._logger.error(f"Failed to calculate metrics: {e}")
-            return {
-                "mae": float("inf"),
-                "mse": float("inf"),
-                "rmse": float("inf"),
-                "r2": -float("inf"),
-                "directional_accuracy": 0.0,
-                "mape": float("inf"),
-            }
+        """Calculate model-specific performance metrics using utilities."""
+        from src.utils.ml_metrics import calculate_regression_metrics
+        return calculate_regression_metrics(y_true, y_pred)
 
     def create_target_from_prices(
         self, prices: pd.Series, target_type: str = "return", horizon: int | None = None
     ) -> pd.Series:
         """
-        Create prediction targets from price series.
+        Create prediction targets from price series using utilities.
 
         Args:
             prices: Price series
@@ -336,56 +233,18 @@ class PricePredictor(BaseMLModel):
         Returns:
             Target series for prediction
         """
+        from src.utils.ml_data_transforms import create_returns_series
+
         horizon = horizon or self.prediction_horizon
 
         if target_type == "price":
             # Predict future price directly
-            targets = prices.shift(-horizon)
-
-        elif target_type == "return":
-            # Predict future return with Decimal precision
-            future_prices = prices.shift(-horizon)
-            targets = pd.Series(index=prices.index, dtype=float)
-
-            for i in range(len(prices)):
-                if (
-                    pd.notna(prices.iloc[i])
-                    and pd.notna(future_prices.iloc[i])
-                    and prices.iloc[i] != 0
-                ):
-                    price_decimal = Decimal(str(prices.iloc[i]))
-                    future_price_decimal = Decimal(str(future_prices.iloc[i]))
-                    return_decimal = (future_price_decimal / price_decimal) - Decimal("1")
-                    targets.iloc[i] = float(return_decimal)
-                else:
-                    targets.iloc[i] = np.nan
-
-        elif target_type == "log_return":
-            # Predict future log return with Decimal precision
-            future_prices = prices.shift(-horizon)
-            targets = pd.Series(index=prices.index, dtype=float)
-
-            for i in range(len(prices)):
-                if (
-                    pd.notna(prices.iloc[i])
-                    and pd.notna(future_prices.iloc[i])
-                    and prices.iloc[i] != 0
-                ):
-                    price_decimal = Decimal(str(prices.iloc[i]))
-                    future_price_decimal = Decimal(str(future_prices.iloc[i]))
-                    ratio = future_price_decimal / price_decimal
-                    # Use float log since Decimal doesn't have ln method
-                    targets.iloc[i] = float(np.log(float(ratio)))
-                else:
-                    targets.iloc[i] = np.nan
-
+            return prices.shift(-horizon).iloc[:-horizon]
+        elif target_type in ["return", "log_return"]:
+            return_type = "simple" if target_type == "return" else "log"
+            return create_returns_series(prices, horizon, return_type)
         else:
             raise ValidationError(f"Unknown target type: {target_type}")
-
-        # Remove last N values that don't have future data
-        targets = targets.iloc[:-horizon]
-
-        return targets
 
     def predict_price_sequence(self, X: pd.DataFrame, sequence_length: int = 10) -> np.ndarray:
         """
@@ -423,7 +282,7 @@ class PricePredictor(BaseMLModel):
         self, y_true: np.ndarray, y_pred: np.ndarray, transaction_cost: Decimal = Decimal("0.001")
     ) -> dict[str, Any]:
         """
-        Calculate trading-specific performance metrics.
+        Calculate trading-specific performance metrics using utilities.
 
         Args:
             y_true: True prices/returns
@@ -433,82 +292,9 @@ class PricePredictor(BaseMLModel):
         Returns:
             Trading performance metrics
         """
-        # Calculate directional signals
-        true_direction = np.sign(np.diff(y_true))
-        pred_direction = np.sign(np.diff(y_pred))
+        from src.utils.ml_metrics import calculate_trading_metrics
+        return calculate_trading_metrics(y_true, y_pred, float(transaction_cost))
 
-        # Directional accuracy
-        directional_accuracy = np.mean(true_direction == pred_direction)
-
-        # Calculate hypothetical returns from trading signals using Decimal for precision
-        returns_decimal = []
-        for i in range(1, len(y_true)):
-            if y_true[i - 1] != 0:
-                returns_decimal.append(
-                    Decimal(str(y_true[i])) / Decimal(str(y_true[i - 1])) - Decimal("1")
-                )
-            else:
-                returns_decimal.append(Decimal("0"))
-
-        # Simple trading strategy: buy if prediction > current, sell if < current
-        positions = pred_direction
-
-        # Calculate strategy returns with Decimal precision
-        strategy_returns_decimal = []
-        for i, ret in enumerate(
-            returns_decimal[1:] if len(returns_decimal) > 1 else returns_decimal
-        ):
-            if i < len(positions):
-                strategy_returns_decimal.append(Decimal(str(positions[i])) * ret)
-
-        # Apply transaction costs with Decimal precision
-        position_changes = np.diff(np.concatenate([[0], positions]))
-        strategy_returns_net_decimal = []
-        for i, strategy_ret in enumerate(strategy_returns_decimal):
-            if i + 1 < len(position_changes):
-                txn_cost = abs(Decimal(str(position_changes[i + 1]))) * transaction_cost
-                strategy_returns_net_decimal.append(strategy_ret - txn_cost)
-            else:
-                strategy_returns_net_decimal.append(strategy_ret)
-
-        # Convert back to float for numpy operations in metrics
-        strategy_returns_net = np.array([float(ret) for ret in strategy_returns_net_decimal])
-
-        # Calculate metrics with financial precision
-        total_return = sum(strategy_returns_net_decimal)
-
-        metrics = {
-            "directional_accuracy": float(directional_accuracy),
-            "strategy_return": float(total_return),
-            "strategy_sharpe": (
-                float(np.mean(strategy_returns_net) / np.std(strategy_returns_net))
-                if np.std(strategy_returns_net) > 0
-                else 0.0
-            ),
-            "max_drawdown": self._calculate_max_drawdown(np.cumsum(strategy_returns_net)),
-            "hit_rate": float(np.mean(strategy_returns_net > 0)),
-            "avg_win": (
-                float(np.mean(strategy_returns_net[strategy_returns_net > 0]))
-                if np.any(strategy_returns_net > 0)
-                else 0.0
-            ),
-            "avg_loss": (
-                float(np.mean(strategy_returns_net[strategy_returns_net < 0]))
-                if np.any(strategy_returns_net < 0)
-                else 0.0
-            ),
-        }
-
-        return metrics
-
-    def _calculate_max_drawdown(self, cumulative_returns: np.ndarray) -> float:
-        """Calculate maximum drawdown from cumulative returns."""
-        if len(cumulative_returns) == 0:
-            return 0.0
-
-        peak = np.maximum.accumulate(cumulative_returns)
-        drawdown = (cumulative_returns - peak) / peak
-        return np.min(drawdown)
 
     def get_feature_importance_analysis(self) -> dict[str, Any]:
         """

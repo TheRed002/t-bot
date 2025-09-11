@@ -19,6 +19,7 @@ from src.core.base.service import BaseService
 from src.core.exceptions import ModelError, ValidationError
 from src.core.types.base import ConfigDict
 from src.utils.decorators import UnifiedDecorator
+from src.utils.ml_validation import validate_features, validate_targets, validate_training_data
 
 # Initialize decorator instance
 dec = UnifiedDecorator()
@@ -137,15 +138,13 @@ class BaseMLModel(BaseService, abc.ABC):
         """Create and return the underlying ML model."""
         pass
 
-    @abc.abstractmethod
     def _validate_features(self, X: pd.DataFrame) -> pd.DataFrame:
-        """Validate and preprocess features for the model."""
-        pass
+        """Validate and preprocess features using utils."""
+        return validate_features(X, self.model_name)
 
-    @abc.abstractmethod
     def _validate_targets(self, y: pd.Series) -> pd.Series:
-        """Validate and preprocess targets for the model."""
-        pass
+        """Validate and preprocess targets using utils."""
+        return validate_targets(y, self.model_name)
 
     @abc.abstractmethod
     def _calculate_metrics(self, y_true: np.ndarray, y_pred: np.ndarray) -> dict[str, float]:
@@ -171,8 +170,12 @@ class BaseMLModel(BaseService, abc.ABC):
             ValidationError: If data validation fails
         """
         try:
-            # Validate features
-            X_processed = self._validate_features(X)
+            # Use utils validation for both features and targets together
+            if y is not None:
+                X_processed, y_processed = validate_training_data(X, y, self.model_name)
+            else:
+                X_processed = self._validate_features(X)
+                y_processed = None
 
             # Apply feature selection if enabled and model is trained
             if feature_selection and self.ml_config.enable_feature_selection and self.feature_names:
@@ -180,17 +183,6 @@ class BaseMLModel(BaseService, abc.ABC):
                 if missing_features:
                     raise ValidationError(f"Missing required features: {missing_features}")
                 X_processed = X_processed[self.feature_names]
-
-            # Validate targets if provided
-            y_processed = None
-            if y is not None:
-                y_processed = self._validate_targets(y)
-
-                # Ensure X and y have same length
-                if len(X_processed) != len(y_processed):
-                    raise ValidationError(
-                        f"Feature and target lengths don't match: {len(X_processed)} vs {len(y_processed)}"
-                    )
 
             self._logger.info(
                 "Data preparation completed",

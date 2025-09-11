@@ -7,6 +7,7 @@ time series cross-validation, nested cross-validation, and custom validation str
 
 from collections.abc import Generator
 from datetime import datetime, timezone
+from decimal import Decimal
 from typing import Any
 
 import numpy as np
@@ -751,7 +752,7 @@ class CrossValidationService(BaseService):
 
     def _calculate_sharpe_ratio(
         self, y_true: np.ndarray, y_pred: np.ndarray, risk_free_rate: float = 0.02
-    ) -> float:
+    ) -> Decimal:
         """
         Calculate Sharpe ratio for trading predictions.
 
@@ -763,19 +764,30 @@ class CrossValidationService(BaseService):
         Returns:
             Sharpe ratio (annualized)
         """
-        # Convert predictions to trading signals (assuming y_pred are returns)
-        returns = y_true * np.sign(y_pred)  # Long/short based on prediction sign
+        # Convert predictions to trading signals with Decimal precision
+        returns_decimal = []
+        for true_val, pred_val in zip(y_true, y_pred):
+            return_val = Decimal(str(true_val)) * Decimal("1" if pred_val >= 0 else "-1")
+            returns_decimal.append(return_val)
 
-        if len(returns) == 0 or np.std(returns) == 0:
-            return 0.0
+        if len(returns_decimal) == 0:
+            return Decimal("0")
+
+        # Calculate standard deviation with Decimal precision
+        mean_return_decimal = sum(returns_decimal) / len(returns_decimal)
+        variance = sum((r - mean_return_decimal) ** 2 for r in returns_decimal) / len(returns_decimal)
+        std_return_decimal = variance.sqrt() if variance > 0 else Decimal("0")
+
+        if std_return_decimal == 0:
+            return Decimal("0")
 
         # Annualize assuming daily returns
-        mean_return = np.mean(returns) * 252  # 252 trading days
-        std_return = np.std(returns) * np.sqrt(252)
+        annual_mean = mean_return_decimal * Decimal("252")  # 252 trading days
+        annual_std = std_return_decimal * Decimal("252").sqrt()
 
-        return (mean_return - risk_free_rate) / std_return if std_return != 0 else 0.0
+        return (annual_mean - Decimal(str(risk_free_rate))) / annual_std if annual_std != 0 else Decimal("0")
 
-    def _calculate_information_ratio(self, y_true: np.ndarray, y_pred: np.ndarray) -> float:
+    def _calculate_information_ratio(self, y_true: np.ndarray, y_pred: np.ndarray) -> Decimal:
         """
         Calculate Information Ratio (excess return / tracking error).
 
@@ -786,15 +798,25 @@ class CrossValidationService(BaseService):
         Returns:
             Information ratio
         """
-        # Assume benchmark return is 0 (excess return calculation)
-        excess_returns = y_true * np.sign(y_pred)
+        # Calculate excess returns with Decimal precision
+        excess_returns_decimal = []
+        for true_val, pred_val in zip(y_true, y_pred):
+            excess_return = Decimal(str(true_val)) * Decimal("1" if pred_val >= 0 else "-1")
+            excess_returns_decimal.append(excess_return)
 
-        if len(excess_returns) == 0 or np.std(excess_returns) == 0:
-            return 0.0
+        if len(excess_returns_decimal) == 0:
+            return Decimal("0")
 
-        return np.mean(excess_returns) / np.std(excess_returns) * np.sqrt(252)
+        mean_excess = sum(excess_returns_decimal) / len(excess_returns_decimal)
+        variance = sum((r - mean_excess) ** 2 for r in excess_returns_decimal) / len(excess_returns_decimal)
+        std_excess = variance.sqrt() if variance > 0 else Decimal("0")
 
-    def _calculate_calmar_ratio(self, y_true: np.ndarray, y_pred: np.ndarray) -> float:
+        if std_excess == 0:
+            return Decimal("0")
+
+        return mean_excess / std_excess * Decimal("252").sqrt()
+
+    def _calculate_calmar_ratio(self, y_true: np.ndarray, y_pred: np.ndarray) -> Decimal:
         """
         Calculate Calmar ratio (annual return / max drawdown).
 
@@ -805,17 +827,21 @@ class CrossValidationService(BaseService):
         Returns:
             Calmar ratio
         """
-        returns = y_true * np.sign(y_pred)
+        # Calculate returns with Decimal precision
+        returns_decimal = []
+        for true_val, pred_val in zip(y_true, y_pred):
+            return_val = Decimal(str(true_val)) * Decimal("1" if pred_val >= 0 else "-1")
+            returns_decimal.append(return_val)
 
-        if len(returns) == 0:
-            return 0.0
+        if len(returns_decimal) == 0:
+            return Decimal("0")
 
-        annual_return = np.mean(returns) * 252
+        annual_return = sum(returns_decimal) / len(returns_decimal) * Decimal("252")
         max_dd = self._calculate_max_drawdown(y_true, y_pred)
 
-        return annual_return / max_dd if max_dd != 0 else 0.0
+        return annual_return / max_dd if max_dd != 0 else Decimal("0")
 
-    def _calculate_max_drawdown(self, y_true: np.ndarray, y_pred: np.ndarray) -> float:
+    def _calculate_max_drawdown(self, y_true: np.ndarray, y_pred: np.ndarray) -> Decimal:
         """
         Calculate maximum drawdown for trading strategy.
 
@@ -826,21 +852,36 @@ class CrossValidationService(BaseService):
         Returns:
             Maximum drawdown (positive value)
         """
-        returns = y_true * np.sign(y_pred)
+        # Calculate returns with Decimal precision
+        returns_decimal = []
+        for true_val, pred_val in zip(y_true, y_pred):
+            return_val = Decimal(str(true_val)) * Decimal("1" if pred_val >= 0 else "-1")
+            returns_decimal.append(return_val)
 
-        if len(returns) == 0:
-            return 0.0
+        if len(returns_decimal) == 0:
+            return Decimal("0")
 
-        # Calculate cumulative returns
-        cumulative = np.cumprod(1 + returns)
+        # Calculate cumulative returns with Decimal precision
+        cumulative_returns = []
+        cumulative_value = Decimal("1")
+        for r in returns_decimal:
+            cumulative_value *= (Decimal("1") + r)
+            cumulative_returns.append(cumulative_value)
 
-        # Calculate running maximum
-        running_max = np.maximum.accumulate(cumulative)
+        # Calculate maximum drawdown with Decimal precision
+        max_dd = Decimal("0")
+        running_max = Decimal("0")
 
-        # Calculate drawdown
-        drawdown = (cumulative - running_max) / running_max
+        for cum_return in cumulative_returns:
+            if cum_return > running_max:
+                running_max = cum_return
 
-        return abs(np.min(drawdown))
+            if running_max > 0:
+                drawdown = (cum_return - running_max) / running_max
+                if drawdown < max_dd:
+                    max_dd = drawdown
+
+        return abs(max_dd)
 
     def _calculate_hit_ratio(self, y_true: np.ndarray, y_pred: np.ndarray) -> float:
         """
@@ -861,7 +902,7 @@ class CrossValidationService(BaseService):
 
         return np.mean(correct_direction)
 
-    def _calculate_profit_factor(self, y_true: np.ndarray, y_pred: np.ndarray) -> float:
+    def _calculate_profit_factor(self, y_true: np.ndarray, y_pred: np.ndarray) -> Decimal:
         """
         Calculate profit factor (gross profit / gross loss).
 
@@ -872,15 +913,19 @@ class CrossValidationService(BaseService):
         Returns:
             Profit factor
         """
-        returns = y_true * np.sign(y_pred)
+        # Calculate returns with Decimal precision
+        returns_decimal = []
+        for true_val, pred_val in zip(y_true, y_pred):
+            return_val = Decimal(str(true_val)) * Decimal("1" if pred_val >= 0 else "-1")
+            returns_decimal.append(return_val)
 
-        if len(returns) == 0:
-            return 0.0
+        if len(returns_decimal) == 0:
+            return Decimal("0")
 
-        gross_profit = np.sum(returns[returns > 0])
-        gross_loss = abs(np.sum(returns[returns < 0]))
+        gross_profit = sum(r for r in returns_decimal if r > 0)
+        gross_loss = abs(sum(r for r in returns_decimal if r < 0))
 
-        return gross_profit / gross_loss if gross_loss != 0 else np.inf
+        return gross_profit / gross_loss if gross_loss != 0 else Decimal("inf")
 
     def _process_cv_results(
         self,

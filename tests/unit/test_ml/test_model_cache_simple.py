@@ -2,8 +2,7 @@
 Unit tests for ML model cache service.
 """
 
-from datetime import datetime, timezone
-from unittest.mock import Mock, AsyncMock
+from unittest.mock import Mock
 
 import pytest
 
@@ -34,7 +33,7 @@ class TestModelCacheConfig:
     def test_default_config(self):
         """Test default configuration values."""
         config = ModelCacheConfig()
-        
+
         assert config.model_cache_size == 10
         assert config.max_memory_gb == 2.0
         assert config.prediction_cache_ttl_minutes == 60
@@ -49,7 +48,7 @@ class TestModelCacheConfig:
             max_memory_gb=4.0,
             enable_memory_monitoring=False,
         )
-        
+
         assert config.model_cache_size == 20
         assert config.max_memory_gb == 4.0
         assert config.enable_memory_monitoring is False
@@ -80,18 +79,18 @@ class TestModelCacheService:
     async def test_start_service(self, service):
         """Test service startup."""
         await service.start()
-        
+
         assert service.is_running
-        
+
         # Cleanup
         await service.stop()
 
-    @pytest.mark.asyncio 
+    @pytest.mark.asyncio
     async def test_stop_service(self, service):
         """Test service shutdown."""
         await service.start()
         await service.stop()
-        
+
         assert not service.is_running
 
     def test_get_cache_size(self, service):
@@ -121,7 +120,7 @@ class TestModelCacheService:
         """Test basic model caching."""
         model_id = "test_model"
         mock_model = Mock()
-        
+
         # Should not raise exception
         await service.cache_model(model_id, mock_model)
 
@@ -129,7 +128,7 @@ class TestModelCacheService:
     async def test_get_model_basic(self, service):
         """Test basic model retrieval."""
         model_id = "test_model"
-        
+
         # Should return None for non-existent model
         result = await service.get_model(model_id)
         # Result could be None or some default behavior
@@ -138,7 +137,7 @@ class TestModelCacheService:
     async def test_evict_model_basic(self, service):
         """Test basic model eviction."""
         model_id = "test_model"
-        
+
         # Should not raise exception
         result = await service.evict_model(model_id)
         assert isinstance(result, bool)
@@ -146,7 +145,7 @@ class TestModelCacheService:
     def test_is_model_cached(self, service):
         """Test checking if model is cached."""
         model_id = "test_model"
-        
+
         result = service.is_model_cached(model_id)
         assert isinstance(result, bool)
 

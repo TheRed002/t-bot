@@ -18,6 +18,7 @@ from scipy import stats
 
 from src.base import BaseComponent
 from src.core.exceptions import ValidationError
+from src.utils.decimal_utils import to_decimal
 from src.utils.decorators import UnifiedDecorator
 
 # Initialize decorator instance
@@ -609,8 +610,8 @@ class ABTestFramework(BaseComponent):
 
         returns_array = np.array(returns)
 
-        # Calculate trading metrics with Decimal precision
-        returns_decimal = [Decimal(str(ret)) for ret in returns_array]
+        # Calculate trading metrics with Decimal precision using consistent utility
+        returns_decimal = [to_decimal(ret) for ret in returns_array]
         total_return_decimal = sum(returns_decimal)
 
         variant.trading_metrics = {
@@ -634,8 +635,8 @@ class ABTestFramework(BaseComponent):
             return 0.0
 
         # Annualize assuming daily returns with Decimal precision
-        mean_return_decimal = Decimal(str(np.mean(returns))) * Decimal("252")
-        std_return_decimal = Decimal(str(np.std(returns))) * Decimal(str(np.sqrt(252)))
+        mean_return_decimal = to_decimal(np.mean(returns)) * Decimal("252")
+        std_return_decimal = to_decimal(np.std(returns)) * to_decimal(np.sqrt(252))
 
         if std_return_decimal == 0:
             return 0.0

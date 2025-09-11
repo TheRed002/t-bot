@@ -11,9 +11,16 @@ import pandas as pd
 
 from src.core.base.service import BaseService
 from src.core.types.base import ConfigDict
+from src.utils.constants import ML_MODEL_CONSTANTS
+from src.ml.interfaces import (
+    IBatchPredictionService,
+    IDriftDetectionService,
+    IModelValidationService,
+    ITrainingService,
+)
 
 
-class ModelValidationService(BaseService):
+class ModelValidationService(BaseService, IModelValidationService):
     """Mock model validation service."""
 
     def __init__(self, config: ConfigDict | None = None, correlation_id: str | None = None):
@@ -56,7 +63,7 @@ class ModelValidationService(BaseService):
         }
 
 
-class DriftDetectionService(BaseService):
+class DriftDetectionService(BaseService, IDriftDetectionService):
     """Mock drift detection service."""
 
     def __init__(self, config: ConfigDict | None = None, correlation_id: str | None = None):
@@ -81,7 +88,7 @@ class DriftDetectionService(BaseService):
         """Mock feature drift detection."""
         return {
             "drift_detected": False,
-            "drift_score": 0.05,
+            "drift_score": ML_MODEL_CONSTANTS["default_drift_score"],
             "reference_samples": len(reference_data),
             "current_samples": len(current_data),
             "method": "mock_detection",
@@ -93,7 +100,7 @@ class DriftDetectionService(BaseService):
         """Mock prediction drift detection."""
         return {
             "drift_detected": False,
-            "drift_score": 0.03,
+            "drift_score": ML_MODEL_CONSTANTS["default_prediction_drift_score"],
             "model_name": model_name,
             "reference_samples": len(reference_predictions),
             "current_samples": len(current_predictions),
@@ -108,14 +115,14 @@ class DriftDetectionService(BaseService):
         """Mock performance drift detection."""
         return {
             "drift_detected": False,
-            "performance_decline": 0.02,
+            "performance_decline": ML_MODEL_CONSTANTS["default_performance_decline"],
             "model_name": model_name,
             "reference_metrics": reference_metrics,
             "current_metrics": current_metrics,
         }
 
 
-class TrainingService(BaseService):
+class TrainingService(BaseService, ITrainingService):
     """Mock training service."""
 
     def __init__(self, config: ConfigDict | None = None, correlation_id: str | None = None):
@@ -134,7 +141,7 @@ class TrainingService(BaseService):
     ) -> dict[str, Any]:
         """Mock model training."""
         return {
-            "training_time": 120.0,
+            "training_time": ML_MODEL_CONSTANTS["default_training_time_seconds"],
             "training_samples": len(training_data),
             "model_name": getattr(model, "model_name", "unknown"),
             "symbol": symbol,
@@ -157,7 +164,7 @@ class TrainingService(BaseService):
         }
 
 
-class BatchPredictionService(BaseService):
+class BatchPredictionService(BaseService, IBatchPredictionService):
     """Mock batch prediction service."""
 
     def __init__(self, config: ConfigDict | None = None, correlation_id: str | None = None):
@@ -174,7 +181,7 @@ class BatchPredictionService(BaseService):
         return [
             {
                 "request_id": req.get("request_id", f"batch_{i}"),
-                "predictions": [0.5, 0.3, 0.7],
+                "predictions": ML_MODEL_CONSTANTS["mock_batch_predictions"],
                 "status": "completed",
             }
             for i, req in enumerate(requests)

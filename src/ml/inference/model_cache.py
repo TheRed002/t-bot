@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 
 from src.core.base.service import BaseService
 from src.core.types.base import ConfigDict
+from src.utils.constants import ML_MODEL_CONSTANTS
 from src.utils.decorators import UnifiedDecorator
 
 # Initialize decorator instance
@@ -168,7 +169,7 @@ class ModelCacheService(BaseService):
                 self.cache_stats["current_size"] = len(self.cache)
                 self.cache_stats["current_memory_mb"] = sum(self.memory_usage.values())
 
-                self._logger.debug(
+                self._logger.info(
                     "Model cached successfully",
                     model_id=model_id,
                     model_memory_mb=model_memory_mb,
@@ -211,7 +212,7 @@ class ModelCacheService(BaseService):
 
                 self.cache_stats["hits"] += 1
 
-                self._logger.debug(
+                self._logger.info(
                     "Cache hit", model_id=model_id, hit_rate=self._calculate_hit_rate()
                 )
 
@@ -219,7 +220,7 @@ class ModelCacheService(BaseService):
             else:
                 self.cache_stats["misses"] += 1
 
-                self._logger.debug(
+                self._logger.info(
                     "Cache miss", model_id=model_id, hit_rate=self._calculate_hit_rate()
                 )
 
@@ -348,7 +349,7 @@ class ModelCacheService(BaseService):
         self.cache_stats["current_size"] = len(self.cache)
         self.cache_stats["current_memory_mb"] = sum(self.memory_usage.values())
 
-        self._logger.debug(
+        self._logger.info(
             "Model removed from cache",
             model_id=model_id,
             reason=reason,
@@ -423,7 +424,7 @@ class ModelCacheService(BaseService):
                 self._remove_model(model_id, reason="TTL cleanup")
 
         if expired_models:
-            self._logger.debug(f"Cleaned up {len(expired_models)} expired models")
+            self._logger.info(f"Cleaned up {len(expired_models)} expired models")
 
         return len(expired_models)
 
@@ -442,7 +443,7 @@ class ModelCacheService(BaseService):
 
             except Exception as e:
                 self._logger.error(f"Cache cleanup error: {e}")
-                time.sleep(10)
+                time.sleep(ML_MODEL_CONSTANTS["error_retry_delay_ms"] / 100)  # Convert to seconds
 
     def _check_memory_pressure(self) -> None:
         """Check system memory pressure and evict models if needed."""
