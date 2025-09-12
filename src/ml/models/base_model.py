@@ -28,6 +28,8 @@ dec = UnifiedDecorator()
 class BaseMLModelConfig(BaseModel):
     """Configuration for ML models."""
 
+    model_config = ConfigDict(protected_namespaces=())
+
     enable_model_validation: bool = Field(default=True, description="Enable model validation")
     enable_feature_selection: bool = Field(default=True, description="Enable feature selection")
     enable_model_persistence: bool = Field(default=True, description="Enable model persistence")

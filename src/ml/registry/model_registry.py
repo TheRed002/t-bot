@@ -142,14 +142,14 @@ class ModelRegistryService(BaseService):
             self._artifact_path.mkdir(parents=True, exist_ok=True)
 
         # Add required dependencies
-        self.add_dependency("DataServiceInterface")
+        self.add_dependency("MLDataService")
 
     async def _do_start(self) -> None:
         """Start the model registry service."""
         await super()._do_start()
 
         # Resolve dependencies
-        self.data_service = self.resolve_dependency("DataServiceInterface")
+        self.ml_data_service = self.resolve_dependency("MLDataService")
 
         # Load existing model metadata if persistence is enabled
         if self.registry_config.enable_persistence:
@@ -421,13 +421,11 @@ class ModelRegistryService(BaseService):
             if active_only:
                 filters["is_active"] = True
 
-            models_data = await self.data_service.execute_query(
-                "SELECT * FROM ml_model_metadata WHERE "
-                + " AND ".join(f"{k} = :{k}" for k in filters.keys())
-                if filters
-                else "1=1",
-                filters,
-            )
+            # Use MLDataService methods instead of raw SQL
+            if filters.get("is_active"):
+                models_data = await self.ml_data_service.get_all_models(active_only=True)
+            else:
+                models_data = await self.ml_data_service.get_all_models(active_only=False)
 
             # Convert to list of dictionaries
             models_list = []
@@ -641,11 +639,8 @@ class ModelRegistryService(BaseService):
                         self._executor, registry_file.unlink
                     )
 
-            # Remove from data service
-            await self.data_service.execute_command(
-                "UPDATE ml_model_metadata SET is_active = :is_active WHERE id = :model_id",
-                {"is_active": False, "model_id": model_id},
-            )
+            # Remove from ML data service
+            await self.ml_data_service.delete_model(model_id)
 
             # Remove from caches
             if model_id in self._model_cache:
@@ -738,10 +733,7 @@ class ModelRegistryService(BaseService):
     async def _generate_model_id_and_version(self, name: str, model_type: str) -> tuple[str, str]:
         """Generate unique model ID and version."""
         # Check existing models
-        existing_models = await self.data_service.execute_query(
-            "SELECT * FROM ml_model_metadata WHERE model_name = :name AND model_type = :model_type",
-            {"name": name, "model_type": model_type},
-        )
+        existing_models = await self.ml_data_service.get_models_by_name_and_type(name, model_type)
 
         if existing_models:
             # Get latest version and increment
@@ -791,8 +783,13 @@ class ModelRegistryService(BaseService):
         filters["is_active"] = True
         query_parts.append("is_active = :is_active")
 
-        models_data = await self.data_service.execute_query(
-            "SELECT * FROM ml_model_metadata WHERE " + " AND ".join(query_parts), filters
+        # Use MLDataService find_models method
+        models_data = await self.ml_data_service.find_models(
+            name=filters.get("model_name"),
+            model_type=filters.get("model_type"),
+            version=filters.get("model_version"),
+            stage=filters.get("stage"),
+            active_only=filters.get("is_active", True)
         )
 
         if not models_data:
@@ -813,11 +810,8 @@ class ModelRegistryService(BaseService):
             else:
                 del self._model_metadata_cache[model_id]
 
-        # Get from data service
-        model_results = await self.data_service.execute_query(
-            "SELECT * FROM ml_model_metadata WHERE id = :model_id", {"model_id": model_id}
-        )
-        model_data = model_results[0] if model_results else None
+        # Get from ML data service
+        model_data = await self.ml_data_service.get_model_by_id(model_id)
         if not model_data:
             return None
 
@@ -831,41 +825,12 @@ class ModelRegistryService(BaseService):
     async def _store_model_metadata(self, metadata: ModelMetadata) -> None:
         """Store model metadata through data service."""
         metadata_dict = metadata.dict()
-        await self.data_service.execute_command(
-            """INSERT INTO ml_model_metadata 
-               (model_name, model_version, model_type, model_path, is_active, 
-                created_at, updated_at) 
-               VALUES (:model_name, :version, :model_type, :file_path, :is_active,
-                       :created_at, :updated_at)""",
-            {
-                "model_name": metadata_dict["name"],
-                "version": metadata_dict["version"],
-                "model_type": metadata_dict["model_type"],
-                "file_path": metadata_dict.get("file_path"),
-                "is_active": "true" if metadata_dict["is_active"] else "false",
-                "created_at": metadata_dict["created_at"],
-                "updated_at": metadata_dict["updated_at"],
-            },
-        )
+        await self.ml_data_service.store_model_metadata(metadata_dict)
 
     async def _update_model_metadata(self, metadata: ModelMetadata) -> None:
         """Update model metadata through data service."""
         metadata_dict = metadata.dict()
-        await self.data_service.execute_command(
-            """UPDATE ml_model_metadata SET 
-               model_name = :model_name, model_version = :version, model_type = :model_type,
-               model_path = :file_path, is_active = :is_active, updated_at = :updated_at
-               WHERE id = :model_id""",
-            {
-                "model_name": metadata_dict["name"],
-                "version": metadata_dict["version"],
-                "model_type": metadata_dict["model_type"],
-                "file_path": metadata_dict.get("file_path"),
-                "is_active": "true" if metadata_dict["is_active"] else "false",
-                "updated_at": metadata_dict["updated_at"],
-                "model_id": metadata_dict["model_id"],
-            },
-        )
+        await self.ml_data_service.update_model_metadata(metadata.model_id, metadata_dict)
 
     async def _save_model_to_file(self, model: Any, file_path: Path) -> None:
         """Save model to file."""
@@ -997,16 +962,14 @@ class ModelRegistryService(BaseService):
             "service": "ModelRegistryService",
         }
 
-        # Store audit entry through data service
+        # Store audit entry through ML data service
         try:
-            await self.data_service.execute_command(
-                "INSERT INTO audit_trail (category, entry, timestamp) VALUES (:category, :entry, :timestamp)",
-                {
+            if hasattr(self.ml_data_service, 'store_audit_entry'):
+                await self.ml_data_service.store_audit_entry("model_registry", {
                     "category": "model_registry",
                     "entry": json.dumps(audit_entry),
                     "timestamp": datetime.now(timezone.utc),
-                },
-            )
+                })
         except Exception as e:
             self._logger.warning(f"Failed to log audit event: {e}")
 
@@ -1062,9 +1025,7 @@ class ModelRegistryService(BaseService):
         """Clean up old model versions."""
         try:
             # Get all models grouped by name and type
-            all_models = await self.data_service.execute_query(
-                "SELECT * FROM ml_model_metadata WHERE is_active = :is_active", {"is_active": True}
-            )
+            all_models = await self.ml_data_service.get_all_models(active_only=True)
 
             # Group by name and type
             model_groups: dict[tuple[str | None, str | None], list[dict[str, Any]]] = {}

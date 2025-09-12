@@ -25,7 +25,7 @@ from src.core.base.interfaces import HealthStatus
 from src.core.base.service import BaseService
 from src.core.exceptions import ValidationError
 from src.core.types.base import ConfigDict
-from src.ml.models.base_model import BaseModel
+from src.ml.models.base_model import BaseMLModel
 from src.utils.decorators import UnifiedDecorator
 
 # Initialize decorator instance
@@ -83,7 +83,7 @@ class ModelValidationService(BaseService):
         self.overfitting_alerts = []
 
         # Add dependencies
-        self.add_dependency("DataServiceInterface")
+        self.add_dependency("MLDataService")
         self.add_dependency("ModelRegistryService")
 
         self._logger.info(
@@ -99,7 +99,7 @@ class ModelValidationService(BaseService):
         """Start the model validation service."""
         try:
             # Resolve dependencies
-            self.data_service = self.resolve_dependency("DataServiceInterface")
+            self.ml_data_service = self.resolve_dependency("MLDataService")
             self.model_registry = self.resolve_dependency("ModelRegistryService")
 
             self._logger.info("Model validation service started successfully")
@@ -135,7 +135,7 @@ class ModelValidationService(BaseService):
     @dec.enhance(log=True, monitor=True, log_level="info")
     async def validate_model_performance(
         self,
-        model: BaseModel,
+        model: BaseMLModel,
         X_test: pd.DataFrame,
         y_test: pd.Series,
         benchmark_score: float | None = None,
@@ -166,7 +166,7 @@ class ModelValidationService(BaseService):
 
     async def _validate_model_performance_impl(
         self,
-        model: BaseModel,
+        model: BaseMLModel,
         X_test: pd.DataFrame,
         y_test: pd.Series,
         benchmark_score: float | None = None,
@@ -268,7 +268,7 @@ class ModelValidationService(BaseService):
     @dec.enhance(log=True, monitor=True, log_level="info")
     async def validate_model_stability(
         self,
-        model: BaseModel,
+        model: BaseMLModel,
         time_series_data: list[tuple[pd.DataFrame, pd.Series]],
         time_periods: list[datetime],
     ) -> dict[str, Any]:
@@ -296,7 +296,7 @@ class ModelValidationService(BaseService):
 
     async def _validate_model_stability_impl(
         self,
-        model: BaseModel,
+        model: BaseMLModel,
         time_series_data: list[tuple[pd.DataFrame, pd.Series]],
         time_periods: list[datetime],
     ) -> dict[str, Any]:
@@ -399,7 +399,7 @@ class ModelValidationService(BaseService):
 
     @dec.enhance(log=True, monitor=True, log_level="info")
     async def validate_production_readiness(
-        self, model: BaseModel, X_test: pd.DataFrame, y_test: pd.Series
+        self, model: BaseMLModel, X_test: pd.DataFrame, y_test: pd.Series
     ) -> dict[str, Any]:
         """
         Validate model readiness for production deployment.
@@ -424,7 +424,7 @@ class ModelValidationService(BaseService):
         )
 
     async def _validate_production_readiness_impl(
-        self, model: BaseModel, X_test: pd.DataFrame, y_test: pd.Series
+        self, model: BaseMLModel, X_test: pd.DataFrame, y_test: pd.Series
     ) -> dict[str, Any]:
         """Implementation of production readiness validation."""
         try:
@@ -512,7 +512,7 @@ class ModelValidationService(BaseService):
     @dec.enhance(log=True, monitor=True, log_level="info")
     async def detect_overfitting(
         self,
-        model: BaseModel,
+        model: BaseMLModel,
         X_train: pd.DataFrame,
         y_train: pd.Series,
         X_val: pd.DataFrame,
@@ -556,7 +556,7 @@ class ModelValidationService(BaseService):
 
     async def _detect_overfitting_impl(
         self,
-        model: BaseModel,
+        model: BaseMLModel,
         X_train: pd.DataFrame,
         y_train: pd.Series,
         X_val: pd.DataFrame,
@@ -654,7 +654,7 @@ class ModelValidationService(BaseService):
 
     def _analyze_performance_gaps(
         self,
-        model: BaseModel,
+        model: BaseMLModel,
         X_train: pd.DataFrame,
         y_train: pd.Series,
         X_val: pd.DataFrame,
@@ -715,7 +715,7 @@ class ModelValidationService(BaseService):
 
     def _analyze_learning_curves(
         self,
-        model: BaseModel,
+        model: BaseMLModel,
         X_train: pd.DataFrame,
         y_train: pd.Series,
         X_val: pd.DataFrame,
@@ -768,7 +768,7 @@ class ModelValidationService(BaseService):
 
     async def _analyze_feature_importance_stability(
         self,
-        model: BaseModel,
+        model: BaseMLModel,
         X_train: pd.DataFrame,
         y_train: pd.Series,
         X_val: pd.DataFrame,
@@ -838,7 +838,7 @@ class ModelValidationService(BaseService):
             self._logger.error(f"Feature importance stability analysis failed: {e}")
             return {"analysis_failed": True, "error": str(e)}
 
-    def _analyze_model_complexity(self, model: BaseModel, X_train: pd.DataFrame) -> dict[str, Any]:
+    def _analyze_model_complexity(self, model: BaseMLModel, X_train: pd.DataFrame) -> dict[str, Any]:
         """Analyze model complexity relative to data size."""
         try:
             n_samples, n_features = X_train.shape
@@ -872,7 +872,7 @@ class ModelValidationService(BaseService):
             return {"analysis_failed": True, "error": str(e)}
 
     def _analyze_cv_stability(
-        self, model: BaseModel, X: pd.DataFrame, y: pd.Series
+        self, model: BaseMLModel, X: pd.DataFrame, y: pd.Series
     ) -> dict[str, Any]:
         """Analyze cross-validation stability to detect overfitting."""
         try:
@@ -914,7 +914,7 @@ class ModelValidationService(BaseService):
             self._logger.error(f"CV stability analysis failed: {e}")
             return {"analysis_failed": True, "error": str(e)}
 
-    def _estimate_model_parameters(self, model: BaseModel) -> int:
+    def _estimate_model_parameters(self, model: BaseMLModel) -> int:
         """Estimate the number of model parameters."""
         try:
             if hasattr(model, "model"):
@@ -1292,7 +1292,7 @@ class ModelValidationService(BaseService):
             return {"trend": "analysis_failed"}
 
     def _check_prediction_consistency(
-        self, model: BaseModel, X_test: pd.DataFrame
+        self, model: BaseMLModel, X_test: pd.DataFrame
     ) -> dict[str, bool]:
         """Check if model predictions are consistent."""
         try:
@@ -1310,7 +1310,7 @@ class ModelValidationService(BaseService):
             return {"predictions_consistent": False}
 
     def _check_computational_efficiency(
-        self, model: BaseModel, X_test: pd.DataFrame
+        self, model: BaseMLModel, X_test: pd.DataFrame
     ) -> dict[str, bool]:
         """Check computational efficiency of the model."""
         try:
@@ -1353,7 +1353,7 @@ class ModelValidationService(BaseService):
                 "memory_efficient": True,
             }
 
-    def _check_error_handling(self, model: BaseModel, X_test: pd.DataFrame) -> dict[str, bool]:
+    def _check_error_handling(self, model: BaseMLModel, X_test: pd.DataFrame) -> dict[str, bool]:
         """Check model error handling capabilities."""
         try:
             checks = {}
@@ -1407,7 +1407,7 @@ class ModelValidationService(BaseService):
                 "handles_errors_gracefully": False,
             }
 
-    def _check_data_quality_handling(self, model: BaseModel) -> dict[str, bool]:
+    def _check_data_quality_handling(self, model: BaseMLModel) -> dict[str, bool]:
         """Check model's data quality handling capabilities."""
         try:
             # Check if model has data validation methods

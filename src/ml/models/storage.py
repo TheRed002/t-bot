@@ -7,7 +7,7 @@ direct coupling to specific serialization libraries.
 
 import abc
 from pathlib import Path
-from typing import Any, Union
+from typing import Any
 
 import joblib
 
@@ -132,7 +132,7 @@ class ModelStorageManager:
 
         self.backend = self._backends[backend]
 
-    def save_model(self, model_data: dict[str, Any], filepath: Union[str, Path]) -> Path:
+    def save_model(self, model_data: dict[str, Any], filepath: str | Path) -> Path:
         """
         Save model data.
 
@@ -147,7 +147,7 @@ class ModelStorageManager:
         self.backend.save(model_data, filepath)
         return filepath
 
-    def load_model(self, filepath: Union[str, Path]) -> dict[str, Any]:
+    def load_model(self, filepath: str | Path) -> dict[str, Any]:
         """
         Load model data.
 

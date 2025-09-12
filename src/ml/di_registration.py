@@ -27,6 +27,8 @@ from src.ml.services import (
     TrainingService,
 )
 from src.ml.store.feature_store import FeatureStoreService
+from src.ml.validation_service import MLValidationService
+from src.ml.integration_service import MLIntegrationService
 
 
 def register_ml_services(container: "DependencyContainer", config: ConfigDict) -> None:
@@ -97,6 +99,16 @@ def register_ml_services(container: "DependencyContainer", config: ConfigDict) -
         return BatchPredictionService(config=config)
     container.register("BatchPredictionService", create_batch_prediction_service, singleton=True)
 
+    # Register ML validation service as singleton (stateless but configuration-dependent)
+    def create_ml_validation_service():
+        return MLValidationService(config=config)
+    container.register("MLValidationService", create_ml_validation_service, singleton=True)
+
+    # Register ML integration service as singleton (stateless but configuration-dependent)
+    def create_ml_integration_service():
+        return MLIntegrationService(config=config)
+    container.register("MLIntegrationService", create_ml_integration_service, singleton=True)
+
     # Note: Service aliases would need to be handled by the container implementation
     # if such functionality is required
 
@@ -109,14 +121,14 @@ def get_ml_service_dependencies() -> dict[str, list[str]]:
         Dictionary mapping service names to their dependencies
     """
     return {
-        "MLRepository": ["DataService"],
+        "MLRepository": ["MLDataService"],
         "ModelFactory": [],
-        "ModelCacheService": ["DataService"],
-        "FeatureStoreService": ["DataService"],
+        "ModelCacheService": ["MLDataService"],
+        "FeatureStoreService": ["MLDataService"],
         "FeatureEngineeringService": [
-            "DataService",
+            "MLDataService",
         ],
-        "ModelRegistryService": ["DataService", "MLRepository"],
+        "ModelRegistryService": ["MLDataService", "MLRepository"],
         "InferenceService": ["ModelCacheService", "ModelRegistryService", "FeatureEngineeringService"],
         "ModelValidationService": [],
         "DriftDetectionService": [],
@@ -132,8 +144,12 @@ def get_ml_service_dependencies() -> dict[str, list[str]]:
             "BatchPredictionService",
             "ModelFactory",
         ],
+        "MLValidationService": [],  # No dependencies - stateless validation service
+        "MLIntegrationService": [],  # No dependencies - stateless integration service
         "MLService": [
-            "DataService",
+            "MLDataService",
+            "MLValidationService",
+            "MLIntegrationService",
             "FeatureEngineeringService",
             "ModelRegistryService",
             "InferenceService",

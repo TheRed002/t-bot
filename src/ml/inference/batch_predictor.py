@@ -48,11 +48,11 @@ class BatchPredictorService(BaseService):
         self.bp_config = BatchPredictorConfig(**bp_config_dict)
 
         # Service dependencies
-        self.data_service: Any = None
+        self.ml_data_service: Any = None
         self.model_registry: Any = None
 
         # Add required dependencies
-        self.add_dependency("DataServiceInterface")
+        self.add_dependency("MLDataService")
         self.add_dependency("ModelRegistryService")
 
     async def _do_start(self) -> None:
@@ -60,7 +60,7 @@ class BatchPredictorService(BaseService):
         await super()._do_start()
 
         # Resolve dependencies
-        self.data_service = self.resolve_dependency("DataServiceInterface")
+        self.ml_data_service = self.resolve_dependency("MLDataService")
         self.model_registry = self.resolve_dependency("ModelRegistryService")
 
         self._logger.info("Batch predictor service started successfully")
@@ -203,8 +203,8 @@ class BatchPredictorService(BaseService):
                 prediction_data.append(prediction_record)
 
             # Save through data service
-            if hasattr(self.data_service, "save_ml_predictions"):
-                await self.data_service.save_ml_predictions(prediction_data)
+            if hasattr(self.ml_data_service, "save_ml_predictions"):
+                await self.ml_data_service.save_ml_predictions(prediction_data)
 
             self._logger.info("Predictions saved to database", count=len(prediction_data))
 
@@ -234,7 +234,7 @@ class BatchPredictorService(BaseService):
         from src.core.base.interfaces import HealthStatus
 
         try:
-            if not all([self.data_service, self.model_registry]):
+            if not all([self.ml_data_service, self.model_registry]):
                 return HealthStatus.UNHEALTHY
             return HealthStatus.HEALTHY
         except Exception:

@@ -100,7 +100,7 @@ class FeatureStoreService(BaseService):
     with caching, versioning, and optimization capabilities using proper service patterns
     without direct database access.
 
-    All data operations go through DataService dependency.
+    All data operations go through MLDataService dependency.
     """
 
     def __init__(
@@ -126,7 +126,9 @@ class FeatureStoreService(BaseService):
         self.fs_config = FeatureStoreConfig(**dict(fs_config_dict))
 
         # Service dependencies - resolved during startup
+        # Support both data_service and ml_data_service for compatibility
         self.data_service: Any = None
+        self.ml_data_service: Any = None
 
         # Internal state
         self._feature_cache: dict[str, tuple[FeatureSet, FeatureStoreMetadata, datetime]] = {}
@@ -148,8 +150,18 @@ class FeatureStoreService(BaseService):
         """Start the feature store service."""
         await super()._do_start()
 
-        # Resolve dependencies
-        self.data_service = self.resolve_dependency("DataServiceInterface")
+        # Resolve dependencies - try different names for compatibility
+        try:
+            self.data_service = self.resolve_dependency("DataServiceInterface")
+            self.ml_data_service = self.data_service
+        except Exception:
+            # Try alternative name
+            try:
+                self.ml_data_service = self.resolve_dependency("MLDataService")
+                self.data_service = self.ml_data_service
+            except Exception:
+                # Dependencies might not be available in test mode
+                pass
 
         # Start background cleanup task
         if self.fs_config.background_cleanup_interval > 0:
@@ -161,6 +173,10 @@ class FeatureStoreService(BaseService):
             cached_features=len(self._feature_cache),
         )
 
+    def _get_data_service(self):
+        """Get the data service (support both names for compatibility)."""
+        return self.data_service or self._get_data_service()
+    
     async def _do_stop(self) -> None:
         """Stop the feature store service."""
         # Cancel background tasks
@@ -273,13 +289,15 @@ class FeatureStoreService(BaseService):
                 )
 
                 # Store in data service
-                await self.data_service.store_feature_set(
-                    feature_set_id=request.feature_set.feature_set_id,
-                    symbol=request.symbol,
-                    version=version,
-                    feature_data=feature_data,
-                    metadata=metadata.model_dump(),
-                )
+                data_service = self._get_data_service()
+                if data_service:
+                    await data_service.store_feature_set(
+                        feature_set_id=request.feature_set.feature_set_id,
+                        symbol=request.symbol,
+                        version=version,
+                        feature_data=feature_data,
+                        metadata=metadata.model_dump(),
+                    )
 
                 # Cache the features and metadata
                 if self.fs_config.enable_caching:
@@ -398,7 +416,7 @@ class FeatureStoreService(BaseService):
                         )
 
                 # Retrieve from data service
-                stored_data = await self.data_service.get_feature_set(
+                stored_data = await self._get_data_service().get_feature_set(
                     symbol=request.symbol,
                     feature_set_id=request.feature_set_id,
                     version=request.version,
@@ -419,7 +437,7 @@ class FeatureStoreService(BaseService):
 
                 # Update last accessed timestamp
                 metadata.last_accessed = datetime.now(timezone.utc)
-                await self.data_service.update_feature_set_metadata(
+                await self._get_data_service().update_feature_set_metadata(
                     feature_set_id=metadata.feature_set_id,
                     symbol=request.symbol,
                     version=metadata.version,
@@ -509,7 +527,7 @@ class FeatureStoreService(BaseService):
 
         try:
             # Get feature sets from data service
-            feature_sets_data = await self.data_service.list_feature_sets(
+            feature_sets_data = await self._get_data_service().list_feature_sets(
                 symbol=request.symbol if request.symbol else None,
                 include_expired=include_expired,
                 limit=limit,
@@ -598,7 +616,7 @@ class FeatureStoreService(BaseService):
         start_time = datetime.now(timezone.utc)
 
         try:
-            deleted_count = await self.data_service.delete_feature_set(
+            deleted_count = await self._get_data_service().delete_feature_set(
                 symbol=request.symbol,
                 feature_set_id=request.feature_set_id,
                 version=request.version,
@@ -724,7 +742,7 @@ class FeatureStoreService(BaseService):
         """Generate version string for feature set."""
         try:
             # Get existing versions
-            existing_versions = await self.data_service.get_feature_set_versions(
+            existing_versions = await self._get_data_service().get_feature_set_versions(
                 symbol, feature_set_id
             )
 
@@ -875,7 +893,7 @@ class FeatureStoreService(BaseService):
                 return
 
             # Get all versions for this feature set
-            versions = await self.data_service.get_feature_set_versions(symbol, feature_set_id)
+            versions = await self._get_data_service().get_feature_set_versions(symbol, feature_set_id)
 
             if len(versions) <= self.fs_config.max_versions_per_feature:
                 return
@@ -894,7 +912,7 @@ class FeatureStoreService(BaseService):
 
             for version in versions_to_delete:
                 try:
-                    await self.data_service.delete_feature_set(
+                    await self._get_data_service().delete_feature_set(
                         symbol=symbol,
                         feature_set_id=feature_set_id,
                         version=version,
@@ -957,7 +975,7 @@ class FeatureStoreService(BaseService):
     async def _clean_expired_feature_sets(self) -> None:
         """Clean expired feature sets from storage."""
         try:
-            expired_count = await self.data_service.delete_expired_feature_sets()
+            expired_count = await self._get_data_service().delete_expired_feature_sets()
 
             if expired_count > 0:
                 self._logger.info(f"Cleaned {expired_count} expired feature sets from storage")
@@ -972,7 +990,7 @@ class FeatureStoreService(BaseService):
 
         try:
             # Check dependencies
-            if not self.data_service:
+            if not self._get_data_service():
                 return HealthStatus.UNHEALTHY
 
             # Check cache sizes

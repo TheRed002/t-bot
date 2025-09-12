@@ -80,7 +80,7 @@ class ArtifactStore(BaseService):
         self.artifact_config = ArtifactStoreConfig(**artifact_config_dict)
 
         # Service dependencies - resolved during startup
-        self.data_service: Any = None
+        self.ml_data_service: Any = None
 
         # Thread pool for I/O operations
         self._executor = ThreadPoolExecutor(max_workers=self.artifact_config.computation_workers)
@@ -92,14 +92,14 @@ class ArtifactStore(BaseService):
         self.base_path = Path(self.artifact_config.artifact_store_path)
 
         # Add required dependencies
-        self.add_dependency("DataServiceInterface")
+        self.add_dependency("MLDataService")
 
     async def _do_start(self) -> None:
         """Start the artifact store service."""
         await super()._do_start()
 
         # Resolve dependencies
-        self.data_service = self.resolve_dependency("DataServiceInterface")
+        self.ml_data_service = self.resolve_dependency("MLDataService")
 
         # Create necessary directories if persistence is enabled
         if self.artifact_config.enable_persistence:
@@ -244,8 +244,8 @@ class ArtifactStore(BaseService):
             await self._save_artifact_metadata(artifact_dir, base_filename, artifact_metadata)
 
             # Store artifact info in data service
-            if self.data_service:
-                await self.data_service.store_artifact_info(artifact_metadata)
+            if self.ml_data_service:
+                await self.ml_data_service.store_artifact_info(artifact_metadata)
 
             # Log audit trail
             if self.artifact_config.enable_audit_trail:
@@ -316,8 +316,8 @@ class ArtifactStore(BaseService):
         try:
             if not self.artifact_config.enable_persistence:
                 # Try to get artifact info from data service
-                if self.data_service:
-                    artifact_info = await self.data_service.get_artifact_info(
+                if self.ml_data_service:
+                    artifact_info = await self.ml_data_service.get_artifact_info(
                         artifact_name, model_id, artifact_type, version
                     )
                     if artifact_info:
@@ -442,8 +442,8 @@ class ArtifactStore(BaseService):
         try:
             if not self.artifact_config.enable_persistence:
                 # Get from data service if available
-                if self.data_service:
-                    artifacts_data = await self.data_service.list_artifacts(
+                if self.ml_data_service:
+                    artifacts_data = await self.ml_data_service.list_artifacts(
                         model_id=model_id,
                         artifact_type=artifact_type,
                         version=version,
@@ -532,8 +532,8 @@ class ArtifactStore(BaseService):
             deleted_count = 0
 
             # Delete from data service
-            if self.data_service:
-                await self.data_service.delete_artifact_info(
+            if self.ml_data_service:
+                await self.ml_data_service.delete_artifact_info(
                     artifact_name, model_id, artifact_type, version
                 )
 
@@ -592,7 +592,7 @@ class ArtifactStore(BaseService):
                 deleted_files=deleted_count,
             )
 
-            return deleted_count > 0 or self.data_service is not None
+            return deleted_count > 0 or self.ml_data_service is not None
 
         except Exception as e:
             self._logger.error(
@@ -1031,8 +1031,8 @@ class ArtifactStore(BaseService):
 
         # Store audit entry through data service
         try:
-            if self.data_service:
-                await self.data_service.store_audit_entry("artifact_store", audit_entry)
+            if self.ml_data_service:
+                await self.ml_data_service.store_audit_entry("artifact_store", audit_entry)
         except Exception as e:
             self._logger.warning(f"Failed to log audit event: {e}")
 
@@ -1058,7 +1058,7 @@ class ArtifactStore(BaseService):
 
         try:
             # Check dependencies
-            if self.artifact_config.enable_persistence and not self.data_service:
+            if self.artifact_config.enable_persistence and not self.ml_data_service:
                 return HealthStatus.DEGRADED
 
             # Check storage paths if persistence is enabled

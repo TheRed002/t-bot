@@ -26,6 +26,8 @@ dec = UnifiedDecorator()
 class ModelManagerConfig(PydanticBaseModel):
     """Configuration for model manager service."""
 
+    model_config = ConfigDict(protected_namespaces=())
+
     enable_model_monitoring: bool = Field(default=True, description="Enable model monitoring")
     default_validation_threshold: float = Field(
         default=ML_MODEL_CONSTANTS["default_validation_threshold"],

@@ -26,6 +26,8 @@ dec = UnifiedDecorator()
 class ModelCacheConfig(BaseModel):
     """Configuration for model cache service."""
 
+    model_config = ConfigDict(protected_namespaces=())
+
     model_cache_size: int = Field(default=10, description="Maximum number of cached models")
     max_memory_gb: float = Field(default=2.0, description="Maximum memory usage in GB")
     prediction_cache_ttl_minutes: int = Field(default=60, description="Cache TTL in minutes")

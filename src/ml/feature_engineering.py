@@ -34,6 +34,7 @@ from src.core.base.service import BaseService
 from src.core.exceptions import DataError, ModelError, ValidationError
 from src.core.types.base import ConfigDict
 from src.core.types.data import FeatureSet
+from src.core.types import MarketData
 from src.utils.constants import ML_FEATURE_CONSTANTS, ML_MODEL_CONSTANTS
 from src.utils.decorators import UnifiedDecorator
 from src.utils.ml_cache import FeatureCache, generate_feature_cache_key
@@ -156,7 +157,7 @@ class FeatureEngineeringService(BaseService):
         self._executor = ThreadPoolExecutor(max_workers=self.fe_config.computation_workers)
 
         # Add required dependencies
-        self.add_dependency("DataServiceInterface")
+        self.add_dependency("MLDataService")
         self.add_dependency("TechnicalIndicatorService")
         self.add_dependency("StatisticalFeatureService")
 
@@ -165,7 +166,7 @@ class FeatureEngineeringService(BaseService):
         await super()._do_start()
 
         # Resolve dependencies
-        self.data_service = self.resolve_dependency("DataServiceInterface")
+        self.ml_data_service = self.resolve_dependency("MLDataService")
 
         # Try to resolve feature calculators from DI, fallback to direct creation if not available
         try:
@@ -597,7 +598,6 @@ class FeatureEngineeringService(BaseService):
             # Convert DataFrame to list of MarketData objects as expected by data module
             market_data_list = []
             for _, row in market_data.iterrows():
-                from src.core.types import MarketData
 
                 market_data_obj = MarketData(
                     symbol=symbol,
@@ -643,7 +643,6 @@ class FeatureEngineeringService(BaseService):
 
             # Add market data to the statistical calculator first
             for _, row in market_data.iterrows():
-                from src.core.types import MarketData
 
                 market_data_obj = MarketData(
                     symbol=symbol,

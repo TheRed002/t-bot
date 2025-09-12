@@ -11,13 +11,13 @@ import pandas as pd
 
 from src.core.base.service import BaseService
 from src.core.types.base import ConfigDict
-from src.utils.constants import ML_MODEL_CONSTANTS
 from src.ml.interfaces import (
     IBatchPredictionService,
     IDriftDetectionService,
     IModelValidationService,
     ITrainingService,
 )
+from src.utils.constants import ML_MODEL_CONSTANTS
 
 
 class ModelValidationService(BaseService, IModelValidationService):

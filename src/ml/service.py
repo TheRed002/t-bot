@@ -15,6 +15,7 @@ from typing import Any
 import pandas as pd
 from pydantic import BaseModel, Field
 
+from src.core.base.interfaces import HealthCheckResult, HealthStatus
 from src.core.base.service import BaseService
 from src.core.event_constants import InferenceEvents, TrainingEvents
 from src.core.exceptions import ModelError, ValidationError
@@ -24,13 +25,14 @@ from src.ml.interfaces import IMLService
 from src.ml.registry.model_registry import ModelLoadRequest, ModelRegistrationRequest
 from src.utils.constants import ML_MODEL_CONSTANTS
 from src.utils.decorators import UnifiedDecorator
+from src.ml.data_transformer import MLDataTransformer
+from src.utils.messaging_patterns import MessagePattern, MessageType, StandardMessage
 from src.utils.ml_cache import CacheManager, generate_cache_key
 from src.utils.ml_metrics import calculate_classification_metrics, calculate_regression_metrics
 from src.utils.ml_validation import (
     check_data_quality,
     validate_training_data,
 )
-from src.utils.messaging_patterns import MessagePattern, MessageType, StandardMessage
 
 # Initialize decorator instance
 dec = UnifiedDecorator()
@@ -169,7 +171,9 @@ class MLService(BaseService, IMLService):
         self.ml_config = MLServiceConfig(**ml_config_dict)
 
         # Service dependencies - resolved during startup
-        self.data_service: Any = None
+        self.ml_data_service: Any = None
+        self.ml_validation_service: Any = None
+        self.ml_integration_service: Any = None
         self.feature_engineering_service: Any = None
         self.model_registry_service: Any = None
         self.inference_service: Any = None
@@ -187,6 +191,8 @@ class MLService(BaseService, IMLService):
 
         # Add required dependencies
         self.add_dependency("DataService")
+        self.add_dependency("MLValidationService")  # Add validation service dependency
+        self.add_dependency("MLIntegrationService")  # Add integration service dependency
         if self.ml_config.enable_feature_engineering:
             self.add_dependency("FeatureEngineeringService")
         if self.ml_config.enable_model_registry:
@@ -201,7 +207,9 @@ class MLService(BaseService, IMLService):
         await super()._do_start()
 
         # Resolve dependencies
-        self.data_service = self.resolve_dependency("DataServiceInterface")
+        self.ml_data_service = self.resolve_dependency("MLDataService")
+        self.ml_validation_service = self.resolve_dependency("MLValidationService")
+        self.ml_integration_service = self.resolve_dependency("MLIntegrationService")
 
         if self.ml_config.enable_feature_engineering:
             self.feature_engineering_service = self.resolve_dependency("FeatureEngineeringService")
@@ -240,7 +248,7 @@ class MLService(BaseService, IMLService):
             config=self.ml_config.dict(),
             dependencies_resolved=sum(
                 [
-                    bool(self.data_service),
+                    bool(self.ml_data_service),
                     bool(self.feature_engineering_service),
                     bool(self.model_registry_service),
                     bool(self.inference_service),
@@ -318,6 +326,21 @@ class MLService(BaseService, IMLService):
                     raise ModelError("Symbol is required for ML pipeline processing")
                 if not request.request_id:
                     raise ModelError("Request ID is required for ML pipeline processing")
+
+                # Transform request data to aligned format for consistency with core module
+                request_data = MLDataTransformer.transform_ml_request_to_standard_format(
+                    "pipeline_processing", 
+                    request.model_dump(),
+                    metadata={"symbol": request.symbol, "processing_stage": "pipeline_start"},
+                    processing_mode="stream"  # Align with data module: single requests use stream
+                )
+                
+                # Apply structural validation using data transformer (data structure only)
+                structural_validated_data = MLDataTransformer.validate_ml_boundary_fields(request_data)
+                
+                # Apply business logic validation using validation service
+                business_validated_data = self.ml_validation_service.validate_ml_request_data(structural_validated_data)
+                self.logger.debug(f"Applied ML structural and business validation for request {request.request_id}")
                 # Check cache first using utils cache manager
                 cache_key = None
                 if (
@@ -538,14 +561,29 @@ class MLService(BaseService, IMLService):
                 return response
 
             except Exception as e:
-                # Apply consistent error propagation patterns
-                from src.utils.messaging_patterns import ErrorPropagationMixin
-
+                # Apply consistent error propagation patterns aligned with core module
                 total_processing_time = (
                     datetime.now(timezone.utc) - pipeline_start
                 ).total_seconds() * 1000
 
-                # Use consistent error propagation
+                # Use ML data transformer for consistent error handling
+                error_context = {
+                    "request_id": request.request_id,
+                    "symbol": request.symbol,
+                    "operation": "pipeline_processing",
+                    "processing_time_ms": total_processing_time,
+                    "field_name": "ml_pipeline_request",
+                    "field_value": request.model_dump() if hasattr(request, 'model_dump') else str(request),
+                    "expected_type": "valid_ml_pipeline_request"
+                }
+                
+                # Apply consistent error propagation using ML data transformer
+                standardized_error_data = MLDataTransformer.handle_ml_error_propagation(
+                    e, error_context, target_module="core"
+                )
+                
+                # Use legacy error propagation as fallback
+                from src.utils.messaging_patterns import ErrorPropagationMixin
                 error_propagator = ErrorPropagationMixin()
                 try:
                     if isinstance(e, ValidationError):
@@ -636,6 +674,29 @@ class MLService(BaseService, IMLService):
             try:
                 # Track the operation
                 self._active_operations[request.request_id] = asyncio.current_task()
+
+                # Transform training request data to aligned format for consistency
+                training_data = MLDataTransformer.transform_for_training_pattern(
+                    request.training_data,
+                    request.target_data,
+                    request.model_type,
+                    metadata={
+                        "model_name": request.model_name,
+                        "stage": request.stage,
+                        "processing_stage": "training_start"
+                    }
+                )
+                
+                # Apply structural validation using data transformer (data structure only)
+                structural_validated_data = MLDataTransformer.validate_ml_boundary_fields(training_data)
+                
+                # Apply business logic validation using validation service
+                business_validated_data = self.ml_validation_service.validate_ml_request_data(structural_validated_data)
+                
+                # Validate model parameters using validation service
+                self.ml_validation_service.validate_model_parameters(request.model_type, request.hyperparameters)
+                
+                self.logger.debug(f"Applied ML training structural and business validation for request {request.request_id}")
 
                 # Emit training started event
                 await self.emit_event(
@@ -925,19 +986,20 @@ class MLService(BaseService, IMLService):
                 return calculate_regression_metrics(y_true, y_pred)
         except Exception as e:
             self._logger.error(f"Metrics calculation failed: {e}")
-            # Fallback to basic metrics
+            # Fallback to basic metrics with Decimal precision
+            from decimal import Decimal
             if is_classification:
                 return {
-                    "accuracy": 0.0,
-                    "precision": 0.0,
-                    "recall": 0.0,
-                    "f1_score": 0.0,
+                    "accuracy": Decimal('0.0'),
+                    "precision": Decimal('0.0'),
+                    "recall": Decimal('0.0'),
+                    "f1_score": Decimal('0.0'),
                 }
             else:
                 return {
-                    "mae": float("inf"),
-                    "mse": float("inf"),
-                    "r2_score": -float("inf"),
+                    "mae": Decimal('inf'),
+                    "mse": Decimal('inf'),
+                    "r2_score": Decimal('-inf'),
                 }
 
     # Batch Processing
@@ -970,16 +1032,37 @@ class MLService(BaseService, IMLService):
         batch_start = datetime.now(timezone.utc)
 
         try:
-            # Apply consistent batch processing paradigm alignment with data module patterns
+            # Transform batch requests using ML data transformer for consistent alignment
+            batch_data = {
+                "requests": [req.model_dump() for req in requests],
+                "batch_size": len(requests),
+                "processing_type": "batch_pipeline"
+            }
+            
+            # Apply ML data transformation for batch processing
+            transformed_batch = MLDataTransformer.transform_ml_request_to_standard_format(
+                "batch_pipeline_processing",
+                batch_data,
+                metadata={"batch_size": len(requests), "processing_stage": "batch_start"},
+                processing_mode="batch"
+            )
+            
+            # Align with core processing paradigm 
+            aligned_batch_data = MLDataTransformer.align_with_core_processing_paradigm(
+                transformed_batch, "batch"
+            )
+            
+            batch_id = aligned_batch_data.get("batch_id", f"ml_batch_{int(batch_start.timestamp() * 1000)}")
+            
+            # Apply legacy batch alignment for backwards compatibility
             from src.utils.messaging_patterns import ProcessingParadigmAligner
-            from src.utils.ml_data_transforms import batch_transform_requests_to_aligned_format
-
-            # Convert requests to aligned batch format using utility function
-            request_items = batch_transform_requests_to_aligned_format(requests)
-
-            # Create batch with consistent format aligned with data module patterns
-            aligned_batch = ProcessingParadigmAligner.create_batch_from_stream(request_items)
-            batch_id = aligned_batch["batch_id"]
+            try:
+                from src.utils.ml_data_transforms import batch_transform_requests_to_aligned_format
+                request_items = batch_transform_requests_to_aligned_format(requests)
+                legacy_aligned_batch = ProcessingParadigmAligner.create_batch_from_stream(request_items)
+            except ImportError:
+                # Continue without legacy transforms if not available
+                pass
             self._logger.info(
                 f"Processing aligned ML batch {batch_id} with {len(request_items)} requests"
             )
@@ -1089,49 +1172,87 @@ class MLService(BaseService, IMLService):
         return await self.model_registry_service.get_model_metrics(model_id)
 
     # Service Health and Metrics
-    async def _service_health_check(self) -> Any:
+    async def _service_health_check(self) -> HealthCheckResult:
         """ML service specific health check."""
-        from src.core.base.interfaces import HealthStatus
 
         try:
             # Check required dependencies
-            if not self.data_service:
-                return HealthStatus.UNHEALTHY
+            if not self.ml_data_service:
+                return HealthCheckResult(
+                    status=HealthStatus.UNHEALTHY,
+                    message="ML data service dependency not available",
+                    details={"missing_service": "ml_data_service"}
+                )
 
             # Check optional dependencies based on configuration
             unhealthy_services = 0
-            total_services = 1  # data_service is always required
+            total_services = 1  # ml_data_service is always required
+            missing_services = []
 
             if self.ml_config.enable_feature_engineering:
                 total_services += 1
                 if not self.feature_engineering_service:
                     unhealthy_services += 1
+                    missing_services.append("feature_engineering_service")
 
             if self.ml_config.enable_model_registry:
                 total_services += 1
                 if not self.model_registry_service:
                     unhealthy_services += 1
+                    missing_services.append("model_registry_service")
 
             if self.ml_config.enable_inference:
                 total_services += 1
                 if not self.inference_service:
                     unhealthy_services += 1
+                    missing_services.append("inference_service")
 
             # Check active operations
             if len(self._active_operations) > self.ml_config.max_concurrent_operations:
-                return HealthStatus.DEGRADED
+                return HealthCheckResult(
+                    status=HealthStatus.DEGRADED,
+                    message="Too many active operations",
+                    details={
+                        "active_operations": len(self._active_operations),
+                        "max_operations": self.ml_config.max_concurrent_operations
+                    }
+                )
 
             # Determine overall health
             if unhealthy_services == 0:
-                return HealthStatus.HEALTHY
+                return HealthCheckResult(
+                    status=HealthStatus.HEALTHY,
+                    message="All ML services operational",
+                    details={"total_services": total_services}
+                )
             elif unhealthy_services < total_services * 0.5:
-                return HealthStatus.DEGRADED
+                return HealthCheckResult(
+                    status=HealthStatus.DEGRADED,
+                    message="Some ML services unavailable",
+                    details={
+                        "missing_services": missing_services,
+                        "unhealthy_count": unhealthy_services,
+                        "total_services": total_services
+                    }
+                )
             else:
-                return HealthStatus.UNHEALTHY
+                return HealthCheckResult(
+                    status=HealthStatus.UNHEALTHY,
+                    message="Majority of ML services unavailable",
+                    details={
+                        "missing_services": missing_services,
+                        "unhealthy_count": unhealthy_services,
+                        "total_services": total_services
+                    }
+                )
 
         except Exception as e:
             self._logger.error("ML service health check failed", error=str(e))
-            return HealthStatus.UNHEALTHY
+            return HealthCheckResult(
+                status=HealthStatus.UNHEALTHY,
+                message=f"Health check failed: {e}",
+                details={"error_type": type(e).__name__}
+            )
 
     def get_ml_service_metrics(self) -> dict[str, Any]:
         """Get ML service metrics."""
@@ -1144,7 +1265,7 @@ class MLService(BaseService, IMLService):
             "inference_enabled": self.ml_config.enable_inference,
             "feature_store_enabled": self.ml_config.enable_feature_store,
             "services_available": {
-                "data_service": bool(self.data_service),
+                "ml_data_service": bool(self.ml_data_service),
                 "feature_engineering_service": bool(self.feature_engineering_service),
                 "model_registry_service": bool(self.model_registry_service),
                 "inference_service": bool(self.inference_service),
@@ -1198,11 +1319,27 @@ class MLService(BaseService, IMLService):
 
         enhanced_signals = []
         try:
+            # Apply cross-module consistency using integration service (business logic)
+            signal_data = {
+                "strategy_id": strategy_id,
+                "signals": signals,
+                "market_context": market_context or {},
+                "enhancement_type": "ml_signal_enhancement",
+                "ml_operation_type": "signal_enhancement"
+            }
+            
+            # Use integration service for business logic decisions about cross-module consistency
+            consistent_signal_data = self.ml_integration_service.prepare_data_for_target_module(
+                signal_data, target_module="strategies", operation_type="signal_enhancement"
+            )
+            
+            self.logger.debug(f"Applied cross-module consistency for ML -> strategies communication")
+            
             # Process each signal for enhancement
             for signal in signals:
                 try:
                     # Extract signal information
-                    symbol = getattr(signal, 'symbol', 'UNKNOWN')
+                    symbol = getattr(signal, "symbol", "UNKNOWN")
 
                     # Create ML pipeline request for signal enhancement
                     pipeline_request = MLPipelineRequest(
@@ -1219,20 +1356,23 @@ class MLService(BaseService, IMLService):
 
                     if ml_response.pipeline_success and ml_response.predictions:
                         # Apply ML enhancement to signal strength
-                        original_strength = getattr(signal, 'strength', 0.5)
+                        original_strength = getattr(signal, "strength", 0.5)
 
                         # Use first prediction as confidence boost
                         prediction_confidence = ml_response.predictions[0]
 
-                        # Calculate enhanced strength using weighted average
+                        # Calculate enhanced strength using weighted average with Decimal precision
+                        from decimal import Decimal
                         enhanced_strength = (
-                            float(original_strength) * 0.7 +
-                            prediction_confidence * 0.3
+                            Decimal(str(original_strength)) * Decimal('0.7') +
+                            Decimal(str(prediction_confidence)) * Decimal('0.3')
                         )
+                        # Convert back to float for compatibility
+                        enhanced_strength = float(enhanced_strength)
 
                         # Create enhanced signal by copying original and updating strength
                         enhanced_signal = signal
-                        if hasattr(signal, 'strength'):
+                        if hasattr(signal, "strength"):
                             from decimal import Decimal
                             enhanced_signal.strength = Decimal(str(min(max(enhanced_strength, 0.0), 1.0)))
 

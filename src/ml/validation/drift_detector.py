@@ -70,7 +70,7 @@ class DriftDetectionService(BaseService):
         self.feature_statistics: dict[str, Any] = {}
 
         # Add dependencies for data and model services
-        self.add_dependency("DataServiceInterface")
+        self.add_dependency("MLDataService")
         self.add_dependency("ModelRegistryService")
 
         self._logger.info(
@@ -85,7 +85,7 @@ class DriftDetectionService(BaseService):
         """Start the drift detection service."""
         try:
             # Resolve dependencies
-            self.data_service = self.resolve_dependency("DataServiceInterface")
+            self.ml_data_service = self.resolve_dependency("MLDataService")
             self.model_registry = self.resolve_dependency("ModelRegistryService")
 
             self._logger.info("Drift detection service started successfully")

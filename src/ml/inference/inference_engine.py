@@ -30,6 +30,8 @@ dec = UnifiedDecorator()
 class InferenceConfig(BaseModel):
     """Configuration for inference service."""
 
+    model_config = ConfigDict(protected_namespaces=())
+
     max_cpu_cores: int = Field(default=4, description="Maximum CPU cores for inference")
     inference_batch_size: int = Field(default=32, description="Inference batch size")
     max_queue_size: int = Field(default=1000, description="Maximum queue size for batch processing")
@@ -57,6 +59,8 @@ class InferencePredictionRequest(BaseModel):
 
 class InferencePredictionResponse(BaseModel):
     """Response object for predictions."""
+
+    model_config = ConfigDict(protected_namespaces=())
 
     request_id: str
     predictions: list[float]
@@ -881,7 +885,7 @@ class InferenceService(BaseService):
     # Service Health and Metrics
     async def _service_health_check(self) -> Any:
         """Inference service specific health check."""
-        from src.core.types import HealthStatus
+        from src.core.base.interfaces import HealthStatus
 
         try:
             # Check dependencies

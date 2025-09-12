@@ -29,7 +29,7 @@ from sklearn.model_selection import (
 from src.core.base.service import BaseService
 from src.core.exceptions import ModelError, ValidationError
 from src.core.types.base import ConfigDict
-from src.ml.models.base_model import BaseModel
+from src.ml.models.base_model import BaseMLModel
 from src.utils.decorators import UnifiedDecorator
 
 # Initialize decorator instance
@@ -256,7 +256,7 @@ class CrossValidationService(BaseService):
     @dec.enhance(log=True, monitor=True, log_level="info")
     async def validate_model(
         self,
-        model: BaseModel,
+        model: BaseMLModel,
         X: pd.DataFrame,
         y: pd.Series,
         cv_strategy: str = "kfold",
@@ -366,7 +366,7 @@ class CrossValidationService(BaseService):
     @dec.enhance(log=True, monitor=True, log_level="info")
     async def time_series_validation(
         self,
-        model: BaseModel,
+        model: BaseMLModel,
         X: pd.DataFrame,
         y: pd.Series,
         ts_strategy: str = "purged_walk_forward",
@@ -675,7 +675,7 @@ class CrossValidationService(BaseService):
 
     def _manual_cross_validation(
         self,
-        model: BaseModel,
+        model: BaseMLModel,
         X: pd.DataFrame,
         y: pd.Series,
         cv_splitter,
@@ -766,7 +766,7 @@ class CrossValidationService(BaseService):
         """
         # Convert predictions to trading signals with Decimal precision
         returns_decimal = []
-        for true_val, pred_val in zip(y_true, y_pred):
+        for true_val, pred_val in zip(y_true, y_pred, strict=False):
             return_val = Decimal(str(true_val)) * Decimal("1" if pred_val >= 0 else "-1")
             returns_decimal.append(return_val)
 
@@ -800,7 +800,7 @@ class CrossValidationService(BaseService):
         """
         # Calculate excess returns with Decimal precision
         excess_returns_decimal = []
-        for true_val, pred_val in zip(y_true, y_pred):
+        for true_val, pred_val in zip(y_true, y_pred, strict=False):
             excess_return = Decimal(str(true_val)) * Decimal("1" if pred_val >= 0 else "-1")
             excess_returns_decimal.append(excess_return)
 
@@ -829,7 +829,7 @@ class CrossValidationService(BaseService):
         """
         # Calculate returns with Decimal precision
         returns_decimal = []
-        for true_val, pred_val in zip(y_true, y_pred):
+        for true_val, pred_val in zip(y_true, y_pred, strict=False):
             return_val = Decimal(str(true_val)) * Decimal("1" if pred_val >= 0 else "-1")
             returns_decimal.append(return_val)
 
@@ -854,7 +854,7 @@ class CrossValidationService(BaseService):
         """
         # Calculate returns with Decimal precision
         returns_decimal = []
-        for true_val, pred_val in zip(y_true, y_pred):
+        for true_val, pred_val in zip(y_true, y_pred, strict=False):
             return_val = Decimal(str(true_val)) * Decimal("1" if pred_val >= 0 else "-1")
             returns_decimal.append(return_val)
 
@@ -915,7 +915,7 @@ class CrossValidationService(BaseService):
         """
         # Calculate returns with Decimal precision
         returns_decimal = []
-        for true_val, pred_val in zip(y_true, y_pred):
+        for true_val, pred_val in zip(y_true, y_pred, strict=False):
             return_val = Decimal(str(true_val)) * Decimal("1" if pred_val >= 0 else "-1")
             returns_decimal.append(return_val)
 
@@ -930,7 +930,7 @@ class CrossValidationService(BaseService):
     def _process_cv_results(
         self,
         cv_results: dict[str, Any],
-        model: BaseModel,
+        model: BaseMLModel,
         cv_strategy: str,
         scoring: str | list[str],
         cv_folds: int,
