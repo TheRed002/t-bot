@@ -8,7 +8,7 @@ services, following proper controller->service->repository patterns.
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
-from src.core.base.component import BaseComponent
+from src.core.base import BaseComponent
 from src.core.types import MarketData, OrderRequest, Position, RiskMetrics, Signal
 from src.utils.messaging_patterns import (
     BoundaryValidator,
@@ -18,6 +18,7 @@ from src.utils.messaging_patterns import (
 
 if TYPE_CHECKING:
     from .interfaces import (
+        PortfolioLimitsServiceInterface,
         PositionSizingServiceInterface,
         RiskMetricsServiceInterface,
         RiskMonitoringServiceInterface,
@@ -39,6 +40,7 @@ class RiskManagementController(BaseComponent, ErrorPropagationMixin):
         risk_validation_service: "RiskValidationServiceInterface",
         risk_metrics_service: "RiskMetricsServiceInterface",
         risk_monitoring_service: "RiskMonitoringServiceInterface",
+        portfolio_limits_service: "PortfolioLimitsServiceInterface",
         messaging_coordinator: MessagingCoordinator | None = None,
         correlation_id: str | None = None,
     ):
@@ -50,6 +52,7 @@ class RiskManagementController(BaseComponent, ErrorPropagationMixin):
             risk_validation_service: Service for risk validation
             risk_metrics_service: Service for risk metrics
             risk_monitoring_service: Service for risk monitoring
+            portfolio_limits_service: Service for portfolio limits
             messaging_coordinator: Messaging coordinator for consistent data flow
             correlation_id: Request correlation ID
         """
@@ -59,6 +62,7 @@ class RiskManagementController(BaseComponent, ErrorPropagationMixin):
         self._risk_validation_service = risk_validation_service
         self._risk_metrics_service = risk_metrics_service
         self._risk_monitoring_service = risk_monitoring_service
+        self._portfolio_limits_service = portfolio_limits_service
         self._messaging_coordinator = messaging_coordinator or MessagingCoordinator(
             "RiskManagementController"
         )
@@ -267,8 +271,8 @@ class RiskManagementController(BaseComponent, ErrorPropagationMixin):
                 symbol=new_position.symbol,
             )
 
-            # Delegate to risk validation service
-            is_valid = await self._risk_validation_service.validate_portfolio_limits(new_position)
+            # Delegate to portfolio limits service
+            is_valid = await self._portfolio_limits_service.check_portfolio_limits(new_position)
 
             self.logger.info(
                 "Portfolio limits validation result",

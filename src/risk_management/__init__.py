@@ -64,11 +64,11 @@ P-002A (error handling), and P-007A (utils) components.
 from .base import BaseRiskManager
 from .controller import RiskManagementController
 
-# Dependency injection registration
-from .di_registration import (
-    configure_risk_management_dependencies,
-    register_risk_management_services,
-)
+# Dependency injection registration - use lazy import to avoid circular dependency
+# from .di_registration import (
+#     configure_risk_management_dependencies,
+#     register_risk_management_services,
+# )
 from .factory import (
     RiskManagementFactory,
     create_recommended_risk_component,
@@ -133,13 +133,11 @@ __all__ = [
     "RiskMonitoringServiceInterface",
     "RiskValidationService",
     "RiskValidationServiceInterface",
-    # Dependency injection
-    "configure_risk_management_dependencies",
+    # Factory functions (di_registration exports removed to avoid circular import)
     "create_recommended_risk_component",
     "create_risk_management_controller",
     "create_risk_service",
     "get_risk_factory",
-    "register_risk_management_services",
 ]
 
 # Add circuit breakers if available
@@ -158,3 +156,19 @@ __author__ = "Trading Bot Framework"
 __description__ = (
     "Enterprise Risk Management System with Controller-Service-Repository Architecture"
 )
+
+
+def __getattr__(name: str):
+    """Lazy import to prevent circular dependencies."""
+    # Handle di_registration imports that were commented out
+    if name in ["configure_risk_management_dependencies", "register_risk_management_services"]:
+        from .di_registration import (
+            configure_risk_management_dependencies,
+            register_risk_management_services,
+        )
+        if name == "configure_risk_management_dependencies":
+            return configure_risk_management_dependencies
+        elif name == "register_risk_management_services":
+            return register_risk_management_services
+    
+    raise AttributeError(f"module '{__name__}' has no attribute '{name}'")

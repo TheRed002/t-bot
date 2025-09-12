@@ -23,7 +23,7 @@ from decimal import Decimal
 from typing import Any, TypeVar
 
 import numpy as np
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field
 
 from src.core.base.interfaces import HealthStatus
 from src.core.base.service import BaseService
@@ -42,6 +42,7 @@ from src.core.types import (
     Signal,
     StateType,
 )
+from src.core.types.base import ConfigDict
 
 # DatabaseService will be injected
 from src.error_handling.decorators import (
@@ -49,17 +50,18 @@ from src.error_handling.decorators import (
     with_error_context,
     with_retry,
 )
-from src.utils.decimal_utils import decimal_to_float
 
 # Monitoring integration
 from src.monitoring.interfaces import MetricsServiceInterface
 
+# Repository interfaces for proper separation of concerns
 # StateService will be injected
 from src.utils.constants import POSITION_SIZING_LIMITS
 from src.utils.decimal_utils import (
     ONE,
     ZERO,
     clamp_decimal,
+    decimal_to_float,
     format_decimal,
     safe_divide,
     to_decimal,
@@ -198,7 +200,8 @@ class RiskService(BaseService):
 
     def __init__(
         self,
-        database_service=None,
+        risk_metrics_repository=None,
+        portfolio_repository=None,
         state_service=None,
         analytics_service=None,
         config=None,
@@ -211,7 +214,8 @@ class RiskService(BaseService):
         Initialize Risk Service.
 
         Args:
-            database_service: Database service for data access (injected)
+            risk_metrics_repository: Repository for risk metrics data access
+            portfolio_repository: Repository for portfolio data access
             state_service: State service for state management (injected)
             analytics_service: Analytics service for risk metrics (injected)
             config: Application configuration
@@ -234,7 +238,8 @@ class RiskService(BaseService):
         )
 
         # Service dependencies
-        self.database_service = database_service
+        self.risk_metrics_repository = risk_metrics_repository
+        self.portfolio_repository = portfolio_repository
         self.state_service = state_service
         self.alert_service = alert_service
         self.analytics_service = analytics_service
@@ -307,6 +312,14 @@ class RiskService(BaseService):
 
         # Initialize monitoring integration
         self.metrics_service = metrics_service
+        self.risk_metrics = None
+        if metrics_service:
+            # Initialize RiskMetrics if we have a metrics collector
+            from src.monitoring.metrics import get_metrics_collector
+
+            collector = get_metrics_collector()
+            if collector:
+                self.risk_metrics = RiskMetrics(collector)
 
         self.logger.info(
             "RiskService initialized",
@@ -386,7 +399,7 @@ class RiskService(BaseService):
 
     @with_error_context(component="risk_management", operation="calculate_position_size")
     @with_circuit_breaker(failure_threshold=3, recovery_timeout=30)
-    @with_retry(max_attempts=2, base_delay=Decimal("0.5"))
+    @with_retry(max_attempts=2, base_delay=0.5)
     @timeout(10.0)
     @time_execution
     @cached(
@@ -866,7 +879,7 @@ class RiskService(BaseService):
 
     @with_error_context(component="risk_management", operation="calculate_risk_metrics")
     @with_circuit_breaker(failure_threshold=5, recovery_timeout=60)
-    @with_retry(max_attempts=3, base_delay=Decimal("1.0"))
+    @with_retry(max_attempts=3, base_delay=1.0)
     @cache_result(ttl=30)  # Cache risk metrics for 30 seconds
     @time_execution
     @cache_risk_metrics(ttl=60)  # Use specialized risk metrics caching decorator
@@ -979,53 +992,31 @@ class RiskService(BaseService):
                 except Exception as e:
                     self.logger.warning(f"Failed to send risk metrics to analytics: {e}")
 
-            # Update monitoring metrics
-            if self.metrics_service:
+            # Update monitoring metrics using RiskMetrics
+            if self.risk_metrics:
                 try:
-                    # Update VaR metrics using specialized methods with safe conversion
+                    # Update VaR metrics using RiskMetrics methods
                     if var_1d is not None:
-                        var_1d_float = decimal_to_float(
-                            var_1d, "risk_var_1d", precision_digits=2
-                        )
-                        # Record VaR metric via metrics service interface
-                        from src.monitoring.services import MetricRequest
-
-                        metric_request = MetricRequest(
-                            name="risk_var_1d",
-                            value=var_1d_float,
-                            labels={"confidence": "0.95", "horizon": "1d"},
-                        )
-                        self.metrics_service.record_gauge(metric_request)
+                        var_1d_float = decimal_to_float(var_1d, "risk_var_1d", precision_digits=2)
+                        self.risk_metrics.record_var(0.95, "1d", var_1d_float)
 
                     if var_5d is not None:
-                        var_5d_float = decimal_to_float(
-                            var_5d, "risk_var_5d", precision_digits=2
-                        )
-                        # Record VaR metric via metrics service interface
-                        from src.monitoring.services import MetricRequest
+                        var_5d_float = decimal_to_float(var_5d, "risk_var_5d", precision_digits=2)
+                        self.risk_metrics.record_var(0.95, "5d", var_5d_float)
 
-                        metric_request = MetricRequest(
-                            name="risk_var_5d",
-                            value=var_5d_float,
-                            labels={"confidence": "0.95", "horizon": "5d"},
-                        )
-                        self.metrics_service.record_gauge(metric_request)
-
-                    # Update drawdown metrics using specialized method with safe conversion
+                    # Update drawdown metrics using RiskMetrics
                     if max_drawdown is not None:
                         drawdown_float = decimal_to_float(
                             max_drawdown, "risk_max_drawdown", precision_digits=4
                         )
-                        # Record drawdown metric via metrics service interface
-                        self.metrics_service.record_drawdown("30d", drawdown_float)
+                        self.risk_metrics.record_drawdown("30d", drawdown_float)
 
-                    # Update Sharpe ratio using specialized method with safe conversion
+                    # Update Sharpe ratio using RiskMetrics
                     if sharpe_ratio is not None:
                         sharpe_float = decimal_to_float(
                             sharpe_ratio, "risk_sharpe_ratio", precision_digits=4
                         )
-                        # Record Sharpe ratio metric via metrics service interface
-                        self.metrics_service.record_sharpe_ratio("30d", sharpe_float)
+                        self.risk_metrics.record_sharpe_ratio("30d", sharpe_float)
                 except Exception as e:
                     self.logger.warning(f"Failed to update monitoring metrics: {e}")
 
@@ -1369,7 +1360,7 @@ class RiskService(BaseService):
 
     @with_error_context(component="risk_management", operation="validate_signal")
     @with_circuit_breaker(failure_threshold=5, recovery_timeout=30)
-    @with_retry(max_attempts=3, base_delay=Decimal("1.0"))
+    @with_retry(max_attempts=3, base_delay=1.0)
     @time_execution
     @cached(
         ttl=30,
@@ -1450,7 +1441,7 @@ class RiskService(BaseService):
 
     @with_error_context(component="risk_management", operation="validate_order")
     @with_circuit_breaker(failure_threshold=5, recovery_timeout=30)
-    @with_retry(max_attempts=3, base_delay=Decimal("1.0"))
+    @with_retry(max_attempts=3, base_delay=1.0)
     @time_execution
     @cached(
         ttl=15,
@@ -2067,26 +2058,36 @@ class RiskService(BaseService):
             self.logger.error(f"State service error while saving risk state: {e}")
             # Monitor state persistence failures
             if self.metrics_service:
-                await self.metrics_service.increment_counter(
-                    "risk.state_persistence_failures_total",
-                    labels={
-                        "component": "RiskService",
-                        "operation": "save_risk_state",
-                        "error_type": "StateError",
-                    },
+                from src.monitoring.services import MetricRequest
+
+                self.metrics_service.record_counter(
+                    MetricRequest(
+                        name="risk_state_persistence_failures_total",
+                        value=1,
+                        labels={
+                            "component": "RiskService",
+                            "operation": "save_risk_state",
+                            "error_type": "StateError",
+                        },
+                    )
                 )
             # Re-raise for critical state updates
             raise RiskManagementError(f"Failed to persist risk state: {e}") from e
         except Exception as e:
             self.logger.error(f"Failed to save risk state: {e}")
             if self.metrics_service:
-                await self.metrics_service.increment_counter(
-                    "risk.state_persistence_failures_total",
-                    labels={
-                        "component": "RiskService",
-                        "operation": "save_risk_state",
-                        "error_type": "GeneralError",
-                    },
+                from src.monitoring.services import MetricRequest
+
+                self.metrics_service.record_counter(
+                    MetricRequest(
+                        name="risk_state_persistence_failures_total",
+                        value=1,
+                        labels={
+                            "component": "RiskService",
+                            "operation": "save_risk_state",
+                            "error_type": "GeneralError",
+                        },
+                    )
                 )
             raise RiskManagementError(f"Failed to save risk state: {e}") from e
 
@@ -2112,34 +2113,49 @@ class RiskService(BaseService):
 
             # Track successful saves
             if self.metrics_service:
-                await self.metrics_service.increment_counter(
-                    "risk.metrics_saved_total",
-                    labels={"component": "RiskService", "operation": "save_risk_metrics"},
+                from src.monitoring.services import MetricRequest
+
+                self.metrics_service.record_counter(
+                    MetricRequest(
+                        name="risk_metrics_saved_total",
+                        value=1,
+                        labels={"component": "RiskService", "operation": "save_risk_metrics"},
+                    )
                 )
 
         except StateError as e:
             self.logger.error(f"State service error while saving risk metrics: {e}")
             if self.metrics_service:
-                await self.metrics_service.increment_counter(
-                    "risk.metrics_save_failures_total",
-                    labels={
-                        "component": "RiskService",
-                        "operation": "save_risk_metrics",
-                        "error_type": "StateError",
-                    },
+                from src.monitoring.services import MetricRequest
+
+                self.metrics_service.record_counter(
+                    MetricRequest(
+                        name="risk_metrics_save_failures_total",
+                        value=1,
+                        labels={
+                            "component": "RiskService",
+                            "operation": "save_risk_metrics",
+                            "error_type": "StateError",
+                        },
+                    )
                 )
             # Re-raise as risk metrics are important for system operation
             raise RiskManagementError(f"Failed to persist risk metrics: {e}") from e
         except Exception as e:
             self.logger.error(f"Failed to save risk metrics: {e}")
             if self.metrics_service:
-                await self.metrics_service.increment_counter(
-                    "risk.metrics_save_failures_total",
-                    labels={
-                        "component": "RiskService",
-                        "operation": "save_risk_metrics",
-                        "error_type": "GeneralError",
-                    },
+                from src.monitoring.services import MetricRequest
+
+                self.metrics_service.record_counter(
+                    MetricRequest(
+                        name="risk_metrics_save_failures_total",
+                        value=1,
+                        labels={
+                            "component": "RiskService",
+                            "operation": "save_risk_metrics",
+                            "error_type": "GeneralError",
+                        },
+                    )
                 )
             raise RiskManagementError(f"Failed to save risk metrics: {e}") from e
 
@@ -2177,9 +2193,13 @@ class RiskService(BaseService):
     async def _verify_dependencies(self) -> bool:
         """Verify that required dependencies are available."""
         try:
-            # Test database service
-            if not self.database_service:
-                self.logger.error("DatabaseService not available")
+            # Test repository services
+            if not self.risk_metrics_repository:
+                self.logger.error("RiskMetricsRepository not available")
+                return False
+
+            if not self.portfolio_repository:
+                self.logger.error("PortfolioRepository not available")
                 return False
 
             # Test state service
@@ -2189,8 +2209,13 @@ class RiskService(BaseService):
 
             # Test state service connectivity
             try:
-                await self.state_service.get_state(StateType.SYSTEM_STATE, "health_check")
-                self.logger.info("StateService health check passed")
+                health_status = await self.state_service.get_health_status()
+                if health_status.get("overall_status") == "healthy":
+                    self.logger.info("StateService health check passed")
+                else:
+                    self.logger.warning(
+                        f"StateService health check shows degraded status: {health_status.get('overall_status')}"
+                    )
             except Exception as e:
                 self.logger.warning(f"StateService health check failed: {e}")
 
@@ -2214,7 +2239,12 @@ class RiskService(BaseService):
 
             # Check state service dependency health
             try:
-                await self.state_service.get_state(StateType.SYSTEM_STATE, "health_check")
+                health_status = await self.state_service.get_health_status()
+                if health_status.get("overall_status") != "healthy":
+                    self.logger.warning(
+                        f"StateService health check shows degraded status: {health_status.get('overall_status')}"
+                    )
+                    return HealthStatus.DEGRADED
             except Exception as e:
                 self.logger.warning(f"StateService health check failed: {e}")
                 return HealthStatus.DEGRADED
@@ -2242,7 +2272,7 @@ class RiskService(BaseService):
                 from src.core.event_constants import RiskEvents
 
                 error_data = {
-                    "event_type": "risk.validation_error",
+                    "event_type": RiskEvents.VALIDATION_ERROR,
                     "error": str(error),
                     "component": "RiskService",
                     "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -2250,9 +2280,7 @@ class RiskService(BaseService):
                 }
 
                 self._emitter.emit(
-                    event=RiskEvents.VALIDATION_ERROR
-                    if hasattr(RiskEvents, "VALIDATION_ERROR")
-                    else "risk.validation_error",
+                    event=RiskEvents.VALIDATION_ERROR,
                     data=error_data,
                     source="risk_management",
                 )
@@ -2444,7 +2472,7 @@ class RiskService(BaseService):
 
     @with_error_context(component="risk_management", operation="should_exit_position")
     @with_circuit_breaker(failure_threshold=5, recovery_timeout=30)
-    @with_retry(max_attempts=3, base_delay=Decimal("1.0"))
+    @with_retry(max_attempts=3, base_delay=1.0)
     @time_execution
     async def should_exit_position(self, position: Position, market_data: MarketData) -> bool:
         """

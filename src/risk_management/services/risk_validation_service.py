@@ -12,11 +12,11 @@ from typing import TYPE_CHECKING
 from src.core.base.service import BaseService
 from src.core.exceptions import ValidationError
 from src.core.types import OrderRequest, Position, RiskLevel, Signal
+from src.risk_management.interfaces import PortfolioRepositoryInterface
 from src.utils.decimal_utils import ZERO, format_decimal, to_decimal
 from src.utils.risk_validation import UnifiedRiskValidator
 
 if TYPE_CHECKING:
-    from src.database.service import DatabaseService
     from src.state import StateService
 
 
@@ -25,7 +25,7 @@ class RiskValidationService(BaseService):
 
     def __init__(
         self,
-        database_service: "DatabaseService",
+        portfolio_repository: PortfolioRepositoryInterface,
         state_service: "StateService",
         config=None,
         correlation_id: str | None = None,
@@ -34,7 +34,7 @@ class RiskValidationService(BaseService):
         Initialize risk validation service.
 
         Args:
-            database_service: Database service for data access
+            portfolio_repository: Repository for portfolio data access
             state_service: State service for state management
             config: Application configuration
             correlation_id: Request correlation ID
@@ -45,7 +45,7 @@ class RiskValidationService(BaseService):
             correlation_id=correlation_id,
         )
 
-        self.database_service = database_service
+        self.portfolio_repository = portfolio_repository
         self.state_service = state_service
         self.config = config
 
@@ -325,7 +325,9 @@ class RiskValidationService(BaseService):
             self.logger.error("Signal missing direction")
             return False
 
-        if not hasattr(signal, "strength") or not isinstance(signal.strength, (int, float, Decimal)):
+        if not hasattr(signal, "strength") or not isinstance(
+            signal.strength, (int, float, Decimal)
+        ):
             self.logger.error("Signal missing or invalid strength")
             return False
 

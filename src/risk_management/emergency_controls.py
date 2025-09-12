@@ -24,8 +24,8 @@ from typing import TYPE_CHECKING, Any, Optional
 
 from pydantic import BaseModel, Field
 
-from src.core.base.component import BaseComponent
-from src.core.config.main import Config
+from src.core.base import BaseComponent
+from src.core.config import Config
 from src.core.exceptions import EmergencyStopError, ValidationError
 
 # MANDATORY: Import from P-001

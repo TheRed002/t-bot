@@ -17,8 +17,8 @@ from typing import Any
 
 import numpy as np
 
-from src.core.base.component import BaseComponent
-from src.core.config.main import Config
+from src.core.base import BaseComponent
+from src.core.config import Config
 from src.core.exceptions import PositionLimitError, ValidationError
 
 # MANDATORY: Import from P-001
@@ -516,8 +516,13 @@ class PortfolioLimits(BaseComponent):
         """
         # Calculate current exposures
         total_exposure = sum(
-            (abs(pos.quantity * pos.current_price) if pos.quantity and pos.current_price else ZERO
-            for pos in self.positions), ZERO
+            (
+                abs(pos.quantity * pos.current_price)
+                if pos.quantity and pos.current_price
+                else ZERO
+                for pos in self.positions
+            ),
+            ZERO,
         )
 
         exposure_percentage = (

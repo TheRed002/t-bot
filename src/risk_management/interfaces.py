@@ -13,6 +13,7 @@ from src.core.types import (
     MarketData,
     OrderRequest,
     Position,
+    PositionSizeMethod,
     RiskLevel,
     RiskMetrics,
     Signal,
@@ -67,7 +68,7 @@ class RiskServiceInterface(Protocol):
         signal: Signal,
         available_capital: Decimal,
         current_price: Decimal,
-        method: str | None = None,
+        method: PositionSizeMethod | None = None,
     ) -> Decimal:
         """Calculate optimal position size."""
         ...
@@ -111,7 +112,7 @@ class PositionSizingServiceInterface(Protocol):
         signal: Signal,
         available_capital: Decimal,
         current_price: Decimal,
-        method: str | None = None,
+        method: PositionSizeMethod | None = None,
     ) -> Decimal:
         """Calculate position size."""
         ...
@@ -150,6 +151,28 @@ class RiskValidationServiceInterface(Protocol):
 
     async def validate_portfolio_limits(self, new_position: Position) -> bool:
         """Validate portfolio limits."""
+        ...
+
+
+class PortfolioLimitsServiceInterface(Protocol):
+    """Protocol for portfolio limits service implementations."""
+
+    async def check_portfolio_limits(self, new_position: Position) -> bool:
+        """Check if adding position would violate portfolio limits."""
+        ...
+
+    async def update_portfolio_state(
+        self, positions: list[Position], portfolio_value: Decimal
+    ) -> None:
+        """Update portfolio state for limit calculations."""
+        ...
+
+    async def update_return_history(self, symbol: str, price: Decimal) -> None:
+        """Update return history for correlation calculations."""
+        ...
+
+    async def get_portfolio_summary(self) -> dict[str, Any]:
+        """Get comprehensive portfolio limits summary."""
         ...
 
 
@@ -192,7 +215,7 @@ class AbstractRiskService(ABC):
         signal: Signal,
         available_capital: Decimal,
         current_price: Decimal,
-        method: str | None = None,
+        method: PositionSizeMethod | None = None,
     ) -> Decimal:
         """Calculate position size."""
         pass
@@ -208,6 +231,50 @@ class AbstractRiskService(ABC):
     ) -> RiskMetrics:
         """Calculate risk metrics."""
         pass
+
+
+class RiskMetricsRepositoryInterface(Protocol):
+    """Protocol for risk metrics data access."""
+
+    async def get_historical_returns(self, symbol: str, days: int) -> list[Decimal]:
+        """Get historical returns for symbol."""
+        ...
+
+    async def get_price_history(self, symbol: str, days: int) -> list[Decimal]:
+        """Get price history for symbol."""
+        ...
+
+    async def get_portfolio_positions(self) -> list[Position]:
+        """Get current portfolio positions."""
+        ...
+
+    async def save_risk_metrics(self, metrics: RiskMetrics) -> None:
+        """Save calculated risk metrics."""
+        ...
+
+    async def get_correlation_data(self, symbols: list[str], days: int) -> dict[str, list[Decimal]]:
+        """Get correlation data for symbols."""
+        ...
+
+
+class PortfolioRepositoryInterface(Protocol):
+    """Protocol for portfolio data access."""
+
+    async def get_current_positions(self) -> list[Position]:
+        """Get current portfolio positions."""
+        ...
+
+    async def get_portfolio_value(self) -> Decimal:
+        """Get current portfolio value."""
+        ...
+
+    async def get_position_history(self, symbol: str, days: int) -> list[Position]:
+        """Get position history for symbol."""
+        ...
+
+    async def update_portfolio_limits(self, limits: dict[str, Any]) -> None:
+        """Update portfolio limits."""
+        ...
 
 
 class RiskManagementFactoryInterface(ABC):

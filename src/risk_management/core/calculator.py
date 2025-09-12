@@ -7,7 +7,7 @@ code duplication across the risk management module.
 from datetime import datetime, timezone
 from decimal import Decimal
 
-from src.core.base.component import BaseComponent
+from src.core.base import BaseComponent
 from src.core.types import Position
 from src.core.types.market import MarketData
 from src.core.types.risk import RiskLevel, RiskMetrics

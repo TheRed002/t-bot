@@ -49,7 +49,7 @@ class TestRiskValidationService:
     def service(self, mock_database_service, mock_state_service, mock_config):
         """Create risk validation service."""
         return RiskValidationService(
-            database_service=mock_database_service,
+            portfolio_repository=mock_database_service,
             state_service=mock_state_service,
             config=mock_config,
             correlation_id="test-correlation-id"
@@ -59,7 +59,7 @@ class TestRiskValidationService:
     def service_without_config(self, mock_database_service, mock_state_service):
         """Create risk validation service without config."""
         return RiskValidationService(
-            database_service=mock_database_service,
+            portfolio_repository=mock_database_service,
             state_service=mock_state_service,
             config=None,
             correlation_id="test-correlation-id"
@@ -133,7 +133,7 @@ class TestRiskValidationService:
 
     def test_service_initialization_with_config(self, service, mock_config):
         """Test service initialization with configuration."""
-        assert service.database_service is not None
+        assert service.portfolio_repository is not None
         assert service.state_service is not None
         assert service.config == mock_config
         assert service.validator is not None
@@ -141,7 +141,7 @@ class TestRiskValidationService:
 
     def test_service_initialization_without_config(self, service_without_config):
         """Test service initialization without configuration."""
-        assert service_without_config.database_service is not None
+        assert service_without_config.portfolio_repository is not None
         assert service_without_config.state_service is not None
         assert service_without_config.config is None
         assert service_without_config.validator is not None

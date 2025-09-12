@@ -13,7 +13,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from src.core.base.component import BaseComponent
+from src.core.base import BaseComponent
 from src.core.exceptions import RiskManagementError
 
 # MANDATORY: Import from P-001
@@ -258,9 +258,7 @@ class MarketRegimeDetector(BaseComponent):
             for data in market_data:
                 if data.symbol not in symbol_data:
                     symbol_data[data.symbol] = []
-                symbol_data[data.symbol].append(
-                    decimal_to_float(data.price)
-                )
+                symbol_data[data.symbol].append(decimal_to_float(data.price))
 
             # Detect individual regimes
             volatility_regimes = []

@@ -17,8 +17,8 @@ from decimal import Decimal
 from enum import Enum
 from typing import Any
 
-from src.core.base.component import BaseComponent
-from src.core.config.main import Config
+from src.core.base import BaseComponent
+from src.core.config import Config
 from src.core.exceptions import RiskManagementError
 from src.core.types import MarketData, Position
 

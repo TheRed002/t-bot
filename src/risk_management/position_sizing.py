@@ -6,10 +6,10 @@ eliminating code duplication while maintaining backward compatibility.
 """
 
 from decimal import Decimal
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-from src.core.base.component import BaseComponent
-from src.core.config.main import Config
+from src.core.base import BaseComponent
+from src.core.config import Config
 from src.core.exceptions import RiskManagementError, ValidationError
 from src.core.types import PositionSizeMethod, Signal
 from src.utils.decimal_utils import ZERO, format_decimal, to_decimal
@@ -23,9 +23,7 @@ from src.utils.position_sizing import (
     validate_position_size,
 )
 
-# Type checking imports to avoid circular dependencies
-if TYPE_CHECKING:
-    from src.database.service import DatabaseService
+# No external dependencies required for this component
 
 
 class PositionSizer(BaseComponent):
@@ -36,32 +34,24 @@ class PositionSizer(BaseComponent):
     For enhanced functionality, consider using RiskService.calculate_position_size().
     """
 
-    def __init__(self, config: Config, database_service: "DatabaseService | None" = None):
+    def __init__(self, config: Config):
         """
         Initialize position sizer with configuration.
 
         Args:
             config: Application configuration containing risk settings
-            database_service: Database service for data access (not used in this implementation)
         """
         super().__init__()  # Initialize BaseComponent
         self.config = config
         self.risk_config = config.risk
-        self.database_service = database_service
 
         # Historical data for calculations - using centralized utilities
         self.price_history: dict[str, list[Decimal]] = {}
         self.return_history: dict[str, list[float]] = {}
 
-        if database_service:
-            self.logger.warning(
-                "PositionSizer initialized with DatabaseService - "
-                "consider migrating to RiskService for full integration"
-            )
-        else:
-            self.logger.warning(
-                "PositionSizer initialized - migrate to RiskService for enterprise features"
-            )
+        self.logger.info(
+            "PositionSizer initialized - consider using PositionSizingService for enterprise features"
+        )
 
     @time_execution
     async def calculate_position_size(
@@ -85,7 +75,7 @@ class PositionSizer(BaseComponent):
             # Validate inputs early
             if signal is None:
                 raise ValidationError("Signal cannot be None")
-            
+
             if portfolio_value <= ZERO:
                 raise ValidationError(f"Portfolio value must be positive: {portfolio_value}")
 
@@ -105,7 +95,7 @@ class PositionSizer(BaseComponent):
                 except ValueError:
                     raise ValidationError(f"Unsupported position sizing method: {method}")
             elif not isinstance(method, PositionSizeMethod):
-                raise ValidationError(f"Invalid method type: {type(method)}")    
+                raise ValidationError(f"Invalid method type: {type(method)}")
 
             # Get risk per trade from config
             risk_per_trade = to_decimal(self.risk_config.risk_per_trade)
@@ -126,65 +116,72 @@ class PositionSizer(BaseComponent):
                 signal=signal,
                 portfolio_value=portfolio_value,
                 risk_per_trade=risk_per_trade,
-                **kwargs
+                **kwargs,
             )
 
             # Get config values for validation bounds (needed early for Kelly)
-            min_position_pct = to_decimal(getattr(self.risk_config, 'min_position_size_pct', '0.01'))
-            max_position_pct = to_decimal(getattr(self.risk_config, 'max_position_size_pct', '0.1'))
+            min_position_pct = to_decimal(
+                getattr(self.risk_config, "min_position_size_pct", "0.01")
+            )
+            max_position_pct = to_decimal(getattr(self.risk_config, "max_position_size_pct", "0.1"))
 
             # Apply Kelly-specific logic for risk_per_trade cap
             if method == PositionSizeMethod.KELLY_CRITERION:
                 max_kelly_size = portfolio_value * risk_per_trade
                 min_kelly_size = portfolio_value * min_position_pct
-                
+
                 # Check if we have sufficient return history data
                 has_sufficient_data = (
-                    signal.symbol in self.return_history and 
-                    len(self.return_history[signal.symbol]) >= 10
+                    signal.symbol in self.return_history
+                    and len(self.return_history[signal.symbol]) >= 10
                 )
-                
+
                 if has_sufficient_data:
                     # For Kelly with sufficient data, apply special handling
                     kelly_params = self._get_kelly_parameters(signal.symbol)
-                    win_prob = kelly_params.get('win_probability', 0.5)
-                    win_loss_ratio = kelly_params.get('win_loss_ratio', 1.0)
-                    
+                    win_prob = kelly_params.get("win_probability", 0.5)
+                    win_loss_ratio = kelly_params.get("win_loss_ratio", 1.0)
+
                     # Check if we have real win/loss data (not defaults)
                     returns = self.return_history[signal.symbol]
                     wins = [r for r in returns if r > 0]
                     losses = [r for r in returns if r < 0]
                     has_real_data = len(wins) > 0 and len(losses) > 0
-                    
+
                     # Only apply positive edge logic if we have real win/loss data
                     if has_real_data:
                         # Calculate if this should be a positive edge (profitable) strategy
                         is_positive_edge = (win_prob * win_loss_ratio) > (1.0 - win_prob)
-                        
+
                         if is_positive_edge and position_size < max_kelly_size:
                             # Positive edge but below risk_per_trade cap -> use cap
                             position_size = max_kelly_size
-                            self.logger.info(f"Kelly positive edge: using risk_per_trade cap: {max_kelly_size}")
+                            self.logger.info(
+                                f"Kelly positive edge: using risk_per_trade cap: {max_kelly_size}"
+                            )
                         elif position_size > max_kelly_size:
                             # Above cap -> cap it
                             position_size = max_kelly_size
-                            self.logger.info(f"Kelly position size capped at risk_per_trade: {max_kelly_size}")
+                            self.logger.info(
+                                f"Kelly position size capped at risk_per_trade: {max_kelly_size}"
+                            )
                         elif position_size < min_kelly_size:
                             # Below minimum -> use minimum (for negative edge cases)
                             position_size = min_kelly_size
-                            self.logger.info(f"Kelly position size set to minimum: {min_kelly_size}")
+                            self.logger.info(
+                                f"Kelly position size set to minimum: {min_kelly_size}"
+                            )
                     else:
                         # All wins or all losses - use fallback behavior (Kelly already applied)
-                        self.logger.info("Kelly fallback: insufficient win/loss data, using calculated Kelly result")
+                        self.logger.info(
+                            "Kelly fallback: insufficient win/loss data, using calculated Kelly result"
+                        )
                 # If insufficient data, let Kelly fallback to fixed percentage naturally
 
             # Validate position size using centralized utility with config bounds
-            
+
             is_valid, validated_size = validate_position_size(
-                position_size, 
-                portfolio_value, 
-                min_position_pct, 
-                max_position_pct
+                position_size, portfolio_value, min_position_pct, max_position_pct
             )
             if not is_valid:
                 self.logger.warning("Position size validation failed, returning zero")
@@ -233,7 +230,7 @@ class PositionSizer(BaseComponent):
 
             # Calculate max history based on volatility_window
             max_history = max(getattr(self.risk_config, "volatility_window", 20) * 2, 100)
-            
+
             # Use centralized utility
             update_position_history(symbol, price, self.price_history, max_history)
 
@@ -242,13 +239,13 @@ class PositionSizer(BaseComponent):
                 previous_price = self.price_history[symbol][-2]
                 current_price = self.price_history[symbol][-1]
                 ret = float((current_price - previous_price) / previous_price)
-                
+
                 # Initialize return history for symbol if needed
                 if symbol not in self.return_history:
                     self.return_history[symbol] = []
-                
+
                 self.return_history[symbol].append(ret)
-                
+
                 # Maintain return history size
                 if len(self.return_history[symbol]) > max_history:
                     self.return_history[symbol] = self.return_history[symbol][-max_history:]
@@ -323,17 +320,24 @@ class PositionSizer(BaseComponent):
                 return False
 
             # Get config values for validation bounds
-            min_position_pct = to_decimal(getattr(self.risk_config, 'min_position_size_pct', '0.01'))
-            max_position_pct = to_decimal(getattr(self.risk_config, 'max_position_size_pct', str(self.risk_config.risk_per_trade)))
-            
+            min_position_pct = to_decimal(
+                getattr(self.risk_config, "min_position_size_pct", "0.01")
+            )
+            max_position_pct = to_decimal(
+                getattr(
+                    self.risk_config, "max_position_size_pct", str(self.risk_config.risk_per_trade)
+                )
+            )
+
             # Calculate position percentage
             from src.utils.decimal_utils import safe_divide
+
             position_pct = safe_divide(position_size, portfolio_value, ZERO)
 
             # Strict validation: reject if outside bounds
             if position_pct < min_position_pct:
                 return False
-            
+
             if position_pct > max_position_pct:
                 return False
 
@@ -369,7 +373,7 @@ class PositionSizer(BaseComponent):
             return {"win_probability": 0.55, "win_loss_ratio": 1.5}
 
         returns = self.return_history[symbol]
-        
+
         # Separate wins and losses
         wins = [r for r in returns if r > 0]
         losses = [r for r in returns if r < 0]
@@ -388,10 +392,7 @@ class PositionSizer(BaseComponent):
         # Calculate win/loss ratio
         win_loss_ratio = avg_win / avg_loss if avg_loss > 0 else 1.5
 
-        return {
-            "win_probability": win_probability,
-            "win_loss_ratio": win_loss_ratio
-        }
+        return {"win_probability": win_probability, "win_loss_ratio": win_loss_ratio}
 
     def _get_volatility_parameters(self, symbol: str) -> dict[str, float]:
         """
@@ -404,13 +405,10 @@ class PositionSizer(BaseComponent):
             Dictionary with volatility parameters
         """
         if symbol not in self.price_history or len(self.price_history[symbol]) < 10:
-            return {
-                "current_volatility": 0.02,
-                "target_volatility": 0.015
-            }
+            return {"current_volatility": 0.02, "target_volatility": 0.015}
 
         prices = self.price_history[symbol]
-        
+
         # Calculate daily returns
         returns = []
         for i in range(1, len(prices)):
@@ -419,16 +417,14 @@ class PositionSizer(BaseComponent):
                 returns.append(ret)
 
         if len(returns) < 2:
-            return {
-                "current_volatility": 0.02,
-                "target_volatility": 0.015
-            }
+            return {"current_volatility": 0.02, "target_volatility": 0.015}
 
         # Calculate volatility as standard deviation of returns
         import statistics
+
         current_volatility = statistics.stdev(returns) if len(returns) > 1 else 0.02
 
         return {
             "current_volatility": current_volatility,
-            "target_volatility": 0.015  # Default target
+            "target_volatility": 0.015,  # Default target
         }

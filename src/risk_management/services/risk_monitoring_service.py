@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any
 
 from src.core.base.service import BaseService
 from src.core.types import RiskLevel, RiskMetrics
+from src.risk_management.interfaces import PortfolioRepositoryInterface
 from src.utils.decimal_utils import format_decimal, to_decimal
 from src.utils.messaging_patterns import (
     BoundaryValidator,
@@ -26,7 +27,6 @@ from src.utils.risk_monitoring import (
 )
 
 if TYPE_CHECKING:
-    from src.database.service import DatabaseService
     from src.state import StateService
 
 
@@ -56,7 +56,7 @@ class RiskMonitoringService(BaseService):
 
     def __init__(
         self,
-        database_service: "DatabaseService",
+        portfolio_repository: PortfolioRepositoryInterface,
         state_service: "StateService",
         messaging_coordinator: MessagingCoordinator | None = None,
         config=None,
@@ -66,7 +66,7 @@ class RiskMonitoringService(BaseService):
         Initialize risk monitoring service.
 
         Args:
-            database_service: Database service for data access
+            portfolio_repository: Repository for portfolio data access
             state_service: State service for state management
             messaging_coordinator: Messaging coordinator for consistent data flow
             config: Application configuration
@@ -78,7 +78,7 @@ class RiskMonitoringService(BaseService):
             correlation_id=correlation_id,
         )
 
-        self.database_service = database_service
+        self.portfolio_repository = portfolio_repository
         self.state_service = state_service
         self.config = config
         self._messaging_coordinator = messaging_coordinator or MessagingCoordinator(

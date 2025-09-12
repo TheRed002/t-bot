@@ -16,8 +16,8 @@ from typing import TYPE_CHECKING, Any, Optional
 if TYPE_CHECKING:
     from src.monitoring.interfaces import MetricsServiceInterface
 
-from src.core.base.component import BaseComponent
-from src.core.config.main import Config
+from src.core.base import BaseComponent
+from src.core.config import Config
 from src.core.exceptions import (
     RiskManagementError,
     ValidationError,
@@ -380,7 +380,6 @@ class BaseRiskManager(BaseComponent, ABC):
                     name="risk_limit_violations_total",
                     value=1,  # Counter increment
                     labels={"limit_type": violation_type, "severity": severity},
-                    namespace="risk_management",
                 )
                 self.metrics_service.record_counter(metric_request)
             except Exception as e:

@@ -3,7 +3,7 @@
 import asyncio
 from typing import Any
 
-from src.core.base.component import BaseComponent
+from src.core.base import BaseComponent
 from src.core.types.risk import RiskAlert, RiskMetrics
 from src.utils.decimal_utils import format_decimal
 from src.utils.decorators import UnifiedDecorator as dec

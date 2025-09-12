@@ -3,7 +3,7 @@
 from decimal import Decimal
 from typing import Any
 
-from src.core.base.component import BaseComponent
+from src.core.base import BaseComponent
 from src.core.dependency_injection import injectable
 from src.core.exceptions import PositionLimitError, ValidationError
 from src.core.logging import get_logger

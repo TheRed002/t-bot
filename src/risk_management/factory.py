@@ -140,23 +140,14 @@ class RiskManagementFactory(RiskManagementFactoryInterface):
 
         try:
             config = self.injector.resolve("Config")
-            database_service = (
-                self.injector.resolve("DatabaseService")
-                if self.injector.has_service("DatabaseService")
-                else None
-            )
-
-            return PositionSizer(
-                config=config,
-                database_service=database_service,
-            )
+            return PositionSizer(config=config)
         except Exception as e:
             logger.error(f"Failed to resolve services from DI container: {e}")
             raise DependencyError(
                 "Failed to resolve required dependencies for legacy PositionSizer",
                 dependency_name="PositionSizer",
                 error_code="FAC_003",
-                suggested_action="Ensure Config and DatabaseService are registered",
+                suggested_action="Ensure Config is registered",
             ) from e
 
     def create_legacy_risk_calculator(self) -> RiskCalculator:
@@ -169,23 +160,14 @@ class RiskManagementFactory(RiskManagementFactoryInterface):
 
         try:
             config = self.injector.resolve("Config")
-            database_service = (
-                self.injector.resolve("DatabaseService")
-                if self.injector.has_service("DatabaseService")
-                else None
-            )
-
-            return RiskCalculator(
-                config=config,
-                database_service=database_service,
-            )
+            return RiskCalculator(config=config)
         except Exception as e:
             logger.error(f"Failed to resolve services from DI container: {e}")
             raise DependencyError(
                 "Failed to resolve required dependencies for legacy RiskCalculator",
                 dependency_name="RiskCalculator",
                 error_code="FAC_004",
-                suggested_action="Ensure Config and DatabaseService are registered",
+                suggested_action="Ensure Config is registered",
             ) from e
 
     def create_risk_management_controller(
@@ -211,12 +193,14 @@ class RiskManagementFactory(RiskManagementFactoryInterface):
             risk_validation_service = self.injector.resolve("RiskValidationService")
             risk_metrics_service = self.injector.resolve("RiskMetricsService")
             risk_monitoring_service = self.injector.resolve("RiskMonitoringService")
+            portfolio_limits_service = self.injector.resolve("PortfolioLimitsService")
 
             controller = RiskManagementController(
                 position_sizing_service=position_sizing_service,
                 risk_validation_service=risk_validation_service,
                 risk_metrics_service=risk_metrics_service,
                 risk_monitoring_service=risk_monitoring_service,
+                portfolio_limits_service=portfolio_limits_service,
                 correlation_id=correlation_id,
             )
 

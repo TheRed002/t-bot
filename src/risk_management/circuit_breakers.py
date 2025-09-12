@@ -23,7 +23,7 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Optional
 
-from src.core.config.main import Config
+from src.core.config import Config
 from src.core.exceptions import (
     CircuitBreakerTriggeredError,
 )
@@ -897,7 +897,6 @@ class CircuitBreakerManager:
                                     "trigger_type": name,
                                     "exchange": data.get("exchange", "unknown"),
                                 },
-                                namespace="risk_management",
                             )
                             self.metrics_service.record_counter(metric_request)
                         except Exception as e:

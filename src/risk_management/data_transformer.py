@@ -23,14 +23,14 @@ class RiskDataTransformer:
         signal: Signal, metadata: dict[str, Any] | None = None
     ) -> dict[str, Any]:
         """
-        Transform Signal to consistent event data format.
+        Transform Signal to consistent event data format aligned with core module patterns.
 
         Args:
             signal: Signal to transform
             metadata: Additional metadata
 
         Returns:
-            Dict with consistent event data format
+            Dict with consistent event data format matching core event system
         """
         return {
             "symbol": signal.symbol,
@@ -40,8 +40,10 @@ class RiskDataTransformer:
             if signal.timestamp
             else datetime.now(timezone.utc).isoformat(),
             "source": signal.source or "risk_management",
-            "processing_mode": "stream",
-            "data_format": "event_data_v1",
+            "processing_mode": "stream",  # Align with core events default
+            "data_format": "bot_event_v1",  # Consistent with core events
+            "message_pattern": "pub_sub",  # Consistent with core messaging
+            "boundary_crossed": True,  # Mark cross-module communication
             "metadata": {**(signal.metadata or {}), **(metadata or {})},
         }
 
@@ -68,8 +70,10 @@ class RiskDataTransformer:
             "unrealized_pnl": str(position.unrealized_pnl) if position.unrealized_pnl else "0",
             "realized_pnl": str(position.realized_pnl) if position.realized_pnl else "0",
             "status": position.status.value if hasattr(position, "status") else "open",
-            "processing_mode": "stream",
-            "data_format": "event_data_v1",
+            "processing_mode": "stream",  # Align with core events default
+            "data_format": "bot_event_v1",  # Consistent with core events
+            "message_pattern": "pub_sub",  # Consistent with core messaging
+            "boundary_crossed": True,  # Mark cross-module communication
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "metadata": metadata or {},
         }
@@ -101,8 +105,10 @@ class RiskDataTransformer:
             else "0",
             "beta": str(risk_metrics.beta) if risk_metrics.beta else "0",
             "correlation": str(risk_metrics.correlation) if risk_metrics.correlation else "0",
-            "processing_mode": "stream",
-            "data_format": "event_data_v1",
+            "processing_mode": "stream",  # Align with core events default
+            "data_format": "bot_event_v1",  # Consistent with core events
+            "message_pattern": "pub_sub",  # Consistent with core messaging
+            "boundary_crossed": True,  # Mark cross-module communication
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "metadata": metadata or {},
         }
@@ -114,7 +120,7 @@ class RiskDataTransformer:
         metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """
-        Transform error to consistent event data format.
+        Transform error to consistent event data format using utils error propagation patterns.
 
         Args:
             error: Exception to transform
@@ -122,17 +128,28 @@ class RiskDataTransformer:
             metadata: Additional metadata
 
         Returns:
-            Dict with consistent event data format
+            Dict with consistent event data format aligned with utils patterns
         """
-        return {
+        # Use utils messaging patterns for consistent error handling
+        from src.utils.messaging_patterns import MessagePattern, MessageType
+
+        # Create standardized error data format
+        error_data = {
             "error_type": type(error).__name__,
             "error_message": str(error),
-            "error_context": context or {},
-            "processing_mode": "stream",
-            "data_format": "event_data_v1",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "context": context or {},
             "metadata": metadata or {},
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "source": "risk_management",
+            "processing_mode": "stream",
+            "data_format": "bot_event_v1",
+            "message_pattern": MessagePattern.PUB_SUB.value,
+            "message_type": MessageType.ERROR_EVENT.value,
+            "boundary_crossed": True,
+            "validation_status": "error",
         }
+
+        return error_data
 
     @staticmethod
     def validate_financial_precision(data: dict[str, Any]) -> dict[str, Any]:
@@ -198,9 +215,9 @@ class RiskDataTransformer:
         if "processing_mode" not in data:
             data["processing_mode"] = "stream"
 
-        # Ensure data format is set
+        # Ensure data format is set (aligned with core events)
         if "data_format" not in data:
-            data["data_format"] = "event_data_v1"
+            data["data_format"] = "bot_event_v1"
 
         # Ensure timestamp is set
         if "timestamp" not in data:
@@ -221,7 +238,7 @@ class RiskDataTransformer:
         cls, event_type: str, data: Any, metadata: dict[str, Any] | None = None
     ) -> dict[str, Any]:
         """
-        Transform data for pub/sub messaging pattern.
+        Transform data for pub/sub messaging pattern aligned with utils.messaging_patterns.
 
         Args:
             event_type: Type of event
@@ -229,21 +246,30 @@ class RiskDataTransformer:
             metadata: Additional metadata
 
         Returns:
-            Dict formatted for pub/sub pattern
+            Dict formatted for pub/sub pattern with utils compatibility
         """
+        # Import MessagePattern and MessageType from utils for consistency
+        from src.utils.messaging_patterns import MessagePattern, MessageType
+
         # Base transformation
         if isinstance(data, Signal):
             transformed = cls.transform_signal_to_event_data(data, metadata)
+            message_type = MessageType.SYSTEM_EVENT.value
         elif isinstance(data, Position):
             transformed = cls.transform_position_to_event_data(data, metadata)
+            message_type = MessageType.TRADE_EXECUTION.value
         elif isinstance(data, RiskMetrics):
             transformed = cls.transform_risk_metrics_to_event_data(data, metadata)
+            message_type = MessageType.SYSTEM_EVENT.value
         elif isinstance(data, Exception):
             transformed = cls.transform_error_to_event_data(data, metadata)
+            message_type = MessageType.ERROR_EVENT.value
         elif isinstance(data, dict):
             transformed = data.copy()
+            message_type = MessageType.SYSTEM_EVENT.value
         else:
             transformed = {"payload": str(data), "type": type(data).__name__}
+            message_type = MessageType.SYSTEM_EVENT.value
 
         # Ensure boundary fields
         transformed = cls.ensure_boundary_fields(transformed)
@@ -251,11 +277,13 @@ class RiskDataTransformer:
         # Validate financial precision
         transformed = cls.validate_financial_precision(transformed)
 
-        # Add event type and enhanced boundary metadata
+        # Add event type and enhanced boundary metadata aligned with utils patterns
         transformed.update(
             {
                 "event_type": event_type,
-                "message_pattern": "pub_sub",  # Consistent messaging pattern
+                "message_type": message_type,  # Aligned with utils.messaging_patterns
+                "message_pattern": MessagePattern.PUB_SUB.value,  # Use enum from utils
+                "pattern": MessagePattern.PUB_SUB.value,  # Compatibility field
                 "boundary_crossed": True,  # Cross-module event flag
                 "validation_status": "validated",  # Boundary validation status
             }
@@ -268,7 +296,7 @@ class RiskDataTransformer:
         cls, request_type: str, data: Any, correlation_id: str | None = None
     ) -> dict[str, Any]:
         """
-        Transform data for request/reply messaging pattern.
+        Transform data for request/reply messaging pattern aligned with utils.messaging_patterns.
 
         Args:
             request_type: Type of request
@@ -276,75 +304,109 @@ class RiskDataTransformer:
             correlation_id: Request correlation ID
 
         Returns:
-            Dict formatted for req/reply pattern
+            Dict formatted for req/reply pattern with utils compatibility
         """
+        # Import MessagePattern from utils for consistency
+        from src.utils.messaging_patterns import MessagePattern, MessageType
+
         # Use pub/sub transformation as base
         transformed = cls.transform_for_pub_sub(request_type, data)
 
-        # Add request/reply specific fields
-        transformed["request_type"] = request_type
-        transformed["correlation_id"] = correlation_id or datetime.now(timezone.utc).isoformat()
-        transformed["processing_mode"] = "request_reply"  # Override processing mode
+        # Add request/reply specific fields aligned with utils patterns
+        transformed.update({
+            "request_type": request_type,
+            "correlation_id": correlation_id or datetime.now(timezone.utc).isoformat(),
+            "message_pattern": MessagePattern.REQ_REPLY.value,  # Use enum from utils
+            "pattern": MessagePattern.REQ_REPLY.value,  # Compatibility field
+            "processing_mode": "request_reply",  # Override processing mode
+            "message_type": MessageType.SYSTEM_EVENT.value,  # Consistent message typing
+        })
 
         return transformed
+
+    @classmethod
+    def transform_for_batch_processing(
+        cls,
+        batch_type: str,
+        data_items: list[Any],
+        batch_id: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """
+        Transform data for batch processing pattern aligned with execution module.
+
+        Args:
+            batch_type: Type of batch operation
+            data_items: List of items to process in batch
+            batch_id: Unique batch identifier
+            metadata: Additional batch metadata
+
+        Returns:
+            Dict formatted for batch processing matching execution module patterns
+        """
+        # Transform each item individually using risk_management transformers
+        transformed_items = []
+        for item in data_items:
+            if isinstance(item, Signal):
+                transformed_items.append(cls.transform_signal_to_event_data(item))
+            elif isinstance(item, Position):
+                transformed_items.append(cls.transform_position_to_event_data(item))
+            elif isinstance(item, RiskMetrics):
+                transformed_items.append(cls.transform_risk_metrics_to_event_data(item))
+            elif isinstance(item, dict):
+                transformed_items.append(cls.ensure_boundary_fields(item.copy()))
+            else:
+                transformed_items.append(
+                    {
+                        "payload": str(item),
+                        "type": type(item).__name__,
+                        "processing_mode": "batch",
+                        "data_format": "bot_event_v1",
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    }
+                )
+
+        # Return consistent batch format matching execution module
+        return {
+            "batch_type": batch_type,
+            "batch_id": batch_id or datetime.now(timezone.utc).isoformat(),
+            "batch_size": len(data_items),
+            "items": transformed_items,
+            "processing_mode": "batch",
+            "data_format": "bot_event_v1",  # Use consistent data format across modules
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "source": "risk_management",
+            "metadata": metadata or {},
+        }
 
     @classmethod
     def align_processing_paradigm(
         cls, data: dict[str, Any], target_mode: str = "stream"
     ) -> dict[str, Any]:
         """
-        Align data processing paradigm with execution module expectations using consistent patterns.
+        Align data processing paradigm using utils.messaging_patterns for consistency.
 
         Args:
             data: Data to align
             target_mode: Target processing mode ("stream", "batch", "request_reply")
 
         Returns:
-            Dict with aligned processing mode
+            Dict with aligned processing mode using standardized utils patterns
         """
-        aligned_data = data.copy()
-
-        # Use ProcessingParadigmAligner for consistency
+        # Use ProcessingParadigmAligner from utils for full consistency
         from src.utils.messaging_patterns import ProcessingParadigmAligner
 
-        source_mode = aligned_data.get("processing_mode", "stream")
+        source_mode = data.get("processing_mode", "stream")
         aligned_data = ProcessingParadigmAligner.align_processing_modes(
-            source_mode=source_mode, target_mode=target_mode, data=aligned_data
+            source_mode=source_mode, target_mode=target_mode, data=data
         )
 
-        # Add mode-specific fields with enhanced boundary metadata
-        if target_mode == "stream":
-            aligned_data.update(
-                {
-                    "stream_position": datetime.now(timezone.utc).timestamp(),
-                    "data_format": "event_data_v1",
-                    "message_pattern": "pub_sub",  # Consistent messaging pattern
-                    "boundary_crossed": True,
-                }
-            )
-        elif target_mode == "batch":
-            if "batch_id" not in aligned_data:
-                aligned_data["batch_id"] = datetime.now(timezone.utc).isoformat()
-            aligned_data.update(
-                {
-                    "data_format": "batch_event_data_v1",
-                    "message_pattern": "batch",  # Batch messaging pattern
-                    "boundary_crossed": True,
-                }
-            )
-        elif target_mode == "request_reply":
-            if "correlation_id" not in aligned_data:
-                aligned_data["correlation_id"] = datetime.now(timezone.utc).isoformat()
-            aligned_data.update(
-                {
-                    "data_format": "request_reply_data_v1",
-                    "message_pattern": "req_reply",  # Request-reply messaging pattern
-                    "boundary_crossed": True,
-                }
-            )
-
-        # Add consistent validation status
-        aligned_data["validation_status"] = "validated"
+        # Add risk_management-specific metadata to the standardized transformation
+        aligned_data.update({
+            "validation_status": "validated",
+            "risk_module_aligned": True,
+            "paradigm_alignment_source": "utils.messaging_patterns",
+        })
 
         return aligned_data
 
@@ -368,15 +430,15 @@ class RiskDataTransformer:
         """
         validated_data = data.copy()
 
-        # Apply consistent messaging patterns
+        # Apply consistent messaging patterns from utils
         from src.utils.messaging_patterns import (
             BoundaryValidator,
             ProcessingParadigmAligner,
         )
 
-        # Apply processing paradigm alignment
+        # Apply standardized processing paradigm alignment
         source_mode = validated_data.get("processing_mode", "stream")
-        target_mode = "stream" if target_module == "state" else source_mode
+        target_mode = "stream" if target_module in ["state", "execution"] else source_mode
 
         validated_data = ProcessingParadigmAligner.align_processing_modes(
             source_mode=source_mode, target_mode=target_mode, data=validated_data
@@ -393,26 +455,48 @@ class RiskDataTransformer:
             }
         )
 
-        # Apply target-module specific boundary validation
+        # Apply standardized boundary validation patterns from utils
         try:
-            if target_module == "state" or target_module == "execution":
-                # Validate at risk_management -> state/execution boundary
-                boundary_data = {
-                    "component": validated_data.get("component", source_module),
-                    "operation": validated_data.get("operation", "risk_operation"),
-                    "timestamp": validated_data.get(
-                        "timestamp", datetime.now(timezone.utc).isoformat()
-                    ),
-                    "processing_mode": validated_data.get("processing_mode", "stream"),
-                    "data_format": validated_data.get("data_format", "event_data_v1"),
-                    "boundary_crossed": True,
-                }
+            # Prepare boundary validation data with consistent format
+            boundary_data = {
+                "component": validated_data.get("component", source_module),
+                "operation": validated_data.get("operation", "risk_operation"),
+                "timestamp": validated_data.get(
+                    "timestamp", datetime.now(timezone.utc).isoformat()
+                ),
+                "processing_mode": validated_data.get("processing_mode", "stream"),
+                "data_format": validated_data.get("data_format", "bot_event_v1"),
+                "message_pattern": validated_data.get("message_pattern", "pub_sub"),
+                "boundary_crossed": True,
+                "processing_paradigm": validated_data.get("processing_paradigm", "stream"),
+            }
+
+            # Apply appropriate boundary validation using utils validators
+            if target_module == "state":
                 BoundaryValidator.validate_risk_to_state_boundary(boundary_data)
+            elif target_module == "execution":
+                # Use state validation as baseline for execution module
+                BoundaryValidator.validate_state_to_risk_boundary(boundary_data)  # Reverse validation pattern
+            elif target_module in ["monitoring", "error_handling"]:
+                # Use consistent error-to-monitoring boundary validation like execution module
+                BoundaryValidator.validate_error_to_monitoring_boundary(boundary_data)
+            else:
+                # Generic boundary validation for other modules
+                logger.debug(
+                    f"No specific boundary validator for {source_module} -> {target_module}, using generic validation"
+                )
 
         except Exception as e:
-            # Log validation issues but don't fail the data flow
+            # Use consistent error handling pattern from utils
             logger.warning(
-                f"Cross-module validation failed for {source_module} -> {target_module}: {e}"
+                f"Cross-module validation failed for {source_module} -> {target_module}: {e}",
+                extra={
+                    "source_module": source_module,
+                    "target_module": target_module,
+                    "validation_error": str(e),
+                    "data_format": validated_data.get("data_format", "unknown"),
+                    "boundary_validation_applied": True,
+                },
             )
 
         return validated_data

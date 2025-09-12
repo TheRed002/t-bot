@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 from src.core.base.service import BaseService
 from src.core.exceptions import RiskManagementError, ValidationError
 from src.core.types import PositionSizeMethod, Signal
+from src.risk_management.interfaces import RiskMetricsRepositoryInterface
 from src.utils.decimal_utils import (
     ONE,
     ZERO,
@@ -26,7 +27,6 @@ from src.utils.messaging_patterns import (
 from src.utils.position_sizing import calculate_position_size, validate_position_size
 
 if TYPE_CHECKING:
-    from src.database.service import DatabaseService
     from src.state import StateService
 
 
@@ -35,7 +35,7 @@ class PositionSizingService(BaseService):
 
     def __init__(
         self,
-        database_service: "DatabaseService",
+        risk_metrics_repository: RiskMetricsRepositoryInterface,
         state_service: "StateService",
         config=None,
         correlation_id: str | None = None,
@@ -44,7 +44,7 @@ class PositionSizingService(BaseService):
         Initialize position sizing service.
 
         Args:
-            database_service: Database service for data access
+            risk_metrics_repository: Repository for risk metrics data access
             state_service: State service for state management
             config: Application configuration
             correlation_id: Request correlation ID
@@ -55,7 +55,7 @@ class PositionSizingService(BaseService):
             correlation_id=correlation_id,
         )
 
-        self.database_service = database_service
+        self.risk_metrics_repository = risk_metrics_repository
         self.state_service = state_service
         self.config = config
 
@@ -375,9 +375,7 @@ class PositionSizingService(BaseService):
         """Calculate price volatility using Decimal precision."""
         import numpy as np
 
-        price_array = np.array(
-            [decimal_to_float(p) for i, p in enumerate(prices)]
-        )
+        price_array = np.array([decimal_to_float(p) for i, p in enumerate(prices)])
         returns = np.diff(price_array) / price_array[:-1]
         volatility = np.std(returns)
         return to_decimal(str(volatility))

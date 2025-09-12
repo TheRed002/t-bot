@@ -14,6 +14,7 @@ import numpy as np
 from src.core.base.service import BaseService
 from src.core.exceptions import RiskManagementError
 from src.core.types import MarketData, Position, RiskLevel, RiskMetrics
+from src.risk_management.interfaces import RiskMetricsRepositoryInterface
 from src.utils.decimal_utils import (
     ONE,
     ZERO,
@@ -35,7 +36,6 @@ from src.utils.risk_calculations import (
 )
 
 if TYPE_CHECKING:
-    from src.database.service import DatabaseService
     from src.state import StateService
 
 
@@ -44,7 +44,7 @@ class RiskMetricsService(BaseService):
 
     def __init__(
         self,
-        database_service: "DatabaseService",
+        risk_metrics_repository: RiskMetricsRepositoryInterface,
         state_service: "StateService",
         config=None,
         correlation_id: str | None = None,
@@ -53,7 +53,7 @@ class RiskMetricsService(BaseService):
         Initialize risk metrics service.
 
         Args:
-            database_service: Database service for data access
+            risk_metrics_repository: Repository for risk metrics data access
             state_service: State service for state management
             config: Application configuration
             correlation_id: Request correlation ID
@@ -64,7 +64,7 @@ class RiskMetricsService(BaseService):
             correlation_id=correlation_id,
         )
 
-        self.database_service = database_service
+        self.risk_metrics_repository = risk_metrics_repository
         self.state_service = state_service
         self.config = config
 
@@ -85,7 +85,7 @@ class RiskMetricsService(BaseService):
             RiskManagementError: If calculation fails
         """
         try:
-            # Create error handler with consistent propagation
+            # Create error handler with consistent propagation aligned with error_handling
             error_handler = ErrorPropagationMixin()
 
             # Validate inputs at module boundary with batch processing alignment

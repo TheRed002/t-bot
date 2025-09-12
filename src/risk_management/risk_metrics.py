@@ -7,10 +7,10 @@ eliminating code duplication while maintaining backward compatibility.
 
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-from src.core.base.component import BaseComponent
-from src.core.config.main import Config
+from src.core.base import BaseComponent
+from src.core.config import Config
 from src.core.exceptions import RiskManagementError
 from src.core.types import MarketData, Position, RiskLevel, RiskMetrics
 from src.utils.decorators import time_execution
@@ -28,9 +28,7 @@ from src.utils.risk_calculations import (
     validate_risk_inputs,
 )
 
-# Type checking imports to avoid circular dependencies
-if TYPE_CHECKING:
-    from src.database.service import DatabaseService
+# No external dependencies required for this component
 
 
 class RiskCalculator(BaseComponent):
@@ -41,18 +39,16 @@ class RiskCalculator(BaseComponent):
     Use RiskService.calculate_risk_metrics() for new implementations.
     """
 
-    def __init__(self, config: Config, database_service: "DatabaseService | None" = None):
+    def __init__(self, config: Config):
         """
         Initialize risk calculator with configuration.
 
         Args:
             config: Application configuration containing risk settings
-            database_service: Database service for data access (not used in this implementation)
         """
         super().__init__()  # Initialize BaseComponent
         self.config = config
         self.risk_config = config.risk
-        self.database_service = database_service
 
         # Historical data for calculations - using centralized utilities
         self.portfolio_values: list[Decimal] = []
@@ -60,15 +56,9 @@ class RiskCalculator(BaseComponent):
         self.position_returns: dict[str, list[Decimal]] = {}
         self.position_prices: dict[str, list[Decimal]] = {}
 
-        if database_service:
-            self.logger.warning(
-                "RiskCalculator initialized with DatabaseService - "
-                "consider migrating to RiskService for full integration"
-            )
-        else:
-            self.logger.warning(
-                "RiskCalculator initialized - migrate to RiskService for enterprise features"
-            )
+        self.logger.info(
+            "RiskCalculator initialized - consider using RiskMetricsService for enterprise features"
+        )
 
     @time_execution
     async def calculate_risk_metrics(
@@ -97,7 +87,9 @@ class RiskCalculator(BaseComponent):
 
             # Validate inputs using centralized utility
             if not validate_risk_inputs(portfolio_value, positions, market_data):
-                raise RiskManagementError("Risk input validation failed - invalid positions or market data")
+                raise RiskManagementError(
+                    "Risk input validation failed - invalid positions or market data"
+                )
 
             # Update historical data
             await self._update_portfolio_history(portfolio_value)

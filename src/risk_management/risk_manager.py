@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
-from src.core.config.main import Config, get_config
+from src.core.config import Config, get_config
 from src.core.dependency_injection import injectable
 from src.core.exceptions import RiskManagementError
 from src.core.logging import get_logger
@@ -165,7 +165,7 @@ class RiskManager(BaseRiskManager):
             is_valid = await self.validate_signal(signal)
             if not is_valid:
                 raise RiskManagementError(f"Signal validation failed for {signal.symbol}")
-            
+
             # Use RiskService if available for enhanced functionality
             if self.risk_service is not None:
                 return await self.risk_service.calculate_position_size(
@@ -320,9 +320,8 @@ class RiskManager(BaseRiskManager):
             )
             potential_exposure = self.total_exposure + order_value
             max_portfolio_exposure = (
-                to_decimal(self.config.risk.available_capital)
-                if hasattr(self.config.risk, "available_capital")
-                and self.config.risk.available_capital
+                to_decimal(getattr(self.config.risk, "available_capital", ZERO))
+                if getattr(self.config.risk, "available_capital", None)
                 else to_decimal(100000)
             )
             if potential_exposure > max_portfolio_exposure:
@@ -446,9 +445,8 @@ class RiskManager(BaseRiskManager):
         try:
             # Check total exposure
             max_portfolio_exposure = (
-                to_decimal(self.config.risk.available_capital)
-                if hasattr(self.config.risk, "available_capital")
-                and self.config.risk.available_capital
+                to_decimal(getattr(self.config.risk, "available_capital", ZERO))
+                if getattr(self.config.risk, "available_capital", None)
                 else to_decimal(100000)
             )
             if self.total_exposure > max_portfolio_exposure:
@@ -555,18 +553,20 @@ class RiskManager(BaseRiskManager):
             Current leverage ratio
         """
         try:
-            if not self.config.risk.available_capital or self.config.risk.available_capital == ZERO:
+            # Check if available_capital field exists in config
+            available_capital = getattr(self.config.risk, "available_capital", None)
+            if not available_capital or available_capital == ZERO:
                 return ZERO
 
             leverage = safe_divide(
                 self.total_exposure,
-                to_decimal(self.config.risk.available_capital),
+                to_decimal(available_capital),
             )
 
             logger.info(
                 "Leverage calculated",
                 total_exposure=format_decimal(self.total_exposure),
-                available_capital=format_decimal(to_decimal(self.config.risk.available_capital)),
+                available_capital=format_decimal(to_decimal(available_capital)),
                 leverage=format_decimal(leverage),
             )
 
@@ -627,9 +627,8 @@ class RiskManager(BaseRiskManager):
             potential_exposure = self.total_exposure + position_value
 
             max_portfolio_exposure = (
-                to_decimal(self.config.risk.available_capital)
-                if hasattr(self.config.risk, "available_capital")
-                and self.config.risk.available_capital
+                to_decimal(getattr(self.config.risk, "available_capital", ZERO))
+                if getattr(self.config.risk, "available_capital", None)
                 else to_decimal(100000)
             )
             if potential_exposure > max_portfolio_exposure:

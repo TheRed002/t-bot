@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from src.risk_management.regime_detection import MarketRegimeDetector
 
-from src.core.base.component import BaseComponent
+from src.core.base import BaseComponent
 from src.core.exceptions import RiskManagementError, ValidationError
 
 # MANDATORY: Import from P-001

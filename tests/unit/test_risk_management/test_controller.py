@@ -35,6 +35,11 @@ class TestRiskManagementController:
         return AsyncMock()
 
     @pytest.fixture
+    def mock_portfolio_limits_service(self):
+        """Create mock portfolio limits service."""
+        return AsyncMock()
+
+    @pytest.fixture
     def mock_messaging_coordinator(self):
         """Create mock messaging coordinator."""
         return Mock(spec=MessagingCoordinator)
@@ -46,6 +51,7 @@ class TestRiskManagementController:
         mock_risk_validation_service,
         mock_risk_metrics_service,
         mock_risk_monitoring_service,
+        mock_portfolio_limits_service,
         mock_messaging_coordinator
     ):
         """Create risk management controller."""
@@ -54,6 +60,7 @@ class TestRiskManagementController:
             risk_validation_service=mock_risk_validation_service,
             risk_metrics_service=mock_risk_metrics_service,
             risk_monitoring_service=mock_risk_monitoring_service,
+            portfolio_limits_service=mock_portfolio_limits_service,
             messaging_coordinator=mock_messaging_coordinator,
             correlation_id="test-correlation-id"
         )
@@ -168,14 +175,16 @@ class TestRiskManagementController:
         mock_position_sizing_service,
         mock_risk_validation_service,
         mock_risk_metrics_service,
-        mock_risk_monitoring_service
+        mock_risk_monitoring_service,
+        mock_portfolio_limits_service
     ):
         """Test controller initialization without messaging coordinator."""
         controller = RiskManagementController(
             position_sizing_service=mock_position_sizing_service,
             risk_validation_service=mock_risk_validation_service,
             risk_metrics_service=mock_risk_metrics_service,
-            risk_monitoring_service=mock_risk_monitoring_service
+            risk_monitoring_service=mock_risk_monitoring_service,
+            portfolio_limits_service=mock_portfolio_limits_service
         )
         
         assert controller._messaging_coordinator is not None
@@ -403,30 +412,30 @@ class TestRiskManagementController:
             
             mock_propagate.assert_called_once()
 
-    async def test_validate_portfolio_limits_success(self, controller, mock_risk_validation_service, sample_positions):
+    async def test_validate_portfolio_limits_success(self, controller, mock_portfolio_limits_service, sample_positions):
         """Test successful portfolio limits validation."""
         new_position = sample_positions[0]
-        mock_risk_validation_service.validate_portfolio_limits.return_value = True
+        mock_portfolio_limits_service.check_portfolio_limits.return_value = True
         
         result = await controller.validate_portfolio_limits(new_position)
         
         assert result is True
-        mock_risk_validation_service.validate_portfolio_limits.assert_called_once_with(new_position)
+        mock_portfolio_limits_service.check_portfolio_limits.assert_called_once_with(new_position)
 
-    async def test_validate_portfolio_limits_failure(self, controller, mock_risk_validation_service, sample_positions):
+    async def test_validate_portfolio_limits_failure(self, controller, mock_portfolio_limits_service, sample_positions):
         """Test portfolio limits validation failure."""
         new_position = sample_positions[0]
-        mock_risk_validation_service.validate_portfolio_limits.return_value = False
+        mock_portfolio_limits_service.check_portfolio_limits.return_value = False
         
         result = await controller.validate_portfolio_limits(new_position)
         
         assert result is False
-        mock_risk_validation_service.validate_portfolio_limits.assert_called_once_with(new_position)
+        mock_portfolio_limits_service.check_portfolio_limits.assert_called_once_with(new_position)
 
-    async def test_validate_portfolio_limits_exception(self, controller, mock_risk_validation_service, sample_positions):
+    async def test_validate_portfolio_limits_exception(self, controller, mock_portfolio_limits_service, sample_positions):
         """Test portfolio limits validation with exception."""
         new_position = sample_positions[0]
-        mock_risk_validation_service.validate_portfolio_limits.side_effect = Exception("Validation error")
+        mock_portfolio_limits_service.check_portfolio_limits.side_effect = Exception("Validation error")
         
         result = await controller.validate_portfolio_limits(new_position)
         
@@ -504,7 +513,8 @@ class TestRiskManagementController:
         mock_position_sizing_service,
         mock_risk_validation_service,
         mock_risk_metrics_service,
-        mock_risk_monitoring_service
+        mock_risk_monitoring_service,
+        mock_portfolio_limits_service
     ):
         """Test controller attributes are properly set after initialization."""
         controller = RiskManagementController(
@@ -512,6 +522,7 @@ class TestRiskManagementController:
             risk_validation_service=mock_risk_validation_service,
             risk_metrics_service=mock_risk_metrics_service,
             risk_monitoring_service=mock_risk_monitoring_service,
+            portfolio_limits_service=mock_portfolio_limits_service,
             correlation_id="test-id"
         )
         
@@ -519,6 +530,7 @@ class TestRiskManagementController:
         assert controller._risk_validation_service == mock_risk_validation_service
         assert controller._risk_metrics_service == mock_risk_metrics_service
         assert controller._risk_monitoring_service == mock_risk_monitoring_service
+        assert controller._portfolio_limits_service == mock_portfolio_limits_service
         assert controller._request_count == 0
 
     async def test_multiple_operations_sequence(

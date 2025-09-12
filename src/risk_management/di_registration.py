@@ -13,11 +13,22 @@ from src.core.logging import get_logger
 if TYPE_CHECKING:
     pass
 
+# Repository implementations
+from src.database.repository.risk import (
+    PortfolioRepository,
+    PortfolioRepositoryImpl,
+    RiskMetricsRepository,
+    RiskMetricsRepositoryImpl,
+)
+
 from .interfaces import (
+    PortfolioRepositoryInterface,
     RiskManagementFactoryInterface,
+    RiskMetricsRepositoryInterface,
 )
 from .service import RiskService
 from .services import (
+    PortfolioLimitsService,
     PositionSizingService,
     RiskMetricsService,
     RiskMonitoringService,
@@ -30,15 +41,65 @@ logger = get_logger(__name__)
 def register_risk_management_services(injector: DependencyInjector) -> None:
     """Register all risk management services with the dependency injector."""
 
+    # Register repository factory functions first
+    def risk_metrics_repository_factory() -> RiskMetricsRepositoryInterface:
+        try:
+            database_service = injector.resolve("DatabaseService")
+            # Create session directly from database service
+            session = getattr(database_service, "_session", None) or database_service.session
+            repository = RiskMetricsRepository(session)
+            return RiskMetricsRepositoryImpl(repository)
+        except Exception as e:
+            logger.error(f"Failed to create RiskMetricsRepository: {e}")
+            # Return placeholder implementation for now
+            class PlaceholderRiskMetricsRepository:
+                async def get_historical_returns(self, symbol: str, days: int) -> list:
+                    return []
+                async def get_price_history(self, symbol: str, days: int) -> list:
+                    return []
+                async def get_portfolio_positions(self) -> list:
+                    return []
+                async def save_risk_metrics(self, metrics) -> None:
+                    pass
+                async def get_correlation_data(self, symbols: list[str], days: int) -> dict:
+                    return {symbol: [] for symbol in symbols}
+            return PlaceholderRiskMetricsRepository()
+
+    def portfolio_repository_factory() -> PortfolioRepositoryInterface:
+        try:
+            database_service = injector.resolve("DatabaseService")
+            # Create session directly from database service
+            session = getattr(database_service, "_session", None) or database_service.session
+            repository = PortfolioRepository(session)
+            return PortfolioRepositoryImpl(repository)
+        except Exception as e:
+            logger.error(f"Failed to create PortfolioRepository: {e}")
+            # Return placeholder implementation for now
+            class PlaceholderPortfolioRepository:
+                async def get_current_positions(self) -> list:
+                    return []
+                async def get_portfolio_value(self):
+                    from decimal import Decimal
+                    return Decimal("0")
+                async def get_position_history(self, symbol: str, days: int) -> list:
+                    return []
+                async def update_portfolio_limits(self, limits: dict) -> None:
+                    pass
+            return PlaceholderPortfolioRepository()
+
+    # Register repositories
+    injector.register_factory("RiskMetricsRepository", risk_metrics_repository_factory)
+    injector.register_factory("PortfolioRepository", portfolio_repository_factory)
+
     # Register service implementations using proper factory pattern with dependency injection
     def position_sizing_service_factory() -> "PositionSizingService":
         try:
-            database_service = injector.resolve("DatabaseService")
+            risk_metrics_repository = injector.resolve("RiskMetricsRepository")
             state_service = injector.resolve("StateService")
             config = injector.resolve("Config") if injector.has_service("Config") else None
 
             return PositionSizingService(
-                database_service=database_service,
+                risk_metrics_repository=risk_metrics_repository,
                 state_service=state_service,
                 config=config,
             )
@@ -46,14 +107,23 @@ def register_risk_management_services(injector: DependencyInjector) -> None:
             logger.error(f"Failed to create PositionSizingService: {e}")
             raise
 
+    def portfolio_limits_service_factory() -> "PortfolioLimitsService":
+        try:
+            config = injector.resolve("Config") if injector.has_service("Config") else None
+
+            return PortfolioLimitsService(config=config)
+        except Exception as e:
+            logger.error(f"Failed to create PortfolioLimitsService: {e}")
+            raise
+
     def risk_validation_service_factory() -> "RiskValidationService":
         try:
-            database_service = injector.resolve("DatabaseService")
+            portfolio_repository = injector.resolve("PortfolioRepository")
             state_service = injector.resolve("StateService")
             config = injector.resolve("Config") if injector.has_service("Config") else None
 
             return RiskValidationService(
-                database_service=database_service,
+                portfolio_repository=portfolio_repository,
                 state_service=state_service,
                 config=config,
             )
@@ -63,12 +133,12 @@ def register_risk_management_services(injector: DependencyInjector) -> None:
 
     def risk_metrics_service_factory() -> "RiskMetricsService":
         try:
-            database_service = injector.resolve("DatabaseService")
+            risk_metrics_repository = injector.resolve("RiskMetricsRepository")
             state_service = injector.resolve("StateService")
             config = injector.resolve("Config") if injector.has_service("Config") else None
 
             return RiskMetricsService(
-                database_service=database_service,
+                risk_metrics_repository=risk_metrics_repository,
                 state_service=state_service,
                 config=config,
             )
@@ -78,12 +148,12 @@ def register_risk_management_services(injector: DependencyInjector) -> None:
 
     def risk_monitoring_service_factory() -> "RiskMonitoringService":
         try:
-            database_service = injector.resolve("DatabaseService")
+            portfolio_repository = injector.resolve("PortfolioRepository")
             state_service = injector.resolve("StateService")
             config = injector.resolve("Config") if injector.has_service("Config") else None
 
             return RiskMonitoringService(
-                database_service=database_service,
+                portfolio_repository=portfolio_repository,
                 state_service=state_service,
                 config=config,
             )
@@ -93,7 +163,8 @@ def register_risk_management_services(injector: DependencyInjector) -> None:
 
     def risk_service_factory() -> "RiskService":
         try:
-            database_service = injector.resolve("DatabaseService")
+            risk_metrics_repository = injector.resolve("RiskMetricsRepository")
+            portfolio_repository = injector.resolve("PortfolioRepository")
             state_service = injector.resolve("StateService")
             # Use interface to avoid circular dependency
             analytics_service = (
@@ -112,7 +183,8 @@ def register_risk_management_services(injector: DependencyInjector) -> None:
             config = injector.resolve("Config") if injector.has_service("Config") else None
 
             return RiskService(
-                database_service=database_service,
+                risk_metrics_repository=risk_metrics_repository,
+                portfolio_repository=portfolio_repository,
                 state_service=state_service,
                 analytics_service=analytics_service,
                 config=config,
@@ -126,6 +198,9 @@ def register_risk_management_services(injector: DependencyInjector) -> None:
     # Register service factories as singletons
     injector.register_factory(
         "PositionSizingService", position_sizing_service_factory, singleton=True
+    )
+    injector.register_factory(
+        "PortfolioLimitsService", portfolio_limits_service_factory, singleton=True
     )
     injector.register_factory(
         "RiskValidationService", risk_validation_service_factory, singleton=True
