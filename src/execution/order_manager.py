@@ -24,6 +24,8 @@ from src.core.base.component import BaseComponent
 from src.core.caching import CacheKeys, cached, get_cache_manager
 from src.core.config import Config
 from src.core.exceptions import (
+    ConfigurationError,
+    DatabaseError,
     ExchangeConnectionError,
     ExchangeError,
     ExchangeInsufficientFundsError,
@@ -253,7 +255,8 @@ class OrderManager(BaseComponent):
         self,
         config: Config,
         exchange_service=None,  # ExchangeService dependency injection
-        redis_client=None,
+        websocket_service=None,  # WebSocketService dependency injection
+        idempotency_service=None,  # IdempotencyService dependency injection
         state_service: Any | None = None,
         metrics_collector: Any | None = None,
     ):
@@ -263,25 +266,32 @@ class OrderManager(BaseComponent):
         Args:
             config: Application configuration
             exchange_service: ExchangeService for exchange operations (injected)
-            redis_client: Optional Redis client for idempotency management
+            websocket_service: WebSocketService for real-time updates (injected)
+            idempotency_service: IdempotencyService for duplicate prevention (injected)
             state_service: Optional StateService for state persistence
             metrics_collector: Optional metrics collector for monitoring
         """
         super().__init__()  # Initialize BaseComponent
         self.config = config
         self.exchange_service = exchange_service  # Store injected service
+        self.websocket_service = websocket_service  # Store injected service
+        self.idempotency_service = idempotency_service  # Store injected service
         self.state_service = state_service
         self.metrics_collector = metrics_collector
+        
+        # Initialize idempotency manager - either from service or create new
+        if idempotency_service:
+            self.idempotency_manager = idempotency_service
+        else:
+            # Create a new instance if not provided
+            self.idempotency_manager = OrderIdempotencyManager(config)
 
         # Initialize tracer for distributed tracing with safety check
         try:
             self._tracer = get_tracer("execution.order_manager")
-        except Exception as e:
+        except (ServiceError, ConfigurationError) as e:
             self._logger.warning(f"Failed to initialize tracer: {e}")
             self._tracer = None
-
-        # Initialize idempotency manager
-        self.idempotency_manager = OrderIdempotencyManager(config, redis_client)
 
         # Initialize cache manager
         self.cache_manager = get_cache_manager(config=config)
@@ -296,7 +306,8 @@ class OrderManager(BaseComponent):
         self.symbol_orders: dict[str, list[str]] = defaultdict(list)  # symbol -> [order_ids]
         self.pending_aggregation: dict[str, list[str]] = defaultdict(list)  # symbol -> [order_ids]
         self.routing_decisions: dict[str, Any] = {}  # order_id -> route info
-        self.websocket_connections: dict[str, Any] = {}  # exchange -> websocket connection
+        # WebSocket connections tracking (for backward compatibility with existing code)
+        self.websocket_connections: dict[str, dict[str, Any]] = {}
         self.order_modifications: dict[str, list[Any]] = defaultdict(list)
 
         # Management configuration
@@ -322,9 +333,6 @@ class OrderManager(BaseComponent):
 
         # P-020 Enhanced configuration
         self.order_aggregation_rules: dict[str, Any] = {}
-        self.websocket_enabled = True
-        self.websocket_reconnect_attempts = 3
-        self.websocket_heartbeat_interval = 30
         self.modification_timeout_seconds = 10
         self.max_child_orders_per_parent = 50
 
@@ -353,7 +361,7 @@ class OrderManager(BaseComponent):
         self._cleanup_started = False
         self._is_running = False
         self._background_tasks: set[asyncio.Task] = set()
-        self._websocket_tasks: dict[str, asyncio.Task] = {}  # exchange -> task
+        self._websocket_tasks: dict[str, asyncio.Task] = {}  # Needed for WebSocket task tracking
 
         # Status check tracking
         self._last_status_check: datetime | None = None
@@ -373,14 +381,18 @@ class OrderManager(BaseComponent):
         if not self._cleanup_started:
             self._is_running = True
 
-            # Start idempotency manager
-            await self.idempotency_manager.start()
+            # Start idempotency manager if it has a start method
+            if hasattr(self.idempotency_manager, 'start'):
+                await self.idempotency_manager.start()
 
             self._start_cleanup_task()
 
             # Start WebSocket connections for real-time updates
-            if self.websocket_enabled:
-                await self._initialize_websocket_connections()
+            # Initialize WebSocket connections through injected service
+            if self.websocket_service:
+                await self.websocket_service.initialize_connections(
+                    exchanges=["binance", "coinbase", "okx"]  # TODO: Get from config
+                )
 
             # Restore orders from StateService if available
             if self.state_service:
@@ -401,7 +413,7 @@ class OrderManager(BaseComponent):
                 except asyncio.CancelledError:
                     self._logger.debug("Cleanup task cancelled")
                     break
-                except Exception as e:
+                except (DatabaseError, ServiceError, StateError) as e:
                     self._logger.error(f"Cleanup task error: {e}")
                     # Continue running unless explicitly stopped
                     if not self._is_running:
@@ -664,7 +676,17 @@ class OrderManager(BaseComponent):
             if "client_order_id" in locals() and client_order_id:
                 await self.idempotency_manager.mark_order_failed(client_order_id, str(e))
             raise ExecutionError(f"Order submission failed: {e}") from e
-        except Exception as e:
+        except ConnectionError as e:
+            self._logger.error(f"Connection error during order submission: {e}")
+            if "client_order_id" in locals() and client_order_id:
+                await self.idempotency_manager.mark_order_failed(client_order_id, str(e))
+            raise ExecutionError(f"Order submission failed due to connection error: {e}") from e
+        except asyncio.TimeoutError as e:
+            self._logger.error(f"Timeout during order submission: {e}")
+            if "client_order_id" in locals() and client_order_id:
+                await self.idempotency_manager.mark_order_failed(client_order_id, str(e))
+            raise ExecutionError(f"Order submission failed due to timeout: {e}") from e
+        except (NetworkError, ValidationError, ServiceError) as e:
             self._logger.error(f"Unexpected error during order submission: {e}", exc_info=True)
             if "client_order_id" in locals() and client_order_id:
                 await self.idempotency_manager.mark_order_failed(client_order_id, str(e))
@@ -679,6 +701,23 @@ class OrderManager(BaseComponent):
                 except Exception as callback_error:
                     self._logger.error(f"Error callback failed: {callback_error}")
 
+            raise ExecutionError(f"Order submission failed: {e}") from e
+        except Exception as e:
+            # Catch any other unexpected exceptions and wrap them in ExecutionError
+            self._logger.error(f"Unexpected error during order submission: {e}", exc_info=True)
+            if "client_order_id" in locals() and client_order_id:
+                await self.idempotency_manager.mark_order_failed(client_order_id, str(e))
+            
+            # Update statistics
+            self.order_statistics["rejected_orders"] += 1
+            
+            # Call error callback if provided
+            if "managed_order" in locals() and managed_order.on_error_callback:
+                try:
+                    await managed_order.on_error_callback(managed_order, str(e))
+                except Exception as callback_error:
+                    self._logger.error(f"Error callback failed: {callback_error}")
+            
             raise ExecutionError(f"Order submission failed: {e}") from e
 
     # ========== P-020 Enhanced Order Management Methods ==========
@@ -1544,7 +1583,17 @@ class OrderManager(BaseComponent):
                             self.config.execution.order_sync_delay_seconds - time_since_last
                         )
 
-                current_status = await exchange.get_order_status(managed_order.order_id)
+                if self.exchange_service:
+                    # Use service layer (proper pattern)
+                    current_status = await self.exchange_service.get_order_status(
+                        exchange_name=exchange.exchange_name,
+                        order_id=managed_order.order_id,
+                        symbol=managed_order.symbol
+                    )
+                else:
+                    # Fallback to direct exchange call (legacy)
+                    order_response = await exchange.get_order_status(managed_order.symbol, managed_order.order_id)
+                    current_status = order_response.status
                 self._last_status_check = datetime.now(timezone.utc)
 
             except ExchangeRateLimitError as e:

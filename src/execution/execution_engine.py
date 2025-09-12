@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, Any, Optional
 from src.core.base.component import BaseComponent
 from src.core.config import Config
 from src.core.exceptions import (
+    ConfigurationError,
     DatabaseError,
     ExchangeError,
     ExecutionError,
@@ -71,7 +72,7 @@ from .slippage.slippage_model import SlippageModel
 if TYPE_CHECKING:
     from src.execution.execution_orchestration_service import ExecutionOrchestrationService
     from src.execution.service import ExecutionService
-    from src.risk_management.service import RiskService
+    from src.execution.interfaces import RiskServiceInterface
     from src.state.state_service import StateService
     from src.state.trade_lifecycle_manager import TradeLifecycleManager
 
@@ -95,7 +96,7 @@ class ExecutionEngine(BaseComponent, ExecutionEngineServiceInterface):
     def __init__(
         self,
         execution_service: Optional["ExecutionService"] = None,
-        risk_service: Optional["RiskService"] = None,
+        risk_service: Optional["RiskServiceInterface"] = None,
         config: Config | None = None,
         orchestration_service: Optional["ExecutionOrchestrationService"] = None,
         exchange_factory: Any = None,  # ExchangeFactoryInterface
@@ -112,7 +113,7 @@ class ExecutionEngine(BaseComponent, ExecutionEngineServiceInterface):
 
         Args:
             execution_service: ExecutionService instance for database operations
-            risk_service: RiskService instance for risk management operations
+            risk_service: RiskServiceInterface instance for risk management operations
             config: Application configuration
             orchestration_service: Optional orchestration service (preferred)
             exchange_factory: Optional ExchangeFactoryInterface for exchange access
@@ -228,7 +229,7 @@ class ExecutionEngine(BaseComponent, ExecutionEngineServiceInterface):
                 except (RuntimeError, AttributeError, ExecutionError) as e:
                     self._logger.error(f"Failed to start {algorithm_name} algorithm: {e}")
                     raise ExecutionError(f"Failed to start {algorithm_name} algorithm: {e}") from e
-                except Exception as e:
+                except (ServiceError, ConfigurationError) as e:
                     self._logger.error(f"Unexpected error starting {algorithm_name} algorithm: {e}")
                     raise
 
@@ -240,7 +241,7 @@ class ExecutionEngine(BaseComponent, ExecutionEngineServiceInterface):
 
             self._logger.info("Execution engine started successfully")
 
-        except Exception as e:
+        except (ServiceError, ConfigurationError, DatabaseError) as e:
             self._logger.error(f"Failed to start execution engine: {e}")
             raise ExecutionError(f"Execution engine startup failed: {e}")
 
@@ -466,7 +467,7 @@ class ExecutionEngine(BaseComponent, ExecutionEngineServiceInterface):
         if not self.execution_service:
             raise ExecutionError("ExecutionService is required for legacy execution")
         if not self.risk_service:
-            raise ExecutionError("RiskService is required for legacy execution")
+            raise ExecutionError("RiskServiceInterface is required for legacy execution")
 
         try:
             # Create trade context in TradeLifecycleManager if available
@@ -561,11 +562,11 @@ class ExecutionEngine(BaseComponent, ExecutionEngineServiceInterface):
 
             try:
                 risk_validation = await self.risk_service.validate_signal(trading_signal)
-            except RiskManagementError as e:
+            except (RiskManagementError, ValidationError, ServiceError) as e:
                 raise ValidationError(f"Risk validation failed: {e}")
 
             if not risk_validation:
-                raise ValidationError("Risk validation failed: Signal rejected by RiskService")
+                raise ValidationError("Risk validation failed: Signal rejected by RiskServiceInterface")
 
             # Calculate position size using RiskService
             # Default to a reasonable available capital if not provided
@@ -590,7 +591,7 @@ class ExecutionEngine(BaseComponent, ExecutionEngineServiceInterface):
                     available_capital=available_capital,
                     current_price=market_data.close,  # Use Decimal directly
                 )
-            except RiskManagementError as e:
+            except (RiskManagementError, ValidationError, ServiceError) as e:
                 raise ExecutionError(f"Position size calculation failed: {e}")
 
             # Update order quantity based on risk management

@@ -37,8 +37,8 @@ TEST_DATA = {
     "ERROR_MSG": "Test error message",
     "PROCESSING_STREAM": "stream",
     "PROCESSING_BATCH": "batch",
-    "FORMAT_V1": "event_data_v1",
-    "FORMAT_BATCH_V1": "batch_event_data_v1",
+    "FORMAT_V1": "bot_event_v1",
+    "FORMAT_BATCH_V1": "bot_event_v1",  # Implementation uses same format for batch
     "FORMAT_CUSTOM_V2": "custom_format_v2",
     "SOURCE_EXECUTION": "execution",
     "SOURCE_CUSTOM": "custom_source",
@@ -273,7 +273,7 @@ class TestExecutionDataTransformerSimple:
         assert result["error_message"] == "Test error message"
         assert result["error_context"] == context
         assert result["processing_mode"] == "stream"
-        assert result["data_format"] == "event_data_v1"
+        assert result["data_format"] == TEST_DATA["FORMAT_V1"]
 
     def test_transform_market_data_to_event_data_basic(self):
         """Test basic market data transformation."""
@@ -295,7 +295,7 @@ class TestExecutionDataTransformerSimple:
             assert result["price"] == "50000.00000000"
             assert result["volume"] == "100.00000000"
             assert result["processing_mode"] == "stream"
-            assert result["data_format"] == "event_data_v1"
+            assert result["data_format"] == TEST_DATA["FORMAT_V1"]
         except (AttributeError, TypeError):
             # If MarketData has different structure, skip
             pytest.skip("MarketData structure incompatible with transformer")

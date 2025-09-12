@@ -139,6 +139,34 @@ class ExecutionEngineServiceInterface(Protocol):
         ...
 
 
+class ExecutionRepositoryServiceInterface(Protocol):
+    """Interface for execution repository operations."""
+
+    async def create_execution_record(self, execution_data: dict[str, Any]) -> dict[str, Any]:
+        """Create execution record through repository."""
+        ...
+
+    async def update_execution_record(self, execution_id: str, updates: dict[str, Any]) -> bool:
+        """Update execution record through repository."""
+        ...
+
+    async def get_execution_record(self, execution_id: str) -> dict[str, Any] | None:
+        """Get execution record through repository."""
+        ...
+
+    async def create_order_record(self, order_data: dict[str, Any]) -> dict[str, Any]:
+        """Create order record through repository."""
+        ...
+
+    async def create_audit_log(self, audit_data: dict[str, Any]) -> dict[str, Any]:
+        """Create audit log through repository."""
+        ...
+
+    async def list_orders(self, filters: dict[str, Any] | None = None, limit: int | None = None) -> list[dict[str, Any]]:
+        """List orders through repository."""
+        ...
+
+
 class RiskValidationServiceInterface(Protocol):
     """Interface for risk validation operations."""
 
@@ -278,6 +306,28 @@ class ExecutionOrchestrationServiceInterface(Protocol):
         """Get comprehensive metrics from all execution services."""
         ...
 
+    async def initialize(self) -> None:
+        """Initialize the execution service."""
+        ...
+
+    async def cleanup(self) -> None:
+        """Clean up execution service resources."""
+        ...
+
+    async def cancel_orders_by_symbol(self, symbol: str) -> None:
+        """Cancel all orders for a specific symbol."""
+        ...
+
+    async def cancel_all_orders(self) -> None:
+        """Cancel all active orders across all symbols."""
+        ...
+
+    async def update_order_status(
+        self, order_id: str, status: str, filled_quantity: Decimal, remaining_quantity: Decimal
+    ) -> None:
+        """Update order status with fill information."""
+        ...
+
     async def cancel_execution(self, execution_id: str, reason: str = "user_request") -> bool:
         """Cancel an execution through orchestration."""
         ...
@@ -317,6 +367,46 @@ class ExecutionRiskValidationServiceInterface(Protocol):
         context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Validate order risk and return detailed results."""
+        ...
+
+
+class WebSocketServiceInterface(Protocol):
+    """Interface for WebSocket connection management."""
+
+    async def initialize_connections(self, exchanges: list[str]) -> None:
+        """Initialize WebSocket connections for exchanges."""
+        ...
+
+    async def subscribe_to_order_updates(self, exchange: str, symbol: str) -> None:
+        """Subscribe to order updates for a symbol on an exchange."""
+        ...
+
+    async def unsubscribe_from_order_updates(self, exchange: str, symbol: str) -> None:
+        """Unsubscribe from order updates for a symbol on an exchange."""
+        ...
+
+    async def cleanup_connections(self) -> None:
+        """Clean up all WebSocket connections."""
+        ...
+
+    def get_connection_status(self) -> dict[str, str]:
+        """Get status of all WebSocket connections."""
+        ...
+
+
+class IdempotencyServiceInterface(Protocol):
+    """Interface for order idempotency management."""
+
+    async def is_duplicate_request(self, request_id: str, operation_data: dict[str, Any]) -> bool:
+        """Check if request is a duplicate."""
+        ...
+
+    async def record_request(self, request_id: str, operation_data: dict[str, Any]) -> None:
+        """Record a request to prevent duplicates."""
+        ...
+
+    async def cleanup_expired_requests(self) -> None:
+        """Clean up expired request records."""
         ...
 
     async def check_position_limits(

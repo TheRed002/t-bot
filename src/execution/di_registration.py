@@ -28,14 +28,18 @@ from src.execution.interfaces import (
 )
 from src.execution.order_manager import OrderManager
 from src.execution.repository import (
+    DatabaseExecutionAuditRepository,
     DatabaseExecutionRepository,
     DatabaseOrderRepository,
+    ExecutionAuditRepositoryInterface,
     ExecutionRepositoryInterface,
     OrderRepositoryInterface,
 )
+from src.execution.repository_service import ExecutionRepositoryService
 from src.execution.service import ExecutionService
 from src.execution.slippage.cost_analyzer import CostAnalyzer
 from src.execution.slippage.slippage_model import SlippageModel
+from src.execution.data_transformer import ExecutionDataTransformer
 
 
 class ExecutionModuleDIRegistration:
@@ -107,6 +111,23 @@ class ExecutionModuleDIRegistration:
             singleton=True,
         )
 
+        self._register_dependency(
+            ExecutionAuditRepositoryInterface,
+            lambda c: DatabaseExecutionAuditRepository(database_service=c.get("DatabaseService")),
+            singleton=True,
+        )
+
+        # Register repository service that aggregates all repositories
+        self._register_dependency(
+            "ExecutionRepositoryService",
+            lambda c: ExecutionRepositoryService(
+                execution_repository=c.get(ExecutionRepositoryInterface),
+                order_repository=c.get(OrderRepositoryInterface),
+                audit_repository=c.get(ExecutionAuditRepositoryInterface),
+            ),
+            singleton=True,
+        )
+
         # Register concrete implementations
         self._register_dependency(
             "ExecutionRepository", lambda c: c.get(ExecutionRepositoryInterface), singleton=True
@@ -118,13 +139,14 @@ class ExecutionModuleDIRegistration:
 
     def _register_components(self) -> None:
         """Register core execution components."""
-        # Register OrderManager with ExchangeService dependency
+        # Register OrderManager with proper service dependencies (not direct infrastructure)
         self._register_dependency(
             OrderManager,
             lambda c: OrderManager(
                 config=self.config,
                 exchange_service=c.get_optional("ExchangeService"),  # Inject ExchangeService
-                redis_client=c.get_optional("RedisClient"),
+                websocket_service=c.get_optional("WebSocketService"),  # Inject WebSocketService
+                idempotency_service=c.get_optional("IdempotencyService"),  # Inject IdempotencyService  
                 state_service=c.get_optional("StateService"),
                 metrics_collector=c.get_optional("MetricsCollector"),
             ),
@@ -134,6 +156,11 @@ class ExecutionModuleDIRegistration:
         # Register SlippageModel
         self._register_dependency(
             "SlippageModel", lambda c: SlippageModel(config=self.config), singleton=True
+        )
+
+        # Register ExecutionDataTransformer (stateless utility class)
+        self._register_dependency(
+            "ExecutionDataTransformer", lambda c: ExecutionDataTransformer(), singleton=True
         )
 
         # Register CostAnalyzer using dependency injection
@@ -193,12 +220,12 @@ class ExecutionModuleDIRegistration:
 
     def _register_services(self) -> None:
         """Register service layer components."""
-        # Register ExecutionService with proper interface-based dependencies
+        # Register ExecutionService with repository service dependency (no direct database access)
         if not self._is_registered("ExecutionService"):
             self._register_dependency(
                 "ExecutionService",
                 lambda c: ExecutionService(
-                    database_service=c.get("DatabaseService"),
+                    repository_service=c.get("ExecutionRepositoryService"),
                     risk_service=c.get_optional("RiskService"),
                     metrics_service=c.get_optional("MetricsService"),
                     validation_service=c.get_optional("ValidationService"),
@@ -211,6 +238,13 @@ class ExecutionModuleDIRegistration:
         self._register_dependency(
             "ExecutionServiceInterface",
             lambda c: c.get("ExecutionService"),
+            singleton=True,
+        )
+
+        # Register ExecutionRepositoryService interface 
+        self._register_dependency(
+            "ExecutionRepositoryServiceInterface",
+            lambda c: c.get("ExecutionRepositoryService"),
             singleton=True,
         )
 

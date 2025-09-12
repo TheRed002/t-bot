@@ -38,18 +38,29 @@ class TestDatabaseExecutionRepository:
     def mock_database_service(self):
         """Create mock database service with pre-defined responses."""
         db_service = MagicMock()
-        db_service.create_entity_from_dict = AsyncMock(return_value={"id": TEST_DATA["EXECUTION_ID"]})
-        # Mock object with attributes for create_entity
+        # Repository uses create_record, not create_entity_from_dict
+        db_service.create_record = AsyncMock(return_value={
+            "id": TEST_DATA["EXECUTION_ID"],
+            "execution_id": "test_exec_1",
+            "operation_type": "order_placement",
+            "created_at": None
+        })
+        # Repository uses update_record
+        db_service.update_record = AsyncMock(return_value={"id": TEST_DATA["EXECUTION_ID"]})
+        # Repository uses get_record
+        db_service.get_record = AsyncMock(return_value=None)
+        # Repository uses list_entities
         mock_record = MagicMock()
         mock_record.id = TEST_DATA["EXECUTION_ID"]
         mock_record.execution_id = "test_exec_1"
         mock_record.operation_type = "order_placement"
         mock_record.created_at = None
-        db_service.create_entity = AsyncMock(return_value=mock_record)
+        db_service.list_entities = AsyncMock(return_value=TEST_DATA["EMPTY_LIST"])
+        db_service.delete_entity_by_id = AsyncMock(return_value=TEST_DATA["TRUE_BOOL"])
+        
+        # Keep old method names for backward compatibility if needed
+        db_service.create_entity_from_dict = AsyncMock(return_value={"id": TEST_DATA["EXECUTION_ID"]})
         db_service.get_entity_by_id = AsyncMock(return_value=None)
-        db_service.update_entity = AsyncMock(return_value=TEST_DATA["TRUE_BOOL"])
-        db_service.query_entities = AsyncMock(return_value=TEST_DATA["EMPTY_LIST"])
-        db_service.delete_entity = AsyncMock(return_value=TEST_DATA["TRUE_BOOL"])
         return db_service
 
     @pytest.fixture(scope="session")
@@ -144,6 +155,6 @@ class TestDatabaseExecutionRepository:
         execution_data = {"symbol": TEST_DATA["SYMBOL"], "operation_status": "pending", "execution_id": "test_exec_1", "operation_type": "order_placement", "exchange": "binance", "side": "buy", "order_type": "limit"}
         await execution_repository.create_execution_record(execution_data)
 
-        # Verify database service methods are available
-        assert hasattr(execution_repository.database_service, "create_entity_from_dict")
-        assert hasattr(execution_repository.database_service, "get_entity_by_id")
+        # Verify database service methods are available (the ones repository actually uses)
+        assert hasattr(execution_repository.database_service, "create_record")
+        assert hasattr(execution_repository.database_service, "get_record")

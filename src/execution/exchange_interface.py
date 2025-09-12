@@ -12,7 +12,6 @@ from src.core.types import (
     MarketData,
     OrderRequest,
     OrderResponse,
-    OrderStatus,
 )
 
 
@@ -42,15 +41,16 @@ class ExchangeInterface(Protocol):
         """
         ...
 
-    async def get_order_status(self, order_id: str) -> OrderStatus:
+    async def get_order_status(self, symbol: str, order_id: str) -> OrderResponse:
         """
         Get the status of an order.
 
         Args:
+            symbol: Trading symbol
             order_id: Order ID to check
 
         Returns:
-            OrderStatus: Current order status
+            OrderResponse: Order response with status and details
 
         Raises:
             ExchangeError: If status check fails
@@ -58,15 +58,16 @@ class ExchangeInterface(Protocol):
         """
         ...
 
-    async def cancel_order(self, order_id: str) -> bool:
+    async def cancel_order(self, symbol: str, order_id: str) -> OrderResponse:
         """
         Cancel an order.
 
         Args:
+            symbol: Trading symbol
             order_id: Order ID to cancel
 
         Returns:
-            bool: True if cancellation successful
+            OrderResponse: Cancellation response with status
 
         Raises:
             ExchangeError: If cancellation fails

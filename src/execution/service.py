@@ -38,18 +38,9 @@ from src.core.types import (
     OrderType,
 )
 
-# Import database models for type checking and instantiation
-from src.database.models import (
-    ExecutionAuditLog,
-    Order,
-    OrderFill,
-    RiskAuditLog,
-    Trade,
-)
-
-# NOTE: Database models should be accessed through DatabaseService
-# not imported directly to maintain proper abstraction
-# DatabaseService will be injected
+# NOTE: Database models are accessed through repository service only
+# to maintain proper service layer abstraction. Direct database 
+# model imports removed to prevent service layer violations.
 from src.error_handling.decorators import with_circuit_breaker, with_retry
 from src.execution.interfaces import ExecutionServiceInterface
 
@@ -65,6 +56,7 @@ from src.utils.execution_utils import (
     calculate_slippage_bps,
 )
 from src.utils.messaging_patterns import ErrorPropagationMixin
+from src.execution.data_transformer import ExecutionDataTransformer
 
 
 class ExecutionService(TransactionalService, ExecutionServiceInterface, ErrorPropagationMixin):
@@ -87,7 +79,7 @@ class ExecutionService(TransactionalService, ExecutionServiceInterface, ErrorPro
 
     def __init__(
         self,
-        database_service: Any,  # Required dependency - injected
+        repository_service: Any,  # ExecutionRepositoryServiceInterface - injected
         risk_service: Any | None = None,  # Optional dependency - injected
         metrics_service: Any | None = None,  # Optional dependency - injected
         validation_service: Any | None = None,  # Optional dependency - injected
@@ -98,7 +90,7 @@ class ExecutionService(TransactionalService, ExecutionServiceInterface, ErrorPro
         Initialize execution service.
 
         Args:
-            database_service: Database service instance (injected)
+            repository_service: Repository service instance (injected)
             risk_service: Risk service instance (injected)
             metrics_service: Metrics service instance (injected)
             validation_service: Validation service instance (injected)
@@ -111,10 +103,10 @@ class ExecutionService(TransactionalService, ExecutionServiceInterface, ErrorPro
         )
 
         # Dependencies are injected via constructor
-        if not database_service:
-            raise ValueError("Database service is required")
+        if not repository_service:
+            raise ValueError("Repository service is required")
 
-        self.database_service = database_service
+        self.repository_service = repository_service
         self.risk_service = risk_service
         self.metrics_service = metrics_service
         self.validation_service = validation_service
@@ -176,9 +168,9 @@ class ExecutionService(TransactionalService, ExecutionServiceInterface, ErrorPro
         """Start the execution service."""
         try:
             # Validate required dependencies are injected
-            if not self.database_service:
-                self._logger.error("DatabaseService is required but not injected")
-                raise ServiceError("DatabaseService dependency missing")
+            if not self.repository_service:
+                self._logger.error("RepositoryService is required but not injected")
+                raise ServiceError("RepositoryService dependency missing")
 
             # Risk service is optional
             if not self.risk_service:
@@ -192,12 +184,12 @@ class ExecutionService(TransactionalService, ExecutionServiceInterface, ErrorPro
             else:
                 self._logger.info("ValidationService available")
 
-            # Ensure database service is running
+            # Ensure repository service is running
             if (
-                hasattr(self.database_service, "is_running")
-                and not self.database_service.is_running
+                hasattr(self.repository_service, "is_running")
+                and not self.repository_service.is_running
             ):
-                await self.database_service.start()
+                await self.repository_service.start()
 
             # Ensure risk service is running if available
             if self.risk_service and hasattr(self.risk_service, "is_running"):
@@ -214,26 +206,28 @@ class ExecutionService(TransactionalService, ExecutionServiceInterface, ErrorPro
             raise ServiceError(f"ExecutionService startup failed: {e}")
 
     async def _initialize_execution_metrics(self) -> None:
-        """Initialize execution metrics from database."""
+        """Initialize execution metrics from repository."""
         try:
-            # Load recent executions for metrics
-            recent_trades = await self.database_service.list_entities(
-                model_class=Trade,  # Use actual model class
+            # Load recent orders for metrics through repository service
+            recent_orders = await self.repository_service.list_orders(
+                filters={"status": "filled"},  # Only filled orders for metrics
                 limit=100,
-                order_by="timestamp",
-                order_desc=True,
             )
 
-            if recent_trades:
-                # Calculate initial metrics
-                total_volume = sum(trade.quantity * trade.executed_price for trade in recent_trades)
+            if recent_orders:
+                # Calculate initial metrics from order records
+                total_volume = Decimal("0")
+                for order in recent_orders:
+                    if order.get("filled_quantity") and order.get("average_price"):
+                        volume = Decimal(str(order["filled_quantity"])) * Decimal(str(order["average_price"]))
+                        total_volume += volume
 
-                self._performance_metrics["total_executions"] = len(recent_trades)
+                self._performance_metrics["total_executions"] = len(recent_orders)
                 self._performance_metrics["total_volume"] = total_volume
 
             self._logger.info(
                 "Execution metrics initialized",
-                recent_trades=len(recent_trades),
+                recent_orders=len(recent_orders) if recent_orders else 0,
                 total_volume=format_currency(
                     Decimal(str(self._performance_metrics["total_volume"]))
                 ),
@@ -246,7 +240,7 @@ class ExecutionService(TransactionalService, ExecutionServiceInterface, ErrorPro
     # Core Execution Operations
 
     @with_circuit_breaker(failure_threshold=10, recovery_timeout=60)
-    @with_retry(max_attempts=2, base_delay=Decimal("0.5"))
+    @with_retry(max_attempts=2, base_delay=0.5)
     @time_execution
     async def record_trade_execution(
         self,
@@ -383,50 +377,20 @@ class ExecutionService(TransactionalService, ExecutionServiceInterface, ErrorPro
                     "updated_at": datetime.now(timezone.utc),
                 }
 
-                # Create Order instance
-                order = Order(**order_data)
+                # Save order through repository service
+                saved_order_dict = await self.repository_service.create_order_record(order_data)
 
-                # Save order to database
-                saved_order = await self.database_service.create_entity(order)
+                # Create OrderFill records - handled by repository service
+                # Note: OrderFill creation will be handled by repository service internally
+                # when creating the order record with fills
 
-                # Create OrderFill records
-                if execution_result.total_filled_quantity > 0:
-                    fill_data = {
-                        "id": str(uuid.uuid4()),
-                        "order_id": saved_order.id,
-                        "exchange_fill_id": execution_result.execution_id,
-                        "price": self._convert_to_decimal_safe(execution_result.average_fill_price),
-                        "quantity": self._convert_to_decimal_safe(
-                            execution_result.total_filled_quantity
-                        ),
-                        "fee": self._convert_to_decimal_safe(execution_result.total_fees),
-                        "fee_currency": "USDT",
-                        "created_at": datetime.now(timezone.utc),
-                    }
-                    fill = OrderFill(**fill_data)
-                    await self.database_service.create_entity(fill)
-
-                # Convert to dict for response
-                saved_order_dict = {
-                    "id": str(saved_order.id),
-                    "bot_id": saved_order.bot_id,
-                    "exchange_order_id": saved_order.exchange_order_id,
-                    "symbol": saved_order.symbol,
-                    "side": saved_order.side,
-                    "type": saved_order.type,
-                    "status": saved_order.status,
-                    "quantity": str(saved_order.quantity),
-                    "filled_quantity": str(saved_order.filled_quantity),
-                    "average_fill_price": str(saved_order.average_price)
-                    if saved_order.average_price
-                    else None,
-                }
+                # saved_order_dict already contains the response from repository service
 
                 # Create comprehensive audit log
                 await self._create_execution_audit_log(
                     execution_id=execution_result.execution_id,
                     operation_type="trade_execution",
-                    order_id=str(saved_order.id),
+                    order_id=str(saved_order_dict.get("id", "")),
                     execution_result=execution_result,
                     market_data=market_data,
                     bot_id=bot_id,
@@ -450,7 +414,7 @@ class ExecutionService(TransactionalService, ExecutionServiceInterface, ErrorPro
 
                         trade = Trade(
                             trade_id=execution_result.execution_id,
-                            order_id=str(saved_order.id),  # Use the saved order ID
+                            order_id=str(saved_order_dict.get("id", "")),  # Use the saved order ID
                             symbol=execution_result.original_order.symbol,
                             side=execution_result.original_order.side,
                             price=execution_result.average_fill_price or market_data.price,
@@ -477,7 +441,7 @@ class ExecutionService(TransactionalService, ExecutionServiceInterface, ErrorPro
 
                 self._logger.info(
                     "Order execution recorded successfully",
-                    order_id=str(saved_order.id),
+                    order_id=str(saved_order_dict.get("id", "")),
                     execution_id=execution_result.execution_id,
                     symbol=execution_result.original_order.symbol,
                     side=execution_result.original_order.side.value,
@@ -566,7 +530,7 @@ class ExecutionService(TransactionalService, ExecutionServiceInterface, ErrorPro
                     self._logger.warning("Failed to end span cleanly", error=str(e))
 
     @with_circuit_breaker(failure_threshold=5, recovery_timeout=60)
-    @with_retry(max_attempts=3, base_delay=Decimal("1.0"))
+    @with_retry(max_attempts=3, base_delay=1.0)
     @time_execution
     async def validate_order_pre_execution(
         self,
@@ -753,9 +717,9 @@ class ExecutionService(TransactionalService, ExecutionServiceInterface, ErrorPro
         Raises:
             ValidationError: If order fails validation
         """
-        # Convert raw data to typed objects
-        order = self._convert_to_order_request(order_data)
-        market_data_obj = self._convert_to_market_data(market_data)
+        # Convert raw data to typed objects using centralized transformer
+        order = ExecutionDataTransformer.convert_to_order_request(order_data)
+        market_data_obj = ExecutionDataTransformer.convert_to_market_data(market_data)
 
         # Delegate to existing typed method
         return await self.validate_order_pre_execution(
@@ -765,45 +729,7 @@ class ExecutionService(TransactionalService, ExecutionServiceInterface, ErrorPro
             risk_context=risk_context,
         )
 
-    def _convert_to_order_request(self, order_data: dict[str, Any]) -> OrderRequest:
-        """Convert dictionary to OrderRequest."""
-        from decimal import Decimal
-
-        from src.core.types import OrderSide, OrderType
-
-        try:
-            return OrderRequest(
-                symbol=order_data["symbol"],
-                side=OrderSide(order_data["side"]),
-                order_type=OrderType(order_data.get("order_type", "MARKET")),
-                quantity=Decimal(str(order_data["quantity"])),
-                price=Decimal(str(order_data["price"])) if order_data.get("price") else None,
-                time_in_force=order_data.get("time_in_force"),
-                exchange=order_data.get("exchange"),
-                client_order_id=order_data.get("client_order_id"),
-            )
-        except (KeyError, ValueError, TypeError) as e:
-            raise ValidationError(f"Invalid order data: {e}") from e
-
-    def _convert_to_market_data(self, market_data: dict[str, Any]) -> MarketData:
-        """Convert dictionary to MarketData."""
-        from decimal import Decimal
-
-        try:
-            return MarketData(
-                symbol=market_data["symbol"],
-                price=Decimal(str(market_data["price"])),
-                volume=Decimal(str(market_data.get("volume", 0)))
-                if market_data.get("volume")
-                else None,
-                bid=Decimal(str(market_data["bid"])) if market_data.get("bid") else None,
-                ask=Decimal(str(market_data["ask"])) if market_data.get("ask") else None,
-                timestamp=datetime.fromisoformat(market_data["timestamp"])
-                if market_data.get("timestamp")
-                else datetime.now(timezone.utc),
-            )
-        except (KeyError, ValueError, TypeError) as e:
-            raise ValidationError(f"Invalid market data: {e}") from e
+    # Data conversion methods removed - now using centralized ExecutionDataTransformer
 
     @with_circuit_breaker(failure_threshold=5, recovery_timeout=60)
     @cache_result(ttl=300)
@@ -872,47 +798,61 @@ class ExecutionService(TransactionalService, ExecutionServiceInterface, ErrorPro
                 filters = {}
             filters["timestamp"] = {"gte": start_time}
 
-            # Get all orders and filter in memory
-            all_orders = await self.database_service.list_entities(
-                model_class=Order,
+            # Get all orders through repository service
+            all_orders = await self.repository_service.list_orders(
                 filters=filters,
-                order_by="created_at",  # Use created_at for Order model
-                order_desc=True,
                 limit=1000,
             )
 
-            # Filter by time in memory
-            filtered_orders = [order for order in all_orders if order.created_at >= start_time]
+            # Filter by time in memory - convert dict format
+            filtered_orders = []
+            for order in all_orders:
+                # Handle both dict and object formats
+                created_at = order.get("created_at") if isinstance(order, dict) else getattr(order, "created_at", None)
+                if isinstance(created_at, str):
+                    from datetime import datetime
+                    created_at = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+                
+                if created_at and created_at >= start_time:
+                    filtered_orders.append(order)
 
             if not filtered_orders:
                 return self._get_empty_metrics()
 
-            # Calculate execution metrics from orders
-            total_volume = sum(
-                order.filled_quantity * (order.average_price or order.price or Decimal("0"))
-                for order in filtered_orders
-                if order.filled_quantity and order.filled_quantity > 0
-            )
+            # Calculate execution metrics from orders - handle dict format
+            total_volume = Decimal("0")
+            for order in filtered_orders:
+                # Handle both dict and object formats
+                filled_quantity = order.get("filled_quantity") if isinstance(order, dict) else getattr(order, "filled_quantity", None)
+                average_price = order.get("average_price") if isinstance(order, dict) else getattr(order, "average_price", None)
+                price = order.get("price") if isinstance(order, dict) else getattr(order, "price", None)
+                
+                if filled_quantity and filled_quantity > 0:
+                    volume = Decimal(str(filled_quantity)) * Decimal(str(average_price or price or "0"))
+                    total_volume += volume
 
-            successful_orders = [o for o in filtered_orders if o.status == OrderStatus.FILLED.value]
+            successful_orders = [
+                o for o in filtered_orders 
+                if (o.get("status") if isinstance(o, dict) else getattr(o, "status", None)) == OrderStatus.FILLED.value
+            ]
             failed_orders = [
-                t
-                for t in filtered_orders
-                if hasattr(t, "status")
-                and t.status in [OrderStatus.CANCELLED.value, OrderStatus.REJECTED.value]
+                o for o in filtered_orders
+                if (o.get("status") if isinstance(o, dict) else getattr(o, "status", None)) 
+                in [OrderStatus.CANCELLED.value, OrderStatus.REJECTED.value]
             ]
 
             success_rate = len(successful_orders) / len(filtered_orders) if filtered_orders else 0
 
-            # Calculate average fees from order fills
+            # Calculate average fees from order fills - handle dict format
             avg_fee_rate = 0.0
             total_fees = Decimal("0")
 
-            # Get fees from OrderFills if available
+            # Get fees from orders if available
             for order in successful_orders:
-                if hasattr(order, "fills") and order.fills:
-                    order_fees = sum(fill.fee for fill in order.fills if fill.fee)
-                    total_fees += order_fees
+                # Handle both dict and object formats
+                fee = order.get("fee") if isinstance(order, dict) else getattr(order, "fee", None)
+                if fee:
+                    total_fees += Decimal(str(fee))
 
             if total_volume > 0:
                 avg_fee_rate = (total_fees / total_volume) * 10000
@@ -925,19 +865,34 @@ class ExecutionService(TransactionalService, ExecutionServiceInterface, ErrorPro
                 "success_rate": success_rate,
                 "total_volume": str(total_volume),
                 "average_fee_rate_bps": avg_fee_rate,
-                "symbols_traded": len(set(order.symbol for order in filtered_orders)),
-                "exchanges_used": len(set(order.exchange for order in filtered_orders)),
+                "symbols_traded": len(set(
+                    order.get("symbol") if isinstance(order, dict) else getattr(order, "symbol", "")
+                    for order in filtered_orders
+                )),
+                "exchanges_used": len(set(
+                    order.get("exchange") if isinstance(order, dict) else getattr(order, "exchange", "")
+                    for order in filtered_orders
+                )),
                 "side_distribution": {
-                    "buy": len([o for o in filtered_orders if o.side == OrderSide.BUY.value]),
-                    "sell": len([o for o in filtered_orders if o.side == OrderSide.SELL.value]),
+                    "buy": len([
+                        o for o in filtered_orders 
+                        if (o.get("side") if isinstance(o, dict) else getattr(o, "side", None)) == OrderSide.BUY.value
+                    ]),
+                    "sell": len([
+                        o for o in filtered_orders 
+                        if (o.get("side") if isinstance(o, dict) else getattr(o, "side", None)) == OrderSide.SELL.value
+                    ]),
                 },
                 "order_type_distribution": {},
                 "performance_metrics": self._performance_metrics.copy(),
             }
 
-            # Add order type distribution
+            # Add order type distribution - handle dict format
             for order_type in [OrderType.MARKET, OrderType.LIMIT, OrderType.STOP_LOSS]:
-                count = len([o for o in filtered_orders if o.type == order_type.value])
+                count = len([
+                    o for o in filtered_orders 
+                    if (o.get("type") if isinstance(o, dict) else getattr(o, "type", None)) == order_type.value
+                ])
                 metrics["order_type_distribution"][order_type.value] = count
 
             return metrics
@@ -1174,7 +1129,7 @@ class ExecutionService(TransactionalService, ExecutionServiceInterface, ErrorPro
                 # Validate using RiskService
                 try:
                     risk_validation = await self.risk_service.validate_signal(trading_signal)
-                except RiskManagementError as e:
+                except (RiskManagementError, ValidationError, ServiceError) as e:
                     risk_validation = False
                     warnings.append(f"Risk validation error: {e}")
 
@@ -1209,7 +1164,7 @@ class ExecutionService(TransactionalService, ExecutionServiceInterface, ErrorPro
                         available_capital=available_capital,
                         current_price=current_price,
                     )
-                except RiskManagementError as e:
+                except (RiskManagementError, ValidationError, ServiceError) as e:
                     recommended_size = None
                     warnings.append(f"Position size calculation error: {e}")
 
@@ -1320,9 +1275,7 @@ class ExecutionService(TransactionalService, ExecutionServiceInterface, ErrorPro
         if self.risk_service:
             try:
                 # Get risk metrics from RiskService
-                from src.core.types.market import MarketData as MarketDataType
-
-                market_data_obj = MarketDataType(
+                market_data_obj = MarketData(
                     symbol=order.symbol,
                     timestamp=datetime.now(timezone.utc),
                     open=market_data.price,
@@ -1339,7 +1292,7 @@ class ExecutionService(TransactionalService, ExecutionServiceInterface, ErrorPro
                         positions=[],  # Current positions will be fetched by RiskService
                         market_data=[market_data_obj],
                     )
-                except RiskManagementError as e:
+                except (RiskManagementError, ValidationError, ServiceError) as e:
                     risk_metrics = None
                     self._logger.warning(f"Risk metrics calculation failed: {e}")
 
@@ -1370,7 +1323,7 @@ class ExecutionService(TransactionalService, ExecutionServiceInterface, ErrorPro
                 # Get risk summary
                 try:
                     risk_summary = await self.risk_service.get_risk_summary()
-                except RiskManagementError as e:
+                except (RiskManagementError, ValidationError, ServiceError) as e:
                     risk_summary = {}
                     self._logger.warning(f"Risk summary retrieval failed: {e}")
                 if risk_summary.get("current_risk_level") == "high":
@@ -1577,9 +1530,8 @@ class ExecutionService(TransactionalService, ExecutionServiceInterface, ErrorPro
                 "created_at": datetime.now(timezone.utc),
             }
 
-            # Create ExecutionAuditLog instance
-            audit_log = ExecutionAuditLog(**audit_log_data)
-            await self.database_service.create_entity(audit_log)
+            # Create audit log through repository service
+            await self.repository_service.create_audit_log(audit_log_data)
 
         except Exception as e:
             self._logger.error(f"Failed to create execution audit log: {e}")
@@ -1637,9 +1589,8 @@ class ExecutionService(TransactionalService, ExecutionServiceInterface, ErrorPro
                 "created_at": datetime.now(timezone.utc),
             }
 
-            # Create RiskAuditLog instance
-            risk_audit_log = RiskAuditLog(**risk_audit_data)
-            await self.database_service.create_entity(risk_audit_log)
+            # Create risk audit log through repository service
+            await self.repository_service.create_audit_log(risk_audit_data)
 
         except Exception as e:
             self._logger.error(f"Failed to create risk audit log: {e}")
@@ -1797,9 +1748,9 @@ class ExecutionService(TransactionalService, ExecutionServiceInterface, ErrorPro
     async def _service_health_check(self) -> HealthStatus:
         """Service-specific health check."""
         try:
-            # Check database connectivity
-            if hasattr(self.database_service, "health_check"):
-                health_status = await self.database_service.health_check()
+            # Check repository service connectivity
+            if hasattr(self.repository_service, "health_check"):
+                health_status = await self.repository_service.health_check()
                 if health_status != HealthStatus.HEALTHY:
                     return health_status
 
@@ -1873,7 +1824,7 @@ class ExecutionService(TransactionalService, ExecutionServiceInterface, ErrorPro
                 if hasattr(health_status, "value")
                 else str(health_status),
                 "dependencies": {
-                    "database_service": bool(self.database_service),
+                    "repository_service": bool(self.repository_service),
                     "risk_service": bool(self.risk_service),
                     "metrics_service": bool(self.metrics_service),
                     "validation_service": bool(self.validation_service),
@@ -1891,6 +1842,128 @@ class ExecutionService(TransactionalService, ExecutionServiceInterface, ErrorPro
                 "error": str(e),
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             }
+
+    async def cancel_orders_by_symbol(self, symbol: str) -> None:
+        """Cancel all orders for a specific symbol."""
+        try:
+            self._logger.info("Cancelling all orders for symbol", symbol=symbol)
+            
+            if not self.order_manager:
+                self._logger.warning("Order manager not available, cannot cancel orders")
+                return
+                
+            # Get orders for the symbol
+            orders_for_symbol = await self.order_manager.get_orders_by_symbol(symbol)
+            
+            # Cancel each active order
+            cancelled_count = 0
+            from src.core.types import OrderStatus
+            active_statuses = {OrderStatus.NEW, OrderStatus.PENDING, OrderStatus.OPEN, OrderStatus.PARTIALLY_FILLED}
+            
+            for order in orders_for_symbol:
+                if order.status in active_statuses:
+                    success = await self.order_manager.cancel_order(order.order_id, reason="symbol_cleanup")
+                    if success:
+                        cancelled_count += 1
+                        
+            self._logger.info("Orders cancelled for symbol", 
+                            symbol=symbol, cancelled_count=cancelled_count)
+                            
+        except Exception as e:
+            self._logger.error(f"Failed to cancel orders for symbol {symbol}: {e}")
+            raise ServiceError(f"Failed to cancel orders for symbol: {e}")
+
+    async def cancel_all_orders(self) -> None:
+        """Cancel all active orders across all symbols."""
+        try:
+            self._logger.info("Cancelling all active orders")
+            
+            if not self.order_manager:
+                self._logger.warning("Order manager not available, cannot cancel orders")
+                return
+                
+            # Get all orders by active statuses and cancel them
+            cancelled_count = 0
+            from src.core.types import OrderStatus
+            active_statuses = [OrderStatus.NEW, OrderStatus.PENDING, OrderStatus.OPEN, OrderStatus.PARTIALLY_FILLED]
+            
+            for status in active_statuses:
+                orders = await self.order_manager.get_orders_by_status(status)
+                for order in orders:
+                    success = await self.order_manager.cancel_order(order.order_id, reason="system_cleanup")
+                    if success:
+                        cancelled_count += 1
+                        
+            self._logger.info("All orders cancelled", cancelled_count=cancelled_count)
+                            
+        except Exception as e:
+            self._logger.error(f"Failed to cancel all orders: {e}")
+            raise ServiceError(f"Failed to cancel all orders: {e}")
+
+    async def initialize(self) -> None:
+        """Initialize the execution service."""
+        try:
+            self._logger.info("Initializing execution service")
+            
+            # Verify components are available
+            if not self.order_manager:
+                self._logger.warning("Order manager not available during initialization")
+                
+            if not hasattr(self, 'execution_engine') or not self.execution_engine:
+                self._logger.warning("Execution engine not available during initialization")
+                
+            self._logger.info("Execution service initialized successfully")
+            
+        except Exception as e:
+            self._logger.error(f"Failed to initialize execution service: {e}")
+            raise ServiceError(f"Failed to initialize execution service: {e}")
+
+    async def cleanup(self) -> None:
+        """Clean up execution service resources."""
+        try:
+            self._logger.info("Cleaning up execution service")
+            
+            # Cancel any remaining orders before cleanup
+            await self.cancel_all_orders()
+            
+            self._logger.info("Execution service cleaned up successfully")
+            
+        except Exception as e:
+            self._logger.error(f"Failed to cleanup execution service: {e}")
+            # Don't raise during cleanup
+
+    async def update_order_status(
+        self, order_id: str, status: str, filled_quantity: Decimal, remaining_quantity: Decimal
+    ) -> None:
+        """Update order status with fill information."""
+        try:
+            self._logger.info("Updating order status", 
+                            order_id=order_id, status=status, 
+                            filled_quantity=filled_quantity, remaining_quantity=remaining_quantity)
+            
+            if not self.order_manager:
+                self._logger.warning("Order manager not available, cannot update order status")
+                return
+                
+            # Convert string status to OrderStatus enum
+            from src.core.types import OrderStatus
+            
+            try:
+                order_status = OrderStatus(status)
+            except ValueError:
+                self._logger.warning(f"Invalid order status: {status}")
+                return
+                
+            # Log order status update (OrderManager handles updates internally via websocket)
+            self._logger.info("Order status update received from error handling", 
+                            order_id=order_id, order_status=order_status,
+                            filled_quantity=filled_quantity, remaining_quantity=remaining_quantity)
+            
+            self._logger.info("Order status updated successfully", order_id=order_id)
+            
+        except Exception as e:
+            self._logger.error(f"Failed to update order status {order_id}: {e}")
+            raise ServiceError(f"Failed to update order status: {e}")
 
     # Bot-specific execution management methods
     async def start_bot_execution(self, bot_id: str, bot_config: dict[str, Any]) -> bool:

@@ -51,17 +51,17 @@ class TestExecutionServiceBasic:
         return config
 
     @pytest.fixture(scope="session")
-    def mock_database_service(self):
-        """Create mock database service."""
-        db_service = Mock()
-        db_service.start_transaction = Mock()
-        db_service.commit_transaction = Mock()
-        db_service.rollback_transaction = Mock()
-        db_service.create_record = AsyncMock()
-        db_service.update_record = AsyncMock()
-        db_service.get_record_by_id = AsyncMock()
-        db_service.query_records = AsyncMock(return_value=[])
-        return db_service
+    def mock_repository_service(self):
+        """Create mock repository service."""
+        repo_service = Mock()
+        repo_service.start_transaction = Mock()
+        repo_service.commit_transaction = Mock()
+        repo_service.rollback_transaction = Mock()
+        repo_service.create_execution_record = AsyncMock()
+        repo_service.update_execution_record = AsyncMock()
+        repo_service.get_execution_by_id = AsyncMock()
+        repo_service.query_executions = AsyncMock(return_value=[])
+        return repo_service
 
     @pytest.fixture(scope="session")
     def mock_risk_service(self):
@@ -79,11 +79,11 @@ class TestExecutionServiceBasic:
         return exchange_service
 
     @pytest.fixture
-    def execution_service(self, mock_database_service, mock_risk_service):
+    def execution_service(self, mock_repository_service, mock_risk_service):
         """Create ExecutionService instance for testing."""
         try:
             service = ExecutionService(
-                database_service=mock_database_service,
+                repository_service=mock_repository_service,
                 risk_service=mock_risk_service,
                 metrics_service=None,
                 validation_service=None,
@@ -122,10 +122,10 @@ class TestExecutionServiceBasic:
             exchange="binance"
         )
 
-    def test_execution_service_creation(self, mock_database_service, mock_risk_service):
+    def test_execution_service_creation(self, mock_repository_service, mock_risk_service):
         """Test ExecutionService can be created."""
         service = ExecutionService(
-            database_service=mock_database_service,
+            repository_service=mock_repository_service,
             risk_service=mock_risk_service,
             metrics_service=None,
             validation_service=None,
@@ -136,10 +136,10 @@ class TestExecutionServiceBasic:
         assert service is not None
         assert isinstance(service, ExecutionService)
 
-    def test_execution_service_has_required_methods(self, mock_database_service, mock_risk_service):
+    def test_execution_service_has_required_methods(self, mock_repository_service, mock_risk_service):
         """Test ExecutionService has required methods."""
         service = ExecutionService(
-            database_service=mock_database_service,
+            repository_service=mock_repository_service,
             risk_service=mock_risk_service
         )
         
@@ -152,10 +152,10 @@ class TestExecutionServiceBasic:
         assert hasattr(service, 'health_check')
 
     @pytest.mark.asyncio
-    async def test_get_health_status(self, mock_database_service, mock_risk_service):
+    async def test_get_health_status(self, mock_repository_service, mock_risk_service):
         """Test health status method."""
         service = ExecutionService(
-            database_service=mock_database_service,
+            repository_service=mock_repository_service,
             risk_service=mock_risk_service
         )
         
@@ -167,10 +167,10 @@ class TestExecutionServiceBasic:
             # Method exists but may require specific setup
             assert hasattr(service, 'health_check')
 
-    def test_execution_service_inheritance(self, mock_database_service, mock_risk_service):
+    def test_execution_service_inheritance(self, mock_repository_service, mock_risk_service):
         """Test ExecutionService inheritance hierarchy."""
         service = ExecutionService(
-            database_service=mock_database_service,
+            repository_service=mock_repository_service,
             risk_service=mock_risk_service
         )
         
@@ -179,10 +179,10 @@ class TestExecutionServiceBasic:
         assert isinstance(service, TransactionalService)
 
     @pytest.mark.asyncio
-    async def test_validate_order_pre_execution_basic(self, mock_database_service, mock_risk_service, sample_order_request, sample_market_data):
+    async def test_validate_order_pre_execution_basic(self, mock_repository_service, mock_risk_service, sample_order_request, sample_market_data):
         """Test order validation method exists and can be called."""
         service = ExecutionService(
-            database_service=mock_database_service,
+            repository_service=mock_repository_service,
             risk_service=mock_risk_service
         )
         
@@ -201,10 +201,10 @@ class TestExecutionServiceBasic:
             assert hasattr(service, 'validate_order_pre_execution')
 
     @pytest.mark.asyncio
-    async def test_record_trade_execution_method_exists(self, mock_database_service, mock_risk_service, sample_order_request, sample_market_data):
+    async def test_record_trade_execution_method_exists(self, mock_repository_service, mock_risk_service, sample_order_request, sample_market_data):
         """Test record_trade_execution method exists."""
         service = ExecutionService(
-            database_service=mock_database_service,
+            repository_service=mock_repository_service,
             risk_service=mock_risk_service
         )
         
@@ -215,10 +215,10 @@ class TestExecutionServiceBasic:
         # The ExecutionService doesn't have execute_order, but has record_trade_execution
         # which is the main execution method
 
-    def test_bot_execution_methods_exist(self, mock_database_service, mock_risk_service):
+    def test_bot_execution_methods_exist(self, mock_repository_service, mock_risk_service):
         """Test bot execution management methods exist."""
         service = ExecutionService(
-            database_service=mock_database_service,
+            repository_service=mock_repository_service,
             risk_service=mock_risk_service
         )
         
@@ -230,10 +230,10 @@ class TestExecutionServiceBasic:
         # These are the actual methods in the ExecutionService
 
     @pytest.mark.asyncio
-    async def test_get_execution_metrics_method_exists(self, mock_database_service, mock_risk_service):
+    async def test_get_execution_metrics_method_exists(self, mock_repository_service, mock_risk_service):
         """Test get_execution_metrics method exists."""
         service = ExecutionService(
-            database_service=mock_database_service,
+            repository_service=mock_repository_service,
             risk_service=mock_risk_service
         )
         
@@ -242,7 +242,7 @@ class TestExecutionServiceBasic:
         assert callable(getattr(service, 'get_execution_metrics'))
         
         # Mock database response
-        mock_database_service.list_entities = AsyncMock(return_value=[])
+        mock_repository_service.list_entities = AsyncMock(return_value=[])
         
         # Try to call it
         try:
@@ -253,15 +253,15 @@ class TestExecutionServiceBasic:
             # Method exists but requires proper setup
             pass
 
-    def test_execution_service_attributes(self, mock_database_service, mock_risk_service):
+    def test_execution_service_attributes(self, mock_repository_service, mock_risk_service):
         """Test ExecutionService has expected attributes."""
         service = ExecutionService(
-            database_service=mock_database_service,
+            repository_service=mock_repository_service,
             risk_service=mock_risk_service
         )
         
         # Should have dependencies
-        assert hasattr(service, 'database_service')
+        assert hasattr(service, 'repository_service')
         assert hasattr(service, 'risk_service')
         
         # Should have performance metrics
@@ -271,10 +271,10 @@ class TestExecutionServiceBasic:
         assert hasattr(service, 'max_order_value')
         assert hasattr(service, 'quality_thresholds')
 
-    def test_execution_service_performance_metrics_access(self, mock_database_service, mock_risk_service):
+    def test_execution_service_performance_metrics_access(self, mock_repository_service, mock_risk_service):
         """Test ExecutionService can access performance metrics."""
         service = ExecutionService(
-            database_service=mock_database_service,
+            repository_service=mock_repository_service,
             risk_service=mock_risk_service
         )
         

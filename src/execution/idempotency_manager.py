@@ -298,10 +298,20 @@ class OrderIdempotencyManager(BaseComponent):
         try:
             # Validate order
             if not order.symbol or not order.quantity:
-                raise ValidationError("Order must have symbol and quantity")
+                raise ValidationError(
+                    "Order must have symbol and quantity",
+                    error_code="VALID_003",
+                    field_name="symbol" if not order.symbol else "quantity",
+                    field_value=order.symbol if not order.symbol else order.quantity
+                )
 
             if order.quantity <= 0:
-                raise ValidationError("Order quantity must be positive")
+                raise ValidationError(
+                    "Order quantity must be positive",
+                    error_code="VALID_003",
+                    field_name="quantity",
+                    field_value=str(order.quantity)
+                )
 
             # Generate order hash for duplicate detection
             order_hash = self._generate_order_hash(order)
@@ -366,7 +376,11 @@ class OrderIdempotencyManager(BaseComponent):
         except Exception as e:
             self.stats["failed_operations"] += 1
             self._logger.error(f"Failed to get/create idempotency key: {e}")
-            raise ExecutionError(f"Idempotency key operation failed: {e}") from e
+            raise ExecutionError(
+                f"Idempotency key operation failed: {e}",
+                error_code="EXEC_000",
+                order_id=client_order_id
+            ) from e
 
     @log_calls
     async def mark_order_completed(
