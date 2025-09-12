@@ -57,11 +57,23 @@ def register_exchange_dependencies(
 
     container.register("exchange_service", create_exchange_service, singleton=True)
 
-    # Register individual exchanges
-    container.register("binance_exchange", lambda: BinanceExchange("binance", config))
-    container.register("coinbase_exchange", lambda: CoinbaseExchange("coinbase", config))
-    container.register("okx_exchange", lambda: OKXExchange("okx", config))
-    container.register("mock_exchange", lambda: MockExchange(config))
+    # Register individual exchanges using factory pattern
+    def create_binance_exchange():
+        return BinanceExchange(config)
+
+    def create_coinbase_exchange():
+        return CoinbaseExchange(config)
+
+    def create_okx_exchange():
+        return OKXExchange(config)
+
+    def create_mock_exchange():
+        return MockExchange(config)
+
+    container.register("binance_exchange", create_binance_exchange)
+    container.register("coinbase_exchange", create_coinbase_exchange)
+    container.register("okx_exchange", create_okx_exchange)
+    container.register("mock_exchange", create_mock_exchange)
 
     logger.info("Exchange dependencies registered successfully")
 

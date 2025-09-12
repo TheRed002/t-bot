@@ -455,7 +455,7 @@ class TestCoinbaseOrderStatus:
         coinbase_exchange.coinbase_client = mock_coinbase_client
         mock_coinbase_client.get_order.return_value = mock_response
 
-        status = await coinbase_exchange.get_order_status("test-order-123")
+        status = await coinbase_exchange.get_order_status("BTC-USD", "test-order-123")
 
         assert status.status == OrderStatus.FILLED
         mock_coinbase_client.get_order.assert_called_once_with(order_id="test-order-123")
@@ -471,7 +471,7 @@ class TestCoinbaseOrderStatus:
         coinbase_exchange.coinbase_client = mock_coinbase_client
         mock_coinbase_client.get_order.return_value = mock_response
 
-        status = await coinbase_exchange.get_order_status("test-order-123")
+        status = await coinbase_exchange.get_order_status("BTC-USD", "test-order-123")
 
         assert status.status == OrderStatus.PENDING
 
@@ -486,7 +486,7 @@ class TestCoinbaseOrderStatus:
         coinbase_exchange.coinbase_client = mock_coinbase_client
         mock_coinbase_client.get_order.return_value = mock_response
 
-        status = await coinbase_exchange.get_order_status("test-order-123")
+        status = await coinbase_exchange.get_order_status("BTC-USD", "test-order-123")
 
         assert status.status == OrderStatus.CANCELLED
 
@@ -501,7 +501,7 @@ class TestCoinbaseOrderStatus:
         coinbase_exchange.coinbase_client = mock_coinbase_client
         mock_coinbase_client.get_order.return_value = mock_response
 
-        status = await coinbase_exchange.get_order_status("test-order-123")
+        status = await coinbase_exchange.get_order_status("BTC-USD", "test-order-123")
 
         assert status.status == OrderStatus.PARTIALLY_FILLED
 
@@ -510,7 +510,7 @@ class TestCoinbaseOrderStatus:
         coinbase_exchange.coinbase_client = None
 
         with pytest.raises(ServiceError, match="Order status retrieval failed"):
-            await coinbase_exchange.get_order_status("test-order-123")
+            await coinbase_exchange.get_order_status("BTC-USD", "test-order-123")
 
     async def test_get_order_status_api_exception(self, coinbase_exchange, mock_coinbase_client):
         """Test order status retrieval with API exception."""
@@ -518,7 +518,7 @@ class TestCoinbaseOrderStatus:
         mock_coinbase_client.get_order.side_effect = MockCoinbaseAdvancedTradingAPIError("Order not found")
 
         with pytest.raises(ServiceError, match="Order status retrieval failed"):
-            await coinbase_exchange.get_order_status("nonexistent")
+            await coinbase_exchange.get_order_status("BTC-USD", "nonexistent")
 
 
 class TestCoinbaseAccountInfo:
@@ -761,7 +761,7 @@ class TestCoinbaseEdgeCases:
             coinbase_exchange.coinbase_client = mock_coinbase_client
             mock_coinbase_client.get_order.return_value = mock_response
 
-            status = await coinbase_exchange.get_order_status("test-order-123")
+            status = await coinbase_exchange.get_order_status("BTC-USD", "test-order-123")
             # Check the correct mapping for each status
             assert status.status == expected_status
 

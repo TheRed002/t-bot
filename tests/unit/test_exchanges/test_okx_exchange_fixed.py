@@ -370,7 +370,7 @@ class TestOKXExchangeFixed:
         order_request.quantity = Decimal("0.1")
         order_request.price = Decimal("50000.0")
 
-        with pytest.raises(ValidationError, match="Order must have symbol and quantity"):
+        with pytest.raises(ValidationError, match="Invalid symbol format for OKX"):
             await okx_exchange._validate_okx_order(order_request)
 
     @pytest.mark.asyncio
@@ -384,7 +384,7 @@ class TestOKXExchangeFixed:
         order_request.order_type = OrderType.LIMIT
         order_request.price = Decimal("50000.0")
 
-        with pytest.raises(ValidationError, match="Order quantity must be positive"):
+        with pytest.raises(ValidationError, match="below minimum"):
             await okx_exchange._validate_okx_order(order_request)
 
     @pytest.mark.asyncio
@@ -398,7 +398,7 @@ class TestOKXExchangeFixed:
         order_request.quantity = Decimal("0.1")
         order_request.price = Decimal("0")
 
-        with pytest.raises(ValidationError, match="Limit orders must have positive price"):
+        with pytest.raises(ValidationError, match="must have positive price"):
             await okx_exchange._validate_okx_order(order_request)
 
     @pytest.mark.asyncio

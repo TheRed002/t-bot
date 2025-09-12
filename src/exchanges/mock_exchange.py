@@ -22,6 +22,9 @@ from src.core.types import (
     Ticker,
     Trade,
 )
+
+# Import error handling decorators
+from src.error_handling.decorators import with_retry
 from src.exchanges.base import BaseExchange
 
 
@@ -83,6 +86,7 @@ class MockExchange(BaseMockExchange):
         """Get all orders for backward compatibility with tests."""
         return self._mock_orders
 
+    @with_retry(max_attempts=2, base_delay=0.5)
     async def connect(self) -> None:
         """Establish mock connection."""
         self.logger.info("Connecting to mock exchange")
@@ -138,6 +142,7 @@ class MockExchange(BaseMockExchange):
         self._connected = False
         self.logger.info("Mock exchange disconnected")
 
+    @with_retry(max_attempts=2, base_delay=0.5)
     async def load_exchange_info(self) -> ExchangeInfo:
         """Load enhanced mock exchange information."""
         self.logger.info("Loading mock exchange info")

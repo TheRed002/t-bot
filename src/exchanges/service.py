@@ -37,13 +37,13 @@ from src.core.types import (
 from src.error_handling.decorators import with_circuit_breaker, with_retry
 
 # Import exchange interfaces to avoid circular dependencies
-from src.exchanges.interfaces import IExchange, IExchangeFactory
+from src.exchanges.interfaces import IExchange, IExchangeFactory, IExchangeService
 from src.utils.decorators import time_execution
 
 logger = get_logger(__name__)
 
 
-class ExchangeService(BaseService):
+class ExchangeService(BaseService, IExchangeService):
     """
     Service layer for exchange operations.
 
@@ -117,7 +117,7 @@ class ExchangeService(BaseService):
     # Exchange Management Methods
 
     @with_circuit_breaker(failure_threshold=3, recovery_timeout=60)
-    @with_retry(max_attempts=3, base_delay=Decimal("1.0"))
+    @with_retry(max_attempts=3, base_delay=1.0)
     @time_execution
     async def get_exchange(self, exchange_name: str) -> IExchange:
         """
@@ -215,7 +215,7 @@ class ExchangeService(BaseService):
     # Trading Operations (Business Logic Layer)
 
     @with_circuit_breaker(failure_threshold=5, recovery_timeout=60)
-    @with_retry(max_attempts=3, base_delay=Decimal("1.0"))
+    @with_retry(max_attempts=3, base_delay=1.0)
     @time_execution
     async def place_order(self, exchange_name: str, order: OrderRequest) -> OrderResponse:
         """
@@ -255,15 +255,19 @@ class ExchangeService(BaseService):
             raise ServiceError(f"Failed to place order: {e}")
 
     async def _validate_order_request(self, order: OrderRequest) -> None:
-        """Validate order request business rules."""
-        if not order.symbol:
-            raise ValidationError("Order symbol is required")
+        """Validate order request business rules using utils validation."""
+        from src.utils import validate_order
 
-        if not order.quantity or order.quantity <= 0:
-            raise ValidationError("Order quantity must be positive")
-
-        if not order.side:
-            raise ValidationError("Order side is required")
+        # Use utils comprehensive validation - convert OrderRequest to dict
+        order_dict = {
+            "symbol": order.symbol,
+            "side": order.side.value.upper() if hasattr(order.side, "value") else str(order.side).upper(),
+            "type": order.order_type.value.upper() if hasattr(order.order_type, "value") else str(order.order_type).upper(),
+            "quantity": order.quantity,
+        }
+        if order.price:
+            order_dict["price"] = order.price
+        validate_order(order_dict)
 
         # Additional business logic validation can be added here
         logger.debug(f"Order validation passed for {order.symbol}")
@@ -288,7 +292,7 @@ class ExchangeService(BaseService):
             logger.warning(f"Error processing order response: {e}")
 
     @with_circuit_breaker(failure_threshold=3, recovery_timeout=60)
-    @with_retry(max_attempts=3, base_delay=Decimal("1.0"))
+    @with_retry(max_attempts=3, base_delay=1.0)
     @time_execution
     async def cancel_order(
         self, exchange_name: str, order_id: str, symbol: str | None = None
@@ -352,7 +356,7 @@ class ExchangeService(BaseService):
             raise ServiceError(f"Failed to cancel order: {e}")
 
     @with_circuit_breaker(failure_threshold=3, recovery_timeout=60)
-    @with_retry(max_attempts=3, base_delay=Decimal("1.0"))
+    @with_retry(max_attempts=3, base_delay=1.0)
     @time_execution
     async def get_order_status(
         self, exchange_name: str, order_id: str, symbol: str | None = None
@@ -404,7 +408,7 @@ class ExchangeService(BaseService):
     # Market Data Operations
 
     @with_circuit_breaker(failure_threshold=3, recovery_timeout=60)
-    @with_retry(max_attempts=2, base_delay=Decimal("0.5"))
+    @with_retry(max_attempts=2, base_delay=0.5)
     @time_execution
     async def get_market_data(
         self, exchange_name: str, symbol: str, timeframe: str = "1m"
@@ -437,7 +441,7 @@ class ExchangeService(BaseService):
             raise ServiceError(f"Failed to get market data: {e}")
 
     @with_circuit_breaker(failure_threshold=3, recovery_timeout=60)
-    @with_retry(max_attempts=2, base_delay=Decimal("0.5"))
+    @with_retry(max_attempts=2, base_delay=0.5)
     @time_execution
     async def get_order_book(self, exchange_name: str, symbol: str, depth: int = 10) -> OrderBook:
         """Get order book data."""
@@ -461,7 +465,7 @@ class ExchangeService(BaseService):
             raise ServiceError(f"Failed to get order book: {e}")
 
     @with_circuit_breaker(failure_threshold=3, recovery_timeout=60)
-    @with_retry(max_attempts=2, base_delay=Decimal("0.5"))
+    @with_retry(max_attempts=2, base_delay=0.5)
     @time_execution
     async def get_ticker(self, exchange_name: str, symbol: str) -> Ticker:
         """Get ticker data."""
@@ -484,7 +488,7 @@ class ExchangeService(BaseService):
     # Account Operations
 
     @with_circuit_breaker(failure_threshold=3, recovery_timeout=60)
-    @with_retry(max_attempts=3, base_delay=Decimal("1.0"))
+    @with_retry(max_attempts=3, base_delay=1.0)
     @time_execution
     async def get_account_balance(self, exchange_name: str) -> dict[str, Decimal]:
         """Get account balances."""
@@ -502,7 +506,7 @@ class ExchangeService(BaseService):
             raise ServiceError(f"Failed to get account balance: {e}")
 
     @with_circuit_breaker(failure_threshold=3, recovery_timeout=60)
-    @with_retry(max_attempts=2, base_delay=Decimal("1.0"))
+    @with_retry(max_attempts=2, base_delay=1.0)
     @time_execution
     async def get_positions(
         self, exchange_name: str, symbol: str | None = None
@@ -528,7 +532,7 @@ class ExchangeService(BaseService):
     # Exchange Information
 
     @with_circuit_breaker(failure_threshold=3, recovery_timeout=60)
-    @with_retry(max_attempts=2, base_delay=Decimal("1.0"))
+    @with_retry(max_attempts=2, base_delay=1.0)
     @time_execution
     async def get_exchange_info(self, exchange_name: str) -> ExchangeInfo:
         """Get exchange information."""

@@ -36,7 +36,9 @@ from src.core.types import OrderRequest, OrderResponse, OrderSide, OrderStatus, 
 
 # MANDATORY: Import from P-002A
 from src.error_handling.error_handler import ErrorHandler
-from src.utils import ValidationFramework, normalize_price, round_to_precision
+from src.utils import ValidationFramework
+from src.utils.data_utils import normalize_price
+from src.utils.decimal_utils import round_to_precision
 from src.utils.exchange_conversion_utils import ExchangeConversionUtils
 from src.utils.exchange_order_utils import (
     AssetPrecisionUtils,
@@ -153,11 +155,12 @@ class OKXOrderManager:
                 raise
             raise ExchangeError(f"Failed to place order on OKX: {e!s}")
 
-    async def cancel_order(self, order_id: str, symbol: str) -> bool:
+    async def cancel_order(self, symbol: str, order_id: str) -> bool:
         """
         Cancel an existing order on OKX.
 
         Args:
+            symbol: Trading symbol
             order_id: ID of the order to cancel
 
         Returns:
@@ -397,8 +400,9 @@ class OKXOrderManager:
             if not order.symbol:
                 raise ValidationError("Symbol is required")
 
-            if not order.quantity or order.quantity <= 0:
-                raise ValidationError("Quantity must be positive")
+            # Use utils validation for quantity
+            from src.utils import validate_quantity
+            validate_quantity(order.quantity)
 
             if order.order_type == OrderType.LIMIT and not order.price:
                 raise ValidationError("Price is required for limit orders")

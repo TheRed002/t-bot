@@ -12,6 +12,9 @@ from src.core.config import Config
 from src.core.dependency_injection import DependencyContainer
 from src.core.exceptions import ExchangeError, ValidationError
 
+# Import error handling decorators
+from src.error_handling.decorators import with_retry
+
 # Logging provided by BaseService
 # Import base exchange interface
 from src.exchanges.base import BaseExchange
@@ -87,6 +90,7 @@ class ExchangeFactory(BaseService, IExchangeFactory):
         """
         return exchange_name in self._exchange_registry
 
+    @with_retry(max_attempts=2, base_delay=1.0)
     async def create_exchange(self, exchange_name: str) -> BaseExchange:
         """
         Create a new exchange instance.
@@ -110,11 +114,9 @@ class ExchangeFactory(BaseService, IExchangeFactory):
         try:
             exchange_class = self._exchange_registry[exchange_name]
 
-            # Handle different constructor signatures
-            if exchange_name == "mock":
-                exchange = exchange_class(self.config)
-            else:
-                exchange = exchange_class(exchange_name, self.config)
+            # All exchange implementations now take only config parameter
+            # The exchange name is passed to BaseExchange constructor internally
+            exchange = exchange_class(self.config)
 
             self.logger.info(f"Created exchange: {exchange_name}")
             return exchange

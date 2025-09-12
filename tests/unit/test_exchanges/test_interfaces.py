@@ -115,6 +115,9 @@ class TestTradeEvent:
     def test_trade_event_enumeration(self):
         """Test trade event enumeration completeness."""
         expected_events = {
+            "signal_received",
+            "validation_passed",
+            "validation_failed",
             "order_submitted",
             "order_accepted",
             "order_rejected",
@@ -122,6 +125,8 @@ class TestTradeEvent:
             "complete_fill",
             "order_cancelled",
             "order_expired",
+            "settlement_complete",
+            "attribution_complete",
         }
 
         actual_events = {event.value for event in TradeEvent}

@@ -46,6 +46,16 @@ from src.error_handling.decorators import with_circuit_breaker, with_retry
 # Import the new BaseExchange
 from src.exchanges.base import BaseExchange
 
+# Import unified patterns
+from src.exchanges.data_transformer import TransformerFactory, standardize_decimal_precision
+from src.utils.data_flow_integrity import (
+    validate_exchange_market_data,
+)
+from src.utils.messaging_patterns import (
+    get_message_queue_manager,
+    publish_market_data,
+)
+
 try:
     # Try to import Binance SDK
     from binance import AsyncClient, BinanceSocketManager
@@ -96,6 +106,12 @@ class BinanceExchange(BaseExchange):
         self.socket_manager: BinanceSocketManager | None = None
 
         # Cache for symbols and exchange info
+
+        # Initialize unified data transformer
+        self.transformer = TransformerFactory.create_transformer("binance")
+
+        # Initialize message queue manager
+        self.message_manager = get_message_queue_manager()
         self._symbol_info_cache: dict[str, dict] = {}
 
         self.logger.info(f"Binance exchange initialized (testnet={self.testnet})")
@@ -118,7 +134,7 @@ class BinanceExchange(BaseExchange):
 
         return True
 
-    @with_retry(max_attempts=3, base_delay=Decimal("2.0"))
+    @with_retry(max_attempts=3, base_delay=2.0)
     async def connect(self) -> None:
         """Establish connection to Binance API."""
         self.logger.info("Connecting to Binance API")
@@ -194,7 +210,7 @@ class BinanceExchange(BaseExchange):
 
         self.logger.info("Disconnected from Binance successfully")
 
-    @with_retry(max_attempts=2, base_delay=Decimal("1.0"))
+    @with_retry(max_attempts=2, base_delay=1.0)
     async def ping(self) -> bool:
         """Test Binance API connectivity."""
         if not self.client:
@@ -271,20 +287,39 @@ class BinanceExchange(BaseExchange):
             # Get 24hr ticker statistics
             ticker_data = await self.client.get_ticker(symbol=symbol)
 
+            # Create raw market data for validation
+            raw_market_data = {
+                "symbol": symbol,
+                "price": str(ticker_data["lastPrice"]),
+                "bid": str(ticker_data["bidPrice"]),
+                "ask": str(ticker_data["askPrice"]),
+                "volume": str(ticker_data["volume"]),
+                "high": str(ticker_data["highPrice"]),
+                "low": str(ticker_data["lowPrice"]),
+                "open": str(ticker_data["openPrice"]),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+
+            # Validate using boundary validator
+            validated_data = validate_exchange_market_data(raw_market_data, "binance")
+
             ticker = Ticker(
                 symbol=symbol,
-                bid_price=Decimal(ticker_data["bidPrice"]),
+                bid_price=standardize_decimal_precision(validated_data["bid"]),
                 bid_quantity=Decimal(ticker_data["bidQty"]),
-                ask_price=Decimal(ticker_data["askPrice"]),
+                ask_price=standardize_decimal_precision(validated_data["ask"]),
                 ask_quantity=Decimal(ticker_data["askQty"]),
-                last_price=Decimal(ticker_data["lastPrice"]),
-                open_price=Decimal(ticker_data["openPrice"]),
-                high_price=Decimal(ticker_data["highPrice"]),
-                low_price=Decimal(ticker_data["lowPrice"]),
-                volume=Decimal(ticker_data["volume"]),
+                last_price=standardize_decimal_precision(validated_data["price"]),
+                open_price=standardize_decimal_precision(validated_data["open"]),
+                high_price=standardize_decimal_precision(validated_data["high"]),
+                low_price=standardize_decimal_precision(validated_data["low"]),
+                volume=standardize_decimal_precision(validated_data["volume"]),
                 exchange="binance",
                 timestamp=datetime.now(timezone.utc),
             )
+
+            # Publish to message queue for consistent distribution
+            await publish_market_data("binance", symbol, validated_data)
 
             # Persist ticker to database
             await self._persist_market_data(ticker)
@@ -468,14 +503,8 @@ class BinanceExchange(BaseExchange):
                     symbol=order_request.symbol,
                 )
 
-            # Validate order (includes mandatory risk checks)
+            # Validate order (includes mandatory risk checks and basic validation)
             await self._validate_order(order_request)
-
-            # Basic validation
-            self._validate_symbol(order_request.symbol)
-            if order_request.price is not None:  # Only validate price for limit orders
-                self._validate_price(order_request.price)
-            self._validate_quantity(order_request.quantity)
 
             if not self.client:
                 raise ExchangeConnectionError("Binance client not connected")
@@ -710,15 +739,24 @@ class BinanceExchange(BaseExchange):
                         f"Failed to release capital after order failure: {release_error}"
                     )
 
-            # Re-raise with appropriate error type
+            # Apply consistent error propagation patterns
+            error_context = self._apply_messaging_pattern({
+                "error_type": type(e).__name__,
+                "error_message": str(e),
+                "operation": "place_order",
+                "symbol": order_request.symbol,
+                "exchange": "binance"
+            }, "order")
+
+            # Re-raise with appropriate error type and consistent propagation
             if isinstance(e, BinanceOrderException):
-                self.logger.error(f"Binance order rejected: {e}")
+                self.logger.error(f"Binance order rejected: {e}", extra=error_context)
                 raise OrderRejectionError(f"Binance order rejected: {e}") from e
             elif isinstance(e, BinanceAPIException):
-                self.logger.error(f"Binance API error placing order: {e}")
+                self.logger.error(f"Binance API error placing order: {e}", extra=error_context)
                 raise ExchangeError(f"Failed to place order: {e}") from e
             else:
-                self.logger.error(f"Error placing order: {e}")
+                self.logger.error(f"Error placing order: {e}", extra=error_context)
                 raise ExchangeError(f"Failed to place order: {e}") from e
         finally:
             # End profiling
@@ -893,27 +931,31 @@ class BinanceExchange(BaseExchange):
 
     def _map_order_type(self, binance_type: str) -> OrderType:
         """Map Binance order type to our OrderType enum."""
+        # Direct mapping without transformer for clarity
         type_mapping = {
-            "LIMIT": OrderType.LIMIT,
             "MARKET": OrderType.MARKET,
+            "LIMIT": OrderType.LIMIT,
             "STOP_LOSS": OrderType.STOP_LOSS,
             "STOP_LOSS_LIMIT": OrderType.STOP_LOSS,
             "TAKE_PROFIT": OrderType.TAKE_PROFIT,
             "TAKE_PROFIT_LIMIT": OrderType.TAKE_PROFIT,
+            "LIMIT_MAKER": OrderType.LIMIT,
         }
         return type_mapping.get(binance_type, OrderType.MARKET)
 
     def _map_to_binance_order_type(self, order_type: OrderType) -> str:
         """Map our OrderType enum to Binance order type."""
+        # Direct mapping without transformer for clarity
         type_mapping = {
-            OrderType.LIMIT: "LIMIT",
             OrderType.MARKET: "MARKET",
+            OrderType.LIMIT: "LIMIT",
             OrderType.STOP_LOSS: "STOP_LOSS_LIMIT",
             OrderType.TAKE_PROFIT: "TAKE_PROFIT_LIMIT",
         }
-        if order_type not in type_mapping:
+        mapped_type = type_mapping.get(order_type)
+        if not mapped_type:
             raise ValidationError(f"Unsupported order type: {order_type}")
-        return type_mapping[order_type]
+        return mapped_type
 
 
 # For backward compatibility

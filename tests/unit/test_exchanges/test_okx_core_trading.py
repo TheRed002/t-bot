@@ -323,7 +323,7 @@ class TestOKXOrderCancellation:
         with patch.object(okx_exchange, "trade_client") as mock_trade:
             mock_trade.cancel_order.return_value = mock_response
 
-            result = await okx_exchange.cancel_order("123456789", "BTC-USDT")
+            result = await okx_exchange.cancel_order("BTC-USDT", "123456789")
 
             assert isinstance(result, OrderResponse)
             assert result.order_id == "123456789"
@@ -345,14 +345,14 @@ class TestOKXOrderCancellation:
             mock_trade.cancel_order.return_value = mock_response
 
             with pytest.raises(ServiceError, match="Order cancellation failed"):
-                await okx_exchange.cancel_order("nonexistent", "BTC-USDT")
+                await okx_exchange.cancel_order("BTC-USDT", "nonexistent")
 
     async def test_cancel_order_no_client(self, okx_exchange):
         """Test canceling order when trade client is not initialized."""
         okx_exchange.trade_client = None
 
         with pytest.raises(ServiceError, match="Order cancellation failed"):
-            await okx_exchange.cancel_order("123456789", "BTC-USDT")
+            await okx_exchange.cancel_order("BTC-USDT", "123456789")
 
     async def test_cancel_order_network_exception(self, okx_exchange):
         """Test order cancellation with network exception."""
@@ -360,7 +360,7 @@ class TestOKXOrderCancellation:
             mock_trade.cancel_order.side_effect = Exception("Network timeout")
 
             with pytest.raises(ServiceError, match="Order cancellation failed"):
-                await okx_exchange.cancel_order("123456789", "BTC-USDT")
+                await okx_exchange.cancel_order("BTC-USDT", "123456789")
 
 
 class TestOKXOrderStatus:
@@ -382,9 +382,9 @@ class TestOKXOrderStatus:
         with patch.object(okx_exchange, "trade_client") as mock_trade:
             mock_trade.get_order.return_value = mock_response
 
-            status = await okx_exchange.get_order_status("123456789")
+            response = await okx_exchange.get_order_status("BTC-USDT", "123456789")
 
-            assert status == OrderStatus.FILLED
+            assert response.status == OrderStatus.FILLED
             mock_trade.get_order.assert_called_once_with(ordId="123456789")
 
     async def test_get_order_status_pending(self, okx_exchange):
@@ -403,9 +403,9 @@ class TestOKXOrderStatus:
         with patch.object(okx_exchange, "trade_client") as mock_trade:
             mock_trade.get_order.return_value = mock_response
 
-            status = await okx_exchange.get_order_status("123456789")
+            response = await okx_exchange.get_order_status("BTC-USDT", "123456789")
 
-            assert status == OrderStatus.NEW
+            assert response.status == OrderStatus.NEW
 
     async def test_get_order_status_canceled(self, okx_exchange):
         """Test order status retrieval for canceled order."""
@@ -423,9 +423,9 @@ class TestOKXOrderStatus:
         with patch.object(okx_exchange, "trade_client") as mock_trade:
             mock_trade.get_order.return_value = mock_response
 
-            status = await okx_exchange.get_order_status("123456789")
+            response = await okx_exchange.get_order_status("BTC-USDT", "123456789")
 
-            assert status == OrderStatus.CANCELLED
+            assert response.status == OrderStatus.CANCELLED
 
     async def test_get_order_status_partially_filled(self, okx_exchange):
         """Test order status retrieval for partially filled order."""
@@ -443,9 +443,9 @@ class TestOKXOrderStatus:
         with patch.object(okx_exchange, "trade_client") as mock_trade:
             mock_trade.get_order.return_value = mock_response
 
-            status = await okx_exchange.get_order_status("123456789")
+            response = await okx_exchange.get_order_status("BTC-USDT", "123456789")
 
-            assert status == OrderStatus.PARTIALLY_FILLED
+            assert response.status == OrderStatus.PARTIALLY_FILLED
 
     async def test_get_order_status_not_found(self, okx_exchange):
         """Test order status retrieval for non-existent order."""
@@ -459,14 +459,14 @@ class TestOKXOrderStatus:
             mock_trade.get_order.return_value = mock_response
 
             with pytest.raises(ServiceError, match="Order status retrieval failed"):
-                await okx_exchange.get_order_status("nonexistent")
+                await okx_exchange.get_order_status("BTC-USDT", "nonexistent")
 
     async def test_get_order_status_no_client(self, okx_exchange):
         """Test getting order status when trade client is not initialized."""
         okx_exchange.trade_client = None
 
         with pytest.raises(ServiceError, match="Order status retrieval failed"):
-            await okx_exchange.get_order_status("123456789")
+            await okx_exchange.get_order_status("BTC-USDT", "123456789")
 
 
 class TestOKXAccountInfo:
@@ -705,7 +705,7 @@ class TestOKXErrorHandling:
         with patch.object(okx_exchange, "trade_client") as mock_trade:
             mock_trade.place_order.return_value = mock_response
 
-            with pytest.raises(ValidationError, match="Symbol INVALIDUSDT not supported"):
+            with pytest.raises(OrderRejectionError, match="Instrument ID does not exist"):
                 await okx_exchange.place_order(invalid_order)
 
     async def test_rate_limit_exceeded_error(self, okx_exchange, mock_order_request):
@@ -774,8 +774,8 @@ class TestOKXEdgeCases:
             with patch.object(okx_exchange, "trade_client") as mock_trade:
                 mock_trade.get_order.return_value = mock_response
 
-                status = await okx_exchange.get_order_status("123456789")
-                assert status == expected_status
+                response = await okx_exchange.get_order_status("BTC-USDT", "123456789")
+                assert response.status == expected_status
 
     async def test_concurrent_order_placement(self, okx_exchange):
         """Test concurrent order placements to OKX."""

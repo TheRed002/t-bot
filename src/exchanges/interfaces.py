@@ -27,13 +27,18 @@ from src.state.state_service import StatePriority
 class TradeEvent(str, Enum):
     """Trade event enumeration (mirror of state module)."""
 
+    SIGNAL_RECEIVED = "signal_received"
+    VALIDATION_PASSED = "validation_passed"
+    VALIDATION_FAILED = "validation_failed"
     ORDER_SUBMITTED = "order_submitted"
     ORDER_ACCEPTED = "order_accepted"
-    ORDER_REJECTED = "order_rejected"
     PARTIAL_FILL = "partial_fill"
     COMPLETE_FILL = "complete_fill"
     ORDER_CANCELLED = "order_cancelled"
+    ORDER_REJECTED = "order_rejected"
     ORDER_EXPIRED = "order_expired"
+    SETTLEMENT_COMPLETE = "settlement_complete"
+    ATTRIBUTION_COMPLETE = "attribution_complete"
 
 
 class IStateService(Protocol):
@@ -367,4 +372,116 @@ class ISandboxAdapter(Protocol):
 
     async def simulate_network_error(self, error_type: str, duration_seconds: int = 5) -> None:
         """Simulate network errors for testing."""
+        ...
+
+
+class IExchangeService(Protocol):
+    """Interface for exchange service layer implementations."""
+
+    async def get_exchange(self, exchange_name: str) -> "IExchange":
+        """Get or create an exchange instance."""
+        ...
+
+    async def place_order(self, exchange_name: str, order: OrderRequest) -> OrderResponse:
+        """Place a trading order through the service layer."""
+        ...
+
+    async def cancel_order(
+        self, exchange_name: str, order_id: str, symbol: str | None = None
+    ) -> bool:
+        """Cancel an existing order."""
+        ...
+
+    async def get_order_status(
+        self, exchange_name: str, order_id: str, symbol: str | None = None
+    ) -> "OrderStatus":
+        """Get order status."""
+        ...
+
+    async def get_market_data(
+        self, exchange_name: str, symbol: str, timeframe: str = "1m"
+    ) -> MarketData:
+        """Get market data for a symbol."""
+        ...
+
+    async def get_order_book(
+        self, exchange_name: str, symbol: str, depth: int = 10
+    ) -> OrderBook:
+        """Get order book data."""
+        ...
+
+    async def get_ticker(self, exchange_name: str, symbol: str) -> Ticker:
+        """Get ticker data."""
+        ...
+
+    async def get_account_balance(self, exchange_name: str) -> dict[str, Decimal]:
+        """Get account balances."""
+        ...
+
+    async def get_positions(
+        self, exchange_name: str, symbol: str | None = None
+    ) -> list[Position]:
+        """Get open positions."""
+        ...
+
+    async def get_exchange_info(self, exchange_name: str) -> ExchangeInfo:
+        """Get exchange information."""
+        ...
+
+    def get_supported_exchanges(self) -> list[str]:
+        """Get list of supported exchanges."""
+        ...
+
+    def get_available_exchanges(self) -> list[str]:
+        """Get list of configured exchanges."""
+        ...
+
+    async def get_exchange_status(self, exchange_name: str) -> dict[str, Any]:
+        """Get exchange connection status."""
+        ...
+
+    async def get_service_health(self) -> dict[str, Any]:
+        """Get comprehensive service health status."""
+        ...
+
+    async def disconnect_all_exchanges(self) -> None:
+        """Disconnect all active exchanges with proper resource cleanup."""
+        ...
+
+    async def get_best_price(
+        self, symbol: str, side: str, exchanges: list[str] | None = None
+    ) -> dict[str, Any]:
+        """Find best price across multiple exchanges."""
+        ...
+
+    async def subscribe_to_stream(
+        self, exchange_name: str, symbol: str, callback: Any
+    ) -> None:
+        """Subscribe to real-time data stream."""
+        ...
+
+    def get_supported_exchanges(self) -> list[str]:
+        """Get list of supported exchanges."""
+        ...
+
+    def get_available_exchanges(self) -> list[str]:
+        """Get list of configured exchanges."""
+        ...
+
+    async def get_exchange_status(self, exchange_name: str) -> dict[str, Any]:
+        """Get exchange connection status."""
+        ...
+
+    async def get_service_health(self) -> dict[str, Any]:
+        """Get comprehensive service health status."""
+        ...
+
+    async def disconnect_all_exchanges(self) -> None:
+        """Disconnect all active exchanges with proper resource cleanup."""
+        ...
+
+    async def get_best_price(
+        self, symbol: str, side: str, exchanges: list[str] | None = None
+    ) -> dict[str, Any]:
+        """Find best price across multiple exchanges."""
         ...

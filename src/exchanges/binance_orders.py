@@ -30,6 +30,9 @@ from src.core.types import OrderRequest, OrderResponse, OrderSide, OrderStatus, 
 # MANDATORY: Import from P-002A
 from src.error_handling.error_handler import ErrorHandler
 
+# MANDATORY: Import from P-007A (utils)
+from src.utils import ValidationFramework
+
 # Fee structures and precision levels are retrieved via exchange info
 from src.utils.data_utils import normalize_price
 from src.utils.decimal_utils import round_to_precision, to_decimal
@@ -40,9 +43,6 @@ from src.utils.exchange_order_utils import (
     FeeCalculationUtils,
     OrderStatusUtils,
 )
-
-# MANDATORY: Import from P-007A (utils)
-from src.utils.validators import ValidationFramework
 
 
 class BinanceOrderManager:
@@ -332,13 +332,13 @@ class BinanceOrderManager:
             self.logger.error(f"Error placing OCO order on Binance: {e!s}")
             raise ExecutionError(f"Failed to place OCO order: {e!s}")
 
-    async def cancel_order(self, order_id: str, symbol: str) -> bool:
+    async def cancel_order(self, symbol: str, order_id: str) -> bool:
         """
         Cancel an order on Binance.
 
         Args:
-            order_id: Order ID to cancel
             symbol: Trading symbol
+            order_id: Order ID to cancel
 
         Returns:
             bool: True if cancellation successful, False otherwise
@@ -364,13 +364,13 @@ class BinanceOrderManager:
             self.logger.error(f"Error cancelling order on Binance: {e!s}")
             return False
 
-    async def get_order_status(self, order_id: str, symbol: str) -> OrderStatus:
+    async def get_order_status(self, symbol: str, order_id: str) -> OrderStatus:
         """
         Get order status from Binance.
 
         Args:
-            order_id: Order ID to check
             symbol: Trading symbol
+            order_id: Order ID to check
 
         Returns:
             OrderStatus: Current order status

@@ -28,7 +28,9 @@ from src.core.types import OrderRequest, OrderResponse, OrderSide, OrderStatus, 
 
 # MANDATORY: Import from P-002A
 from src.error_handling.error_handler import ErrorHandler
-from src.utils import ValidationFramework, normalize_price, round_to_precision
+from src.utils import ValidationFramework
+from src.utils.data_utils import normalize_price
+from src.utils.decimal_utils import round_to_precision
 from src.utils.exchange_conversion_utils import ExchangeConversionUtils
 from src.utils.exchange_order_utils import (
     AssetPrecisionUtils,
@@ -194,11 +196,12 @@ class CoinbaseOrderManager:
             self.logger.error(f"Failed to place order: {e!s}")
             raise ExecutionError(f"Failed to place order: {e!s}")
 
-    async def cancel_order(self, order_id: str, symbol: str) -> bool:
+    async def cancel_order(self, symbol: str, order_id: str) -> bool:
         """
         Cancel an existing order on Coinbase exchange.
 
         Args:
+            symbol: Trading symbol  
             order_id: ID of the order to cancel
 
         Returns:
@@ -225,11 +228,12 @@ class CoinbaseOrderManager:
             self.logger.error(f"Failed to cancel order {order_id}: {e!s}")
             return False
 
-    async def get_order_status(self, order_id: str) -> OrderStatus:
+    async def get_order_status(self, symbol: str, order_id: str) -> OrderStatus:
         """
         Get the status of an order on Coinbase exchange.
 
         Args:
+            symbol: Trading symbol
             order_id: ID of the order to check
 
         Returns:

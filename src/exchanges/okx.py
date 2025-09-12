@@ -44,11 +44,11 @@ from src.core.types import (
     Trade,
 )
 
+# MANDATORY: Import from error_handling decorators as per CLAUDE.md
+from src.error_handling.decorators import with_circuit_breaker, with_retry
+
 # MANDATORY: Import from base as per CLAUDE.md
 from src.exchanges.base import BaseExchange
-
-# MANDATORY: Import from utils as per CLAUDE.md
-from src.utils.decorators import circuit_breaker, retry
 
 
 class OKXExchange(BaseExchange):
@@ -224,8 +224,8 @@ class OKXExchange(BaseExchange):
 
     # === Market Data Methods ===
 
-    @circuit_breaker(failure_threshold=5)
-    @retry(max_attempts=3)
+    @with_circuit_breaker(failure_threshold=5)
+    @with_retry(max_attempts=3)
     async def get_ticker(self, symbol: str) -> Ticker:
         """Get ticker information for a symbol."""
         if not self.connected:
@@ -295,8 +295,8 @@ class OKXExchange(BaseExchange):
             self.logger.error(f"Failed to get OKX ticker for {symbol}: {e}")
             raise ServiceError(f"Ticker retrieval failed: {e}") from e
 
-    @circuit_breaker(failure_threshold=5)
-    @retry(max_attempts=3)
+    @with_circuit_breaker(failure_threshold=5)
+    @with_retry(max_attempts=3)
     async def get_order_book(self, symbol: str, limit: int = 100) -> OrderBook:
         """Get order book for a symbol."""
         if not self.connected:
@@ -342,8 +342,8 @@ class OKXExchange(BaseExchange):
             self.logger.error(f"Failed to get OKX order book for {symbol}: {e}")
             raise ServiceError(f"Order book retrieval failed: {e}") from e
 
-    @circuit_breaker(failure_threshold=5)
-    @retry(max_attempts=3)
+    @with_circuit_breaker(failure_threshold=5)
+    @with_retry(max_attempts=3)
     async def get_recent_trades(self, symbol: str, limit: int = 100) -> list[Trade]:
         """Get recent trades for a symbol."""
         if not self.connected:
@@ -404,20 +404,18 @@ class OKXExchange(BaseExchange):
 
     # === Trading Methods ===
 
-    @circuit_breaker(failure_threshold=3)
-    @retry(max_attempts=2)
+    @with_circuit_breaker(failure_threshold=3)
+    @with_retry(max_attempts=2)
     async def place_order(self, order_request: OrderRequest) -> OrderResponse:
         """Place an order on OKX exchange."""
-        self._validate_symbol(order_request.symbol)
-        if order_request.price is not None:
-            self._validate_price(order_request.price)
-        self._validate_quantity(order_request.quantity)
+        # Use core validation through inherited _validate_order method
+        await self._validate_order(order_request)
 
         try:
             if not self.trade_client:
                 raise ExchangeConnectionError("OKX trade client not initialized")
 
-            # Validate order parameters
+            # Add OKX-specific validation only
             await self._validate_okx_order(order_request)
 
             # Convert order to OKX format
@@ -472,9 +470,9 @@ class OKXExchange(BaseExchange):
             self.logger.error(f"Failed to place OKX order: {e}")
             raise OrderRejectionError(f"Order placement failed: {e}") from e
 
-    @circuit_breaker(failure_threshold=3)
-    @retry(max_attempts=2)
-    async def cancel_order(self, order_id: str, symbol: str) -> OrderResponse:
+    @with_circuit_breaker(failure_threshold=3)
+    @with_retry(max_attempts=2)
+    async def cancel_order(self, symbol: str, order_id: str) -> OrderResponse:
         """Cancel an existing order."""
         self._validate_symbol(symbol)
 
@@ -515,9 +513,9 @@ class OKXExchange(BaseExchange):
             self.logger.error(f"Failed to cancel OKX order {order_id}: {e}")
             raise ServiceError(f"Order cancellation failed: {e}") from e
 
-    @circuit_breaker(failure_threshold=5)
-    @retry(max_attempts=3)
-    async def get_order_status(self, order_id: str, symbol: str | None = None) -> OrderStatus:
+    @with_circuit_breaker(failure_threshold=5)
+    @with_retry(max_attempts=3)
+    async def get_order_status(self, symbol: str, order_id: str) -> OrderResponse:
         """Get current status of an order."""
         if symbol:
             self._validate_symbol(symbol)
@@ -540,17 +538,16 @@ class OKXExchange(BaseExchange):
                 raise ServiceError(f"Order status retrieval failed: {error_msg}")
 
             data = result.get("data", [{}])[0]
-            okx_status = data.get("state", "")
 
-            # Convert OKX status to OrderStatus
-            return self._convert_okx_status_to_order_status(okx_status)
+            # Convert OKX order data to OrderResponse
+            return self._convert_okx_order_to_response(data)
 
         except Exception as e:
             self.logger.error(f"Failed to get OKX order status {order_id}: {e}")
             raise ServiceError(f"Order status retrieval failed: {e}") from e
 
-    @circuit_breaker(failure_threshold=5)
-    @retry(max_attempts=3)
+    @with_circuit_breaker(failure_threshold=5)
+    @with_retry(max_attempts=3)
     async def get_open_orders(self, symbol: str | None = None) -> list[OrderResponse]:
         """Get all open orders, optionally filtered by symbol."""
         if symbol:
@@ -608,8 +605,8 @@ class OKXExchange(BaseExchange):
 
     # === Account Methods ===
 
-    @circuit_breaker(failure_threshold=5)
-    @retry(max_attempts=3)
+    @with_circuit_breaker(failure_threshold=5)
+    @with_retry(max_attempts=3)
     async def get_account_balance(self) -> dict[str, Decimal]:
         """Get account balance for all assets."""
         try:
@@ -643,8 +640,8 @@ class OKXExchange(BaseExchange):
             self.logger.error(f"Failed to get OKX account balance: {e}")
             raise ServiceError(f"Account balance retrieval failed: {e}") from e
 
-    @circuit_breaker(failure_threshold=5)
-    @retry(max_attempts=3)
+    @with_circuit_breaker(failure_threshold=5)
+    @with_retry(max_attempts=3)
     async def get_balance(self, asset: str | None = None) -> dict[str, Any]:
         """Get balance for specific asset or all assets."""
         try:
@@ -693,8 +690,8 @@ class OKXExchange(BaseExchange):
             self.logger.error(f"Failed to get OKX balance: {e}")
             raise ServiceError(f"Balance retrieval failed: {e}") from e
 
-    @circuit_breaker(failure_threshold=5)
-    @retry(max_attempts=3)
+    @with_circuit_breaker(failure_threshold=5)
+    @with_retry(max_attempts=3)
     async def get_positions(self) -> list[Position]:
         """Get all open positions (for margin/futures trading)."""
         try:
@@ -740,38 +737,29 @@ class OKXExchange(BaseExchange):
             raise ExchangeConnectionError(f"OKX connection test failed: {e}")
 
     async def _validate_okx_order(self, order: OrderRequest) -> None:
-        """Validate order parameters against OKX requirements."""
-        try:
-            # Basic validation
-            if not order.symbol or not order.quantity:
-                raise ValidationError("Order must have symbol and quantity")
+        """Validate order parameters specific to OKX (core validation already done)."""
+        # Core validation already performed in _validate_order()
+        # Only add OKX-specific validation here
 
-            if order.quantity <= 0:
-                raise ValidationError("Order quantity must be positive")
+        # Validate symbol format for OKX
+        okx_symbol = self._convert_symbol_to_okx_format(order.symbol)
+        if not okx_symbol or "-" not in okx_symbol:
+            raise ValidationError(f"Invalid symbol format for OKX: {order.symbol}")
 
-            # Validate symbol format
-            okx_symbol = self._convert_symbol_to_okx_format(order.symbol)
-            if not okx_symbol or "-" not in okx_symbol:
-                raise ValidationError(f"Invalid symbol format for OKX: {order.symbol}")
+        # Validate OKX-specific order size constraints
+        min_size = Decimal("0.00001")  # Generic minimum (could be enhanced with real exchange info)
+        if order.quantity < min_size:
+            raise ValidationError(f"Order quantity {order.quantity} below minimum {min_size}")
 
-            # Validate order type specific parameters
-            if order.order_type == OrderType.LIMIT:
-                if not order.price or order.price <= 0:
-                    raise ValidationError("Limit orders must have positive price")
-
-            # Validate minimum order size (could be enhanced with real exchange info)
-            min_size = Decimal("0.00001")  # Generic minimum
-            if order.quantity < min_size:
-                raise ValidationError(f"Order quantity {order.quantity} below minimum {min_size}")
-
-            # Validate maximum order size to prevent accidental large orders
-            max_size = Decimal("1000000")  # Generic maximum
-            if order.quantity > max_size:
-                raise ValidationError(f"Order quantity {order.quantity} above maximum {max_size}")
-
-        except Exception as e:
-            self.logger.error(f"OKX order validation failed: {e}")
-            raise ValidationError(f"Order validation failed: {e}")
+        # Validate maximum order size to prevent accidental large orders
+        max_size = Decimal("1000000")  # Generic maximum
+        if order.quantity > max_size:
+            raise ValidationError(f"Order quantity {order.quantity} above maximum {max_size}")
+        
+        # Validate price for limit orders
+        if order.order_type == OrderType.LIMIT:
+            if not order.price or order.price <= Decimal("0"):
+                raise ValidationError(f"Limit orders must have positive price")
 
     def _convert_order_to_okx(self, order: OrderRequest) -> dict[str, Any]:
         """Convert unified order request to OKX format."""

@@ -46,7 +46,6 @@ from src.core.exceptions import (
     ExecutionError,
     OrderRejectionError,
     ServiceError,
-    ValidationError,
 )
 from src.core.types import (
     ExchangeInfo,
@@ -61,11 +60,11 @@ from src.core.types import (
     Trade,
 )
 
+# MANDATORY: Import from error_handling decorators as per CLAUDE.md
+from src.error_handling.decorators import with_circuit_breaker, with_retry
+
 # MANDATORY: Import from base as per CLAUDE.md
 from src.exchanges.base import BaseExchange
-
-# MANDATORY: Import from utils as per CLAUDE.md
-from src.utils.decorators import circuit_breaker, retry
 
 
 class CoinbaseExchange(BaseExchange):
@@ -228,8 +227,8 @@ class CoinbaseExchange(BaseExchange):
 
     # === Market Data Methods ===
 
-    @circuit_breaker(failure_threshold=5)
-    @retry(max_attempts=3)
+    @with_circuit_breaker(failure_threshold=5)
+    @with_retry(max_attempts=3)
     async def get_ticker(self, symbol: str) -> Ticker:
         """Get ticker information for a symbol."""
         self._validate_symbol(symbol)
@@ -254,8 +253,8 @@ class CoinbaseExchange(BaseExchange):
             self.logger.error(f"Failed to get Coinbase ticker for {symbol}: {e}")
             raise ServiceError(f"Ticker retrieval failed: {e}") from e
 
-    @circuit_breaker(failure_threshold=5)
-    @retry(max_attempts=3)
+    @with_circuit_breaker(failure_threshold=5)
+    @with_retry(max_attempts=3)
     async def get_order_book(self, symbol: str, limit: int = 100) -> OrderBook:
         """Get order book for a symbol."""
         self._validate_symbol(symbol)
@@ -280,8 +279,8 @@ class CoinbaseExchange(BaseExchange):
             self.logger.error(f"Failed to get Coinbase order book for {symbol}: {e}")
             raise ServiceError(f"Order book retrieval failed: {e}") from e
 
-    @circuit_breaker(failure_threshold=5)
-    @retry(max_attempts=3)
+    @with_circuit_breaker(failure_threshold=5)
+    @with_retry(max_attempts=3)
     async def get_recent_trades(self, symbol: str, limit: int = 100) -> list[Trade]:
         """Get recent trades for a symbol."""
         self._validate_symbol(symbol)
@@ -311,20 +310,18 @@ class CoinbaseExchange(BaseExchange):
 
     # === Trading Methods ===
 
-    @circuit_breaker(failure_threshold=3)
-    @retry(max_attempts=2)
+    @with_circuit_breaker(failure_threshold=3)
+    @with_retry(max_attempts=2)
     async def place_order(self, order_request: OrderRequest) -> OrderResponse:
         """Place an order on Coinbase exchange."""
-        self._validate_symbol(order_request.symbol)
-        if order_request.price is not None:
-            self._validate_price(order_request.price)
-        self._validate_quantity(order_request.quantity)
+        # Use core validation through inherited _validate_order method
+        await self._validate_order(order_request)
 
         try:
             if not self.coinbase_client:
                 raise ExchangeConnectionError("Coinbase client not initialized")
 
-            # Validate order parameters
+            # Add Coinbase-specific validation only
             await self._validate_coinbase_order(order_request)
 
             if self.coinbase_client:
@@ -340,8 +337,8 @@ class CoinbaseExchange(BaseExchange):
             self.logger.error(f"Failed to place Coinbase order: {e}")
             raise OrderRejectionError(f"Order placement failed: {e}") from e
 
-    @circuit_breaker(failure_threshold=3)
-    @retry(max_attempts=2)
+    @with_circuit_breaker(failure_threshold=3)
+    @with_retry(max_attempts=2)
     async def cancel_order(self, symbol: str, order_id: str) -> OrderResponse:
         """Cancel an existing order."""
         self._validate_symbol(symbol)
@@ -380,9 +377,9 @@ class CoinbaseExchange(BaseExchange):
             self.logger.error(f"Failed to cancel Coinbase order {order_id}: {e}")
             raise ServiceError(f"Order cancellation failed: {e}") from e
 
-    @circuit_breaker(failure_threshold=5)
-    @retry(max_attempts=3)
-    async def get_order_status(self, order_id: str) -> OrderResponse:
+    @with_circuit_breaker(failure_threshold=5)
+    @with_retry(max_attempts=3)
+    async def get_order_status(self, symbol: str, order_id: str) -> OrderResponse:
         """Get current status of an order."""
 
         try:
@@ -433,8 +430,8 @@ class CoinbaseExchange(BaseExchange):
             self.logger.error(f"Failed to get Coinbase order status {order_id}: {e}")
             raise ServiceError(f"Order status retrieval failed: {e}") from e
 
-    @circuit_breaker(failure_threshold=5)
-    @retry(max_attempts=3)
+    @with_circuit_breaker(failure_threshold=5)
+    @with_retry(max_attempts=3)
     async def get_open_orders(self, symbol: str | None = None) -> list[OrderResponse]:
         """Get all open orders, optionally filtered by symbol."""
         if symbol:
@@ -471,8 +468,8 @@ class CoinbaseExchange(BaseExchange):
 
     # === Account Methods ===
 
-    @circuit_breaker(failure_threshold=5)
-    @retry(max_attempts=3)
+    @with_circuit_breaker(failure_threshold=5)
+    @with_retry(max_attempts=3)
     async def get_account_balance(self) -> dict[str, Decimal]:
         """Get account balance for all assets."""
         try:
@@ -493,8 +490,8 @@ class CoinbaseExchange(BaseExchange):
             self.logger.error(f"Failed to get Coinbase account balance: {e}")
             raise ServiceError(f"Account balance retrieval failed: {e}") from e
 
-    @circuit_breaker(failure_threshold=5)
-    @retry(max_attempts=3)
+    @with_circuit_breaker(failure_threshold=5)
+    @with_retry(max_attempts=3)
     async def get_balance(self, asset: str | None = None) -> dict[str, Any]:
         """Get balance for specific asset or all assets."""
         try:
@@ -548,8 +545,8 @@ class CoinbaseExchange(BaseExchange):
             self.logger.error(f"Failed to get Coinbase balance: {e}")
             raise ServiceError(f"Balance retrieval failed: {e}") from e
 
-    @circuit_breaker(failure_threshold=5)
-    @retry(max_attempts=3)
+    @with_circuit_breaker(failure_threshold=5)
+    @with_retry(max_attempts=3)
     async def get_positions(self) -> list[Position]:
         """Get all open positions (for margin/futures trading)."""
         try:
@@ -592,28 +589,17 @@ class CoinbaseExchange(BaseExchange):
             raise ExchangeConnectionError(f"Coinbase connection test failed: {e}")
 
     async def _validate_coinbase_order(self, order: OrderRequest) -> None:
-        """Validate order parameters for Coinbase."""
-        try:
-            # Basic validation
-            if not order.symbol or not order.quantity:
-                raise ValidationError("Order must have symbol and quantity")
+        """Validate order parameters specific to Coinbase (uses core validation)."""
+        # Use inherited validation from BaseExchange for basic checks
+        await self._validate_order(order)
 
-            if order.quantity <= 0:
-                raise ValidationError("Order quantity must be positive")
+        # Only add Coinbase-specific validation
+        coinbase_symbol = self._convert_to_coinbase_symbol(order.symbol)
 
-            if order.order_type == OrderType.LIMIT and (not order.price or order.price <= 0):
-                raise ValidationError("Limit orders must have positive price")
-
-            # Convert symbol format for validation (BTC-USD format)
-            coinbase_symbol = self._convert_to_coinbase_symbol(order.symbol)
-
-            # Validate symbol exists (you could get this from exchange info)
-            valid_symbols = ["BTC-USD", "ETH-USD", "BTC-USDT", "ETH-USDT", "LTC-USD", "ADA-USD"]
-            if coinbase_symbol not in valid_symbols:
-                self.logger.warning(f"Symbol {coinbase_symbol} may not be available on Coinbase")
-
-        except Exception as e:
-            raise ValidationError(f"Order validation failed: {e}")
+        # Validate symbol exists (could be enhanced to get from exchange info)
+        valid_symbols = ["BTC-USD", "ETH-USD", "BTC-USDT", "ETH-USDT", "LTC-USD", "ADA-USD"]
+        if coinbase_symbol not in valid_symbols:
+            self.logger.warning(f"Symbol {coinbase_symbol} may not be available on Coinbase")
 
     async def _place_order_advanced_api(self, order: OrderRequest) -> OrderResponse:
         """Place order using Coinbase Advanced Trading API."""

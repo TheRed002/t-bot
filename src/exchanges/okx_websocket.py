@@ -683,7 +683,7 @@ class OKXWebSocketManager:
 
             if stream_name in self.public_subscriptions:
                 for ticker_data in data:
-                    # Convert to unified Ticker format
+                    # Convert to unified Ticker format with processing metadata
                     ticker = Ticker(
                         symbol=symbol,
                         bid_price=Decimal(ticker_data.get("bidPx", "0")),
@@ -697,17 +697,27 @@ class OKXWebSocketManager:
                         price_change=Decimal(ticker_data.get("change24h", "0")),
                     )
 
-                    # Call all registered callbacks concurrently
+                    # Apply consistent processing paradigm metadata
+                    stream_metadata = {
+                        "message_pattern": "pub_sub",  # WebSocket streams use pub/sub
+                        "processing_mode": "stream",   # Real-time stream processing
+                        "data_format": "event_data_v1", # Consistent with state module
+                        "boundary_validation": "applied",
+                        "operation_type": "ticker"
+                    }
+
+                    # Call all registered callbacks concurrently with stream metadata
                     callback_tasks = []
                     for callback in self.public_subscriptions[stream_name]:
                         try:
                             if asyncio.iscoroutinefunction(callback):
-                                callback_tasks.append(callback(ticker))
+                                # Pass both ticker and metadata for consistent processing
+                                callback_tasks.append(callback(ticker, stream_metadata))
                             else:
                                 # Run sync callback in executor to avoid blocking
                                 callback_tasks.append(
                                     asyncio.get_event_loop().run_in_executor(
-                                        None, callback, ticker
+                                        None, lambda: callback(ticker, stream_metadata)
                                     )
                                 )
                         except Exception as e:
