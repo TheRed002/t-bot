@@ -1,3 +1,5 @@
+from typing import TYPE_CHECKING, Any, TypeVar
+
 """
 Database repository implementation using the service layer pattern.
 
@@ -6,8 +8,6 @@ providing a clean separation between service and repository layers.
 """
 
 # Use TYPE_CHECKING to avoid circular imports
-from typing import TYPE_CHECKING, Any, TypeVar
-
 from src.core.base.interfaces import HealthStatus
 from src.core.base.repository import BaseRepository
 from src.core.exceptions import DatabaseConnectionError, DatabaseQueryError

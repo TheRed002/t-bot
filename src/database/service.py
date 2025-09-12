@@ -13,17 +13,18 @@ CRITICAL: All modules MUST use this service instead of direct database access.
 
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, TypeVar
 
 import redis.asyncio as redis
 from sqlalchemy import asc, desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.core.base.interfaces import HealthStatus
+from src.core.base.interfaces import DatabaseServiceInterface, HealthStatus
 
 # Import core components
 from src.core.base.service import BaseService
-from src.core.exceptions import ComponentError, DatabaseError
+from src.core.exceptions import ComponentError, DatabaseError, ValidationError
 from src.core.logging import get_logger
 
 # Import database infrastructure
@@ -39,7 +40,7 @@ K = TypeVar("K")
 logger = get_logger(__name__)
 
 
-class DatabaseService(BaseService):
+class DatabaseService(BaseService, DatabaseServiceInterface):
     """
     Simple database service implementing service layer pattern.
 
@@ -156,32 +157,73 @@ class DatabaseService(BaseService):
 
     # CRUD Operations
 
-    async def create_entity(self, entity: T) -> T:
+    async def create_entity(self, entity: T, processing_mode: str = "stream") -> T:
         """
-        Create a new entity.
+        Create a new entity with consistent data transformation and processing mode.
 
         Args:
             entity: Entity to create
+            processing_mode: Processing mode ("stream" for real-time, "batch" for bulk operations)
 
         Returns:
-            Created entity with ID assigned
+            Created entity with ID assigned (in standardized format)
         """
         try:
+            # Apply consistent data transformation at module boundary
+            transformed_entity = self._transform_entity_data(entity, processing_mode)
+
             async with self.connection_manager.get_async_session() as session:
-                session.add(entity)
+                session.add(transformed_entity)
                 await session.commit()
-                await session.refresh(entity)
+                await session.refresh(transformed_entity)
 
                 # Invalidate cache if enabled
                 if self._cache_enabled and self._redis_client:
-                    cache_pattern = f"{type(entity).__name__}_*"
+                    cache_pattern = f"{type(transformed_entity).__name__}_*"
                     await self._invalidate_cache_pattern(cache_pattern)
 
-                return entity
+                return transformed_entity
 
         except Exception as e:
             logger.error(f"Entity creation failed for {type(entity).__name__}: {e}")
-            raise DatabaseError(f"Failed to create {type(entity).__name__}: {e}") from e
+            # Apply consistent error propagation aligned with error_handling module
+            from src.error_handling.propagation_utils import (
+                ProcessingStage,
+                PropagationMethod,
+                add_propagation_step,
+            )
+
+            error_data = {
+                "error_type": type(e).__name__,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "operation": "create_entity",
+                "entity_type": type(entity).__name__,
+                "processing_mode": processing_mode,
+                "data_format": "database_entity_v1",
+            }
+
+            # Add propagation step for cross-module error flow
+            error_data = add_propagation_step(
+                error_data,
+                source_module="database",
+                target_module="error_handling",
+                method=PropagationMethod.DIRECT_CALL,
+                stage=ProcessingStage.ERROR_PROPAGATION
+            )
+
+            # Validate boundary data before propagation
+            from src.utils.messaging_patterns import BoundaryValidator
+            try:
+                BoundaryValidator.validate_database_to_error_boundary(error_data)
+            except ValidationError as ve:
+                logger.warning(f"Database boundary validation failed: {ve}")
+                # Continue with propagation but log validation failure
+
+            self._propagate_database_error(e, "create_entity", type(entity).__name__)
+            raise DatabaseError(
+                f"Failed to create {type(entity).__name__}: {e}",
+                details=error_data
+            ) from e
 
     async def get_entity_by_id(self, model_class: type[T], entity_id: K) -> T | None:
         """
@@ -289,44 +331,36 @@ class DatabaseService(BaseService):
         order_by: str | None = None,
         order_desc: bool = False,
         include_relations: list[str] | None = None,
+        processing_mode: str = "stream",
     ) -> list[T]:
         """
-        List entities with filtering, pagination, and ordering.
+        List entities with filtering, pagination, and ordering using consistent processing patterns.
 
         Args:
             model_class: Entity class
             limit: Maximum number of entities
             offset: Number of entities to skip
-            filters: Filter criteria
+            filters: Filter criteria (validated at boundary)
             order_by: Field to order by
             order_desc: Descending order flag
             include_relations: Relations to eager load
+            processing_mode: Processing mode ("stream" for real-time, "batch" for bulk operations)
 
         Returns:
-            List of entities matching criteria
+            List of entities matching criteria (in standardized format)
         """
         try:
+            # Validate filters at module boundary
+            if filters:
+                self._validate_filter_boundary(filters, model_class.__name__)
+
             async with self.connection_manager.get_async_session() as session:
                 # Build query
                 query = select(model_class)
 
-                # Apply filters
+                # Apply filters with consistent transformation
                 if filters:
-                    for field, value in filters.items():
-                        if hasattr(model_class, field):
-                            attr = getattr(model_class, field)
-                            if isinstance(value, dict):
-                                # Handle range filters like {"gte": 100, "lte": 200}
-                                if "gte" in value:
-                                    query = query.where(attr >= value["gte"])
-                                if "lte" in value:
-                                    query = query.where(attr <= value["lte"])
-                                if "gt" in value:
-                                    query = query.where(attr > value["gt"])
-                                if "lt" in value:
-                                    query = query.where(attr < value["lt"])
-                            else:
-                                query = query.where(attr == value)
+                    query = self._apply_consistent_filters(query, model_class, filters)
 
                 # Apply ordering
                 if order_by and hasattr(model_class, order_by):
@@ -336,22 +370,73 @@ class DatabaseService(BaseService):
                     else:
                         query = query.order_by(asc(attr))
 
-                # Apply pagination
+                # Apply pagination (adjust for processing mode)
+                if processing_mode == "stream":
+                    # Stream processing uses smaller default batches for real-time processing
+                    default_limit = 50
+                else:
+                    # Batch processing uses larger batches for efficiency
+                    default_limit = 100
+
                 if offset:
                     query = query.offset(offset)
                 if limit:
                     query = query.limit(limit)
+                else:
+                    query = query.limit(default_limit)
 
                 # Execute query
                 result = await session.execute(query)
-                return result.scalars().all()
+                entities = result.scalars().all()
+
+                # Transform entities to consistent format
+                return [self._transform_entity_data(entity, processing_mode) for entity in entities]
 
         except Exception as e:
             logger.error(f"Entity listing failed for {model_class.__name__}: {e}")
-            raise DatabaseError(f"Failed to list {model_class.__name__} entities: {e}") from e
+            # Apply consistent error propagation aligned with error_handling module
+            from src.error_handling.propagation_utils import (
+                ProcessingStage,
+                PropagationMethod,
+                add_propagation_step,
+            )
+
+            error_data = {
+                "error_type": type(e).__name__,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "operation": "list_entities",
+                "entity_type": model_class.__name__,
+                "processing_mode": processing_mode,
+                "data_format": "database_entity_v1",
+                "operation_type": "list",
+                "batch_size": limit,
+            }
+
+            # Add propagation step for cross-module error flow
+            error_data = add_propagation_step(
+                error_data,
+                source_module="database",
+                target_module="error_handling",
+                method=PropagationMethod.DIRECT_CALL,
+                stage=ProcessingStage.ERROR_PROPAGATION
+            )
+
+            # Validate boundary data before propagation
+            from src.utils.messaging_patterns import BoundaryValidator
+            try:
+                BoundaryValidator.validate_database_to_error_boundary(error_data)
+            except ValidationError as ve:
+                logger.warning(f"Database boundary validation failed: {ve}")
+                # Continue with propagation but log validation failure
+
+            self._propagate_database_error(e, "list_entities", model_class.__name__)
+            raise DatabaseError(
+                f"Failed to list {model_class.__name__} entities: {e}",
+                details=error_data
+            ) from e
 
     async def count_entities(
-        self, model_class: type[T], filters: dict[str, Any] | None = None
+        self, model_class: type[T] | None = None, filters: dict[str, Any] | None = None
     ) -> int:
         """
         Count entities matching filters.
@@ -473,6 +558,39 @@ class DatabaseService(BaseService):
             "started": self._started,
         }
 
+    async def execute_query(self, query: str, params: dict[str, Any] | None = None) -> Any:
+        """Execute a database query."""
+        if not self._started:
+            raise DatabaseError("Database service not started")
+
+        try:
+            async with self.get_session() as session:
+                result = await session.execute(query, params or {})
+                await session.commit()
+                return result
+        except Exception as e:
+            logger.error(f"Query execution failed: {e}")
+            raise DatabaseError(f"Query execution failed: {e}") from e
+
+    async def get_connection_pool_status(self) -> dict[str, Any]:
+        """Get connection pool status."""
+        if not self.connection_manager:
+            return {"status": "unavailable", "reason": "No connection manager"}
+
+        try:
+            # Get pool information from the connection manager
+            if hasattr(self.connection_manager, "get_pool_status"):
+                return await self.connection_manager.get_pool_status()
+            else:
+                # Basic status information
+                return {
+                    "status": "available" if self._started else "stopped",
+                    "connection_manager": type(self.connection_manager).__name__,
+                }
+        except Exception as e:
+            logger.error(f"Failed to get connection pool status: {e}")
+            return {"status": "error", "error": str(e)}
+
     # Cache utility methods
 
     async def _invalidate_cache_pattern(self, pattern: str) -> None:
@@ -486,3 +604,119 @@ class DatabaseService(BaseService):
             pass
         except Exception as e:
             logger.warning(f"Cache pattern invalidation failed: {e}")
+
+    # Data Transformation and Validation Methods (aligned with core module patterns)
+
+    def _transform_entity_data(self, entity: T, processing_mode: str) -> T:
+        """Transform entity data to consistent format aligned with core module patterns."""
+        if entity is None:
+            return entity
+
+        # Use standardized data transformation for consistency across modules
+        from src.utils.data_flow_integrity import DataFlowTransformer
+
+        try:
+            entity = DataFlowTransformer.validate_and_transform_entity(
+                entity, module_source="database", processing_mode=processing_mode
+            )
+        except Exception as e:
+            self.logger.warning(f"Standardized entity transformation failed: {e}")
+            # Fallback to minimal transformation
+            if hasattr(entity, "__dict__") and not hasattr(entity, "processing_mode"):
+                entity.processing_mode = processing_mode
+
+        return entity
+
+    def _validate_filter_boundary(self, filters: dict[str, Any], entity_name: str) -> None:
+        """Validate filter data at module boundary for consistency."""
+        from src.utils.data_flow_integrity import DataFlowValidator
+
+        try:
+            # Use standardized boundary validation
+            DataFlowValidator.validate_complete_data_flow(
+                filters,
+                source_module="database",
+                target_module="core",
+                operation_type=f"filter_validation_{entity_name}"
+            )
+        except Exception:
+            # Fallback to original validation
+            if not isinstance(filters, dict):
+                from src.core.exceptions import ValidationError
+                raise ValidationError(
+                    f"Filters must be dict for {entity_name}",
+                    field_name="filters",
+                    field_value=type(filters).__name__,
+                    expected_type="dict"
+                )
+
+            # Validate financial filter fields using standardized approach
+            from src.utils.data_flow_integrity import DataFlowTransformer
+
+            try:
+                # Create temporary holder for validation
+                class FilterHolder:
+                    def __init__(self, filter_dict):
+                        for key, value in filter_dict.items():
+                            setattr(self, key, value)
+
+                filter_holder = FilterHolder(filters)
+                DataFlowTransformer.apply_financial_field_transformation(filter_holder)
+            except Exception as validation_error:
+                from src.utils.data_flow_integrity import StandardizedErrorPropagator
+                StandardizedErrorPropagator.propagate_validation_error(
+                    validation_error,
+                    context=f"filter_validation_{entity_name}",
+                    module_source="database",
+                    field_name="filters",
+                    field_value=str(filters)
+                )
+
+    def _apply_consistent_filters(self, query: Any, model_class: type[T], filters: dict[str, Any]) -> Any:
+        """Apply filters with consistent transformation patterns."""
+        for field, value in filters.items():
+            if hasattr(model_class, field):
+                attr = getattr(model_class, field)
+                if isinstance(value, dict):
+                    # Handle range filters with consistent validation
+                    if "gte" in value:
+                        query = query.where(attr >= value["gte"])
+                    if "lte" in value:
+                        query = query.where(attr <= value["lte"])
+                    if "gt" in value:
+                        query = query.where(attr > value["gt"])
+                    if "lt" in value:
+                        query = query.where(attr < value["lt"])
+                else:
+                    query = query.where(attr == value)
+        return query
+
+    def _propagate_database_error(self, error: Exception, operation: str, entity_name: str) -> None:
+        """Propagate database errors with consistent patterns aligned with core module."""
+        from src.core.exceptions import DatabaseError, ValidationError
+
+        # Apply consistent error propagation patterns
+        if isinstance(error, ValidationError):
+            # Validation errors are re-raised as-is for consistency
+            logger.debug(
+                f"Validation error in database.{operation} for {entity_name} - propagating as validation error",
+                operation=operation,
+                entity_name=entity_name,
+                error_type=type(error).__name__
+            )
+        elif isinstance(error, DatabaseError):
+            # Database errors get additional context
+            logger.warning(
+                f"Database error in database.{operation} for {entity_name} - adding context",
+                operation=operation,
+                entity_name=entity_name,
+                error=str(error)
+            )
+        else:
+            # Generic errors get database-level error propagation
+            logger.error(
+                f"Database service error in database.{operation} for {entity_name} - wrapping in DatabaseError",
+                operation=operation,
+                entity_name=entity_name,
+                original_error=str(error)
+            )

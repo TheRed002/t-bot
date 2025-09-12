@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.database.models.state import (
-    StateBackup,
+StateBackup,
     StateCheckpoint,
     StateHistory,
     StateMetadata,

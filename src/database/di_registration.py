@@ -69,7 +69,7 @@ def _register_connection_manager(injector: DependencyInjector) -> None:
         else:
             from src.core.config import Config
 
-            config = Config().to_dict()
+            config = Config()
 
         return DatabaseConnectionManager(config)
 

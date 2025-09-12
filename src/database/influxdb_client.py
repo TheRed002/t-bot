@@ -87,7 +87,7 @@ class InfluxDBClientWrapper(BaseComponent):
         """
         if isinstance(value, Decimal):
             return float(value)
-        elif isinstance(value, int | float):
+        elif isinstance(value, (int, float)):
             return float(value)
         else:
             return float(value or 0)
@@ -108,7 +108,7 @@ class InfluxDBClientWrapper(BaseComponent):
 
         # Add fields
         for key, value in fields.items():
-            if isinstance(value, int | float):
+            if isinstance(value, (int, float)):
                 point.field(key, value)
             elif isinstance(value, bool):
                 point.field(key, value)

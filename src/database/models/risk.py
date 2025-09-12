@@ -10,6 +10,7 @@ from sqlalchemy import (
     CheckConstraint,
     Column,
     DateTime,
+    Enum as SQLEnum,
     ForeignKey,
     Index,
     Integer,
@@ -19,6 +20,13 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from src.core.types import (
+    AlertSeverity,
+    CircuitBreakerStatus,
+    CircuitBreakerType,
+    PositionSizeMethod,
+)
 
 from .base import Base, TimestampMixin
 
@@ -93,8 +101,8 @@ class RiskConfiguration(Base, TimestampMixin):
     emergency_stop_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
     # Additional configuration
-    position_sizing_method: Mapped[str] = mapped_column(
-        String(50), nullable=False, default="fixed_percentage"
+    position_sizing_method: Mapped[PositionSizeMethod] = mapped_column(
+        SQLEnum(PositionSizeMethod), nullable=False, default=PositionSizeMethod.FIXED_PERCENTAGE
     )
     risk_assessment_method: Mapped[str] = mapped_column(
         String(50), nullable=False, default="standard"
@@ -181,10 +189,6 @@ class RiskConfiguration(Base, TimestampMixin):
             name="check_risk_config_min_time_between_trades_non_negative",
         ),
         CheckConstraint(
-            "position_sizing_method IN ('fixed', 'fixed_percentage', 'kelly_criterion', 'risk_parity', 'volatility_adjusted', 'confidence_weighted', 'atr_based', 'optimal_f', 'equal_weight', 'custom')",
-            name="check_risk_config_position_sizing_method",
-        ),
-        CheckConstraint(
             "risk_assessment_method IN ('standard', 'monte_carlo', 'historical', 'parametric', 'custom')",
             name="check_risk_config_risk_assessment_method",
         ),
@@ -206,7 +210,7 @@ class CircuitBreakerConfig(Base, TimestampMixin):
         nullable=False,
         index=True,
     )
-    breaker_type: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    breaker_type: Mapped[CircuitBreakerType] = mapped_column(SQLEnum(CircuitBreakerType), nullable=False, index=True)
     name: Mapped[str] = mapped_column(String(100), nullable=False)
 
     # Trigger configuration
@@ -217,9 +221,9 @@ class CircuitBreakerConfig(Base, TimestampMixin):
 
     # Status and control
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
-    status: Mapped[str] = mapped_column(
-        String(20), nullable=False, default="active"
-    )  # active, triggered, cooldown, disabled
+    status: Mapped[CircuitBreakerStatus] = mapped_column(
+        SQLEnum(CircuitBreakerStatus), nullable=False, default=CircuitBreakerStatus.ACTIVE
+    )
     priority: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
 
     # Action configuration
@@ -273,14 +277,6 @@ class CircuitBreakerConfig(Base, TimestampMixin):
             "trigger_count >= 0", name="check_circuit_breaker_config_trigger_count_non_negative"
         ),
         CheckConstraint(
-            "status IN ('active', 'triggered', 'cooldown', 'disabled')",
-            name="check_circuit_breaker_config_status",
-        ),
-        CheckConstraint(
-            "breaker_type IN ('daily_loss_limit', 'drawdown_limit', 'volatility_spike', 'model_confidence', 'system_error_rate', 'correlation_spike')",
-            name="check_circuit_breaker_config_breaker_type",
-        ),
-        CheckConstraint(
             "action_type IN ('close_all_positions', 'block_new_orders', 'cancel_pending_orders', 'reduce_position_sizes', 'switch_to_safe_mode', 'manual_override')",
             name="check_circuit_breaker_config_action_type",
         ),
@@ -311,9 +307,9 @@ class CircuitBreakerEvent(Base, TimestampMixin):
     )
     trigger_value: Mapped[Decimal] = mapped_column(DECIMAL(20, 8), nullable=False)
     threshold_value: Mapped[Decimal] = mapped_column(DECIMAL(20, 8), nullable=False)
-    severity: Mapped[str] = mapped_column(
-        String(20), nullable=False, default="medium"
-    )  # low, medium, high, critical
+    severity: Mapped[AlertSeverity] = mapped_column(
+        SQLEnum(AlertSeverity), nullable=False, default=AlertSeverity.MEDIUM
+    )
 
     # Status and resolution
     status: Mapped[str] = mapped_column(
@@ -376,10 +372,6 @@ class CircuitBreakerEvent(Base, TimestampMixin):
             name="check_circuit_breaker_event_orders_cancelled_non_negative",
         ),
         CheckConstraint(
-            "severity IN ('low', 'medium', 'high', 'critical')",
-            name="check_circuit_breaker_event_severity",
-        ),
-        CheckConstraint(
             "status IN ('triggered', 'active', 'resolved', 'cancelled')",
             name="check_circuit_breaker_event_status",
         ),
@@ -413,9 +405,9 @@ class RiskViolation(Base, TimestampMixin):
     violation_type: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
     rule_name: Mapped[str] = mapped_column(String(100), nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False)
-    severity: Mapped[str] = mapped_column(
-        String(20), nullable=False, default="medium"
-    )  # low, medium, high, critical
+    severity: Mapped[AlertSeverity] = mapped_column(
+        SQLEnum(AlertSeverity), nullable=False, default=AlertSeverity.MEDIUM
+    )
 
     # Context
     symbol: Mapped[str | None] = mapped_column(String(20), nullable=True, index=True)
@@ -461,10 +453,6 @@ class RiskViolation(Base, TimestampMixin):
         Index("idx_risk_violation_symbol", "symbol"),
         Index("idx_risk_violation_strategy", "strategy_name"),
         Index("idx_risk_violation_bot_type", "bot_id", "violation_type"),
-        CheckConstraint(
-            "severity IN ('low', 'medium', 'high', 'critical')",
-            name="check_risk_violation_severity",
-        ),
         CheckConstraint(
             "violation_type IN ('position_limit', 'exposure_limit', 'drawdown_limit', 'correlation_limit', 'var_limit', 'concentration_limit', 'leverage_limit', 'liquidity_limit', 'trading_limit', 'custom')",
             name="check_risk_violation_type",

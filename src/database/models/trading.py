@@ -31,12 +31,12 @@ class Order(Base, AuditMixin, MetadataMixin):
     filled_quantity: Mapped[Decimal] = mapped_column(DECIMAL(20, 8), default=0)
     average_price: Mapped[Decimal | None] = mapped_column(DECIMAL(20, 8))
 
-    bot_id = Column(UUID(as_uuid=True), ForeignKey("bots.id", ondelete="CASCADE"), nullable=False)
+    bot_id = Column(UUID(as_uuid=True), ForeignKey("bots.id", ondelete="CASCADE"), nullable=False, index=True)
     strategy_id = Column(
-        UUID(as_uuid=True), ForeignKey("strategies.id", ondelete="CASCADE"), nullable=False
+        UUID(as_uuid=True), ForeignKey("strategies.id", ondelete="CASCADE"), nullable=False, index=True
     )
     position_id = Column(
-        UUID(as_uuid=True), ForeignKey("positions.id", ondelete="SET NULL"), nullable=True
+        UUID(as_uuid=True), ForeignKey("positions.id", ondelete="SET NULL"), nullable=True, index=True
     )
 
     # Relationships
@@ -143,9 +143,9 @@ class Position(Base, AuditMixin, MetadataMixin):
     realized_pnl: Mapped[Decimal] = mapped_column(DECIMAL(20, 8), default=0)
     unrealized_pnl: Mapped[Decimal] = mapped_column(DECIMAL(20, 8), default=0)
 
-    bot_id = Column(UUID(as_uuid=True), ForeignKey("bots.id", ondelete="CASCADE"), nullable=False)
+    bot_id = Column(UUID(as_uuid=True), ForeignKey("bots.id", ondelete="CASCADE"), nullable=False, index=True)
     strategy_id = Column(
-        UUID(as_uuid=True), ForeignKey("strategies.id", ondelete="CASCADE"), nullable=False
+        UUID(as_uuid=True), ForeignKey("strategies.id", ondelete="CASCADE"), nullable=False, index=True
     )
 
     # Risk management
@@ -248,7 +248,7 @@ class OrderFill(Base, TimestampMixin):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     order_id = Column(
-        UUID(as_uuid=True), ForeignKey("orders.id", ondelete="CASCADE"), nullable=False
+        UUID(as_uuid=True), ForeignKey("orders.id", ondelete="CASCADE"), nullable=False, index=True
     )
     exchange_fill_id = Column(String(255))
 
@@ -302,13 +302,13 @@ class Trade(Base, TimestampMixin, MetadataMixin):
     side = Column(String(10), nullable=False)
 
     entry_order_id = Column(
-        UUID(as_uuid=True), ForeignKey("orders.id", ondelete="SET NULL"), nullable=True
+        UUID(as_uuid=True), ForeignKey("orders.id", ondelete="SET NULL"), nullable=True, index=True
     )
     exit_order_id = Column(
-        UUID(as_uuid=True), ForeignKey("orders.id", ondelete="SET NULL"), nullable=True
+        UUID(as_uuid=True), ForeignKey("orders.id", ondelete="SET NULL"), nullable=True, index=True
     )
     position_id = Column(
-        UUID(as_uuid=True), ForeignKey("positions.id", ondelete="CASCADE"), nullable=False
+        UUID(as_uuid=True), ForeignKey("positions.id", ondelete="CASCADE"), nullable=False, index=True
     )
 
     quantity: Mapped[Decimal] = mapped_column(DECIMAL(20, 8), nullable=False)
@@ -322,16 +322,16 @@ class Trade(Base, TimestampMixin, MetadataMixin):
     fees: Mapped[Decimal] = mapped_column(DECIMAL(20, 8), default=0)
     net_pnl: Mapped[Decimal | None] = mapped_column(DECIMAL(20, 8))
 
-    bot_id = Column(UUID(as_uuid=True), ForeignKey("bots.id", ondelete="CASCADE"), nullable=False)
+    bot_id = Column(UUID(as_uuid=True), ForeignKey("bots.id", ondelete="CASCADE"), nullable=False, index=True)
     strategy_id = Column(
-        UUID(as_uuid=True), ForeignKey("strategies.id", ondelete="CASCADE"), nullable=False
+        UUID(as_uuid=True), ForeignKey("strategies.id", ondelete="CASCADE"), nullable=False, index=True
     )
 
     # Relationships
     bot = relationship("Bot", back_populates="trades")
     strategy = relationship("Strategy", back_populates="trades")
-    entry_order = relationship("Order", foreign_keys=[entry_order_id])
-    exit_order = relationship("Order", foreign_keys=[exit_order_id])
+    entry_order = relationship("Order", foreign_keys=[entry_order_id], overlaps="orders")
+    exit_order = relationship("Order", foreign_keys=[exit_order_id], overlaps="orders")
     position = relationship("Position", back_populates="trades")
     execution_audit_logs = relationship(
         "ExecutionAuditLog", foreign_keys="ExecutionAuditLog.trade_id", back_populates="trade"

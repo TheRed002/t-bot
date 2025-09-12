@@ -17,57 +17,6 @@ from src.database.interfaces import UnitOfWorkFactoryInterface
 
 # Use TYPE_CHECKING to avoid circular imports
 if TYPE_CHECKING:
-    from src.database.repository.audit import (
-        CapitalAuditLogRepository,
-        ExecutionAuditLogRepository,
-        PerformanceAuditLogRepository,
-        RiskAuditLogRepository,
-    )
-    from src.database.repository.bot import (
-        BotLogRepository,
-        BotRepository,
-        SignalRepository,
-        StrategyRepository,
-    )
-    from src.database.repository.bot_instance import BotInstanceRepository
-    from src.database.repository.capital import (
-        CapitalAllocationRepository,
-        CurrencyExposureRepository,
-        ExchangeAllocationRepository,
-        FundFlowRepository,
-    )
-    from src.database.repository.data import (
-        DataPipelineRepository,
-        DataQualityRepository,
-        FeatureRepository,
-    )
-    from src.database.repository.market_data import MarketDataRepository
-    from src.database.repository.ml import (
-        MLModelMetadataRepository,
-        MLPredictionRepository,
-        MLRepository,
-        MLTrainingJobRepository,
-    )
-    from src.database.repository.state import (
-        StateBackupRepository,
-        StateCheckpointRepository,
-        StateHistoryRepository,
-        StateMetadataRepository,
-        StateSnapshotRepository,
-    )
-    from src.database.repository.system import (
-        AlertRepository,
-        AuditLogRepository,
-        BalanceSnapshotRepository,
-        PerformanceMetricsRepository,
-    )
-    from src.database.repository.trading import (
-        OrderFillRepository,
-        OrderRepository,
-        PositionRepository,
-        TradeRepository,
-    )
-    from src.database.repository.user import UserRepository
     from src.database.services.trading_service import TradingService
 
 # Import error handling from P-002A
@@ -289,17 +238,22 @@ class UnitOfWork:
         self.close()
 
     @retry(max_attempts=3, delay=0.5)
-    def commit(self):
-        """Commit transaction with retry logic."""
+    def commit(self, processing_mode: str = "stream"):
+        """
+        Commit transaction with retry logic and consistent processing mode validation.
+        
+        Args:
+            processing_mode: Processing mode ("stream" for real-time, "batch" for transactional)
+        """
         if self.session:
             try:
                 self.session.commit()
-                self._logger.debug("Transaction committed")
+                self._logger.debug(f"Transaction committed with processing_mode: {processing_mode}")
             except (IntegrityError, OperationalError) as e:
                 self._logger.warning(f"Database transaction error: {e}")
                 self.rollback()
                 if self.error_handler and self.config:
-                    # Handle deadlock and connection issues
+                    # Handle deadlock and connection issues with consistent error propagation
                     error_context = self.error_handler.create_error_context(
                         e,
                         "unit_of_work",
@@ -314,14 +268,23 @@ class UnitOfWork:
                         severity=error_context.severity.value,
                         component=error_context.component,
                         operation=error_context.operation,
+                        processing_mode=processing_mode,
+                        data_format="transaction_error_v1"
                     )
                 raise DatabaseQueryError(
                     "Database transaction failed",
                     suggested_action="Check data constraints and retry",
+                    details={
+                        "processing_mode": processing_mode,
+                        "data_format": "database_error_v1",
+                        "operation_type": "commit"
+                    }
                 ) from e
             except Exception as e:
                 self._logger.error(f"Commit failed: {e}")
                 self.rollback()
+                # Apply consistent error propagation
+                self._propagate_uow_error(e, "commit", processing_mode)
                 raise
 
     def rollback(self):
@@ -401,12 +364,43 @@ class UnitOfWork:
                 suggested_action="Check system state and contact support",
             ) from e
 
+    def _propagate_uow_error(self, error: Exception, operation: str, processing_mode: str = "batch") -> None:
+        """Propagate UnitOfWork errors with consistent patterns aligned with core module."""
+        from src.core.exceptions import DatabaseError, ValidationError
+
+        # Apply consistent error propagation patterns
+        if isinstance(error, ValidationError):
+            # Validation errors are re-raised as-is for consistency
+            self._logger.debug(
+                f"Validation error in uow.{operation} - propagating as validation error",
+                operation=operation,
+                processing_mode=processing_mode,
+                error_type=type(error).__name__
+            )
+        elif isinstance(error, DatabaseError):
+            # Database errors get additional UoW context
+            self._logger.warning(
+                f"Database error in uow.{operation} - adding UoW context",
+                operation=operation,
+                processing_mode=processing_mode,
+                error=str(error)
+            )
+        else:
+            # Generic errors get UoW-level error propagation
+            self._logger.error(
+                f"UoW error in uow.{operation} - wrapping in DatabaseError",
+                operation=operation,
+                processing_mode=processing_mode,
+                original_error=str(error)
+            )
+
 
 class AsyncUnitOfWork:
     """
-    Async Unit of Work pattern for managing database transactions.
+    Async Unit of Work pattern for managing database transactions with service layer pattern.
 
     This provides proper async/await support for database operations.
+    Controllers should only interact with services, not repositories directly.
     """
 
     def __init__(self, async_session_factory, dependency_injector=None):
@@ -415,254 +409,102 @@ class AsyncUnitOfWork:
 
         Args:
             async_session_factory: Injected async SQLAlchemy session factory
-            dependency_injector: Optional dependency injector for repository creation
+            dependency_injector: Optional dependency injector for service creation
         """
         self.async_session_factory = async_session_factory
         self.session: AsyncSession | None = None
         self._logger = logger
         self._dependency_injector = dependency_injector
 
-        # Core repositories
-        self.users: UserRepository | None = None
-        self.bots: BotRepository | None = None
-        self.bot_instances: BotInstanceRepository | None = None
-        self.bot_logs: BotLogRepository | None = None
-        self.strategies: StrategyRepository | None = None
-        self.signals: SignalRepository | None = None
+        # Services layer - controllers interact with these, not repositories
+        self.trading_service: TradingService | None = None
 
-        # Trading repositories
-        self.orders: OrderRepository | None = None
-        self.positions: PositionRepository | None = None
-        self.trades: TradeRepository | None = None
-        self.fills: OrderFillRepository | None = None
+        # Repository access for service layer only - not exposed to controllers
+        self._repositories: dict[str, Any] = {}
 
-        # Audit repositories
-        self.capital_audit_logs: CapitalAuditLogRepository | None = None
-        self.execution_audit_logs: ExecutionAuditLogRepository | None = None
-        self.performance_audit_logs: PerformanceAuditLogRepository | None = None
-        self.risk_audit_logs: RiskAuditLogRepository | None = None
-
-        # Capital management repositories
-        self.capital_allocations: CapitalAllocationRepository | None = None
-        self.fund_flows: FundFlowRepository | None = None
-        self.currency_exposures: CurrencyExposureRepository | None = None
-        self.exchange_allocations: ExchangeAllocationRepository | None = None
-
-        # Data repositories
-        self.features: FeatureRepository | None = None
-        self.data_quality: DataQualityRepository | None = None
-        self.data_pipelines: DataPipelineRepository | None = None
-        self.market_data: MarketDataRepository | None = None
-
-        # ML repositories
-        self.ml: MLRepository | None = None
-        self.ml_predictions: MLPredictionRepository | None = None
-        self.ml_models: MLModelMetadataRepository | None = None
-        self.ml_training_jobs: MLTrainingJobRepository | None = None
-
-        # State management repositories
-        self.state_snapshots: StateSnapshotRepository | None = None
-        self.state_checkpoints: StateCheckpointRepository | None = None
-        self.state_history: StateHistoryRepository | None = None
-        self.state_metadata: StateMetadataRepository | None = None
-        self.state_backups: StateBackupRepository | None = None
-
-        # System repositories
-        self.alerts: AlertRepository | None = None
-        self.audit_logs: AuditLogRepository | None = None
-        self.performance_metrics: PerformanceMetricsRepository | None = None
-        self.balance_snapshots: BalanceSnapshotRepository | None = None
+        # Flag to prevent direct repository access
+        self._repositories_hidden = False
 
     async def __aenter__(self):
-        """Async enter context manager."""
+        """Async enter context manager and initialize services."""
         self.session = self.async_session_factory()
 
-        # Initialize repositories using factory pattern with dependency injection
+        # Initialize services using dependency injection pattern
         if self._dependency_injector:
-            # Use dependency injection for repository creation
-            await self._create_repositories_via_di()
+            await self._create_services_via_di()
         else:
-            # Fallback to direct instantiation
-            self._create_repositories_direct()
+            await self._create_services_direct()
 
+        # Hide repositories from controllers - only services should be accessible
+        self._hide_repositories()
         return self
 
-    async def _create_repositories_via_di(self):
-        """Create repositories using dependency injection."""
+    async def _create_services_via_di(self):
+        """Create services using dependency injection with repository creation."""
         try:
-            # Core repositories
-            self.users = self._create_repository(UserRepository)
-            self.bots = self._create_repository(BotRepository)
-            self.bot_instances = self._create_repository(BotInstanceRepository)
-            self.bot_logs = self._create_repository(BotLogRepository)
-            self.strategies = self._create_repository(StrategyRepository)
-            self.signals = self._create_repository(SignalRepository)
+            # Create repositories internally for service layer
+            await self._create_internal_repositories()
 
-            # Trading repositories
-            self.orders = self._create_repository(OrderRepository)
-            self.positions = self._create_repository(PositionRepository)
-            self.trades = self._create_repository(TradeRepository)
-            self.fills = self._create_repository(OrderFillRepository)
-
-            # Audit repositories
-            self.capital_audit_logs = self._create_repository(CapitalAuditLogRepository)
-            self.execution_audit_logs = self._create_repository(ExecutionAuditLogRepository)
-            self.performance_audit_logs = self._create_repository(PerformanceAuditLogRepository)
-            self.risk_audit_logs = self._create_repository(RiskAuditLogRepository)
-
-            # Capital management repositories
-            self.capital_allocations = self._create_repository(CapitalAllocationRepository)
-            self.fund_flows = self._create_repository(FundFlowRepository)
-            self.currency_exposures = self._create_repository(CurrencyExposureRepository)
-            self.exchange_allocations = self._create_repository(ExchangeAllocationRepository)
-
-            # Data repositories
-            self.features = self._create_repository(FeatureRepository)
-            self.data_quality = self._create_repository(DataQualityRepository)
-            self.data_pipelines = self._create_repository(DataPipelineRepository)
-            self.market_data = self._create_repository(MarketDataRepository)
-
-            # ML repositories
-            self.ml = self._create_repository(MLRepository)
-            self.ml_predictions = self._create_repository(MLPredictionRepository)
-            self.ml_models = self._create_repository(MLModelMetadataRepository)
-            self.ml_training_jobs = self._create_repository(MLTrainingJobRepository)
-
-            # State management repositories
-            self.state_snapshots = self._create_repository(StateSnapshotRepository)
-            self.state_checkpoints = self._create_repository(StateCheckpointRepository)
-            self.state_history = self._create_repository(StateHistoryRepository)
-            self.state_metadata = self._create_repository(StateMetadataRepository)
-            self.state_backups = self._create_repository(StateBackupRepository)
-
-            # System repositories
-            self.alerts = self._create_repository(AlertRepository)
-            self.audit_logs = self._create_repository(AuditLogRepository)
-            self.performance_metrics = self._create_repository(PerformanceMetricsRepository)
-            self.balance_snapshots = self._create_repository(BalanceSnapshotRepository)
+            # Create services that use repositories
+            try:
+                self.trading_service = self._create_service("TradingService")
+            except Exception as e:
+                self._logger.warning(f"Failed to create TradingService via DI: {e}")
+                self.trading_service = None
 
         except Exception as e:
-            self._logger.warning(f"Failed to create repositories via DI: {e}")
+            self._logger.warning(f"Failed to create services via DI: {e}")
             # Fallback to direct creation
-            self._create_repositories_direct()
+            await self._create_services_direct()
 
-    def _create_repository(self, repository_class):
-        """Create repository using dependency injection with fallback."""
+    def _create_service(self, service_name: str):
+        """Create service using dependency injection."""
+        return self._dependency_injector.resolve(service_name)
+
+    async def _create_services_direct(self):
+        """Create services directly without dependency injection."""
+        # Create repositories internally for service layer
+        await self._create_internal_repositories()
+
+        # Create services that use repositories
         try:
-            repo_name = repository_class.__name__
-            return self._dependency_injector.resolve(repo_name)
-        except (ImportError, AttributeError, KeyError, TypeError) as e:
-            logger.debug(
-                f"DI resolution failed for {repository_class.__name__}, "
-                f"using direct instantiation: {e}"
-            )
-            return repository_class(self.session)
+            from src.database.services.trading_service import TradingService
 
-    def _create_repositories_direct(self):
-        """Create repositories directly without dependency injection."""
-        # Import repositories at runtime to avoid circular imports
-        from src.database.repository.audit import (
-            CapitalAuditLogRepository,
-            ExecutionAuditLogRepository,
-            PerformanceAuditLogRepository,
-            RiskAuditLogRepository,
-        )
-        from src.database.repository.bot import (
-            BotLogRepository,
-            BotRepository,
-            SignalRepository,
-            StrategyRepository,
-        )
-        from src.database.repository.bot_instance import BotInstanceRepository
-        from src.database.repository.capital import (
-            CapitalAllocationRepository,
-            CurrencyExposureRepository,
-            ExchangeAllocationRepository,
-            FundFlowRepository,
-        )
-        from src.database.repository.data import (
-            DataPipelineRepository,
-            DataQualityRepository,
-            FeatureRepository,
-        )
-        from src.database.repository.market_data import MarketDataRepository
-        from src.database.repository.ml import (
-            MLModelMetadataRepository,
-            MLPredictionRepository,
-            MLRepository,
-            MLTrainingJobRepository,
-        )
-        from src.database.repository.state import (
-            StateBackupRepository,
-            StateCheckpointRepository,
-            StateHistoryRepository,
-            StateMetadataRepository,
-            StateSnapshotRepository,
-        )
-        from src.database.repository.system import (
-            AlertRepository,
-            AuditLogRepository,
-            BalanceSnapshotRepository,
-            PerformanceMetricsRepository,
-        )
+            self.trading_service = TradingService(
+                order_repo=self._repositories["orders"],
+                position_repo=self._repositories["positions"],
+                trade_repo=self._repositories["trades"],
+            )
+        except ImportError:
+            self._logger.warning("TradingService not found, skipping service creation")
+            self.trading_service = None
+
+    async def _create_internal_repositories(self):
+        """Create repositories internally for service layer use only."""
+        # Import repositories here to avoid circular imports
         from src.database.repository.trading import (
-            OrderFillRepository,
             OrderRepository,
             PositionRepository,
             TradeRepository,
         )
-        from src.database.repository.user import UserRepository
 
-        # Initialize all repositories with async session
-        self.users = UserRepository(self.session)
-        self.bots = BotRepository(self.session)
-        self.bot_instances = BotInstanceRepository(self.session)
-        self.bot_logs = BotLogRepository(self.session)
-        self.strategies = StrategyRepository(self.session)
-        self.signals = SignalRepository(self.session)
+        # Create repositories for internal service use - not exposed to controllers
+        self._repositories["orders"] = OrderRepository(self.session)
+        self._repositories["positions"] = PositionRepository(self.session)
+        self._repositories["trades"] = TradeRepository(self.session)
 
-        # Initialize trading repositories
-        self.orders = OrderRepository(self.session)
-        self.positions = PositionRepository(self.session)
-        self.trades = TradeRepository(self.session)
-        self.fills = OrderFillRepository(self.session)
+    def _hide_repositories(self) -> None:
+        """Hide repositories from controllers to enforce service layer pattern."""
+        self._repositories_hidden = True
 
-        # Initialize audit repositories
-        self.capital_audit_logs = CapitalAuditLogRepository(self.session)
-        self.execution_audit_logs = ExecutionAuditLogRepository(self.session)
-        self.performance_audit_logs = PerformanceAuditLogRepository(self.session)
-        self.risk_audit_logs = RiskAuditLogRepository(self.session)
-
-        # Initialize capital management repositories
-        self.capital_allocations = CapitalAllocationRepository(self.session)
-        self.fund_flows = FundFlowRepository(self.session)
-        self.currency_exposures = CurrencyExposureRepository(self.session)
-        self.exchange_allocations = ExchangeAllocationRepository(self.session)
-
-        # Initialize data repositories
-        self.features = FeatureRepository(self.session)
-        self.data_quality = DataQualityRepository(self.session)
-        self.data_pipelines = DataPipelineRepository(self.session)
-        self.market_data = MarketDataRepository(self.session)
-
-        # Initialize ML repositories
-        self.ml = MLRepository(self.session)
-        self.ml_predictions = MLPredictionRepository(self.session)
-        self.ml_models = MLModelMetadataRepository(self.session)
-        self.ml_training_jobs = MLTrainingJobRepository(self.session)
-
-        # Initialize state management repositories
-        self.state_snapshots = StateSnapshotRepository(self.session)
-        self.state_checkpoints = StateCheckpointRepository(self.session)
-        self.state_history = StateHistoryRepository(self.session)
-        self.state_metadata = StateMetadataRepository(self.session)
-        self.state_backups = StateBackupRepository(self.session)
-
-        # Initialize system repositories
-        self.alerts = AlertRepository(self.session)
-        self.audit_logs = AuditLogRepository(self.session)
-        self.performance_metrics = PerformanceMetricsRepository(self.session)
-        self.balance_snapshots = BalanceSnapshotRepository(self.session)
+    def __getattr__(self, name):
+        """Prevent direct repository access by controllers."""
+        if getattr(self, "_repositories_hidden", False):
+            raise AttributeError(
+                f"Direct repository access is not allowed. Use service layer instead. "
+                f"Attempted to access: {name}"
+            )
+        raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         """Async exit context manager with guaranteed resource cleanup."""
@@ -725,14 +567,21 @@ class AsyncUnitOfWork:
                 suggested_action="Monitor connection pool usage",
             ) from close_error
 
-    async def commit(self):
-        """Async commit transaction."""
+    async def commit(self, processing_mode: str = "stream"):
+        """
+        Async commit transaction with consistent processing mode validation.
+        
+        Args:
+            processing_mode: Processing mode ("stream" for real-time, "batch" for transactional)
+        """
         if self.session:
             try:
                 await self.session.commit()
-                self._logger.debug("Transaction committed")
+                self._logger.debug(f"Async transaction committed with processing_mode: {processing_mode}")
             except Exception as e:
-                self._logger.error(f"Commit failed: {e}")
+                self._logger.error(f"Async commit failed: {e}")
+                # Apply consistent error propagation
+                await self._propagate_async_uow_error(e, "commit", processing_mode)
                 raise
 
     async def rollback(self):
@@ -758,42 +607,11 @@ class AsyncUnitOfWork:
                 # Always clear references, even if close fails
                 self.session = None
 
-                # Clear all repository references
-                self.users = None
-                self.bots = None
-                self.bot_instances = None
-                self.bot_logs = None
-                self.strategies = None
-                self.signals = None
-                self.orders = None
-                self.positions = None
-                self.trades = None
-                self.fills = None
-                self.capital_audit_logs = None
-                self.execution_audit_logs = None
-                self.performance_audit_logs = None
-                self.risk_audit_logs = None
-                self.capital_allocations = None
-                self.fund_flows = None
-                self.currency_exposures = None
-                self.exchange_allocations = None
-                self.features = None
-                self.data_quality = None
-                self.data_pipelines = None
-                self.market_data = None
-                self.ml = None
-                self.ml_predictions = None
-                self.ml_models = None
-                self.ml_training_jobs = None
-                self.state_snapshots = None
-                self.state_checkpoints = None
-                self.state_history = None
-                self.state_metadata = None
-                self.state_backups = None
-                self.alerts = None
-                self.audit_logs = None
-                self.performance_metrics = None
-                self.balance_snapshots = None
+                # Clear service references
+                self.trading_service = None
+
+                # Clear internal repository references
+                self._repositories.clear()
 
     async def refresh(self, entity):
         """Async refresh entity from database."""
@@ -835,6 +653,36 @@ class AsyncUnitOfWork:
                     "Critical database error",
                     suggested_action="Check system state and contact support",
                 ) from e
+
+    async def _propagate_async_uow_error(self, error: Exception, operation: str, processing_mode: str = "batch") -> None:
+        """Propagate async UnitOfWork errors with consistent patterns aligned with core module."""
+        from src.core.exceptions import DatabaseError, ValidationError
+
+        # Apply consistent error propagation patterns
+        if isinstance(error, ValidationError):
+            # Validation errors are re-raised as-is for consistency
+            self._logger.debug(
+                f"Validation error in async_uow.{operation} - propagating as validation error",
+                operation=operation,
+                processing_mode=processing_mode,
+                error_type=type(error).__name__
+            )
+        elif isinstance(error, DatabaseError):
+            # Database errors get additional async UoW context
+            self._logger.warning(
+                f"Database error in async_uow.{operation} - adding async UoW context",
+                operation=operation,
+                processing_mode=processing_mode,
+                error=str(error)
+            )
+        else:
+            # Generic errors get async UoW-level error propagation
+            self._logger.error(
+                f"Async UoW error in async_uow.{operation} - wrapping in DatabaseError",
+                operation=operation,
+                processing_mode=processing_mode,
+                original_error=str(error)
+            )
 
 
 class UnitOfWorkFactory(UnitOfWorkFactoryInterface):
@@ -901,36 +749,21 @@ class UnitOfWorkExample:
         self._logger = logger
 
     async def example_transaction(self, entity_data: dict):
-        """Example transaction pattern."""
+        """Example transaction pattern using services."""
         uow = self.uow_factory.create_async()
         async with uow:
-            # Example: Create related entities in single transaction
-            # This is a template - actual business logic should be in services
+            # Example: Use services for business logic
+            if uow.trading_service:
+                trade_result = await uow.trading_service.create_trade(entity_data)
+                return trade_result
+            return None
 
-            # Step 1: Create primary entity
-            primary_entity = await uow.bots.create(entity_data)
-
-            # Step 2: Create related entities
-            # (Implementation would depend on specific business requirements)
-
-            # Transaction commits automatically on context exit
-            return primary_entity
-
-    async def example_multi_repository_operation(self, entity_id: str):
-        """Example multi-repository operation."""
+    async def example_multi_service_operation(self, entity_id: str):
+        """Example multi-service operation."""
         uow = self.uow_factory.create_async()
         async with uow:
-            # Example: Update multiple related entities
-            # This is a template - actual business logic should be in services
-
-            # Step 1: Get primary entity
-            primary_entity = await uow.bots.get(entity_id)
-
-            if primary_entity:
-                # Step 2: Update related entities
-                # (Implementation would depend on specific business requirements)
-                await uow.bots.update(primary_entity)
-
-                return True
-
-            return False
+            # Example: Use services for coordinated operations
+            if uow.trading_service:
+                statistics = await uow.trading_service.get_trade_statistics(entity_id)
+                return statistics
+            return None

@@ -60,17 +60,7 @@ class DatabaseRepository(CoreBaseRepository):
             return entity
         except Exception as e:
             await self.session.rollback()
-            # Use consistent error propagation patterns
-            try:
-                from src.utils.messaging_patterns import ErrorPropagationMixin
-
-                error_propagator = ErrorPropagationMixin()
-                error_propagator.propagate_database_error(
-                    e, f"repository_{self.model.__name__.lower()}_create"
-                )
-            except ImportError:
-                # Fallback to direct raise if pattern not available
-                raise RepositoryError(f"Failed to create {self.model.__name__}: {e}") from e
+            raise RepositoryError(f"Failed to create {self.model.__name__}: {e}") from e
 
     async def _get_entity_by_id(self, entity_id: Any) -> Any | None:
         """Get entity by ID from database."""
@@ -96,17 +86,7 @@ class DatabaseRepository(CoreBaseRepository):
             return merged
         except Exception as e:
             await self.session.rollback()
-            # Use consistent error propagation patterns
-            try:
-                from src.utils.messaging_patterns import ErrorPropagationMixin
-
-                error_propagator = ErrorPropagationMixin()
-                error_propagator.propagate_database_error(
-                    e, f"repository_{self.model.__name__.lower()}_update"
-                )
-            except ImportError:
-                # Fallback to direct raise if pattern not available
-                raise RepositoryError(f"Failed to update {self.model.__name__}: {e}") from e
+            raise RepositoryError(f"Failed to update {self.model.__name__}: {e}") from e
 
     async def _delete_entity(self, entity_id) -> bool:
         """Delete entity from database."""
@@ -119,17 +99,7 @@ class DatabaseRepository(CoreBaseRepository):
             return False
         except Exception as e:
             await self.session.rollback()
-            # Use consistent error propagation patterns
-            try:
-                from src.utils.messaging_patterns import ErrorPropagationMixin
-
-                error_propagator = ErrorPropagationMixin()
-                error_propagator.propagate_database_error(
-                    e, f"repository_{self.model.__name__.lower()}_delete"
-                )
-            except ImportError:
-                # Fallback to direct raise if pattern not available
-                raise RepositoryError(f"Failed to delete {self.model.__name__}: {e}") from e
+            raise RepositoryError(f"Failed to delete {self.model.__name__}: {e}") from e
 
     async def _list_entities(
         self,
@@ -316,36 +286,16 @@ class DatabaseRepository(CoreBaseRepository):
 
     def _validate_entity_at_boundary(self, entity: Any, operation: str) -> None:
         """Validate entity at database module boundary."""
-        try:
-            # Use consistent boundary validation patterns
-            from src.utils.messaging_patterns import BoundaryValidator
+        if entity is None:
+            raise ValueError(f"Cannot {operation} None entity")
 
-            # Convert entity to dict for validation if needed
-            if hasattr(entity, "__dict__"):
-                entity_dict = {k: v for k, v in entity.__dict__.items() if not k.startswith("_")}
-            else:
-                entity_dict = entity
-
-            # Apply database-specific boundary validation
-            BoundaryValidator.validate_database_entity(entity_dict, operation)
-
-        except ImportError:
-            # Fallback: basic validation if pattern not available
-            if entity is None:
-                raise ValueError(f"Cannot {operation} None entity")
-
-            # Basic validation for financial fields if present
-            financial_fields = ["price", "quantity", "volume", "value"]
-            for field in financial_fields:
-                if hasattr(entity, field):
-                    value = getattr(entity, field)
-                    if value is not None and value < 0:
-                        raise ValueError(f"Financial field {field} cannot be negative")
-
-        except Exception as e:
-            logger.error(f"Entity boundary validation failed for {operation}: {e}")
-            # Allow operation to continue with warning for non-critical validation failures
-            logger.warning(f"Proceeding with {operation} despite validation warning")
+        # Basic validation for financial fields if present
+        financial_fields = ["price", "quantity", "volume", "value"]
+        for field in financial_fields:
+            if hasattr(entity, field):
+                value = getattr(entity, field)
+                if value is not None and value < 0:
+                    raise ValueError(f"Financial field {field} cannot be negative")
 
 
 # Backward compatibility aliases

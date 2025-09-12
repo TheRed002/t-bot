@@ -63,7 +63,7 @@ class DatabaseServiceInterface(ABC):
 
     @abstractmethod
     async def count_entities(
-        self, model_class: type[T], filters: dict[str, Any] | None = None
+        self, model_class: type[T] | None = None, filters: dict[str, Any] | None = None
     ) -> int:
         """Count entities matching filters."""
         pass
@@ -323,7 +323,7 @@ class MarketDataServiceInterface(ABC):
 
     @abstractmethod
     async def get_historical_data(
-        self, symbol: str, start_time: datetime, end_time: datetime
+        self, symbol: str, start_time: datetime, end_time: datetime, timeframe: str = "1m"
     ) -> list[dict[str, Any]]:
         """Get historical market data."""
         pass

@@ -76,10 +76,33 @@ class StateSnapshot(Base, AuditMixin, MetadataMixin, SoftDeleteMixin):
     retention_days = Column(Integer, nullable=True)  # Auto-delete after N days
     is_protected = Column(Boolean, default=False, nullable=False)  # Prevent auto-deletion
 
+    # Foreign key relationships for business context
+    bot_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("bots.id", ondelete="SET NULL", onupdate="CASCADE"),
+        nullable=True,
+        index=True
+    )
+    strategy_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("strategies.id", ondelete="SET NULL", onupdate="CASCADE"),
+        nullable=True,
+        index=True
+    )
+    position_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("positions.id", ondelete="SET NULL", onupdate="CASCADE"),
+        nullable=True,
+        index=True
+    )
+
     # Relationships
     checkpoints = relationship(
         "StateCheckpoint", back_populates="snapshot", cascade="all, delete-orphan"
     )
+    bot = relationship("Bot", foreign_keys="StateSnapshot.bot_id")
+    strategy = relationship("Strategy", foreign_keys="StateSnapshot.strategy_id")
+    position = relationship("Position", foreign_keys="StateSnapshot.position_id")
 
     # Indexes and constraints for performance and data integrity
     __table_args__ = (
@@ -89,6 +112,11 @@ class StateSnapshot(Base, AuditMixin, MetadataMixin, SoftDeleteMixin):
         Index("ix_state_snapshots_checksum", "state_checksum"),
         Index("ix_state_snapshots_protected", "is_protected"),
         Index("ix_state_snapshots_type_status", "snapshot_type", "status"),
+        Index("ix_state_snapshots_bot_id", "bot_id"),
+        Index("ix_state_snapshots_strategy_id", "strategy_id"),
+        Index("ix_state_snapshots_position_id", "position_id"),
+        Index("ix_state_snapshots_bot_created", "bot_id", "created_at"),
+        Index("ix_state_snapshots_strategy_created", "strategy_id", "created_at"),
         UniqueConstraint("state_checksum", name="uq_state_snapshots_checksum"),
         CheckConstraint("raw_size_bytes >= 0", name="ck_state_snapshots_raw_size_positive"),
         CheckConstraint(
@@ -168,6 +196,9 @@ class StateCheckpoint(Base, AuditMixin, MetadataMixin):
     previous_checkpoint = relationship(
         "StateCheckpoint", remote_side="StateCheckpoint.checkpoint_id"
     )
+    bot = relationship("Bot", foreign_keys="StateCheckpoint.bot_id")
+    strategy = relationship("Strategy", foreign_keys="StateCheckpoint.strategy_id")
+    order = relationship("Order", foreign_keys="StateCheckpoint.order_id")
 
     # State changes (delta from base or previous checkpoint)
     state_changes = Column(JSONB, nullable=False)  # Only changed states
@@ -175,6 +206,26 @@ class StateCheckpoint(Base, AuditMixin, MetadataMixin):
     # Change tracking
     changes_count = Column(Integer, nullable=False, default=0)
     states_affected = Column(JSONB, nullable=True)  # List of state IDs affected
+
+    # Foreign key relationships for business context
+    bot_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("bots.id", ondelete="SET NULL", onupdate="CASCADE"),
+        nullable=True,
+        index=True
+    )
+    strategy_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("strategies.id", ondelete="SET NULL", onupdate="CASCADE"),
+        nullable=True,
+        index=True
+    )
+    order_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("orders.id", ondelete="SET NULL", onupdate="CASCADE"),
+        nullable=True,
+        index=True
+    )
 
     # Storage info
     size_bytes = Column(BigInteger, nullable=False, default=0)
@@ -199,6 +250,10 @@ class StateCheckpoint(Base, AuditMixin, MetadataMixin):
         Index("ix_state_checkpoints_type", "checkpoint_type"),
         Index("ix_state_checkpoints_status", "status"),
         Index("ix_state_checkpoints_type_status", "checkpoint_type", "status"),
+        Index("ix_state_checkpoints_bot_id", "bot_id"),
+        Index("ix_state_checkpoints_strategy_id", "strategy_id"),
+        Index("ix_state_checkpoints_order_id", "order_id"),
+        Index("ix_state_checkpoints_bot_created", "bot_id", "created_at"),
         UniqueConstraint("changes_checksum", name="uq_state_checkpoints_checksum"),
         CheckConstraint("changes_count >= 0", name="ck_state_checkpoints_changes_count_positive"),
         CheckConstraint("size_bytes >= 0", name="ck_state_checkpoints_size_positive"),
@@ -265,6 +320,38 @@ class StateHistory(Base, TimestampMixin, MetadataMixin):
         default="medium",
     )
 
+    # Foreign key relationships for business context
+    bot_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("bots.id", ondelete="SET NULL", onupdate="CASCADE"),
+        nullable=True,
+        index=True
+    )
+    strategy_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("strategies.id", ondelete="SET NULL", onupdate="CASCADE"),
+        nullable=True,
+        index=True
+    )
+    order_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("orders.id", ondelete="SET NULL", onupdate="CASCADE"),
+        nullable=True,
+        index=True
+    )
+    position_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("positions.id", ondelete="SET NULL", onupdate="CASCADE"),
+        nullable=True,
+        index=True
+    )
+    trade_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("trades.id", ondelete="SET NULL", onupdate="CASCADE"),
+        nullable=True,
+        index=True
+    )
+
     # Validation and checksums
     old_checksum = Column(String(128), nullable=True)
     new_checksum = Column(String(128), nullable=True)
@@ -291,9 +378,16 @@ class StateHistory(Base, TimestampMixin, MetadataMixin):
         Index("ix_state_history_source_component", "source_component"),
         Index("ix_state_history_operation_id", "operation_id"),
         Index("ix_state_history_rollback", "can_rollback", "rolled_back"),
+        Index("ix_state_history_bot_id", "bot_id"),
+        Index("ix_state_history_strategy_id", "strategy_id"),
+        Index("ix_state_history_order_id", "order_id"),
+        Index("ix_state_history_position_id", "position_id"),
+        Index("ix_state_history_trade_id", "trade_id"),
         # Compound index for common queries
         Index("ix_state_history_type_id_time", "state_type", "state_id", "created_at"),
         Index("ix_state_history_operation_time", "operation", "created_at"),
+        Index("ix_state_history_bot_created", "bot_id", "created_at"),
+        Index("ix_state_history_strategy_created", "strategy_id", "created_at"),
         CheckConstraint("old_size_bytes >= 0", name="ck_state_history_old_size_positive"),
         CheckConstraint("new_size_bytes >= 0", name="ck_state_history_new_size_positive"),
         CheckConstraint(
@@ -321,6 +415,13 @@ class StateHistory(Base, TimestampMixin, MetadataMixin):
         if self.changed_fields and isinstance(self.changed_fields, list):
             return set(self.changed_fields)
         return set()
+
+    # Relationships
+    bot = relationship("Bot", foreign_keys="StateHistory.bot_id")
+    strategy = relationship("Strategy", foreign_keys="StateHistory.strategy_id")
+    order = relationship("Order", foreign_keys="StateHistory.order_id")
+    position = relationship("Position", foreign_keys="StateHistory.position_id")
+    trade = relationship("Trade", foreign_keys="StateHistory.trade_id")
 
 
 class StateMetadata(Base, AuditMixin):
@@ -369,6 +470,20 @@ class StateMetadata(Base, AuditMixin):
     is_hot = Column(Boolean, default=False, nullable=False)  # Frequently accessed
     should_cache = Column(Boolean, default=True, nullable=False)
 
+    # Foreign key relationships for business context
+    bot_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("bots.id", ondelete="SET NULL", onupdate="CASCADE"),
+        nullable=True,
+        index=True
+    )
+    strategy_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("strategies.id", ondelete="SET NULL", onupdate="CASCADE"),
+        nullable=True,
+        index=True
+    )
+
     # Validation
     schema_version = Column(String(50), nullable=False, default="1.0.0")
     validation_errors = Column(JSONB, nullable=True)  # Cached validation results
@@ -383,10 +498,14 @@ class StateMetadata(Base, AuditMixin):
         Index("ix_state_metadata_hot", "is_hot"),
         Index("ix_state_metadata_cache_priority", "cache_priority"),
         Index("ix_state_metadata_tags", "tags"),
+        Index("ix_state_metadata_bot_id", "bot_id"),
+        Index("ix_state_metadata_strategy_id", "strategy_id"),
         # Compound indexes for common queries
         Index("ix_state_metadata_type_modified", "state_type", "last_modified"),
         Index("ix_state_metadata_storage_locations", "in_redis", "in_postgresql"),
         Index("ix_state_metadata_type_critical", "state_type", "is_critical"),
+        Index("ix_state_metadata_bot_type", "bot_id", "state_type"),
+        Index("ix_state_metadata_strategy_type", "strategy_id", "state_type"),
         CheckConstraint("current_version > 0", name="ck_state_metadata_version_positive"),
         CheckConstraint("current_size_bytes >= 0", name="ck_state_metadata_size_positive"),
         CheckConstraint("access_count >= 0", name="ck_state_metadata_access_count_positive"),
@@ -425,6 +544,10 @@ class StateMetadata(Base, AuditMixin):
         }
         return layer_map.get(layer.lower(), False)
 
+    # Relationships
+    bot = relationship("Bot", foreign_keys="StateMetadata.bot_id")
+    strategy = relationship("Strategy", foreign_keys="StateMetadata.strategy_id")
+
 
 class StateBackup(Base, AuditMixin, MetadataMixin):
     """
@@ -452,6 +575,20 @@ class StateBackup(Base, AuditMixin, MetadataMixin):
     state_types_included = Column(JSONB, nullable=True)  # List of state types
     total_states = Column(Integer, nullable=False, default=0)
     total_size_bytes = Column(BigInteger, nullable=False, default=0)
+
+    # Foreign key relationships for business context
+    bot_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("bots.id", ondelete="SET NULL", onupdate="CASCADE"),
+        nullable=True,
+        index=True
+    )
+    strategy_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("strategies.id", ondelete="SET NULL", onupdate="CASCADE"),
+        nullable=True,
+        index=True
+    )
 
     # Storage information
     storage_location = Column(String(500), nullable=True)  # File path or S3 URL
@@ -507,6 +644,10 @@ class StateBackup(Base, AuditMixin, MetadataMixin):
         Index("ix_state_backups_protected", "is_protected"),
         Index("ix_state_backups_type_status", "backup_type", "status"),
         Index("ix_state_backups_status_created", "status", "created_at"),
+        Index("ix_state_backups_bot_id", "bot_id"),
+        Index("ix_state_backups_strategy_id", "strategy_id"),
+        Index("ix_state_backups_bot_created", "bot_id", "created_at"),
+        Index("ix_state_backups_strategy_created", "strategy_id", "created_at"),
         UniqueConstraint("backup_checksum", name="uq_state_backups_checksum"),
         CheckConstraint("total_states >= 0", name="ck_state_backups_total_states_positive"),
         CheckConstraint("total_size_bytes >= 0", name="ck_state_backups_total_size_positive"),
@@ -552,6 +693,10 @@ class StateBackup(Base, AuditMixin, MetadataMixin):
         if self.state_types_included and isinstance(self.state_types_included, list):
             return set(self.state_types_included)
         return set()
+
+    # Relationships
+    bot = relationship("Bot", foreign_keys="StateBackup.bot_id")
+    strategy = relationship("Strategy", foreign_keys="StateBackup.strategy_id")
 
     def mark_verified(self, checksum: str) -> bool:
         """Mark backup as integrity verified."""

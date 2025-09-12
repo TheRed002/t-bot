@@ -17,6 +17,7 @@ from typing import Any
 import redis.asyncio as redis
 
 from src.core.base import BaseComponent
+from src.core.base.interfaces import CacheClientInterface
 
 # Import core components from P-001
 from src.core.exceptions import DataError
@@ -59,7 +60,7 @@ def substitute_env_vars(url: str) -> str:
     return re.sub(pattern, replace_var, url)
 
 
-class RedisClient(BaseComponent):
+class RedisClient(BaseComponent, CacheClientInterface):
     """Async Redis client with utilities for trading bot data."""
 
     def __init__(self, config_or_url: Any | str, *, auto_close: bool = False) -> None:
@@ -278,7 +279,7 @@ class RedisClient(BaseComponent):
             namespaced_key = self._get_namespaced_key(key, namespace)
 
             # Serialize value
-            if isinstance(value, dict | list):
+            if isinstance(value, (dict, list)):
                 serialized_value = json.dumps(value, default=str)
             else:
                 serialized_value = str(value)
@@ -392,7 +393,7 @@ class RedisClient(BaseComponent):
             namespaced_key = self._get_namespaced_key(key, namespace)
 
             # Serialize value
-            if isinstance(value, dict | list):
+            if isinstance(value, (dict, list)):
                 serialized_value = json.dumps(value, default=str)
             else:
                 serialized_value = str(value)
@@ -473,7 +474,7 @@ class RedisClient(BaseComponent):
             namespaced_key = self._get_namespaced_key(key, namespace)
 
             # Serialize value
-            if isinstance(value, dict | list):
+            if isinstance(value, (dict, list)):
                 serialized_value = json.dumps(value, default=str)
             else:
                 serialized_value = str(value)
@@ -494,7 +495,7 @@ class RedisClient(BaseComponent):
             namespaced_key = self._get_namespaced_key(key, namespace)
 
             # Serialize value
-            if isinstance(value, dict | list):
+            if isinstance(value, (dict, list)):
                 serialized_value = json.dumps(value, default=str)
             else:
                 serialized_value = str(value)
@@ -541,7 +542,7 @@ class RedisClient(BaseComponent):
             namespaced_key = self._get_namespaced_key(key, namespace)
 
             # Serialize value
-            if isinstance(value, dict | list):
+            if isinstance(value, (dict, list)):
                 serialized_value = json.dumps(value, default=str)
             else:
                 serialized_value = str(value)

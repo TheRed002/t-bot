@@ -1,8 +1,9 @@
 """
-Database manager for coordinating database service operations.
+Database manager for coordinating database operations through service layer.
 
 This module provides a high-level coordinator for database operations,
-delegating to appropriate services while maintaining transaction boundaries.
+delegating to appropriate business services while maintaining transaction boundaries.
+Follows the controller -> service -> repository pattern strictly.
 """
 
 from datetime import datetime
@@ -17,34 +18,32 @@ if TYPE_CHECKING:
 
 class DatabaseManager(BaseComponent):
     """
-    Database operations coordinator.
+    Database operations coordinator that enforces service layer pattern.
 
-    This class coordinates database operations by delegating to the
-    DatabaseService while providing higher-level orchestration.
-    Follows the controller -> service -> repository pattern.
+    This class coordinates database operations by delegating to business services,
+    not infrastructure services. Controllers should use this manager to access
+    business logic through proper service abstraction.
     """
 
-    def __init__(self, database_service) -> None:  # DatabaseService - runtime import
+    def __init__(self, trading_service=None, market_data_service=None) -> None:
         """
-        Initialize the database manager with injected dependencies.
+        Initialize the database manager with injected business services.
 
         Args:
-            database_service: Injected DatabaseService instance for data operations
+            trading_service: Injected TradingService for trading operations
+            market_data_service: Injected MarketDataService for market data operations
         """
         super().__init__()
 
-        # Validate required dependencies
-        if database_service is None:
-            raise ValueError("database_service must be injected via dependency injection")
-
-        self.database_service = database_service
+        # Business services - these encapsulate business logic
+        self.trading_service = trading_service
+        self.market_data_service = market_data_service
 
     async def get_historical_data(
         self, symbol: str, start_time: datetime, end_time: datetime, timeframe: str = "1m"
     ) -> list[dict[str, Any]]:
         """
-        Coordinate retrieval of historical market data through service layer.
-        Infrastructure only - data transformation moved to service layer.
+        Coordinate retrieval of historical market data through business service.
 
         Args:
             symbol: Trading symbol
@@ -56,30 +55,13 @@ class DatabaseManager(BaseComponent):
             List of market data records as dictionaries
         """
         try:
-            # Delegate to service layer - no business logic here
-            from src.database.models.market_data import MarketData
+            # Delegate to business service - no direct database access
+            if not self.market_data_service:
+                raise ServiceError("MarketDataService not available")
 
-            filters = {
-                "symbol": symbol,
-                "timestamp": {"gte": start_time, "lte": end_time},
-                "timeframe": timeframe,
-            }
-
-            # Return raw data - let calling service handle formatting
-            market_data = await self.database_service.list_entities(
-                model_class=MarketData, filters=filters, order_by="timestamp", order_desc=False
+            return await self.market_data_service.get_historical_data(
+                symbol, start_time, end_time, timeframe
             )
-
-            # Minimal infrastructure conversion only - detailed formatting belongs in service layer
-            return [
-                {
-                    "id": md.id,
-                    "symbol": md.symbol,
-                    "timestamp": md.timestamp,
-                    "data": md,  # Pass raw model - let service handle field extraction
-                }
-                for md in market_data
-            ]
 
         except Exception as e:
             self.logger.error(f"Failed to get historical data: {e}")
@@ -87,8 +69,7 @@ class DatabaseManager(BaseComponent):
 
     async def save_trade(self, trade_data: dict[str, Any]) -> dict[str, Any]:
         """
-        Coordinate saving of trade data through database service.
-        Infrastructure only - entity creation and validation moved to service layer.
+        Coordinate saving of trade data through business service.
 
         Args:
             trade_data: Trade information
@@ -97,20 +78,11 @@ class DatabaseManager(BaseComponent):
             Created trade record as dictionary
         """
         try:
-            # Infrastructure coordination only - entity creation should be done in service layer
-            from src.database.models.trading import Trade
+            # Delegate to business service - no direct database access
+            if not self.trading_service:
+                raise ServiceError("TradingService not available")
 
-            # Raw entity creation without business logic
-            trade = Trade(**trade_data)
-
-            # Save through database service
-            saved_trade = await self.database_service.create_entity(trade)
-
-            # Minimal infrastructure response - detailed formatting belongs in service layer
-            result = {"id": saved_trade.id, "created": True, "entity": saved_trade}
-
-            self.logger.info(f"Trade saved: {saved_trade.id}")
-            return result
+            return await self.trading_service.create_trade(trade_data)
 
         except Exception as e:
             self.logger.error(f"Failed to save trade: {e}")
@@ -120,8 +92,7 @@ class DatabaseManager(BaseComponent):
         self, strategy_id: str | None = None, symbol: str | None = None
     ) -> list[dict[str, Any]]:
         """
-        Coordinate retrieval of positions through database service.
-        Infrastructure only - data formatting moved to service layer.
+        Coordinate retrieval of positions through business service.
 
         Args:
             strategy_id: Optional strategy filter
@@ -131,28 +102,11 @@ class DatabaseManager(BaseComponent):
             List of positions as dictionaries
         """
         try:
-            # Infrastructure coordination only
-            from src.database.models.trading import Position
+            # Delegate to business service - no direct database access
+            if not self.trading_service:
+                raise ServiceError("TradingService not available")
 
-            filters = {}
-            if strategy_id:
-                filters["strategy_id"] = strategy_id
-            if symbol:
-                filters["symbol"] = symbol
-
-            # Get positions through database service
-            positions = await self.database_service.list_entities(
-                model_class=Position, filters=filters, order_by="created_at", order_desc=True
-            )
-
-            # Minimal infrastructure response - detailed formatting belongs in service layer
-            return [
-                {
-                    "id": position.id,
-                    "entity": position,  # Pass raw entity - let service handle field extraction
-                }
-                for position in positions
-            ]
+            return await self.trading_service.get_positions(strategy_id, symbol)
 
         except Exception as e:
             self.logger.error(f"Failed to get positions: {e}")
@@ -161,9 +115,12 @@ class DatabaseManager(BaseComponent):
     async def close(self):
         """Close database manager resources."""
         try:
-            if self.database_service:
-                await self.database_service.stop()
-                self.logger.info("DatabaseManager closed successfully")
+            # Close business services if they have close methods
+            if hasattr(self.trading_service, "stop"):
+                await self.trading_service.stop()
+            if hasattr(self.market_data_service, "stop"):
+                await self.market_data_service.stop()
+            self.logger.info("DatabaseManager closed successfully")
         except Exception as e:
             self.logger.error(f"Error closing DatabaseManager: {e}")
             raise

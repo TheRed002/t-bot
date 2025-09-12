@@ -221,6 +221,7 @@ class AnalyticsStrategyMetrics(Base, TimestampMixin):
         Index("idx_analytics_strategy_name", "strategy_name"),
         Index("idx_analytics_strategy_bot_timestamp", "bot_id", "timestamp"),
         Index("idx_analytics_strategy_strategy_timestamp", "strategy_id", "timestamp"),
+        Index("idx_analytics_strategy_performance", "total_pnl", "total_trades", "timestamp"),
         CheckConstraint("total_trades >= 0", name="check_strategy_total_trades_non_negative"),
         CheckConstraint("winning_trades >= 0", name="check_strategy_winning_trades_non_negative"),
         CheckConstraint("losing_trades >= 0", name="check_strategy_losing_trades_non_negative"),

@@ -25,6 +25,12 @@ from .ml import (
     MLRepository,
     MLTrainingJobRepository,
 )
+from .risk import (
+    PortfolioRepository,
+    PortfolioRepositoryImpl,
+    RiskMetricsRepository,
+    RiskMetricsRepositoryImpl,
+)
 from .service_repository import DatabaseServiceRepository
 from .state import (
     StateBackupRepository,
@@ -78,8 +84,13 @@ __all__ = [
     "OrderRepository",
     "PerformanceAuditLogRepository",
     "PerformanceMetricsRepository",
+    # Risk Management
+    "PortfolioRepository",
+    "PortfolioRepositoryImpl",
     "PositionRepository",
     "RiskAuditLogRepository",
+    "RiskMetricsRepository",
+    "RiskMetricsRepositoryImpl",
     "SignalRepository",
     # State
     "StateBackupRepository",

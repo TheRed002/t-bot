@@ -41,6 +41,14 @@ from .data import (
     FeatureRecord,
 )
 
+# Import exchange models
+from .exchange import (
+    ExchangeConfiguration,
+    ExchangeConnectionStatus,
+    ExchangeRateLimit,
+    ExchangeTradingPair,
+)
+
 # Import market data models
 from .market_data import MarketDataRecord
 
@@ -102,6 +110,11 @@ __all__ = [
     "DataQualityRecord",
     "EscalationPolicy",
     "ExchangeAllocationDB",
+    # Exchange models
+    "ExchangeConfiguration",
+    "ExchangeConnectionStatus",
+    "ExchangeRateLimit",
+    "ExchangeTradingPair",
     "ExecutionAuditLog",
     # Data models
     "FeatureRecord",

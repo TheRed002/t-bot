@@ -1,3 +1,4 @@
+
 """User repository implementation."""
 
 from sqlalchemy.ext.asyncio import AsyncSession

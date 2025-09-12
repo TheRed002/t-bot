@@ -52,25 +52,34 @@ log_performance = UnifiedDecorator.enhance(log=True, monitor=True)
 
 def get_query_config(config: dict[str, Any] | None = None) -> dict[str, int]:
     """Get query configuration with fallbacks to constants."""
+    # Handle both dict config and Config object
+    if config and hasattr(config, "model_dump"):
+        # It's a Config object, convert to dict
+        config_dict = config.model_dump()
+    elif isinstance(config, dict):
+        config_dict = config
+    else:
+        config_dict = {}
+
     return {
         "QUERY_CACHE_TTL_LONG": (
-            config.get("query_cache_ttl_long", TIMEOUTS.get("QUERY_CACHE_TTL_LONG", 300))
-            if config
+            config_dict.get("query_cache_ttl_long", TIMEOUTS.get("QUERY_CACHE_TTL_LONG", 300))
+            if config_dict
             else 300
         ),
         "QUERY_CACHE_TTL_SHORT": (
-            config.get("query_cache_ttl_short", TIMEOUTS.get("QUERY_CACHE_TTL_SHORT", 60))
-            if config
+            config_dict.get("query_cache_ttl_short", TIMEOUTS.get("QUERY_CACHE_TTL_SHORT", 60))
+            if config_dict
             else 60
         ),
         "QUERY_CACHE_TTL_REALTIME": (
-            config.get("query_cache_ttl_realtime", TIMEOUTS.get("QUERY_CACHE_TTL_REALTIME", 30))
-            if config
+            config_dict.get("query_cache_ttl_realtime", TIMEOUTS.get("QUERY_CACHE_TTL_REALTIME", 30))
+            if config_dict
             else 30
         ),
         "QUERY_TIMEOUT_DEFAULT": (
-            config.get("query_timeout_default", TIMEOUTS.get("QUERY_TIMEOUT_DEFAULT", 30))
-            if config
+            config_dict.get("query_timeout_default", TIMEOUTS.get("QUERY_TIMEOUT_DEFAULT", 30))
+            if config_dict
             else 30
         ),
     }
@@ -87,18 +96,27 @@ class DatabaseQueries(BaseComponent):
         self.session = session
         self.config = config or {}
         self.query_config = get_query_config(self.config)
+        # Error handler initialization with proper error handling
         try:
             from src.core.config import Config
 
             if not config:
                 default_config = Config()
-                self.error_handler = ErrorHandler(default_config)
+            elif isinstance(config, dict):
+                default_config = Config()
             else:
-                if isinstance(config, dict):
-                    config_obj = Config()
-                    self.error_handler = ErrorHandler(config_obj)
+                default_config = config
+
+            # Try to create error handler, but gracefully handle missing dependencies
+            try:
+                self.error_handler = ErrorHandler(default_config)
+            except ValueError as ve:
+                if "SecuritySanitizer" in str(ve) or "SecurityRateLimiter" in str(ve):
+                    # Security components not available - use minimal error handling
+                    self.logger.debug(f"ErrorHandler security components not available: {ve}")
+                    self.error_handler = None
                 else:
-                    self.error_handler = ErrorHandler(config)
+                    raise
         except Exception as e:
             self.logger.warning(f"Failed to initialize error handler: {e}")
             self.error_handler = None
@@ -162,22 +180,35 @@ class DatabaseQueries(BaseComponent):
                             model_type=type(model_instance).__name__,
                         )
 
-                        recovery_config = getattr(self, "config", {})
-                        if hasattr(recovery_config, "to_dict"):
-                            recovery_config = recovery_config.to_dict()
-                        recovery_scenario = NetworkDisconnectionRecovery(recovery_config)
+                        # Create recovery scenario with proper config type
+                        try:
+                            recovery_config = getattr(self, "config", {})
+                            if hasattr(recovery_config, "model_dump"):
+                                config_for_recovery = recovery_config
+                            elif isinstance(recovery_config, dict):
+                                from src.core.config import Config
+                                config_for_recovery = Config()
+                            else:
+                                from src.core.config import Config
+                                config_for_recovery = Config()
+                            recovery_scenario = NetworkDisconnectionRecovery(config_for_recovery)
+                        except Exception as recovery_init_error:
+                            self.logger.warning(f"Failed to create recovery scenario: {recovery_init_error}")
+                            recovery_scenario = None
 
-                        handled = await self.error_handler.handle_error(
-                            e, error_context, recovery_scenario
-                        )
-                        if handled:
-                            try:
-                                session.add(model_instance)
-                                await session.commit()
-                                return model_instance
-                            except SQLAlchemyError as retry_error:
-                                self.logger.error(f"Retry operation failed: {retry_error}")
-                                # Fall through to raise original error
+                        # Only handle error if we have a valid recovery scenario
+                        if recovery_scenario:
+                            handled = await self.error_handler.handle_error(
+                                e, error_context, recovery_scenario
+                            )
+                            if handled:
+                                try:
+                                    session.add(model_instance)
+                                    await session.commit()
+                                    return model_instance
+                                except SQLAlchemyError as retry_error:
+                                    self.logger.error(f"Retry operation failed: {retry_error}")
+                                    # Fall through to raise original error
 
                     self.logger.error("Database create operation failed", error=str(e))
                     raise DataError(f"Failed to create record: {e!s}")
@@ -215,23 +246,36 @@ class DatabaseQueries(BaseComponent):
                         record_id=record_id,
                     )
 
-                    recovery_config = getattr(self, "config", {})
-                    if hasattr(recovery_config, "to_dict"):
-                        recovery_config = recovery_config.to_dict()
-                    recovery_scenario = NetworkDisconnectionRecovery(recovery_config)
+                    # Create recovery scenario with proper config type
+                    try:
+                        recovery_config = getattr(self, "config", {})
+                        if hasattr(recovery_config, "model_dump"):
+                            config_for_recovery = recovery_config
+                        elif isinstance(recovery_config, dict):
+                            from src.core.config import Config
+                            config_for_recovery = Config()
+                        else:
+                            from src.core.config import Config
+                            config_for_recovery = Config()
+                        recovery_scenario = NetworkDisconnectionRecovery(config_for_recovery)
+                    except Exception as recovery_init_error:
+                        self.logger.warning(f"Failed to create recovery scenario: {recovery_init_error}")
+                        recovery_scenario = None
 
-                    handled = await self.error_handler.handle_error(
-                        e, error_context, recovery_scenario
-                    )
-                    if handled:
-                        try:
-                            result = await session.execute(
-                                select(model_class).where(model_class.id == record_id)
-                            )
-                            return result.scalar_one_or_none()
-                        except SQLAlchemyError as retry_error:
-                            self.logger.error(f"Retry operation failed: {retry_error}")
-                            # Fall through to raise original error
+                    # Only handle error if we have a valid recovery scenario
+                    if recovery_scenario:
+                        handled = await self.error_handler.handle_error(
+                            e, error_context, recovery_scenario
+                        )
+                        if handled:
+                            try:
+                                result = await session.execute(
+                                    select(model_class).where(model_class.id == record_id)
+                                )
+                                return result.scalar_one_or_none()
+                            except SQLAlchemyError as retry_error:
+                                self.logger.error(f"Retry operation failed: {retry_error}")
+                                # Fall through to raise original error
 
                 self.logger.error("Database get_by_id operation failed", error=str(e))
                 raise DataError(f"Failed to get record by ID: {e!s}")
