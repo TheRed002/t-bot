@@ -22,6 +22,7 @@ class ConnectionState(Enum):
     CONNECTING = "connecting"
     DISCONNECTED = "disconnected"
     FAILED = "failed"
+    ACTIVE = "active"  # Alias for CONNECTED for compatibility
 
 
 class ConnectionHealth(Enum):

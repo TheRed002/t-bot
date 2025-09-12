@@ -33,40 +33,17 @@ from .constants import (
 )
 
 
-class DatabaseServiceInterface(Protocol):
-    """Protocol for database service operations."""
+class StateDataServiceInterface(Protocol):
+    """Protocol for state data operations abstracted from database details."""
 
-    async def initialize(self) -> None: ...
-    async def cleanup(self) -> None: ...
-    async def get_active_balances(self) -> list[dict[str, Any]]: ...
-    async def get_cached_balances(self) -> list[dict[str, Any]]: ...
-    async def get_open_positions(self) -> list[dict[str, Any]]: ...
-    async def get_cached_positions(self) -> list[dict[str, Any]]: ...
-    async def get_open_positions_with_prices(self) -> list[dict[str, Any]]: ...
-    async def count_positions_without_stop_loss(self) -> int: ...
-    async def update_balance(
-        self, exchange: str, currency: str, available: str, locked: str
-    ) -> None: ...
-    async def update_balance_cache(
-        self, exchange: str, currency: str, balance_data: dict[str, Any]
-    ) -> None: ...
-    async def record_balance_reconciliation(
-        self, exchange: str, currency: str, balance_data: dict[str, Any]
-    ) -> None: ...
-    async def update_position(
-        self, exchange: str, symbol: str, side: str, quantity: str, current_price: str
-    ) -> None: ...
-    async def update_position_cache(
-        self, exchange: str, symbol: str, side: str, position_data: dict[str, Any]
-    ) -> None: ...
-    async def close_position(self, exchange: str, symbol: str, side: str) -> None: ...
-    async def remove_position_from_cache(self, exchange: str, symbol: str, side: str) -> None: ...
-    async def update_order_status(
-        self, order_id: str, status: str, filled_quantity: str, remaining_quantity: str
-    ) -> None: ...
-    async def update_order_cache(self, order_id: str, order_data: dict[str, Any]) -> None: ...
-    async def cancel_order(self, order_id: str) -> None: ...
-    async def update_order_cache_status(self, order_id: str, status: str) -> None: ...
+    async def get_balance_state(self) -> dict[str, Any]: ...
+    async def get_position_state(self) -> dict[str, Any]: ...
+    async def get_order_state(self) -> dict[str, Any]: ...
+    async def get_risk_state(self) -> dict[str, Any]: ...
+    async def reconcile_balance_discrepancies(self, discrepancies: list[dict[str, Any]]) -> bool: ...
+    async def reconcile_position_discrepancies(self, discrepancies: list[dict[str, Any]]) -> bool: ...
+    async def reconcile_order_discrepancies(self, discrepancies: list[dict[str, Any]]) -> bool: ...
+    async def reconcile_risk_discrepancies(self, discrepancies: list[dict[str, Any]]) -> bool: ...
     async def add_missing_stop_losses(self) -> int: ...
     async def get_order_details(self, order_id: str) -> dict[str, Any] | None: ...
 
@@ -127,7 +104,7 @@ class StateMonitor:
     def __init__(
         self,
         config: Config,
-        database_service: DatabaseServiceInterface | None = None,
+        state_data_service: StateDataServiceInterface | None = None,
         risk_service: RiskServiceInterface | None = None,
         execution_service: ExecutionServiceInterface | None = None,
     ) -> None:
@@ -135,7 +112,7 @@ class StateMonitor:
         self.logger = get_logger(self.__class__.__module__)
 
         # Injected services - these should be provided by DI container
-        self._database_service = database_service
+        self._state_data_service = state_data_service
         self._risk_service = risk_service
         self._execution_service = execution_service
 
@@ -179,8 +156,8 @@ class StateMonitor:
         """Configure dependencies via dependency injector."""
         try:
             # Try to get services from DI container
-            if not self._database_service and injector.has_service("DatabaseService"):
-                self._database_service = injector.resolve("DatabaseService")
+            if not self._state_data_service and injector.has_service("StateDataService"):
+                self._state_data_service = injector.resolve("StateDataService")
 
             if not self._risk_service and injector.has_service("RiskService"):
                 self._risk_service = injector.resolve("RiskService")
@@ -196,8 +173,8 @@ class StateMonitor:
         """Validate that required services are available for proper operation."""
         missing_services = []
 
-        if self._database_service is None:
-            missing_services.append("DatabaseService")
+        if self._state_data_service is None:
+            missing_services.append("StateDataService")
         if self._risk_service is None:
             missing_services.append("RiskService")
         if self._execution_service is None:
@@ -324,9 +301,9 @@ class StateMonitor:
 
             # Use service layer for data access
             try:
-                if self._database_service is None:
+                if self._state_data_service is None:
                     self.logger.warning(
-                        "DatabaseService not available - skipping balance sync check"
+                        "StateDataService not available - skipping balance sync check"
                     )
                     return {
                         "is_consistent": True,
@@ -334,35 +311,12 @@ class StateMonitor:
                         "severity": "low",
                     }
 
-                db_service = self._database_service
-                await db_service.initialize()
+                # Get balance state through service abstraction
+                balance_state = await self._state_data_service.get_balance_state()
 
-                # Get balances from database via service
-                db_balances = {}
-                balance_records = await db_service.get_active_balances()
-                for balance in balance_records:
-                    key = f"{balance['exchange']}:{balance['currency']}"
-                    db_balances[key] = {
-                        "available": self._safe_to_decimal(
-                            balance["available"], "balance.available"
-                        ),
-                        "locked": self._safe_to_decimal(balance["locked"], "balance.locked"),
-                        "total": self._safe_to_decimal(balance["available"], "balance.available")
-                        + self._safe_to_decimal(balance["locked"], "balance.locked"),
-                    }
-
-                # Get balances from Redis cache via service
-                cache_balances = {}
-                cached_balance_records = await db_service.get_cached_balances()
-                for balance in cached_balance_records:
-                    key = f"{balance['exchange']}:{balance['currency']}"
-                    cache_balances[key] = {
-                        "available": self._safe_to_decimal(
-                            balance.get("available", 0), "cache.available"
-                        ),
-                        "locked": self._safe_to_decimal(balance.get("locked", 0), "cache.locked"),
-                        "total": self._safe_to_decimal(balance.get("total", 0), "cache.total"),
-                    }
+                # Extract database and cache balances from state
+                db_balances = balance_state.get("database_balances", {})
+                cache_balances = balance_state.get("cache_balances", {})
 
                 # Note: Exchange balance checks would require ExchangeService injection
                 # For now, we'll skip direct exchange queries to avoid tight coupling
@@ -478,9 +432,9 @@ class StateMonitor:
 
             # Use service layer for data access
             try:
-                if self._database_service is None:
+                if self._state_data_service is None:
                     self.logger.warning(
-                        "DatabaseService not available - skipping position sync check"
+                        "StateDataService not available - skipping position sync check"
                     )
                     return {
                         "is_consistent": True,
@@ -491,40 +445,16 @@ class StateMonitor:
                     self.logger.warning("RiskService not available - limited position sync check")
                     # Continue with limited functionality
 
-                db_service = self._database_service
+                # Get position state through service abstraction
+                position_state = await self._state_data_service.get_position_state()
+
+                # Extract database and cache positions from state
+                db_positions = position_state.get("database_positions", {})
+                cache_positions = position_state.get("cache_positions", {})
+
                 risk_service = self._risk_service
-                await db_service.initialize()
                 if risk_service:
                     await risk_service.initialize()
-
-                # Get positions from database via service
-                db_positions = {}
-                position_records = await db_service.get_open_positions()
-                for position in position_records:
-                    key = f"{position['exchange']}:{position['symbol']}:{position['side']}"
-                    db_positions[key] = {
-                        "quantity": self._safe_to_decimal(
-                            position["quantity"], "position.quantity"
-                        ),
-                        "entry_price": self._safe_to_decimal(
-                            position["entry_price"], "position.entry_price"
-                        ),
-                    }
-
-                # Get positions from cache via service
-                cache_positions = {}
-                cached_position_records = await db_service.get_cached_positions()
-                for position in cached_position_records:
-                    if position.get("status") == "open":
-                        key = f"{position['exchange']}:{position['symbol']}:{position['side']}"
-                        cache_positions[key] = {
-                            "quantity": self._safe_to_decimal(
-                                position.get("quantity", 0), "cache.position.quantity"
-                            ),
-                            "entry_price": self._safe_to_decimal(
-                                position.get("entry_price", 0), "cache.position.entry_price"
-                            ),
-                        }
             except Exception as e:
                 self.logger.error(f"Error initializing data sources for position sync: {e}")
                 db_positions = {}
@@ -694,9 +624,9 @@ class StateMonitor:
 
             # Use service layer for data access
             try:
-                if self._database_service is None:
+                if self._state_data_service is None:
                     self.logger.warning(
-                        "DatabaseService not available - skipping risk compliance check"
+                        "StateDataService not available - skipping risk compliance check"
                     )
                     return {
                         "is_consistent": True,
@@ -707,7 +637,7 @@ class StateMonitor:
                     self.logger.warning("RiskService not available - limited risk compliance check")
                     # Continue with limited functionality
 
-                db_service = self._database_service
+                # Use state data service abstraction
                 risk_service = self._risk_service
                 await db_service.initialize()
                 if risk_service:
@@ -936,11 +866,11 @@ class StateMonitor:
 
             # Use service layer for data access
             try:
-                if self._database_service is None:
-                    self.logger.warning("DatabaseService not available - cannot reconcile balances")
+                if self._state_data_service is None:
+                    self.logger.warning("StateDataService not available - cannot reconcile balances")
                     return False
 
-                db_service = self._database_service
+                # Use state data service abstraction
                 await db_service.initialize()
 
                 reconciled_count = 0
@@ -1012,16 +942,16 @@ class StateMonitor:
 
             # Use service layer for data access
             try:
-                if self._database_service is None:
+                if self._state_data_service is None:
                     self.logger.warning(
-                        "DatabaseService not available - cannot reconcile positions"
+                        "StateDataService not available - cannot reconcile positions"
                     )
                     return False
                 if self._risk_service is None:
                     self.logger.warning("RiskService not available - cannot reconcile positions")
                     return False
 
-                db_service = self._database_service
+                # Use state data service abstraction
                 risk_service = self._risk_service
                 await db_service.initialize()
                 await risk_service.initialize()
@@ -1097,14 +1027,14 @@ class StateMonitor:
 
             # Use service layer for data access
             try:
-                if self._database_service is None:
-                    self.logger.warning("DatabaseService not available - cannot reconcile orders")
+                if self._state_data_service is None:
+                    self.logger.warning("StateDataService not available - cannot reconcile orders")
                     return False
                 if self._execution_service is None:
                     self.logger.warning("ExecutionService not available - cannot reconcile orders")
                     return False
 
-                db_service = self._database_service
+                # Use state data service abstraction
                 execution_service = self._execution_service
                 await db_service.initialize()
                 await execution_service.initialize()
@@ -1202,8 +1132,8 @@ class StateMonitor:
             self.logger.info("Reconciling risk limits", discrepancy_count=len(discrepancies))
 
             # Use service layer for data access
-            if self._database_service is None:
-                self.logger.warning("DatabaseService not available - cannot reconcile risk limits")
+            if self._state_data_service is None:
+                self.logger.warning("StateDataService not available - cannot reconcile risk limits")
                 return False
             if self._execution_service is None:
                 self.logger.warning("ExecutionService not available - cannot reconcile risk limits")
@@ -1454,10 +1384,43 @@ class StateMonitor:
         cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
         return [result for result in self.state_history if result.validation_time > cutoff]
 
+    async def reconcile_state(self, component: str, discrepancies: list[dict[str, Any]]) -> bool:
+        """
+        Reconcile state discrepancies for a given component.
+        
+        Args:
+            component: Component with discrepancies
+            discrepancies: List of discrepancy data
+            
+        Returns:
+            True if reconciliation was successful
+        """
+        if not self._state_data_service:
+            self.logger.warning("StateDataService not available - cannot reconcile state")
+            return False
+
+        try:
+            # Delegate to the appropriate service method based on component type
+            if "balance" in component.lower():
+                return await self._state_data_service.reconcile_balance_discrepancies(discrepancies)
+            elif "position" in component.lower():
+                return await self._state_data_service.reconcile_position_discrepancies(discrepancies)
+            elif "order" in component.lower():
+                return await self._state_data_service.reconcile_order_discrepancies(discrepancies)
+            elif "risk" in component.lower():
+                return await self._state_data_service.reconcile_risk_discrepancies(discrepancies)
+            else:
+                # For unknown component types, try balance reconciliation as default
+                return await self._state_data_service.reconcile_balance_discrepancies(discrepancies)
+
+        except Exception as e:
+            self.logger.error(f"State reconciliation failed: {e}")
+            return False
+
 
 def create_state_monitor_factory(
     config: Config | None = None,
-    database_service: DatabaseServiceInterface | None = None,
+    state_data_service: StateDataServiceInterface | None = None,
     risk_service: RiskServiceInterface | None = None,
     execution_service: ExecutionServiceInterface | None = None,
 ):
@@ -1466,7 +1429,7 @@ def create_state_monitor_factory(
     def factory() -> "StateMonitor":
         return StateMonitor(
             config=config or Config(),
-            database_service=database_service,
+            state_data_service=state_data_service,
             risk_service=risk_service,
             execution_service=execution_service,
         )
@@ -1482,8 +1445,8 @@ def register_state_monitor_with_di(injector, config: Config | None = None) -> No
         resolved_config = (
             injector.resolve("Config") if injector.has_service("Config") else config or Config()
         )
-        database_service = (
-            injector.resolve("DatabaseService") if injector.has_service("DatabaseService") else None
+        state_data_service = (
+            injector.resolve("StateDataService") if injector.has_service("StateDataService") else None
         )
         risk_service = (
             injector.resolve("RiskService") if injector.has_service("RiskService") else None
@@ -1496,7 +1459,7 @@ def register_state_monitor_with_di(injector, config: Config | None = None) -> No
 
         return StateMonitor(
             config=resolved_config,
-            database_service=database_service,
+            state_data_service=state_data_service,
             risk_service=risk_service,
             execution_service=execution_service,
         )

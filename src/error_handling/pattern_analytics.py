@@ -28,9 +28,19 @@ class ErrorPatternAnalytics(BaseService):
     """Simple error pattern analyzer."""
 
     def __init__(self, config: Config):
+        # Convert Config to ConfigDict properly for BaseService
+        from src.core.types.base import ConfigDict
+
+        if hasattr(config, "model_dump"):
+            config_dict = ConfigDict(config.model_dump())
+        elif isinstance(config, dict):
+            config_dict = ConfigDict(config)
+        else:
+            config_dict = ConfigDict({})
+
         super().__init__(
             name="ErrorPatternAnalytics",
-            config=config.model_dump() if hasattr(config, "model_dump") else None,
+            config=config_dict,
         )
 
         # Store the original config for test compatibility
@@ -83,14 +93,18 @@ class ErrorPatternAnalytics(BaseService):
         self.correlation_matrix: dict[str, Any] = {}
 
     def add_error_event(self, error_context: dict[str, Any]) -> None:
-        """Add an error event to the analytics system."""
+        """Add an error event to the analytics system with consistent processing mode."""
+        # Apply consistent data transformation patterns matching monitoring module
+        transformed_context = self._transform_error_event_data(error_context)
 
         error_event = {
             "timestamp": datetime.now(timezone.utc),
-            "component": error_context.get("component", "unknown"),
-            "error_type": error_context.get("error_type", "unknown"),
-            "severity": error_context.get("severity", "medium"),
-            "operation": error_context.get("operation", "unknown"),
+            "component": transformed_context.get("component", "unknown"),
+            "error_type": transformed_context.get("error_type", "unknown"),
+            "severity": transformed_context.get("severity", "medium"),
+            "operation": transformed_context.get("operation", "unknown"),
+            "processing_mode": transformed_context.get("processing_mode", "stream"),
+            "data_format": transformed_context.get("data_format", "event_data_v1"),  # Align with state module format
         }
 
         # Add to history with size limit
@@ -209,6 +223,66 @@ class ErrorPatternAnalytics(BaseService):
                 )
 
         return {"trends": trends}
+
+    def get_error_patterns(self) -> list[dict[str, Any]]:
+        """Get detected error patterns for consistency with error handler."""
+        pattern_summary = self.get_pattern_summary()
+        patterns = []
+
+        # Convert summary to pattern format for compatibility
+        for component, count in pattern_summary.get("errors_by_component", {}).items():
+            if count >= self.frequency_threshold:
+                patterns.append({
+                    "component": component,
+                    "frequency": count,
+                    "pattern_type": "high_frequency",
+                    "processing_mode": "stream",
+                    "data_format": "event_data_v1"  # Align with state module format
+                })
+
+        return patterns
+
+    async def add_batch_error_events(self, error_contexts: list[dict[str, Any]]) -> None:
+        """Add multiple error events in batch for consistent processing paradigm alignment."""
+        if not error_contexts:
+            return
+
+        # Apply consistent batch processing patterns aligned with risk_management
+        for error_context in error_contexts:
+            # Set batch processing mode for consistency with risk_management module
+            if "processing_mode" not in error_context:
+                error_context["processing_mode"] = "batch"
+            # Add batch metadata consistent with risk_management patterns
+            if "data_format" not in error_context:
+                error_context["data_format"] = "bot_event_v1"
+            if "processing_paradigm" not in error_context:
+                error_context["processing_paradigm"] = "batch"
+            self.add_error_event(error_context)
+
+    def _transform_error_event_data(self, error_context: dict[str, Any]) -> dict[str, Any]:
+        """Transform error event data consistently matching monitoring module patterns."""
+        transformed_context = error_context.copy()
+
+        # Apply consistent processing metadata
+        if "processing_mode" not in transformed_context:
+            transformed_context["processing_mode"] = "stream"  # Default to stream processing
+
+        if "data_format" not in transformed_context:
+            transformed_context["data_format"] = "event_data_v1"  # Align with state module format
+
+        if "timestamp" not in transformed_context:
+            transformed_context["timestamp"] = datetime.now(timezone.utc).isoformat()
+
+        # Apply consistent financial data transformations if present
+        if "price" in transformed_context and transformed_context["price"] is not None:
+            from src.utils.decimal_utils import to_decimal
+            transformed_context["price"] = to_decimal(transformed_context["price"])
+
+        if "quantity" in transformed_context and transformed_context["quantity"] is not None:
+            from src.utils.decimal_utils import to_decimal
+            transformed_context["quantity"] = to_decimal(transformed_context["quantity"])
+
+        return transformed_context
 
     async def cleanup(self) -> None:
         """Cleanup resources."""

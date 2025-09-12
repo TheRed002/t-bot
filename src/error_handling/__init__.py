@@ -1,3 +1,5 @@
+from typing import Optional
+
 """
 Error handling module for the trading bot framework.
 

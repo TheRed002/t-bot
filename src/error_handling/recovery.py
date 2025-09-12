@@ -6,7 +6,7 @@ from collections.abc import Callable
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any, Protocol, runtime_checkable
 
-from src.core.base import BaseComponent
+from src.core.base.component import BaseComponent
 from src.error_handling.security_rate_limiter import (
     get_security_rate_limiter,
     record_recovery_failure,
@@ -55,7 +55,17 @@ class RetryRecovery(BaseComponent):
             max_delay: Maximum delay between retries
             exponential_base: Base for exponential backoff
         """
-        super().__init__(name="RetryRecovery", config={})
+        # Create proper ConfigDict for BaseComponent
+        from src.core.types.base import ConfigDict
+
+        config_dict = ConfigDict({
+            "max_attempts": max_attempts,
+            "base_delay": str(base_delay),
+            "max_delay": str(max_delay),
+            "exponential_base": str(exponential_base),
+        })
+
+        super().__init__(name="RetryRecovery", config=config_dict)
         self._max_attempts = max_attempts
         self.base_delay = base_delay
         self.max_delay = max_delay
@@ -145,7 +155,16 @@ class CircuitBreakerRecovery(BaseComponent):
             timeout: Time before attempting half-open state
             half_open_requests: Requests allowed in half-open state
         """
-        super().__init__(name="CircuitBreakerRecovery", config={})
+        # Create proper ConfigDict for BaseComponent
+        from src.core.types.base import ConfigDict
+
+        config_dict = ConfigDict({
+            "failure_threshold": failure_threshold,
+            "timeout": str(timeout),
+            "half_open_requests": half_open_requests,
+        })
+
+        super().__init__(name="CircuitBreakerRecovery", config=config_dict)
         self._max_attempts = 1  # Circuit breaker doesn't retry
         self.failure_threshold = failure_threshold
         self.timeout = timeout
@@ -261,7 +280,15 @@ class FallbackRecovery(BaseComponent):
             fallback_function: Function to call as fallback
             max_attempts: Maximum fallback attempts
         """
-        super().__init__(name="FallbackRecovery", config={})
+        # Create proper ConfigDict for BaseComponent
+        from src.core.types.base import ConfigDict
+
+        config_dict = ConfigDict({
+            "max_attempts": max_attempts,
+            "fallback_type": "function",
+        })
+
+        super().__init__(name="FallbackRecovery", config=config_dict)
         self.fallback_function = fallback_function
         self._max_attempts = max_attempts
 

@@ -36,15 +36,13 @@ from .constants import (
 )
 
 
-class DatabaseServiceInterface(Protocol):
-    """Protocol for database service operations."""
+class RecoveryDataServiceInterface(Protocol):
+    """Protocol for recovery data operations abstracted from database details."""
 
-    async def initialize(self) -> None: ...
-    async def update_position(
-        self, exchange: str, symbol: str, side: str, quantity: str, current_price: str
-    ) -> None: ...
-    async def get_open_positions_with_prices(self) -> list[dict[str, Any]]: ...
-    async def get_order_details(self, order_id: str) -> dict[str, Any] | None: ...
+    async def get_recovery_context(self, scenario: str) -> dict[str, Any]: ...
+    async def execute_position_recovery(self, recovery_data: dict[str, Any]) -> bool: ...
+    async def execute_order_recovery(self, recovery_data: dict[str, Any]) -> bool: ...
+    async def log_recovery_action(self, action: str, details: dict[str, Any]) -> None: ...
 
 
 class RiskServiceInterface(Protocol):
@@ -88,17 +86,27 @@ class RecoveryScenario(BaseComponent):
     def __init__(
         self,
         config: Config,
-        database_service: DatabaseServiceInterface | None = None,
+        recovery_data_service: RecoveryDataServiceInterface | None = None,
         risk_service: RiskServiceInterface | None = None,
         cache_service: CacheServiceInterface | None = None,
         state_service: StateServiceInterface | None = None,
         bot_service: BotServiceInterface | None = None,
     ):
-        super().__init__(name="RecoveryScenario", config={})
+        # Convert Config to ConfigDict properly for BaseComponent
+        from src.core.types.base import ConfigDict
+
+        if hasattr(config, "model_dump"):
+            config_dict = ConfigDict(config.model_dump())
+        elif isinstance(config, dict):
+            config_dict = ConfigDict(config)
+        else:
+            config_dict = ConfigDict({})
+
+        super().__init__(name="RecoveryScenario", config=config_dict)
         self.config = config
 
         # Inject services to avoid tight coupling
-        self._database_service = database_service
+        self._recovery_data_service = recovery_data_service
         self._risk_service = risk_service
         self._cache_service = cache_service
         self._state_service = state_service
@@ -120,8 +128,8 @@ class RecoveryScenario(BaseComponent):
         """Configure dependencies via dependency injector."""
         try:
             # Try to get services from DI container
-            if not self._database_service and injector.has_service("DatabaseService"):
-                self._database_service = injector.resolve("DatabaseService")
+            if not self._recovery_data_service and injector.has_service("RecoveryDataService"):
+                self._recovery_data_service = injector.resolve("RecoveryDataService")
 
             if not self._risk_service and injector.has_service("RiskService"):
                 self._risk_service = injector.resolve("RiskService")
@@ -170,14 +178,14 @@ class PartialFillRecovery(RecoveryScenario):
     def __init__(
         self,
         config: Config,
-        database_service: DatabaseServiceInterface | None = None,
+        recovery_data_service: RecoveryDataServiceInterface | None = None,
         risk_service: RiskServiceInterface | None = None,
         cache_service: CacheServiceInterface | None = None,
         state_service: StateServiceInterface | None = None,
         bot_service: BotServiceInterface | None = None,
     ):
         super().__init__(
-            config, database_service, risk_service, cache_service, state_service, bot_service
+            config, recovery_data_service, risk_service, cache_service, state_service, bot_service
         )
         self.min_fill_percentage = Decimal(
             str(
@@ -305,8 +313,8 @@ class PartialFillRecovery(RecoveryScenario):
 
     async def _update_position(self, order: dict[str, Any], filled_quantity: Decimal) -> None:
         """Update position tracking with partial fill using injected services."""
-        if not self._database_service:
-            self._logger.warning("Database service not available", order_id=order.get("id"))
+        if not self._recovery_data_service:
+            self._logger.warning("RecoveryDataService not available", order_id=order.get("id"))
             return
 
         if not self._risk_service:
@@ -320,17 +328,22 @@ class PartialFillRecovery(RecoveryScenario):
         )
 
         try:
-            await self._database_service.initialize()
-            await self._risk_service.initialize()
+            # Calculate remaining quantity
+            total_quantity = Decimal(str(order.get("quantity", 0)))
+            remaining_quantity = total_quantity - filled_quantity
 
-            # Update position via injected service
-            await self._database_service.update_position(
-                exchange=order.get("exchange"),
-                symbol=order.get("symbol"),
-                side=order.get("side"),
-                quantity=str(filled_quantity),
-                current_price=str(order.get("price")),
-            )
+            # Execute position recovery through service abstraction
+            recovery_data = {
+                "type": "partial_fill",
+                "order": order,
+                "filled_quantity": filled_quantity,
+                "remaining_quantity": remaining_quantity,
+            }
+
+            recovery_success = await self._recovery_data_service.execute_position_recovery(recovery_data)
+
+            if not recovery_success:
+                raise Exception("Position recovery failed through data service")
 
             # Update risk management via injected service
             await self._risk_service.update_position(
@@ -350,8 +363,8 @@ class PartialFillRecovery(RecoveryScenario):
 
     async def _adjust_stop_loss(self, order: dict[str, Any], filled_quantity: Decimal) -> None:
         """Adjust stop loss based on partial fill using injected services."""
-        if not self._database_service:
-            self._logger.warning("Database service not available", order_id=order.get("id"))
+        if not self._recovery_data_service:
+            self._logger.warning("RecoveryDataService not available", order_id=order.get("id"))
             return
 
         if not self._risk_service:
@@ -365,7 +378,7 @@ class PartialFillRecovery(RecoveryScenario):
         )
 
         try:
-            await self._database_service.initialize()
+            # Initialize recovery data service if available
             await self._risk_service.initialize()
 
             # Calculate new stop loss based on partial fill
@@ -375,7 +388,8 @@ class PartialFillRecovery(RecoveryScenario):
             )
 
             # Get current positions via injected service
-            positions = await self._database_service.get_open_positions_with_prices()
+            recovery_context = await self._recovery_data_service.get_recovery_context("order_rejection")
+            positions = recovery_context.get("positions", [])
             current_position = None
 
             for pos in positions:
@@ -433,14 +447,14 @@ class NetworkDisconnectionRecovery(RecoveryScenario):
     def __init__(
         self,
         config: Config,
-        database_service: DatabaseServiceInterface | None = None,
+        recovery_data_service: RecoveryDataServiceInterface | None = None,
         risk_service: RiskServiceInterface | None = None,
         cache_service: CacheServiceInterface | None = None,
         state_service: StateServiceInterface | None = None,
         bot_service: BotServiceInterface | None = None,
     ):
         super().__init__(
-            config, database_service, risk_service, cache_service, state_service, bot_service
+            config, recovery_data_service, risk_service, cache_service, state_service, bot_service
         )
         self.max_offline_duration = self.recovery_config.get(
             "network_max_offline_duration", DEFAULT_NETWORK_MAX_OFFLINE_DURATION
@@ -900,14 +914,14 @@ class ExchangeMaintenanceRecovery(RecoveryScenario):
     def __init__(
         self,
         config: Config,
-        database_service: DatabaseServiceInterface | None = None,
+        recovery_data_service: RecoveryDataServiceInterface | None = None,
         risk_service: RiskServiceInterface | None = None,
         cache_service: CacheServiceInterface | None = None,
         state_service: StateServiceInterface | None = None,
         bot_service: BotServiceInterface | None = None,
     ):
         super().__init__(
-            config, database_service, risk_service, cache_service, state_service, bot_service
+            config, recovery_data_service, risk_service, cache_service, state_service, bot_service
         )
         self.detect_maintenance = True  # Default behavior
         self.redistribute_capital = True  # Default behavior
@@ -986,14 +1000,14 @@ class DataFeedInterruptionRecovery(RecoveryScenario):
     def __init__(
         self,
         config: Config,
-        database_service: DatabaseServiceInterface | None = None,
+        recovery_data_service: RecoveryDataServiceInterface | None = None,
         risk_service: RiskServiceInterface | None = None,
         cache_service: CacheServiceInterface | None = None,
         state_service: StateServiceInterface | None = None,
         bot_service: BotServiceInterface | None = None,
     ):
         super().__init__(
-            config, database_service, risk_service, cache_service, state_service, bot_service
+            config, recovery_data_service, risk_service, cache_service, state_service, bot_service
         )
         self.max_staleness = self.recovery_config.get(
             "data_feed_max_staleness", DEFAULT_DATA_FEED_MAX_STALENESS
@@ -1063,8 +1077,9 @@ class DataFeedInterruptionRecovery(RecoveryScenario):
             # during data feed instability
             if self._risk_service:
                 # Get all open positions and apply conservative parameters
-                if self._database_service:
-                    positions = await self._database_service.get_open_positions_with_prices()
+                if self._recovery_data_service:
+                    recovery_context = await self._recovery_data_service.get_recovery_context("emergency_stop")
+                    positions = recovery_context.get("positions", [])
                     for position in positions:
                         symbol = position.get("symbol")
                         if symbol:
@@ -1091,14 +1106,14 @@ class OrderRejectionRecovery(RecoveryScenario):
     def __init__(
         self,
         config: Config,
-        database_service: DatabaseServiceInterface | None = None,
+        recovery_data_service: RecoveryDataServiceInterface | None = None,
         risk_service: RiskServiceInterface | None = None,
         cache_service: CacheServiceInterface | None = None,
         state_service: StateServiceInterface | None = None,
         bot_service: BotServiceInterface | None = None,
     ):
         super().__init__(
-            config, database_service, risk_service, cache_service, state_service, bot_service
+            config, recovery_data_service, risk_service, cache_service, state_service, bot_service
         )
         self.analyze_rejection_reason = True  # Default behavior
         self.adjust_parameters = True  # Default behavior
@@ -1211,14 +1226,14 @@ class APIRateLimitRecovery(RecoveryScenario):
     def __init__(
         self,
         config: Config,
-        database_service: DatabaseServiceInterface | None = None,
+        recovery_data_service: RecoveryDataServiceInterface | None = None,
         risk_service: RiskServiceInterface | None = None,
         cache_service: CacheServiceInterface | None = None,
         state_service: StateServiceInterface | None = None,
         bot_service: BotServiceInterface | None = None,
     ):
         super().__init__(
-            config, database_service, risk_service, cache_service, state_service, bot_service
+            config, recovery_data_service, risk_service, cache_service, state_service, bot_service
         )
         self.respect_retry_after = True
         self.max_retry_attempts = API_RATE_LIMIT_MAX_ATTEMPTS
@@ -1263,16 +1278,16 @@ def create_partial_fill_recovery_factory(config: Config | None = None):
         resolved_config = config or Config()
 
         # Resolve services from DI container if available
-        database_service = None
+        recovery_data_service = None
         risk_service = None
         cache_service = None
         state_service = None
         bot_service = None
 
         if injector:
-            database_service = (
-                injector.resolve("DatabaseService")
-                if injector.has_service("DatabaseService")
+            recovery_data_service = (
+                injector.resolve("RecoveryDataService")
+                if injector.has_service("RecoveryDataService")
                 else None
             )
             risk_service = (
@@ -1290,7 +1305,7 @@ def create_partial_fill_recovery_factory(config: Config | None = None):
 
         recovery = PartialFillRecovery(
             resolved_config,
-            database_service,
+            recovery_data_service,
             risk_service,
             cache_service,
             state_service,
@@ -1313,16 +1328,16 @@ def create_network_disconnection_recovery_factory(config: Config | None = None):
         resolved_config = config or Config()
 
         # Resolve services from DI container if available
-        database_service = None
+        recovery_data_service = None
         risk_service = None
         cache_service = None
         state_service = None
         bot_service = None
 
         if injector:
-            database_service = (
-                injector.resolve("DatabaseService")
-                if injector.has_service("DatabaseService")
+            recovery_data_service = (
+                injector.resolve("RecoveryDataService")
+                if injector.has_service("RecoveryDataService")
                 else None
             )
             risk_service = (
@@ -1340,7 +1355,7 @@ def create_network_disconnection_recovery_factory(config: Config | None = None):
 
         recovery = NetworkDisconnectionRecovery(
             resolved_config,
-            database_service,
+            recovery_data_service,
             risk_service,
             cache_service,
             state_service,

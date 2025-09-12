@@ -65,7 +65,7 @@ def create_propagation_metadata(
         "processing_stage": stage.value,
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "boundary_crossed": source_module != target_modules[0] if target_modules else False,
-        "data_format": "error_propagation_v1",
+        "data_format": "event_data_v1",  # Align with state module format
         **kwargs,
     }
 
@@ -96,7 +96,7 @@ def validate_propagation_data(
     if not isinstance(data, dict):
         raise ValidationError(
             "Error propagation data must be dictionary",
-            error_code="PROP_001",
+            error_code="VALID_403",
             field_name="propagation_data",
         )
 
@@ -106,7 +106,7 @@ def validate_propagation_data(
     if missing_fields:
         raise ValidationError(
             f"Missing required fields for error propagation: {missing_fields}",
-            error_code="PROP_002",
+            error_code="VALID_403",
             field_name="required_fields",
         )
 
@@ -116,7 +116,7 @@ def validate_propagation_data(
     if target_module == "core":
         # Core module expects specific format
         if "data_format" not in validated_data:
-            validated_data["data_format"] = "error_context_v1"
+            validated_data["data_format"] = "event_data_v1"  # Align with state module format
         if "processing_stage" not in validated_data:
             validated_data["processing_stage"] = "error_propagation"
 
@@ -126,7 +126,7 @@ def validate_propagation_data(
             if not isinstance(validated_data["entity_id"], str | int):
                 raise ValidationError(
                     "Database entity_id must be string or int",
-                    error_code="PROP_003",
+                    error_code="VALID_403",
                     field_name="entity_id",
                 )
 
@@ -165,12 +165,15 @@ def transform_error_for_module(
     """
     transformed = error_data.copy()
 
-    # Add processing mode metadata
+    # Add processing mode metadata aligned with risk_management patterns
     transformed.update(
         {
             "processing_mode": processing_mode,
             "target_module": target_module,
             "transformation_timestamp": datetime.now(timezone.utc).isoformat(),
+            "data_format": "bot_event_v1",  # Consistent with risk_management
+            "message_pattern": "pub_sub",  # Consistent with risk_management
+            "boundary_crossed": True,  # Mark cross-module communication
         }
     )
 
@@ -197,10 +200,9 @@ def _transform_for_core(data: dict[str, Any]) -> dict[str, Any]:
         "event_type": "error_occurred",
         "event_data": data,
         "timestamp": data.get("timestamp", datetime.now(timezone.utc).isoformat()),
-        "data_format": "event_data_v1",  # Align with state module format
+        "data_format": "event_data_v1",  # Align with core event system format
         "processing_stage": "core_event_processing",
-        "processing_mode": "stream",  # Consistent processing mode
-        "message_pattern": "pub_sub",  # Consistent messaging pattern
+        "processing_mode": "stream",  # Align with core events default
         "boundary_crossed": True,  # Cross-module event
     }
 
@@ -224,7 +226,10 @@ def _transform_for_database(data: dict[str, Any]) -> dict[str, Any]:
         "table_context": "error_logs",
         "entity_data": data,
         "operation_type": "insert",
-        "data_format": "database_entity_v1",
+        "data_format": "event_data_v1",  # Align with state module format
+        # Preserve processing_mode from original data for consistency
+        "processing_mode": data.get("processing_mode", "stream"),
+        "boundary_crossed": True,  # Database transformation crosses module boundary
     }
 
     # Add database-specific fields
@@ -248,9 +253,8 @@ def _transform_for_monitoring(data: dict[str, Any]) -> dict[str, Any]:
             "severity": data.get("severity", "medium"),
         },
         "timestamp": data.get("timestamp", datetime.now(timezone.utc).isoformat()),
-        "data_format": "monitoring_metric_v1",
-        "processing_mode": "stream",  # Consistent processing mode
-        "message_pattern": "pub_sub",  # Consistent messaging pattern
+        "data_format": "event_data_v1",  # Align with state module format
+        "processing_mode": "stream",  # Align with core events default
         "boundary_crossed": True,  # Cross-module event
     }
 
@@ -262,7 +266,7 @@ def _transform_for_exchanges(data: dict[str, Any]) -> dict[str, Any]:
     exchange_format: dict[str, Any] = {
         "exchange_error": True,
         "error_context": data,
-        "data_format": "exchange_error_v1",
+        "data_format": "event_data_v1",  # Align with state module format
     }
 
     # Ensure financial precision for exchange errors

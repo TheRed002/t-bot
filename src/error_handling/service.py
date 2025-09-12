@@ -20,6 +20,7 @@ from src.core.base.interfaces import HealthCheckResult
 from src.core.base.service import BaseService
 from src.core.config import Config
 from src.core.exceptions import DataValidationError, ServiceError, ValidationError
+from src.error_handling.data_transformer import ErrorDataTransformer
 from src.utils.messaging_patterns import (
     BoundaryValidator,
     ErrorPropagationMixin,
@@ -170,6 +171,11 @@ class ErrorHandlingService(BaseService, ErrorPropagationMixin):
         # Apply consistent data transformation for financial context
         transformed_context = self._transform_error_context(context or {}, component)
 
+        # Apply boundary validation using consistent patterns with risk_management
+        transformed_context = ErrorDataTransformer.apply_cross_module_validation(
+            transformed_context, source_module="error_handling", target_module="core"
+        )
+
         # Use service execution pattern
         return await self.execute_with_monitoring(
             "handle_error",
@@ -205,9 +211,8 @@ class ErrorHandlingService(BaseService, ErrorPropagationMixin):
                 "error_type": type(error).__name__,
                 "severity": "error",
                 "timestamp": datetime.now(timezone.utc).isoformat(),
-                "processing_mode": "batch",
-                "data_format": "boundary_validation_v1",
-                "message_pattern": "batch",
+                "processing_mode": "stream",  # Align with core events default
+                "data_format": "event_data_v1",  # Align with state module format
                 "boundary_crossed": True,
             }
             if context:
@@ -240,9 +245,13 @@ class ErrorHandlingService(BaseService, ErrorPropagationMixin):
             error=error, context=error_context, recovery_strategy=recovery_strategy
         )
 
-        # Add to pattern analytics
+        # Add to pattern analytics with consistent processing mode
         if self._pattern_analytics is not None:
-            self._pattern_analytics.add_error_event(error_context.__dict__)
+            # Apply processing paradigm alignment for pattern analytics
+            error_context_dict = error_context.__dict__.copy()
+            error_context_dict["processing_mode"] = transformed_context.get("processing_mode", "stream")
+            error_context_dict["data_format"] = transformed_context.get("data_format", "event_data_v1")  # Align with state module format
+            self._pattern_analytics.add_error_event(error_context_dict)
 
         # Create standardized response
         response_data = {
@@ -253,9 +262,49 @@ class ErrorHandlingService(BaseService, ErrorPropagationMixin):
             "timestamp": error_context.timestamp.isoformat(),
             "component": component,
             "operation": operation,
+            "processing_mode": transformed_context.get("processing_mode", "stream"),
+            "data_format": transformed_context.get("data_format", "event_data_v1"),  # Align with state module format
         }
 
+        # Notify monitoring module of error handling completion for consistent cross-module patterns
+        await self._notify_monitoring_of_error_handling(response_data)
+
         return response_data
+
+    async def _notify_monitoring_of_error_handling(self, error_response: dict[str, Any]) -> None:
+        """Notify monitoring module of error handling completion with consistent message patterns."""
+        try:
+            # Use the cross-module data consistency validation
+            from src.utils.monitoring_helpers import validate_cross_module_data_consistency
+
+            notification_data = validate_cross_module_data_consistency(
+                source_module="error_handling",
+                target_module="monitoring",
+                data={
+                    "error_id": error_response.get("error_id", "unknown"),
+                    "component": error_response.get("component", "unknown"),
+                    "severity": error_response.get("severity", "medium"),
+                    "recovery_success": error_response.get("recovery_success", False),
+                    "processing_mode": error_response.get("processing_mode", "stream"),
+                    "data_format": "event_data_v1",  # Align with state module format
+                    "operation": error_response.get("operation", "unknown"),
+                    "timestamp": error_response.get("timestamp", datetime.now(timezone.utc).isoformat()),
+                    "notification_type": "error_handling_completed",
+                }
+            )
+
+            # Log the cross-module notification for monitoring integration
+            self.logger.debug(
+                "Notified monitoring module of error handling completion",
+                extra=notification_data
+            )
+
+        except Exception as notification_error:
+            # Don't fail error handling if monitoring notification fails
+            self.logger.warning(
+                f"Failed to notify monitoring module: {notification_error}",
+                error_id=error_response.get("error_id", "unknown")
+            )
 
     async def handle_global_error(
         self, error: Exception, context: dict[str, Any] | None = None, severity: str = "error"
@@ -442,19 +491,53 @@ class ErrorHandlingService(BaseService, ErrorPropagationMixin):
             raise ServiceError(f"Error handler metrics retrieval failed: {e}") from e
 
     def _transform_error_context(self, context: dict[str, Any], component: str) -> dict[str, Any]:
-        """Transform error context data for consistent processing."""
+        """Transform error context data for consistent processing matching monitoring module patterns."""
         transformed_context = context.copy()
 
-        # Add standard processing fields
+        # Add standard processing fields with consistent module alignment
         transformed_context.update(
             {
                 "processing_stage": "error_handling",
                 "processed_at": datetime.now(timezone.utc).isoformat(),
                 "component": component,
+                # Add consistent processing metadata to align with monitoring module
+                "processing_mode": transformed_context.get("processing_mode", "stream"),
+                "data_format": transformed_context.get("data_format", "bot_event_v1"),  # Consistent with risk_management module
+                "message_pattern": "pub_sub",  # Consistent with risk_management module
+                "boundary_validation": "applied",
+                "error_propagation_pattern": "service_to_service",
             }
         )
 
+        # Apply financial data transformations if present for consistency
+        if "price" in transformed_context and transformed_context["price"] is not None:
+            from src.utils.decimal_utils import to_decimal
+            transformed_context["price"] = to_decimal(transformed_context["price"])
+
+        if "quantity" in transformed_context and transformed_context["quantity"] is not None:
+            from src.utils.decimal_utils import to_decimal
+            transformed_context["quantity"] = to_decimal(transformed_context["quantity"])
+
         return transformed_context
+
+    def _validate_data_module_boundary(self, error: Exception, component: str, operation: str, context: dict[str, Any]) -> None:
+        """Validate error data at data -> error_handling module boundary."""
+        if component == "data" or component.startswith("data_"):
+            # Apply data-specific boundary validation
+            boundary_data = {
+                "component": component,
+                "error_type": type(error).__name__,
+                "operation": operation,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "processing_mode": context.get("processing_mode", "stream"),
+                "data_format": "event_data_v1",  # Align with state module format
+                "boundary_crossed": True,
+                **context
+            }
+
+            # Use consistent boundary validation patterns
+            from src.utils.messaging_patterns import BoundaryValidator
+            BoundaryValidator.validate_monitoring_to_error_boundary(boundary_data)
 
     async def start_error_monitoring(self) -> None:
         """Start error monitoring services."""
@@ -479,7 +562,7 @@ class ErrorHandlingService(BaseService, ErrorPropagationMixin):
                 self.logger.warning(f"Failed to stop pattern analytics monitoring: {e}")
 
     async def handle_batch_errors(
-        self, errors: list[tuple[Exception, str, str, dict[str, Any] | None]]
+        self, errors: list[tuple[Exception, str, str, dict[str, Any]]] | None
     ) -> list[dict[str, Any]]:
         """Handle multiple errors in batch."""
         if not errors:
@@ -490,7 +573,7 @@ class ErrorHandlingService(BaseService, ErrorPropagationMixin):
         )
 
     async def _handle_batch_errors_impl(
-        self, errors: list[tuple[Exception, str, str, dict[str, Any] | None]]
+        self, errors: list[tuple[Exception, str, str, dict[str, Any]]] | None
     ) -> list[dict[str, Any]]:
         """Implementation of batch error handling with backpressure control."""
         await self._ensure_initialized()
@@ -518,8 +601,31 @@ class ErrorHandlingService(BaseService, ErrorPropagationMixin):
                     }
 
         # Process all errors concurrently but with backpressure control
+        # Apply consistent batch processing paradigm alignment
         tasks = [handle_single_error(error_data) for error_data in errors]
         results = await asyncio.gather(*tasks, return_exceptions=False)
+
+        # Send batch results to pattern analytics for consistent processing paradigm
+        if self._pattern_analytics is not None and results:
+            try:
+                # Convert results to error contexts for batch analytics
+                batch_error_contexts = [
+                    {
+                        "error_id": result.get("error_id", "unknown"),
+                        "component": result.get("component", "unknown"),
+                        "severity": result.get("severity", "medium"),
+                        "processing_mode": "batch",  # Mark as batch processed
+                        "data_format": "event_data_v1",  # Align with state module format
+                        "timestamp": result.get("timestamp", datetime.now(timezone.utc).isoformat()),
+                    }
+                    for result in results
+                    if isinstance(result, dict) and result.get("handled", False)
+                ]
+
+                if batch_error_contexts:
+                    await self._pattern_analytics.add_batch_error_events(batch_error_contexts)
+            except Exception as analytics_error:
+                self.logger.warning(f"Failed to add batch error events to analytics: {analytics_error}")
 
         return results
 

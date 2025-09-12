@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
-from src.core.base import BaseFactory
+from src.core.base.factory import BaseFactory
 from src.core.exceptions import ErrorCategory, ErrorSeverity
 from src.error_handling.security_sanitizer import (
     SensitivityLevel,
@@ -142,12 +142,15 @@ class ErrorContext:
         if additional_context:
             known_kwargs["additional"] = additional_context
 
+        # Use severity from kwargs if provided, otherwise use auto-detected
+        final_severity = known_kwargs.pop("severity", severity)
+
         return cls(
             error=error,
             error_id=kwargs.get("error_id", str(uuid.uuid4())),
             component=component,
             operation=operation,
-            severity=severity,
+            severity=final_severity,
             **known_kwargs,
         )
 
@@ -200,15 +203,14 @@ class ErrorContext:
         coordinator = MessagingCoordinator("ErrorContextTransform")
         base_dict = coordinator._apply_data_transformation(base_dict)
 
-        # Add standard data processing fields
+        # Add standard data processing fields aligned with core patterns
         base_dict.update(
             {
-                "data_format": "error_context_v1",
+                "data_format": "event_data_v1",  # Align with state module format
                 "processing_stage": "error_handling",
                 "validation_status": "validated" if self.details else "pending",
-                # Add fields consistent with database module boundary validation
                 "boundary_crossed": True,
-                "processing_mode": "async",
+                "processing_mode": "stream",  # Align with core events default
             }
         )
 

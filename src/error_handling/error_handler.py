@@ -393,7 +393,7 @@ class ErrorHandler:
             if missing_fields:
                 raise ValidationError(
                     f"Missing required fields from core module: {missing_fields}",
-                    error_code="VALID_001",
+                    error_code="VALID_410",
                     field_name="module_boundary",
                     validation_rule="core_event_format",
                 )
@@ -405,7 +405,7 @@ class ErrorHandler:
             ):
                 raise ValidationError(
                     "Database entity_id must be string or int",
-                    error_code="VALID_002",
+                    error_code="VALID_411",
                     field_name="entity_id",
                     field_value=validated_data["entity_id"],
                 )
@@ -422,7 +422,7 @@ class ErrorHandler:
                     except Exception as e:
                         raise ValidationError(
                             f"Invalid financial data format for {field}",
-                            error_code="VALID_003",
+                            error_code="VALID_412",
                             field_name=field,
                             field_value=validated_data[field],
                             validation_rule="financial_precision",
@@ -459,15 +459,19 @@ class ErrorHandler:
                 boundary_data, source_module
             )
 
-            # Apply additional boundary validation for state-to-error flow
-            if source_module == "state" or "state" in component.lower():
+            # Apply additional boundary validation for cross-module error flow
+            if source_module in ["state", "database"] or any(module in component.lower() for module in ["state", "database"]):
                 from src.utils.messaging_patterns import BoundaryValidator
 
                 try:
-                    BoundaryValidator.validate_monitoring_to_error_boundary(validated_boundary_data)
+                    # Use appropriate boundary validator based on source module
+                    if "database" in source_module.lower() or "database" in component.lower():
+                        BoundaryValidator.validate_database_to_error_boundary(validated_boundary_data)
+                    else:
+                        BoundaryValidator.validate_monitoring_to_error_boundary(validated_boundary_data)
                 except Exception as boundary_error:
                     self.logger.warning(
-                        f"State-to-error boundary validation failed: {boundary_error}"
+                        f"{source_module}-to-error boundary validation failed: {boundary_error}"
                     )
 
         except Exception as validation_error:
@@ -530,6 +534,52 @@ class ErrorHandler:
         """Get current stack trace for debugging."""
         return "".join(traceback.format_stack())
 
+    def _validate_cross_module_boundary(self, data: dict[str, Any], source: str, operation: str) -> None:
+        """Validate data at cross-module boundaries for consistency with core patterns."""
+        if not isinstance(data, dict):
+            raise ValidationError(
+                f"Cross-module error data must be dict for {operation} from {source}",
+                field_name="error_data",
+                field_value=type(data).__name__,
+                expected_type="dict",
+            )
+
+        # Validate required boundary fields for error propagation
+        if source.startswith(("monitoring", "web_interface")) and operation.startswith(("error", "alert")):
+            required_fields = ["processing_mode", "data_format"]
+            for field in required_fields:
+                if field not in data:
+                    raise ValidationError(
+                        f"Missing required boundary field '{field}' in {operation} from {source}",
+                        field_name=field,
+                        field_value=None,
+                        expected_type="string",
+                    )
+
+        # Validate error handling specific fields
+        if source == "error_handling" and operation.startswith(("error", "recovery")):
+            if "error_type" not in data:
+                raise ValidationError(
+                    "Missing 'error_type' field in error event from error_handling module",
+                    field_name="error_type",
+                    field_value=None,
+                    expected_type="string",
+                )
+
+        # Validate financial data consistency at boundaries
+        financial_fields = ["price", "quantity", "volume"]
+        for field in financial_fields:
+            if field in data and data[field] is not None:
+                try:
+                    float(data[field])
+                except (ValueError, TypeError):
+                    raise ValidationError(
+                        f"Financial field '{field}' must be numeric in cross-module error",
+                        field_name=field,
+                        field_value=data[field],
+                        validation_rule="must be numeric",
+                    )
+
     @time_execution
     async def handle_error(
         self,
@@ -581,7 +631,7 @@ class ErrorHandler:
             "operation": context.operation,
             "severity": context.severity.value,
             "processing_mode": "stream",  # Align with state module default
-            "message_pattern": "pub_sub",  # Consistent messaging pattern
+            "message_pattern": "pub_sub",  # Consistent with risk_management module
             "processing_stage": "error_handling",
             **context.details,
         }
@@ -611,7 +661,7 @@ class ErrorHandler:
                 **sanitized_details,
                 "rate_limited": not rate_limit_result.allowed,
                 "event_type": "error_occurred",
-                "message_pattern": "pub_sub",  # Consistent messaging pattern
+                "message_pattern": "pub_sub",  # Consistent with risk_management module
                 "processing_mode": "stream",  # Align with state module
             },
         )
@@ -717,8 +767,8 @@ class ErrorHandler:
             {
                 "processing_mode": "stream",  # Align with state module default
                 "processing_stage": "error_handling",
-                "data_format": "error_context_v1",
-                "message_pattern": "pub_sub",  # Consistent messaging
+                "data_format": "event_data_v1",  # Align with state module format
+                "message_pattern": "pub_sub",  # Consistent with risk_management module
                 "stream_position": kwargs.get("stream_position", 0),
                 "correlation_id": kwargs.get(
                     "correlation_id", f"error_stream_{datetime.now(timezone.utc).timestamp()}"
@@ -1072,7 +1122,7 @@ class ErrorHandler:
         """
         if not isinstance(data, dict):
             return {
-                "data_format": "error_context_v1",
+                "data_format": "event_data_v1",  # Align with state module format
                 "processing_stage": "validation",
                 "validation_status": "transformed",
                 "original_data": data,
@@ -1083,7 +1133,7 @@ class ErrorHandler:
         # Ensure standard fields are present - align with core event patterns
         standardized = data.copy()
         if "data_format" not in standardized:
-            standardized["data_format"] = "error_context_v1"
+            standardized["data_format"] = "event_data_v1"  # Align with state module format
         if "processing_stage" not in standardized:
             standardized["processing_stage"] = "error_handling"
         if "validation_status" not in standardized:

@@ -4,7 +4,7 @@ Unit tests for state monitor functionality.
 Tests state validation, reconciliation, and consistency monitoring.
 """
 
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock, AsyncMock
 
 import pytest
 
@@ -107,14 +107,17 @@ class TestStateMonitor:
         """Test state reconciliation."""
         discrepancies = [{"type": "test_discrepancy"}]
 
-        # Mock the reconciliation method to return True
-        with patch.object(
-            state_monitor, "_reconcile_portfolio_balances", return_value=True
-        ) as mock_reconcile:
-            result = await state_monitor.reconcile_state("portfolio_balance_sync", discrepancies)
+        # Create a mock StateDataService
+        mock_state_data_service = MagicMock()
+        mock_state_data_service.reconcile_balance_discrepancies = AsyncMock(return_value=True)
+        
+        # Set the service on the state monitor
+        state_monitor._state_data_service = mock_state_data_service
 
-            assert result is True
-            mock_reconcile.assert_called_once_with(discrepancies)
+        result = await state_monitor.reconcile_state("portfolio_balance_sync", discrepancies)
+
+        assert result is True
+        mock_state_data_service.reconcile_balance_discrepancies.assert_called_once_with(discrepancies)
 
     def test_get_state_summary(self, state_monitor):
         """Test getting state summary."""

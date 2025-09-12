@@ -32,7 +32,19 @@ class GlobalErrorHandler(BaseService):
         self, config: Any | None = None, context_factory: Optional["ErrorContextFactory"] = None
     ):
         """Initialize global error handler with optional configuration and dependencies."""
-        super().__init__(name="GlobalErrorHandler", config=config)
+        # Convert config to ConfigDict properly for BaseService
+        from src.core.types.base import ConfigDict
+
+        if config is None:
+            config_dict = ConfigDict({})
+        elif hasattr(config, "model_dump"):
+            config_dict = ConfigDict(config.model_dump())
+        elif isinstance(config, dict):
+            config_dict = ConfigDict(config)
+        else:
+            config_dict = ConfigDict({})
+
+        super().__init__(name="GlobalErrorHandler", config=config_dict)
 
         self._error_callbacks: list[Callable] = []
         self._critical_callbacks: list[Callable] = []

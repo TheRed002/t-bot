@@ -171,16 +171,16 @@ def register_error_handling_services(injector, config: Config | None = None) -> 
                 )
 
                 # Try to resolve dependencies - these are optional for StateMonitor
-                database_service = None
+                state_data_service = None
                 risk_service = None
                 execution_service = None
 
                 try:
-                    database_service = (
-                        injector.get("DatabaseService") if injector.has("DatabaseService") else None
+                    state_data_service = (
+                        injector.get("StateDataService") if injector.has("StateDataService") else None
                     )
                 except Exception as e:
-                    logger.debug(f"Failed to resolve DatabaseService for StateMonitor: {e}")
+                    logger.debug(f"Failed to resolve StateDataService for StateMonitor: {e}")
 
                 try:
                     risk_service = (
@@ -200,7 +200,7 @@ def register_error_handling_services(injector, config: Config | None = None) -> 
 
                 instance = StateMonitor(
                     config=resolved_config,
-                    database_service=database_service,
+                    state_data_service=state_data_service,
                     risk_service=risk_service,
                     execution_service=execution_service,
                 )

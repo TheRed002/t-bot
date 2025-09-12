@@ -377,3 +377,25 @@ def shutdown_all_error_handlers() -> None:
 circuit_breaker = with_circuit_breaker
 retry = with_retry
 fallback = with_fallback
+
+# Additional backward compatibility function
+def retry_with_backoff(
+    max_attempts: int = 3,
+    base_delay: float = 1.0,
+    max_delay: float = 60.0,
+    backoff_factor: float = 2.0,
+    exceptions: tuple | None = None,
+):
+    """
+    Retry with exponential backoff - backward compatibility function.
+    
+    This is an alias for with_retry with exponential backoff.
+    """
+    return with_retry(
+        max_attempts=max_attempts,
+        base_delay=base_delay,
+        max_delay=max_delay,
+        exponential=True,
+        exceptions=exceptions,
+        backoff_factor=backoff_factor,
+    )
