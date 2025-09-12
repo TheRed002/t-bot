@@ -308,7 +308,7 @@ class EventPublisher:
             "event_type": event_type,
             "component": "EventPublisher",
             "processing_mode": "stream",  # Match state module default
-            "data_format": "event_data_v1",  # Match state module format
+            "data_format": "bot_event_v1",  # Consistent with event system format
             "message_pattern": "pub_sub",  # Consistent messaging pattern
             "boundary_crossed": True,
             "timestamp": datetime.now(timezone.utc).isoformat(),

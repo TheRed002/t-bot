@@ -943,6 +943,45 @@ class MLConfig(BaseConfig):
         return v
 
 
+class ExecutionConfig(BaseConfig):
+    """Execution engine configuration for order processing and algorithms."""
+
+    # Order manager timing settings
+    cleanup_interval_hours: int = Field(default=1, description="Cleanup interval in hours")
+    idempotency_cleanup_interval_minutes: int = Field(default=60, description="Idempotency cleanup interval in minutes")
+    connection_retry_delay_seconds: float = Field(default=5.0, description="Connection retry delay in seconds")
+    connection_retry_max_delay_seconds: float = Field(default=30.0, description="Maximum connection retry delay")
+    connection_retry_backoff_factor: float = Field(default=2.0, description="Connection retry backoff multiplier")
+
+    # Order processing timing
+    order_processing_delay_seconds: float = Field(default=0.1, description="Small delay between order processing")
+    order_sync_delay_seconds: float = Field(default=1.0, description="Order synchronization delay")
+    rate_limit_delay_seconds: float = Field(default=1.0, description="Rate limiting delay")
+
+    # Algorithm-specific timing
+    twap_slice_interval_buffer_seconds: float = Field(default=1.0, description="TWAP slice interval buffer")
+    twap_max_wait_seconds: int = Field(default=300, description="TWAP maximum wait time")
+    twap_error_recovery_delay_seconds: int = Field(default=30, description="TWAP error recovery delay")
+
+    vwap_max_wait_seconds: int = Field(default=300, description="VWAP maximum wait time")
+    vwap_error_delay_seconds: int = Field(default=10, description="VWAP error delay")
+    vwap_slice_retry_delay_seconds: int = Field(default=5, description="VWAP slice retry delay")
+    vwap_min_slice_interval_seconds: int = Field(default=30, description="VWAP minimum slice interval")
+    vwap_monitoring_delay_seconds: int = Field(default=60, description="VWAP monitoring delay")
+
+    iceberg_fill_monitoring_interval_seconds: int = Field(default=1, description="Iceberg fill monitoring interval")
+    iceberg_error_delay_seconds: int = Field(default=10, description="Iceberg error delay")
+    iceberg_retry_delay_seconds: int = Field(default=5, description="Iceberg retry delay")
+    iceberg_refresh_delay_seconds: int = Field(default=2, description="Iceberg refresh delay base")
+    iceberg_random_delay_range: int = Field(default=3, description="Iceberg random delay range")
+
+    # Error handling delays
+    rate_limit_retry_delay_seconds: int = Field(default=60, description="Rate limit retry delay")
+    general_error_delay_seconds: int = Field(default=5, description="General error delay")
+    busy_wait_prevention_delay_seconds: int = Field(default=1, description="Busy wait prevention delay")
+    connection_error_delay_seconds: int = Field(default=10, description="Connection error delay")
+
+
 class Config(BaseConfig):
     """Master configuration class for the entire application.
 
@@ -961,6 +1000,7 @@ class Config(BaseConfig):
         risk: Risk management configuration
         capital_management: Capital management configuration
         strategies: Strategy management configuration
+        execution: Execution engine configuration
         ml: Machine learning configuration
     """
 
@@ -980,6 +1020,7 @@ class Config(BaseConfig):
     risk: RiskConfig = RiskConfig()
     capital_management: CapitalManagementConfig = CapitalManagementConfig()
     strategies: StrategyManagementConfig = StrategyManagementConfig()
+    execution: ExecutionConfig = ExecutionConfig()
     ml: MLConfig = MLConfig()
 
     @field_validator("environment")
