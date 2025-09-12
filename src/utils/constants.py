@@ -665,4 +665,16 @@ ML_MODEL_CONSTANTS = {
     "max_concurrent_operations": 10,  # Maximum concurrent ML operations
     "pipeline_timeout_seconds": 300,  # Pipeline timeout in seconds (5 minutes)
     "cache_ttl_minutes": 60,  # Cache TTL in minutes (1 hour)
+    "ml_executor_workers": 4,  # Number of ML executor threads
+    # Mock service constants
+    "default_drift_score": 0.05,  # Default drift score for mock services
+    "default_prediction_drift_score": 0.03,  # Default prediction drift score
+    "default_performance_decline": 0.02,  # Default performance decline
+    "default_training_time_seconds": 120.0,  # Default training time for mocks
+    "mock_batch_predictions": [0.5, 0.3, 0.7],  # Default mock batch predictions
+    "cache_cleanup_interval_minutes": 30,  # Cache cleanup interval in minutes
+    "async_warmup_delay_ms": 1,  # Async warmup delay in milliseconds
+    "error_retry_delay_ms": 100,  # Error retry delay in milliseconds
+    "cached_computation_time": 0.0,  # Time for cached computations
+    "default_query_limit": 100,  # Default limit for database queries
 }

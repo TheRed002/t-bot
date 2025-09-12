@@ -1,3 +1,4 @@
+
 """
 Synthetic Data Generation Utilities for Backtesting.
 

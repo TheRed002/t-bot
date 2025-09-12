@@ -1,10 +1,10 @@
 """Service interfaces for the utils module."""
 
-from abc import ABC, abstractmethod
+from abc import abstractmethod
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
-from pydantic import ConfigDict
+from src.core.base import BaseService
 
 if TYPE_CHECKING:
     from src.utils.validation.service import ValidationContext, ValidationResult
@@ -110,12 +110,12 @@ class CalculatorInterface(Protocol):
         ...
 
 
-class BaseUtilityService(ABC):
-    """Base class for utility services."""
+class BaseUtilityService(BaseService):
+    """Base class for utility services that inherits from core BaseService."""
 
-    def __init__(self, name: str | None = None, config: ConfigDict | None = None):
+    def __init__(self, name: str | None = None, config: dict[str, Any] | None = None):
         """Initialize base utility service."""
-        self.name = name or self.__class__.__name__
+        super().__init__(name or self.__class__.__name__)
         self.config = config or {}
 
     @abstractmethod

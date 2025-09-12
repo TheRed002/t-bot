@@ -2,7 +2,8 @@
 WebSocket Management Utilities for T-Bot Trading System.
 
 This module provides common utilities for WebSocket connection management,
-subscription handling, and message broadcasting across different WebSocket handlers.
+subscription handling, message broadcasting, and reconnection logic across 
+different WebSocket handlers and exchange implementations.
 """
 
 import asyncio
@@ -390,3 +391,70 @@ async def handle_websocket_disconnect(
         logger.info(f"WebSocket connection cleaned up for user {user_id}")
     except Exception as e:
         logger.error(f"Error cleaning up WebSocket connection for user {user_id}: {e}")
+
+
+# Exchange WebSocket Reconnection Utilities
+
+class ExchangeWebSocketReconnectionManager:
+    """Common reconnection logic for exchange WebSocket connections."""
+
+    def __init__(self, exchange_name: str, max_reconnect_attempts: int = 5):
+        self.exchange_name = exchange_name
+        self.max_reconnect_attempts = max_reconnect_attempts
+        self.reconnect_attempts = 0
+        self.reconnect_task: asyncio.Task | None = None
+
+    def reset_reconnect_attempts(self) -> None:
+        """Reset reconnection attempt counter."""
+        self.reconnect_attempts = 0
+
+    def should_attempt_reconnect(self) -> bool:
+        """Check if reconnection should be attempted."""
+        return self.reconnect_attempts < self.max_reconnect_attempts
+
+    def calculate_reconnect_delay(self) -> float:
+        """Calculate backoff delay for next reconnection attempt."""
+        import random
+        base_delay = min(2.0 ** self.reconnect_attempts, 30.0)  # Max 30s
+        jitter = random.uniform(0.1, 0.3) * base_delay
+        return base_delay + jitter
+
+    async def schedule_reconnect(self, reconnect_callback) -> None:
+        """
+        Schedule a reconnection attempt with exponential backoff.
+        
+        Args:
+            reconnect_callback: Async function to call for reconnection
+        """
+        if not self.should_attempt_reconnect():
+            logger.error(f"Max reconnection attempts reached for {self.exchange_name}")
+            return
+
+        if self.reconnect_task and not self.reconnect_task.done():
+            logger.debug(f"Reconnection already scheduled for {self.exchange_name}")
+            return
+
+        self.reconnect_task = asyncio.create_task(
+            self._reconnect_with_delay(reconnect_callback)
+        )
+
+    async def _reconnect_with_delay(self, reconnect_callback) -> None:
+        """Execute reconnection with delay."""
+        try:
+            delay = self.calculate_reconnect_delay()
+            self.reconnect_attempts += 1
+
+            logger.info(f"Scheduling reconnection attempt {self.reconnect_attempts} "
+                       f"for {self.exchange_name} in {delay:.1f}s")
+
+            await asyncio.sleep(delay)
+            await reconnect_callback()
+
+        except Exception as e:
+            logger.error(f"Reconnection failed for {self.exchange_name}: {e}")
+
+    def cancel_reconnect(self) -> None:
+        """Cancel any pending reconnection."""
+        if self.reconnect_task and not self.reconnect_task.done():
+            self.reconnect_task.cancel()
+            self.reconnect_task = None

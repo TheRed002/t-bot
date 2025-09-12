@@ -42,8 +42,10 @@ class LogLevel(Enum):
 class InformationLevel(Enum):
     """Information levels for security context."""
 
+    MINIMAL = "minimal"
     BASIC = "basic"
     DETAILED = "detailed"
+    FULL = "full"
     SENSITIVE = "sensitive"
     INTERNAL = "internal"
     PUBLIC = "public"
@@ -90,6 +92,7 @@ class UserRole(Enum):
 
     GUEST = "guest"
     USER = "user"
+    DEVELOPER = "developer"
     ADMIN = "admin"
     SYSTEM = "system"
 

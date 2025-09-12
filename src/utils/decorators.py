@@ -1057,6 +1057,11 @@ __all__ = [
     "validate_input",
     "validate_output",
     "validated",
+    "with_cache",
+    "with_monitoring",
+    "with_error_handler",
+    "with_audit_trail",
+    "with_circuit_breaker",
 ]
 
 
@@ -1065,3 +1070,4 @@ with_cache = cached
 with_monitoring = monitored
 with_error_handler = robust
 with_audit_trail = logged
+with_circuit_breaker = circuit_breaker

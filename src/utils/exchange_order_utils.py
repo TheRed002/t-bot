@@ -341,6 +341,50 @@ class OrderTypeUtils:
         return common_mappings.get(exchange_type_lower, OrderType.LIMIT)
 
 
+class AssetPrecisionUtils:
+    """Utilities for asset precision calculations."""
+
+    @staticmethod
+    def get_asset_precision(symbol: str, precision_type: str = "quantity") -> int:
+        """
+        Get asset-specific precision for calculations.
+        
+        Args:
+            symbol: Trading symbol (format varies by exchange)
+            precision_type: Type of precision ('quantity', 'price', 'fee')
+            
+        Returns:
+            int: Precision decimal places
+        """
+        # Asset-specific precision rules
+        precision_rules = {
+            "crypto": {"quantity": 8, "price": 8, "fee": 8},
+            "fiat": {"quantity": 2, "price": 4, "fee": 2},
+            "stocks": {"quantity": 0, "price": 2, "fee": 2}
+        }
+
+        # Determine asset type based on symbol (works for all exchange formats)
+        symbol_upper = symbol.upper()
+
+        # Check for stablecoins/crypto pairs
+        if any(stable in symbol_upper for stable in ["USDT", "USDC", "BUSD"]):
+            asset_type = "crypto"
+        # Check for fiat pairs
+        elif any(fiat in symbol_upper for fiat in ["USD", "EUR", "GBP", "JPY"]):
+            if (symbol_upper.endswith(("-USD", "-EUR", "-GBP", "-JPY")) or
+                symbol_upper.endswith(("USD", "EUR", "GBP", "JPY"))):
+                # Crypto to fiat pair
+                asset_type = "crypto"
+            else:
+                # Pure forex pair
+                asset_type = "fiat"
+        else:
+            # Default to crypto precision
+            asset_type = "crypto"
+
+        return precision_rules[asset_type].get(precision_type, 8)
+
+
 class FeeCalculationUtils:
     """Utilities for fee calculations."""
 
@@ -354,25 +398,35 @@ class FeeCalculationUtils:
 
     @staticmethod
     @retry(max_attempts=2, delay=0.1)
-    def calculate_fee(order_value: Decimal, exchange: str, is_maker: bool = False) -> Decimal:
+    def calculate_fee(order_value: Decimal, exchange: str, symbol: str, is_maker: bool = False) -> Decimal:
         """
         Calculate trading fee for an order.
 
         Args:
             order_value: Total order value (quantity * price)
             exchange: Exchange name
+            symbol: Trading symbol for precision calculation
             is_maker: Whether this is a maker order
 
         Returns:
-            Decimal: Calculated fee amount
+            Decimal: Calculated fee amount with proper precision
         """
         try:
+            # Set proper decimal context for financial calculations
+            from decimal import getcontext
+            getcontext().prec = 28
+
             fee_rates = FeeCalculationUtils.DEFAULT_FEE_RATES.get(
                 exchange, FeeCalculationUtils.DEFAULT_FEE_RATES["default"]
             )
 
             fee_rate = fee_rates["maker"] if is_maker else fee_rates["taker"]
-            return order_value * fee_rate
+            fee = order_value * fee_rate
+
+            # Round fee to appropriate precision
+            from src.utils.decimal_utils import round_to_precision
+            fee_precision = AssetPrecisionUtils.get_asset_precision(symbol, "fee")
+            return round_to_precision(fee, fee_precision)
 
         except Exception as e:
             # Return zero fee on calculation error

@@ -286,11 +286,9 @@ def validate_type_conversion(
                         f"CRITICAL: Converting financial field '{field_name}' from Decimal to float - use Decimal throughout"
                     )
                 try:
-                    from src.monitoring.financial_precision import safe_decimal_to_float
+                    from src.utils.decimal_utils import decimal_to_float
 
-                    result = safe_decimal_to_float(
-                        value, f"validation_{field_name}", warn_on_loss=True
-                    )
+                    result = decimal_to_float(value)
                     if not math.isfinite(result):
                         raise ValidationError(
                             f"Conversion of {field_name} to float resulted in non-finite value"
@@ -307,11 +305,9 @@ def validate_type_conversion(
             else:
                 # Use safe conversion for unknown types
                 try:
-                    from src.monitoring.financial_precision import safe_decimal_to_float
+                    from src.utils.decimal_utils import decimal_to_float
 
-                    return safe_decimal_to_float(
-                        value, f"validation_{field_name}", warn_on_loss=True
-                    )
+                    return decimal_to_float(value)
                 except ImportError:
                     # Fallback conversion
                     return float(value)
@@ -400,7 +396,7 @@ def _validate_numeric_field(data: dict[str, Any], field: str) -> None:
             # Use core exception types for consistent error propagation
             raise ValidationError(
                 f"Invalid MarketData {field}: {e}",
-                error_code="DATA_001",
+                error_code="VALID_000",
                 details={"field": field, "value": data.get(field), "original_error": str(e)},
             ) from e
 
@@ -417,13 +413,13 @@ def _validate_bid_ask_relationship(data: dict[str, Any]) -> None:
             if bid_decimal > ask_decimal:
                 raise ValidationError(
                     "MarketData bid cannot be greater than ask",
-                    error_code="DATA_001",
+                    error_code="VALID_000",
                     details={"bid": str(bid_decimal), "ask": str(ask_decimal)},
                 )
         except (ValueError, TypeError) as e:
             raise ValidationError(
                 "Invalid bid/ask price format",
-                error_code="DATA_001",
+                error_code="VALID_000",
                 details={"bid": data["bid"], "ask": data["ask"], "original_error": str(e)},
             ) from e
 

@@ -54,7 +54,7 @@ def handle_service_error(
         logger.error(f"Unexpected error in {operation}", exc_info=True, **error_details)
 
         service_error = ServiceError(
-            f"{operation} failed: {error}", error_code="SVC_999", details=error_details
+            f"{operation} failed: {error}", error_code="SERV_000", details=error_details
         )
 
         if reraise:

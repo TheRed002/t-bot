@@ -1,3 +1,4 @@
+
 """
 Shared error categorization utilities for error handling system.
 

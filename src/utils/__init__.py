@@ -102,6 +102,11 @@ from .decorators import (
     validate_input,
     validate_output,
     validated,
+    with_audit_trail,
+    with_cache,
+    with_circuit_breaker,
+    with_error_handler,
+    with_monitoring,
 )
 
 # Execution utilities (new) - shared utilities to eliminate duplication in execution module
@@ -392,6 +397,12 @@ __all__ = [
     "validate_symbol",
     "validate_timeframe",
     "validated",
+    # Decorator aliases
+    "with_cache",
+    "with_monitoring",
+    "with_error_handler",
+    "with_audit_trail",
+    "with_circuit_breaker",
     # Execution utilities
     "calculate_order_value",
     "calculate_price_deviation_bps",

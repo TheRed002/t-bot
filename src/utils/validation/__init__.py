@@ -1,3 +1,5 @@
+from typing import Optional
+
 """Validation module for the T-Bot trading system.
 
 This module provides both legacy validation framework and modern

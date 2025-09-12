@@ -213,34 +213,34 @@ def safe_import_monitoring() -> dict[str, Any]:
     return components
 
 
-def resolve_service_dependencies(service_instance: Any, dependency_mapping: dict[str, str]) -> None:
+def resolve_service_dependencies(
+    service_instance: Any,
+    dependency_mapping: dict[str, str],
+    injected_services: dict[str, Any] | None = None
+) -> None:
     """
-    Resolve service dependencies using proper dependency injection factory pattern.
+    Resolve service dependencies using proper dependency injection pattern.
 
     Args:
         service_instance: Service instance to inject dependencies into
         dependency_mapping: Mapping of attribute names to service names
+        injected_services: Pre-injected services (required from service layer)
     """
-    try:
-        from src.core.dependency_injection import injector
+    logger = get_logger(service_instance.__class__.__module__)
+    injected_services = injected_services or {}
 
-        logger = get_logger(service_instance.__class__.__module__)
+    for attr_name, service_name in dependency_mapping.items():
+        current_service = getattr(service_instance, attr_name, None)
 
-        for attr_name, service_name in dependency_mapping.items():
-            current_service = getattr(service_instance, attr_name, None)
-
-            # Only resolve services that weren't injected
-            if not current_service:
-                try:
-                    resolved_service = injector.resolve(service_name)
-                    setattr(service_instance, attr_name, resolved_service)
-                    logger.debug(f"Resolved {service_name} via dependency injection")
-                except Exception as e:
-                    logger.warning(f"Could not resolve {service_name} from injector: {e}")
-
-    except Exception as e:
-        logger = get_logger(__name__)
-        logger.warning(f"Failed to resolve dependencies via dependency injection: {e}")
+        # Only resolve services that weren't injected
+        if not current_service:
+            if service_name in injected_services:
+                setattr(service_instance, attr_name, injected_services[service_name])
+                logger.debug(f"Injected {service_name} from service layer")
+            else:
+                logger.warning(
+                    f"Service {service_name} not provided - should be injected from service layer"
+                )
 
 
 async def safe_close_connection(

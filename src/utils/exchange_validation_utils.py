@@ -1,3 +1,4 @@
+
 """
 Common Exchange Validation Utilities
 

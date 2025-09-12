@@ -11,7 +11,6 @@ from typing import Any
 
 from src.core.exceptions import ValidationError
 from src.core.types import MarketData
-from src.utils.validation.core import ValidationFramework
 from src.utils.validation.validation_types import (
     ValidationCategory,
     ValidationIssue,
@@ -36,7 +35,23 @@ class MarketDataValidationUtils:
         Raises:
             ValidationError: If symbol format is invalid
         """
-        return ValidationFramework.validate_symbol(symbol) is not None
+        try:
+            import re
+            if not symbol or not isinstance(symbol, str):
+                raise ValidationError("Symbol must be a non-empty string")
+
+            # Normalize to uppercase
+            symbol_norm = symbol.upper().strip()
+
+            # Require slash separator format like BTC/USDT
+            if not re.match(r"^[A-Z]{2,10}/[A-Z]{2,10}$", symbol_norm):
+                raise ValidationError(f"Invalid symbol format: {symbol}. Must be in format BASE/QUOTE (e.g. BTC/USDT)")
+
+            return True
+        except ValidationError:
+            raise
+        except Exception:
+            return False
 
     @staticmethod
     def validate_price_value(
@@ -225,11 +240,19 @@ class MarketDataValidationUtils:
             data: MarketData object to validate
 
         Returns:
-            True if prices are consistent
+            True if prices are consistent, False if insufficient data
 
         Raises:
             ValidationError: If prices are inconsistent
         """
+        # Check if we have enough data to validate consistency
+        price_fields = [data.open, data.high, data.low, data.close]
+        non_none_prices = [p for p in price_fields if p is not None]
+
+        # Need at least 2 price points to validate consistency
+        if len(non_none_prices) < 2:
+            return False
+
         # High >= Low check
         if data.high and data.low and data.high < data.low:
             raise ValidationError(f"High price {data.high} less than low price {data.low}")
@@ -342,23 +365,23 @@ class MarketDataValidator:
             self._validate_required_fields(data)
 
             # Price validations
-            if data.close:
-                MarketDataValidationUtils.validate_price_value(data.close, "close")
+            if data.close is not None:
+                MarketDataValidationUtils.validate_price_value(data.close, "close", min_price=Decimal("0.00000001"))
 
-            if data.open:
-                MarketDataValidationUtils.validate_price_value(data.open, "open")
+            if data.open is not None:
+                MarketDataValidationUtils.validate_price_value(data.open, "open", min_price=Decimal("0.00000001"))
 
-            if data.high:
-                MarketDataValidationUtils.validate_price_value(data.high, "high")
+            if data.high is not None:
+                MarketDataValidationUtils.validate_price_value(data.high, "high", min_price=Decimal("0.00000001"))
 
-            if data.low:
-                MarketDataValidationUtils.validate_price_value(data.low, "low")
+            if data.low is not None:
+                MarketDataValidationUtils.validate_price_value(data.low, "low", min_price=Decimal("0.00000001"))
 
-            if data.bid_price:
-                MarketDataValidationUtils.validate_price_value(data.bid_price, "bid_price")
+            if data.bid_price is not None:
+                MarketDataValidationUtils.validate_price_value(data.bid_price, "bid_price", min_price=Decimal("0.00000001"))
 
-            if data.ask_price:
-                MarketDataValidationUtils.validate_price_value(data.ask_price, "ask_price")
+            if data.ask_price is not None:
+                MarketDataValidationUtils.validate_price_value(data.ask_price, "ask_price", min_price=Decimal("0.00000001"))
 
             # Volume validation
             if data.volume:

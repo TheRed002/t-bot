@@ -48,6 +48,26 @@ class PositionSizingAlgorithm(ABC):
         return True
 
 
+class FixedAlgorithm(PositionSizingAlgorithm):
+    """Fixed position sizing algorithm - uses configured position size regardless of portfolio."""
+
+    def calculate_size(
+        self, signal: Signal, portfolio_value: Decimal, risk_per_trade: Decimal, **kwargs
+    ) -> Decimal:
+        """Calculate position size as fixed amount."""
+        if not self.validate_inputs(signal, portfolio_value, risk_per_trade):
+            return ZERO
+
+        # Get fixed size from kwargs or calculate from risk_per_trade
+        fixed_size = to_decimal(str(kwargs.get("fixed_size", portfolio_value * risk_per_trade)))
+
+        # Apply signal confidence/strength
+        confidence = get_signal_confidence(signal)
+        position_size = fixed_size * confidence
+
+        return position_size
+
+
 class FixedPercentageAlgorithm(PositionSizingAlgorithm):
     """Fixed percentage position sizing algorithm."""
 
@@ -114,6 +134,14 @@ class KellyCriterionAlgorithm(PositionSizingAlgorithm):
         # Apply signal confidence
         confidence = get_signal_confidence(signal)
         final_fraction = bounded_fraction * confidence
+
+        # Log detailed Kelly calculation for debugging and verification
+        logger.info(
+            f"Kelly Criterion sizing (Half-Kelly): symbol={signal.symbol}, "
+            f"win_probability={win_probability}, loss_probability={loss_probability}, "
+            f"win_loss_ratio={win_loss_ratio}, kelly_fraction={kelly_fraction}, "
+            f"half_kelly={safe_kelly_fraction}, final_fraction={final_fraction}"
+        )
 
         return portfolio_value * final_fraction
 
@@ -346,6 +374,7 @@ def calculate_position_size(
     """
     # Algorithm mapping
     algorithms = {
+        PositionSizeMethod.FIXED: FixedAlgorithm(),
         PositionSizeMethod.FIXED_PERCENTAGE: FixedPercentageAlgorithm(),
         PositionSizeMethod.KELLY_CRITERION: KellyCriterionAlgorithm(),
         PositionSizeMethod.VOLATILITY_ADJUSTED: VolatilityAdjustedAlgorithm(),

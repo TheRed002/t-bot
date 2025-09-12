@@ -108,14 +108,14 @@ def convert_currency(
     if amount_decimal < ZERO:
         raise ValidationError(
             "Amount cannot be negative",
-            error_code="DATA_001",
+            error_code="VALID_000",
             details={"amount": str(amount_decimal)},
         )
 
     if rate_decimal <= ZERO:
         raise ValidationError(
             "Exchange rate must be positive",
-            error_code="DATA_001",
+            error_code="VALID_000",
             details={"exchange_rate": str(rate_decimal)},
         )
 
@@ -293,7 +293,7 @@ def chunk_list(lst: list[Any], chunk_size: int) -> list[list[Any]]:
 
     if chunk_size <= 0:
         raise ValidationError(
-            "Chunk size must be positive", error_code="DATA_001", details={"chunk_size": chunk_size}
+            "Chunk size must be positive", error_code="VALID_000", details={"chunk_size": chunk_size}
         )
 
     # Apply boundary validation for data processing
@@ -334,9 +334,17 @@ def chunk_list(lst: list[Any], chunk_size: int) -> list[list[Any]]:
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             }
 
-            # Use paradigm aligner for consistency
-            aligned_batch = ProcessingParadigmAligner.create_batch_from_stream(
-                [{"chunk_data": current_chunk, **batch_metadata}]
+            # Use paradigm aligner for consistency with data pipeline patterns
+            stream_items = [{"item": item, "batch_position": i} for i, item in enumerate(current_chunk)]
+            aligned_batch = ProcessingParadigmAligner.create_batch_from_stream(stream_items)
+
+            # Apply consistent batch processing mode alignment
+            batch_with_metadata = ProcessingParadigmAligner.align_processing_modes(
+                source_mode="batch", target_mode="batch", data={
+                    "chunk_data": current_chunk,
+                    **batch_metadata,
+                    **aligned_batch
+                }
             )
 
             chunks.append(current_chunk)  # Keep backward compatibility

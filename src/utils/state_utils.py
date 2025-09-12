@@ -27,6 +27,325 @@ from .serialization_utilities import (
 logger = get_logger(__name__)
 
 
+def create_state_metadata(
+    state_id: str,
+    state_type: "StateType",
+    source_component: str,
+    state_data: dict[str, Any] | None = None,
+    version: int = 1,
+    tags: list[str] | None = None
+) -> "StateMetadata":
+    """
+    Create StateMetadata object with consistent patterns.
+    
+    Args:
+        state_id: State identifier
+        state_type: Type of state 
+        source_component: Component creating the metadata
+        state_data: Optional state data for checksum/size calculation
+        version: State version (default 1)
+        tags: Optional tags for metadata
+    
+    Returns:
+        StateMetadata object with calculated fields
+    """
+    try:
+        # Import here to avoid circular dependencies
+        from src.core.types import StateType as StateTypeImport
+        from src.state.state_service import StateMetadata
+
+        # Handle both string and enum types
+        if isinstance(state_type, str):
+            # Convert string to StateType enum if needed
+            state_type = getattr(StateTypeImport, state_type.upper(), StateTypeImport.BOT_STATE)
+
+        # Calculate metadata fields if state_data provided
+        checksum = None
+        size_bytes = 0
+
+        if state_data:
+            checksum = calculate_state_checksum(state_data)
+            serialized_data = serialize_state_data(state_data)
+            size_bytes = len(serialized_data)
+
+        # Generate default tags if not provided
+        if tags is None:
+            tags = [
+                state_type.value,
+                source_component.lower(),
+                f"version_{version}"
+            ]
+
+        now = datetime.now(timezone.utc)
+
+        return StateMetadata(
+            state_id=state_id,
+            state_type=state_type,
+            version=version,
+            created_at=now,
+            updated_at=now,
+            checksum=checksum,
+            size_bytes=size_bytes,
+            source_component=source_component,
+            tags=tags
+        )
+
+    except Exception as e:
+        logger.error(f"Failed to create state metadata: {e}")
+        raise StateError(f"Metadata creation failed: {e}") from e
+
+
+def handle_state_error(
+    operation: str,
+    state_type: str | None = None,
+    state_id: str | None = None,
+    error: Exception | None = None,
+    error_context: dict[str, Any] | None = None
+) -> None:
+    """
+    Standardized error handling for state operations.
+    
+    Args:
+        operation: Description of the operation that failed
+        state_type: Optional state type for context
+        state_id: Optional state ID for context
+        error: Original exception that was caught
+        error_context: Additional context for error reporting
+    """
+    # Build context for logging
+    context_parts = [operation]
+    if state_type:
+        context_parts.append(f"state_type={state_type}")
+    if state_id:
+        context_parts.append(f"state_id={state_id}")
+
+    context_str = " | ".join(context_parts)
+
+    # Log the error with context
+    error_msg = f"State operation failed: {context_str}"
+    if error:
+        error_msg += f" | {error}"
+
+    logger.error(error_msg, extra=error_context or {})
+
+    # Raise appropriate exception based on operation type
+    if "validation" in operation.lower():
+        raise ValidationError(f"{operation} failed: {error}") from error
+    elif "consistency" in operation.lower() or "sync" in operation.lower():
+        from src.core.exceptions import StateConsistencyError
+        raise StateConsistencyError(f"{operation} failed: {error}") from error
+    else:
+        raise StateError(f"{operation} failed: {error}") from error
+
+
+def log_state_operation(
+    operation: str,
+    state_type: str | None = None,
+    state_id: str | None = None,
+    details: dict[str, Any] | None = None
+) -> None:
+    """
+    Standardized logging for state operations.
+    
+    Args:
+        operation: Description of the operation
+        state_type: Optional state type for context
+        state_id: Optional state ID for context  
+        details: Additional details to log
+    """
+    # Build log message
+    context_parts = [operation]
+    if state_type:
+        context_parts.append(f"state_type={state_type}")
+    if state_id:
+        context_parts.append(f"state_id={state_id}")
+
+    message = " | ".join(context_parts)
+
+    # Log with additional details
+    logger.info(message, extra=details or {})
+
+
+class StateOperationLock:
+    """
+    Centralized lock manager for state operations to eliminate duplication.
+    """
+
+    def __init__(self):
+        self._locks: dict[str, asyncio.Lock] = {}
+        self._cleanup_threshold = 1000  # Clean up locks after this many
+
+    def get_lock(self, key: str) -> asyncio.Lock:
+        """Get or create a lock for the given key."""
+        if key not in self._locks:
+            self._locks[key] = asyncio.Lock()
+
+            # Periodic cleanup to prevent memory leaks
+            if len(self._locks) > self._cleanup_threshold:
+                self._cleanup_unused_locks()
+
+        return self._locks[key]
+
+    def _cleanup_unused_locks(self) -> None:
+        """Remove unlocked locks to prevent memory leaks."""
+        unused_keys = [
+            key for key, lock in self._locks.items()
+            if not lock.locked()
+        ]
+
+        # Remove up to half of unused locks
+        cleanup_count = min(len(unused_keys), self._cleanup_threshold // 2)
+        for key in unused_keys[:cleanup_count]:
+            del self._locks[key]
+
+        logger.debug(f"Cleaned up {cleanup_count} unused state operation locks")
+
+    async def with_lock(self, key: str, operation: callable, *args, **kwargs):
+        """Execute operation with lock for the given key."""
+        lock = self.get_lock(key)
+        async with lock:
+            if asyncio.iscoroutinefunction(operation):
+                return await operation(*args, **kwargs)
+            else:
+                return operation(*args, **kwargs)
+
+
+# Global instance for state operation locks
+_state_locks = StateOperationLock()
+
+
+def get_state_lock(key: str) -> asyncio.Lock:
+    """Get a lock for state operations - centralized lock management."""
+    return _state_locks.get_lock(key)
+
+
+async def with_state_lock(key: str, operation: callable, *args, **kwargs):
+    """Execute operation with state lock - eliminates duplicate lock patterns."""
+    return await _state_locks.with_lock(key, operation, *args, **kwargs)
+
+
+class StateCache:
+    """
+    Centralized cache manager for state operations to eliminate duplication.
+    """
+
+    def __init__(self, max_size: int = 10000, ttl_seconds: int = 300):
+        self._cache: dict[str, tuple[Any, datetime]] = {}
+        self._max_size = max_size
+        self._ttl_seconds = ttl_seconds
+
+    def get(self, key: str) -> Any | None:
+        """Get value from cache if not expired."""
+        if key in self._cache:
+            value, timestamp = self._cache[key]
+
+            # Check if expired
+            if (datetime.now(timezone.utc) - timestamp).total_seconds() < self._ttl_seconds:
+                return value
+            else:
+                # Remove expired entry
+                del self._cache[key]
+
+        return None
+
+    def set(self, key: str, value: Any) -> None:
+        """Set value in cache with timestamp."""
+        # Clean up if at max size
+        if len(self._cache) >= self._max_size:
+            self._cleanup_expired()
+
+            # If still at max size, remove oldest entries
+            if len(self._cache) >= self._max_size:
+                self._remove_oldest()
+
+        self._cache[key] = (value, datetime.now(timezone.utc))
+
+    def pop(self, key: str, default: Any = None) -> Any:
+        """Remove and return value from cache."""
+        if key in self._cache:
+            value, _ = self._cache.pop(key)
+            return value
+        return default
+
+    def clear(self) -> None:
+        """Clear all cache entries."""
+        self._cache.clear()
+
+    def size(self) -> int:
+        """Get current cache size."""
+        return len(self._cache)
+
+    def keys(self) -> list[str]:
+        """Get all cache keys."""
+        return list(self._cache.keys())
+
+    def _cleanup_expired(self) -> int:
+        """Remove expired entries and return count removed."""
+        now = datetime.now(timezone.utc)
+        expired_keys = []
+
+        for key, (_, timestamp) in self._cache.items():
+            if (now - timestamp).total_seconds() >= self._ttl_seconds:
+                expired_keys.append(key)
+
+        for key in expired_keys:
+            del self._cache[key]
+
+        return len(expired_keys)
+
+    def _remove_oldest(self) -> None:
+        """Remove oldest 25% of entries."""
+        if not self._cache:
+            return
+
+        # Sort by timestamp and remove oldest 25%
+        sorted_items = sorted(self._cache.items(), key=lambda x: x[1][1])
+        remove_count = max(1, len(sorted_items) // 4)
+
+        for key, _ in sorted_items[:remove_count]:
+            del self._cache[key]
+
+    def get_stats(self) -> dict[str, int | float]:
+        """Get cache statistics."""
+        total_entries = len(self._cache)
+        expired_count = 0
+        now = datetime.now(timezone.utc)
+
+        for _, (_, timestamp) in self._cache.items():
+            if (now - timestamp).total_seconds() >= self._ttl_seconds:
+                expired_count += 1
+
+        return {
+            "total_entries": total_entries,
+            "expired_entries": expired_count,
+            "valid_entries": total_entries - expired_count,
+            "max_size": self._max_size,
+            "ttl_seconds": self._ttl_seconds,
+            "fill_ratio": total_entries / self._max_size if self._max_size > 0 else 0.0
+        }
+
+
+# Global cache instances for common state operations
+_validation_cache = StateCache(max_size=5000, ttl_seconds=300)  # 5 minutes
+_metadata_cache = StateCache(max_size=10000, ttl_seconds=600)   # 10 minutes
+_general_cache = StateCache(max_size=10000, ttl_seconds=300)    # 5 minutes
+
+
+def get_validation_cache() -> StateCache:
+    """Get validation cache instance - eliminates duplicate validation cache management."""
+    return _validation_cache
+
+
+def get_metadata_cache() -> StateCache:
+    """Get metadata cache instance - eliminates duplicate metadata cache management."""
+    return _metadata_cache
+
+
+def get_general_state_cache() -> StateCache:
+    """Get general state cache instance - eliminates duplicate cache management."""
+    return _general_cache
+
+
 # Backward compatibility wrappers for state management utilities
 def calculate_state_checksum(data: dict[str, Any]) -> str:
     """Calculate checksum for state data integrity (wrapper for centralized utility)."""

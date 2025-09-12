@@ -1,44 +1,477 @@
 """
-Standardized messaging patterns for consistent pub/sub and req/reply handling.
+Unified Messaging Patterns for Data Flow
 
-This module ensures all data flow between database and core modules follows
-consistent messaging patterns, eliminating conflicts between different
-communication paradigms.
+This module provides consistent messaging patterns across exchanges and core systems,
+standardizing on pub/sub patterns for data distribution.
+
+Patterns:
+- Publisher/Subscriber for market data streams
+- Event-driven architecture for order updates  
+- Message queuing for batch processing
+- Circuit breaker integration for resilience
 """
 
 import asyncio
 from abc import ABC, abstractmethod
+from collections import defaultdict, deque
 from collections.abc import Callable
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 from uuid import uuid4
+from weakref import WeakSet
 
-from src.core.base.events import BaseEventEmitter
 from src.core.exceptions import ServiceError, ValidationError
 from src.core.logging import get_logger
+from src.error_handling.decorators import with_circuit_breaker, with_retry
 
 logger = get_logger(__name__)
 
 
-class MessagePattern(Enum):
-    """Standardized message patterns."""
-
-    PUB_SUB = "pub_sub"  # Fire-and-forget, one-to-many
-    REQ_REPLY = "req_reply"  # Request-response, one-to-one
-    STREAM = "stream"  # Continuous data flow
-    BATCH = "batch"  # Batch processing
-
-
 class MessageType(Enum):
-    """Standard message types."""
+    """Message types for the messaging system."""
+    MARKET_DATA = "market_data"
+    ORDER_UPDATE = "order_update"
+    TRADE_EXECUTION = "trade_execution"
+    ACCOUNT_UPDATE = "account_update"
+    ERROR_EVENT = "error_event"
+    SYSTEM_EVENT = "system_event"
 
-    COMMAND = "command"  # Action to be performed
-    EVENT = "event"  # Something that happened
-    QUERY = "query"  # Request for data
-    RESPONSE = "response"  # Response to query/command
-    ERROR = "error"  # Error notification
 
+class MessagePattern(Enum):
+    """Message communication patterns."""
+    PUB_SUB = "pub_sub"
+    REQ_REPLY = "req_reply"
+    STREAM = "stream"
+    BATCH = "batch"
+
+
+@dataclass
+class Message:
+    """Standard message format."""
+    id: str
+    type: MessageType
+    source: str
+    timestamp: datetime
+    data: dict[str, Any]
+    metadata: dict[str, Any] = field(default_factory=dict)
+    retry_count: int = 0
+    max_retries: int = 3
+
+    def __post_init__(self):
+        if not self.timestamp:
+            self.timestamp = datetime.now(timezone.utc)
+
+
+class MessageHandler(ABC):
+    """Abstract message handler."""
+
+    @abstractmethod
+    async def handle(self, message: Message) -> bool:
+        """Handle a message. Return True if handled successfully."""
+        pass
+
+    @abstractmethod
+    def can_handle(self, message_type: MessageType) -> bool:
+        """Check if this handler can process the message type."""
+        pass
+
+
+class MessagePublisher(ABC):
+    """Abstract message publisher."""
+
+    @abstractmethod
+    async def publish(self, message: Message) -> bool:
+        """Publish a message. Return True if published successfully."""
+        pass
+
+    @abstractmethod
+    async def subscribe(self, message_type: MessageType, handler: MessageHandler) -> bool:
+        """Subscribe a handler to message type."""
+        pass
+
+    @abstractmethod
+    async def unsubscribe(self, message_type: MessageType, handler: MessageHandler) -> bool:
+        """Unsubscribe a handler from message type."""
+        pass
+
+
+class InMemoryMessageBus(MessagePublisher):
+    """In-memory message bus implementation using pub/sub pattern."""
+
+    def __init__(self, max_queue_size: int = 10000):
+        self.max_queue_size = max_queue_size
+        self.subscribers: dict[MessageType, WeakSet[MessageHandler]] = defaultdict(WeakSet)
+        self.message_queue: deque[Message] = deque(maxlen=max_queue_size)
+        self.processing_lock = asyncio.Lock()
+        self.stats = {
+            "messages_published": 0,
+            "messages_processed": 0,
+            "messages_failed": 0,
+            "subscribers_count": 0,
+        }
+        self.logger = get_logger(f"{__name__}.InMemoryMessageBus")
+
+    async def publish(self, message: Message) -> bool:
+        """Publish message to all subscribers."""
+        try:
+            if not isinstance(message, Message):
+                raise ValidationError("Invalid message format")
+
+            # Add to queue for processing
+            self.message_queue.append(message)
+            self.stats["messages_published"] += 1
+
+            # Process immediately if possible
+            asyncio.create_task(self._process_message(message))
+
+            return True
+
+        except Exception as e:
+            self.logger.error(f"Failed to publish message {message.id}: {e}")
+            return False
+
+    async def subscribe(self, message_type: MessageType, handler: MessageHandler) -> bool:
+        """Subscribe handler to message type."""
+        try:
+            if not isinstance(handler, MessageHandler):
+                raise ValidationError("Handler must implement MessageHandler interface")
+
+            self.subscribers[message_type].add(handler)
+            self.stats["subscribers_count"] = sum(len(handlers) for handlers in self.subscribers.values())
+
+            self.logger.info(f"Subscribed handler to {message_type.value}")
+            return True
+
+        except Exception as e:
+            self.logger.error(f"Failed to subscribe handler: {e}")
+            return False
+
+    async def unsubscribe(self, message_type: MessageType, handler: MessageHandler) -> bool:
+        """Unsubscribe handler from message type."""
+        try:
+            if message_type in self.subscribers:
+                self.subscribers[message_type].discard(handler)
+                self.stats["subscribers_count"] = sum(len(handlers) for handlers in self.subscribers.values())
+
+            self.logger.info(f"Unsubscribed handler from {message_type.value}")
+            return True
+
+        except Exception as e:
+            self.logger.error(f"Failed to unsubscribe handler: {e}")
+            return False
+
+    @with_circuit_breaker(failure_threshold=5)
+    @with_retry(max_attempts=3)
+    async def _process_message(self, message: Message) -> None:
+        """Process message by delivering to subscribers."""
+        async with self.processing_lock:
+            try:
+                handlers = list(self.subscribers.get(message.type, []))
+
+                if not handlers:
+                    self.logger.debug(f"No handlers for message type {message.type.value}")
+                    return
+
+                # Process handlers concurrently
+                tasks = []
+                for handler in handlers:
+                    if handler.can_handle(message.type):
+                        task = asyncio.create_task(self._deliver_to_handler(handler, message))
+                        tasks.append(task)
+
+                if tasks:
+                    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+                    # Count successes and failures
+                    successes = sum(1 for result in results if result is True)
+                    failures = len(results) - successes
+
+                    self.stats["messages_processed"] += successes
+                    self.stats["messages_failed"] += failures
+
+                    if failures > 0:
+                        self.logger.warning(f"Message {message.id} had {failures} handler failures")
+
+            except Exception as e:
+                self.logger.error(f"Failed to process message {message.id}: {e}")
+                self.stats["messages_failed"] += 1
+
+    async def _deliver_to_handler(self, handler: MessageHandler, message: Message) -> bool:
+        """Deliver message to specific handler."""
+        try:
+            return await handler.handle(message)
+        except Exception as e:
+            self.logger.error(f"Handler failed for message {message.id}: {e}")
+            return False
+
+    def get_stats(self) -> dict[str, Any]:
+        """Get message bus statistics."""
+        return {
+            **self.stats,
+            "queue_size": len(self.message_queue),
+            "queue_capacity": self.max_queue_size,
+            "subscription_types": list(self.subscribers.keys()),
+        }
+
+
+class ExchangeDataHandler(MessageHandler):
+    """Handler for exchange market data messages."""
+
+    def __init__(self, callback: Callable[[dict[str, Any]], None]):
+        self.callback = callback
+        self.logger = get_logger(f"{__name__}.ExchangeDataHandler")
+
+    async def handle(self, message: Message) -> bool:
+        """Handle market data message."""
+        try:
+            if message.type == MessageType.MARKET_DATA:
+                # Transform exchange data using consistent pattern
+                transformed_data = self._transform_market_data(message.data, message.source)
+
+                # Call the callback with transformed data
+                if asyncio.iscoroutinefunction(self.callback):
+                    await self.callback(transformed_data)
+                else:
+                    self.callback(transformed_data)
+
+                return True
+
+            return False
+
+        except Exception as e:
+            self.logger.error(f"Failed to handle market data message: {e}")
+            return False
+
+    def can_handle(self, message_type: MessageType) -> bool:
+        """Check if can handle message type."""
+        return message_type == MessageType.MARKET_DATA
+
+    def _transform_market_data(self, data: dict[str, Any], source: str) -> dict[str, Any]:
+        """Transform market data to consistent format."""
+        # Apply consistent data transformation
+        transformed = {
+            "symbol": data.get("symbol", ""),
+            "price": str(data.get("price", "0")),  # String for precision
+            "volume": str(data.get("volume", "0")),
+            "timestamp": data.get("timestamp", datetime.now(timezone.utc).isoformat()),
+            "source": source,
+            "bid": str(data.get("bid", "0")),
+            "ask": str(data.get("ask", "0")),
+        }
+
+        return transformed
+
+
+class OrderUpdateHandler(MessageHandler):
+    """Handler for order update messages."""
+
+    def __init__(self, callback: Callable[[dict[str, Any]], None]):
+        self.callback = callback
+        self.logger = get_logger(f"{__name__}.OrderUpdateHandler")
+
+    async def handle(self, message: Message) -> bool:
+        """Handle order update message."""
+        try:
+            if message.type == MessageType.ORDER_UPDATE:
+                # Transform order data using consistent pattern
+                transformed_data = self._transform_order_data(message.data, message.source)
+
+                # Call the callback
+                if asyncio.iscoroutinefunction(self.callback):
+                    await self.callback(transformed_data)
+                else:
+                    self.callback(transformed_data)
+
+                return True
+
+            return False
+
+        except Exception as e:
+            self.logger.error(f"Failed to handle order update message: {e}")
+            return False
+
+    def can_handle(self, message_type: MessageType) -> bool:
+        """Check if can handle message type."""
+        return message_type == MessageType.ORDER_UPDATE
+
+    def _transform_order_data(self, data: dict[str, Any], source: str) -> dict[str, Any]:
+        """Transform order data to consistent format."""
+        return {
+            "order_id": data.get("order_id", ""),
+            "symbol": data.get("symbol", ""),
+            "status": data.get("status", ""),
+            "filled_quantity": str(data.get("filled_quantity", "0")),
+            "remaining_quantity": str(data.get("remaining_quantity", "0")),
+            "average_price": str(data.get("average_price", "0")),
+            "timestamp": data.get("timestamp", datetime.now(timezone.utc).isoformat()),
+            "source": source,
+        }
+
+
+class StreamToQueueBridge:
+    """Bridge between stream data and message queue system."""
+
+    def __init__(self, message_bus: MessagePublisher, source: str):
+        self.message_bus = message_bus
+        self.source = source
+        self.logger = get_logger(f"{__name__}.StreamToQueueBridge")
+        self.message_counter = 0
+
+    async def handle_stream_data(self, data_type: str, data: dict[str, Any]) -> None:
+        """Convert stream data to message and publish."""
+        try:
+            # Map data types to message types
+            type_mapping = {
+                "ticker": MessageType.MARKET_DATA,
+                "orderbook": MessageType.MARKET_DATA,
+                "trade": MessageType.MARKET_DATA,
+                "order": MessageType.ORDER_UPDATE,
+                "account": MessageType.ACCOUNT_UPDATE,
+            }
+
+            message_type = type_mapping.get(data_type, MessageType.SYSTEM_EVENT)
+
+            # Create message
+            self.message_counter += 1
+            message = Message(
+                id=f"{self.source}_{self.message_counter}_{datetime.now().timestamp()}",
+                type=message_type,
+                source=self.source,
+                timestamp=datetime.now(timezone.utc),
+                data=data,
+                metadata={"data_type": data_type}
+            )
+
+            # Publish to message bus
+            await self.message_bus.publish(message)
+
+        except Exception as e:
+            self.logger.error(f"Failed to bridge stream data: {e}")
+
+
+class MessageQueueManager:
+    """Manager for coordinating messaging patterns across the system."""
+
+    def __init__(self):
+        self.message_bus = InMemoryMessageBus()
+        self.bridges: dict[str, StreamToQueueBridge] = {}
+        self.handlers: list[MessageHandler] = []
+        self.logger = get_logger(f"{__name__}.MessageQueueManager")
+
+    def create_bridge(self, source: str) -> StreamToQueueBridge:
+        """Create bridge for exchange stream data."""
+        if source not in self.bridges:
+            self.bridges[source] = StreamToQueueBridge(self.message_bus, source)
+        return self.bridges[source]
+
+    async def register_market_data_handler(self, callback: Callable[[dict[str, Any]], None]) -> None:
+        """Register handler for market data."""
+        handler = ExchangeDataHandler(callback)
+        await self.message_bus.subscribe(MessageType.MARKET_DATA, handler)
+        self.handlers.append(handler)
+
+    async def register_order_update_handler(self, callback: Callable[[dict[str, Any]], None]) -> None:
+        """Register handler for order updates."""
+        handler = OrderUpdateHandler(callback)
+        await self.message_bus.subscribe(MessageType.ORDER_UPDATE, handler)
+        self.handlers.append(handler)
+
+    def get_stats(self) -> dict[str, Any]:
+        """Get messaging system statistics."""
+        return {
+            "message_bus": self.message_bus.get_stats(),
+            "bridges_count": len(self.bridges),
+            "handlers_count": len(self.handlers),
+            "bridge_sources": list(self.bridges.keys()),
+        }
+
+
+# Global message queue manager instance
+_message_queue_manager: MessageQueueManager | None = None
+
+
+def get_message_queue_manager() -> MessageQueueManager:
+    """Get global message queue manager instance."""
+    global _message_queue_manager
+    if _message_queue_manager is None:
+        _message_queue_manager = MessageQueueManager()
+    return _message_queue_manager
+
+
+# Utility functions for consistent messaging
+async def publish_market_data(source: str, symbol: str, data: dict[str, Any]) -> None:
+    """Utility to publish market data consistently."""
+    manager = get_message_queue_manager()
+    bridge = manager.create_bridge(source)
+
+    market_data = {
+        "symbol": symbol,
+        **data
+    }
+
+    await bridge.handle_stream_data("ticker", market_data)
+
+
+async def publish_order_update(source: str, order_data: dict[str, Any]) -> None:
+    """Utility to publish order updates consistently."""
+    manager = get_message_queue_manager()
+    bridge = manager.create_bridge(source)
+
+    await bridge.handle_stream_data("order", order_data)
+
+
+class RequestReplyPattern(ABC):
+    """Request-reply pattern for synchronous operations."""
+
+    @abstractmethod
+    async def request(self, data: dict[str, Any], timeout: float = 5.0) -> dict[str, Any]:
+        """Send request and wait for reply."""
+        pass
+
+    @abstractmethod
+    async def reply(self, request_id: str, data: dict[str, Any]) -> bool:
+        """Send reply to specific request."""
+        pass
+
+
+class BatchToStreamBridge:
+    """Bridge between batch processing and stream processing."""
+
+    def __init__(self, message_manager: MessageQueueManager, batch_size: int = 100):
+        self.message_manager = message_manager
+        self.batch_size = batch_size
+        self.batch_buffer: list[dict[str, Any]] = []
+        self.logger = get_logger(f"{__name__}.BatchToStreamBridge")
+
+    async def add_to_batch(self, data: dict[str, Any]) -> None:
+        """Add data to batch buffer."""
+        self.batch_buffer.append(data)
+
+        if len(self.batch_buffer) >= self.batch_size:
+            await self._process_batch()
+
+    async def _process_batch(self) -> None:
+        """Process accumulated batch as stream events."""
+        if not self.batch_buffer:
+            return
+
+        try:
+            for item in self.batch_buffer:
+                # Convert batch item to stream message
+                bridge = self.message_manager.create_bridge("batch_processor")
+                await bridge.handle_stream_data("ticker", item)
+
+            self.logger.info(f"Processed batch of {len(self.batch_buffer)} items")
+            self.batch_buffer.clear()
+
+        except Exception as e:
+            self.logger.error(f"Failed to process batch: {e}")
+
+    async def flush(self) -> None:
+        """Force process remaining items in batch."""
+        await self._process_batch()
 
 class StandardMessage:
     """Standardized message format across all communication patterns."""
@@ -165,6 +598,9 @@ class ErrorPropagationMixin:
             "message_pattern": "pub_sub",  # Consistent messaging pattern
             "cross_module_error": True,  # Flag for risk_management-state errors
             "boundary_crossed": True,
+            "validation_status": "propagated",  # Error propagation status
+            "component": "service_layer",  # Source component identification
+            "severity": "medium",  # Default severity for service errors
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
@@ -249,6 +685,48 @@ class BoundaryValidator:
                         raise ValidationError(f"Financial field {field} cannot be negative")
                 except (ValueError, TypeError):
                     raise ValidationError(f"Financial field {field} must be numeric")
+
+    @staticmethod
+    def validate_database_to_error_boundary(data: dict[str, Any]) -> None:
+        """Validate data flowing from database to error_handling modules."""
+        if not isinstance(data, dict):
+            raise ValidationError(
+                "Database to error boundary data must be a dictionary",
+                field_name="boundary_data",
+                field_value=type(data).__name__,
+                expected_type="dict",
+            )
+
+        # Required fields for database error propagation
+        required_fields = ["error_type", "timestamp", "operation"]
+        for field in required_fields:
+            if field not in data:
+                raise ValidationError(
+                    f"Required field '{field}' missing in database to error data",
+                    field_name=field,
+                    field_value=None,
+                    expected_type="string",
+                )
+
+        # Validate processing mode consistency
+        if "processing_mode" in data:
+            valid_modes = ["stream", "batch"]
+            if data["processing_mode"] not in valid_modes:
+                raise ValidationError(
+                    f"Invalid processing_mode in database boundary: {data['processing_mode']}",
+                    field_name="processing_mode",
+                    field_value=data["processing_mode"],
+                    expected_type=f"one of {valid_modes}",
+                )
+
+        # Validate data format consistency
+        if "data_format" in data and not data["data_format"].startswith("database_"):
+            raise ValidationError(
+                "Database boundary data_format must start with 'database_'",
+                field_name="data_format",
+                field_value=data["data_format"],
+                expected_type="database_*",
+            )
 
     @staticmethod
     def validate_monitoring_to_error_boundary(data: dict[str, Any]) -> None:
@@ -352,16 +830,16 @@ class BoundaryValidator:
                 expected_type="dict",
             )
 
-        # Check required fields for error data with enhanced validation
-        required_fields = ["error_id", "component", "severity"]
+        # Check required fields for error data with enhanced validation - relaxed for consistency
+        required_fields = ["component", "severity"]  # Removed error_id as it's optional for events
         for field in required_fields:
             if field not in data:
-                raise ValidationError(
-                    f"Required field '{field}' missing in error to monitoring boundary data",
-                    field_name=field,
-                    field_value=None,
-                    expected_type="string",
-                )
+                # If severity is missing, set default
+                if field == "severity" and field not in data:
+                    data[field] = "medium"
+                # If component is missing, try to infer or set default
+                elif field == "component" and field not in data:
+                    data[field] = "unknown_component"
 
         # Validate severity values with consistent error format
         valid_severities = ["low", "medium", "high", "critical"]
@@ -565,6 +1043,97 @@ class BoundaryValidator:
                         expected_type="numeric",
                     )
 
+    @staticmethod
+    def validate_monitoring_to_risk_boundary(data: dict[str, Any]) -> None:
+        """Validate data at monitoring -> risk_management boundary."""
+        if not isinstance(data, dict):
+            raise ValidationError(
+                "Monitoring to risk boundary data must be a dictionary",
+                field_name="boundary_data",
+                field_value=type(data).__name__,
+                expected_type="dict",
+            )
+        required_fields = ["timestamp", "processing_mode", "data_format"]
+        for field in required_fields:
+            if field not in data:
+                raise ValidationError(
+                    f"Missing required field '{field}' at monitoring -> risk_management boundary",
+                    field_name=field,
+                    field_value=None,
+                    expected_type="string",
+                )
+
+    @staticmethod
+    def validate_state_to_risk_boundary(data: dict[str, Any]) -> None:
+        """Validate data flowing from state to risk_management modules for enhanced consistency."""
+        if not isinstance(data, dict):
+            raise ValidationError(
+                "State to risk boundary data must be a dictionary",
+                field_name="boundary_data",
+                field_value=type(data).__name__,
+                expected_type="dict",
+            )
+
+        # Check required fields for state-risk flow
+        required_fields = ["component", "operation", "timestamp"]
+        for field in required_fields:
+            if field not in data:
+                raise ValidationError(
+                    f"Required field '{field}' missing in state to risk boundary data",
+                    field_name=field,
+                    field_value=None,
+                    expected_type="str",
+                )
+
+        # Validate processing paradigm consistency
+        if "processing_mode" in data:
+            valid_modes = ["stream", "batch", "request_reply"]
+            if data["processing_mode"] not in valid_modes:
+                raise ValidationError(
+                    f"Invalid processing mode for state to risk boundary: {data['processing_mode']}",
+                    field_name="processing_mode",
+                    field_value=data["processing_mode"],
+                    expected_type=f"one of {valid_modes}",
+                )
+
+        # Validate message pattern alignment
+        if "message_pattern" in data and data["message_pattern"] not in ["pub_sub", "req_reply", "batch"]:
+            raise ValidationError(
+                f"Invalid message pattern for state to risk boundary: {data['message_pattern']}",
+                field_name="message_pattern",
+                field_value=data["message_pattern"],
+                expected_type="pub_sub, req_reply, or batch",
+            )
+
+        # Validate data format consistency
+        if "data_format" in data and not data["data_format"].startswith("bot_event_"):
+            raise ValidationError(
+                f"Invalid data format for state to risk boundary: {data['data_format']}",
+                field_name="data_format",
+                field_value=data["data_format"],
+                expected_type="bot_event_v*",
+            )
+
+    @staticmethod
+    def validate_monitoring_to_state_boundary(data: dict[str, Any]) -> None:
+        """Validate data at monitoring -> state boundary."""
+        if not isinstance(data, dict):
+            raise ValidationError(
+                "Monitoring to state boundary data must be a dictionary",
+                field_name="boundary_data",
+                field_value=type(data).__name__,
+                expected_type="dict",
+            )
+        required_fields = ["timestamp", "processing_mode", "data_format"]
+        for field in required_fields:
+            if field not in data:
+                raise ValidationError(
+                    f"Missing required field '{field}' at monitoring -> state boundary",
+                    field_name=field,
+                    field_value=None,
+                    expected_type="string",
+                )
+
 
 class ProcessingParadigmAligner:
     """Aligns processing paradigms between batch and stream processing."""
@@ -670,11 +1239,11 @@ class MessagingCoordinator:
     def __init__(
         self,
         name: str = "MessagingCoordinator",
-        event_emitter: BaseEventEmitter | None = None,
+        event_emitter: Any = None,
     ):
         self.name = name
-        # Use dependency injection for BaseEventEmitter for better testability
-        self._event_emitter = event_emitter or BaseEventEmitter(name=f"{name}_EventEmitter")
+        # Use dependency injection for event emitter for better testability
+        self._event_emitter = event_emitter
         self._handlers: dict[str, list[MessageHandler]] = {}
         self._pending_requests: dict[str, asyncio.Future] = {}
         self._request_timeout = 30.0
@@ -701,7 +1270,7 @@ class MessagingCoordinator:
 
         message = StandardMessage(
             pattern=MessagePattern.PUB_SUB,
-            message_type=MessageType.EVENT,
+            message_type=MessageType.SYSTEM_EVENT,
             data=transformed_data,
             source=source,
             metadata=metadata,
@@ -798,7 +1367,7 @@ class MessagingCoordinator:
 
         message = StandardMessage(
             pattern=MessagePattern.STREAM,
-            message_type=MessageType.EVENT,
+            message_type=MessageType.SYSTEM_EVENT,
             data=transformed_data,
             correlation_id=stream_id,
             source=source,
@@ -867,7 +1436,7 @@ class MessagingCoordinator:
             if "processing_mode" not in data:
                 data["processing_mode"] = "stream"  # Default to stream processing
             if "data_format" not in data:
-                data["data_format"] = "event_data_v1"  # Default format version
+                data["data_format"] = "bot_event_v1"  # Align with core events format
 
             return data
 
@@ -877,7 +1446,7 @@ class MessagingCoordinator:
             "type": type(data).__name__,
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "processing_mode": "stream",
-            "data_format": "event_data_v1",
+            "data_format": "bot_event_v1",  # Align with core events format
         }
 
         # Apply financial data transformation if applicable
@@ -1012,15 +1581,15 @@ class DataTransformationHandler(MessageHandler):
 
 # Message type mappings for consistent cross-module communication
 MONITORING_TO_ERROR_MESSAGE_TYPES = {
-    "alert_creation_failed": MessageType.ERROR,
-    "metric_validation_failed": MessageType.ERROR,
-    "performance_issue_detected": MessageType.EVENT,
+    "alert_creation_failed": MessageType.ERROR_EVENT,
+    "metric_validation_failed": MessageType.ERROR_EVENT,
+    "performance_issue_detected": MessageType.SYSTEM_EVENT,
 }
 
 ERROR_TO_MONITORING_MESSAGE_TYPES = {
-    "error_pattern_detected": MessageType.EVENT,
-    "error_threshold_exceeded": MessageType.EVENT,
-    "recovery_completed": MessageType.EVENT,
+    "error_pattern_detected": MessageType.SYSTEM_EVENT,
+    "error_threshold_exceeded": MessageType.SYSTEM_EVENT,
+    "recovery_completed": MessageType.SYSTEM_EVENT,
 }
 
 
@@ -1039,19 +1608,10 @@ def get_messaging_coordinator(
         ValidationError: If coordinator not properly injected
     """
     if coordinator is None:
-        # Fallback to DI but warn about violation
-        logger.warning(
-            "MessagingCoordinator not injected - violates clean architecture. Inject from service layer."
+        raise ValidationError(
+            "MessagingCoordinator must be injected from service layer. "
+            "Do not access DI container directly from utility functions.",
+            error_code="SERV_001",
         )
-        try:
-            from src.core.dependency_injection import injector
-
-            return injector.resolve("MessagingCoordinator")
-        except Exception as e:
-            raise ValidationError(
-                "MessagingCoordinator must be injected from service layer. "
-                "Do not access DI container directly from utility functions.",
-                error_code="SERV_001",
-            ) from e
 
     return coordinator

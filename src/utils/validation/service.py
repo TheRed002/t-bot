@@ -58,7 +58,7 @@ import time
 from abc import ABC, abstractmethod
 from decimal import Decimal, InvalidOperation
 from enum import Enum
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -1606,62 +1606,51 @@ class ValidationService(BaseService):
 # ValidationService registration is handled by service_registry.py
 
 
-async def get_validation_service(reload: bool = False) -> ValidationService:
-    """Get or create the global ValidationService instance from DI container.
-
-    This factory function uses proper service locator pattern with dependency injection.
+async def get_validation_service(
+    validation_service: ValidationService | None = None,
+) -> ValidationService:
+    """Get validation service instance using proper dependency injection.
 
     Args:
-        reload: Force reload of validation service
+        validation_service: Injected validation service (required from service layer)
 
     Returns:
-        Global ValidationService instance
+        ValidationService instance
+
+    Raises:
+        TradingValidationError: If service not properly injected
     """
-    from src.core.dependency_injection import injector
-
-    if reload:
-        # Clear and re-register the service
-        injector.get_container().clear()
-        if not TYPE_CHECKING:
-            from src.utils.service_registry import register_util_services
-
-            register_util_services()
-
-    try:
-        # Use interface-based resolution for better decoupling
-        service = injector.resolve("ValidationServiceInterface")
-    except Exception as e:
-        # Fallback with proper error handling
-
-        logger = get_logger(__name__)
-        logger.debug(
-            f"Failed to resolve ValidationServiceInterface, registering util services: {e}"
+    if validation_service is None:
+        raise TradingValidationError(
+            "ValidationService must be injected from service layer. "
+            "Do not access DI container directly from utility functions.",
+            error_code="SERV_001",
+            category=ErrorCategory.VALIDATION,
         )
-        if not TYPE_CHECKING:
-            from src.utils.service_registry import register_util_services
-
-            register_util_services()
-        service = injector.resolve("ValidationServiceInterface")
 
     # Initialize if not already running
-    if not service.is_running:
-        await service.initialize()
+    if not validation_service.is_running:
+        await validation_service.initialize()
 
-    return service
+    return validation_service
 
 
-async def shutdown_validation_service() -> None:
-    """Shutdown the global validation service using service locator pattern."""
-    import logging
+async def shutdown_validation_service(
+    validation_service: ValidationService | None = None,
+) -> None:
+    """Shutdown validation service using proper dependency injection.
+    
+    Args:
+        validation_service: Injected validation service (required from service layer)
+    """
+    if validation_service is None:
+        logger.warning(
+            "ValidationService not injected for shutdown - service layer should handle shutdown"
+        )
+        return
 
-    from src.core.dependency_injection import injector
-
-    logger = logging.getLogger(__name__)
     try:
-        # Use interface-based resolution
-        service = injector.resolve("ValidationServiceInterface")
-        if service.is_running:
-            await service.shutdown()
+        if validation_service.is_running:
+            await validation_service.shutdown()
     except Exception as e:
-        # Service not found or already shut down
-        logger.debug(f"ValidationService shutdown failed or service not found: {e}")
+        logger.debug(f"ValidationService shutdown failed: {e}")

@@ -35,7 +35,7 @@ def validate_capital_amount(
     if not isinstance(amount, Decimal):
         raise ValidationError(
             f"Invalid {amount_name} type: expected Decimal, got {type(amount).__name__}",
-            error_code="VAL_001",
+            error_code="VALID_001",
             details={"component": component, "field": amount_name},
         )
 
@@ -45,7 +45,7 @@ def validate_capital_amount(
 
         raise ValidationError(
             f"Invalid {amount_name}: {format_currency(amount)} must be greater than {format_currency(min_value)}",
-            error_code="VAL_002",
+            error_code="VALID_002",
             details={"amount": str(amount), "min_value": str(min_value), "component": component},
         )
 
@@ -64,7 +64,7 @@ def validate_strategy_id(strategy_id: str, component: str = "CapitalManagement")
     if not strategy_id or not strategy_id.strip():
         raise ValidationError(
             "Strategy ID cannot be empty",
-            error_code="VAL_003",
+            error_code="VALID_003",
             details={"component": component, "field": "strategy_id"},
         )
 
@@ -83,7 +83,7 @@ def validate_exchange_name(exchange: str, component: str = "CapitalManagement") 
     if not exchange or not exchange.strip():
         raise ValidationError(
             "Exchange cannot be empty",
-            error_code="VAL_004",
+            error_code="VALID_004",
             details={"component": component, "field": "exchange"},
         )
 
@@ -102,7 +102,7 @@ def validate_currency_code(currency: str, component: str = "CapitalManagement") 
     if not currency or not currency.strip():
         raise ValidationError(
             "Currency code cannot be empty",
-            error_code="VAL_005",
+            error_code="VALID_005",
             details={"component": component, "field": "currency"},
         )
 
@@ -110,7 +110,7 @@ def validate_currency_code(currency: str, component: str = "CapitalManagement") 
     if len(currency.strip()) < 2 or len(currency.strip()) > 10:
         raise ValidationError(
             f"Invalid currency code format: {currency}",
-            error_code="VAL_006",
+            error_code="VALID_006",
             details={"currency": currency, "component": component},
         )
 
@@ -138,14 +138,14 @@ def validate_percentage(
     if not isinstance(percentage, Decimal):
         raise ValidationError(
             f"Invalid {percentage_name} type: expected Decimal, got {type(percentage).__name__}",
-            error_code="VAL_007",
+            error_code="VALID_007",
             details={"component": component, "field": percentage_name},
         )
 
     if percentage < min_value or percentage > max_value:
         raise ValidationError(
             f"Invalid {percentage_name}: {percentage:.4f} must be between {min_value:.4f} and {max_value:.4f}",
-            error_code="VAL_008",
+            error_code="VALID_008",
             details={
                 "percentage": str(percentage),
                 "min_value": str(min_value),
@@ -219,7 +219,7 @@ def validate_supported_currencies(
     if currency not in supported_currencies:
         raise ValidationError(
             f"Unsupported currency: {currency}",
-            error_code="VAL_009",
+            error_code="VALID_009",
             details={
                 "currency": currency,
                 "supported_currencies": supported_currencies,

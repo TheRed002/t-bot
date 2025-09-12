@@ -8,9 +8,10 @@ HTTP session management, error handling, validation, and async task management.
 import asyncio
 import hashlib
 import uuid
+import warnings
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Context, Decimal, localcontext
 from typing import Any
 
 import aiohttp
@@ -23,6 +24,24 @@ logger = get_logger(__name__)
 
 # Use consistent error handling imports - no fallback for critical dependencies
 from src.error_handling.context import ErrorContext
+
+# Financial precision context for critical calculations
+FINANCIAL_CONTEXT = Context(
+    prec=28,  # 28 significant digits (matches most financial systems)
+    rounding=ROUND_HALF_UP,
+    Emin=-999999,
+    Emax=999999,
+    capitals=1,
+    clamp=0,
+    flags=[],
+    traps=[],
+)
+
+
+class FinancialPrecisionWarning(UserWarning):
+    """Warning raised when precision loss is detected in financial calculations."""
+
+    pass
 
 
 class HTTPSessionManager:
@@ -155,17 +174,26 @@ def generate_fingerprint(data: dict[str, Any]) -> str:
 async def create_error_context(
     component: str, operation: str, error: Exception, details: dict[str, Any] | None = None
 ) -> ErrorContext:
-    """Create a standardized error context."""
+    """Create a standardized error context with consistent boundary validation."""
     correlation_id = generate_correlation_id()
 
     context_details = {
         "correlation_id": correlation_id,
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "error_type": type(error).__name__,
+        # Add consistent boundary validation metadata
+        "processing_mode": "stream",  # Default to stream processing
+        "data_format": "error_context_v1",
+        "boundary_validation": "applied",
+        "component_type": "monitoring",
+        "message_pattern": "async",  # Consistent async pattern
     }
 
     if details:
         context_details.update(details)
+        # Override with provided processing mode if specified
+        if "processing_mode" in details:
+            context_details["processing_mode"] = details["processing_mode"]
 
     return ErrorContext.from_exception(
         error=error,
@@ -173,6 +201,57 @@ async def create_error_context(
         operation=operation,
         details=context_details,
     )
+
+
+def validate_cross_module_data_consistency(
+    source_module: str, target_module: str, data: dict[str, Any]
+) -> dict[str, Any]:
+    """Validate data consistency across module boundaries with enhanced validation patterns."""
+    if not isinstance(data, dict):
+        raise ValidationError(
+            f"Cross-module data must be a dictionary for {source_module} -> {target_module}",
+            field_name="cross_module_data",
+            field_value=type(data).__name__,
+            expected_type="dict",
+        )
+
+    validated_data = data.copy()
+
+    # Add consistent cross-module metadata
+    validated_data.update({
+        "source_module": source_module,
+        "target_module": target_module,
+        "boundary_crossed": True,
+        "validation_applied": True,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    })
+
+    # Ensure consistent processing metadata
+    if "processing_mode" not in validated_data:
+        validated_data["processing_mode"] = "stream"  # Default to stream
+
+    if "data_format" not in validated_data:
+        validated_data["data_format"] = f"{source_module}_to_{target_module}_v1"
+
+    if "message_pattern" not in validated_data:
+        validated_data["message_pattern"] = "async"  # Consistent async pattern
+
+    # Apply financial data validation if present
+    from src.utils.decimal_utils import to_decimal
+    financial_fields = ["price", "quantity", "volume", "amount"]
+    for field in financial_fields:
+        if field in validated_data and validated_data[field] is not None:
+            try:
+                validated_data[field] = to_decimal(validated_data[field])
+            except Exception as e:
+                raise ValidationError(
+                    f"Failed to convert {field} to decimal in cross-module data",
+                    field_name=field,
+                    field_value=validated_data[field],
+                    expected_type="decimal",
+                ) from e
+
+    return validated_data
 
 
 async def handle_error_with_fallback(
@@ -415,10 +494,10 @@ class MetricValueProcessor:
         value: Any, metric_name: str, decimal_places: int = 8, max_value: float | None = None
     ) -> float:
         """Process and validate financial metric values."""
-        from src.monitoring.financial_precision import safe_decimal_to_float
+        from src.utils.decimal_utils import decimal_to_float
 
         if isinstance(value, Decimal):
-            result = safe_decimal_to_float(value, metric_name, decimal_places)
+            result = decimal_to_float(value)
         else:
             result = round(float(value), decimal_places)
 
@@ -572,3 +651,143 @@ class SystemMetricsCollector:
         except Exception as e:
             logger.error(f"Failed to collect system metrics: {e}")
             return {}
+
+
+# Financial utility functions extracted from monitoring modules
+def safe_decimal_to_float(
+    value: Decimal | float | int,
+    metric_name: str,
+    precision_digits: int = 8,
+    warn_on_loss: bool = True,
+) -> float:
+    """
+    Safely convert financial Decimal values to float for metrics.
+
+    Args:
+        value: The financial value to convert
+        metric_name: Name of the metric (for logging)
+        precision_digits: Number of decimal places to preserve
+        warn_on_loss: Whether to warn on precision loss
+
+    Returns:
+        Float value suitable for Prometheus metrics
+
+    Raises:
+        ValueError: If value is invalid or None
+    """
+    if value is None:
+        raise ValueError(f"Cannot convert None to float for metric {metric_name}")
+
+    # If already float or int, just validate and return
+    if isinstance(value, (float, int)):
+        if isinstance(value, float) and not float("-inf") < value < float("inf"):
+            raise ValueError(f"Invalid float value for metric {metric_name}: {value}")
+        return round(float(value), precision_digits)
+
+    # Handle Decimal conversion
+    if not isinstance(value, Decimal):
+        raise TypeError(
+            f"Expected Decimal, float, or int for metric {metric_name}, got {type(value)}"
+        )
+
+    # Check for special values
+    if not value.is_finite():
+        raise ValueError(f"Non-finite Decimal value for metric {metric_name}: {value}")
+
+    # Perform conversion with precision tracking
+    original_str = str(value)
+    float_value = float(value)
+
+    # Check for precision loss
+    if warn_on_loss:
+        # Convert back to Decimal to check precision loss
+        back_to_decimal = Decimal(str(float_value))
+
+        # Use financial context for comparison
+        with localcontext(FINANCIAL_CONTEXT):
+            difference = abs(value - back_to_decimal)
+            relative_error = difference / abs(value) if value != 0 else Decimal(0)
+
+            # Warn if relative error > 0.00001% (0.1 basis point of a basis point)
+            if relative_error > Decimal("0.0000001"):
+                warning_msg = (
+                    f"Precision loss detected for metric {metric_name}: "
+                    f"Original={original_str}, Float={float_value}, "
+                    f"RelativeError={float(relative_error * 100):.8f}%"
+                )
+                warnings.warn(warning_msg, FinancialPrecisionWarning, stacklevel=2)
+                logger.warning(warning_msg)
+
+    return round(float_value, precision_digits)
+
+
+def validate_financial_range(
+    value: Decimal | float,
+    metric_name: str,
+    min_value: Decimal | float | None = None,
+    max_value: Decimal | float | None = None,
+) -> None:
+    """
+    Validate that a financial value is within expected bounds.
+
+    Args:
+        value: The value to validate
+        metric_name: Name of the metric (for error messages)
+        min_value: Minimum allowed value (inclusive)
+        max_value: Maximum allowed value (inclusive)
+
+    Raises:
+        ValidationError: If validation fails
+    """
+    if value is None:
+        raise ValidationError(f"Cannot validate None value for metric {metric_name}")
+
+    # Convert to Decimal for precise comparison
+    decimal_value = Decimal(str(value)) if not isinstance(value, Decimal) else value
+
+    if min_value is not None:
+        min_decimal = Decimal(str(min_value)) if not isinstance(min_value, Decimal) else min_value
+        if decimal_value < min_decimal:
+            raise ValidationError(
+                f"Value {decimal_value} for metric {metric_name} is below minimum {min_decimal}"
+            )
+
+    if max_value is not None:
+        max_decimal = Decimal(str(max_value)) if not isinstance(max_value, Decimal) else max_value
+        if decimal_value > max_decimal:
+            raise ValidationError(
+                f"Value {decimal_value} for metric {metric_name} exceeds maximum {max_decimal}"
+            )
+
+
+def convert_financial_batch(
+    values: dict[str, Decimal | float | int],
+    metric_prefix: str,
+    precision_map: dict[str, int] | None = None,
+) -> dict[str, float]:
+    """
+    Convert a batch of financial values to floats with precision tracking.
+
+    Args:
+        values: Dictionary of metric_name -> value
+        metric_prefix: Prefix for metric names in logging
+        precision_map: Optional map of metric_name -> precision_digits
+
+    Returns:
+        Dictionary of metric_name -> float value
+    """
+    precision_map = precision_map or {}
+    results = {}
+
+    for name, value in values.items():
+        precision = precision_map.get(name, 8)  # Default to 8 decimal places
+        metric_full_name = f"{metric_prefix}.{name}" if metric_prefix else name
+
+        try:
+            from src.utils.decimal_utils import decimal_to_float
+            results[name] = decimal_to_float(value)
+        except (ValueError, TypeError) as e:
+            logger.error(f"Failed to convert {metric_full_name}: {e}")
+            raise
+
+    return results

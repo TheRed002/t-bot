@@ -1,34 +1,746 @@
 """
-Data Flow Integrity Module for T-Bot Trading System.
+Data Flow Integrity Validators
 
-This module provides comprehensive solutions to prevent precision loss cascades
-and ensure data integrity throughout the entire data flow from monitoring to
-utils modules and beyond.
+This module provides consistent validation at module boundaries to ensure
+data integrity across the entire pipeline from exchanges to core systems.
 
-Key Features:
-- Decimal precision preservation across module boundaries
+Validations:
+- Exchange → Data module boundary validation
+- Data → Core module boundary validation  
+- Error propagation consistency
+- Data format standardization
+- Financial precision preservation across module boundaries
 - Type consistency validation
 - Null handling standardization
-- Financial range validation with adaptive bounds
-- Precision loss detection and reporting
-
-Critical Fix Areas:
-1. Financial Precision Loss: Prevents conversion chain from Decimal to float
-2. Parameter Validation Gaps: Comprehensive input validation
-3. Type Conversion Inconsistencies: Standardized Decimal/float/int handling
-4. Hard-coded Validation Ranges: Dynamic limits for market conditions
-5. Null Handling Problems: Consistent patterns for None values
 """
 
-import warnings
-from decimal import Decimal, InvalidOperation
+from datetime import datetime
+from decimal import Decimal
 from typing import Any
 
-from src.core.exceptions import ValidationError
+from src.core.exceptions import DataValidationError, ServiceError, ValidationError
 from src.core.logging import get_logger
-from src.monitoring.financial_precision import FinancialPrecisionWarning, safe_decimal_to_float
+from src.utils.validators import validate_decimal_precision
 
 logger = get_logger(__name__)
+
+
+class ModuleBoundaryValidator:
+    """Base validator for module boundary validation."""
+
+    def __init__(self, source_module: str, target_module: str):
+        self.source_module = source_module
+        self.target_module = target_module
+        self.logger = get_logger(f"{__name__}.{source_module}_to_{target_module}")
+
+    def validate_data_structure(self, data: dict[str, Any], required_fields: list[str]) -> dict[str, Any]:
+        """Validate basic data structure."""
+        missing_fields = [field for field in required_fields if field not in data]
+        if missing_fields:
+            raise DataValidationError(
+                f"Missing required fields in {self.source_module}→{self.target_module}: {missing_fields}"
+            )
+
+        return data
+
+    def validate_decimal_fields(self, data: dict[str, Any], decimal_fields: list[str]) -> dict[str, Any]:
+        """Validate and standardize decimal fields."""
+        for field in decimal_fields:
+            if field in data and data[field] is not None:
+                try:
+                    # Convert to Decimal with proper precision
+                    data[field] = validate_decimal_precision(data[field])
+                except Exception as e:
+                    raise DataValidationError(
+                        f"Invalid decimal format for {field} in {self.source_module}→{self.target_module}: {e}"
+                    ) from e
+
+        return data
+
+    def validate_timestamp_fields(self, data: dict[str, Any], timestamp_fields: list[str]) -> dict[str, Any]:
+        """Validate timestamp fields."""
+        for field in timestamp_fields:
+            if field in data and data[field] is not None:
+                if not isinstance(data[field], (datetime, str, int, float)):
+                    raise DataValidationError(
+                        f"Invalid timestamp format for {field} in {self.source_module}→{self.target_module}"
+                    )
+
+        return data
+
+
+class ExchangeToDataValidator(ModuleBoundaryValidator):
+    """Validator for Exchange → Data module boundary."""
+
+    def __init__(self):
+        super().__init__("exchanges", "data")
+
+    def validate_market_data(self, data: dict[str, Any], exchange: str) -> dict[str, Any]:
+        """Validate market data from exchange before data processing."""
+        try:
+            # Required fields for market data
+            required_fields = ["symbol", "price", "timestamp"]
+            decimal_fields = ["price", "volume", "bid", "ask", "high", "low", "open", "close"]
+            timestamp_fields = ["timestamp"]
+
+            # Basic structure validation
+            data = self.validate_data_structure(data, required_fields)
+
+            # Decimal precision validation
+            data = self.validate_decimal_fields(data, decimal_fields)
+
+            # Timestamp validation
+            data = self.validate_timestamp_fields(data, timestamp_fields)
+
+            # Exchange-specific validation
+            self._validate_exchange_specific(data, exchange)
+
+            # Add validation metadata
+            data["_validation"] = {
+                "validated_at": datetime.utcnow().isoformat(),
+                "validator": "ExchangeToDataValidator",
+                "source_exchange": exchange,
+                "version": "1.0"
+            }
+
+            self.logger.debug(f"Validated market data from {exchange}: {data.get('symbol', 'unknown')}")
+            return data
+
+        except Exception as e:
+            self.logger.error(f"Market data validation failed for {exchange}: {e}")
+            raise DataValidationError(f"Exchange→Data validation failed: {e}") from e
+
+    def validate_order_data(self, data: dict[str, Any], exchange: str) -> dict[str, Any]:
+        """Validate order data from exchange."""
+        try:
+            required_fields = ["order_id", "symbol", "status"]
+            decimal_fields = ["quantity", "price", "filled_quantity", "remaining_quantity", "average_price"]
+            timestamp_fields = ["created_at", "updated_at", "filled_at"]
+
+            data = self.validate_data_structure(data, required_fields)
+            data = self.validate_decimal_fields(data, decimal_fields)
+            data = self.validate_timestamp_fields(data, timestamp_fields)
+
+            # Validate order status
+            valid_statuses = ["PENDING", "FILLED", "PARTIALLY_FILLED", "CANCELLED", "REJECTED"]
+            if data.get("status") not in valid_statuses:
+                raise DataValidationError(f"Invalid order status: {data.get('status')}")
+
+            data["_validation"] = {
+                "validated_at": datetime.utcnow().isoformat(),
+                "validator": "ExchangeToDataValidator",
+                "source_exchange": exchange,
+                "validation_type": "order_data"
+            }
+
+            return data
+
+        except Exception as e:
+            raise DataValidationError(f"Order data validation failed: {e}") from e
+
+    def _validate_exchange_specific(self, data: dict[str, Any], exchange: str) -> None:
+        """Exchange-specific validation rules."""
+        symbol = data.get("symbol", "")
+        price = data.get("price")
+
+        if exchange == "binance":
+            # Binance-specific validation
+            if not symbol or len(symbol) < 6:
+                raise DataValidationError(f"Invalid Binance symbol format: {symbol}")
+
+            if price and price <= 0:
+                raise DataValidationError(f"Invalid price for Binance: {price}")
+
+        elif exchange == "coinbase":
+            # Coinbase-specific validation
+            if not symbol or "-" not in symbol:
+                raise DataValidationError(f"Invalid Coinbase symbol format: {symbol}")
+
+        elif exchange == "okx":
+            # OKX-specific validation
+            if not symbol or "-" not in symbol:
+                raise DataValidationError(f"Invalid OKX symbol format: {symbol}")
+
+
+class DataToCoreValidator(ModuleBoundaryValidator):
+    """Validator for Data → Core module boundary."""
+
+    def __init__(self):
+        super().__init__("data", "core")
+
+    def validate_processed_data(self, data: dict[str, Any], data_type: str) -> dict[str, Any]:
+        """Validate processed data before core consumption."""
+        try:
+            if data_type == "market_data":
+                return self._validate_processed_market_data(data)
+            elif data_type == "order_data":
+                return self._validate_processed_order_data(data)
+            elif data_type == "analytics_data":
+                return self._validate_analytics_data(data)
+            else:
+                raise DataValidationError(f"Unknown data type: {data_type}")
+
+        except Exception as e:
+            raise DataValidationError(f"Data→Core validation failed: {e}") from e
+
+    def _validate_processed_market_data(self, data: dict[str, Any]) -> dict[str, Any]:
+        """Validate processed market data."""
+        required_fields = ["symbol", "price", "timestamp", "source"]
+        decimal_fields = ["price", "volume", "bid", "ask"]
+
+        data = self.validate_data_structure(data, required_fields)
+        data = self.validate_decimal_fields(data, decimal_fields)
+
+        # Ensure data has been processed by data module
+        if "_validation" not in data:
+            raise DataValidationError("Data missing validation metadata from data module")
+
+        # Add core validation metadata
+        data["_core_validation"] = {
+            "validated_at": datetime.utcnow().isoformat(),
+            "validator": "DataToCoreValidator",
+            "data_type": "market_data"
+        }
+
+        return data
+
+    def _validate_processed_order_data(self, data: dict[str, Any]) -> dict[str, Any]:
+        """Validate processed order data."""
+        required_fields = ["order_id", "symbol", "status", "source"]
+        decimal_fields = ["quantity", "price", "filled_quantity"]
+
+        data = self.validate_data_structure(data, required_fields)
+        data = self.validate_decimal_fields(data, decimal_fields)
+
+        data["_core_validation"] = {
+            "validated_at": datetime.utcnow().isoformat(),
+            "validator": "DataToCoreValidator",
+            "data_type": "order_data"
+        }
+
+        return data
+
+    def _validate_analytics_data(self, data: dict[str, Any]) -> dict[str, Any]:
+        """Validate analytics data."""
+        required_fields = ["symbol", "metric_type", "value", "timestamp"]
+        decimal_fields = ["value"]
+
+        data = self.validate_data_structure(data, required_fields)
+        data = self.validate_decimal_fields(data, decimal_fields)
+
+        data["_core_validation"] = {
+            "validated_at": datetime.utcnow().isoformat(),
+            "validator": "DataToCoreValidator",
+            "data_type": "analytics_data"
+        }
+
+        return data
+
+
+class ErrorPropagationValidator:
+    """Validator for consistent error propagation across modules."""
+
+    def __init__(self):
+        self.logger = get_logger(f"{__name__}.ErrorPropagationValidator")
+
+    def validate_error_format(self, error: Exception, source_module: str) -> Exception:
+        """Validate and standardize error format."""
+        try:
+            # Map source module errors to standard error types
+            error_mapping = {
+                "exchanges": {
+                    "connection": "ExchangeConnectionError",
+                    "order": "OrderRejectionError",
+                    "rate_limit": "ExchangeRateLimitError",
+                    "validation": "ValidationError"
+                },
+                "data": {
+                    "validation": "DataValidationError",
+                    "processing": "DataError",
+                    "storage": "DataStorageError"
+                },
+                "core": {
+                    "service": "ServiceError",
+                    "validation": "ValidationError"
+                }
+            }
+
+            # Determine error category
+            error_type = type(error).__name__
+            error_message = str(error)
+
+            # Check if error follows expected patterns
+            module_errors = error_mapping.get(source_module, {})
+            expected_errors = list(module_errors.values())
+
+            if error_type not in expected_errors:
+                self.logger.warning(
+                    f"Unexpected error type {error_type} from {source_module}. "
+                    f"Expected one of: {expected_errors}"
+                )
+
+            # Add error metadata for tracing
+            if not hasattr(error, "_propagation_metadata"):
+                error._propagation_metadata = {
+                    "source_module": source_module,
+                    "error_type": error_type,
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "validation_passed": error_type in expected_errors
+                }
+
+            return error
+
+        except Exception as e:
+            self.logger.error(f"Error validation failed: {e}")
+            return error
+
+    def validate_error_chain(self, errors: list[Exception]) -> list[Exception]:
+        """Validate error chain for proper propagation."""
+        validated_errors = []
+
+        for i, error in enumerate(errors):
+            # Check for proper error chaining
+            if i > 0 and not hasattr(error, "__cause__"):
+                self.logger.warning(f"Error at position {i} missing proper chaining")
+
+            validated_errors.append(error)
+
+        return validated_errors
+
+
+class DataFlowIntegrityManager:
+    """Manager for coordinating data flow validation across modules."""
+
+    def __init__(self):
+        self.exchange_to_data = ExchangeToDataValidator()
+        self.data_to_core = DataToCoreValidator()
+        self.error_validator = ErrorPropagationValidator()
+        self.logger = get_logger(f"{__name__}.DataFlowIntegrityManager")
+
+        # Statistics tracking
+        self.stats = {
+            "validations_performed": 0,
+            "validation_failures": 0,
+            "error_corrections": 0,
+            "data_transformations": 0
+        }
+
+    def validate_exchange_data(self, data: dict[str, Any], exchange: str, data_type: str) -> dict[str, Any]:
+        """Validate data coming from exchanges."""
+        try:
+            if data_type == "market_data":
+                result = self.exchange_to_data.validate_market_data(data, exchange)
+            elif data_type == "order_data":
+                result = self.exchange_to_data.validate_order_data(data, exchange)
+            else:
+                raise DataValidationError(f"Unknown data type: {data_type}")
+
+            self.stats["validations_performed"] += 1
+            return result
+
+        except Exception as e:
+            self.stats["validation_failures"] += 1
+            validated_error = self.error_validator.validate_error_format(e, "exchanges")
+            raise validated_error
+
+    def validate_core_data(self, data: dict[str, Any], data_type: str) -> dict[str, Any]:
+        """Validate data before core processing."""
+        try:
+            result = self.data_to_core.validate_processed_data(data, data_type)
+            self.stats["validations_performed"] += 1
+            return result
+
+        except Exception as e:
+            self.stats["validation_failures"] += 1
+            validated_error = self.error_validator.validate_error_format(e, "data")
+            raise validated_error
+
+    def get_validation_stats(self) -> dict[str, Any]:
+        """Get validation statistics."""
+        return {
+            **self.stats,
+            "success_rate": (
+                (self.stats["validations_performed"] - self.stats["validation_failures"])
+                / max(self.stats["validations_performed"], 1)
+            ) * 100
+        }
+
+
+# Global instance
+_integrity_manager: DataFlowIntegrityManager | None = None
+
+
+def get_integrity_manager() -> DataFlowIntegrityManager:
+    """Get global data flow integrity manager."""
+    global _integrity_manager
+    if _integrity_manager is None:
+        _integrity_manager = DataFlowIntegrityManager()
+    return _integrity_manager
+
+
+# Utility functions for consistent validation
+def validate_exchange_market_data(data: dict[str, Any], exchange: str) -> dict[str, Any]:
+    """Utility to validate market data from exchanges."""
+    manager = get_integrity_manager()
+    return manager.validate_exchange_data(data, exchange, "market_data")
+
+
+def validate_exchange_order_data(data: dict[str, Any], exchange: str) -> dict[str, Any]:
+    """Utility to validate order data from exchanges."""
+    manager = get_integrity_manager()
+    return manager.validate_exchange_data(data, exchange, "order_data")
+
+
+def validate_core_market_data(data: dict[str, Any]) -> dict[str, Any]:
+    """Utility to validate market data for core processing."""
+    manager = get_integrity_manager()
+    return manager.validate_core_data(data, "market_data")
+
+
+def validate_core_order_data(data: dict[str, Any]) -> dict[str, Any]:
+    """Utility to validate order data for core processing."""
+    manager = get_integrity_manager()
+    return manager.validate_core_data(data, "order_data")
+
+
+# Existing functions (keeping for backward compatibility)
+import warnings
+from decimal import InvalidOperation
+from typing import Any
+
+from src.core.logging import get_logger
+from src.monitoring.financial_precision import FinancialPrecisionWarning
+from src.utils.decimal_utils import decimal_to_float
+
+logger = get_logger(__name__)
+
+
+class DataFlowTransformer:
+    """Standardized data transformation utilities for consistent cross-module data flow."""
+
+    @staticmethod
+    def apply_financial_field_transformation(entity: Any) -> Any:
+        """
+        Apply consistent financial field transformations to any entity.
+        
+        Args:
+            entity: Entity with potential financial fields
+            
+        Returns:
+            Entity with transformed financial fields
+        """
+        if entity is None:
+            return entity
+
+        # Import decimal utility at module level for consistency
+        from src.utils.decimal_utils import to_decimal
+
+        # Standard financial fields that need Decimal conversion
+        financial_fields = ["price", "quantity", "volume", "value", "amount", "balance", "cost"]
+
+        for field in financial_fields:
+            if hasattr(entity, field) and getattr(entity, field) is not None:
+                try:
+                    setattr(entity, field, to_decimal(getattr(entity, field)))
+                except Exception as e:
+                    logger.warning(f"Failed to convert {field} to decimal: {e}")
+
+        return entity
+
+    @staticmethod
+    def apply_standard_metadata(data: dict[str, Any], module_source: str, processing_mode: str = "stream") -> dict[str, Any]:
+        """
+        Apply standardized metadata for cross-module consistency.
+        
+        Args:
+            data: Data dictionary to enhance
+            module_source: Source module name
+            processing_mode: Processing mode (default: stream)
+            
+        Returns:
+            Enhanced data dictionary with standard metadata
+        """
+        from datetime import datetime, timezone
+
+        enhanced_data = data.copy()
+
+        # Add standard metadata fields
+        enhanced_data.update({
+            "processing_mode": processing_mode,
+            "data_format": "standardized_entity_v1",  # Consistent format across modules
+            "boundary_crossed": True,
+            "module_source": module_source,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "message_pattern": "pub_sub" if processing_mode == "stream" else "req_reply"
+        })
+
+        return enhanced_data
+
+    @staticmethod
+    def validate_and_transform_entity(entity: Any, module_source: str, processing_mode: str = "stream") -> Any:
+        """
+        Complete validation and transformation for cross-module entity transfer.
+        
+        Args:
+            entity: Entity to validate and transform
+            module_source: Source module name  
+            processing_mode: Processing mode
+            
+        Returns:
+            Validated and transformed entity
+        """
+        if entity is None:
+            return entity
+
+        # Apply financial transformations
+        entity = DataFlowTransformer.apply_financial_field_transformation(entity)
+
+        # Add standard metadata if entity has attributes
+        if hasattr(entity, "__dict__"):
+            if not hasattr(entity, "processing_mode"):
+                entity.processing_mode = processing_mode
+            if not hasattr(entity, "data_format"):
+                entity.data_format = "standardized_entity_v1"
+            if not hasattr(entity, "boundary_crossed"):
+                entity.boundary_crossed = True
+            if not hasattr(entity, "module_source"):
+                entity.module_source = module_source
+
+        return entity
+
+
+class StandardizedErrorPropagator:
+    """Standardized error propagation for consistent cross-module error handling."""
+
+    @staticmethod
+    def propagate_validation_error(
+        error: Exception,
+        context: str,
+        module_source: str,
+        field_name: str = None,
+        field_value: Any = None
+    ) -> None:
+        """
+        Propagate validation errors with consistent metadata across modules.
+        
+        Args:
+            error: Original exception
+            context: Error context description
+            module_source: Source module name
+            field_name: Optional field name for field-specific errors
+            field_value: Optional field value for debugging
+        """
+        from datetime import datetime, timezone
+
+        from src.core.exceptions import ValidationError
+
+        # Create standardized error metadata
+        error_metadata = {
+            "error_type": type(error).__name__,
+            "error_message": str(error),
+            "context": context,
+            "module_source": module_source,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "processing_mode": "stream",
+            "data_format": "standardized_error_v1",
+            "boundary_crossed": True
+        }
+
+        if field_name:
+            error_metadata["field_name"] = field_name
+        if field_value is not None:
+            error_metadata["field_value"] = str(field_value)
+
+        # Log error with structured metadata
+        logger.error(f"Validation error in {module_source}.{context}: {error}", extra=error_metadata)
+
+        # Raise standardized ValidationError
+        raise ValidationError(
+            f"{module_source} validation failed in {context}: {error}",
+            field_name=field_name,
+            field_value=field_value,
+            expected_type="valid_data"
+        ) from error
+
+    @staticmethod
+    def propagate_service_error(
+        error: Exception,
+        context: str,
+        module_source: str,
+        operation: str = None
+    ) -> None:
+        """
+        Propagate service errors with consistent metadata across modules.
+        
+        Args:
+            error: Original exception
+            context: Error context description
+            module_source: Source module name
+            operation: Optional operation being performed
+        """
+        from datetime import datetime, timezone
+
+        # Create standardized error metadata
+        error_metadata = {
+            "error_type": type(error).__name__,
+            "error_message": str(error),
+            "context": context,
+            "module_source": module_source,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "processing_mode": "stream",
+            "data_format": "standardized_error_v1",
+            "boundary_crossed": True
+        }
+
+        if operation:
+            error_metadata["operation"] = operation
+
+        # Log error with structured metadata
+        logger.error(f"Service error in {module_source}.{context}: {error}", extra=error_metadata)
+
+        # Raise standardized ServiceError
+        raise ServiceError(
+            f"{module_source} service failed in {context}: {error}"
+        ) from error
+
+
+class DataFlowValidator:
+    """Validates data flow consistency across module boundaries."""
+
+    @staticmethod
+    def validate_message_pattern_consistency(data: dict[str, Any]) -> None:
+        """
+        Validate that message patterns are consistent across module boundaries.
+
+        Args:
+            data: Data dictionary to validate
+
+        Raises:
+            ValidationError: If message patterns are inconsistent
+        """
+        required_fields = ["message_pattern", "processing_mode", "data_format"]
+
+        for field in required_fields:
+            if field not in data:
+                raise ValidationError(
+                    f"Required message field '{field}' missing",
+                    field_name=field,
+                    field_value=None,
+                    expected_type="string"
+                )
+
+        # Validate message pattern values
+        valid_patterns = ["pub_sub", "req_reply", "stream", "batch"]
+        if data["message_pattern"] not in valid_patterns:
+            raise ValidationError(
+                f"Invalid message pattern: {data['message_pattern']}",
+                field_name="message_pattern",
+                field_value=data["message_pattern"],
+                validation_rule=f"must be one of {valid_patterns}"
+            )
+
+        # Validate processing mode alignment
+        valid_modes = ["stream", "batch", "request_reply", "sync", "async"]
+        if data["processing_mode"] not in valid_modes:
+            raise ValidationError(
+                f"Invalid processing mode: {data['processing_mode']}",
+                field_name="processing_mode",
+                field_value=data["processing_mode"],
+                validation_rule=f"must be one of {valid_modes}"
+            )
+
+        # Validate data format versioning
+        if not data["data_format"].endswith("_v1"):
+            raise ValidationError(
+                f"Invalid data format version: {data['data_format']}",
+                field_name="data_format",
+                field_value=data["data_format"],
+                validation_rule="must end with _v1"
+            )
+
+    @staticmethod
+    def validate_boundary_crossing_metadata(data: dict[str, Any]) -> None:
+        """
+        Validate boundary crossing metadata for cross-module communication.
+
+        Args:
+            data: Data dictionary to validate
+
+        Raises:
+            ValidationError: If boundary metadata is missing or invalid
+        """
+        # Check for boundary crossing flag
+        if "boundary_crossed" not in data or not isinstance(data["boundary_crossed"], bool):
+            raise ValidationError(
+                "Missing or invalid boundary_crossed flag",
+                field_name="boundary_crossed",
+                field_value=data.get("boundary_crossed"),
+                expected_type="bool"
+            )
+
+        # Validate timestamp format
+        if "timestamp" in data and isinstance(data["timestamp"], str):
+            try:
+                from datetime import datetime
+                # Attempt to parse ISO format
+                datetime.fromisoformat(data["timestamp"].replace("Z", "+00:00"))
+            except ValueError:
+                raise ValidationError(
+                    "Invalid timestamp format",
+                    field_name="timestamp",
+                    field_value=data["timestamp"],
+                    validation_rule="must be ISO format"
+                )
+
+    @classmethod
+    def validate_complete_data_flow(
+        cls,
+        data: dict[str, Any],
+        source_module: str,
+        target_module: str,
+        operation_type: str = "data_flow"
+    ) -> None:
+        """
+        Perform complete validation for cross-module data flow.
+
+        Args:
+            data: Data to validate
+            source_module: Source module name
+            target_module: Target module name
+            operation_type: Type of operation
+
+        Raises:
+            ValidationError: If any validation fails
+        """
+        try:
+            # Validate message pattern consistency
+            cls.validate_message_pattern_consistency(data)
+
+            # Validate boundary crossing metadata
+            cls.validate_boundary_crossing_metadata(data)
+
+            logger.debug(
+                f"Data flow validation passed: {source_module} -> {target_module}",
+                extra={
+                    "source_module": source_module,
+                    "target_module": target_module,
+                    "operation_type": operation_type,
+                    "validation_status": "passed"
+                }
+            )
+
+        except ValidationError as e:
+            logger.error(
+                f"Data flow validation failed: {source_module} -> {target_module}: {e}",
+                extra={
+                    "source_module": source_module,
+                    "target_module": target_module,
+                    "operation_type": operation_type,
+                    "validation_status": "failed",
+                    "error_type": type(e).__name__
+                }
+            )
+            raise
 
 
 class DataFlowIntegrityError(Exception):
@@ -148,24 +860,11 @@ def get_precision_tracker(tracker: PrecisionTracker | None = None) -> PrecisionT
         ValidationError: If tracker not properly injected
     """
     if tracker is None:
-        # Use factory pattern with dependency injection
-        try:
-            from src.core.dependency_injection import injector
-
-            return injector.resolve("PrecisionInterface")
-        except Exception:
-            # Fallback factory creation only if DI fails
-            logger.warning(
-                "PrecisionTracker not available via DI - using fallback factory. "
-                "Consider registering utils services properly."
-            )
-            try:
-                return PrecisionTracker()
-            except Exception as fallback_error:
-                raise ValidationError(
-                    "PrecisionTracker factory failed. Ensure utils services are registered.",
-                    error_code="SERV_001",
-                ) from fallback_error
+        raise ValidationError(
+            "PrecisionTracker must be injected from service layer. "
+            "Do not access DI container directly from utility functions.",
+            error_code="SERV_001",
+        )
 
     return tracker
 
@@ -247,7 +946,7 @@ class DataFlowValidator:
         return validated_data
 
     def _validate_field(self, field_name: str, value: Any, context: str) -> Any:
-        """Validate individual field based on rules using service layer validation."""
+        """Validate individual field based on rules using service layer validation with consistent error patterns."""
         # Find applicable rule
         rule = self._get_rule_for_field(field_name)
         if not rule:
@@ -256,41 +955,74 @@ class DataFlowValidator:
                 value, allow_null=True, field_name=field_name
             )
 
-        # Apply null handling
-        validated_value = self._validate_null_handling_service(
-            value, allow_null=rule.get("allow_null", True), field_name=field_name
-        )
-
-        if validated_value is None:
-            return None
-
-        # Type conversion
-        target_type = rule.get("type")
-        if target_type:
-            validated_value = self._validate_type_conversion_service(
-                validated_value, target_type, field_name, strict=False
+        try:
+            # Apply null handling with consistent error propagation
+            validated_value = self._validate_null_handling_service(
+                value, allow_null=rule.get("allow_null", True), field_name=field_name
             )
 
-        # Range validation for numerical types
-        if isinstance(validated_value, Decimal | int | float):
-            min_val = rule.get("min_value")
-            max_val = rule.get("max_value")
+            if validated_value is None:
+                return None
 
-            if min_val is not None or max_val is not None:
-                if isinstance(validated_value, Decimal):
-                    self._validate_financial_range_service(
-                        validated_value, min_val, max_val, field_name
-                    )
-                elif min_val is not None and validated_value < min_val:
-                    raise ValidationError(
-                        f"{field_name} below minimum: {validated_value} < {min_val}"
-                    )
-                elif max_val is not None and validated_value > max_val:
-                    raise ValidationError(
-                        f"{field_name} above maximum: {validated_value} > {max_val}"
-                    )
+            # Type conversion with consistent patterns
+            target_type = rule.get("type")
+            if target_type:
+                validated_value = self._validate_type_conversion_service(
+                    validated_value, target_type, field_name, strict=False
+                )
 
-        return validated_value
+            # Range validation for numerical types using consistent error propagation
+            if isinstance(validated_value, Decimal | int | float):
+                min_val = rule.get("min_value")
+                max_val = rule.get("max_value")
+
+                if min_val is not None or max_val is not None:
+                    if isinstance(validated_value, Decimal):
+                        self._validate_financial_range_service(
+                            validated_value, min_val, max_val, field_name
+                        )
+                    elif min_val is not None and validated_value < min_val:
+                        # Use consistent error propagation pattern matching messaging patterns
+                        from src.utils.messaging_patterns import ErrorPropagationMixin
+                        error_propagator = ErrorPropagationMixin()
+                        validation_error = ValidationError(
+                            f"{field_name} below minimum: {validated_value} < {min_val}",
+                            field_name=field_name,
+                            field_value=validated_value,
+                            validation_rule="minimum_value_check"
+                        )
+                        error_propagator.propagate_validation_error(validation_error, f"field_validation_{context}")
+                    elif max_val is not None and validated_value > max_val:
+                        # Use consistent error propagation pattern matching messaging patterns
+                        from src.utils.messaging_patterns import ErrorPropagationMixin
+                        error_propagator = ErrorPropagationMixin()
+                        validation_error = ValidationError(
+                            f"{field_name} above maximum: {validated_value} > {max_val}",
+                            field_name=field_name,
+                            field_value=validated_value,
+                            validation_rule="maximum_value_check"
+                        )
+                        error_propagator.propagate_validation_error(validation_error, f"field_validation_{context}")
+
+            return validated_value
+
+        except Exception as e:
+            # Consistent error propagation for validation failures
+            from src.utils.messaging_patterns import ErrorPropagationMixin
+            error_propagator = ErrorPropagationMixin()
+
+            if not isinstance(e, ValidationError):
+                # Wrap non-validation errors in consistent format
+                validation_error = ValidationError(
+                    f"Field validation failed for {field_name}",
+                    field_name=field_name,
+                    field_value=str(value),
+                    validation_rule="field_validation_error",
+                    context={"original_error": str(e)}
+                )
+                error_propagator.propagate_validation_error(validation_error, f"field_validation_{context}")
+            else:
+                error_propagator.propagate_validation_error(e, f"field_validation_{context}")
 
     def _validate_null_handling_service(
         self, value: Any, allow_null: bool = False, field_name: str = "value"
@@ -353,11 +1085,8 @@ class DataFlowValidator:
                     return value
                 elif isinstance(value, int | Decimal):
                     # Use safe conversion to maintain precision tracking
-                    from src.monitoring.financial_precision import safe_decimal_to_float
 
-                    result = safe_decimal_to_float(
-                        value, f"validation_{field_name}", warn_on_loss=True
-                    )
+                    result = decimal_to_float(value)
                     if not math.isfinite(result):
                         raise ValidationError(
                             f"Conversion of {field_name} to float resulted in non-finite value"
@@ -365,11 +1094,8 @@ class DataFlowValidator:
                     return result
                 else:
                     # Use safe conversion for unknown types
-                    from src.monitoring.financial_precision import safe_decimal_to_float
 
-                    return safe_decimal_to_float(
-                        value, f"validation_{field_name}", warn_on_loss=True
-                    )
+                    return decimal_to_float(value)
             elif target_type is int:
                 import math
 
@@ -529,7 +1255,7 @@ class IntegrityPreservingConverter:
         """
         try:
             # Use the existing safe_decimal_to_float with tracking
-            result = safe_decimal_to_float(value, metric_name, precision_digits, warn_on_loss=True)
+            result = decimal_to_float(value)
 
             # Track the conversion if enabled
             if self.tracker and isinstance(value, Decimal):
@@ -597,24 +1323,11 @@ def get_data_flow_validator(validator: DataFlowValidator | None = None) -> DataF
         ValidationError: If validator not properly injected
     """
     if validator is None:
-        # Use factory pattern with dependency injection
-        try:
-            from src.core.dependency_injection import injector
-
-            return injector.resolve("DataFlowInterface")
-        except Exception:
-            # Fallback factory creation only if DI fails
-            logger.warning(
-                "DataFlowValidator not available via DI - using fallback factory. "
-                "Consider registering utils services properly."
-            )
-            try:
-                return DataFlowValidator()
-            except Exception as fallback_error:
-                raise ValidationError(
-                    "DataFlowValidator factory failed. Ensure utils services are registered.",
-                    error_code="SERV_001",
-                ) from fallback_error
+        raise ValidationError(
+            "DataFlowValidator must be injected from service layer. "
+            "Do not access DI container directly from utility functions.",
+            error_code="SERV_001",
+        )
 
     return validator
 
@@ -634,28 +1347,11 @@ def get_integrity_converter(
         ValidationError: If converter not properly injected
     """
     if converter is None:
-        # Use factory pattern with dependency injection
-        try:
-            from src.core.dependency_injection import injector
-
-            return injector.resolve("IntegrityPreservingConverter")
-        except Exception:
-            # Fallback factory creation only if DI fails
-            logger.warning(
-                "IntegrityPreservingConverter not available via DI - using fallback factory. "
-                "Consider registering utils services properly."
-            )
-            try:
-                # Create with default precision tracker
-                precision_tracker = get_precision_tracker()
-                return IntegrityPreservingConverter(
-                    track_precision=True, precision_tracker=precision_tracker
-                )
-            except Exception as fallback_error:
-                raise ValidationError(
-                    "IntegrityPreservingConverter factory failed. Ensure utils services are registered.",
-                    error_code="SERV_001",
-                ) from fallback_error
+        raise ValidationError(
+            "IntegrityPreservingConverter must be injected from service layer. "
+            "Do not access DI container directly from utility functions.",
+            error_code="SERV_001",
+        )
 
     return converter
 
@@ -721,7 +1417,8 @@ def validate_cross_module_data(
 
 
 def fix_precision_cascade(
-    data: dict[str, Any], target_formats: dict[str, str] | None = None
+    data: dict[str, Any] | None = None,
+    target_formats: dict[str, str] | None = None
 ) -> dict[str, Any]:
     """
     Fix precision loss cascade by ensuring proper type handling.

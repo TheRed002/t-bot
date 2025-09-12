@@ -539,7 +539,7 @@ def format_ohlcv_data(ohlcv_data: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def format_indicator_data(
-    indicator_name: str, values: list[Decimal], timestamps: list[datetime] | None = None
+    indicator_name: str, values: list[Decimal] | None = None, timestamps: list[datetime] | None = None
 ) -> dict[str, Any]:
     """
     Format indicator data for charting with financial precision.
@@ -743,7 +743,7 @@ def format_trade_report(trades: list[dict[str, Any]]) -> dict[str, Any]:
 # =============================================================================
 
 
-def format_csv_data(data: list[dict[str, Any]], headers: list[str] | None = None) -> str:
+def format_csv_data(data: list[dict[str, Any]] | None = None, headers: list[str] | None = None) -> str:
     """
     Format data as CSV string.
 

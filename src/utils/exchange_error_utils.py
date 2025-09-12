@@ -43,18 +43,13 @@ class ExchangeErrorHandler:
         self.config = config
         self.logger = get_logger(f"{exchange_name}.error_handler")
 
-        # Use factory pattern with dependency injection
+        # Use proper dependency injection pattern
         if error_handler is None:
-            try:
-                from src.core.dependency_injection import injector
-
-                self.error_handler = injector.resolve("ErrorHandler")
-            except Exception as e:
-                self.logger.warning(
-                    f"ErrorHandler not available via DI - using fallback factory: {e}. "
-                    "Consider registering error handling services properly."
-                )
-                self.error_handler = ErrorHandler(config)
+            self.logger.warning(
+                "ErrorHandler not injected - using fallback factory. "
+                "Consider injecting from service layer for better testability."
+            )
+            self.error_handler = ErrorHandler(config)
         else:
             self.error_handler = error_handler
 

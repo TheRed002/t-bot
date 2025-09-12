@@ -210,7 +210,7 @@ def classify_error_type(exception: Exception) -> ErrorType:
                 error_msg = ""
         except Exception:
             error_msg = ""
-            
+
         if not error_msg:
             return ErrorType.UNKNOWN
         error_msg = error_msg.lower()

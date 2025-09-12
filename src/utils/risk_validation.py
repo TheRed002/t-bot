@@ -16,12 +16,6 @@ from src.utils.decimal_utils import ONE, ZERO, safe_divide, to_decimal
 logger = get_logger(__name__)
 
 
-class RiskValidationError(Exception):
-    """Risk validation specific error."""
-
-    pass
-
-
 class UnifiedRiskValidator:
     """
     Centralized risk validator that eliminates validation code duplication.

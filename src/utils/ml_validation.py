@@ -220,6 +220,129 @@ def validate_market_data(
     return data
 
 
+def validate_prediction_data(X: pd.DataFrame, model_name: str = "Unknown") -> pd.DataFrame:
+    """
+    Validate data for prediction (no targets required).
+    
+    Args:
+        X: Feature data
+        model_name: Name of the model for error context
+        
+    Returns:
+        Validated feature DataFrame
+        
+    Raises:
+        ValidationError: If prediction data is invalid
+    """
+    if X.empty:
+        raise ValidationError(f"{model_name}: Prediction data cannot be empty")
+
+    return validate_features(X, model_name)
+
+
+def validate_direction_threshold(threshold: float, model_name: str = "Unknown") -> float:
+    """
+    Validate direction classification threshold.
+    
+    Args:
+        threshold: Direction threshold value
+        model_name: Name of the model for error context
+        
+    Returns:
+        Validated threshold
+        
+    Raises:
+        ValidationError: If threshold is invalid
+    """
+    if not isinstance(threshold, (int, float)):
+        raise ValidationError(f"{model_name}: Direction threshold must be numeric")
+
+    if threshold <= 0 or threshold >= 1:
+        raise ValidationError(f"{model_name}: Direction threshold must be between 0 and 1")
+
+    return float(threshold)
+
+
+def validate_prediction_horizon(horizon: int, model_name: str = "Unknown") -> int:
+    """
+    Validate prediction horizon parameter.
+    
+    Args:
+        horizon: Prediction horizon value
+        model_name: Name of the model for error context
+        
+    Returns:
+        Validated horizon
+        
+    Raises:
+        ValidationError: If horizon is invalid
+    """
+    if not isinstance(horizon, int):
+        raise ValidationError(f"{model_name}: Prediction horizon must be integer")
+
+    if horizon <= 0:
+        raise ValidationError(f"{model_name}: Prediction horizon must be positive")
+
+    if horizon > 100:  # Reasonable upper bound
+        raise ValidationError(f"{model_name}: Prediction horizon too large (max 100)")
+
+    return horizon
+
+
+def validate_algorithm_choice(algorithm: str, allowed_algorithms: list[str], model_name: str = "Unknown") -> str:
+    """
+    Validate algorithm choice against allowed options.
+    
+    Args:
+        algorithm: Algorithm name
+        allowed_algorithms: List of allowed algorithm names
+        model_name: Name of the model for error context
+        
+    Returns:
+        Validated algorithm name
+        
+    Raises:
+        ValidationError: If algorithm is not allowed
+    """
+    if algorithm not in allowed_algorithms:
+        raise ValidationError(
+            f"{model_name}: Unknown algorithm '{algorithm}'. Allowed: {allowed_algorithms}"
+        )
+
+    return algorithm
+
+
+def validate_class_weights(class_weights: Any, model_name: str = "Unknown") -> Any:
+    """
+    Validate class weights parameter.
+    
+    Args:
+        class_weights: Class weights specification
+        model_name: Name of the model for error context
+        
+    Returns:
+        Validated class weights
+        
+    Raises:
+        ValidationError: If class weights are invalid
+    """
+    if class_weights is None:
+        return None
+
+    if isinstance(class_weights, str):
+        if class_weights not in ["balanced", "balanced_subsample"]:
+            raise ValidationError(
+                f"{model_name}: Invalid class weights string. Use 'balanced' or 'balanced_subsample'"
+            )
+    elif isinstance(class_weights, dict):
+        if not all(isinstance(k, (int, str)) and isinstance(v, (int, float)) for k, v in class_weights.items()):
+            raise ValidationError(f"{model_name}: Class weights dict must have numeric values")
+    else:
+        raise ValidationError(f"{model_name}: Class weights must be None, string, or dict")
+
+    return class_weights
+
+
 def check_data_quality(
     X: pd.DataFrame,
     y: pd.Series = None,
@@ -279,3 +402,44 @@ def check_data_quality(
     quality_report["constant_features"] = constant_features
 
     return quality_report
+
+
+def validate_model_hyperparameters(params: dict[str, Any], model_type: str, model_name: str = "Unknown") -> dict[str, Any]:
+    """
+    Validate model hyperparameters based on model type.
+    
+    Args:
+        params: Hyperparameter dictionary
+        model_type: Type of model
+        model_name: Name of the model for error context
+        
+    Returns:
+        Validated hyperparameters
+        
+    Raises:
+        ValidationError: If hyperparameters are invalid
+    """
+    if not isinstance(params, dict):
+        raise ValidationError(f"{model_name}: Hyperparameters must be a dictionary")
+
+    validated_params = params.copy()
+
+    # Common validations
+    if "random_state" in validated_params:
+        if not isinstance(validated_params["random_state"], (int, type(None))):
+            raise ValidationError(f"{model_name}: random_state must be integer or None")
+
+    if "n_estimators" in validated_params:
+        if not isinstance(validated_params["n_estimators"], int) or validated_params["n_estimators"] <= 0:
+            raise ValidationError(f"{model_name}: n_estimators must be positive integer")
+
+    if "max_depth" in validated_params:
+        if validated_params["max_depth"] is not None:
+            if not isinstance(validated_params["max_depth"], int) or validated_params["max_depth"] <= 0:
+                raise ValidationError(f"{model_name}: max_depth must be positive integer or None")
+
+    if "learning_rate" in validated_params:
+        if not isinstance(validated_params["learning_rate"], (int, float)) or validated_params["learning_rate"] <= 0:
+            raise ValidationError(f"{model_name}: learning_rate must be positive number")
+
+    return validated_params

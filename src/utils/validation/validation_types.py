@@ -22,6 +22,15 @@ class ValidationCategory(Enum):
     CONSISTENCY = "consistency"
 
 
+class ValidationSeverity(Enum):
+    """Validation severity levels."""
+
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    CRITICAL = "critical"
+
+
 class QualityDimension(Enum):
     """Data quality dimensions."""
 
