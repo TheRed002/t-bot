@@ -459,7 +459,8 @@ class TestHighPerformanceDataBuffer:
             ]
         )
 
-        with pytest.raises(ValueError, match="Data must have 3 columns"):
+        from src.core.exceptions import DataProcessingError
+        with pytest.raises(DataProcessingError, match="Data must have 3 columns"):
             buffer.append_batch(data)
 
     def test_append_batch_wraparound(self):

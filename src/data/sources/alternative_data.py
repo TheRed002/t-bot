@@ -30,10 +30,10 @@ from src.core.exceptions import DataSourceError
 from src.core.logging import get_logger
 
 # Import from P-002A error handling
-from src.error_handling.error_handler import ErrorHandler
+from src.error_handling import ErrorHandler, with_retry
 
 # Import from P-007A utilities
-from src.utils.decorators import retry, time_execution
+from src.utils.decorators import time_execution
 
 logger = get_logger(__name__)
 
@@ -139,7 +139,7 @@ class AlternativeDataSource(BaseComponent):
 
         self.logger.info("AlternativeDataSource initialized")
 
-    @retry(max_attempts=3, base_delay=2.0)
+    @with_retry(max_attempts=3, base_delay=2.0, exponential=True)
     async def initialize(self) -> None:
         """Initialize alternative data source connections."""
         session = None
@@ -171,7 +171,7 @@ class AlternativeDataSource(BaseComponent):
             self.logger.error(f"Failed to initialize AlternativeDataSource: {e!s}")
             raise DataSourceError(f"Alternative data source initialization failed: {e!s}")
 
-    @retry(max_attempts=2, base_delay=1.0)
+    @with_retry(max_attempts=2, base_delay=1.0, exponential=True)
     async def _test_data_sources(self) -> None:
         """Test connections to alternative data sources."""
         try:
@@ -210,7 +210,7 @@ class AlternativeDataSource(BaseComponent):
             raise
 
     @time_execution
-    @retry(max_attempts=3, base_delay=2.0)
+    @with_retry(max_attempts=3, base_delay=2.0, exponential=True)
     async def get_economic_indicators(
         self, indicators: list[str], days_back: int = 30
     ) -> list[EconomicIndicator]:

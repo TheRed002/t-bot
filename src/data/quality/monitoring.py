@@ -27,7 +27,7 @@ from src.core.config import Config
 from src.core.types import DriftType, MarketData, QualityLevel, Signal
 
 # Import from P-002A error handling
-from src.error_handling.error_handler import ErrorHandler
+from src.error_handling import ErrorHandler
 
 # Import from P-007A utilities
 from src.utils.decorators import time_execution

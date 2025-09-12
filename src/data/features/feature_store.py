@@ -25,12 +25,14 @@ from pydantic import BaseModel, Field, field_validator
 
 from src.core import BaseComponent, HealthCheckResult, HealthStatus
 from src.core.config import Config
+from src.core.exceptions import ValidationError
 from src.core.types import MarketData
 
 # Import from P-002A error handling
-from src.error_handling.error_handler import ErrorHandler
+from src.error_handling import ErrorHandler
 
 # Import from P-007A utilities
+from src.utils.decimal_utils import to_decimal
 from src.utils.decorators import time_execution
 
 
@@ -89,18 +91,18 @@ class FeatureRequest(BaseModel):
     """Feature calculation request model."""
 
     symbol: str = Field(..., min_length=1, max_length=20)
-    feature_names: list[str] = Field(..., min_length=1)
+    feature_types: list[str] = Field(..., min_length=1)  # Changed from feature_names to match data.types
     lookback_period: int = Field(default=100, ge=1, le=5000)
     parameters: dict[str, Any] = Field(default_factory=dict)
-    use_cache: bool = True
+    cache_result: bool = True  # Changed from use_cache to match data.types
     force_recalculation: bool = False
     priority: int = Field(default=5, ge=1, le=10)
 
-    @field_validator("feature_names")
+    @field_validator("feature_types")
     @classmethod
-    def validate_feature_names(cls, v):
+    def validate_feature_types(cls, v):
         if not v:
-            raise ValueError("At least one feature name is required")
+            raise ValidationError("At least one feature name is required")
         return v
 
 
@@ -145,7 +147,7 @@ class FeatureCalculationPipeline:
         # Get all unique feature names
         all_features = set()
         for request in requests:
-            all_features.update(request.feature_names)
+            all_features.update(request.feature_types)
 
         # Get market data once for all calculations
         max_lookback = max(request.lookback_period for request in requests)
@@ -395,7 +397,7 @@ class FeatureStore(BaseComponent):
         results = []
 
         # Check cache first
-        if request.use_cache and not request.force_recalculation:
+        if request.cache_result and not request.force_recalculation:
             cached_results = await self._get_cached_features(request)
             if cached_results:
                 self._metrics["cache_hits"] += len(cached_results)
@@ -403,17 +405,17 @@ class FeatureStore(BaseComponent):
 
                 # Remove cached features from request
                 cached_names = {result.feature_id.split(":")[-1] for result in cached_results}
-                request.feature_names = [
-                    name for name in request.feature_names if name not in cached_names
+                request.feature_types = [
+                    name for name in request.feature_types if name not in cached_names
                 ]
 
         # Calculate remaining features
-        if request.feature_names:
+        if request.feature_types:
             calculated_results = await self._calculate_features_batch(request)
             results.extend(calculated_results)
 
             # Cache results
-            if request.use_cache:
+            if request.cache_result:
                 await self._cache_results(calculated_results)
 
         return results
@@ -422,7 +424,7 @@ class FeatureStore(BaseComponent):
         """Get features from cache if available and valid."""
         cached_results = []
 
-        for feature_name in request.feature_names:
+        for feature_name in request.feature_types:
             cache_key = self._build_cache_key(request.symbol, feature_name, request.parameters)
 
             if cache_key in self._feature_cache:
@@ -447,7 +449,7 @@ class FeatureStore(BaseComponent):
 
     async def _calculate_features_batch(self, request: FeatureRequest) -> list[FeatureValue]:
         """Calculate features in batch for efficiency."""
-        self._metrics["cache_misses"] += len(request.feature_names)
+        self._metrics["cache_misses"] += len(request.feature_types)
 
         # Get market data once for all calculations
         market_data = await self._get_market_data(request.symbol, request.lookback_period)
@@ -460,7 +462,7 @@ class FeatureStore(BaseComponent):
         calculation_tasks = []
 
         # Create calculation tasks
-        for feature_name in request.feature_names:
+        for feature_name in request.feature_types:
             task = asyncio.create_task(
                 self._calculate_single_feature(
                     request.symbol, feature_name, market_data, request.parameters
@@ -475,7 +477,7 @@ class FeatureStore(BaseComponent):
         for i, result in enumerate(completed_results):
             if isinstance(result, Exception):
                 self.logger.error(
-                    f"Feature calculation failed for {request.feature_names[i]}: {result}"
+                    f"Feature calculation failed for {request.feature_types[i]}: {result}"
                 )
                 self._metrics["failed_calculations"] += 1
             elif result:
@@ -582,7 +584,7 @@ class FeatureStore(BaseComponent):
                 start_time=start_time,
                 end_time=end_time,
                 limit=lookback_period * 1440,  # Assume minute data
-                use_cache=True,
+                cache_result=True,
             )
 
             db_records = await self.data_service.get_market_data(request)
@@ -593,14 +595,14 @@ class FeatureStore(BaseComponent):
                 market_data.append(
                     MarketData(
                         symbol=record.symbol,
-                        close=Decimal(str(record.price)) if record.price else Decimal("0"),
-                        volume=Decimal(str(record.volume)) if record.volume else Decimal("0"),
+                        close=to_decimal(record.price) if record.price else to_decimal(0),
+                        volume=to_decimal(record.volume) if record.volume else to_decimal(0),
                         timestamp=record.timestamp,
-                        high=Decimal(str(record.high_price)) if record.high_price else Decimal("0"),
-                        low=Decimal(str(record.low_price)) if record.low_price else Decimal("0"),
-                        open=Decimal(str(record.open_price)) if record.open_price else Decimal("0"),
-                        bid_price=Decimal(str(record.bid)) if record.bid else None,
-                        ask_price=Decimal(str(record.ask)) if record.ask else None,
+                        high=to_decimal(record.high_price) if record.high_price else to_decimal(0),
+                        low=to_decimal(record.low_price) if record.low_price else to_decimal(0),
+                        open=to_decimal(record.open_price) if record.open_price else to_decimal(0),
+                        bid_price=to_decimal(record.bid) if record.bid else None,
+                        ask_price=to_decimal(record.ask) if record.ask else None,
                         exchange=getattr(record, "exchange", "unknown"),
                     )
                 )
@@ -675,11 +677,11 @@ class FeatureStore(BaseComponent):
     ) -> Decimal | None:
         """Calculate Simple Moving Average."""
         try:
-            prices = [Decimal(str(data.price)) for data in market_data[-period:] if data.price]
+            prices = [to_decimal(data.price) for data in market_data[-period:] if data.price]
             if len(prices) < period:
                 return None
             getcontext().prec = 16
-            result = sum(prices) / Decimal(str(len(prices)))
+            result = sum(prices) / to_decimal(len(prices))
             return result.quantize(Decimal("0.00000001"))
         except Exception as e:
             self.logger.error(f"Simple moving average calculation failed: {e}")
@@ -690,13 +692,13 @@ class FeatureStore(BaseComponent):
     ) -> Decimal | None:
         """Calculate Exponential Moving Average."""
         try:
-            prices = [Decimal(str(data.price)) for data in market_data if data.price]
+            prices = [to_decimal(data.price) for data in market_data if data.price]
             if len(prices) < period:
                 return None
 
             # Calculate EMA
             getcontext().prec = 16
-            multiplier = Decimal("2") / (Decimal(str(period)) + Decimal("1"))
+            multiplier = Decimal("2") / (to_decimal(period) + Decimal("1"))
             ema = prices[0]
 
             for price in prices[1:]:

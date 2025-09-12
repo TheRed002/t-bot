@@ -29,10 +29,10 @@ from src.core.logging import get_logger
 from src.core.types import NewsSentiment
 
 # Import from P-002A error handling
-from src.error_handling.error_handler import ErrorHandler
+from src.error_handling import ErrorHandler, with_retry
 
 # Import from P-007A utilities
-from src.utils.decorators import retry, time_execution
+from src.utils.decorators import time_execution
 
 logger = get_logger(__name__)
 
@@ -105,7 +105,7 @@ class NewsDataSource(BaseComponent):
 
         self.logger.info("NewsDataSource initialized")
 
-    @retry(max_attempts=3, base_delay=2.0)
+    @with_retry(max_attempts=3, base_delay=2.0, exponential=True)
     async def initialize(self) -> None:
         """Initialize news data source connections."""
         session = None
@@ -140,7 +140,7 @@ class NewsDataSource(BaseComponent):
             self.logger.error(f"Failed to initialize NewsDataSource: {e!s}")
             raise DataSourceError(f"News data source initialization failed: {e!s}")
 
-    @retry(max_attempts=3, base_delay=2.0)
+    @with_retry(max_attempts=3, base_delay=2.0, exponential=True)
     async def _test_connection(self) -> None:
         """Test connection to NewsAPI."""
         try:
@@ -158,7 +158,7 @@ class NewsDataSource(BaseComponent):
             raise
 
     @time_execution
-    @retry(max_attempts=3, base_delay=1.0)
+    @with_retry(max_attempts=3, base_delay=1.0, exponential=True)
     async def get_news_for_symbol(
         self, symbol: str, hours_back: int = 24, max_articles: int = 50
     ) -> list[NewsArticle]:
@@ -218,7 +218,7 @@ class NewsDataSource(BaseComponent):
             self.logger.error(f"Failed to get news for {symbol}: {e!s}")
             raise DataSourceError(f"News retrieval failed: {e!s}")
 
-    @retry(max_attempts=3, base_delay=1.0)
+    @with_retry(max_attempts=3, base_delay=1.0, exponential=True)
     async def _fetch_articles(
         self, query: str, from_date: datetime, to_date: datetime, page_size: int = 50
     ) -> list[NewsArticle]:

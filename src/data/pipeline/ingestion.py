@@ -33,19 +33,17 @@ from src.data.sources.alternative_data import AlternativeDataSource
 from src.data.sources.market_data import MarketDataSource
 from src.data.sources.news_data import NewsDataSource
 from src.data.sources.social_media import SocialMediaDataSource
-from src.error_handling.connection_manager import ConnectionManager
 
 # Import from P-002 database components
 # Import from P-002A error handling
-from src.error_handling.error_handler import ErrorHandler
-from src.error_handling.pattern_analytics import ErrorPatternAnalytics
-from src.error_handling.recovery_scenarios import (
+from src.error_handling import (
     DataFeedInterruptionRecovery,
+    ErrorHandler,
+    ErrorPatternAnalytics,
     NetworkDisconnectionRecovery,
+    with_retry,
 )
-
-# Import from P-007A utilities
-from src.utils.decorators import retry
+from src.error_handling.connection_manager import ConnectionManager
 
 # IngestionMode and PipelineStatus are now imported from core.types
 
@@ -388,7 +386,7 @@ class DataIngestionPipeline(BaseComponent):
             self.logger.error(f"Failed to start batch ingestion: {e!s}")
             raise
 
-    @retry(max_attempts=3, base_delay=1.0)
+    @with_retry(max_attempts=3, base_delay=1.0, exponential=True)
     async def _ingest_market_data_real_time(self, symbol: str) -> None:
         """Ingest real-time market data for a symbol."""
         try:

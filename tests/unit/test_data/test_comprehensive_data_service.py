@@ -126,7 +126,8 @@ class TestDataServiceInitialization:
 
     def test_initialization_without_database_service(self, mock_config):
         """Test initialization fails without database service."""
-        with pytest.raises(ValueError, match="database_service is required"):
+        from src.core.exceptions import DataError
+        with pytest.raises(DataError, match="database_service is required"):
             DataService(config=mock_config, database_service=None)
 
     @pytest.mark.asyncio

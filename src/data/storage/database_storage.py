@@ -52,7 +52,7 @@ class DatabaseStorage(BaseComponent, DataStorageInterface):
 
         except DatabaseError as e:
             self.logger.error(f"Database storage failed: {e}")
-            raise DataError(f"Database storage failed: {e}") from e
+            raise DataError(f"Database storage failed: {e!s}") from e
         except Exception as e:
             self.logger.error(f"Database storage failed: {e}")
             raise DataError(f"Database storage failed: {e}") from e
@@ -90,7 +90,7 @@ class DatabaseStorage(BaseComponent, DataStorageInterface):
 
         except DatabaseError as e:
             self.logger.error(f"Database retrieval failed: {e}")
-            raise DataError(f"Database retrieval failed: {e}") from e
+            raise DataError(f"Database retrieval failed: {e!s}") from e
         except Exception as e:
             self.logger.error(f"Database retrieval failed: {e}")
             raise DataError(f"Database retrieval failed: {e}") from e

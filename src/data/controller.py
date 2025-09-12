@@ -18,7 +18,7 @@ from src.data.constants import (
 )
 from src.data.interfaces import DataServiceInterface
 from src.data.types import DataRequest
-from src.error_handling.decorators import FallbackConfig, FallbackStrategy, enhanced_error_handler
+from src.error_handling import FallbackStrategy, with_fallback
 
 
 class DataController(BaseComponent):
@@ -52,16 +52,13 @@ class DataController(BaseComponent):
         await self.data_service.initialize()
         self.logger.info("DataController initialized")
 
-    @enhanced_error_handler(
-        fallback_config=FallbackConfig(
-            strategy=FallbackStrategy.RETURN_EMPTY,
-            default_value={
-                "success": False,
-                "error": "Storage operation failed",
-                "error_code": "STORAGE_ERROR",
-            },
-        ),
-        enable_logging=True,
+    @with_fallback(
+        strategy=FallbackStrategy.RETURN_EMPTY,
+        default_value={
+            "success": False,
+            "error": "Storage operation failed",
+            "error_code": "STORAGE_ERROR",
+        },
     )
     async def store_market_data_request(
         self, data: MarketData | list[MarketData], exchange: str, validate: bool = True
@@ -100,18 +97,15 @@ class DataController(BaseComponent):
             "exchange": exchange,
         }
 
-    @enhanced_error_handler(
-        fallback_config=FallbackConfig(
-            strategy=FallbackStrategy.RETURN_EMPTY,
-            default_value={
+    @with_fallback(
+        strategy=FallbackStrategy.RETURN_EMPTY,
+        default_value={
                 "success": False,
                 "error": "Retrieval operation failed",
                 "error_code": "RETRIEVAL_ERROR",
                 "data": [],
                 "count": 0,
-            },
-        ),
-        enable_logging=True,
+        },
     )
     async def get_market_data_request(
         self, symbol: str, exchange: str, limit: int = DEFAULT_DATA_LIMIT, use_cache: bool = True
@@ -169,17 +163,14 @@ class DataController(BaseComponent):
             "exchange": exchange,
         }
 
-    @enhanced_error_handler(
-        fallback_config=FallbackConfig(
-            strategy=FallbackStrategy.RETURN_EMPTY,
-            default_value={
+    @with_fallback(
+        strategy=FallbackStrategy.RETURN_EMPTY,
+        default_value={
                 "success": False,
                 "error": "Count operation failed",
                 "error_code": "COUNT_ERROR",
                 "count": 0,
-            },
-        ),
-        enable_logging=True,
+        },
     )
     async def get_data_count_request(
         self, symbol: str, exchange: str = "binance"
@@ -208,18 +199,15 @@ class DataController(BaseComponent):
         # Format response
         return {"success": True, "count": count, "symbol": symbol, "exchange": exchange}
 
-    @enhanced_error_handler(
-        fallback_config=FallbackConfig(
-            strategy=FallbackStrategy.RETURN_EMPTY,
-            default_value={
+    @with_fallback(
+        strategy=FallbackStrategy.RETURN_EMPTY,
+        default_value={
                 "success": False,
                 "error": "Recent data operation failed",
                 "error_code": "RECENT_DATA_ERROR",
                 "data": [],
                 "count": 0,
-            },
-        ),
-        enable_logging=True,
+        },
     )
     async def get_recent_data_request(
         self, symbol: str, limit: int = DEFAULT_DATA_LIMIT, exchange: str = DEFAULT_EXCHANGE
@@ -273,17 +261,14 @@ class DataController(BaseComponent):
             "exchange": exchange,
         }
 
-    @enhanced_error_handler(
-        fallback_config=FallbackConfig(
-            strategy=FallbackStrategy.RETURN_EMPTY,
-            default_value={
+    @with_fallback(
+        strategy=FallbackStrategy.RETURN_EMPTY,
+        default_value={
                 "success": False,
                 "status": "unhealthy",
                 "error": "Health check failed",
                 "error_code": "HEALTH_CHECK_ERROR",
-            },
-        ),
-        enable_logging=True,
+        },
     )
     async def get_health_status_request(self) -> dict[str, Any]:
         """
@@ -303,9 +288,7 @@ class DataController(BaseComponent):
             "timestamp": health.get("timestamp"),
         }
 
-    @enhanced_error_handler(
-        fallback_config=FallbackConfig(strategy=FallbackStrategy.RETURN_NONE), enable_logging=True
-    )
+    @with_fallback(strategy=FallbackStrategy.RETURN_NONE)
     async def cleanup(self) -> None:
         """Cleanup controller resources."""
         await self.data_service.cleanup()

@@ -16,7 +16,6 @@ Dependencies:
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from decimal import Decimal, getcontext
 from typing import Any
 
 # Import from P-002 database components
@@ -25,13 +24,13 @@ from src.core.config import Config
 
 # Import from P-001 core components
 from src.core.types import MarketData, StorageMode
-from src.database import InfluxDBClient as InfluxDBClientWrapper
+from src.database.interfaces import DatabaseServiceInterface
 
 # Import from P-002A error handling
-from src.error_handling.error_handler import ErrorHandler
+from src.error_handling import ErrorHandler, with_retry
 
 # Import from P-007A utilities
-from src.utils.decorators import retry, time_execution
+from src.utils.decorators import time_execution
 
 # StorageMode is now imported from core.types
 
@@ -56,11 +55,14 @@ class DataStorageManager(BaseComponent):
     through the pipeline, with support for different storage modes.
     """
 
-    def __init__(self, config: Config):
+    def __init__(self, config: Config, database_service: DatabaseServiceInterface | None = None):
         """Initialize data storage manager."""
         super().__init__()  # Initialize BaseComponent
         self.config = config
         self.error_handler = ErrorHandler(config)
+
+        # Inject database service for storage operations
+        self.database_service = database_service
 
         # Storage configuration
         storage_config = getattr(config, "data_storage", {})
@@ -74,21 +76,6 @@ class DataStorageManager(BaseComponent):
             self.batch_size = 100
             self.buffer_threshold = 50
             self.cleanup_interval = 3600
-
-        # Initialize InfluxDB client for time series market data (connection will be established in initialize())
-        influx_config = getattr(config, "influxdb", {})
-        if isinstance(influx_config, dict):
-            self.influx_client = InfluxDBClientWrapper(
-                url=influx_config.get("url", "http://localhost:8086"),
-                token=influx_config.get("token", ""),
-                org=influx_config.get("org", "trading-bot"),
-                bucket=influx_config.get("bucket", "market-data"),
-            )
-        else:
-            # Default InfluxDB configuration
-            self.influx_client = InfluxDBClientWrapper(
-                url="http://localhost:8086", token="", org="trading-bot", bucket="market-data"
-            )
 
         # Storage buffers
         self.storage_buffer: list[dict[str, Any]] = []
@@ -116,13 +103,13 @@ class DataStorageManager(BaseComponent):
 
             self.logger.info("Initializing DataStorageManager...")
 
-            # Establish InfluxDB connection
-            if self.influx_client:
+            # Initialize database service if provided
+            if self.database_service and hasattr(self.database_service, "initialize"):
                 try:
-                    await self.influx_client.connect()
-                    self.logger.info("InfluxDB connection established")
+                    await self.database_service.initialize()
+                    self.logger.info("Database service connection established")
                 except Exception as e:
-                    self.logger.warning(f"InfluxDB connection failed: {e}")
+                    self.logger.warning(f"Database service initialization failed: {e}")
 
             self._initialized = True
             self.logger.info("DataStorageManager initialized successfully")
@@ -132,7 +119,7 @@ class DataStorageManager(BaseComponent):
             raise
 
     @time_execution
-    @retry(max_attempts=3, base_delay=1.0)
+    @with_retry(max_attempts=3, base_delay=1.0, exponential=True)
     async def store_market_data(self, data: MarketData) -> bool:
         """
         Store market data to database.
@@ -160,32 +147,33 @@ class DataStorageManager(BaseComponent):
             return False
 
     async def _store_real_time(self, data: MarketData) -> bool:
-        """Store data immediately to InfluxDB."""
+        """Store data immediately through database service."""
         try:
             if not self._initialized:
                 await self.initialize()
 
-            # Write market data to InfluxDB with proper precision conversion
-            # Prepare fields dict per client wrapper API
-            getcontext().prec = 28
-            fields = {
-                "price": float(Decimal(str(data.price)).quantize(Decimal("0.00000001"))),  # Convert with precision
-                "volume": float(Decimal(str(data.volume)).quantize(Decimal("0.00000001"))) if data.volume is not None else 0.0,
-            }
-            if data.bid is not None:
-                fields["bid"] = float(Decimal(str(data.bid)).quantize(Decimal("0.00000001")))  # Convert with precision
-            if data.ask is not None:
-                fields["ask"] = float(Decimal(str(data.ask)).quantize(Decimal("0.00000001")))  # Convert with precision
-            if data.high_price is not None:
-                fields["high"] = float(Decimal(str(data.high_price)).quantize(Decimal("0.00000001")))  # Convert with precision
-            if data.low_price is not None:
-                fields["low"] = float(Decimal(str(data.low_price)).quantize(Decimal("0.00000001")))  # Convert with precision
-            if data.open_price is not None:
-                fields["open"] = float(Decimal(str(data.open_price)).quantize(Decimal("0.00000001")))  # Convert with precision
+            if not self.database_service:
+                self.logger.warning("No database service available for real-time storage")
+                return False
 
-            await self.influx_client.write_market_data(
-                symbol=data.symbol, data=fields, timestamp=data.timestamp
-            )
+            # Store through database service interface using proper service layer
+            # Transform data to standard format for database service
+            data_dict = {
+                "symbol": data.symbol,
+                "exchange": "pipeline",  # Default exchange for pipeline data
+                "timestamp": data.timestamp or datetime.now(timezone.utc),
+                "open": getattr(data, "open_price", None) or getattr(data, "open", None),
+                "high": getattr(data, "high_price", None) or getattr(data, "high", None),
+                "low": getattr(data, "low_price", None) or getattr(data, "low", None),
+                "close": getattr(data, "close_price", None) or getattr(data, "close", None) or data.price,
+                "price": data.price,
+                "volume": data.volume,
+                "bid": getattr(data, "bid", None),
+                "ask": getattr(data, "ask", None),
+            }
+
+            # Use database service's generic entity creation
+            await self.database_service.execute_operation("create_market_data", data_dict)
 
             self.metrics.successful_stores += 1
             self.metrics.total_records_stored += 1
@@ -221,45 +209,47 @@ class DataStorageManager(BaseComponent):
 
     @time_execution
     async def _flush_buffer(self) -> bool:
-        """Flush storage buffer to InfluxDB."""
+        """Flush storage buffer through database service."""
         try:
             if not self.storage_buffer:
                 return True
 
-            # Prepare market data points for InfluxDB
-            market_data_points = []
+            if not self.database_service:
+                self.logger.warning("No database service available for buffer flush")
+                return False
 
+            # Prepare data dictionaries for database service
+            data_items = []
             for item in self.storage_buffer:
                 if item["type"] == "market_data":
                     data = item["data"]
-                    market_data_points.append(data)
-
-            # Bulk write to InfluxDB
-            if market_data_points:
-                # Write individually to ensure type safety and avoid missing API
-                for md in market_data_points:
-                    getcontext().prec = 28
-                    fields = {
-                        "price": float(Decimal(str(md.price)).quantize(Decimal("0.00000001"))),  # Convert with precision
-                        "volume": float(Decimal(str(md.volume)).quantize(Decimal("0.00000001"))) if md.volume is not None else 0.0,
+                    data_dict = {
+                        "symbol": data.symbol,
+                        "exchange": "pipeline",  # Default exchange for pipeline data
+                        "timestamp": data.timestamp or datetime.now(timezone.utc),
+                        "open": getattr(data, "open_price", None) or getattr(data, "open", None),
+                        "high": getattr(data, "high_price", None) or getattr(data, "high", None),
+                        "low": getattr(data, "low_price", None) or getattr(data, "low", None),
+                        "close": getattr(data, "close_price", None) or getattr(data, "close", None) or data.price,
+                        "price": data.price,
+                        "volume": data.volume,
+                        "bid": getattr(data, "bid", None),
+                        "ask": getattr(data, "ask", None),
                     }
-                    if md.bid is not None:
-                        fields["bid"] = float(Decimal(str(md.bid)).quantize(Decimal("0.00000001")))  # Convert with precision
-                    if md.ask is not None:
-                        fields["ask"] = float(Decimal(str(md.ask)).quantize(Decimal("0.00000001")))  # Convert with precision
-                    if md.high_price is not None:
-                        fields["high"] = float(Decimal(str(md.high_price)).quantize(Decimal("0.00000001")))  # Convert with precision
-                    if md.low_price is not None:
-                        fields["low"] = float(Decimal(str(md.low_price)).quantize(Decimal("0.00000001")))  # Convert with precision
-                    if md.open_price is not None:
-                        fields["open"] = float(Decimal(str(md.open_price)).quantize(Decimal("0.00000001")))  # Convert with precision
-                    await self.influx_client.write_market_data(md.symbol, fields, md.timestamp)
+                    data_items.append(data_dict)
+
+            # Bulk write through database service using proper service layer
+            if data_items:
+                await self.database_service.execute_operation("bulk_create_market_data", data_items)
 
                 # Update metrics
-                stored_count = len(market_data_points)
+                stored_count = len(data_items)
                 self.metrics.successful_stores += stored_count
                 self.metrics.total_records_stored += stored_count
                 self.metrics.last_storage_time = datetime.now(timezone.utc)
+
+                # Clear buffer after successful flush
+                self.storage_buffer.clear()
 
                 self.logger.info(f"Flushed {stored_count} records to database")
                 return True
@@ -283,15 +273,33 @@ class DataStorageManager(BaseComponent):
             if not self._initialized:
                 await self.initialize()
 
-            # Bulk write to InfluxDB
-            await self.influx_client.write_market_data_batch(data_list)
+            if not self.database_service:
+                self.logger.warning("No database service available for batch storage")
+                return 0
 
-            # Also store to PostgreSQL for persistent storage
-            if self.storage_mode == StorageMode.WARM or self.storage_mode == StorageMode.ARCHIVE:
-                await self._store_batch_to_postgresql(data_list)
+            # Convert to data dictionaries for database service
+            data_items = []
+            for data in data_list:
+                data_dict = {
+                    "symbol": data.symbol,
+                    "exchange": "pipeline",  # Default exchange for pipeline data
+                    "timestamp": data.timestamp or datetime.now(timezone.utc),
+                    "open": getattr(data, "open_price", None) or getattr(data, "open", None),
+                    "high": getattr(data, "high_price", None) or getattr(data, "high", None),
+                    "low": getattr(data, "low_price", None) or getattr(data, "low", None),
+                    "close": getattr(data, "close_price", None) or getattr(data, "close", None) or data.price,
+                    "price": data.price,
+                    "volume": data.volume,
+                    "bid": getattr(data, "bid", None),
+                    "ask": getattr(data, "ask", None),
+                }
+                data_items.append(data_dict)
+
+            # Bulk write through database service using proper service layer
+            await self.database_service.execute_operation("bulk_create_market_data", data_items)
 
             # Update metrics
-            stored_count = len(data_list)
+            stored_count = len(data_items)
             self.metrics.successful_stores += stored_count
             self.metrics.total_records_stored += stored_count
             self.metrics.last_storage_time = datetime.now(timezone.utc)
@@ -371,27 +379,22 @@ class DataStorageManager(BaseComponent):
 
     async def cleanup(self) -> None:
         """Cleanup storage manager resources."""
-        influx_client = None
         try:
             # Flush any remaining buffered data
             await self.force_flush()
 
-            # Close InfluxDB connection
-            if self.influx_client:
-                influx_client = self.influx_client
-                self.influx_client = None
-                await influx_client.disconnect()
+            # Cleanup database service if provided
+            if self.database_service and hasattr(self.database_service, "cleanup"):
+                await self.database_service.cleanup()
 
             self.logger.info("DataStorageManager cleanup completed")
 
         except Exception as e:
             self.logger.error(f"Error during DataStorageManager cleanup: {e!s}")
         finally:
-            if influx_client:
-                try:
-                    await influx_client.disconnect()
-                except Exception as e:
-                    self.logger.warning(f"Failed to disconnect InfluxDB client during cleanup: {e}")
+            # Clear local state
+            self.storage_buffer.clear()
+            self._initialized = False
 
     async def _store_batch_to_postgresql(self, data_list: list[MarketData]) -> bool:
         """

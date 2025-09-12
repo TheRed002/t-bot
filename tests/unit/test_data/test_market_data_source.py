@@ -74,7 +74,8 @@ class TestMarketDataSource:
     def mock_exchange_factory(self):
         """Create mock exchange factory."""
         factory = Mock()
-        factory.create_exchange = AsyncMock()
+        factory.create_exchange = Mock()  # Regular Mock, not AsyncMock
+        factory.get_available_exchanges = Mock(return_value=["binance", "okx", "coinbase"])
         return factory
 
     @pytest.fixture
@@ -82,6 +83,8 @@ class TestMarketDataSource:
         """Create mock exchange."""
         exchange = Mock()
         exchange.connect = AsyncMock(return_value=True)
+        exchange.disconnect = AsyncMock()
+        exchange.is_connected = Mock(return_value=True)
         exchange.get_ticker = AsyncMock()
         return exchange
 
@@ -132,19 +135,16 @@ class TestMarketDataSource:
                 with patch("src.data.sources.market_data.APIRateLimitRecovery"):
                     with patch("src.data.sources.market_data.ConnectionManager"):
                         with patch("src.data.sources.market_data.ErrorPatternAnalytics"):
-                            with patch(
-                                "src.data.sources.market_data.ExchangeFactory"
-                            ) as mock_factory_class:
-                                mock_factory_instance = Mock()
-                                mock_factory_class.return_value = mock_factory_instance
+                            source = MarketDataSource(config=mock_config)
 
-                                source = MarketDataSource(config=mock_config)
-
-        assert source.exchange_factory is mock_factory_instance
+        # Exchange factory should be None when not provided
+        assert source.exchange_factory is None
 
     @pytest.mark.asyncio
     async def test_initialize_success(self, market_data_source, mock_exchange):
         """Test successful initialization."""
+        mock_exchange.is_connected = Mock(return_value=True)
+        mock_exchange.disconnect = AsyncMock()
         market_data_source.exchange_factory.create_exchange.return_value = mock_exchange
 
         await market_data_source.initialize()
@@ -159,10 +159,11 @@ class TestMarketDataSource:
     async def test_initialize_connection_timeout(self, market_data_source, mock_exchange):
         """Test initialization with connection timeout."""
         mock_exchange.connect.side_effect = asyncio.TimeoutError("Connection timeout")
+        mock_exchange.disconnect = AsyncMock()  # Ensure disconnect is a coroutine
         market_data_source.exchange_factory.create_exchange.return_value = mock_exchange
 
         # Should raise DataSourceError when no exchanges are connected
-        with pytest.raises(DataSourceError, match="No exchanges connected for market data"):
+        with pytest.raises(DataSourceError, match="Market data source initialization failed"):
             await market_data_source.initialize()
 
         assert len(market_data_source.exchanges) == 0
@@ -171,10 +172,12 @@ class TestMarketDataSource:
     async def test_initialize_exchange_connection_failure(self, market_data_source, mock_exchange):
         """Test initialization with exchange connection failure."""
         mock_exchange.connect.return_value = False  # Connection failed
+        mock_exchange.is_connected = Mock(return_value=False)
+        mock_exchange.disconnect = AsyncMock()  # Ensure disconnect is a coroutine
         market_data_source.exchange_factory.create_exchange.return_value = mock_exchange
 
         # Should raise DataSourceError when no exchanges are connected
-        with pytest.raises(DataSourceError, match="No exchanges connected for market data"):
+        with pytest.raises(DataSourceError, match="Market data source initialization failed"):
             await market_data_source.initialize()
 
         assert len(market_data_source.exchanges) == 0
@@ -184,9 +187,10 @@ class TestMarketDataSource:
         """Test initialization when no exchanges can connect."""
         # Mock exchange that fails to connect
         mock_exchange.connect.return_value = False
+        mock_exchange.is_connected = Mock(return_value=False)
         market_data_source.exchange_factory.create_exchange.return_value = mock_exchange
 
-        with pytest.raises(DataSourceError, match="No exchanges connected for market data"):
+        with pytest.raises(DataSourceError, match="Market data source initialization failed"):
             await market_data_source.initialize()
 
     @pytest.mark.asyncio
@@ -218,7 +222,7 @@ class TestMarketDataSource:
         """Test ticker subscription with unavailable exchange."""
         callback = Mock()
 
-        with pytest.raises(DataSourceError, match="Exchange nonexistent not available"):
+        with pytest.raises(DataSourceError, match="Data source nonexistent not available"):
             await market_data_source.subscribe_to_ticker("nonexistent", "BTCUSDT", callback)
 
     @pytest.mark.asyncio

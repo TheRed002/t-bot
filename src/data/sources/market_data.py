@@ -35,19 +35,22 @@ from src.data.constants import (
     STREAM_ERROR_DELAY_SECONDS,
     STREAM_TASK_CLEANUP_TIMEOUT_SECONDS,
 )
-from src.error_handling.connection_manager import ConnectionManager
+
+# Import from P-003+ exchange interfaces - abstracted through data interfaces
+from src.data.interfaces import DataSourceInterface
 
 # Import from P-002A error handling
-from src.error_handling.error_handler import ErrorHandler
-from src.error_handling.pattern_analytics import ErrorPatternAnalytics
-from src.error_handling.recovery_scenarios import APIRateLimitRecovery, NetworkDisconnectionRecovery
-from src.exchanges.factory import ExchangeFactory
-
-# Import from P-003+ exchange interfaces
-from src.exchanges.interfaces import IExchange
+from src.error_handling import (
+    APIRateLimitRecovery,
+    ErrorHandler,
+    ErrorPatternAnalytics,
+    NetworkDisconnectionRecovery,
+    with_retry,
+)
+from src.error_handling.connection_manager import ConnectionManager
 
 # Import from P-007A utilities
-from src.utils.decorators import retry, time_execution
+from src.utils.decorators import time_execution
 
 
 class DataStreamType(Enum):
@@ -81,13 +84,13 @@ class MarketDataSource(BaseComponent):
     unified market data access for the trading system.
     """
 
-    def __init__(self, config: Config, exchange_factory: ExchangeFactory | None = None):
+    def __init__(self, config: Config, exchange_factory=None):
         """
         Initialize market data source.
 
         Args:
             config: Application configuration
-            exchange_factory: Required exchange factory for dependency injection
+            exchange_factory: Injected exchange factory for dependency inversion
         """
         super().__init__()  # Initialize BaseComponent
         self.config = config
@@ -97,12 +100,12 @@ class MarketDataSource(BaseComponent):
         self.connection_manager = ConnectionManager(config)
         self.pattern_analytics = ErrorPatternAnalytics(config)
 
-        # Exchange management with dependency injection - create if not provided
-        if exchange_factory is None:
-            self.exchange_factory = ExchangeFactory(config)
-        else:
-            self.exchange_factory = exchange_factory
-        self.exchanges: dict[str, IExchange] = {}
+        # Exchange factory for creating data sources
+        self.exchange_factory = exchange_factory
+        self.data_sources: dict[str, DataSourceInterface] = {}
+        
+        # Alias for backward compatibility with tests
+        self.exchanges = self.data_sources
 
         # Data subscription management
         self.subscriptions: dict[str, DataSubscription] = {}
@@ -127,71 +130,85 @@ class MarketDataSource(BaseComponent):
         self.logger.info("MarketDataSource initialized")
 
     async def initialize(self) -> None:
-        """Initialize exchange connections and data sources."""
-        connected_exchanges = []
+        """Initialize data source connections."""
+        connected_sources = []
         try:
-            # Initialize exchanges
-            supported_exchanges = ["binance", "okx", "coinbase"]
-
-            for exchange_name in supported_exchanges:
-                exchange = None
-                try:
-                    exchange = await self.exchange_factory.create_exchange(exchange_name)
-                    # Add timeout to exchange connection
-                    connected = await asyncio.wait_for(exchange.connect(), timeout=EXCHANGE_CONNECTION_TIMEOUT_SECONDS)
-                    if connected:
-                        self.exchanges[exchange_name] = exchange
-                        connected_exchanges.append(exchange_name)
-                        self.logger.info(f"Connected to {exchange_name} for market data")
-                    else:
-                        self.logger.warning(f"Failed to connect to {exchange_name}")
-                        # Clean up failed connection
+            # Initialize data sources through exchange factory if available
+            if self.exchange_factory:
+                # Get available exchanges from factory
+                available_exchanges = getattr(self.exchange_factory, "get_available_exchanges", lambda: [])()
+                for exchange_name in available_exchanges:
+                    try:
+                        # Create exchange instance through factory
+                        exchange = self.exchange_factory.create_exchange(exchange_name)
                         if exchange:
-                            try:
-                                await exchange.disconnect()
-                            except Exception as e:
-                                self.logger.debug(f"Error disconnecting {exchange_name} during cleanup: {e}")
+                            self.data_sources[exchange_name] = exchange
+                    except Exception as e:
+                        self.logger.warning(f"Failed to create exchange {exchange_name}: {e}")
+
+            # Initialize all data sources
+            failed_sources = []
+            for source_name, data_source in list(self.data_sources.items()):
+                try:
+                    # Add timeout to data source connection
+                    await asyncio.wait_for(
+                        data_source.connect(), timeout=EXCHANGE_CONNECTION_TIMEOUT_SECONDS
+                    )
+                    if data_source.is_connected():
+                        connected_sources.append(source_name)
+                        self.logger.info(f"Connected to {source_name} for market data")
+                    else:
+                        self.logger.warning(f"Failed to connect to {source_name}")
+                        failed_sources.append(source_name)
+                        # Clean up failed connection
+                        try:
+                            await data_source.disconnect()
+                        except Exception as e:
+                            self.logger.debug(
+                                f"Error disconnecting {source_name} during cleanup: {e}"
+                            )
                 except asyncio.TimeoutError:
-                    self.logger.error(f"Connection timeout for {exchange_name}")
+                    self.logger.error(f"Connection timeout for {source_name}")
+                    failed_sources.append(source_name)
                     # Clean up timed out connection
-                    if exchange:
-                        try:
-                            await exchange.disconnect()
-                        except Exception as e:
-                            self.logger.debug(f"Error disconnecting {exchange_name} after timeout: {e}")
+                    try:
+                        await data_source.disconnect()
+                    except Exception as e:
+                        self.logger.debug(f"Error disconnecting {source_name} after timeout: {e}")
                 except Exception as e:
-                    self.logger.error(f"Error initializing {exchange_name}: {e!s}")
+                    self.logger.error(f"Error initializing {source_name}: {e!s}")
+                    failed_sources.append(source_name)
                     # Clean up failed connection
-                    if exchange:
-                        try:
-                            await exchange.disconnect()
-                        except Exception as cleanup_e:
-                            self.logger.debug(f"Error disconnecting {exchange_name} after failed init: {cleanup_e}")
+                    try:
+                        await data_source.disconnect()
+                    except Exception as cleanup_e:
+                        self.logger.debug(
+                            f"Error disconnecting {source_name} after failed init: {cleanup_e}"
+                        )
+            
+            # Remove failed sources from data_sources
+            for source_name in failed_sources:
+                self.data_sources.pop(source_name, None)
 
-            if not self.exchanges:
-                # Clean up any partial connections before raising error
-                for exchange in connected_exchanges:
-                    if exchange in self.exchanges:
-                        try:
-                            await self.exchanges[exchange].disconnect()
-                        except Exception as e:
-                            self.logger.debug(f"Error disconnecting {exchange} during cleanup: {e}")
-                self.exchanges.clear()
-                raise DataSourceError("No exchanges connected for market data")
+            if not connected_sources:
+                raise DataSourceError("No data sources connected for market data")
 
-            self.logger.info(f"MarketDataSource initialized with {len(self.exchanges)} exchanges")
+            self.logger.info(
+                f"MarketDataSource initialized with {len(connected_sources)} data sources"
+            )
 
         except Exception as e:
             # Clean up any partial connections on initialization failure
-            for exchange in connected_exchanges:
+            for source_name in connected_sources:
                 try:
-                    if exchange in self.exchanges:
-                        await self.exchanges[exchange].disconnect()
+                    if source_name in self.data_sources:
+                        await self.data_sources[source_name].disconnect()
                 except Exception as cleanup_e:
-                    self.logger.debug(f"Error disconnecting {exchange} during error cleanup: {cleanup_e}")
-            self.exchanges.clear()
+                    self.logger.debug(
+                        f"Error disconnecting {source_name} during error cleanup: {cleanup_e}"
+                    )
             self.logger.error(f"Failed to initialize MarketDataSource: {e!s}")
-            raise DataSourceError(f"Market data source initialization failed: {e!s}")
+            raise DataSourceError(f"Market data source initialization failed: {e!s}") from e
 
     @time_execution
     async def subscribe_to_ticker(
@@ -209,8 +226,8 @@ class MarketDataSource(BaseComponent):
             str: Subscription ID
         """
         try:
-            if exchange_name not in self.exchanges:
-                raise DataSourceError(f"Exchange {exchange_name} not available")
+            if exchange_name not in self.data_sources:
+                raise DataSourceError(f"Data source {exchange_name} not available")
 
             subscription_id = f"{exchange_name}_{symbol}_ticker"
 
@@ -236,9 +253,9 @@ class MarketDataSource(BaseComponent):
 
         except Exception as e:
             self.logger.error(f"Failed to subscribe to ticker {exchange_name}: {symbol}: {e!s}")
-            raise DataSourceError(f"Ticker subscription failed: {e!s}")
+            raise DataSourceError(f"Ticker subscription failed: {e!s}") from e
 
-    @retry(max_attempts=DEFAULT_RETRY_MAX_ATTEMPTS, base_delay=DEFAULT_RETRY_BASE_DELAY)
+    @with_retry(max_attempts=DEFAULT_RETRY_MAX_ATTEMPTS, base_delay=DEFAULT_RETRY_BASE_DELAY, exponential=True)
     async def get_historical_data(
         self,
         exchange_name: str,
@@ -261,10 +278,10 @@ class MarketDataSource(BaseComponent):
             List[MarketData]: Historical market data
         """
         try:
-            if exchange_name not in self.exchanges:
-                raise DataSourceError(f"Exchange {exchange_name} not available")
+            if exchange_name not in self.data_sources:
+                raise DataSourceError(f"Data source {exchange_name} not available")
 
-            self.exchanges[exchange_name]
+            self.data_sources[exchange_name]
 
             # Get historical data from exchange
             # Implementation would depend on specific exchange API
@@ -299,12 +316,12 @@ class MarketDataSource(BaseComponent):
             self.pattern_analytics.add_error_event(error_context.__dict__)
 
             self.logger.error(f"Failed to get historical data {exchange_name}: {symbol}: {e!s}")
-            raise DataSourceError(f"Historical data retrieval failed: {e!s}")
+            raise DataSourceError(f"Historical data retrieval failed: {e!s}") from e
 
     async def _ticker_stream(self, exchange_name: str) -> None:
-        """Manage ticker data stream for an exchange."""
+        """Manage ticker data stream for a data source."""
         try:
-            exchange = self.exchanges[exchange_name]
+            data_source = self.data_sources[exchange_name]
 
             while self.active_streams.get(f"{exchange_name}_ticker", False):
                 try:
@@ -326,7 +343,13 @@ class MarketDataSource(BaseComponent):
                     # Get ticker data for all subscribed symbols
                     for subscription in ticker_subs:
                         try:
-                            ticker = await exchange.get_ticker(subscription.symbol)
+                            # Use data source interface for ticker data
+                            ticker_data = await data_source.fetch(
+                                subscription.symbol, "ticker", limit=1
+                            )
+                            if ticker_data:
+                                # Convert to Ticker object (implementation would depend on format)
+                                ticker = ticker_data[0]  # For now, use first item
                             if ticker:
                                 # Cache ticker data
                                 cache_key = f"{exchange_name}_{subscription.symbol}"
@@ -442,7 +465,7 @@ class MarketDataSource(BaseComponent):
     async def get_market_data_summary(self) -> dict[str, Any]:
         """Get market data source summary and statistics."""
         return {
-            "connected_exchanges": list(self.exchanges.keys()),
+            "connected_data_sources": list(self.data_sources.keys()),
             "active_subscriptions": len([s for s in self.subscriptions.values() if s.active]),
             "total_subscriptions": len(self.subscriptions),
             "statistics": self.stats.copy(),
@@ -456,7 +479,6 @@ class MarketDataSource(BaseComponent):
     async def cleanup(self) -> None:
         """Cleanup market data source resources."""
         stream_tasks = []
-        exchanges = []
         try:
             # Stop all streams
             for stream_key in list(self.active_streams.keys()):
@@ -472,25 +494,26 @@ class MarketDataSource(BaseComponent):
             if stream_tasks:
                 try:
                     await asyncio.wait_for(
-                        asyncio.gather(*stream_tasks, return_exceptions=True), timeout=STREAM_TASK_CLEANUP_TIMEOUT_SECONDS
+                        asyncio.gather(*stream_tasks, return_exceptions=True),
+                        timeout=STREAM_TASK_CLEANUP_TIMEOUT_SECONDS,
                     )
                 except asyncio.TimeoutError:
                     self.logger.warning("Timeout waiting for stream tasks to complete")
 
-            # Disconnect from exchanges with proper error handling
-            exchanges = list(self.exchanges.values())
-            for exchange in exchanges:
+            # Disconnect from data sources with proper error handling
+            data_sources = list(self.data_sources.values())
+            for data_source in data_sources:
                 try:
-                    await exchange.disconnect()
+                    await data_source.disconnect()
                 except Exception as e:
-                    self.logger.warning(f"Error disconnecting exchange: {e}")
+                    self.logger.warning(f"Error disconnecting data source: {e}")
 
             # Clear caches
             self.ticker_cache.clear()
             self.order_book_cache.clear()
             self.trade_cache.clear()
             self.stream_tasks.clear()
-            self.exchanges.clear()
+            self.data_sources.clear()
 
             self.logger.info("MarketDataSource cleanup completed")
 
@@ -525,19 +548,19 @@ class MarketDataSource(BaseComponent):
                         except Exception as e:
                             self.logger.debug(f"Error during task cleanup: {e}")
 
-                # Force disconnect any remaining exchanges
-                for exchange in exchanges:
+                # Force disconnect any remaining data sources
+                for data_source in data_sources:
                     try:
-                        await exchange.disconnect()
+                        await data_source.disconnect()
                     except Exception as e:
-                        self.logger.debug(f"Error disconnecting exchange during cleanup: {e}")
+                        self.logger.debug(f"Error disconnecting data source during cleanup: {e}")
 
                 # Clear all data structures
                 self.ticker_cache.clear()
                 self.order_book_cache.clear()
                 self.trade_cache.clear()
                 self.stream_tasks.clear()
-                self.exchanges.clear()
+                self.data_sources.clear()
                 self.active_streams.clear()
             except Exception as e:
                 self.logger.warning(f"Error in final cleanup: {e}")

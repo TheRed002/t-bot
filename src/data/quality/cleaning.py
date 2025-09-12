@@ -26,7 +26,7 @@ from typing import Any
 from src.core import BaseComponent, Config, MarketData, Signal
 
 # Import from P-002A error handling
-from src.error_handling.error_handler import ErrorHandler
+from src.error_handling import ErrorHandler
 
 # Import from P-007A utilities
 from src.utils.decorators import time_execution
@@ -72,54 +72,33 @@ class DataCleaner(BaseComponent):
     outliers, noise, and data quality issues.
     """
 
-    def __init__(self, config: Config | dict[str, Any], error_handler: ErrorHandler | None = None):
+    def __init__(self, config: Config, error_handler: ErrorHandler | None = None):
         """
         Initialize the data cleaner with configuration.
 
         Args:
-            config: Application configuration
+            config: Application configuration from core
             error_handler: Optional error handler for DI
         """
         super().__init__()  # Initialize BaseComponent
         self.config = config
-        cfg_get = config.get if isinstance(config, dict) else getattr
 
         # Use injected error handler or create fallback
         if error_handler:
             self.error_handler = error_handler
         else:
-            self.error_handler = ErrorHandler(config if not isinstance(config, dict) else Config())
+            self.error_handler = ErrorHandler(config)
 
-        # Cleaning thresholds
-        self.outlier_threshold = (
-            cfg_get("outlier_threshold", 3.0)
-            if isinstance(config, dict)
-            else getattr(config, "outlier_threshold", 3.0)
-        )
-        self.missing_threshold = (
-            cfg_get("missing_threshold", 0.1)
-            if isinstance(config, dict)
-            else getattr(config, "missing_threshold", 0.1)
-        )
-        self.smoothing_window = (
-            cfg_get("smoothing_window", 5)
-            if isinstance(config, dict)
-            else getattr(config, "smoothing_window", 5)
-        )
-        self.duplicate_threshold = (
-            cfg_get("duplicate_threshold", 1.0)
-            if isinstance(config, dict)
-            else getattr(config, "duplicate_threshold", 1.0)
-        )
+        # Cleaning thresholds - use core Config object directly
+        self.outlier_threshold = getattr(config, "outlier_threshold", 3.0)
+        self.missing_threshold = getattr(config, "missing_threshold", 0.1)
+        self.smoothing_window = getattr(config, "smoothing_window", 5)
+        self.duplicate_threshold = getattr(config, "duplicate_threshold", 1.0)
 
         # Data history for cleaning - use Decimal for precision
         self.price_history: dict[str, list[Decimal]] = {}
         self.volume_history: dict[str, list[Decimal]] = {}
-        self.max_history_size = (
-            cfg_get("max_history_size", 1000)
-            if isinstance(config, dict)
-            else getattr(config, "max_history_size", 1000)
-        )
+        self.max_history_size = getattr(config, "max_history_size", 1000)
 
         # Cleaning statistics
         self.cleaning_stats = {

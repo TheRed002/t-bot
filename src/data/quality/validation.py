@@ -18,9 +18,7 @@ from typing import Any
 from src.core import BaseComponent, Config, MarketData, Signal, ValidationLevel
 
 # Import from P-002A error handling
-from src.error_handling.error_handler import ErrorHandler
-from src.error_handling.pattern_analytics import ErrorPatternAnalytics
-from src.error_handling.recovery_scenarios import DataFeedInterruptionRecovery
+from src.error_handling import DataFeedInterruptionRecovery, ErrorHandler, ErrorPatternAnalytics
 
 # Import from P-007A utilities
 from src.utils.decorators import time_execution
@@ -46,29 +44,26 @@ class DataValidator(BaseComponent):
         Initialize the data validator with configuration.
 
         Args:
-            config: Application configuration or config dict
+            config: Application configuration object from core or dict
         """
-
-        # Handle both Config object and dict
         super().__init__()  # Initialize BaseComponent
-        if isinstance(config, dict):
-            # Create a minimal Config object for testing
-            self.config = type("Config", (), config)()
-            for key, value in config.items():
-                setattr(self.config, key, value)
-            # Use the dict for easier access to values
-            config_source = config
-        else:
-            self.config = config
-            config_source = config
+        self.config = config
+        
+        # Helper function to get config values
+        def get_config_value(key, default):
+            if isinstance(config, dict):
+                return config.get(key, default)
+            else:
+                return getattr(config, key, default)
 
-        # Initialize error handling components only if config is a Config object
-        if isinstance(config, Config):
+        # Initialize error handling components using core Config
+        # Only initialize if we have a Config object, not a dict
+        if not isinstance(config, dict):
             self.error_handler = ErrorHandler(config)
             self.recovery_scenario = DataFeedInterruptionRecovery(config)
             self.pattern_analytics = ErrorPatternAnalytics(config)
         else:
-            # For testing with dict config, skip error handling components
+            # Mock objects for testing with dict config
             self.error_handler = None
             self.recovery_scenario = None
             self.pattern_analytics = None
@@ -78,25 +73,25 @@ class DataValidator(BaseComponent):
             enable_precision_validation=True,
             enable_consistency_validation=True,
             enable_timestamp_validation=True,
-            max_decimal_places=config_source.get("decimal_precision", 8) if isinstance(config_source, dict) else getattr(config_source, "decimal_precision", 8),
-            max_future_seconds=config_source.get("max_future_seconds", 300) if isinstance(config_source, dict) else getattr(config_source, "max_future_seconds", 300),
-            max_age_seconds=config_source.get("max_data_age_seconds", 3600) if isinstance(config_source, dict) else getattr(config_source, "max_data_age_seconds", 3600),
+            max_decimal_places=get_config_value("decimal_precision", 8),
+            max_future_seconds=get_config_value("max_future_seconds", 300),
+            max_age_seconds=get_config_value("max_data_age_seconds", 3600),
         )
 
         # Statistical tracking for outlier detection
         self.price_history: dict[str, list[float]] = {}
         self.volume_history: dict[str, list[float]] = {}
-        self.max_history_size = config_source.get("max_history_size", 1000) if isinstance(config_source, dict) else getattr(config_source, "max_history_size", 1000)
-        self.outlier_std_threshold = config_source.get("outlier_std_threshold", 3.0) if isinstance(config_source, dict) else getattr(config_source, "outlier_std_threshold", 3.0)
+        self.max_history_size = get_config_value("max_history_size", 1000)
+        self.outlier_std_threshold = get_config_value("outlier_std_threshold", 3.0)
 
         # Validation thresholds
-        self.price_change_threshold = config_source.get("price_change_threshold", 0.5) if isinstance(config_source, dict) else getattr(config_source, "price_change_threshold", 0.5)
-        self.volume_change_threshold = config_source.get("volume_change_threshold", 10.0) if isinstance(config_source, dict) else getattr(config_source, "volume_change_threshold", 10.0)
-        self.max_data_age_seconds = config_source.get("max_data_age_seconds", 3600) if isinstance(config_source, dict) else getattr(config_source, "max_data_age_seconds", 3600)
+        self.price_change_threshold = get_config_value("price_change_threshold", 0.5)
+        self.volume_change_threshold = get_config_value("volume_change_threshold", 10.0)
+        self.max_data_age_seconds = get_config_value("max_data_age_seconds", 3600)
 
         # Cross-source consistency tracking
         self.source_data: dict[str, dict[str, Any]] = {}
-        self.consistency_threshold = config_source.get("consistency_threshold", 0.01) if isinstance(config_source, dict) else getattr(config_source, "consistency_threshold", 0.01)
+        self.consistency_threshold = get_config_value("consistency_threshold", 0.01)
 
         self.logger.info("DataValidator initialized with consolidated utilities", config=config)
 

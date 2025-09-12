@@ -694,7 +694,7 @@ class StreamingDataService(BaseComponent):
         if not config or handler is None:
             raise DataProcessingError(
                 f"Invalid streaming configuration for {exchange}",
-                error_code="STREAM_CONFIG_001",
+                error_code="DATA_201",
                 processing_step="configuration_validation",
                 data_source=exchange,
                 pipeline_stage="ingestion",
@@ -712,7 +712,7 @@ class StreamingDataService(BaseComponent):
             source_mode="stream", target_mode="batch", data=batch_data
         )
 
-        # Use existing coordinator from processing paradigm alignment
+        # Use consistent pub/sub messaging pattern for streaming data processing
         coordinator = MessagingCoordinator("StreamingDataProcessing")
 
         market_data_list = []
@@ -726,13 +726,21 @@ class StreamingDataService(BaseComponent):
 
                 market_data = await handler(message, exchange)
                 if market_data:
-                    # Apply consistent data transformation from messaging coordinator
+                    # Apply consistent data transformation from messaging coordinator using pub/sub pattern
                     market_data_dict = (
                         market_data.model_dump()
                         if hasattr(market_data, "model_dump")
                         else market_data.__dict__
                     )
                     transformed_data = coordinator._apply_data_transformation(market_data_dict)
+
+                    # Ensure consistent financial data transformation matching utils patterns
+                    if "price" in transformed_data and transformed_data["price"] is not None:
+                        from src.utils.data_utils import normalize_price
+                        if hasattr(market_data, "symbol") and market_data.symbol:
+                            transformed_data["price"] = normalize_price(
+                                transformed_data["price"], market_data.symbol, precision=8
+                            )
 
                     # Recreate MarketData with consistent transformed data
                     market_data = MarketData(**transformed_data)
@@ -748,7 +756,7 @@ class StreamingDataService(BaseComponent):
                 # Use consistent error propagation pattern from pipeline
                 processing_error = DataProcessingError(
                     f"Message processing failed for {exchange}",
-                    error_code="STREAM_PROCESSING_001",
+                    error_code="DATA_202",
                     processing_step="streaming_message_conversion",
                     input_data_sample={
                         "exchange": exchange,
@@ -794,7 +802,7 @@ class StreamingDataService(BaseComponent):
             except Exception as e:
                 raise DataValidationError(
                     f"Streaming data validation failed for {exchange}",
-                    error_code="STREAM_VALIDATION_001",
+                    error_code="DATA_203",
                     validation_rule="market_data_batch_validation",
                     invalid_fields=["batch_validation"],
                     data_source=exchange,
@@ -811,7 +819,7 @@ class StreamingDataService(BaseComponent):
             try:
                 # Use consistent storage interface with pipeline
                 success = await self.data_service.store_market_data(
-                    market_data_list,
+                    data=market_data_list,
                     exchange=exchange,
                     validate=False,  # Already validated at boundary
                 )
@@ -819,7 +827,7 @@ class StreamingDataService(BaseComponent):
                 if not success:
                     raise DataError(
                         f"Data storage operation failed for {exchange}",
-                        error_code="STREAM_STORAGE_001",
+                        error_code="DATA_204",
                         data_type="market_data_batch",
                         data_source=exchange,
                         context={"batch_size": len(market_data_list)},
@@ -831,7 +839,7 @@ class StreamingDataService(BaseComponent):
                     # Wrap generic errors in consistent format
                     raise DataError(
                         f"Streaming storage error for {exchange}",
-                        error_code="STREAM_STORAGE_002",
+                        error_code="DATA_205",
                         data_type="market_data_batch",
                         data_source=exchange,
                         context={"original_error": str(e)},

@@ -13,6 +13,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
+from src.core.exceptions import ValidationError
 from src.data.constants import (
     MAX_CACHE_TTL_SECONDS,
     MAX_DATA_LIMIT,
@@ -80,7 +81,7 @@ class DataRequest(BaseModel):
     def validate_time_range(cls, v: datetime | None, info: Any) -> datetime | None:
         if v and hasattr(info, "data") and "start_time" in info.data and info.data["start_time"]:
             if v <= info.data["start_time"]:
-                raise ValueError("end_time must be after start_time")
+                raise ValidationError("end_time must be after start_time", field_name="end_time")
         return v
 
 

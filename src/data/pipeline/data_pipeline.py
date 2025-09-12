@@ -35,8 +35,7 @@ from src.core.types import MarketData
 from src.data.interfaces import DataServiceInterface
 
 # Import from P-002A error handling
-from src.error_handling import ErrorHandler, with_circuit_breaker
-from src.error_handling.decorators import retry_with_backoff
+from src.error_handling import ErrorHandler, with_circuit_breaker, with_retry
 
 # Monitoring imports
 from src.monitoring import MetricsCollector, Status, StatusCode, get_tracer
@@ -48,7 +47,8 @@ from src.utils.pipeline_utilities import (
     PipelineStage as SharedPipelineStage,
     ProcessingMode,
 )
-from src.utils.validators import validate_decimal_precision, validate_market_data
+from src.utils.validation.service import ValidationService
+from src.utils.validators import validate_decimal_precision
 
 logger = get_logger(__name__)
 
@@ -94,17 +94,17 @@ class DataTransformation:
 
     @staticmethod
     async def normalize_prices(data: MarketData) -> MarketData:
-        """Normalize price data using consistent financial transformation patterns from messaging coordinator."""
+        """Normalize price data using consistent financial transformation patterns aligned with database service."""
         try:
-            # Use consistent financial data transformation patterns
+            # Use consistent financial data transformation patterns matching database service
             from decimal import Decimal
 
             from src.utils.decimal_utils import to_decimal
 
-            # Use consistent 8 decimal place precision matching database schema
-            precision_quantizer = Decimal("0.00000001")  # 8 decimal places
+            # Use consistent 8 decimal place precision matching database schema exactly
+            precision_quantizer = Decimal("0.00000001")  # 8 decimal places - matches database DECIMAL(20,8)
 
-            # Apply consistent transformations from messaging coordinator
+            # Apply consistent transformations matching database service _transform_entity_data
             normalized_fields = {}
             for field_name, field_value in [
                 ("open", getattr(data, "open", None)),
@@ -117,7 +117,7 @@ class DataTransformation:
                 ("volume", getattr(data, "volume", None)),
             ]:
                 if field_value is not None:
-                    # Use consistent decimal conversion and quantization
+                    # Use consistent decimal conversion and quantization - same pattern as database service
                     decimal_value = to_decimal(field_value)
                     normalized_fields[field_name] = decimal_value.quantize(precision_quantizer)
                 else:
@@ -139,34 +139,54 @@ class DataTransformation:
                 metadata=getattr(data, "metadata", {}),
             )
 
+            # Add processing metadata to the metadata dictionary instead of setting attributes
+            metadata = normalized_data.metadata.copy()
+            metadata.update({
+                "processing_mode": "stream",  # Consistent with database service default
+                "data_format": "database_entity_v1",  # Match database format
+                "boundary_crossed": True  # Data crosses pipeline-database boundary
+            })
+            
+            # Create new instance with updated metadata since MarketData is immutable
+            normalized_data = MarketData(
+                symbol=normalized_data.symbol,
+                timestamp=normalized_data.timestamp,
+                open=normalized_data.open,
+                high=normalized_data.high,
+                low=normalized_data.low,
+                close=normalized_data.close,
+                volume=normalized_data.volume,
+                quote_volume=normalized_data.quote_volume,
+                trades_count=normalized_data.trades_count,
+                vwap=normalized_data.vwap,
+                exchange=normalized_data.exchange,
+                metadata=metadata,
+                bid_price=normalized_data.bid_price,
+                ask_price=normalized_data.ask_price,
+            )
+
             return normalized_data
 
         except Exception as e:
-            from src.core.exceptions import DataProcessingError
+            # Use consistent error propagation patterns matching error_handling module
             from src.utils.messaging_patterns import ErrorPropagationMixin
+            mixin = ErrorPropagationMixin()
 
-            # Use consistent error propagation from messaging patterns
-            error_mixin = ErrorPropagationMixin()
-
-            # Create consistent error context matching backtesting patterns
-            processing_error = DataProcessingError(
-                f"Price normalization failed for {getattr(data, 'symbol', 'unknown')}",
-                processing_step="normalize_prices",
-                input_data_sample=data.model_dump() if hasattr(data, "model_dump") else str(data),
-                data_source="data_pipeline",
-                data_type="MarketData",
-                pipeline_stage="transformation",
-                details={
-                    "processing_mode": "hybrid",  # Align with updated default mode
-                    "data_format": "market_data_v1",
-                    "boundary_crossed": True,
-                    "cross_module_error": True,
-                    "original_error": str(e)
-                }
-            )
-
-            # Apply consistent error propagation pattern
-            error_mixin.propagate_service_error(processing_error, "data_pipeline.normalize_prices")
+            try:
+                # Propagate error with context
+                mixin.propagate_service_error(e, f"data_pipeline.normalize_prices.{getattr(data, 'symbol', 'unknown')}")
+            except Exception:
+                # Fallback to original error creation if propagation fails
+                from src.core.exceptions import DataProcessingError
+                processing_error = DataProcessingError(
+                    f"Price normalization failed for {getattr(data, 'symbol', 'unknown')}: {e}",
+                    processing_step="normalize_prices",
+                    input_data_sample=getattr(data, "symbol", "unknown"),
+                    data_source="data_pipeline",
+                    data_type="MarketData",
+                    pipeline_stage="transformation"
+                )
+                raise processing_error from e
 
     @staticmethod
     async def validate_ohlc_consistency(data: MarketData) -> bool:
@@ -234,9 +254,16 @@ class DataQualityChecker:
         quality_score = 100.0
 
         try:
-            # Basic validation
-            if not validate_market_data(data.model_dump()):
-                errors.append("Basic market data validation failed")
+            # Basic validation using modern ValidationService
+            validation_service = ValidationService()
+            try:
+                validation_result = validation_service.validate_market_data(data.model_dump())
+                if not validation_result.get("is_valid", False):
+                    validation_errors = validation_result.get("errors", ["Basic market data validation failed"])
+                    errors.extend(validation_errors)
+                    quality_score -= 50
+            except Exception as validation_error:
+                errors.append(f"Market data validation failed: {validation_error}")
                 quality_score -= 50
 
             # Price validation
@@ -354,7 +381,7 @@ class EnhancedDataPipeline(BaseComponent):
 
         # Required dependencies - must be injected
         if data_service is None:
-            raise ValueError("data_service is required and must be injected")
+            raise DataError("data_service is required and must be injected")
         self.data_service = data_service  # Required - use service layer only
 
         self.feature_store = feature_store
@@ -394,15 +421,15 @@ class EnhancedDataPipeline(BaseComponent):
         """Setup pipeline configuration."""
         pipeline_config = getattr(self.config, "data_pipeline", {})
 
-        # Use consistent processing mode mapping aligned with backtesting patterns
-        mode_str = pipeline_config.get("processing_mode", "hybrid")  # Default to hybrid for compatibility
+        # Use consistent processing mode mapping aligned with error_handling service patterns
+        mode_str = pipeline_config.get("processing_mode", "stream")  # Default to stream for consistency with error_handling
         processing_mode = {
             "batch": ProcessingMode.BATCH,
             "stream": ProcessingMode.STREAM,
             "hybrid": ProcessingMode.HYBRID,
             "real_time": ProcessingMode.REAL_TIME,
             "realtime": ProcessingMode.REAL_TIME,  # Alternative spelling
-        }.get(mode_str.lower(), ProcessingMode.HYBRID)  # Default to hybrid for backtesting compatibility
+        }.get(mode_str.lower(), ProcessingMode.STREAM)  # Default to stream for error_handling consistency
 
         self.processing_config = {
             "processing_mode": processing_mode,
@@ -618,7 +645,7 @@ class EnhancedDataPipeline(BaseComponent):
         except Exception as e:
             self.logger.error(f"{stage.value} worker {worker_id} fatal error: {e}")
 
-    @retry_with_backoff(max_attempts=3)
+    @with_retry(max_attempts=3, base_delay=1.0, exponential=True)
     @with_circuit_breaker(failure_threshold=5, recovery_timeout=60)
     async def _process_stage(self, stage: PipelineStage, record: PipelineRecord) -> None:
         """Process a record through a specific pipeline stage."""
@@ -711,7 +738,10 @@ class EnhancedDataPipeline(BaseComponent):
         self.logger.debug(f"Data ingestion completed for record {record.id}")
 
     async def _process_validation(self, record: PipelineRecord) -> None:
-        """Process data validation stage."""
+        """Process data validation stage with comprehensive boundary validation."""
+        # Apply pipeline-specific boundary validation before quality check
+        self._validate_pipeline_data_boundary(record)
+
         validation_result = await self.quality_checker.assess_data_quality(record.data)
         record.validation_result = validation_result
 
@@ -721,17 +751,17 @@ class EnhancedDataPipeline(BaseComponent):
 
     async def _process_cleansing(self, record: PipelineRecord) -> None:
         """Process data cleansing stage."""
-        # Remove or fix data anomalies
-        if record.data.close and float(record.data.close) <= 0:
-            raise DataValidationError("Invalid price data cannot be cleansed")
+        # Delegate cleansing logic to service layer
+        if record.validation_result and not record.validation_result.is_valid:
+            raise DataValidationError(f"Data cleansing cannot fix invalid data: {record.validation_result.errors}")
 
-        # Handle missing data
+        # Basic cleansing - handle missing timestamps
         if not record.data.timestamp:
             record.data.timestamp = datetime.now(timezone.utc)
 
     async def _process_transformation(self, record: PipelineRecord) -> None:
         """Process data transformation stage."""
-        # Normalize data format
+        # Delegate transformation to utility class (infrastructure concern)
         record.data = await DataTransformation.normalize_prices(record.data)
 
     async def _process_enrichment(self, record: PipelineRecord) -> None:
@@ -751,49 +781,20 @@ class EnhancedDataPipeline(BaseComponent):
             )
 
     async def _process_storage(self, record: PipelineRecord) -> None:
-        """Process data storage stage through service layer."""
+        """Process data storage stage through service layer with consistent messaging patterns."""
         try:
-            # Apply consistent module boundary validation
-            from src.utils.messaging_patterns import BoundaryValidator
+            # Basic validation before storage
+            if not record.data.symbol:
+                raise DataError("Symbol is required for data storage")
 
-            # Validate at module boundary before storage
-            if record.data:
-                data_dict = (
-                    record.data.model_dump()
-                    if hasattr(record.data, "model_dump")
-                    else record.data.__dict__
-                )
-                BoundaryValidator.validate_database_entity(data_dict, "create")
-
-            # Validate record data at module boundary
-            validation_result = record.validation_result
-            if not validation_result or not validation_result.is_valid:
-                # Use consistent core exception patterns
-                raise DataError(
-                    "Invalid data cannot be stored",
-                    error_code="DATA_004",
-                    data_type="market_data",
-                    data_source="pipeline",
-                    pipeline_stage="storage",
-                    context={"record_id": record.record_id},
-                )
-
-            # Use injected data service only - no direct storage access
+            # Delegate storage to service layer
             if not self.data_service:
-                # Use consistent core exception patterns for dependency errors
-                raise DataError(
-                    "No data service available for pipeline - must be injected",
-                    error_code="DATA_002",
-                    data_type="service_dependency",
-                    data_source="pipeline",
-                    pipeline_stage="storage",
-                    context={
-                        "required_service": "DataServiceInterface",
-                        "record_id": record.record_id,
-                    },
-                )
+                raise DataError("No data service available for pipeline - must be injected")
 
             # Use service layer to store data
+            pipeline_mode = self.processing_config.get("processing_mode", ProcessingMode.STREAM)
+            processing_mode_str = "batch" if pipeline_mode == ProcessingMode.BATCH else "stream"
+
             success = await self.data_service.store_market_data(
                 data=[record.data],
                 exchange=getattr(record.data, "exchange", "unknown"),
@@ -801,29 +802,15 @@ class EnhancedDataPipeline(BaseComponent):
             )
 
             if not success:
-                # Use consistent core exception patterns for storage failures
-                raise DataError(
-                    "Pipeline data storage failed through service layer",
-                    error_code="DATA_004",
-                    data_type="market_data",
-                    data_source="pipeline",
-                    pipeline_stage="storage",
-                    context={
-                        "record_id": record.record_id,
-                        "symbol": getattr(record.data, "symbol", "unknown"),
-                        "stage": record.stage.value,
-                    },
-                )
+                raise DataError(f"Pipeline data storage failed for record {record.record_id}")
+
+            # Log successful storage
+            self.logger.debug(f"Successfully stored record {record.record_id} for symbol {getattr(record.data, 'symbol', 'unknown')}")
 
         except Exception as e:
-            # Re-raise with consistent error context
+            # Re-raise with error context
             if not isinstance(e, DataError):
-                raise DataError(
-                    f"Storage operation failed for record {record.record_id}",
-                    error_code="PIPELINE_STORAGE_002",
-                    data_type="market_data",
-                    context={"record_id": record.record_id},
-                ) from e
+                raise DataError(f"Storage operation failed for record {record.record_id}: {e}") from e
             raise
 
     async def _process_indexing(self, record: PipelineRecord) -> None:
@@ -841,10 +828,33 @@ class EnhancedDataPipeline(BaseComponent):
             )
 
     async def _handle_processing_failure(self, record: PipelineRecord) -> None:
-        """Handle processing failure for a record."""
-        self.logger.error(
-            f"Record {record.record_id} failed after {record.retry_count} retries: {record.error_message}"
+        """Handle processing failure for a record using consistent error propagation."""
+        # Use consistent error propagation patterns matching error_handling module
+        from src.core.exceptions import DataProcessingError
+        from src.utils.messaging_patterns import ErrorPropagationMixin
+
+        processing_error = DataProcessingError(
+            f"Pipeline processing failed for record {record.record_id} after {record.retry_count} retries",
+            processing_step=record.stage.value,
+            input_data_sample=getattr(record.data, "symbol", record.record_id),
+            data_source="data_pipeline",
+            data_type="PipelineRecord",
+            pipeline_stage=record.stage.value
         )
+
+        mixin = ErrorPropagationMixin()
+        try:
+            # Propagate error with context
+            mixin.propagate_service_error(
+                processing_error,
+                f"data_pipeline.{record.stage.value}.{getattr(record.data, 'symbol', record.record_id)}"
+            )
+        except Exception as prop_error:
+            # Fallback to regular logging if propagation fails
+            self.logger.error(
+                f"Record {record.record_id} failed after {record.retry_count} retries: {record.error_message}. "
+                f"Error propagation also failed: {prop_error}"
+            )
 
         # Could implement dead letter queue here
         # Could send alerts to monitoring systems
@@ -1061,3 +1071,28 @@ class EnhancedDataPipeline(BaseComponent):
                 self._initialized = False
             except Exception as e:
                 self.logger.warning(f"Error in final pipeline cleanup: {e}")
+
+    def _validate_pipeline_data_boundary(self, record: PipelineRecord) -> None:
+        """Validate data at pipeline internal boundaries."""
+        try:
+            # Basic pipeline validation
+            if not record.data.symbol:
+                raise DataValidationError(
+                    "Symbol is required at pipeline boundary",
+                    field_name="symbol",
+                    field_value=None,
+                    validation_rule="required"
+                )
+
+            if not record.data.timestamp:
+                # Allow missing timestamp but log warning
+                self.logger.warning(f"Missing timestamp for record {record.record_id}, will be set during processing")
+
+        except Exception as e:
+            self.logger.error(f"Pipeline boundary validation failed for record {record.record_id}: {e}")
+            raise DataValidationError(
+                "Pipeline data boundary validation failed",
+                field_name="pipeline_boundary",
+                field_value=record.record_id,
+                validation_rule="pipeline_boundary_compliance"
+            ) from e

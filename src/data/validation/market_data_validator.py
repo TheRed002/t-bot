@@ -57,9 +57,7 @@ class MarketDataValidator(BaseComponent, DataValidatorInterface, ServiceDataVali
         try:
             if isinstance(data, dict):
                 # Convert dict to MarketData for validation
-                from src.core.types import MarketData as MD
-
-                market_data = MD(**data)
+                market_data = MarketData(**data)
                 return self._validator.validate_market_data_record(market_data)
             elif isinstance(data, MarketData):
                 return self._validator.validate_market_data_record(data)

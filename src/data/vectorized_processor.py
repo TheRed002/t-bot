@@ -36,7 +36,8 @@ from numba import float64, jit, prange, vectorize
 from src.core.config import Config
 from src.core.exceptions import DataProcessingError
 from src.core.logging import get_logger
-from src.error_handling.decorators import FallbackConfig, FallbackStrategy, enhanced_error_handler
+from src.error_handling import FallbackStrategy, with_fallback
+from src.utils.decimal_utils import to_decimal
 from src.utils.technical_indicators import (
     calculate_bollinger_bands_vectorized,
     calculate_ema_vectorized,
@@ -115,9 +116,7 @@ class HighPerformanceDataBuffer:
                 # Failed to setup memory map, fallback to regular buffer
                 self.use_mmap = False
 
-    @enhanced_error_handler(
-        fallback_config=FallbackConfig(strategy=FallbackStrategy.RETURN_NONE), enable_logging=True
-    )
+    @with_fallback(strategy=FallbackStrategy.RETURN_NONE)
     def _setup_memory_map(self) -> None:
         """Setup memory-mapped buffer for large datasets."""
         # Create memory-mapped array with secure filename
@@ -137,7 +136,7 @@ class HighPerformanceDataBuffer:
     def append_batch(self, data: np.ndarray) -> None:
         """Append batch of data for better performance."""
         if data.shape[1] != self.num_fields:
-            raise ValueError(f"Data must have {self.num_fields} columns")
+            raise DataProcessingError(f"Data must have {self.num_fields} columns")
 
         # Thread-safe operation
         with self._lock:
@@ -339,11 +338,11 @@ class VectorizedProcessor:
             # but maintaining Decimal precision in the conversion process
             data_array[i] = [
                 record.get("timestamp", time.time()),
-                float(Decimal(str(record.get("open", 0))).quantize(Decimal("0.00000001"))),
-                float(Decimal(str(record.get("high", 0))).quantize(Decimal("0.00000001"))),
-                float(Decimal(str(record.get("low", 0))).quantize(Decimal("0.00000001"))),
-                float(Decimal(str(record.get("close", 0))).quantize(Decimal("0.00000001"))),
-                float(Decimal(str(record.get("volume", 0))).quantize(Decimal("0.00000001"))),
+                float(to_decimal(record.get("open", 0))),
+                float(to_decimal(record.get("high", 0))),
+                float(to_decimal(record.get("low", 0))),
+                float(to_decimal(record.get("close", 0))),
+                float(to_decimal(record.get("volume", 0))),
             ]
 
         return data_array
@@ -428,26 +427,18 @@ class VectorizedProcessor:
             # Calculate fast indicators with high precision
             getcontext().prec = 28
             indicators = {
-                "ema_12": Decimal(str(calculate_ema_vectorized(all_prices, 12)[-1])).quantize(
-                    Decimal("0.00000001")
-                ),
-                "ema_26": Decimal(str(calculate_ema_vectorized(all_prices, 26)[-1])).quantize(
-                    Decimal("0.00000001")
-                ),
-                "rsi": Decimal(str(calculate_rsi_vectorized(all_prices)[-1])).quantize(
-                    Decimal("0.0001")
-                ),
+                "ema_12": to_decimal(calculate_ema_vectorized(all_prices, 12)[-1]),
+                "ema_26": to_decimal(calculate_ema_vectorized(all_prices, 26)[-1]),
+                "rsi": to_decimal(calculate_rsi_vectorized(all_prices)[-1]),
             }
 
             # Calculate MACD
             macd_line, macd_signal, macd_histogram = calculate_macd_vectorized(all_prices)
             indicators.update(
                 {
-                    "macd_line": Decimal(str(macd_line[-1])).quantize(Decimal("0.00000001")),
-                    "macd_signal": Decimal(str(macd_signal[-1])).quantize(Decimal("0.00000001")),
-                    "macd_histogram": Decimal(str(macd_histogram[-1])).quantize(
-                        Decimal("0.00000001")
-                    ),
+                    "macd_line": to_decimal(macd_line[-1]),
+                    "macd_signal": to_decimal(macd_signal[-1]),
+                    "macd_histogram": to_decimal(macd_histogram[-1]),
                 }
             )
 

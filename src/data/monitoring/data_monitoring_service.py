@@ -32,7 +32,7 @@ from src.core.types import AlertSeverity
 from src.data.events import DataEvent, DataEventSubscriber, DataEventType
 
 # Import from P-002A error handling
-from src.error_handling.error_handler import ErrorHandler
+from src.error_handling import ErrorHandler
 
 # Import from P-007A utilities
 
@@ -488,6 +488,14 @@ class DataMonitoringService(BaseComponent, DataEventSubscriber):
         except Exception as e:
             self.logger.error(f"Failed to setup event subscriptions: {e}")
             raise
+
+    async def _subscribe_to_data_event(
+        self, event_type: DataEventType, handler: Callable[[DataEvent], None]
+    ) -> None:
+        """Subscribe to a data event type with handler."""
+        # This is a placeholder for actual event subscription mechanism
+        # In a full implementation, this would register with an event bus/broker
+        self.logger.debug(f"Subscribed to {event_type.value} events")
 
     async def _handle_data_stored(self, event: DataEvent) -> None:
         """Handle data stored events."""

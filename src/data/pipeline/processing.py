@@ -142,7 +142,7 @@ class DataProcessor(BaseComponent):
         self, data: MarketData, steps: list[ProcessingStep] | None = None
     ) -> ProcessingResult:
         """
-        Process market data through the configured pipeline.
+        Process market data through the configured pipeline with module boundary validation.
 
         Args:
             data: Market data to process
@@ -156,6 +156,14 @@ class DataProcessor(BaseComponent):
         processed_data = data
 
         try:
+            # Module boundary validation before processing
+            from src.utils.messaging_patterns import BoundaryValidator
+
+            # Validate input data at module boundary
+            if data:
+                data_dict = data.model_dump() if hasattr(data, "model_dump") else data.__dict__
+                BoundaryValidator.validate_database_entity(data_dict, "create")
+
             processing_steps = steps or self.processing_config.steps
 
             for step in processing_steps:
@@ -321,31 +329,32 @@ class DataProcessor(BaseComponent):
             return data
 
     def _normalize_price(self, price: Decimal) -> Decimal:
-        """Normalize price values with consistent precision matching database schema."""
+        """Normalize price values with consistent precision matching database schema and utils patterns."""
         if not price:
             return price
 
-        # Use consistent data transformation pattern from utils
+        # Use consistent data transformation pattern from utils matching data_utils.normalize_price
         try:
+            from src.utils.data_utils import normalize_price
+            # Use symbol context for proper precision (assuming BTC for default crypto precision)
+            return normalize_price(price, "BTCUSDT", precision=8)
+        except ImportError:
+            # Fallback using consistent utils decimal pattern
             normalized = to_decimal(price)
-            # Use consistent 8 decimal places precision matching DECIMAL(20,8) in database
             return normalized.quantize(Decimal("0.00000001"))
-        except (ImportError, Exception):
-            # Fallback to direct conversion if utility not available
-            return Decimal(str(price)).quantize(Decimal("0.00000001"))
 
     def _normalize_volume(self, volume: Decimal) -> Decimal:
-        """Normalize volume values with consistent precision matching database schema."""
+        """Normalize volume values with consistent precision matching database schema and utils patterns."""
         if not volume:
             return volume
 
         # Use consistent data transformation pattern from utils
         try:
+            # Volume uses same 8-decimal precision as prices for crypto
             normalized = to_decimal(volume)
-            # Use consistent 8 decimal places precision matching DECIMAL(20,8) in database
             return normalized.quantize(Decimal("0.00000001"))
-        except (ImportError, Exception):
-            # Fallback to direct conversion if utility not available
+        except Exception:
+            # Fallback to direct conversion maintaining precision
             return Decimal(str(volume)).quantize(Decimal("0.00000001"))
 
     def _normalize_timestamp(self, timestamp: datetime) -> datetime:
@@ -395,7 +404,10 @@ class DataProcessor(BaseComponent):
                     if window:
                         last_price = window[-1].price if hasattr(window[-1], "price") else None
                         if last_price and data.price:
-                            price_change = calculate_percentage_change(last_price, data.price)
+                            # Ensure both values are properly converted to Decimal
+                            last_price_decimal = to_decimal(last_price)
+                            current_price_decimal = to_decimal(data.price)
+                            price_change = calculate_percentage_change(last_price_decimal, current_price_decimal)
 
                             if not hasattr(enriched_data, "metadata"):
                                 enriched_data.metadata = {}
@@ -537,7 +549,7 @@ class DataProcessor(BaseComponent):
                         error_propagator.propagate_validation_error(
                             DataValidationError(
                                 f"Market data validation failed: {'; '.join(validation_errors)}",
-                                error_code="PROCESSING_VALIDATION_001",
+                                error_code="DATA_206",
                                 validation_rule="market_data_processing_validation",
                                 invalid_fields=validation_errors,
                                 data_type="market_data",
@@ -549,7 +561,7 @@ class DataProcessor(BaseComponent):
                         # Fallback to direct raise if pattern not available
                         raise DataValidationError(
                             f"Market data validation failed: {'; '.join(validation_errors)}",
-                            error_code="PROCESSING_VALIDATION_001",
+                            error_code="DATA_206",
                             validation_rule="market_data_processing_validation",
                             invalid_fields=validation_errors,
                             data_type="market_data",
@@ -567,7 +579,7 @@ class DataProcessor(BaseComponent):
             self.logger.error(f"Data validation failed: {e!s}")
             raise DataValidationError(
                 "Validation process failed",
-                error_code="PROCESSING_VALIDATION_002",
+                error_code="DATA_207",
                 validation_rule="validation_system_error",
                 data_type=data_type,
                 context={"error": str(e)},
