@@ -5,6 +5,8 @@ This module provides service layer abstractions for state management,
 separating business logic from components and infrastructure concerns.
 """
 
+# Import shared types to avoid circular dependencies
+from ..types import PostTradeAnalysis, PreTradeValidation, ValidationCheck, ValidationResult
 from .quality_service import (
     QualityService,
     QualityServiceProtocol,
@@ -31,6 +33,7 @@ from .trade_lifecycle_service import (
 )
 
 __all__ = [
+    # Services
     "QualityService",
     "QualityServiceProtocol",
     "StateBusinessService",
@@ -43,4 +46,9 @@ __all__ = [
     "StateValidationServiceProtocol",
     "TradeLifecycleService",
     "TradeLifecycleServiceProtocol",
+    # Types
+    "PostTradeAnalysis",
+    "PreTradeValidation",
+    "ValidationCheck",
+    "ValidationResult",
 ]

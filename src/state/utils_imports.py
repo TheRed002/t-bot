@@ -7,12 +7,13 @@ utils features are unavailable.
 """
 
 import functools
-import logging
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-logger = logging.getLogger(__name__)
+from src.core.logging import get_logger
+
+logger = get_logger(__name__)
 
 
 # Try to import time_execution decorator with fallback
@@ -86,14 +87,29 @@ except ImportError as e:
     DEFAULT_TRADE_STALENESS_THRESHOLD = 3600  # 1 hour
 
 
+# Try to import validation utilities
+try:
+    from src.utils.validation_utilities import AuditEventType
+except ImportError as e:
+    logger.warning(f"Failed to import validation utilities: {e}")
+    # Provide fallback enum
+    from enum import Enum
+
+    class AuditEventType(Enum):
+        STATE_UPDATED = "state_updated"
+        STATE_CREATED = "state_created"
+        STATE_DELETED = "state_deleted"
+
+
 # Export all imported utilities
 __all__ = [
     "CHECKPOINT_FILE_EXTENSION",
     "DEFAULT_CACHE_TTL",
+    "DEFAULT_CLEANUP_INTERVAL",
     "DEFAULT_COMPRESSION_THRESHOLD",
     "DEFAULT_MAX_CHECKPOINTS",
-    "DEFAULT_CLEANUP_INTERVAL",
     "DEFAULT_TRADE_STALENESS_THRESHOLD",
+    "AuditEventType",
     "ValidationService",
     "ensure_directory_exists",
     "logger",

@@ -12,7 +12,7 @@ from src.core.base.service import BaseService
 from src.core.types import ExecutionResult, MarketData, OrderRequest
 
 if TYPE_CHECKING:
-    from ..quality_controller import PostTradeAnalysis, PreTradeValidation
+    from ..types import PostTradeAnalysis, PreTradeValidation
 
 
 class QualityServiceProtocol(Protocol):
@@ -96,7 +96,7 @@ class QualityService(BaseService):
         Returns:
             Validation results
         """
-        from ..quality_controller import PreTradeValidation, ValidationResult
+        from ..types import PreTradeValidation, ValidationResult
 
         validation = PreTradeValidation(order_request=order_request)
         validation.overall_result = ValidationResult.PASSED
@@ -128,7 +128,7 @@ class QualityService(BaseService):
         Returns:
             Post-trade analysis results
         """
-        from ..quality_controller import PostTradeAnalysis
+        from ..types import PostTradeAnalysis
 
         analysis = PostTradeAnalysis(trade_id=trade_id, execution_result=execution_result)
         analysis.execution_quality_score = Decimal("100.0")

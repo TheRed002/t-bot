@@ -14,9 +14,10 @@ import asyncio
 # Import types from service layer, not from state_service directly
 from typing import TYPE_CHECKING, Any
 
-from src.core.base.component import BaseComponent
+from src.core.base.service import BaseService
 from src.core.config.main import Config
 from src.core.exceptions import ServiceError, StateConsistencyError, ValidationError
+from src.utils.messaging_patterns import ErrorPropagationMixin
 
 from .services import (
     StateBusinessServiceProtocol,
@@ -26,10 +27,10 @@ from .services import (
 )
 
 if TYPE_CHECKING:
-    from .state_service import StateChange, StateMetadata, StatePriority, StateType
+    from .state_service import StateChange, StatePriority, StateType
 
 
-class StateController(BaseComponent):
+class StateController(BaseService, ErrorPropagationMixin):
     """
     State controller that coordinates state management operations.
 
@@ -58,23 +59,15 @@ class StateController(BaseComponent):
             validation_service: Service for validation operations
             synchronization_service: Service for synchronization operations
         """
-        super().__init__(
-            name="StateController", config=config.__dict__ if hasattr(config, "__dict__") else {}
-        )
+        # Convert Config to dict for BaseService
+        config_dict = self._extract_config_dict(config)
+        super().__init__(name="StateController", config=config_dict)
 
         # Service layer dependencies - use dependency injection if not provided
-        self._business_service = business_service or self._resolve_service(
-            "StateBusinessService"
-        )
-        self._persistence_service = persistence_service or self._resolve_service(
-            "StatePersistenceService"
-        )
-        self._validation_service = validation_service or self._resolve_service(
-            "StateValidationService"
-        )
-        self._synchronization_service = synchronization_service or self._resolve_service(
-            "StateSynchronizationService"
-        )
+        self._business_service = business_service or self._resolve_service("StateBusinessService")
+        self._persistence_service = persistence_service or self._resolve_service("StatePersistenceService")
+        self._validation_service = validation_service or self._resolve_service("StateValidationService")
+        self._synchronization_service = synchronization_service or self._resolve_service("StateSynchronizationService")
 
         # Controller state (not business state)
         self._transaction_locks: dict[str, asyncio.Lock] = {}
@@ -82,15 +75,15 @@ class StateController(BaseComponent):
 
         self.logger.info("StateController initialized")
 
-    def _resolve_service(self, service_name: str, factory_func):
-        """Resolve service from DI container or create using factory."""
+    def _resolve_service(self, service_name: str, factory_func=None):
+        """Resolve service from DI container or return None if not available."""
         try:
             from src.core.dependency_injection import get_container
             container = get_container()
             return container.get(service_name)
         except Exception:
-            # Fallback to factory creation
-            return factory_func()
+            # Return None if service not available (services are optional)
+            return None
 
     async def get_state(
         self, state_type: "StateType", state_id: str, include_metadata: bool = False
@@ -110,13 +103,18 @@ class StateController(BaseComponent):
             ServiceError: If service operations fail
         """
         try:
+            # Check if persistence service is available
+            if not self._persistence_service:
+                self.logger.warning("Persistence service not available")
+                return None
+
             # Delegate to persistence service
             state_data = await self._persistence_service.load_state(state_type, state_id)
 
             if not state_data:
                 return None
 
-            if include_metadata:
+            if include_metadata and self._business_service:
                 # Get metadata through business service
                 metadata = await self._business_service.calculate_state_metadata(
                     state_type, state_id, state_data, "StateController"
@@ -172,26 +170,29 @@ class StateController(BaseComponent):
                 current_state = await self.get_state(state_type, state_id)
 
                 # Coordinate validation through service layer
-                if validate:
+                if validate and self._validation_service:
                     await self._coordinate_validation(
                         state_type, state_id, current_state, state_data, priority.value
                     )
 
                 # Process state update through business service
-                state_change = await self._business_service.process_state_update(
-                    state_type, state_id, state_data, source_component, reason
-                )
-
-                # Calculate metadata through business service
-                metadata = await self._business_service.calculate_state_metadata(
-                    state_type, state_id, state_data, source_component
-                )
+                state_change = None
+                metadata = None
+                if self._business_service:
+                    state_change = await self._business_service.process_state_update(
+                        state_type, state_id, state_data, source_component, reason
+                    )
+                    metadata = await self._business_service.calculate_state_metadata(
+                        state_type, state_id, state_data, source_component
+                    )
 
                 # Coordinate persistence through service layer
-                await self._coordinate_persistence(state_type, state_id, state_data, metadata)
+                if self._persistence_service and metadata:
+                    await self._coordinate_persistence(state_type, state_id, state_data, metadata)
 
                 # Coordinate synchronization through service layer
-                await self._coordinate_synchronization(state_change)
+                if self._synchronization_service and state_change:
+                    await self._coordinate_synchronization(state_change)
 
                 self.logger.info(
                     f"State updated successfully: {transaction_key}",
@@ -287,6 +288,10 @@ class StateController(BaseComponent):
         priority: str,
     ) -> None:
         """Coordinate validation through validation service."""
+        if not self._validation_service:
+            self.logger.warning("Validation service not available, skipping validation")
+            return
+
         # Validate state data
         validation_result = await self._validation_service.validate_state_data(
             state_type, new_state
@@ -302,21 +307,25 @@ class StateController(BaseComponent):
             if not transition_valid:
                 raise ValidationError("Invalid state transition")
 
-        # Validate business rules through business service
-        business_violations = await self._business_service.validate_business_rules(
-            state_type, new_state, "update"
-        )
-        if business_violations:
-            raise ValidationError(f"Business rule violations: {business_violations}")
+        # Delegate business rule validation to validation service
+        if self._validation_service and hasattr(self._validation_service, "validate_business_rules"):
+            business_violations = await self._validation_service.validate_business_rules(
+                state_type, new_state, "update"
+            )
+            if business_violations:
+                raise ValidationError(f"Business rule violations: {business_violations}")
 
     async def _coordinate_persistence(
         self,
         state_type: "StateType",
         state_id: str,
         state_data: dict[str, Any],
-        metadata: "StateMetadata",
+        metadata: Any,
     ) -> None:
         """Coordinate persistence through persistence service."""
+        if not self._persistence_service:
+            raise StateConsistencyError("Persistence service not available")
+
         success = await self._persistence_service.save_state(
             state_type, state_id, state_data, metadata
         )
@@ -325,6 +334,10 @@ class StateController(BaseComponent):
 
     async def _coordinate_synchronization(self, state_change: "StateChange") -> None:
         """Coordinate synchronization through synchronization service."""
+        if not self._synchronization_service:
+            self.logger.debug("Synchronization service not available, skipping synchronization")
+            return
+
         try:
             await self._synchronization_service.synchronize_state_change(state_change)
         except Exception as e:
@@ -345,3 +358,18 @@ class StateController(BaseComponent):
             self.logger.info("StateController cleanup completed")
         except Exception as e:
             self.logger.error(f"Error during StateController cleanup: {e}")
+
+    def _extract_config_dict(self, config: Config) -> dict[str, Any]:
+        """Extract config as dictionary for BaseService."""
+        if not config:
+            return {}
+
+        # Try to get config as dict
+        if hasattr(config, "dict") and callable(config.dict):
+            # Pydantic model
+            return config.dict()
+        elif hasattr(config, "__dict__"):
+            return getattr(config, "__dict__", {})
+        else:
+            # Fallback
+            return {}

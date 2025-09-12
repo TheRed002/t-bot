@@ -10,8 +10,9 @@ from typing import TYPE_CHECKING, Any, Protocol, Union
 
 if TYPE_CHECKING:
     from src.core.config.main import Config
+    from src.database.models.state import StateMetadata
 
-    from .state_service import StateChange, StateMetadata, StateService, StateSnapshot, StateType
+    from .state_service import RuntimeStateSnapshot, StateChange, StateService, StateType
 
 
 class StateControllerProtocol(Protocol):
@@ -100,12 +101,12 @@ class StatePersistenceServiceInterface(ABC):
         pass
 
     @abstractmethod
-    async def save_snapshot(self, snapshot: "StateSnapshot") -> bool:
+    async def save_snapshot(self, snapshot: "RuntimeStateSnapshot") -> bool:
         """Save a state snapshot."""
         pass
 
     @abstractmethod
-    async def load_snapshot(self, snapshot_id: str) -> "StateSnapshot | None":
+    async def load_snapshot(self, snapshot_id: str) -> "RuntimeStateSnapshot | None":
         """Load a state snapshot."""
         pass
 
@@ -138,8 +139,18 @@ class StateValidationServiceInterface(ABC):
         self,
         state_type: "StateType",
         state_data: dict[str, Any],
+        operation: str = "update",
     ) -> list[str]:
         """Validate business rules for state data."""
+        pass
+
+    @abstractmethod
+    def matches_criteria(
+        self,
+        state: dict[str, Any],
+        criteria: dict[str, Any]
+    ) -> bool:
+        """Check if state matches search criteria."""
         pass
 
 
@@ -243,4 +254,25 @@ class StateServiceFactoryInterface(ABC):
         mock_database: bool = False,
     ) -> "StateService":
         """Create a StateService instance for testing."""
+        pass
+
+
+class MetricsStorageInterface(ABC):
+    """Abstract interface for metrics storage operations."""
+
+    @abstractmethod
+    async def store_validation_metrics(self, validation_data: dict[str, Any]) -> bool:
+        """Store validation metrics."""
+        pass
+
+    @abstractmethod
+    async def store_analysis_metrics(self, analysis_data: dict[str, Any]) -> bool:
+        """Store analysis metrics."""
+        pass
+
+    @abstractmethod
+    async def get_historical_metrics(
+        self, metric_type: str, start_time: Any, end_time: Any
+    ) -> list[dict[str, Any]]:
+        """Retrieve historical metrics."""
         pass

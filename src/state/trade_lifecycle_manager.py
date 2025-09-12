@@ -26,7 +26,7 @@ from src.core.base.component import BaseComponent
 from src.core.caching import CacheKeys, cache_invalidate, cached, get_cache_manager
 from src.core.config.main import Config
 from src.core.exceptions import StateConsistencyError
-from src.core.types import ExecutionResult, OrderRequest, OrderSide, OrderType
+from src.core.types import ExecutionResult, OrderRequest, OrderSide, OrderType, StateType
 
 # Service layer imports only - no direct database access
 from .services import StatePersistenceServiceProtocol
@@ -738,7 +738,6 @@ class TradeLifecycleManager(BaseComponent):
             # Try persistence service first (more reliable)
             if self._persistence_service:
                 # Create a pseudo-state for the trade context
-                from .state_service import StateType as _StateType
 
                 context_data = {
                     "trade_id": trade_context.trade_id,
@@ -755,18 +754,27 @@ class TradeLifecycleManager(BaseComponent):
                 }
 
                 # Create metadata using centralized utility
-                from src.utils.state_utils import create_state_metadata
+                try:
+                    from src.utils.state_utils import create_state_metadata
 
-                metadata = create_state_metadata(
-                    state_id=trade_context.trade_id,
-                    state_type=_StateType.TRADE_STATE,
-                    source_component="TradeLifecycleManager",
-                    state_data=context_data
-                )
+                    metadata = create_state_metadata(
+                        state_id=trade_context.trade_id,
+                        state_type=StateType.TRADE_STATE,
+                        source_component="TradeLifecycleManager",
+                        state_data=context_data
+                    )
+                except ImportError:
+                    # Fallback metadata creation if utility not available
+                    from src.database.models.state import StateMetadata
+                    metadata = StateMetadata(
+                        state_id=trade_context.trade_id,
+                        state_type=StateType.TRADE_STATE,
+                        source_component="TradeLifecycleManager"
+                    )
 
                 # Save through persistence service
                 await self._persistence_service.save_state(
-                    _StateType.TRADE_STATE, trade_context.trade_id, context_data, metadata
+                    StateType.TRADE_STATE, trade_context.trade_id, context_data, metadata
                 )
 
             # Fall back to cache service if available
@@ -812,20 +820,29 @@ class TradeLifecycleManager(BaseComponent):
 
             # Use persistence service if available
             if self._persistence_service:
-                from .state_service import StateType as _StateType
 
                 # Create event state for logging
                 event_state_id = f"{trade_id}_{event.value}_{datetime.now().timestamp()}"
-                metadata = create_state_metadata(
-                    state_id=event_state_id,
-                    state_type=_StateType.TRADE_STATE,  # Use trade state type for events
-                    source_component="TradeLifecycleManager",
-                    state_data=event_record
-                )
+                try:
+                    from src.utils.state_utils import create_state_metadata
+                    metadata = create_state_metadata(
+                        state_id=event_state_id,
+                        state_type=StateType.TRADE_STATE,  # Use trade state type for events
+                        source_component="TradeLifecycleManager",
+                        state_data=event_record
+                    )
+                except ImportError:
+                    # Fallback metadata creation if utility not available
+                    from src.database.models.state import StateMetadata
+                    metadata = StateMetadata(
+                        state_id=event_state_id,
+                        state_type=StateType.TRADE_STATE,
+                        source_component="TradeLifecycleManager"
+                    )
 
                 # Save event through service layer
                 await self._persistence_service.save_state(
-                    _StateType.TRADE_STATE, event_state_id, event_record, metadata
+                    StateType.TRADE_STATE, event_state_id, event_record, metadata
                 )
             else:
                 # Fall back to logging only
@@ -863,7 +880,6 @@ class TradeLifecycleManager(BaseComponent):
 
             # Persist history record through service layer
             if self._persistence_service:
-                from .state_service import StateType as _StateType
 
                 # Convert history record to dict for persistence
                 history_data = {
@@ -885,15 +901,25 @@ class TradeLifecycleManager(BaseComponent):
                     "status": "finalized",
                 }
 
-                metadata = create_state_metadata(
-                    state_id=f"{trade_id}_history",
-                    state_type=_StateType.TRADE_STATE,
-                    source_component="TradeLifecycleManager",
-                    state_data=history_data
-                )
+                try:
+                    from src.utils.state_utils import create_state_metadata
+                    metadata = create_state_metadata(
+                        state_id=f"{trade_id}_history",
+                        state_type=StateType.TRADE_STATE,
+                        source_component="TradeLifecycleManager",
+                        state_data=history_data
+                    )
+                except ImportError:
+                    # Fallback metadata creation if utility not available
+                    from src.database.models.state import StateMetadata
+                    metadata = StateMetadata(
+                        state_id=f"{trade_id}_history",
+                        state_type=StateType.TRADE_STATE,
+                        source_component="TradeLifecycleManager"
+                    )
 
                 await self._persistence_service.save_state(
-                    _StateType.TRADE_STATE, f"{trade_id}_history", history_data, metadata
+                    StateType.TRADE_STATE, f"{trade_id}_history", history_data, metadata
                 )
 
             # Add to in-memory history
@@ -954,11 +980,10 @@ class TradeLifecycleManager(BaseComponent):
     async def _load_active_trades(self) -> None:
         """Load active trades from persistence layer."""
         try:
-            from .state_service import StateType as _StateType
 
             # Load all trade states from persistence
             states = await self._persistence_service.list_states(
-                _StateType.TRADE_STATE,
+                StateType.TRADE_STATE,
                 limit=1000,  # Reasonable limit for active trades
             )
 

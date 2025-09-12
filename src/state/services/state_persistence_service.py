@@ -16,8 +16,9 @@ from src.core.exceptions import DatabaseError, StateConsistencyError
 
 if TYPE_CHECKING:
     from src.core.types import StateType
+    from src.database.models.state import StateMetadata
 
-    from ..state_service import StateMetadata, StateSnapshot
+    from ..state_service import RuntimeStateSnapshot
 
 
 class StatePersistenceServiceProtocol(Protocol):
@@ -42,9 +43,9 @@ class StatePersistenceServiceProtocol(Protocol):
         offset: int = 0,
     ) -> list[dict[str, Any]]: ...
 
-    async def save_snapshot(self, snapshot: "StateSnapshot") -> bool: ...
+    async def save_snapshot(self, snapshot: "RuntimeStateSnapshot") -> bool: ...
 
-    async def load_snapshot(self, snapshot_id: str) -> "StateSnapshot | None": ...
+    async def load_snapshot(self, snapshot_id: str) -> "RuntimeStateSnapshot | None": ...
 
 
 class StatePersistenceService(BaseService):
@@ -191,10 +192,10 @@ class StatePersistenceService(BaseService):
 
             from src.database.models.state import StateSnapshot
 
-            # Check for existing snapshot
+            # Check for existing snapshot by name
             existing_snapshots = await self.database_service.list_entities(
                 StateSnapshot,
-                filters={"snapshot_id": f"{state_id}_{state_type.value}_{metadata.version}"},
+                filters={"name": f"{state_type.value}_{state_id}"},
                 limit=1,
             )
 
@@ -218,7 +219,7 @@ class StatePersistenceService(BaseService):
                     schema_version="1.0.0",
                     status="active",
                 )
-                await self.database_service.create_entity(snapshot)
+                await self.database_service.create_entity(snapshot, processing_mode="stream")
 
             self.logger.debug(f"State saved successfully: {state_type.value}:{state_id}")
             return True
@@ -384,7 +385,7 @@ class StatePersistenceService(BaseService):
             self.logger.error(f"Failed to list states: {e}")
             return []
 
-    async def save_snapshot(self, snapshot: "StateSnapshot") -> bool:
+    async def save_snapshot(self, snapshot: "RuntimeStateSnapshot") -> bool:
         """
         Save a state snapshot.
 
@@ -403,9 +404,8 @@ class StatePersistenceService(BaseService):
             import json
             import uuid
 
-            from src.database.models.state import StateSnapshot as StateSnapshotModel
 
-            # Create StateSnapshot entity
+            # Create RuntimeStateSnapshot entity
             snapshot_entity = StateSnapshotModel(
                 snapshot_id=uuid.uuid4(),
                 name=f"system_snapshot_{snapshot.snapshot_id}",
@@ -413,12 +413,12 @@ class StatePersistenceService(BaseService):
                 snapshot_type="manual",
                 state_data=snapshot.__dict__,
                 raw_size_bytes=len(json.dumps(snapshot.__dict__, default=str)),
-                state_checksum=snapshot.snapshot_id,  # Use snapshot_id as checksum for now
+                state_checksum=str(snapshot.snapshot_id),  # Convert UUID to string for checksum field
                 schema_version="1.0.0",
                 status="active",
             )
 
-            await self.database_service.create_entity(snapshot_entity)
+            await self.database_service.create_entity(snapshot_entity, processing_mode="stream")
 
             self.logger.debug(f"Snapshot saved successfully: {snapshot.snapshot_id}")
             return True
@@ -430,7 +430,7 @@ class StatePersistenceService(BaseService):
             self.logger.error(f"Failed to save snapshot: {e}")
             return False
 
-    async def load_snapshot(self, snapshot_id: str) -> "StateSnapshot | None":
+    async def load_snapshot(self, snapshot_id: str) -> "RuntimeStateSnapshot | None":
         """
         Load a state snapshot.
 
@@ -438,7 +438,7 @@ class StatePersistenceService(BaseService):
             snapshot_id: Snapshot identifier
 
         Returns:
-            StateSnapshot or None if not found
+            RuntimeStateSnapshot or None if not found
         """
         try:
             if not self.database_service:
@@ -446,17 +446,17 @@ class StatePersistenceService(BaseService):
                 return None
 
             # Use database service with proper model
-            from src.database.models.state import StateSnapshot as StateSnapshotModel
+            from src.database.models.state import StateSnapshot as RuntimeStateSnapshotModel
 
             # Find snapshot by name pattern
             snapshots = await self.database_service.list_entities(
-                StateSnapshotModel, filters={"name": f"system_snapshot_{snapshot_id}"}, limit=1
+                RuntimeStateSnapshotModel, filters={"name": f"system_snapshot_{snapshot_id}"}, limit=1
             )
 
             if snapshots and snapshots[0].state_data:
-                from ..state_service import StateSnapshot as _StateSnapshot
+                from ..state_service import RuntimeStateSnapshot as _RuntimeStateSnapshot
 
-                return _StateSnapshot(**snapshots[0].state_data)
+                return _RuntimeStateSnapshot(**snapshots[0].state_data)
 
             return None
 

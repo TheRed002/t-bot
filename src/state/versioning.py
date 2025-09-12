@@ -5,7 +5,6 @@ This module provides comprehensive state schema versioning, migration support,
 and backward compatibility for state persistence operations.
 """
 
-import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -19,6 +18,7 @@ from packaging import version
 LegacyVersion = None
 
 from src.core.exceptions import StateConsistencyError
+from src.core.logging import get_logger
 
 
 class MigrationType(Enum):
@@ -66,7 +66,9 @@ class StateVersion:
                 self.minor = int(parts[1]) if len(parts) > 1 else 0
                 self.patch = int(parts[2]) if len(parts) > 2 else 0
         except Exception as e:
-            logging.warning(f"Failed to parse version {self.version_string}: {e}")
+            # Use proper logger instead of module-level logging
+            logger = get_logger(__name__)
+            logger.warning(f"Failed to parse version {self.version_string}: {e}")
 
     def __str__(self) -> str:
         return self.version_string
@@ -140,7 +142,7 @@ class StateMigration(ABC):
         self.migration_id = migration_id
         self.name = name
         self.description = description
-        self.logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
+        self.logger = get_logger(f"{__name__}.{self.__class__.__name__}")
 
     @property
     @abstractmethod
@@ -246,7 +248,7 @@ class StateVersioningSystem:
                              Should be a service, not a repository.
         """
         self.current_version = StateVersion(current_version)
-        self.logger = logging.getLogger(__name__)
+        self.logger = get_logger(__name__)
         self._metadata_service = metadata_service
 
         # Migration registry

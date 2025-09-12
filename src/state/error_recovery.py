@@ -6,13 +6,13 @@ and data integrity validation for all state persistence operations.
 """
 
 import asyncio
-import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.exceptions import StateConsistencyError
+from src.core.logging import get_logger
 from src.utils.error_recovery_utilities import (
     BaseErrorRecovery,
     ErrorContext,
@@ -38,10 +38,10 @@ class StateErrorRecovery(BaseErrorRecovery):
     building upon the centralized error recovery utilities.
     """
 
-    def __init__(self, logger: logging.Logger | None = None):
+    def __init__(self, logger=None):
         """Initialize state-specific error recovery system."""
         super().__init__(component_name="StateErrorRecovery")
-        self.logger = logger or logging.getLogger(__name__)
+        self.logger = logger or get_logger(__name__)
 
     # Note: classify_error() method now inherited from BaseErrorRecovery
 

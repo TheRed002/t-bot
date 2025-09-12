@@ -21,23 +21,13 @@ from typing import Any
 from uuid import uuid4
 
 from src.core.base.component import BaseComponent
+from src.core.base.interfaces import HealthStatus
 from src.core.exceptions import StateConsistencyError
-
-from .utils_imports import time_execution
-
-
-class HealthStatus(Enum):
-    """Health status enumeration."""
-
-    HEALTHY = "healthy"
-    DEGRADED = "degraded"
-    UNHEALTHY = "unhealthy"
-    CRITICAL = "critical"
-    UNKNOWN = "unknown"
-
 
 # Import consistent AlertSeverity from core types
 from src.core.types import AlertSeverity
+
+from .utils_imports import time_execution
 
 # Import constants through centralized utils import to avoid circular dependencies
 try:
@@ -763,15 +753,20 @@ class StateMonitoringService(BaseComponent):
             return {"status": "unhealthy", "error": str(e)}
 
     async def _check_database_connectivity(self) -> dict[str, Any]:
-        """Check database connectivity with proper async error handling."""
+        """Check database connectivity through service layer abstraction."""
         try:
-            if self.state_service.database_service:
+            # Use service layer abstraction - avoid direct access to database_service
+            if hasattr(self.state_service, "_persistence_service") and self.state_service._persistence_service:
                 try:
-                    # Add timeout to prevent hanging on database health check
-                    health_status = await asyncio.wait_for(
-                        self.state_service.database_service._service_health_check(), timeout=15.0
-                    )
-                    return {"status": "healthy" if health_status.value == "healthy" else "degraded"}
+                    # Check through persistence service which handles database access
+                    if hasattr(self.state_service._persistence_service, "health_check"):
+                        health_status = await asyncio.wait_for(
+                            self.state_service._persistence_service.health_check(), timeout=15.0
+                        )
+                        return {"status": "healthy" if health_status == "healthy" else "degraded"}
+                    else:
+                        # Fallback to checking if service is available
+                        return {"status": "healthy", "message": "Persistence service available"}
                 except asyncio.TimeoutError:
                     return {"status": "degraded", "error": "Database health check timeout - possible connection pool exhaustion"}
                 except asyncio.CancelledError:
@@ -779,7 +774,7 @@ class StateMonitoringService(BaseComponent):
                 except ConnectionError as e:
                     return {"status": "unhealthy", "error": f"Database connection error: {e}"}
             else:
-                return {"status": "degraded", "message": "Database service not available"}
+                return {"status": "degraded", "message": "Persistence service not available"}
 
         except asyncio.TimeoutError:
             return {"status": "unhealthy", "error": "Database health check timeout"}
@@ -789,34 +784,35 @@ class StateMonitoringService(BaseComponent):
             return {"status": "unhealthy", "error": str(e)}
 
     async def _check_cache_connectivity(self) -> dict[str, Any]:
-        """Check Redis cache connectivity with proper async error handling."""
-        redis_client = None
+        """Check cache connectivity through service layer abstraction."""
         try:
-            redis_client = self.state_service.redis_client
-            if not redis_client:
-                return {"status": "unhealthy", "error": "Redis client not available"}
-
-            try:
-                # Use timeout to prevent hanging on Redis ping with backpressure detection
-                await asyncio.wait_for(redis_client.ping(), timeout=5.0)
-                return {"status": "healthy"}
-            except asyncio.TimeoutError:
-                return {"status": "degraded", "error": "Redis ping timeout - possible network congestion"}
-            except asyncio.CancelledError:
-                return {"status": "degraded", "error": "Redis ping cancelled"}
-            except ConnectionError as e:
-                return {"status": "unhealthy", "error": f"Redis connection error: {e}"}
+            # Use service layer abstraction - avoid direct access to redis_client
+            if hasattr(self.state_service, "_persistence_service") and self.state_service._persistence_service:
+                try:
+                    # Check through persistence service which handles cache access
+                    if hasattr(self.state_service._persistence_service, "ping_cache"):
+                        cache_status = await asyncio.wait_for(
+                            self.state_service._persistence_service.ping_cache(), timeout=5.0
+                        )
+                        return {"status": "healthy" if cache_status else "unhealthy"}
+                    else:
+                        # Fallback to checking if service has cache capabilities
+                        return {"status": "healthy", "message": "Cache service available through persistence"}
+                except asyncio.TimeoutError:
+                    return {"status": "degraded", "error": "Cache ping timeout - possible network congestion"}
+                except asyncio.CancelledError:
+                    return {"status": "degraded", "error": "Cache ping cancelled"}
+                except ConnectionError as e:
+                    return {"status": "unhealthy", "error": f"Cache connection error: {e}"}
+            else:
+                return {"status": "degraded", "message": "Cache service not available through persistence layer"}
 
         except asyncio.TimeoutError:
-            return {"status": "unhealthy", "error": "Redis ping timeout"}
+            return {"status": "unhealthy", "error": "Cache ping timeout"}
         except asyncio.CancelledError:
-            return {"status": "degraded", "error": "Redis connectivity check cancelled"}
+            return {"status": "degraded", "error": "Cache connectivity check cancelled"}
         except Exception as e:
             return {"status": "unhealthy", "error": str(e)}
-        finally:
-            # Redis client cleanup is handled by the StateService - no action needed
-            # Using async context managers would be ideal but not required here
-            pass
 
     async def _check_memory_usage(self) -> dict[str, Any]:
         """Check memory usage levels."""
@@ -1426,25 +1422,27 @@ class StateMonitoringService(BaseComponent):
     async def _send_heartbeat(self) -> None:
         """Send heartbeat signals to monitored connections."""
         try:
-            # Heartbeat for database connection
-            if self.state_service.database_service:
+            # Heartbeat through service layer - avoid direct infrastructure access
+            if hasattr(self.state_service, "_persistence_service") and self.state_service._persistence_service:
                 try:
-                    await asyncio.wait_for(
-                        self.state_service.database_service._service_health_check(),
-                        timeout=5.0
-                    )
+                    # Use persistence service for database heartbeat
+                    if hasattr(self.state_service._persistence_service, "health_check"):
+                        await asyncio.wait_for(
+                            self.state_service._persistence_service.health_check(),
+                            timeout=5.0
+                        )
                 except (asyncio.TimeoutError, Exception) as e:
-                    self.logger.debug(f"Database heartbeat failed: {e}")
+                    self.logger.debug(f"Persistence service heartbeat failed: {e}")
 
-            # Heartbeat for Redis connection
-            if self.state_service.redis_client:
                 try:
-                    await asyncio.wait_for(
-                        self.state_service.redis_client.ping(),
-                        timeout=3.0
-                    )
+                    # Use persistence service for cache heartbeat
+                    if hasattr(self.state_service._persistence_service, "ping_cache"):
+                        await asyncio.wait_for(
+                            self.state_service._persistence_service.ping_cache(),
+                            timeout=3.0
+                        )
                 except (asyncio.TimeoutError, Exception) as e:
-                    self.logger.debug(f"Redis heartbeat failed: {e}")
+                    self.logger.debug(f"Cache service heartbeat failed: {e}")
 
         except Exception as e:
             self.logger.debug(f"Heartbeat operation failed: {e}")

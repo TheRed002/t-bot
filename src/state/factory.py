@@ -35,7 +35,7 @@ class DatabaseServiceProtocol(Protocol):
         """Create a new entity."""
         ...
 
-    async def get_entity_by_id(self, model_class: type, entity_id: Any) -> Union[Any, None]:
+    async def get_entity_by_id(self, model_class: type, entity_id: Any) -> Any | None:
         """Get entity by ID."""
         ...
 
@@ -113,7 +113,7 @@ class MockDatabaseService:
         self._metrics["successful_queries"] += 1
         return entity
 
-    async def get_entity_by_id(self, model_class: type, entity_id: Any) -> Union[Any, None]:
+    async def get_entity_by_id(self, model_class: type, entity_id: Any) -> Any | None:
         """Get entity by ID from mock storage."""
         self._metrics["total_queries"] += 1
         entity = self._entities.get(entity_id)
@@ -144,7 +144,7 @@ class StateServiceFactory(StateServiceFactoryInterface):
     enterprise-grade state management with all required services.
     """
 
-    def __init__(self, injector: Union[DependencyInjector, None] = None):
+    def __init__(self, injector: DependencyInjector | None = None):
         """
         Initialize factory with dependency injector.
 
@@ -167,7 +167,7 @@ class StateServiceFactory(StateServiceFactoryInterface):
     async def create_state_service(
         self,
         config: Config,
-        database_service: Union[DatabaseServiceInterface, None] = None,
+        database_service: DatabaseServiceInterface | None = None,
         auto_start: bool = True,
     ) -> "StateService":
         """
@@ -184,8 +184,8 @@ class StateServiceFactory(StateServiceFactoryInterface):
         # Handle case where injector is None (should not happen in production but OK for testing)
         if self._injector is None:
             # For testing scenarios when injector is None, create a simple mock StateService
-            from unittest.mock import MagicMock, AsyncMock
-            
+            from unittest.mock import AsyncMock, MagicMock
+
             # Create a mock StateService with necessary methods
             mock_state_service = MagicMock()
             mock_state_service.initialize = AsyncMock()
@@ -194,11 +194,11 @@ class StateServiceFactory(StateServiceFactoryInterface):
             mock_state_service.set_state = AsyncMock(return_value=True)
             mock_state_service.get_state = AsyncMock(return_value=None)
             mock_state_service.create_snapshot = AsyncMock(return_value="snapshot_123")
-            
+
             # If auto_start is requested, call initialize
             if auto_start:
                 await mock_state_service.initialize()
-            
+
             return mock_state_service
 
         # Register dependencies if provided
@@ -218,7 +218,7 @@ class StateServiceFactory(StateServiceFactoryInterface):
 
 
     async def create_state_service_for_testing(
-        self, config: Union[Config, None] = None, mock_database: bool = False
+        self, config: Config | None = None, mock_database: bool = False
     ) -> "StateService":
         """
         Create StateService configured for testing.
@@ -272,9 +272,9 @@ class StateServiceRegistry:
     async def get_instance(
         cls,
         name: str = "default",
-        config: Union[Config, None] = None,
-        database_service: Union[DatabaseServiceInterface, None] = None,
-        injector: Union[DependencyInjector, None] = None,
+        config: Config | None = None,
+        database_service: DatabaseServiceInterface | None = None,
+        injector: DependencyInjector | None = None,
     ) -> "StateService":
         """
         Get or create a StateService instance.
@@ -361,7 +361,7 @@ class StateServiceRegistry:
 # Convenience functions for common patterns
 
 
-async def create_default_state_service(config: Config, injector: Union[DependencyInjector, None] = None) -> "StateService":
+async def create_default_state_service(config: Config, injector: DependencyInjector | None = None) -> "StateService":
     """Create default StateService using factory pattern with dependency injection."""
     if injector is None:
         from src.core.dependency_injection import injector as global_injector
@@ -375,7 +375,7 @@ async def create_default_state_service(config: Config, injector: Union[Dependenc
     return await factory.create_state_service(config)
 
 
-async def get_state_service(name: str = "default", injector: Union[DependencyInjector, None] = None) -> "StateService":
+async def get_state_service(name: str = "default", injector: DependencyInjector | None = None) -> "StateService":
     """Get StateService instance from registry."""
     if name in StateServiceRegistry._instances:
         return StateServiceRegistry._instances[name]
@@ -388,7 +388,7 @@ async def get_state_service(name: str = "default", injector: Union[DependencyInj
     return await StateServiceRegistry.get_instance(name, config=config, injector=injector)
 
 
-async def create_test_state_service(injector: Union[DependencyInjector, None] = None) -> "StateService":
+async def create_test_state_service(injector: DependencyInjector | None = None) -> "StateService":
     """Create StateService configured for testing using factory pattern."""
     if injector is None:
         from src.core.dependency_injection import DependencyInjector

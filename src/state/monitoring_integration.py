@@ -10,7 +10,7 @@ from typing import Any
 
 from src.core.base.component import BaseComponent
 from src.core.exceptions import StateConsistencyError
-from src.error_handling.context import ErrorContext
+from src.error_handling import ErrorContext
 from src.monitoring import MetricsCollector
 from src.monitoring.alerting import (
     Alert as MonitoringAlert,
@@ -122,7 +122,6 @@ class StateMetricsAdapter(BaseComponent):
             HealthStatus.HEALTHY: 1.0,
             HealthStatus.DEGRADED: 0.5,
             HealthStatus.UNHEALTHY: 0.0,
-            HealthStatus.CRITICAL: 0.0,
             HealthStatus.UNKNOWN: -1.0,
         }.get(status, -1.0)
 
@@ -188,7 +187,7 @@ class StateAlertAdapter(BaseComponent):
                 # Check if severity is valid (handle both string and enum values)
                 try:
                     if isinstance(alert.severity, str):
-                        severity_values = [s.value for s in AlertSeverity] if hasattr(AlertSeverity, '__members__') else []
+                        severity_values = [s.value for s in AlertSeverity] if hasattr(AlertSeverity, "__members__") else []
                         if alert.severity not in severity_values and alert.severity not in AlertSeverity.__members__:
                             self.logger.error(f"Invalid alert severity: {alert.severity}")
                             return

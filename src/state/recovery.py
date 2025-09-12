@@ -27,22 +27,7 @@ from src.error_handling import (
 )
 from src.utils.checksum_utilities import calculate_state_checksum
 
-from .utils_imports import time_execution
-
-
-class AuditEventType(Enum):
-    """Audit event type enumeration."""
-
-    STATE_CREATED = "state_created"
-    STATE_UPDATED = "state_updated"
-    STATE_DELETED = "state_deleted"
-    STATE_RECOVERED = "state_recovered"
-    STATE_ROLLBACK = "state_rollback"
-    VALIDATION_FAILED = "validation_failed"
-    CORRUPTION_DETECTED = "corruption_detected"
-    RECOVERY_INITIATED = "recovery_initiated"
-    SNAPSHOT_CREATED = "snapshot_created"
-    SNAPSHOT_RESTORED = "snapshot_restored"
+from .utils_imports import AuditEventType, time_execution
 
 
 class RecoveryStatus(Enum):

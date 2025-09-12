@@ -15,7 +15,9 @@ from src.core.exceptions import StateConsistencyError
 from .services import StatePersistenceServiceProtocol
 
 if TYPE_CHECKING:
-    from .state_service import StateMetadata, StateService, StateSnapshot, StateType
+    from src.database.models.state import StateMetadata
+
+    from .state_service import RuntimeStateSnapshot, StateService, StateType
 
 
 class StatePersistence(BaseComponent):
@@ -300,7 +302,7 @@ class StatePersistence(BaseComponent):
             self.logger.error(f"Failed to search states: {e}")
             return []
 
-    async def save_snapshot(self, snapshot: "StateSnapshot") -> bool:
+    async def save_snapshot(self, snapshot: "RuntimeStateSnapshot") -> bool:
         """
         Save a state snapshot.
 
@@ -322,7 +324,7 @@ class StatePersistence(BaseComponent):
             self.logger.error(f"Failed to save snapshot: {e}")
             return False
 
-    async def load_snapshot(self, snapshot_id: str) -> "StateSnapshot | None":
+    async def load_snapshot(self, snapshot_id: str) -> "RuntimeStateSnapshot | None":
         """
         Load a state snapshot.
 
@@ -446,10 +448,28 @@ class StatePersistence(BaseComponent):
                 await asyncio.sleep(1.0)  # Wait before retrying on error
 
     async def _process_save_batch(self, batch: list[dict[str, Any]]) -> None:
-        """Process a batch of save operations concurrently."""
+        """Process a batch of save operations concurrently with aligned processing paradigm."""
         try:
+            # Use ProcessingParadigmAligner for consistent batch processing (align with utils patterns)
+            from src.utils.messaging_patterns import ProcessingParadigmAligner
+
+            # Convert batch to aligned format
+            batch_data = ProcessingParadigmAligner.create_batch_from_stream(batch)
+            aligned_batch = ProcessingParadigmAligner.align_processing_modes(
+                "batch", "stream", batch_data
+            )
+
             save_tasks = []
             for save_item in batch:
+                # Add processing metadata for consistency
+                save_item.update({
+                    "processing_mode": "batch",
+                    "data_format": "bot_event_v1",  # Align with core events
+                    "message_pattern": "batch",  # Batch messaging pattern
+                    "batch_id": aligned_batch.get("batch_id"),
+                    "boundary_crossed": True,  # Mark cross-module communication
+                })
+
                 task = self.save_state(
                     save_item["state_type"],
                     save_item["state_id"],
@@ -466,10 +486,28 @@ class StatePersistence(BaseComponent):
             self.logger.error(f"Save batch processing error: {e}")
 
     async def _process_delete_batch(self, batch: list[dict[str, Any]]) -> None:
-        """Process a batch of delete operations concurrently."""
+        """Process a batch of delete operations concurrently with aligned processing paradigm."""
         try:
+            # Use ProcessingParadigmAligner for consistent batch processing (align with utils patterns)
+            from src.utils.messaging_patterns import ProcessingParadigmAligner
+
+            # Convert batch to aligned format
+            batch_data = ProcessingParadigmAligner.create_batch_from_stream(batch)
+            aligned_batch = ProcessingParadigmAligner.align_processing_modes(
+                "batch", "stream", batch_data
+            )
+
             delete_tasks = []
             for delete_item in batch:
+                # Add processing metadata for consistency
+                delete_item.update({
+                    "processing_mode": "batch",
+                    "data_format": "bot_event_v1",  # Align with core events
+                    "message_pattern": "batch",  # Batch messaging pattern
+                    "batch_id": aligned_batch.get("batch_id"),
+                    "boundary_crossed": True,  # Mark cross-module communication
+                })
+
                 task = self.delete_state(delete_item["state_type"], delete_item["state_id"])
                 delete_tasks.append(task)
 

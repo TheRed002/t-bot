@@ -14,7 +14,9 @@ from src.core.base.service import BaseService
 from src.core.exceptions import StateConsistencyError, ValidationError
 
 if TYPE_CHECKING:
-    from ..state_service import StateChange, StateMetadata, StateType
+    from src.database.models.state import StateMetadata
+
+    from ..state_service import StateChange, StateType
 
 
 class StateBusinessServiceProtocol(Protocol):
@@ -398,14 +400,19 @@ class StateBusinessService(BaseService):
     async def _apply_business_transformations(self, state_change: "StateChange") -> "StateChange":
         """Apply business logic transformations to state change."""
         try:
-            # Add audit information
+            # Add audit information with consistent data format
             if state_change.new_value:
                 state_change.new_value["_audit"] = {
                     "change_id": state_change.change_id,
                     "timestamp": state_change.timestamp.isoformat(),
                     "source": state_change.source_component,
                     "reason": state_change.reason,
+                    "data_format": "state_audit_v1",  # Consistent with utils patterns
+                    "processing_mode": "stream",  # Align with core events
                 }
+
+                # Apply consistent financial data transformation using utils patterns
+                await self._apply_financial_transformations(state_change.new_value)
 
             # Apply state-type specific transformations
             if state_change.state_type.value == "bot_state":
@@ -418,6 +425,38 @@ class StateBusinessService(BaseService):
         except Exception as e:
             self.logger.warning(f"Business transformation failed: {e}")
             return state_change
+
+    async def _apply_financial_transformations(self, state_data: dict[str, Any]) -> None:
+        """Apply consistent financial data transformations using utils patterns."""
+        try:
+            # Import utils pattern for consistency
+            from src.utils.decimal_utils import to_decimal
+
+            # Transform financial fields to Decimal for precision (consistent with utils/formatters)
+            financial_fields = ["price", "quantity", "volume", "entry_price", "current_price", "stop_loss", "take_profit", "value", "amount"]
+
+            for field in financial_fields:
+                if field in state_data and state_data[field] is not None:
+                    try:
+                        state_data[field] = to_decimal(state_data[field])
+                    except (ValueError, TypeError) as e:
+                        self.logger.warning(f"Failed to convert {field} to Decimal: {e}")
+
+            # Ensure timestamp consistency (matching utils patterns)
+            if "timestamp" not in state_data:
+                state_data["timestamp"] = datetime.now(timezone.utc).isoformat()
+            elif isinstance(state_data["timestamp"], str):
+                # Ensure timezone-aware timestamps (consistent with utils/messaging_patterns)
+                try:
+                    dt = datetime.fromisoformat(state_data["timestamp"].replace("Z", "+00:00"))
+                    if dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=timezone.utc)
+                    state_data["timestamp"] = dt.isoformat()
+                except ValueError:
+                    pass  # Leave as-is if parsing fails
+
+        except Exception as e:
+            self.logger.warning(f"Financial transformation failed: {e}")
 
     def _generate_state_tags(
         self, state_type: "StateType", state_data: dict[str, Any]

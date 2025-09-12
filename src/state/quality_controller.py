@@ -13,14 +13,12 @@ detailed insights for continuous improvement of trading strategies.
 """
 
 import asyncio
-from abc import ABC, abstractmethod
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from enum import Enum
 from typing import Any
-from uuid import uuid4
 
 import numpy as np
 from pydantic import ConfigDict
@@ -31,6 +29,9 @@ from src.core.config.main import Config
 from src.core.exceptions import StateConsistencyError, ValidationError
 from src.core.logging import get_logger
 from src.core.types import ExecutionResult, MarketData, OrderRequest
+
+# Import shared types
+from .types import PostTradeAnalysis, PreTradeValidation, ValidationResult
 
 # No direct database imports - use service abstractions only
 from .utils_imports import time_execution
@@ -47,84 +48,6 @@ class QualityLevel(Enum):
     POOR = "poor"  # 30-49
     CRITICAL = "critical"  # 0-29
 
-
-class ValidationResult(Enum):
-    """Validation result enumeration."""
-
-    PASSED = "passed"
-    FAILED = "failed"
-    WARNING = "warning"
-
-
-@dataclass
-class ValidationCheck:
-    """Individual validation check result."""
-
-    check_name: str = ""
-    result: ValidationResult = ValidationResult.PASSED
-    score: Decimal = Decimal("100.0")
-    message: str = ""
-    details: dict[str, Any] = field(default_factory=dict)
-    severity: str = "low"  # low, medium, high, critical
-
-
-@dataclass
-class PreTradeValidation:
-    """Pre-trade validation results."""
-
-    validation_id: str = field(default_factory=lambda: str(uuid4()))
-    order_request: OrderRequest | None = None
-    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-
-    # Overall results
-    overall_result: ValidationResult = ValidationResult.PASSED
-    overall_score: Decimal = Decimal("100.0")
-
-    # Individual checks
-    checks: list[ValidationCheck] = field(default_factory=list)
-
-    # Risk assessment
-    risk_level: str = "low"  # low, medium, high, critical
-    risk_score: Decimal = Decimal("0.0")
-
-    # Recommendations
-    recommendations: list[str] = field(default_factory=list)
-
-    # Processing time
-    validation_time_ms: Decimal = Decimal("0.0")
-
-
-@dataclass
-class PostTradeAnalysis:
-    """Post-trade analysis results."""
-
-    analysis_id: str = field(default_factory=lambda: str(uuid4()))
-    trade_id: str = ""
-    execution_result: ExecutionResult | None = None
-    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-
-    # Quality scores
-    execution_quality_score: Decimal = Decimal("100.0")
-    timing_quality_score: Decimal = Decimal("100.0")
-    price_quality_score: Decimal = Decimal("100.0")
-    overall_quality_score: Decimal = Decimal("100.0")
-
-    # Performance metrics
-    slippage_bps: Decimal = Decimal("0.0")
-    execution_time_seconds: Decimal = Decimal("0.0")
-    fill_rate: Decimal = Decimal("100.0")
-
-    # Market impact analysis
-    market_impact_bps: Decimal = Decimal("0.0")
-    temporary_impact_bps: Decimal = Decimal("0.0")
-    permanent_impact_bps: Decimal = Decimal("0.0")
-
-    # Benchmark comparison
-    benchmark_scores: dict[str, Decimal] = field(default_factory=dict)
-
-    # Issues and recommendations
-    issues: list[str] = field(default_factory=list)
-    recommendations: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -153,34 +76,11 @@ class QualityTrend:
     alert_level: str = "none"  # none, warning, critical
 
 
-class MetricsStorage(ABC):
-    """
-    Abstract interface for metrics storage operations.
-
-    This interface abstracts metrics persistence operations,
-    allowing different storage backends (InfluxDB, TimescaleDB, etc.)
-    without tight coupling.
-    """
-
-    @abstractmethod
-    async def store_validation_metrics(self, validation_data: dict[str, Any]) -> bool:
-        """Store validation metrics."""
-        raise NotImplementedError
-
-    @abstractmethod
-    async def store_analysis_metrics(self, analysis_data: dict[str, Any]) -> bool:
-        """Store analysis metrics."""
-        raise NotImplementedError
-
-    @abstractmethod
-    async def get_historical_metrics(
-        self, metric_type: str, start_time: datetime, end_time: datetime
-    ) -> list[dict[str, Any]]:
-        """Retrieve historical metrics."""
-        raise NotImplementedError
+# Use interface from interfaces.py
+from .interfaces import MetricsStorageInterface
 
 
-class InfluxDBMetricsStorage(MetricsStorage):
+class InfluxDBMetricsStorage(MetricsStorageInterface):
     """
     InfluxDB implementation of MetricsStorage interface.
 
@@ -197,11 +97,8 @@ class InfluxDBMetricsStorage(MetricsStorage):
 
         if config:
             try:
-                # Use service abstraction for InfluxDB
-                if config and hasattr(config, "influxdb"):
-                    self._available = True
-                else:
-                    self._available = False
+                # Determine availability through configuration without direct dependency
+                self._available = bool(getattr(config, "influxdb", None))
             except Exception as e:
                 self.logger.warning(f"Failed to initialize InfluxDB metrics storage: {e}")
                 self._available = False
@@ -248,6 +145,7 @@ class InfluxDBMetricsStorage(MetricsStorage):
             return False
 
         try:
+            # Import within try block to avoid hard dependency
             from influxdb_client import Point
 
             point = Point("trade_validation_metrics")
@@ -283,6 +181,7 @@ class InfluxDBMetricsStorage(MetricsStorage):
             return False
 
         try:
+            # Import within try block to avoid hard dependency
             from influxdb_client import Point
 
             point = Point("trade_analysis_metrics")
@@ -339,7 +238,7 @@ class InfluxDBMetricsStorage(MetricsStorage):
             return []
 
 
-class NullMetricsStorage(MetricsStorage):
+class NullMetricsStorage(MetricsStorageInterface):
     """
     Null implementation of MetricsStorage for testing or when metrics storage is disabled.
     """
@@ -376,7 +275,7 @@ class QualityController(BaseComponent):
     def __init__(
         self,
         config: Config,
-        metrics_storage: MetricsStorage | None = None,
+        metrics_storage: MetricsStorageInterface | None = None,
         quality_service: Any | None = None,
         validation_service: Any | None = None,
     ):

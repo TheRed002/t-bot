@@ -47,13 +47,14 @@ from src.core.exceptions import StateError, StateConsistencyError
 from src.core.types import ExecutionResult, MarketData, OrderRequest, OrderSide
 from src.state.quality_controller import (
     InfluxDBMetricsStorage,
-    MetricsStorage,
     NullMetricsStorage,
-    PostTradeAnalysis,
-    PreTradeValidation,
     QualityController,
     QualityLevel,
     QualityTrend,
+)
+from src.state.types import (
+    PostTradeAnalysis,
+    PreTradeValidation,
     ValidationCheck,
     ValidationResult,
 )
@@ -430,7 +431,7 @@ class TestQualityController:
     @pytest.fixture(scope="class")
     def mock_metrics_storage(self):
         """Mock metrics storage fixture."""
-        return AsyncMock(spec=MetricsStorage)
+        return AsyncMock(spec=NullMetricsStorage)
 
     def test_quality_controller_initialization(self, mock_config):
         """Test quality controller initialization."""

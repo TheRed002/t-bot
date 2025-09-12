@@ -13,9 +13,12 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 from src.core.base.service import BaseService
 from src.core.exceptions import StateConsistencyError
+from src.utils.messaging_patterns import ErrorPropagationMixin
 
 if TYPE_CHECKING:
-    from ..state_service import StateChange, StateType
+    from ..state_service import StateChange
+
+from src.core.types import StateType
 
 
 class StateSynchronizationServiceProtocol(Protocol):
@@ -39,7 +42,7 @@ class StateSynchronizationServiceProtocol(Protocol):
     ) -> "StateChange": ...
 
 
-class StateSynchronizationService(BaseService):
+class StateSynchronizationService(BaseService, ErrorPropagationMixin):
     """
     State synchronization service providing distributed state consistency.
 
@@ -72,7 +75,7 @@ class StateSynchronizationService(BaseService):
         # Synchronization state
         self._pending_syncs: dict[str, StateChange] = {}
         self._sync_locks: dict[str, asyncio.Lock] = {}
-        self._subscribers: dict[str, set[Callable]] = {}
+        self._subscribers: dict[StateType, set[Callable]] = {}
 
         # Backpressure handling
         self._sync_semaphore = asyncio.Semaphore(50)  # Limit concurrent syncs
@@ -91,7 +94,7 @@ class StateSynchronizationService(BaseService):
 
     async def synchronize_state_change(self, state_change: "StateChange") -> bool:
         """
-        Synchronize a state change across the system with backpressure handling.
+        Synchronize a state change across the system with backpressure handling and boundary validation.
 
         Args:
             state_change: State change to synchronize
@@ -100,6 +103,25 @@ class StateSynchronizationService(BaseService):
             True if synchronization successful
         """
         try:
+            # Apply boundary validation consistent with utils patterns
+            from src.utils.messaging_patterns import BoundaryValidator
+
+            # Validate state change data at module boundary
+            if state_change.new_value:
+                try:
+                    boundary_data = {
+                        "component": "state_sync",
+                        "operation": "synchronize",
+                        "timestamp": state_change.timestamp.isoformat(),
+                        "processing_mode": "stream",  # Align with utils messaging patterns
+                        "data_format": "bot_event_v1",  # Align with core events
+                        "message_pattern": "pub_sub",  # Consistent messaging pattern
+                        **state_change.new_value
+                    }
+                    BoundaryValidator.validate_risk_to_state_boundary(boundary_data)
+                except Exception as validation_error:
+                    self.logger.warning(f"Boundary validation failed for sync: {validation_error}")
+
             # Apply backpressure control - use semaphore to limit concurrent operations
             async with self._sync_semaphore:
                 self._sync_count += 1
@@ -185,7 +207,7 @@ class StateSynchronizationService(BaseService):
         change_info: dict[str, Any],
     ) -> None:
         """
-        Broadcast state change to interested parties.
+        Broadcast state change to interested parties with boundary validation.
 
         Args:
             state_type: Type of state that changed
@@ -194,6 +216,9 @@ class StateSynchronizationService(BaseService):
             change_info: Additional change information
         """
         try:
+            # Apply boundary validation consistent with utils patterns
+            from src.utils.messaging_patterns import BoundaryValidator
+
             broadcast_event = {
                 "event_type": "state_change",
                 "state_type": state_type.value,
@@ -201,7 +226,24 @@ class StateSynchronizationService(BaseService):
                 "state_data": state_data,
                 "change_info": change_info,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
+                "processing_mode": "stream",  # Align with utils messaging patterns
+                "data_format": "bot_event_v1",  # Align with core events
+                "message_pattern": "pub_sub",  # Explicit messaging pattern
+                "component": "state_sync",
+                "boundary_crossed": True,  # Mark cross-module communication
             }
+
+            # Validate boundary data consistency with risk-state boundary patterns
+            if state_data:
+                try:
+                    BoundaryValidator.validate_risk_to_state_boundary({
+                        "component": "state_sync",
+                        "operation": "broadcast",
+                        "timestamp": broadcast_event["timestamp"],
+                        **state_data
+                    })
+                except Exception as validation_error:
+                    self.logger.warning(f"Boundary validation failed for broadcast: {validation_error}")
 
             # Broadcast to type-specific subscribers
             type_key = state_type.value
@@ -256,7 +298,7 @@ class StateSynchronizationService(BaseService):
             # Fall back to most recent change
             return max(conflicting_changes, key=lambda c: c.timestamp)
 
-    def subscribe_to_state_changes(self, state_type: str, callback: Callable) -> None:
+    def subscribe_to_state_changes(self, state_type: StateType, callback: Callable) -> None:
         """
         Subscribe to state change notifications.
 
@@ -268,9 +310,9 @@ class StateSynchronizationService(BaseService):
             self._subscribers[state_type] = set()
 
         self._subscribers[state_type].add(callback)
-        self.logger.debug(f"Added subscriber for {state_type} state changes")
+        self.logger.debug(f"Added subscriber for {state_type.value} state changes")
 
-    def unsubscribe_from_state_changes(self, state_type: str, callback: Callable) -> None:
+    def unsubscribe_from_state_changes(self, state_type: StateType, callback: Callable) -> None:
         """
         Unsubscribe from state change notifications.
 
@@ -280,7 +322,7 @@ class StateSynchronizationService(BaseService):
         """
         if state_type in self._subscribers:
             self._subscribers[state_type].discard(callback)
-            self.logger.debug(f"Removed subscriber for {state_type} state changes")
+            self.logger.debug(f"Removed subscriber for {state_type.value} state changes")
 
     def get_synchronization_metrics(self) -> dict[str, Any]:
         """Get synchronization service metrics including backpressure indicators."""

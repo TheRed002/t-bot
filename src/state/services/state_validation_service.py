@@ -3,7 +3,8 @@ State Validation Service - Provides state validation capabilities.
 
 This service handles all validation logic for state data, providing
 a clean interface for validation operations without exposing
-implementation details.
+implementation details. It uses the centralized utils ValidationService
+to avoid code duplication.
 """
 
 from datetime import datetime, timezone
@@ -11,7 +12,10 @@ from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Protocol
 
 from src.core.base.service import BaseService
-from src.core.validator_registry import ValidatorRegistry
+from src.utils.messaging_patterns import ErrorPropagationMixin
+
+# Import ValidationService and ErrorPropagationMixin for consistency with utils patterns
+from ..utils_imports import ValidationService
 
 if TYPE_CHECKING:
     from ..state_service import StateType
@@ -38,38 +42,52 @@ class StateValidationServiceProtocol(Protocol):
         self,
         state_type: "StateType",
         state_data: dict[str, Any],
+        operation: str = "update",
     ) -> list[str]: ...
 
+    def matches_criteria(
+        self,
+        state: dict[str, Any],
+        criteria: dict[str, Any]
+    ) -> bool: ...
 
-class StateValidationService(BaseService):
+
+class StateValidationService(BaseService, ErrorPropagationMixin):
     """
     State validation service providing comprehensive validation capabilities.
 
-    This service handles all validation logic for state data, including
-    business rules, data integrity, and state transition validation.
+    This service delegates core validation logic to the centralized utils ValidationService
+    to avoid code duplication while providing state-specific validation logic.
     """
 
-    def __init__(self, validation_service: Any = None):
+    def __init__(self, validation_service: ValidationService | None = None):
         """
         Initialize the state validation service.
 
         Args:
-            validation_service: Injected validation service dependency
+            validation_service: Injected utils ValidationService dependency
         """
         super().__init__(name="StateValidationService")
 
-        # Injected dependency - fallback to registry if not provided
+        # Use centralized ValidationService from utils instead of duplicating validation logic
         self.validation_service = validation_service
         if not validation_service:
-            self.validator_registry = ValidatorRegistry()
-            self.logger.info("StateValidationService using ValidatorRegistry fallback")
+            try:
+                # Try to resolve from DI container
+                from src.core.dependency_injection import get_container
+                container = get_container()
+                self.validation_service = container.get("ValidationService")
+            except Exception:
+                # Fallback to direct instantiation
+                self.validation_service = ValidationService()
+            self.logger.info("StateValidationService resolved ValidationService from DI container")
 
-        # Validation configuration
+        # State-specific validation configuration
         self.strict_validation = True
         self.enable_business_rules = True
         self.cache_validation_results = True
 
-        # Validation cache
+        # Validation cache for state-specific results
         self._validation_cache: dict[str, tuple[dict[str, Any], datetime]] = {}
         self.cache_ttl_seconds = 300  # 5 minutes
 
@@ -79,7 +97,7 @@ class StateValidationService(BaseService):
         self._cache_hits = 0
 
         self.logger.info(
-            f"StateValidationService initialized with validation_service: {type(validation_service).__name__ if validation_service else 'ValidatorRegistry'}"
+            f"StateValidationService initialized with ValidationService: {type(self.validation_service).__name__}"
         )
 
     async def validate_state_data(
@@ -89,7 +107,7 @@ class StateValidationService(BaseService):
         validation_level: str = "normal",
     ) -> dict[str, Any]:
         """
-        Validate state data against all applicable rules.
+        Validate state data against all applicable rules using centralized validation.
 
         Args:
             state_type: Type of state to validate
@@ -112,38 +130,43 @@ class StateValidationService(BaseService):
                     self._cache_hits += 1
                     return cached_result
 
-            # Initialize validation result
-            errors: list[str] = []
-            warnings: list[str] = []
-            result = {
-                "is_valid": True,
-                "errors": errors,
-                "warnings": warnings,
-                "validation_level": validation_level,
-                "state_type": state_type.value,
-                "validated_at": start_time.isoformat(),
-            }
+            # Delegate core validation to utils ValidationService to avoid duplication
+            validation_errors: list[str] = []
+            validation_warnings: list[str] = []
 
-            # Perform basic data validation
-            basic_errors = await self._validate_basic_data_structure(state_type, state_data)
-            errors.extend(basic_errors)
+            # Use utils ValidationService for common validations
+            if self.validation_service:
+                # Validate financial fields using centralized service
+                financial_fields = ["price", "quantity", "volume", "amount", "balance", "cost"]
+                for field in financial_fields:
+                    if field in state_data:
+                        if not self.validation_service.validate_decimal(state_data[field]):
+                            validation_errors.append(f"Invalid {field}: must be a valid decimal")
 
-            # Perform type-specific validation
-            type_errors = await self._validate_state_type_specific(state_type, state_data)
-            errors.extend(type_errors)
+                # Validate symbols if present
+                if "symbol" in state_data:
+                    if not self.validation_service.validate_symbol(state_data["symbol"]):
+                        validation_errors.append("Invalid symbol format")
 
-            # Perform business rule validation if enabled
+            # Perform state-specific business rule validation
             if self.enable_business_rules:
-                business_errors = await self.validate_business_rules(state_type, state_data)
-                errors.extend(business_errors)
+                business_errors = await self.validate_business_rules(state_type, state_data, "validate")
+                validation_errors.extend(business_errors)
 
             # Perform strict validation if required
             if validation_level == "strict" or self.strict_validation:
                 strict_errors = await self._validate_strict_requirements(state_type, state_data)
-                errors.extend(strict_errors)
+                validation_errors.extend(strict_errors)
 
-            # Update validation result
-            result["is_valid"] = len(errors) == 0
+            # Build validation result
+            result = {
+                "is_valid": len(validation_errors) == 0,
+                "errors": validation_errors,
+                "warnings": validation_warnings,
+                "validation_level": validation_level,
+                "state_type": state_type.value,
+                "validated_at": start_time.isoformat(),
+            }
 
             # Calculate validation time
             end_time = datetime.now(timezone.utc)
@@ -226,6 +249,7 @@ class StateValidationService(BaseService):
         self,
         state_type: "StateType",
         state_data: dict[str, Any],
+        operation: str = "update",
     ) -> list[str]:
         """
         Validate business rules for state data.
@@ -266,6 +290,47 @@ class StateValidationService(BaseService):
         except Exception as e:
             self.logger.error(f"Business rule validation failed: {e}")
             return [f"Business rule validation error: {e}"]
+
+    def matches_criteria(
+        self,
+        state: dict[str, Any],
+        criteria: dict[str, Any]
+    ) -> bool:
+        """Check if state matches search criteria with advanced validation logic.
+        
+        Args:
+            state: State data to check
+            criteria: Criteria to match against
+            
+        Returns:
+            True if state matches all criteria
+        """
+        try:
+            for key, expected_value in criteria.items():
+                if key not in state:
+                    return False
+
+                actual_value = state[key]
+
+                # Handle special comparison cases
+                if isinstance(expected_value, dict):
+                    # Handle range/comparison criteria like {"min": 10, "max": 100}
+                    if "min" in expected_value and actual_value < expected_value["min"]:
+                        return False
+                    if "max" in expected_value and actual_value > expected_value["max"]:
+                        return False
+                elif isinstance(expected_value, (list, tuple)):
+                    # Handle "in" criteria
+                    if actual_value not in expected_value:
+                        return False
+                elif actual_value != expected_value:
+                    return False
+
+            return True
+
+        except Exception as e:
+            self.logger.warning(f"Criteria matching failed: {e}")
+            return False
 
     def get_validation_metrics(self) -> dict[str, Any]:
         """Get validation service metrics."""

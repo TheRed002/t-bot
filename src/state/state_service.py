@@ -22,9 +22,9 @@ from enum import Enum
 from typing import TYPE_CHECKING, Any, Protocol, TypeVar
 from uuid import uuid4
 
-from src.core.base.component import BaseComponent
 from src.core.base.events import BaseEventEmitter
 from src.core.base.interfaces import HealthCheckResult
+from src.core.base.service import BaseService
 from src.core.config.main import Config
 from src.core.exceptions import (
     DependencyError,
@@ -34,6 +34,10 @@ from src.core.exceptions import (
     ValidationError,
 )
 from src.core.types import StateType
+
+# Import simple consistency utilities
+# Database model imports
+from src.database.models.state import StateMetadata
 from src.error_handling import (
     ErrorContext,
     ErrorHandler,
@@ -44,7 +48,8 @@ from src.monitoring.telemetry import get_tracer
 from src.utils.checksum_utilities import calculate_state_checksum
 from src.utils.messaging_patterns import BoundaryValidator, ErrorPropagationMixin
 
-# Import simple consistency utilities
+from .data_transformer import StateDataTransformer
+
 # Service layer imports
 from .services import (
     StateBusinessServiceProtocol,
@@ -114,19 +119,7 @@ class StatePriority(str, Enum):
     LOW = "low"  # Metrics, historical data
 
 
-@dataclass
-class StateMetadata:
-    """Metadata for state tracking and versioning."""
-
-    state_id: str
-    state_type: StateType
-    version: int = 1
-    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-    updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-    checksum: str = ""
-    size_bytes: int = 0
-    source_component: str = ""
-    tags: dict[str, str] = field(default_factory=dict)
+# StateMetadata is now imported from database.models.state
 
 
 @dataclass
@@ -157,8 +150,8 @@ class StateChange:
 
 
 @dataclass
-class StateSnapshot:
-    """Complete state snapshot for recovery and backup."""
+class RuntimeStateSnapshot:
+    """Runtime state snapshot data structure for in-memory operations."""
 
     snapshot_id: str = field(default_factory=lambda: str(uuid4()))
     timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
@@ -234,7 +227,7 @@ class StateMetrics:
         }
 
 
-class StateService(BaseComponent, ErrorPropagationMixin):
+class StateService(BaseService, ErrorPropagationMixin):
     """
     Comprehensive state management service providing enterprise-grade
     state handling with synchronization, validation, persistence, and recovery.
@@ -268,29 +261,8 @@ class StateService(BaseComponent, ErrorPropagationMixin):
             validation_service: Validation service for data validation (injected dependency)
             synchronization_service: Synchronization service for state sync (injected dependency)
         """
-        # BaseComponent expects config dict, not Config object
-        config_dict = {}
-        if config:
-            # Try to get config as dict first
-            if hasattr(config, "__dict__"):
-                config_dict = getattr(config, "__dict__", {})
-            elif hasattr(config, "_mock_methods"):
-                # Mock object in tests
-                config_dict = {}
-            else:
-                # Fallback to safe attribute extraction
-                try:
-                    config_dict = {
-                        key: getattr(config, key)
-                        for key in dir(config)
-                        if not key.startswith("_") and not callable(getattr(config, key, None))
-                    }
-                except Exception as e:
-                    # Log the error but don't raise to avoid breaking initialization
-                    import logging
-                    logger = logging.getLogger(__name__)
-                    logger.warning(f"Failed to extract config attributes: {e}")
-                    config_dict = {}
+        # Convert Config object to dict for BaseService
+        config_dict = self._extract_config_dict(config)
         super().__init__(name="StateService", config=config_dict)
         self.config = config
 
@@ -645,9 +617,9 @@ class StateService(BaseComponent, ErrorPropagationMixin):
                     return None
 
                 except Exception as e:
-                    # Use consistent error propagation with boundary validation aligned with risk_management
+                    # Use consistent error propagation with boundary validation aligned with core module patterns
                     try:
-                        # Apply consistent error data structure aligned with capital_management module
+                        # Apply consistent error data structure aligned with core module expectations
                         raw_error_data = {
                             "cache_key": cache_key,
                             "state_type": state_type.value,
@@ -657,8 +629,8 @@ class StateService(BaseComponent, ErrorPropagationMixin):
                             "component": "StateService",
                             "operation": "get_state",
                             "severity": "medium",
-                            "processing_mode": "stream",  # Align with capital_management processing
-                            "data_format": "event_data_v1",  # Match capital_management data format
+                            "processing_mode": "stream",  # Align with core events default processing
+                            "data_format": "bot_event_v1",  # Match core events data format
                             "message_pattern": "pub_sub",  # Consistent messaging pattern
                             "boundary_crossed": True,
                             "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -667,7 +639,7 @@ class StateService(BaseComponent, ErrorPropagationMixin):
                             else "state_error",
                         }
 
-                        # Apply boundary validation for capital_management-state consistency
+                        # Apply boundary validation for state-to-core consistency
                         from src.utils.messaging_patterns import ProcessingParadigmAligner
                         error_data = ProcessingParadigmAligner.align_processing_modes(
                             "stream",
@@ -675,13 +647,20 @@ class StateService(BaseComponent, ErrorPropagationMixin):
                             raw_error_data,
                         )
 
-                        # Validate at state-to-capital boundary with consistent patterns
+                        # Validate at state-to-core boundary with consistent patterns for cross-module compatibility
                         try:
-                            BoundaryValidator.validate_risk_to_state_boundary(error_data)
+                            BoundaryValidator.validate_monitoring_to_error_boundary(error_data)
                         except ValidationError as validation_error:
                             self.logger.warning(
-                                f"State-to-capital boundary validation failed: {validation_error}"
+                                f"State-to-core boundary validation failed: {validation_error}"
                             )
+
+                        # Apply consistent financial validation if present
+                        if any(field in error_data for field in ["price", "quantity", "volume"]):
+                            try:
+                                BoundaryValidator.validate_database_entity(error_data, "error_propagation")
+                            except ValidationError as financial_error:
+                                self.logger.warning(f"Financial validation failed in error propagation: {financial_error}")
 
                         self.propagate_service_error(e, f"get_state:{cache_key}")
                     except Exception as propagation_error:
@@ -706,7 +685,7 @@ class StateService(BaseComponent, ErrorPropagationMixin):
                         await handler.handle_error(e, error_context)
                         self._state_metrics.failed_operations += 1
                         raise StateConsistencyError(
-                            f"State retrieval failed: {e}", error_code="STATE_000"
+                            f"State retrieval failed: {e}", error_code="STATE_700"
                         ) from e
 
     @time_execution
@@ -772,8 +751,18 @@ class StateService(BaseComponent, ErrorPropagationMixin):
                                 state_type, state_data
                             )
                             if not validation_result["is_valid"]:
-                                raise ValidationError(
+                                from src.utils.data_flow_integrity import (
+                                    StandardizedErrorPropagator,
+                                )
+                                validation_error = ValidationError(
                                     f"State validation failed: {validation_result['errors']}"
+                                )
+                                StandardizedErrorPropagator.propagate_validation_error(
+                                    validation_error,
+                                    context="state_validation",
+                                    module_source="state",
+                                    field_name=f"{state_type.value}_{state_id}",
+                                    field_value=str(validation_result["errors"])
                                 )
 
                         # Delegate ALL business processing to business service
@@ -827,7 +816,7 @@ class StateService(BaseComponent, ErrorPropagationMixin):
                         await handler.handle_error(e, error_context)
                         self._update_operation_metrics(0, False)
                         raise StateConsistencyError(
-                            f"State update failed: {e}", error_code="STATE_001"
+                            f"State update failed: {e}", error_code="STATE_701"
                         ) from e
 
     async def delete_state(
@@ -1000,7 +989,7 @@ class StateService(BaseComponent, ErrorPropagationMixin):
             Snapshot ID
         """
         try:
-            snapshot = StateSnapshot(description=description, timestamp=datetime.now(timezone.utc))
+            snapshot = RuntimeStateSnapshot(description=description, timestamp=datetime.now(timezone.utc))
 
             include_types = state_types or list(StateType)
 
@@ -1300,23 +1289,44 @@ class StateService(BaseComponent, ErrorPropagationMixin):
         )
 
     def _calculate_memory_usage(self) -> float:
-        """Calculate approximate memory usage in MB."""
-        import sys
+        """Calculate approximate memory usage in MB through service layer."""
+        try:
+            # Delegate to monitoring service if available
+            if self._business_service and hasattr(self._business_service, "calculate_memory_usage"):
+                return self._business_service.calculate_memory_usage(
+                    memory_cache=self._memory_cache,
+                    metadata_cache=self._metadata_cache
+                )
 
-        total_size = 0
-        total_size += sys.getsizeof(self._memory_cache)
-        total_size += sum(sys.getsizeof(v) for v in self._memory_cache.values())
-        total_size += sys.getsizeof(self._metadata_cache)
-        total_size += sum(sys.getsizeof(v) for v in self._metadata_cache.values())
+            # Fallback to simple calculation
+            import sys
+            total_size = 0
+            total_size += sys.getsizeof(self._memory_cache)
+            total_size += sum(sys.getsizeof(v) for v in self._memory_cache.values())
+            total_size += sys.getsizeof(self._metadata_cache)
+            total_size += sum(sys.getsizeof(v) for v in self._metadata_cache.values())
+            return total_size / (1024 * 1024)  # Convert to MB
 
-        return total_size / (1024 * 1024)  # Convert to MB
+        except Exception as e:
+            self.logger.warning(f"Memory usage calculation failed: {e}")
+            return 0.0
 
     def _matches_criteria(self, state: dict[str, Any], criteria: dict[str, Any]) -> bool:
-        """Check if state matches search criteria."""
-        for key, value in criteria.items():
-            if key not in state or state[key] != value:
-                return False
-        return True
+        """Check if state matches search criteria through service layer."""
+        try:
+            # Delegate to validation service if available for complex matching
+            if self._validation_service and hasattr(self._validation_service, "matches_criteria"):
+                return self._validation_service.matches_criteria(state, criteria)
+
+            # Fallback to simple matching
+            for key, value in criteria.items():
+                if key not in state or state[key] != value:
+                    return False
+            return True
+
+        except Exception as e:
+            self.logger.warning(f"Criteria matching failed: {e}")
+            return False
 
     async def _load_metadata_through_service(
         self, cache_key: str, state_type: StateType, state_id: str
@@ -1360,44 +1370,100 @@ class StateService(BaseComponent, ErrorPropagationMixin):
         state_data: dict[str, Any] | None,
         state_change: StateChange,
     ) -> None:
-        """Broadcast state change to subscribers using consistent event-driven pattern aligned with risk_management."""
+        """Broadcast state change to subscribers using consistent event-driven pattern aligned with core events."""
         try:
-            # Apply consistent data transformation matching capital_management patterns
+            # Apply consistent data transformation matching core events patterns exactly
             from src.utils.messaging_patterns import MessagingCoordinator, ProcessingParadigmAligner
 
             coordinator = MessagingCoordinator("StateService")
 
-            # Transform data using consistent patterns aligned with capital_management module
-            raw_event_data = {
-                "state_type": state_type.value,
-                "state_id": state_id,
-                "state_data": state_data,
-                "operation": state_change.operation.value,
-                "source_component": state_change.source_component,
-                "processing_mode": "stream",  # Align with capital_management processing
-                "message_pattern": "pub_sub",  # Consistent messaging pattern
-                "data_format": "event_data_v1",  # Match capital_management data format
-                "component": "StateService",
-                "boundary_crossed": True,  # Cross-module event
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-            }
+            # Use StateDataTransformer for consistent data transformation patterns
+            raw_event_data = StateDataTransformer.transform_state_change_to_event_data(
+                state_type=state_type,
+                state_id=state_id,
+                state_data=state_data,
+                metadata={
+                    "operation": state_change.operation.value,
+                    "source_component": state_change.source_component,
+                    "component": "StateService",
+                }
+            )
+
+            # Apply standardized financial data transformation using consistent utility
+            if state_data:
+                try:
+                    from src.utils.data_flow_integrity import DataFlowTransformer
+                    # Apply financial field transformation directly to state_data
+                    transformed_state_data = DataFlowTransformer.apply_standard_metadata(
+                        state_data.copy(), module_source="state", processing_mode="stream"
+                    )
+                    # Update raw_event_data with transformed fields
+                    for field in ["price", "quantity", "volume", "value", "amount", "balance", "cost"]:
+                        if field in transformed_state_data:
+                            raw_event_data[field] = transformed_state_data[field]
+                except Exception as e:
+                    self.logger.warning(f"Failed to apply standardized transformation: {e}")
+                    # Fallback to original transformation with consistent decimal utility
+                    from src.utils.data_flow_integrity import DataFlowTransformer
+                    try:
+                        # Handle dict-like data with standardized transformer
+                        transformed_data = state_data.copy()
+                        # Create a temporary object to use with the standardized transformer
+                        class TempDataHolder:
+                            def __init__(self, data_dict):
+                                for key, value in data_dict.items():
+                                    setattr(self, key, value)
+
+                            def __getattr__(self, name):
+                                return None
+
+                        temp_holder = TempDataHolder(transformed_data)
+                        temp_holder = DataFlowTransformer.apply_financial_field_transformation(temp_holder)
+
+                        # Extract transformed values back to dict
+                        financial_fields = ["price", "quantity", "volume", "value", "amount", "balance", "cost"]
+                        for field in financial_fields:
+                            if hasattr(temp_holder, field):
+                                transformed_data[field] = getattr(temp_holder, field)
+
+                        # Update raw_event_data
+                        for field in financial_fields:
+                            if field in transformed_data:
+                                raw_event_data[field] = transformed_data[field]
+                    except Exception as fallback_error:
+                        self.logger.warning(f"Fallback transformation also failed: {fallback_error}")
 
             # Apply processing paradigm alignment for cross-module consistency
             aligned_data = ProcessingParadigmAligner.align_processing_modes(
                 "stream", "stream", raw_event_data
             )
 
+            # Apply StateDataTransformer validation for consistent financial precision and boundary fields
+            aligned_data = StateDataTransformer.validate_financial_precision(aligned_data)
+            aligned_data = StateDataTransformer.ensure_boundary_fields(aligned_data, "state_management")
+
             # Apply consistent transformation pattern from messaging_patterns
             transformed_data = coordinator._apply_data_transformation(aligned_data)
 
-            # Apply boundary validation to ensure consistency across state-capital boundaries
+            # Apply standardized boundary validation for cross-module consistency
             try:
-                BoundaryValidator.validate_risk_to_state_boundary(transformed_data)
+                from src.utils.data_flow_integrity import DataFlowValidator
+                DataFlowValidator.validate_complete_data_flow(
+                    transformed_data,
+                    source_module="state",
+                    target_module="core",
+                    operation_type="state_event_broadcast"
+                )
             except Exception as validation_error:
-                self.logger.warning(f"State event boundary validation failed: {validation_error}")
-                # Continue with event emission despite validation failure
+                self.logger.warning(f"Standardized boundary validation failed: {validation_error}")
+                # Fallback to legacy validation
+                try:
+                    BoundaryValidator.validate_monitoring_to_error_boundary(transformed_data)
+                except Exception as legacy_error:
+                    self.logger.warning(f"Legacy boundary validation also failed: {legacy_error}")
+                # Continue with event emission despite validation failures
 
-            # Use unified event system for consistent message patterns aligned with risk_management
+            # Use unified event system for consistent message patterns aligned with core events
             await self._event_emitter.emit_async(
                 f"state.{state_type.value}.changed", transformed_data, source="StateService"
             )
@@ -1637,8 +1703,6 @@ class StateService(BaseComponent, ErrorPropagationMixin):
                 self._error_handler = container.get("ErrorHandler")
             except (DependencyError, ServiceError):
                 # Fallback to direct creation with config
-                from src.error_handling.error_handler import ErrorHandler
-
                 self._error_handler = ErrorHandler(self.config)
         return self._error_handler
 
@@ -1738,3 +1802,31 @@ class StateService(BaseComponent, ErrorPropagationMixin):
         return None
 
     # All complex business logic methods removed - delegating to service layer only
+
+    def _extract_config_dict(self, config: Config) -> dict[str, Any]:
+        """Extract config as dictionary for BaseService."""
+        if not config:
+            return {}
+
+        # Try to get config as dict
+        if hasattr(config, "dict") and callable(config.dict):
+            # Pydantic model
+            return config.dict()
+        elif hasattr(config, "__dict__"):
+            return getattr(config, "__dict__", {})
+        elif hasattr(config, "_mock_methods"):
+            # Mock object in tests
+            return {}
+        else:
+            # Fallback to safe attribute extraction
+            try:
+                return {
+                    key: getattr(config, key)
+                    for key in dir(config)
+                    if not key.startswith("_") and not callable(getattr(config, key, None))
+                }
+            except Exception as e:
+                from src.core.logging import get_logger
+                logger = get_logger(__name__)
+                logger.warning(f"Failed to extract config attributes: {e}")
+                return {}
