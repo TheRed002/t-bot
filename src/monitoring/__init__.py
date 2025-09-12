@@ -27,7 +27,7 @@ Infrastructure Layer:
 """
 
 # Core monitoring components
-from typing import Union, Optional
+from typing import Optional, Union
 
 from .alerting import (
     Alert,
@@ -284,35 +284,27 @@ def initialize_monitoring_service(
             logger = logging.getLogger(__name__)
             logger.warning(f"DI initialization failed, falling back to manual wiring: {e}")
 
-    # Fallback: Manual dependency wiring for backward compatibility
-    metrics_collector = MetricsCollector(metrics_registry)
-
-    if notification_config is None:
-        notification_config = NotificationConfig()
-    alert_manager = AlertManager(notification_config)
-
-    performance_profiler = PerformanceProfiler(
-        metrics_collector=metrics_collector,
-        alert_manager=alert_manager,
-    )
-
-    # Initialize telemetry if configured
-    if telemetry_config:
-        setup_telemetry(telemetry_config)
-
-    # Setup Prometheus server
+    # Fallback: Use factory methods to avoid direct instantiation in service layer
+    from src.monitoring.factory import create_default_monitoring_service
     try:
-        setup_prometheus_server(prometheus_port)
-    except Exception as e:
-        # Log warning but don't fail initialization
+        # Initialize telemetry if configured
+        if telemetry_config:
+            setup_telemetry(telemetry_config)
+
+        # Setup Prometheus server
+        import os
+        if not os.environ.get("TESTING"):
+            try:
+                setup_prometheus_server(prometheus_port)
+            except Exception as e:
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.warning(f"Failed to setup Prometheus server on port {prometheus_port}: {e}")
+
+        # Try to use factory method which handles proper DI
+        return create_default_monitoring_service()
+    except Exception as factory_error:
         import logging
-
         logger = logging.getLogger(__name__)
-        logger.warning(f"Failed to setup Prometheus server on port {prometheus_port}: {e}")
-
-    # Create service layer with injected dependencies
-    alert_service = DefaultAlertService(alert_manager)
-    metrics_service = DefaultMetricsService(metrics_collector)
-    performance_service = DefaultPerformanceService(performance_profiler)
-
-    return MonitoringService(alert_service, metrics_service, performance_service)
+        logger.error(f"Factory creation failed: {factory_error}")
+        raise RuntimeError("Failed to initialize monitoring service - all methods exhausted") from factory_error

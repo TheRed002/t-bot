@@ -55,9 +55,9 @@ from src.core.types import OrderType
 from src.monitoring.alerting import Alert, AlertManager, AlertSeverity, AlertStatus
 from src.monitoring.financial_precision import (
     _FINANCIAL_DECIMAL_CONTEXT,
-    safe_decimal_to_float,
 )
 from src.monitoring.metrics import MetricsCollector
+from src.utils.decimal_utils import decimal_to_float
 
 # Import utils decorators and helpers for better integration
 from src.utils.decorators import cache_result, logged, monitored, retry, time_execution
@@ -288,17 +288,9 @@ class PerformanceProfiler(BaseComponent):
         """
         super().__init__(name="PerformanceProfiler")
 
-        # Use dependency injection if available, fallback for testing
+        # Use dependency injection - don't instantiate infrastructure directly
         if metrics_collector is None:
-            try:
-                from src.monitoring.metrics import MetricsCollector
-
-                self.metrics_collector = MetricsCollector()
-            except ImportError:
-                # Create a mock metrics collector for tests
-                from unittest.mock import Mock
-
-                self.metrics_collector = Mock()
+            raise ValueError("metrics_collector is required - use dependency injection")
         else:
             self.metrics_collector = metrics_collector
         self.alert_manager = alert_manager
@@ -759,7 +751,7 @@ class PerformanceProfiler(BaseComponent):
             # Convert milliseconds to seconds with financial precision
             with localcontext(_FINANCIAL_DECIMAL_CONTEXT):
                 duration_seconds_decimal = Decimal(str(duration_ms)) / Decimal("1000")
-                duration_seconds = safe_decimal_to_float(
+                duration_seconds = decimal_to_float(
                     duration_seconds_decimal, "function_execution_latency", precision_digits=6
                 )
 
@@ -803,7 +795,7 @@ class PerformanceProfiler(BaseComponent):
             # Convert milliseconds to seconds with financial precision
             with localcontext(_FINANCIAL_DECIMAL_CONTEXT):
                 duration_seconds_decimal = Decimal(str(duration_ms)) / Decimal("1000")
-                duration_seconds = safe_decimal_to_float(
+                duration_seconds = decimal_to_float(
                     duration_seconds_decimal, "async_function_execution_latency", precision_digits=6
                 )
 
@@ -890,13 +882,12 @@ class PerformanceProfiler(BaseComponent):
 
             from src.monitoring.financial_precision import (
                 _FINANCIAL_DECIMAL_CONTEXT,
-                safe_decimal_to_float,
-            )
+                        )
 
             with localcontext(_FINANCIAL_DECIMAL_CONTEXT):
                 # latency_ms is already Decimal, no need to convert
                 latency_seconds_decimal = latency_ms / Decimal("1000")
-                latency_seconds = safe_decimal_to_float(
+                latency_seconds = decimal_to_float(
                     latency_seconds_decimal, "order_execution_latency", precision_digits=6
                 )
 
@@ -966,13 +957,12 @@ class PerformanceProfiler(BaseComponent):
 
         from src.monitoring.financial_precision import (
             _FINANCIAL_DECIMAL_CONTEXT,
-            safe_decimal_to_float,
-        )
+                )
 
         with localcontext(_FINANCIAL_DECIMAL_CONTEXT):
             # processing_time_ms is already Decimal, no need to convert
             processing_time_seconds_decimal = processing_time_ms / Decimal("1000")
-            processing_time_seconds = safe_decimal_to_float(
+            processing_time_seconds = decimal_to_float(
                 processing_time_seconds_decimal, "market_data_latency", precision_digits=6
             )
 
@@ -1011,13 +1001,12 @@ class PerformanceProfiler(BaseComponent):
 
         from src.monitoring.financial_precision import (
             _FINANCIAL_DECIMAL_CONTEXT,
-            safe_decimal_to_float,
-        )
+                )
 
         with localcontext(_FINANCIAL_DECIMAL_CONTEXT):
             # latency_ms is already Decimal, no need to convert
             latency_seconds_decimal = latency_ms / Decimal("1000")
-            latency_seconds = safe_decimal_to_float(
+            latency_seconds = decimal_to_float(
                 latency_seconds_decimal, "websocket_latency", precision_digits=6
             )
 
@@ -1059,13 +1048,12 @@ class PerformanceProfiler(BaseComponent):
 
         from src.monitoring.financial_precision import (
             _FINANCIAL_DECIMAL_CONTEXT,
-            safe_decimal_to_float,
-        )
+                )
 
         with localcontext(_FINANCIAL_DECIMAL_CONTEXT):
             # query_time_ms is already Decimal, no need to convert
             query_time_seconds_decimal = query_time_ms / Decimal("1000")
-            query_time_seconds = safe_decimal_to_float(
+            query_time_seconds = decimal_to_float(
                 query_time_seconds_decimal, "database_query_latency", precision_digits=6
             )
 
@@ -1119,13 +1107,12 @@ class PerformanceProfiler(BaseComponent):
 
         from src.monitoring.financial_precision import (
             _FINANCIAL_DECIMAL_CONTEXT,
-            safe_decimal_to_float,
-        )
+                )
 
         with localcontext(_FINANCIAL_DECIMAL_CONTEXT):
             # execution_time_ms is already Decimal, no need to convert
             execution_time_seconds_decimal = execution_time_ms / Decimal("1000")
-            execution_time_seconds = safe_decimal_to_float(
+            execution_time_seconds = decimal_to_float(
                 execution_time_seconds_decimal, "strategy_execution_latency", precision_digits=6
             )
 

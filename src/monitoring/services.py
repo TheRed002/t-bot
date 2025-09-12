@@ -8,14 +8,14 @@ providing a clean interface between controllers and domain logic.
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import TYPE_CHECKING, Any, Union
+from typing import TYPE_CHECKING, Any
 
 from src.core.base.service import BaseService
-from src.core.exceptions import ComponentError, DataValidationError, ValidationError
-from src.core.types import OrderType
+from src.core.exceptions import ComponentError, ValidationError
+from src.core.types import AlertSeverity, OrderType
 
 if TYPE_CHECKING:
-    from src.monitoring.alerting import Alert, AlertManager, AlertSeverity
+    from src.monitoring.alerting import Alert, AlertManager
     from src.monitoring.dashboards import Dashboard, GrafanaDashboardManager
     from src.monitoring.interfaces import (
         AlertServiceInterface,
@@ -41,6 +41,7 @@ else:
         MetricsServiceInterface,
         PerformanceServiceInterface,
     )
+from src.monitoring.data_transformer import MonitoringDataTransformer
 from src.utils.messaging_patterns import (
     BoundaryValidator,
     ErrorPropagationMixin,
@@ -55,7 +56,7 @@ class AlertRequest:
     """Request to create an alert."""
 
     rule_name: str
-    severity: "AlertSeverity"
+    severity: AlertSeverity
     message: str
     labels: dict[str, str]
     annotations: dict[str, str]
@@ -96,10 +97,24 @@ class DefaultAlertService(BaseService, AlertServiceInterface, ErrorPropagationMi
             )
 
         # Apply consistent data transformation patterns after validation
-        transformed_request = self._transform_alert_request_data(request)
+        request_data = {
+            "rule_name": request.rule_name,
+            "severity": request.severity.value,
+            "message": request.message,
+            "labels": request.labels,
+            "annotations": request.annotations,
+        }
+        transformed_data = MonitoringDataTransformer.transform_for_pub_sub("alert_create", request_data)
+        transformed_request = AlertRequest(
+            rule_name=transformed_data["rule_name"],
+            severity=request.severity,
+            message=transformed_data["message"],
+            labels=transformed_data["labels"],
+            annotations=transformed_data["annotations"],
+        )
 
         if not isinstance(transformed_request.rule_name, str):
-            raise DataValidationError(
+            raise ValidationError(
                 "Invalid rule_name parameter",
                 field_name="rule_name",
                 field_value=transformed_request.rule_name,
@@ -123,10 +138,7 @@ class DefaultAlertService(BaseService, AlertServiceInterface, ErrorPropagationMi
             return alert.fingerprint
         except Exception as e:
             # Check if it's a validation error and propagate accordingly
-            if hasattr(e, "__class__") and (
-                "ValidationError" in e.__class__.__name__
-                or "DataValidationError" in e.__class__.__name__
-            ):
+            if hasattr(e, "__class__") and "ValidationError" in e.__class__.__name__:
                 # Apply consistent error propagation - re-raise validation errors
                 self.propagate_validation_error(e, "AlertService.create_alert")
                 return  # propagate_validation_error should raise, but add explicit return for safety
@@ -139,8 +151,8 @@ class DefaultAlertService(BaseService, AlertServiceInterface, ErrorPropagationMi
                 details={
                     "rule_name": transformed_request.rule_name,
                     "severity": transformed_request.severity.value,
-                    "processing_mode": "async",
-                    "data_format": "alert_request_v1",
+                    "processing_mode": "stream",
+                    "data_format": "bot_event_v1",
                 },
             )
             raise ComponentError(
@@ -159,7 +171,7 @@ class DefaultAlertService(BaseService, AlertServiceInterface, ErrorPropagationMi
         """Acknowledge an alert."""
         return await self._alert_manager.acknowledge_alert(fingerprint, acknowledged_by)
 
-    def get_active_alerts(self, severity: Union["AlertSeverity", None] = None) -> list["Alert"]:
+    def get_active_alerts(self, severity: AlertSeverity | None = None) -> list["Alert"]:
         """Get active alerts."""
         return self._alert_manager.get_active_alerts(severity)
 
@@ -176,14 +188,19 @@ class DefaultAlertService(BaseService, AlertServiceInterface, ErrorPropagationMi
         self._alert_manager.add_escalation_policy(policy)
 
     async def handle_error_event_from_error_handling(self, error_data: dict[str, Any]) -> str:
-        """Handle error event from error_handling module with boundary validation."""
+        """Handle error event from error_handling module with consistent async message pattern."""
+        # Apply consistent data transformation before validation using MonitoringDataTransformer
+        transformed_error_data = MonitoringDataTransformer.apply_cross_module_validation(
+            error_data, source_module="error_handling", target_module="monitoring"
+        )
+
         # Validate data at error_handling -> monitoring boundary
-        BoundaryValidator.validate_error_to_monitoring_boundary(error_data)
+        BoundaryValidator.validate_error_to_monitoring_boundary(transformed_error_data)
 
-        # Create alert request from error data
-        from src.monitoring.alerting import AlertSeverity
+        # Create alert request from error data with consistent processing mode
+        # Use consistent AlertSeverity from core types
 
-        # Map severity string to enum
+        # Map severity string to enum using consistent core types
         severity_mapping = {
             "low": AlertSeverity.INFO,
             "medium": AlertSeverity.MEDIUM,
@@ -191,26 +208,75 @@ class DefaultAlertService(BaseService, AlertServiceInterface, ErrorPropagationMi
             "critical": AlertSeverity.CRITICAL,
         }
 
-        severity = severity_mapping.get(error_data.get("severity", "medium"), AlertSeverity.MEDIUM)
+        severity = severity_mapping.get(transformed_error_data.get("severity", "medium"), AlertSeverity.MEDIUM)
 
         alert_request = AlertRequest(
-            rule_name=f"error_handling_{error_data.get('error_id', 'unknown')}",
+            rule_name=f"error_handling_{transformed_error_data.get('error_id', 'unknown')}",
             severity=severity,
-            message=f"Error pattern detected in {error_data.get('component', 'unknown')}",
+            message=f"Error pattern detected in {transformed_error_data.get('component', 'unknown')}",
             labels={
                 "source": "error_handling",
-                "component": error_data.get("component", "unknown"),
-                "error_id": error_data.get("error_id", "unknown"),
-                "processing_mode": "async",
+                "component": transformed_error_data.get("component", "unknown"),
+                "error_id": transformed_error_data.get("error_id", "unknown"),
+                "processing_mode": transformed_error_data.get("processing_mode", "stream"),
+                "message_pattern": "pub_sub",  # Consistent pub/sub pattern
             },
             annotations={
-                "recovery_success": str(error_data.get("recovery_success", False)),
-                "operation": error_data.get("operation", "unknown"),
-                "processed_at": error_data.get("timestamp", datetime.now(timezone.utc).isoformat()),
+                "recovery_success": str(transformed_error_data.get("recovery_success", False)),
+                "operation": transformed_error_data.get("operation", "unknown"),
+                "processed_at": transformed_error_data.get("timestamp", datetime.now(timezone.utc).isoformat()),
+                "data_format": transformed_error_data.get("data_format", "bot_event_v1"),
+                "pub_sub_processed": "true",  # Mark as pub/sub processed
             },
         )
 
         return await self.create_alert(alert_request)
+
+    async def handle_batch_error_events_from_error_handling(
+        self, error_events: list[dict[str, Any]]
+    ) -> list[str]:
+        """Handle multiple error events in batch for consistent processing paradigm."""
+        if not error_events:
+            return []
+
+        # Process each error event asynchronously for message pattern consistency
+        import asyncio
+        tasks = [
+            self.handle_error_event_from_error_handling(error_data)
+            for error_data in error_events
+        ]
+
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # Convert exceptions to error strings for consistent return format
+        alert_ids = []
+        for result in results:
+            if isinstance(result, Exception):
+                self.logger.error(f"Failed to process batch error event: {result}")
+                alert_ids.append(f"error_{str(result)[:50]}")
+            else:
+                alert_ids.append(result)
+
+        return alert_ids
+
+    def _transform_error_event_data(self, error_data: dict[str, Any]) -> dict[str, Any]:
+        """Transform error event data for consistent monitoring processing."""
+        transformed_data = error_data.copy()
+
+        # Apply consistent processing metadata
+        if "processing_mode" not in transformed_data:
+            transformed_data["processing_mode"] = "stream"  # Default to stream
+
+        if "message_pattern" not in transformed_data:
+            transformed_data["message_pattern"] = "pub_sub"  # Consistent pub/sub pattern
+
+        if "data_format" not in transformed_data:
+            transformed_data["data_format"] = "bot_event_v1"
+
+        if "timestamp" not in transformed_data:
+            transformed_data["timestamp"] = datetime.now(timezone.utc).isoformat()
+
+        return transformed_data
 
     def _transform_alert_request_data(self, request: AlertRequest) -> AlertRequest:
         """Transform alert request data consistently across operations."""
@@ -263,9 +329,30 @@ class DefaultMetricsService(BaseService, MetricsServiceInterface, ErrorPropagati
                 field_value=type(request).__name__,
                 expected_type="MetricRequest",
             )
+        
+        # Validate value type before transformation
+        if not isinstance(request.value, (int, float, Decimal)):
+            raise ValidationError(
+                "Invalid value parameter",
+                field_name="value",
+                field_value=request.value,
+                expected_type="number",
+            )
 
         # Apply consistent data transformation patterns after validation
-        transformed_request = self._transform_metric_request_data(request)
+        metric_data = {
+            "name": request.name,
+            "value": str(request.value),
+            "labels": request.labels,
+            "namespace": request.namespace,
+        }
+        transformed_data = MonitoringDataTransformer.transform_for_pub_sub("metric_counter", metric_data)
+        transformed_request = MetricRequest(
+            name=transformed_data["name"],
+            value=request.value,
+            labels=transformed_data["labels"],
+            namespace=transformed_data["namespace"],
+        )
 
         if not isinstance(transformed_request.name, str):
             raise ValidationError(
@@ -306,10 +393,7 @@ class DefaultMetricsService(BaseService, MetricsServiceInterface, ErrorPropagati
             )
         except Exception as e:
             # Check if it's a validation error and propagate accordingly
-            if hasattr(e, "__class__") and (
-                "ValidationError" in e.__class__.__name__
-                or "DataValidationError" in e.__class__.__name__
-            ):
+            if hasattr(e, "__class__") and "ValidationError" in e.__class__.__name__:
                 # Apply consistent error propagation - re-raise validation errors
                 self.propagate_validation_error(e, "MetricsService.record_counter")
                 return  # propagate_validation_error should raise, but add explicit return for safety
@@ -323,15 +407,27 @@ class DefaultMetricsService(BaseService, MetricsServiceInterface, ErrorPropagati
                     "metric_name": transformed_request.name,
                     "metric_value": transformed_request.value,
                     "namespace": transformed_request.namespace,
-                    "processing_mode": "sync",
-                    "data_format": "metric_request_v1",
+                    "processing_mode": "stream",
+                    "data_format": "bot_event_v1",
                 },
             ) from e
 
     def record_gauge(self, request: MetricRequest) -> None:
         """Record a gauge metric."""
-        # Apply consistent data transformation patterns
-        transformed_request = self._transform_metric_request_data(request)
+        # Apply consistent data transformation patterns using MonitoringDataTransformer
+        metric_data = {
+            "name": request.name,
+            "value": str(request.value),
+            "labels": request.labels,
+            "namespace": request.namespace,
+        }
+        transformed_data = MonitoringDataTransformer.transform_for_pub_sub("metric_gauge", metric_data)
+        transformed_request = MetricRequest(
+            name=transformed_data["name"],
+            value=request.value,
+            labels=transformed_data["labels"],
+            namespace=transformed_data["namespace"],
+        )
 
         try:
             # Convert Decimal to float for metrics collector
@@ -348,10 +444,7 @@ class DefaultMetricsService(BaseService, MetricsServiceInterface, ErrorPropagati
             )
         except Exception as e:
             # Check if it's a validation error and propagate accordingly
-            if hasattr(e, "__class__") and (
-                "ValidationError" in e.__class__.__name__
-                or "DataValidationError" in e.__class__.__name__
-            ):
+            if hasattr(e, "__class__") and "ValidationError" in e.__class__.__name__:
                 # Apply consistent error propagation - re-raise validation errors
                 self.propagate_validation_error(e, "MetricsService.record_gauge")
                 return  # propagate_validation_error should raise, but add explicit return for safety
@@ -363,15 +456,27 @@ class DefaultMetricsService(BaseService, MetricsServiceInterface, ErrorPropagati
                 operation="record_gauge",
                 details={
                     "metric_name": transformed_request.name,
-                    "processing_mode": "sync",
-                    "data_format": "metric_request_v1",
+                    "processing_mode": "stream",
+                    "data_format": "bot_event_v1",
                 },
             ) from e
 
     def record_histogram(self, request: MetricRequest) -> None:
         """Record a histogram metric."""
-        # Apply consistent data transformation patterns
-        transformed_request = self._transform_metric_request_data(request)
+        # Apply consistent data transformation patterns using MonitoringDataTransformer
+        metric_data = {
+            "name": request.name,
+            "value": str(request.value),
+            "labels": request.labels,
+            "namespace": request.namespace,
+        }
+        transformed_data = MonitoringDataTransformer.transform_for_pub_sub("metric_gauge", metric_data)
+        transformed_request = MetricRequest(
+            name=transformed_data["name"],
+            value=request.value,
+            labels=transformed_data["labels"],
+            namespace=transformed_data["namespace"],
+        )
 
         try:
             # Convert Decimal to float for metrics collector
@@ -388,10 +493,7 @@ class DefaultMetricsService(BaseService, MetricsServiceInterface, ErrorPropagati
             )
         except Exception as e:
             # Check if it's a validation error and propagate accordingly
-            if hasattr(e, "__class__") and (
-                "ValidationError" in e.__class__.__name__
-                or "DataValidationError" in e.__class__.__name__
-            ):
+            if hasattr(e, "__class__") and "ValidationError" in e.__class__.__name__:
                 # Apply consistent error propagation - re-raise validation errors
                 self.propagate_validation_error(e, "MetricsService.record_histogram")
                 return  # propagate_validation_error should raise, but add explicit return for safety
@@ -403,8 +505,8 @@ class DefaultMetricsService(BaseService, MetricsServiceInterface, ErrorPropagati
                 operation="record_histogram",
                 details={
                     "metric_name": transformed_request.name,
-                    "processing_mode": "sync",
-                    "data_format": "metric_request_v1",
+                    "processing_mode": "stream",
+                    "data_format": "bot_event_v1",
                 },
             ) from e
 
@@ -426,31 +528,13 @@ class DefaultMetricsService(BaseService, MetricsServiceInterface, ErrorPropagati
                 "severity": error_data.get("severity", "medium"),
                 "error_id": error_data.get("error_id", "unknown"),
                 "source": "error_handling",
-                "processing_mode": "async",
+                "processing_mode": error_data.get("processing_mode", "stream"),
             },
             namespace="error_handling",
         )
 
         self.record_counter(metric_request)
 
-    def _transform_metric_request_data(self, request: MetricRequest) -> MetricRequest:
-        """Transform metric request data consistently across operations."""
-        # Apply minimal transformation to preserve existing behavior
-        # Only transform financial values where needed
-        transformed_value = request.value
-        if isinstance(request.value, (float, int)) and (
-            "price" in request.name.lower() or "quantity" in request.name.lower()
-        ):
-            from src.utils.decimal_utils import to_decimal
-
-            transformed_value = to_decimal(str(request.value))
-
-        return MetricRequest(
-            name=request.name,
-            value=transformed_value,
-            labels=request.labels,  # Keep original labels unchanged
-            namespace=request.namespace,
-        )
 
 
 class DefaultPerformanceService(BaseService, PerformanceServiceInterface, ErrorPropagationMixin):
@@ -477,9 +561,16 @@ class DefaultPerformanceService(BaseService, PerformanceServiceInterface, ErrorP
     ) -> None:
         """Record order execution metrics."""
         # Apply consistent data transformation patterns for financial data
-        transformed_data = self._transform_order_execution_data(
-            exchange, order_type, symbol, latency_ms, fill_rate, slippage_bps
-        )
+        performance_data = {
+            "exchange": exchange,
+            "symbol": symbol,
+            "operation": "order_execution",
+            "latency_ms": str(latency_ms),
+            "order_type": order_type,
+            "fill_rate": str(fill_rate),
+            "slippage_bps": str(slippage_bps),
+        }
+        transformed_data = MonitoringDataTransformer.transform_for_pub_sub("performance_execution", performance_data)
 
         # Validate input parameters using consistent core validation patterns
 
@@ -499,10 +590,21 @@ class DefaultPerformanceService(BaseService, PerformanceServiceInterface, ErrorP
                 expected_type="str",
             )
 
-        if (
-            not isinstance(transformed_data["latency_ms"], (int, float, Decimal))
-            or transformed_data["latency_ms"] < 0
-        ):
+        # Convert string back to number for validation if needed
+        try:
+            if isinstance(transformed_data["latency_ms"], str):
+                latency_val = float(transformed_data["latency_ms"])
+            else:
+                latency_val = transformed_data["latency_ms"]
+            
+            if latency_val < 0:
+                raise ValidationError(
+                    "Invalid latency_ms parameter",
+                    field_name="latency_ms",
+                    field_value=transformed_data["latency_ms"],
+                    validation_rule="must be non-negative number",
+                )
+        except (ValueError, TypeError):
             raise ValidationError(
                 "Invalid latency_ms parameter",
                 field_name="latency_ms",
@@ -568,8 +670,8 @@ class DefaultPerformanceService(BaseService, PerformanceServiceInterface, ErrorP
                 details={
                     "exchange": transformed_data["exchange"],
                     "symbol": transformed_data["symbol"],
-                    "processing_mode": "sync",
-                    "data_format": "order_execution_v1",
+                    "processing_mode": "stream",
+                    "data_format": "bot_event_v1",
                 },
             ) from e
 
@@ -593,35 +695,6 @@ class DefaultPerformanceService(BaseService, PerformanceServiceInterface, ErrorP
         """Get system resource statistics."""
         return self._performance_profiler.get_system_resource_stats()
 
-    def _transform_order_execution_data(
-        self,
-        exchange: str,
-        order_type: str,
-        symbol: str,
-        latency_ms: Decimal,
-        fill_rate: Decimal,
-        slippage_bps: Decimal,
-    ) -> dict[str, Any]:
-        """Transform order execution data consistently across operations."""
-        # Apply consistent data transformation patterns matching database module
-
-        # Apply consistent Decimal transformation for financial data
-        from src.utils.decimal_utils import to_decimal
-
-        transformed_fill_rate = to_decimal(str(fill_rate))
-        transformed_slippage_bps = to_decimal(str(slippage_bps))
-
-        return {
-            "exchange": exchange,
-            "order_type": order_type,
-            "symbol": symbol,
-            "latency_ms": float(latency_ms),
-            "fill_rate": float(transformed_fill_rate),
-            "slippage_bps": float(transformed_slippage_bps),
-            "processing_mode": "sync",
-            "data_format": "order_execution_v1",
-            "processed_at": datetime.now(timezone.utc).isoformat(),
-        }
 
 
 class DefaultDashboardService(BaseService, DashboardServiceInterface):

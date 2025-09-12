@@ -685,7 +685,7 @@ def setup_telemetry(config: OpenTelemetryConfig) -> TradingTracer:
 
         logger.error(f"Failed to setup OpenTelemetry: {main_exception}")
         raise MonitoringError(
-            f"Failed to setup OpenTelemetry: {main_exception}", error_code="MON_1005"
+            f"Failed to setup OpenTelemetry: {main_exception}", error_code="MON_1001"
         ) from main_exception
 
 

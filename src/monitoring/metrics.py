@@ -101,9 +101,9 @@ from src.monitoring.config import (
 )
 from src.monitoring.financial_precision import (
     FINANCIAL_CONTEXT,
-    safe_decimal_to_float,
     validate_financial_range,
 )
+from src.utils.decimal_utils import decimal_to_float
 from src.utils.decorators import cache_result, logged, monitored, retry
 
 # Skip prometheus imports during testing to avoid potential blocking
@@ -462,7 +462,7 @@ class MetricsCollector(BaseComponent):
                 else:
                     raise MonitoringError(
                         f"Unknown metric type: {metric_type_str}",
-                        error_code="MON_1002",
+                        error_code="MON_1001",
                     )
 
                 self._metrics[full_name] = new_metric
@@ -848,166 +848,21 @@ class MetricsCollector(BaseComponent):
 
     async def _collect_system_metrics(self) -> None:
         """
-        Collect system-level metrics using shared utilities.
+        Infrastructure method that delegates system metrics collection to service layer.
+        This method should only handle infrastructure concerns, not business logic.
         """
-        from src.utils.monitoring_helpers import SystemMetricsCollector, generate_correlation_id
-
-        correlation_id = generate_correlation_id()
-
-        try:
-            # Use shared system metrics collector to eliminate duplication
-            metrics = await SystemMetricsCollector.collect_system_metrics()
-
-            if not metrics:
-                self.logger.warning(f"No system metrics collected [correlation: {correlation_id}]")
-                return
-
-            # Update metrics using shared utilities for consistent precision handling
-            from decimal import Decimal
-
-            from src.monitoring.financial_precision import safe_decimal_to_float
-
-            # Set metrics with proper precision handling
-            self.set_gauge(
-                "system_cpu_usage_percent",
-                safe_decimal_to_float(
-                    Decimal(str(metrics.get("cpu_percent", 0))),
-                    "system_cpu_usage_percent",
-                    precision_digits=2,
-                ),
-            )
-
-            if "memory_used" in metrics:
-                self.set_gauge(
-                    "system_memory_usage_bytes",
-                    safe_decimal_to_float(
-                        Decimal(str(metrics["memory_used"])),
-                        "system_memory_usage_bytes",
-                        precision_digits=0,
-                    ),
-                )
-                self.set_gauge(
-                    "system_memory_total_bytes",
-                    safe_decimal_to_float(
-                        Decimal(str(metrics["memory_total"])),
-                        "system_memory_total_bytes",
-                        precision_digits=0,
-                    ),
-                )
-                self.set_gauge(
-                    "system_memory_usage_percent",
-                    safe_decimal_to_float(
-                        Decimal(str(metrics["memory_percent"])),
-                        "system_memory_usage_percent",
-                        precision_digits=2,
-                    ),
-                )
-
-            if "network_bytes_sent" in metrics:
+        # This is infrastructure code - delegate to service layer for business logic
+        if hasattr(self, "system_metrics") and self.system_metrics:
+            try:
+                # Delegate to SystemMetrics service for actual collection logic
+                await self.system_metrics.collect_and_record_system_metrics()
+            except Exception as e:
+                self.logger.error(f"Failed to collect system metrics via service layer: {e}")
+                # Record collection failure
                 self.increment_counter(
-                    "system_network_bytes_sent_total", value=metrics["network_bytes_sent"]
+                    "system_metrics_collection_errors_total",
+                    labels={"error_type": type(e).__name__}
                 )
-                self.increment_counter(
-                    "system_network_bytes_recv_total", value=metrics["network_bytes_recv"]
-                )
-
-            self.logger.debug(
-                f"System metrics collected successfully [correlation: {correlation_id}]"
-            )
-
-        except Exception as e:
-            # Create enhanced error context with correlation ID
-            context = ErrorContext.from_exception(
-                error=e,
-                component="MetricsCollector",
-                operation="collect_system_metrics",
-                severity=ErrorSeverity.HIGH,  # System metrics failure is serious
-                correlation_id=correlation_id,
-                details={
-                    "prometheus_available": PROMETHEUS_AVAILABLE,
-                    "metrics_count": len(self._metrics),
-                    "error_handler_available": self._error_handler is not None,
-                },
-            )
-
-            # Record metrics collection failure
-            self.increment_counter(
-                "system_metrics_collection_errors_total",
-                labels={"error_type": type(e).__name__, "correlation_id": correlation_id},
-            )
-
-            # Enhanced error handling with consistent patterns across modules
-            handler_success = False
-            handler_error = None
-
-            if self._error_handler:
-                try:
-                    # Use consistent async error handling pattern
-                    if hasattr(self._error_handler, "handle_error"):
-                        await self._error_handler.handle_error(e, context)
-                        handler_success = True
-                    elif hasattr(self._error_handler, "handle_error_sync"):
-                        # Don't await sync methods
-                        self._error_handler.handle_error_sync(e, context)
-                        handler_success = True
-                    else:
-                        # Use core exception types for consistent error propagation
-                        from src.core.exceptions import ComponentError
-
-                        error_msg = (
-                            f"Error handler has no valid methods. Correlation: {correlation_id}"
-                        )
-                        self.logger.error(error_msg)
-                        raise ComponentError(
-                            error_msg,
-                            component_name="MetricsCollector",
-                            operation="collect_system_metrics",
-                            details={
-                                "correlation_id": correlation_id,
-                                "error_handler_type": type(self._error_handler).__name__,
-                            },
-                        )
-
-                except Exception as he:
-                    handler_error = he
-                    self.logger.error(
-                        f"Error handler failed with {type(he).__name__}: {he}. "
-                        f"Original error: {type(e).__name__}: {e}. Correlation: {correlation_id}"
-                    )
-
-            else:
-                error_msg = f"No error handler available for metrics collection error. Correlation: {correlation_id}"
-                self.logger.error(error_msg)
-
-            # Critical: Don't silently continue if system metrics collection fails repeatedly
-            if not handler_success:
-                # For critical system monitoring failures, escalate using consistent patterns
-                if isinstance(e, (MemoryError, OSError)) or "disk" in str(e).lower():
-                    from src.core.exceptions import ComponentError
-
-                    critical_error = ComponentError(
-                        f"Critical system metrics collection failure: {e}",
-                        component_name="MetricsCollector",
-                        operation="collect_system_metrics",
-                        details={
-                            "correlation_id": correlation_id,
-                            "error_type": type(e).__name__,
-                            "is_critical": True,
-                            "handler_available": self._error_handler is not None,
-                            "handler_success": handler_success,
-                        },
-                    )
-                    # Chain original exception and handler error for full context
-                    critical_error.__cause__ = e
-                    if handler_error:
-                        critical_error.__context__ = handler_error
-                    raise critical_error
-
-            # Log warning for non-critical failures but don't stop execution
-            self.logger.warning(
-                f"System metrics collection failed but continuing. "
-                f"Error: {type(e).__name__}: {e}. Correlation: {correlation_id}"
-            )
 
     @cache_result(ttl=5)
     @monitored()
@@ -1530,8 +1385,8 @@ class TradingMetrics(BaseComponent):
         )
 
         # Convert to float with precision tracking
-        pnl_float = safe_decimal_to_float(pnl_decimal, "trades_pnl_usd", precision_digits=8)
-        volume_float = safe_decimal_to_float(
+        pnl_float = decimal_to_float(pnl_decimal)
+        volume_float = decimal_to_float(
             volume_decimal, "trades_volume_usd", precision_digits=8
         )
 
@@ -1577,8 +1432,8 @@ class TradingMetrics(BaseComponent):
         )
 
         # Convert to float with precision tracking
-        value_float = safe_decimal_to_float(value_usd, "portfolio_value_usd", precision_digits=2)
-        pnl_float = safe_decimal_to_float(pnl_usd, "portfolio_pnl_usd", precision_digits=2)
+        value_float = decimal_to_float(value_usd)
+        pnl_float = decimal_to_float(pnl_usd)
 
         # Validate timeframe
         valid_timeframes = ["1m", "5m", "15m", "1h", "4h", "1d", "1w", "1M"]
@@ -1618,7 +1473,7 @@ class TradingMetrics(BaseComponent):
                 pnl_decimal_calc = Decimal(str(pnl_float))
                 pnl_percentage_decimal = (pnl_decimal_calc / value_decimal) * Decimal("100")
 
-            pnl_pct = safe_decimal_to_float(
+            pnl_pct = decimal_to_float(
                 pnl_percentage_decimal, "portfolio_pnl_percent", precision_digits=4
             )
             self._collector.set_gauge(
@@ -1700,7 +1555,7 @@ class TradingMetrics(BaseComponent):
         with localcontext(FINANCIAL_CONTEXT):
             latency_decimal = Decimal(str(latency))
             latency_seconds_decimal = latency_decimal / Decimal("1000")
-            latency_seconds = safe_decimal_to_float(
+            latency_seconds = decimal_to_float(
                 latency_seconds_decimal, "order_execution_latency", precision_digits=6
             )
 
@@ -1811,6 +1666,75 @@ class SystemMetrics(BaseComponent):
         """
         labels = {"mount_point": mount_point}
         self._collector.set_gauge("system_disk_usage_percent", usage_percent, labels)
+
+    async def collect_and_record_system_metrics(self) -> None:
+        """
+        Business logic for collecting system metrics - moved from MetricsCollector.
+        This is where the business logic belongs in the service layer.
+        """
+        from src.utils.monitoring_helpers import SystemMetricsCollector, generate_correlation_id
+
+        correlation_id = generate_correlation_id()
+
+        try:
+            # Use shared system metrics collector to eliminate duplication
+            metrics = await SystemMetricsCollector.collect_system_metrics()
+
+            if not metrics:
+                self.logger.warning(f"No system metrics collected [correlation: {correlation_id}]")
+                return
+
+            # Update metrics using shared utilities for consistent precision handling
+            from decimal import Decimal
+
+
+            # Record CPU usage
+            if "cpu_percent" in metrics:
+                self.record_cpu_usage(
+                    decimal_to_float(
+                        Decimal(str(metrics.get("cpu_percent", 0))),
+                        "system_cpu_usage_percent",
+                        precision_digits=2,
+                    )
+                )
+
+            # Record memory usage
+            if "memory_used" in metrics and "memory_total" in metrics:
+                self.record_memory_usage(
+                    decimal_to_float(
+                        Decimal(str(metrics["memory_used"])),
+                        "system_memory_usage_mb",
+                        precision_digits=0,
+                    ) / (1024 * 1024),  # Convert bytes to MB
+                    decimal_to_float(
+                        Decimal(str(metrics["memory_total"])),
+                        "system_memory_total_mb",
+                        precision_digits=0,
+                    ) / (1024 * 1024),  # Convert bytes to MB
+                )
+
+            # Record network I/O
+            if "network_bytes_sent" in metrics and "network_bytes_recv" in metrics:
+                self.record_network_io(
+                    metrics["network_bytes_sent"],
+                    metrics["network_bytes_recv"]
+                )
+
+            self.logger.debug(
+                f"System metrics collected successfully [correlation: {correlation_id}]"
+            )
+
+        except Exception as e:
+            self.logger.error(
+                f"Failed to collect system metrics: {type(e).__name__}: {e}. "
+                f"Correlation: {correlation_id}"
+            )
+            # Record collection failure
+            self._collector.increment_counter(
+                "system_metrics_collection_errors_total",
+                labels={"error_type": type(e).__name__, "correlation_id": correlation_id},
+            )
+            raise
 
 
 class ExchangeMetrics(BaseComponent):
@@ -2091,7 +2015,7 @@ class ExchangeMetrics(BaseComponent):
         with localcontext(FINANCIAL_CONTEXT):
             latency_decimal = Decimal(str(latency))
             latency_seconds_decimal = latency_decimal / Decimal("1000")
-            latency_seconds = safe_decimal_to_float(
+            latency_seconds = decimal_to_float(
                 latency_seconds_decimal, "exchange_order_latency", precision_digits=6
             )
 

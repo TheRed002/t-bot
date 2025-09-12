@@ -9,8 +9,10 @@ from abc import ABC, abstractmethod
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Optional
 
+from src.core.types import AlertSeverity
+
 if TYPE_CHECKING:
-    from src.monitoring.alerting import Alert, AlertRule, AlertSeverity, EscalationPolicy
+    from src.monitoring.alerting import Alert, AlertRule, EscalationPolicy
     from src.monitoring.dashboards import Dashboard
     from src.monitoring.performance import LatencyStats, SystemResourceStats
     from src.monitoring.services import AlertRequest, MetricRequest
@@ -54,7 +56,7 @@ class AlertServiceInterface(ABC):
         pass
 
     @abstractmethod
-    def get_active_alerts(self, severity: Optional["AlertSeverity"] = None) -> list["Alert"]:
+    def get_active_alerts(self, severity: AlertSeverity | None = None) -> list["Alert"]:
         """Get active alerts."""
         pass
 
