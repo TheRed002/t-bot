@@ -17,6 +17,7 @@ Version: 2.0.0 - Refactored for service layer
 """
 
 from datetime import datetime, timezone
+from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
 from src.core.base.component import BaseComponent
@@ -530,11 +531,11 @@ class CostAnalyzer(BaseComponent):
         return recommendations
 
     def _calculate_volume_participation(
-        self, filled_quantity: float, market_data: MarketData
-    ) -> float:
+        self, filled_quantity: Decimal, market_data: MarketData
+    ) -> Decimal:
         """Calculate volume participation rate."""
         if not market_data.volume or market_data.volume == 0:
-            return 0.0
+            return Decimal("0.0")
 
         return filled_quantity / market_data.volume
 

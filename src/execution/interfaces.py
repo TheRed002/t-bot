@@ -6,6 +6,7 @@ providing clear contracts for all service operations.
 """
 
 from abc import ABC, abstractmethod
+from decimal import Decimal
 from typing import Any, Protocol
 
 from src.core.types import (
@@ -14,6 +15,7 @@ from src.core.types import (
     MarketData,
     OrderRequest,
     OrderStatus,
+    Signal,
 )
 from src.execution.types import ExecutionInstruction
 
@@ -43,6 +45,16 @@ class ExecutionServiceInterface(Protocol):
         """Comprehensive order validation before execution."""
         ...
 
+    async def validate_order_pre_execution_from_data(
+        self,
+        order_data: dict[str, Any],
+        market_data: dict[str, Any],
+        bot_id: str | None = None,
+        risk_context: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Validate order from raw data dictionaries."""
+        ...
+
     async def get_execution_metrics(
         self,
         bot_id: str | None = None,
@@ -50,6 +62,19 @@ class ExecutionServiceInterface(Protocol):
         time_range_hours: int = 24,
     ) -> dict[str, Any]:
         """Get comprehensive execution metrics."""
+        ...
+
+    async def start(self) -> None:
+        """Start the execution service."""
+        ...
+
+    async def stop(self) -> None:
+        """Stop the execution service."""
+        ...
+
+    @property
+    def is_running(self) -> bool:
+        """Check if service is running."""
         ...
 
 
@@ -75,11 +100,7 @@ class OrderManagementServiceInterface(Protocol):
         """Update order status."""
         ...
 
-    async def cancel_order(
-        self,
-        order_id: str,
-        reason: str = "manual"
-    ) -> bool:
+    async def cancel_order(self, order_id: str, reason: str = "manual") -> bool:
         """Cancel a managed order."""
         ...
 
@@ -109,10 +130,7 @@ class ExecutionEngineServiceInterface(Protocol):
         """Get currently active executions."""
         ...
 
-    async def cancel_execution(
-        self,
-        execution_id: str
-    ) -> bool:
+    async def cancel_execution(self, execution_id: str) -> bool:
         """Cancel an active execution."""
         ...
 
@@ -139,6 +157,40 @@ class RiskValidationServiceInterface(Protocol):
         current_positions: dict[str, Any] | None = None,
     ) -> bool:
         """Check if order violates position limits."""
+        ...
+
+
+class RiskServiceInterface(Protocol):
+    """Interface for risk service operations used by execution module."""
+
+    async def validate_signal(self, signal: Signal) -> bool:
+        """Validate a trading signal."""
+        ...
+
+    async def validate_order(self, order: OrderRequest) -> bool:
+        """Validate an order request."""
+        ...
+
+    async def calculate_position_size(
+        self,
+        signal: Signal,
+        available_capital: Decimal,
+        current_price: Decimal,
+        method: Any = None,
+    ) -> Decimal:
+        """Calculate recommended position size."""
+        ...
+
+    async def calculate_risk_metrics(
+        self,
+        positions: list[Any],
+        market_data: list[Any],
+    ) -> dict[str, Any]:
+        """Calculate risk metrics."""
+        ...
+
+    async def get_risk_summary(self) -> dict[str, Any]:
+        """Get risk summary."""
         ...
 
 
@@ -189,4 +241,93 @@ class ExecutionAlgorithmInterface(ABC):
     @abstractmethod
     def get_algorithm_type(self) -> ExecutionAlgorithm:
         """Get the algorithm type."""
+        ...
+
+
+class ExecutionOrchestrationServiceInterface(Protocol):
+    """Interface for execution orchestration service operations."""
+
+    async def execute_order(
+        self,
+        order: OrderRequest,
+        market_data: MarketData,
+        bot_id: str | None = None,
+        strategy_name: str | None = None,
+        execution_params: dict[str, Any] | None = None,
+    ) -> ExecutionResult:
+        """Execute an order through the orchestration layer."""
+        ...
+
+    async def execute_order_from_data(
+        self,
+        order_data: dict[str, Any],
+        market_data: dict[str, Any],
+        bot_id: str | None = None,
+        strategy_name: str | None = None,
+        execution_params: dict[str, Any] | None = None,
+    ) -> ExecutionResult:
+        """Execute an order from raw data dictionaries."""
+        ...
+
+    async def get_comprehensive_metrics(
+        self,
+        bot_id: str | None = None,
+        symbol: str | None = None,
+        time_range_hours: int = 24,
+    ) -> dict[str, Any]:
+        """Get comprehensive metrics from all execution services."""
+        ...
+
+    async def cancel_execution(self, execution_id: str, reason: str = "user_request") -> bool:
+        """Cancel an execution through orchestration."""
+        ...
+
+    async def get_active_executions(self) -> dict[str, Any]:
+        """Get all active executions."""
+        ...
+
+    async def health_check(self) -> dict[str, Any]:
+        """Perform comprehensive health check."""
+        ...
+
+    async def start(self) -> None:
+        """Start orchestration service."""
+        ...
+
+    async def stop(self) -> None:
+        """Stop orchestration service."""
+        ...
+
+
+class ExecutionRiskValidationServiceInterface(Protocol):
+    """Interface for risk validation operations within execution module."""
+
+    async def validate_order(self, order: OrderRequest) -> bool:
+        """Validate order against risk rules."""
+        ...
+
+    async def validate_signal(self, signal: Signal) -> bool:
+        """Validate signal against risk rules."""
+        ...
+
+    async def validate_order_risk(
+        self,
+        order: OrderRequest,
+        market_data: MarketData,
+        context: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Validate order risk and return detailed results."""
+        ...
+
+    async def check_position_limits(
+        self,
+        order: OrderRequest,
+        current_positions: dict[str, Any] | None = None,
+    ) -> bool:
+        """Check position limits for order."""
+        ...
+
+    @property
+    def is_running(self) -> bool:
+        """Check if service is running."""
         ...

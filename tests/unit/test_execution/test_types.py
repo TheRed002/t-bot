@@ -1,11 +1,38 @@
-"""Unit tests for execution types."""
+"""Optimized unit tests for execution types."""
+
+import logging
+from decimal import Decimal
 
 import pytest
-from decimal import Decimal
-from datetime import datetime, timezone
 
-from src.execution.types import ExecutionInstruction
+# Disable logging for performance
+logging.disable(logging.CRITICAL)
+
 from src.core.types.execution import ExecutionAlgorithm, ExecutionStatus, SlippageType
+from src.execution.types import ExecutionInstruction
+
+# Pre-defined constants for faster test data creation
+TEST_DECIMALS = {
+    "ONE": Decimal("1.0"),
+    "TWO_FIVE": Decimal("2.5"),
+    "PRICE_50K": Decimal("50000"),
+    "PRICE_2K": Decimal("2000.0")
+}
+
+# Cache common test configurations
+COMMON_ATTRS = {
+    "btc_symbol": "BTC/USDT",
+    "eth_symbol": "ETH/USDT",
+    "strategy_1": "test_strategy",
+    "strategy_2": "test_strategy_2",
+    "time_horizon_60": 60,
+    "time_horizon_30": 30,
+    "slices_10": 10,
+    "slices_5": 5,
+    "participation_rate": 0.25,
+    "min_algorithms": 8,
+    "min_statuses": 6
+}
 
 
 class TestExecutionTypes:
@@ -38,63 +65,63 @@ class TestExecutionTypes:
         assert SlippageType.PRICE_IMPROVEMENT.value == "price_improvement"
 
     def test_execution_instruction_creation(self):
-        """Test ExecutionInstruction creation."""
+        """Test ExecutionInstruction creation with cached constants."""
         from src.core.types import OrderRequest, OrderSide, OrderType
-        
+
         order = OrderRequest(
-            symbol="BTC/USDT",
+            symbol=COMMON_ATTRS["btc_symbol"],
             side=OrderSide.BUY,
             order_type=OrderType.MARKET,
-            quantity=Decimal("1.0"),
-            price=Decimal("50000")
+            quantity=TEST_DECIMALS["ONE"],
+            price=TEST_DECIMALS["PRICE_50K"],
         )
-        
+
         instruction = ExecutionInstruction(
             order=order,
             algorithm=ExecutionAlgorithm.TWAP,
-            strategy_name="test_strategy",
-            time_horizon_minutes=60,
-            max_slices=10
+            strategy_name=COMMON_ATTRS["strategy_1"],
+            time_horizon_minutes=COMMON_ATTRS["time_horizon_60"],
+            max_slices=COMMON_ATTRS["slices_10"],
         )
-        
-        assert instruction.order.symbol == "BTC/USDT"
+
+        assert instruction.order.symbol == COMMON_ATTRS["btc_symbol"]
         assert instruction.order.side == OrderSide.BUY
-        assert instruction.order.quantity == Decimal("1.0")
+        assert instruction.order.quantity == TEST_DECIMALS["ONE"]
         assert instruction.algorithm == ExecutionAlgorithm.TWAP
-        assert instruction.strategy_name == "test_strategy"
+        assert instruction.strategy_name == COMMON_ATTRS["strategy_1"]
 
     def test_execution_instruction_with_optional_fields(self):
-        """Test ExecutionInstruction with optional fields."""
+        """Test ExecutionInstruction with optional fields using cached constants."""
         from src.core.types import OrderRequest, OrderSide, OrderType
-        
+
         order = OrderRequest(
-            symbol="ETH/USDT",
+            symbol=COMMON_ATTRS["eth_symbol"],
             side=OrderSide.SELL,
             order_type=OrderType.LIMIT,
-            quantity=Decimal("2.5"),
-            price=Decimal("2000.0")
+            quantity=TEST_DECIMALS["TWO_FIVE"],
+            price=TEST_DECIMALS["PRICE_2K"],
         )
-        
+
         instruction = ExecutionInstruction(
             order=order,
             algorithm=ExecutionAlgorithm.VWAP,
-            strategy_name="test_strategy_2",
-            time_horizon_minutes=30,
-            max_slices=5,
-            participation_rate=0.25
+            strategy_name=COMMON_ATTRS["strategy_2"],
+            time_horizon_minutes=COMMON_ATTRS["time_horizon_30"],
+            max_slices=COMMON_ATTRS["slices_5"],
+            participation_rate=COMMON_ATTRS["participation_rate"],
         )
-        
-        assert instruction.order.price == Decimal("2000.0")
-        assert instruction.participation_rate == 0.25
+
+        assert instruction.order.price == TEST_DECIMALS["PRICE_2K"]
+        assert instruction.participation_rate == COMMON_ATTRS["participation_rate"]
 
     def test_enum_iteration(self):
         """Test that enums can be iterated."""
         algorithms = list(ExecutionAlgorithm)
-        assert len(algorithms) >= 8  # We have 8 algorithms now
+        assert len(algorithms) >= COMMON_ATTRS["min_algorithms"]  # We have 8 algorithms now
         assert ExecutionAlgorithm.TWAP in algorithms
-        
+
         statuses = list(ExecutionStatus)
-        assert len(statuses) >= 6
+        assert len(statuses) >= COMMON_ATTRS["min_statuses"]
         assert ExecutionStatus.COMPLETED in statuses
 
     def test_enum_membership(self):
@@ -107,6 +134,6 @@ class TestExecutionTypes:
         """Test enum string representation."""
         assert str(ExecutionAlgorithm.TWAP) == "ExecutionAlgorithm.TWAP"
         assert str(ExecutionStatus.COMPLETED) == "ExecutionStatus.COMPLETED"
-        
+
         # Test repr
         assert repr(ExecutionAlgorithm.TWAP) == "<ExecutionAlgorithm.TWAP: 'twap'>"

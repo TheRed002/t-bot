@@ -78,12 +78,12 @@ class BaseAlgorithm(BaseComponent, ABC):
         self.successful_executions = 0
         self.failed_executions = 0
 
-        self.logger.info(f"Initialized {self.__class__.__name__} execution algorithm")
+        self._logger.info(f"Initialized {self.__class__.__name__} execution algorithm")
 
     async def start(self) -> None:
         """Start the execution algorithm."""
         await super().start()  # This sets _is_running = True
-        self.logger.info(f"Started {self.__class__.__name__} execution algorithm")
+        self._logger.info(f"Started {self.__class__.__name__} execution algorithm")
 
     async def stop(self) -> None:
         """Stop the execution algorithm."""
@@ -91,7 +91,7 @@ class BaseAlgorithm(BaseComponent, ABC):
         for execution_id in list(self.current_executions.keys()):
             await self.cancel_execution(execution_id)
         await super().stop()  # This sets _is_running = False
-        self.logger.info(f"Stopped {self.__class__.__name__} execution algorithm")
+        self._logger.info(f"Stopped {self.__class__.__name__} execution algorithm")
 
     @abstractmethod
     async def execute(
@@ -165,7 +165,7 @@ class BaseAlgorithm(BaseComponent, ABC):
             # Algorithm-specific validation
             await self._validate_algorithm_parameters(instruction)
 
-            self.logger.debug(
+            self._logger.debug(
                 "Execution instruction validated",
                 symbol=instruction.order.symbol,
                 algorithm=instruction.algorithm.value,
@@ -177,7 +177,7 @@ class BaseAlgorithm(BaseComponent, ABC):
             # Re-raise validation errors as-is
             raise
         except Exception as e:
-            self.logger.error(
+            self._logger.error(
                 "Unexpected error during instruction validation",
                 error=str(e),
                 symbol=instruction.order.symbol if instruction.order else None,
@@ -446,7 +446,7 @@ class BaseAlgorithm(BaseComponent, ABC):
 
             execution_state.total_fees = total_fees
 
-            self.logger.debug(
+            self._logger.debug(
                 "Slippage metrics calculated",
                 execution_id=execution_state.execution_id,
                 price_slippage=(
@@ -456,14 +456,14 @@ class BaseAlgorithm(BaseComponent, ABC):
             )
 
         except (ValidationError, ExecutionError) as e:
-            self.logger.warning(
+            self._logger.warning(
                 "Failed to calculate slippage metrics",
                 execution_id=execution_state.execution_id,
                 error=str(e),
             )
             raise
         except Exception as e:
-            self.logger.error(
+            self._logger.error(
                 "Unexpected error calculating slippage metrics",
                 execution_id=execution_state.execution_id,
                 error=str(e),
@@ -515,11 +515,133 @@ class BaseAlgorithm(BaseComponent, ABC):
             for execution_id, _ in to_remove:
                 del self.current_executions[execution_id]
 
-            self.logger.debug(
+            self._logger.debug(
                 "Cleaned up completed executions",
                 removed_count=len(to_remove),
                 remaining_count=len(self.current_executions),
             )
+
+    def _validate_exchange_factory(self, exchange_factory) -> None:
+        """
+        Validate that exchange factory is provided and accessible.
+
+        Args:
+            exchange_factory: Exchange factory to validate
+
+        Raises:
+            ExecutionError: If exchange factory is invalid
+        """
+        if not exchange_factory:
+            raise ExecutionError(
+                f"Exchange factory is required for {self.__class__.__name__} execution"
+            )
+
+    async def _get_exchange_from_factory(self, exchange_factory, instruction: ExecutionInstruction):
+        """
+        Get exchange instance from factory based on instruction preferences.
+
+        Args:
+            exchange_factory: Exchange factory
+            instruction: Execution instruction with exchange preferences
+
+        Returns:
+            Exchange instance
+
+        Raises:
+            ExecutionError: If exchange cannot be obtained
+        """
+        # Determine which exchange to use
+        exchange_name = "binance"  # Default exchange
+        if instruction.preferred_exchanges:
+            exchange_name = instruction.preferred_exchanges[0]
+
+        try:
+            exchange = await exchange_factory.get_exchange(exchange_name)
+            if not exchange:
+                raise ExecutionError(f"Failed to get exchange: {exchange_name}")
+            return exchange
+        except Exception as e:
+            raise ExecutionError(f"Failed to access exchange {exchange_name}: {e}")
+
+    def _update_execution_statistics(self, status: ExecutionStatus) -> None:
+        """
+        Update algorithm execution statistics.
+
+        Args:
+            status: Final execution status
+        """
+        if status == ExecutionStatus.COMPLETED:
+            self.successful_executions += 1
+        else:
+            self.failed_executions += 1
+        self.total_executions += 1
+
+    async def _handle_execution_error(
+        self, e: Exception, execution_id: str = None, algorithm_name: str = None
+    ) -> None:
+        """
+        Handle execution errors with common error handling pattern.
+
+        Args:
+            e: Exception that occurred
+            execution_id: Execution ID if available
+            algorithm_name: Algorithm name for error messages
+        """
+        algo_name = algorithm_name or self.__class__.__name__
+
+        # Update execution result if we have the execution_id
+        if execution_id and execution_id in self.current_executions:
+            await self._update_execution_result(
+                self.current_executions[execution_id],
+                status=ExecutionStatus.FAILED,
+                error_message=str(e),
+            )
+            self.failed_executions += 1
+            self.total_executions += 1
+
+        self._logger.error(
+            f"{algo_name} execution failed",
+            execution_id=execution_id or "unknown",
+            error=str(e),
+        )
+
+    async def _standard_cancel_execution(
+        self, execution_id: str, algorithm_name: str = None
+    ) -> bool:
+        """
+        Standard cancellation logic used by all algorithms.
+
+        Args:
+            execution_id: ID of execution to cancel
+            algorithm_name: Algorithm name for logging
+
+        Returns:
+            bool: True if cancellation successful, False otherwise
+        """
+        algo_name = algorithm_name or self.__class__.__name__
+
+        try:
+            if execution_id not in self.current_executions:
+                self._logger.warning(f"Execution not found for cancellation: {execution_id}")
+                return False
+
+            execution_result = self.current_executions[execution_id]
+
+            if execution_result.status not in [ExecutionStatus.RUNNING, ExecutionStatus.PENDING]:
+                self._logger.warning(
+                    f"Cannot cancel execution in status: {execution_result.status.value}"
+                )
+                return False
+
+            # Update status to cancelled
+            await self._update_execution_result(execution_result, status=ExecutionStatus.CANCELLED)
+
+            self._logger.info(f"{algo_name} execution cancelled: {execution_id}")
+            return True
+
+        except Exception as e:
+            self._logger.error(f"Failed to cancel {algo_name} execution: {e}")
+            return False
 
     # Abstract methods required by BaseComponent
     async def _do_start(self) -> None:
@@ -534,7 +656,7 @@ class BaseAlgorithm(BaseComponent, ABC):
             try:
                 await self.cancel_execution(execution_id)
             except Exception as e:
-                self.logger.error(f"Error cancelling execution {execution_id}: {e}")
+                self._logger.error(f"Error cancelling execution {execution_id}: {e}")
 
     async def _health_check_internal(self) -> Any:
         """Component-specific health checks."""

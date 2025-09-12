@@ -124,13 +124,13 @@ class ExecutionResultAdapter:
             mapped_status = ExecutionStatus.RUNNING  # Map to core status
         else:
             mapped_status = status
-            
+
         # Store original status in metadata for later retrieval
         combined_metadata = {
             **(metadata or {}),
             "child_orders": child_orders,
             "error_message": error_message,
-            "original_status": status.value if hasattr(status, 'value') else status,
+            "original_status": status.value if hasattr(status, "value") else status,
         }
 
         # Get best and worst prices from fills

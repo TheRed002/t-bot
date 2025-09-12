@@ -45,7 +45,7 @@ class ExecutionResultWrapper:
         self._original_order = original_order
         self._algorithm = algorithm
         self._state_registry = state_registry or {}
-        
+
     def _update_core(self, new_core: CoreExecutionResult) -> None:
         """Update the core result for in-place updates."""
         self._core = new_core
@@ -97,11 +97,11 @@ class ExecutionResultWrapper:
     @property
     def total_filled_quantity(self) -> Decimal:
         return self._core.filled_quantity
-    
+
     @total_filled_quantity.setter
     def total_filled_quantity(self, value: Decimal) -> None:
         # Allow setting for test compatibility
-        if hasattr(self._core, 'filled_quantity'):
+        if hasattr(self._core, "filled_quantity"):
             self._core.filled_quantity = value
 
     @property
@@ -123,11 +123,11 @@ class ExecutionResultWrapper:
     @property
     def average_price(self) -> Decimal:
         return self._core.average_price
-    
+
     @average_price.setter
     def average_price(self, value: Decimal) -> None:
         # Allow setting for test compatibility
-        if hasattr(self._core, 'average_price'):
+        if hasattr(self._core, "average_price"):
             self._core.average_price = value
 
     @property
@@ -156,11 +156,6 @@ class ExecutionResultWrapper:
         """Child orders list - needed for backward compatibility."""
         # Return empty list if not available, since this is used in tests
         return self._core.metadata.get("child_orders", [])
-    
-    @property
-    def number_of_trades(self) -> int:
-        """Number of trades alias for num_fills."""
-        return self._core.num_fills
 
     @property
     def execution_duration(self) -> float | None:
@@ -215,7 +210,9 @@ class ExecutionResultWrapper:
         """Calculate execution efficiency score."""
         # Simple efficiency calculation based on fill rate and slippage
         fill_efficiency = Decimal(str(self._core.fill_rate * 100))  # 0-100 based on fill rate
-        slippage_penalty = min(self._core.slippage_bps * Decimal("0.5"), Decimal("20"))  # Max 20 point penalty
+        slippage_penalty = min(
+            self._core.slippage_bps * Decimal("0.5"), Decimal("20")
+        )  # Max 20 point penalty
         efficiency = max(fill_efficiency - slippage_penalty, Decimal("0"))
         return efficiency
 

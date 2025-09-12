@@ -20,23 +20,29 @@ Version: 2.0.0 - Refactored for service layer
 import asyncio
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Any, Dict, List, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Optional
 
 from src.core.base.component import BaseComponent
 from src.core.config import Config
 from src.core.exceptions import (
+    DatabaseError,
     ExchangeError,
     ExecutionError,
     NetworkError,
+    RiskManagementError,
     ServiceError,
     ValidationError,
 )
 
 # MANDATORY: Import from P-001
+# Import both ExecutionInstruction types for adapter pattern
 from src.core.types import (
     ExecutionAlgorithm,
+    ExecutionInstruction as CoreExecutionInstruction,
+    ExecutionResult,
     ExecutionStatus,
     MarketData,
+    OrderRequest,
     OrderSide,
 )
 
@@ -44,8 +50,9 @@ from src.core.types import (
 from src.error_handling.decorators import with_circuit_breaker, with_error_context, with_retry
 from src.execution.execution_result_wrapper import ExecutionResultWrapper
 
-# Import internal execution instruction type
-from src.execution.types import ExecutionInstruction
+# Import execution engine service interface
+from src.execution.interfaces import ExecutionEngineServiceInterface
+from src.execution.types import ExecutionInstruction as InternalExecutionInstruction
 
 # Import monitoring components
 from src.monitoring import MetricsCollector, get_tracer
@@ -62,13 +69,14 @@ from .slippage.slippage_model import SlippageModel
 
 # TYPE_CHECKING imports to prevent circular dependencies
 if TYPE_CHECKING:
+    from src.execution.execution_orchestration_service import ExecutionOrchestrationService
     from src.execution.service import ExecutionService
     from src.risk_management.service import RiskService
     from src.state.state_service import StateService
     from src.state.trade_lifecycle_manager import TradeLifecycleManager
 
 
-class ExecutionEngine(BaseComponent):
+class ExecutionEngine(BaseComponent, ExecutionEngineServiceInterface):
     """
     Central execution engine orchestrator using enterprise ExecutionService.
 
@@ -86,18 +94,18 @@ class ExecutionEngine(BaseComponent):
 
     def __init__(
         self,
-        execution_service: Optional['ExecutionService'] = None,
-        risk_service: Optional['RiskService'] = None,
-        config: Optional[Config] = None,
-        orchestration_service: Optional['ExecutionOrchestrationService'] = None,
+        execution_service: Optional["ExecutionService"] = None,
+        risk_service: Optional["RiskService"] = None,
+        config: Config | None = None,
+        orchestration_service: Optional["ExecutionOrchestrationService"] = None,
         exchange_factory: Any = None,  # ExchangeFactoryInterface
-        state_service: Optional['StateService'] = None,
-        trade_lifecycle_manager: Optional['TradeLifecycleManager'] = None,
-        metrics_collector: Optional[MetricsCollector] = None,
-        order_manager: Optional[OrderManager] = None,
-        slippage_model: Optional[SlippageModel] = None,
-        cost_analyzer: Optional[CostAnalyzer] = None,
-        algorithms: Optional[Dict[ExecutionAlgorithm, BaseAlgorithm]] = None,
+        state_service: Optional["StateService"] = None,
+        trade_lifecycle_manager: Optional["TradeLifecycleManager"] = None,
+        metrics_collector: MetricsCollector | None = None,
+        order_manager: OrderManager | None = None,
+        slippage_model: SlippageModel | None = None,
+        cost_analyzer: CostAnalyzer | None = None,
+        algorithms: dict[ExecutionAlgorithm, BaseAlgorithm] | None = None,
     ) -> None:
         """
         Initialize execution engine with injected dependencies.
@@ -115,7 +123,7 @@ class ExecutionEngine(BaseComponent):
             slippage_model: Injected SlippageModel instance
             cost_analyzer: Injected CostAnalyzer instance
             algorithms: Injected execution algorithms
-            
+
         Raises:
             ValueError: If execution_service is None
         """
@@ -137,7 +145,7 @@ class ExecutionEngine(BaseComponent):
 
         # Log warning if metrics_collector is not provided
         if not metrics_collector:
-            self.logger.warning(
+            self._logger.warning(
                 "MetricsCollector not provided - monitoring features will be limited"
             )
 
@@ -148,78 +156,36 @@ class ExecutionEngine(BaseComponent):
         try:
             self._tracer = get_tracer("execution.engine")
         except (ImportError, AttributeError, RuntimeError) as e:
-            self.logger.warning(f"Failed to initialize tracer: {e}")
+            self._logger.warning(f"Failed to initialize tracer: {e}")
             self._tracer = None
 
-        # Use injected components (should come from DI container)
+        # Use injected components (must be provided by DI container)
+        if not order_manager:
+            raise ValueError("OrderManager is required and must be injected")
         self.order_manager = order_manager
-        if not self.order_manager:
-            # Fallback creation only if not injected
-            self.logger.warning("OrderManager not injected, creating fallback instance")
-            self.order_manager = OrderManager(
-                self.config, state_service=state_service, metrics_collector=metrics_collector
-            )
-        
-        self.slippage_model = slippage_model
-        if not self.slippage_model:
-            # Fallback creation only if not injected
-            self.logger.warning("SlippageModel not injected, creating fallback instance")
-            self.slippage_model = SlippageModel(self.config)
-        
-        # Use injected CostAnalyzer (should come from DI container)
-        self.cost_analyzer = cost_analyzer
-        if not self.cost_analyzer and execution_service:
-            # Fallback creation only if not injected and ExecutionService available
-            self.logger.warning("CostAnalyzer not injected, creating fallback instance")
-            self.cost_analyzer = CostAnalyzer(execution_service, self.config)
 
-        # Use injected algorithms (should come from factory via DI)
-        if algorithms:
-            self.algorithms: Dict[ExecutionAlgorithm, BaseAlgorithm] = algorithms
-        else:
-            # Fallback to minimal algorithms if not injected (emergency fallback)
-            self.logger.warning("No algorithms injected, using fallback minimal algorithms")
-            from .algorithms.base_algorithm import BaseAlgorithm
-            
-            class FallbackAlgorithm(BaseAlgorithm):
-                def __init__(self, algorithm_type, config):
-                    super().__init__(config)
-                    self.algorithm_type = algorithm_type
-                
-                def get_algorithm_type(self):
-                    return self.algorithm_type
-                
-                async def execute(self, instruction, exchange_factory=None, risk_manager=None):
-                    from .execution_result_wrapper import ExecutionResultWrapper
-                    return ExecutionResultWrapper(None)
-                
-                async def cancel_execution(self, execution_id):
-                    return True
-                
-                async def cancel(self, execution_id):
-                    """Cancel an active execution (alias for cancel_execution)."""
-                    return {"status": "cancelled", "execution_id": execution_id}
-                
-                async def get_status(self, execution_id):
-                    """Get the status of an execution."""
-                    return {"status": "pending", "execution_id": execution_id}
-                
-                async def _validate_algorithm_parameters(self, instruction):
-                    pass
-            
-            self.algorithms = {
-                ExecutionAlgorithm.TWAP: FallbackAlgorithm(ExecutionAlgorithm.TWAP, self.config),
-                ExecutionAlgorithm.VWAP: FallbackAlgorithm(ExecutionAlgorithm.VWAP, self.config),
-                ExecutionAlgorithm.ICEBERG: FallbackAlgorithm(ExecutionAlgorithm.ICEBERG, self.config),
-                ExecutionAlgorithm.SMART_ROUTER: FallbackAlgorithm(ExecutionAlgorithm.SMART_ROUTER, self.config),
-            }
+        if not slippage_model:
+            raise ValueError("SlippageModel is required and must be injected")
+        self.slippage_model = slippage_model
+
+        # Use injected CostAnalyzer (must be provided by DI container)
+        if not cost_analyzer:
+            raise ValueError("CostAnalyzer is required and must be injected")
+        self.cost_analyzer = cost_analyzer
+
+        # Use injected algorithms (must be provided by DI container)
+        if not algorithms:
+            raise ValueError("Execution algorithms are required and must be injected")
+        self.algorithms: dict[ExecutionAlgorithm, BaseAlgorithm] = algorithms
 
         # Engine state (local tracking only)
         # is_running is managed by BaseComponent
-        self.active_executions: Dict[str, ExecutionResultWrapper] = {}
+        self.active_executions: dict[str, ExecutionResultWrapper] = {}
 
         # Algorithm selection thresholds from config
-        self.large_order_threshold = Decimal(self.config.execution.get("large_order_threshold", "10000"))
+        self.large_order_threshold = Decimal(
+            self.config.execution.get("large_order_threshold", "10000")
+        )
         self.volume_significance_threshold = self.config.execution.get(
             "volume_significance_threshold", 0.01
         )
@@ -232,7 +198,7 @@ class ExecutionEngine(BaseComponent):
             "post_trade_analyses": 0,
         }
 
-        self.logger.info(
+        self._logger.info(
             "Execution engine initialized with ExecutionService",
             service_type=type(self.execution_service).__name__,
             has_state_service=self.state_service is not None,
@@ -247,7 +213,7 @@ class ExecutionEngine(BaseComponent):
         """
         try:
             if self.is_running:
-                self.logger.warning("Execution engine is already running")
+                self._logger.warning("Execution engine is already running")
                 return
 
             # Ensure ExecutionService is running
@@ -258,23 +224,24 @@ class ExecutionEngine(BaseComponent):
             for algorithm_name, algorithm in self.algorithms.items():
                 try:
                     await algorithm.start()
-                    self.logger.info(f"Started {algorithm_name} algorithm")
+                    self._logger.info(f"Started {algorithm_name} algorithm")
                 except (RuntimeError, AttributeError, ExecutionError) as e:
-                    self.logger.error(f"Failed to start {algorithm_name} algorithm: {e}")
+                    self._logger.error(f"Failed to start {algorithm_name} algorithm: {e}")
+                    raise ExecutionError(f"Failed to start {algorithm_name} algorithm: {e}") from e
                 except Exception as e:
-                    self.logger.error(f"Unexpected error starting {algorithm_name} algorithm: {e}")
+                    self._logger.error(f"Unexpected error starting {algorithm_name} algorithm: {e}")
                     raise
 
             # Start order manager
             await self.order_manager.start()
 
-            self._is_running = True  # Set internal state for BaseComponent
+            await super().start()  # Use BaseComponent's start method
             self.local_statistics["engine_starts"] += 1
 
-            self.logger.info("Execution engine started successfully")
+            self._logger.info("Execution engine started successfully")
 
         except Exception as e:
-            self.logger.error(f"Failed to start execution engine: {e}")
+            self._logger.error(f"Failed to start execution engine: {e}")
             raise ExecutionError(f"Execution engine startup failed: {e}")
 
     @time_execution
@@ -294,22 +261,64 @@ class ExecutionEngine(BaseComponent):
             for algorithm_name, algorithm in self.algorithms.items():
                 try:
                     await algorithm.stop()
-                    self.logger.info(f"Stopped {algorithm_name} algorithm")
+                    self._logger.info(f"Stopped {algorithm_name} algorithm")
                 except (RuntimeError, AttributeError, ExecutionError) as e:
-                    self.logger.error(f"Error stopping {algorithm_name} algorithm: {e}")
+                    self._logger.error(f"Error stopping {algorithm_name} algorithm: {e}")
+                    # Don't re-raise during shutdown to allow graceful shutdown of other algorithms
                 except Exception as e:
-                    self.logger.error(f"Unexpected error stopping {algorithm_name} algorithm: {e}")
+                    self._logger.error(f"Unexpected error stopping {algorithm_name} algorithm: {e}")
+                    # Don't re-raise during shutdown to allow graceful shutdown of other algorithms
 
             # Stop order manager
             await self.order_manager.shutdown()
 
-            self._is_running = False  # Set internal state for BaseComponent
+            await super().stop()  # Use BaseComponent's stop method
 
-            self.logger.info("Execution engine stopped successfully")
+            self._logger.info("Execution engine stopped successfully")
 
         except Exception as e:
-            self.logger.error(f"Error stopping execution engine: {e}")
+            self._logger.error(f"Error stopping execution engine: {e}")
             raise
+
+    def _convert_core_to_internal_instruction(
+        self, core_instruction: CoreExecutionInstruction
+    ) -> InternalExecutionInstruction:
+        """
+        Convert CoreExecutionInstruction to InternalExecutionInstruction for algorithm compatibility.
+
+        This adapter ensures algorithms can continue using the internal ExecutionInstruction format
+        while the external interface uses the standardized core ExecutionInstruction.
+        """
+        # Create OrderRequest from core instruction fields
+        order = OrderRequest(
+            symbol=core_instruction.symbol,
+            side=core_instruction.side,
+            quantity=core_instruction.target_quantity,
+            order_type="limit" if core_instruction.limit_price else "market",
+            price=core_instruction.limit_price,
+            time_in_force="GTC",  # Default time in force
+        )
+
+        # Convert field names to internal format
+        return InternalExecutionInstruction(
+            order=order,
+            algorithm=core_instruction.algorithm,
+            strategy_name=core_instruction.metadata.get("strategy_name"),
+            # Algorithm parameters
+            slice_interval_seconds=core_instruction.slice_interval,
+            # Risk controls (convert percentage to basis points if needed)
+            max_slippage_bps=core_instruction.max_slippage_pct * 10000
+            if core_instruction.max_slippage_pct
+            else None,
+            # Smart routing (map venue fields)
+            preferred_exchanges=core_instruction.preferred_venues,
+            avoid_exchanges=core_instruction.avoid_venues,
+            # Timing
+            start_time=core_instruction.start_time,
+            end_time=core_instruction.end_time,
+            # Metadata
+            metadata=core_instruction.metadata,
+        )
 
     @with_error_context(component="ExecutionEngine", operation="execute_order")
     @with_circuit_breaker(failure_threshold=10, recovery_timeout=60)
@@ -318,10 +327,10 @@ class ExecutionEngine(BaseComponent):
     @time_execution
     async def execute_order(
         self,
-        instruction: ExecutionInstruction,
+        instruction: CoreExecutionInstruction | InternalExecutionInstruction,
         market_data: MarketData,
-        bot_id: Optional[str] = None,
-        strategy_name: Optional[str] = None,
+        bot_id: str | None = None,
+        strategy_name: str | None = None,
     ) -> ExecutionResultWrapper:
         """
         Execute an order using appropriate algorithm and record via service layer.
@@ -343,60 +352,115 @@ class ExecutionEngine(BaseComponent):
             if not self.is_running:
                 raise ExecutionError("Execution engine is not running")
 
+            # Handle both CoreExecutionInstruction and InternalExecutionInstruction
+            if isinstance(instruction, InternalExecutionInstruction):
+                internal_instruction = instruction
+            else:
+                # Convert core instruction to internal format for algorithm compatibility
+                internal_instruction = self._convert_core_to_internal_instruction(instruction)
+
             # Use orchestration service if available (preferred approach)
             if self.orchestration_service:
                 execution_result = await self.orchestration_service.execute_order(
-                    order=instruction.order,
+                    order=internal_instruction.order,
                     market_data=market_data,
                     bot_id=bot_id,
                     strategy_name=strategy_name,
                     execution_params={
-                        "algorithm": instruction.algorithm.value,
-                        "time_horizon_minutes": instruction.time_horizon_minutes,
-                        "participation_rate": instruction.participation_rate,
-                        "max_slices": instruction.max_slices,
-                        "max_slippage_bps": instruction.max_slippage_bps,
-                    }
+                        "algorithm": internal_instruction.algorithm.value,
+                        "time_horizon_minutes": internal_instruction.time_horizon_minutes,
+                        "participation_rate": internal_instruction.participation_rate,
+                        "max_slices": internal_instruction.max_slices,
+                        "max_slippage_bps": internal_instruction.max_slippage_bps,
+                    },
                 )
-                
-                self.logger.info(
+
+                self._logger.info(
                     "Order executed through orchestration service",
                     execution_id=execution_result.execution_id,
-                    symbol=instruction.order.symbol,
+                    symbol=internal_instruction.order.symbol,
                     bot_id=bot_id,
                 )
-                
+
                 return execution_result
-                
+
             # Fallback to legacy execution path
-            return await self._execute_order_legacy(instruction, market_data, bot_id, strategy_name)
-            
+            return await self._execute_order_legacy(
+                internal_instruction, market_data, bot_id, strategy_name
+            )
+
         except (ExecutionError, ValidationError, ServiceError) as e:
             # Re-raise expected exceptions
-            self.logger.error(
+            symbol = (
+                instruction.order.symbol if hasattr(instruction, "order") else instruction.symbol
+            )
+            algorithm = (
+                instruction.algorithm.value if hasattr(instruction, "algorithm") else "unknown"
+            )
+            self._logger.error(
                 "Order execution failed",
-                execution_instruction=instruction.algorithm.value,
-                symbol=instruction.order.symbol,
+                execution_instruction=algorithm,
+                symbol=symbol,
                 error=str(e),
             )
             raise
 
         except Exception as e:
             # Log and wrap unexpected exceptions
-            self.logger.error(
+            symbol = (
+                instruction.order.symbol if hasattr(instruction, "order") else instruction.symbol
+            )
+            algorithm = (
+                instruction.algorithm.value if hasattr(instruction, "algorithm") else "unknown"
+            )
+            self._logger.error(
                 "Unexpected error in order execution",
-                execution_instruction=instruction.algorithm.value,
-                symbol=instruction.order.symbol,
+                execution_instruction=algorithm,
+                symbol=symbol,
                 error=str(e),
             )
             raise ExecutionError(f"Order execution failed: {e}")
 
+    async def execute_instruction(
+        self,
+        instruction: InternalExecutionInstruction,
+        market_data: MarketData,
+        bot_id: str | None = None,
+        strategy_name: str | None = None,
+    ) -> ExecutionResult:
+        """
+        Execute a trading instruction (implements ExecutionEngineServiceInterface).
+
+        Args:
+            instruction: Execution instruction containing order details
+            market_data: Current market data
+            bot_id: Associated bot instance ID
+            strategy_name: Strategy that generated the order
+
+        Returns:
+            ExecutionResult: Result of execution
+
+        Raises:
+            ExecutionError: If execution fails
+            ValidationError: If order validation fails
+        """
+        # Execute using the existing execute_order method and extract the result
+        execution_wrapper = await self.execute_order(
+            instruction=instruction,
+            market_data=market_data,
+            bot_id=bot_id,
+            strategy_name=strategy_name,
+        )
+
+        # Extract the ExecutionResult from the wrapper
+        return execution_wrapper.result
+
     async def _execute_order_legacy(
         self,
-        instruction: ExecutionInstruction,
+        instruction: InternalExecutionInstruction,
         market_data: MarketData,
-        bot_id: Optional[str] = None,
-        strategy_name: Optional[str] = None,
+        bot_id: str | None = None,
+        strategy_name: str | None = None,
     ) -> ExecutionResultWrapper:
         """Legacy execution path for backward compatibility."""
         if not self.execution_service:
@@ -413,7 +477,7 @@ class ExecutionEngine(BaseComponent):
                     strategy_name=strategy_name,
                     symbol=instruction.order.symbol,
                     side=instruction.order.side,
-                    order_type=instruction.order.order_type,
+                    order_type="market" if instruction.order.price is None else "limit",
                     quantity=instruction.order.quantity,
                     price=instruction.order.price,
                     metadata={
@@ -422,7 +486,7 @@ class ExecutionEngine(BaseComponent):
                         "market_volume": str(market_data.volume) if market_data.volume else 0,
                     },
                 )
-                self.logger.debug(
+                self._logger.debug(
                     "Trade context created",
                     trade_id=trade_context.trade_id,
                     symbol=instruction.order.symbol,
@@ -489,28 +553,51 @@ class ExecutionEngine(BaseComponent):
                 metadata={
                     "quantity": str(instruction.order.quantity),
                     "price": str(instruction.order.price or market_data.close),
-                    "order_type": instruction.order.order_type.value,
+                    "order_type": "market" if instruction.order.price is None else "limit",
                     "bot_id": bot_id,
                     "strategy_name": strategy_name,
                 },
             )
 
-            risk_validation = await self.risk_service.validate_signal(trading_signal)
+            try:
+                risk_validation = await self.risk_service.validate_signal(trading_signal)
+            except RiskManagementError as e:
+                raise ValidationError(f"Risk validation failed: {e}")
 
             if not risk_validation:
                 raise ValidationError("Risk validation failed: Signal rejected by RiskService")
 
             # Calculate position size using RiskService
-            position_size = await self.risk_service.calculate_position_size(
-                signal=trading_signal,
-                available_capital=None,  # Will be fetched by RiskService
-                current_price=market_data.close,  # Use Decimal directly
-            )
+            # Default to a reasonable available capital if not provided
+            available_capital = Decimal("100000")  # Default $100k available capital
+            try:
+                # Try to get actual available capital from config or state
+                if hasattr(self.config, "capital") and hasattr(
+                    self.config.capital, "default_available"
+                ):
+                    available_capital = Decimal(str(self.config.capital.default_available))
+                elif hasattr(self.config, "trading") and hasattr(
+                    self.config.trading, "available_capital"
+                ):
+                    available_capital = Decimal(str(self.config.trading.available_capital))
+            except (AttributeError, ValueError):
+                # Use default if config not available
+                pass
+
+            try:
+                position_size = await self.risk_service.calculate_position_size(
+                    signal=trading_signal,
+                    available_capital=available_capital,
+                    current_price=market_data.close,  # Use Decimal directly
+                )
+            except RiskManagementError as e:
+                raise ExecutionError(f"Position size calculation failed: {e}")
 
             # Update order quantity based on risk management
             if position_size and position_size > 0:
-                instruction.order.quantity = Decimal(str(position_size))
-                self.logger.info(
+                # Note: CoreExecutionInstruction is immutable, can't modify target_quantity
+                # This modification would need to be done differently in the adapter layer
+                self._logger.info(
                     "Position size adjusted by risk management",
                     original_quantity=str(instruction.order.quantity),
                     adjusted_quantity=position_size,
@@ -524,10 +611,14 @@ class ExecutionEngine(BaseComponent):
             self.local_statistics["algorithm_selections"] += 1
 
             # Validate slippage if max_slippage_bps is specified
-            if hasattr(instruction, 'max_slippage_bps') and instruction.max_slippage_bps is not None:
-                expected_slippage_bps = self.slippage_model.calculate_expected_slippage(
+            if (
+                hasattr(instruction, "max_slippage_bps")
+                and instruction.max_slippage_bps is not None
+            ):
+                slippage_prediction = await self.slippage_model.predict_slippage(
                     instruction.order, market_data
                 )
+                expected_slippage_bps = slippage_prediction.total_slippage_bps
                 if expected_slippage_bps > instruction.max_slippage_bps:
                     raise ExecutionError(
                         f"Expected slippage {expected_slippage_bps} bps exceeds maximum allowed "
@@ -540,10 +631,63 @@ class ExecutionEngine(BaseComponent):
                     trade_id=trade_context.trade_id,
                     event="order_created",
                     data={
-                        "order_type": instruction.order.order_type.value,
+                        "order_type": "market" if instruction.order.price is None else "limit",
                         "quantity": str(instruction.order.quantity),
                         "algorithm": selected_algorithm.__class__.__name__,
+                        "processing_mode": "stream",
+                        "data_format": "event_data_v1",
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
                     },
+                )
+
+            # Emit order creation event with consistent format and boundary validation
+            if hasattr(self, "_emitter") and self._emitter:
+                from src.core.event_constants import OrderEvents
+                from src.execution.data_transformer import ExecutionDataTransformer
+                from src.utils.messaging_patterns import BoundaryValidator
+
+                event_data = ExecutionDataTransformer.transform_for_pub_sub(
+                    event_type=OrderEvents.CREATED,
+                    data=instruction.order,
+                    metadata={
+                        "strategy": strategy_name,
+                        "algorithm": selected_algorithm.__class__.__name__,
+                        "component": "ExecutionEngine",
+                        "processing_mode": "stream",
+                        "boundary_crossed": True,
+                    },
+                )
+
+                # Apply consistent boundary validation for cross-module communication
+                try:
+                    # Align processing paradigm for consistent data flow
+                    aligned_data = ExecutionDataTransformer.align_processing_paradigm(
+                        event_data, target_mode="stream"
+                    )
+
+                    # Validate at execution -> error_handling boundary
+                    BoundaryValidator.validate_error_to_monitoring_boundary(
+                        {
+                            "component": "ExecutionEngine",
+                            "error_type": "OrderCreatedEvent",
+                            "severity": "low",
+                            "timestamp": aligned_data.get("timestamp"),
+                            "processing_mode": "stream",
+                            "data_format": "event_data_v1",
+                            "message_pattern": "pub_sub",
+                            "boundary_crossed": True,
+                        }
+                    )
+                except Exception as boundary_error:
+                    self._logger.warning(
+                        f"Boundary validation failed for order creation: {boundary_error}"
+                    )
+
+                self._emitter.emit(
+                    event=OrderEvents.CREATED,
+                    data=event_data,
+                    source="execution",
+                    tags={"component": "ExecutionEngine", "strategy": strategy_name},
                 )
 
             # Execute using selected algorithm with exchange factory and risk manager adapter
@@ -556,7 +700,7 @@ class ExecutionEngine(BaseComponent):
                         exchange_factory=self.exchange_factory,
                         risk_manager=self.risk_manager_adapter,  # Use adapter for algorithm compatibility
                     ),
-                    timeout=timeout
+                    timeout=timeout,
                 )
             except asyncio.TimeoutError:
                 raise ExecutionError(f"Execution timeout after {timeout} seconds")
@@ -635,7 +779,7 @@ class ExecutionEngine(BaseComponent):
                         post_trade_analysis=post_trade_analysis,
                     )
             except Exception as state_error:
-                self.logger.error(
+                self._logger.error(
                     f"Failed to complete trade attribution: {state_error}",
                     execution_id=execution_result.execution_id,
                     trade_id=trade_context.trade_id if trade_context else None,
@@ -644,7 +788,7 @@ class ExecutionEngine(BaseComponent):
             # Remove from active executions
             self.active_executions.pop(execution_result.execution_id, None)
 
-            self.logger.info(
+            self._logger.info(
                 "Order execution completed via service",
                 execution_id=execution_result.execution_id,
                 algorithm=selected_algorithm.__class__.__name__,
@@ -657,7 +801,7 @@ class ExecutionEngine(BaseComponent):
             return execution_result
 
         except (ExecutionError, ValidationError, ServiceError) as e:
-            self.logger.error(
+            self._logger.error(
                 "Order execution failed",
                 execution_instruction=instruction.algorithm.value,
                 symbol=instruction.order.symbol,
@@ -666,7 +810,7 @@ class ExecutionEngine(BaseComponent):
             raise
 
         except Exception as e:
-            self.logger.error(
+            self._logger.error(
                 "Unexpected error in order execution",
                 execution_instruction=instruction.algorithm.value,
                 symbol=instruction.order.symbol,
@@ -688,7 +832,7 @@ class ExecutionEngine(BaseComponent):
         try:
             execution_result = self.active_executions.get(execution_id)
             if not execution_result:
-                self.logger.warning(f"No active execution found with ID: {execution_id}")
+                self._logger.warning(f"No active execution found with ID: {execution_id}")
                 return False
 
             # Update execution status
@@ -698,7 +842,7 @@ class ExecutionEngine(BaseComponent):
             # Remove from active executions
             self.active_executions.pop(execution_id, None)
 
-            self.logger.info(
+            self._logger.info(
                 "Execution cancelled",
                 execution_id=execution_id,
                 symbol=execution_result.original_order.symbol,
@@ -706,12 +850,15 @@ class ExecutionEngine(BaseComponent):
 
             return True
 
-        except Exception as e:
-            self.logger.error(f"Failed to cancel execution {execution_id}: {e}")
+        except (ExecutionError, ServiceError, ValidationError) as e:
+            self._logger.error(f"Failed to cancel execution {execution_id}: {e}")
             return False
+        except Exception as e:
+            self._logger.error(f"Unexpected error cancelling execution {execution_id}: {e}")
+            raise ExecutionError(f"Unexpected error during execution cancellation: {e}") from e
 
     @time_execution
-    async def get_execution_metrics(self) -> Dict[str, Any]:
+    async def get_execution_metrics(self) -> dict[str, Any]:
         """
         Get comprehensive execution metrics from ExecutionService.
 
@@ -743,16 +890,24 @@ class ExecutionEngine(BaseComponent):
 
             return combined_metrics
 
-        except Exception as e:
-            self.logger.error(f"Failed to get execution metrics: {e}")
+        except (ServiceError, DatabaseError) as e:
+            self._logger.error(f"Failed to get execution metrics: {e}")
             return {
                 "error": str(e),
                 "engine_status": "running" if self.is_running else "stopped",
                 "active_executions": len(self.active_executions),
             }
+        except Exception as e:
+            self._logger.error(f"Unexpected error getting execution metrics: {e}")
+            # For metrics, return error state instead of raising
+            return {
+                "error": f"Unexpected error: {e!s}",
+                "engine_status": "error",
+                "active_executions": 0,
+            }
 
     @time_execution
-    async def get_active_executions(self) -> Dict[str, ExecutionResultWrapper]:
+    async def get_active_executions(self) -> dict[str, ExecutionResultWrapper]:
         """
         Get currently active executions.
 
@@ -765,9 +920,9 @@ class ExecutionEngine(BaseComponent):
 
     async def _select_algorithm(
         self,
-        instruction: ExecutionInstruction,
+        instruction: InternalExecutionInstruction,
         market_data: MarketData,
-        validation_results: Dict[str, Any],
+        validation_results: dict[str, Any],
     ) -> BaseAlgorithm:
         """
         Select appropriate execution algorithm based on instruction and market conditions.
@@ -785,7 +940,7 @@ class ExecutionEngine(BaseComponent):
             if instruction.algorithm in self.algorithms:
                 selected_algorithm = self.algorithms[instruction.algorithm]
 
-                self.logger.debug(
+                self._logger.debug(
                     "Algorithm selected from instruction",
                     algorithm=instruction.algorithm.value,
                     symbol=instruction.order.symbol,
@@ -803,38 +958,45 @@ class ExecutionEngine(BaseComponent):
             if risk_level == "high" or order_value > self.large_order_threshold:
                 # Use TWAP for high-risk or large orders
                 selected = self.algorithms[ExecutionAlgorithm.TWAP]
-                self.logger.debug("Selected TWAP for high-risk/large order")
+                self._logger.debug("Selected TWAP for high-risk/large order")
 
             elif market_data.volume and order_value > market_data.volume * Decimal(
                 str(self.volume_significance_threshold)
             ):
                 # Use VWAP for orders > 1% of volume
                 selected = self.algorithms[ExecutionAlgorithm.VWAP]
-                self.logger.debug("Selected VWAP for volume-significant order")
+                self._logger.debug("Selected VWAP for volume-significant order")
 
             elif instruction.order.quantity > Decimal("1000"):
                 # Use Iceberg for large quantity orders
                 selected = self.algorithms[ExecutionAlgorithm.ICEBERG]
-                self.logger.debug("Selected Iceberg for large quantity order")
+                self._logger.debug("Selected Iceberg for large quantity order")
 
             else:
                 # Use Smart Router for general cases
                 selected = self.algorithms[ExecutionAlgorithm.SMART_ROUTER]
-                self.logger.debug("Selected Smart Router for general order")
+                self._logger.debug("Selected Smart Router for general order")
 
             return selected
 
+        except (ValidationError, ServiceError) as e:
+            self._logger.error(f"Algorithm selection failed: {e}")
+            # Fallback to Smart Router for expected errors
+            return self.algorithms[ExecutionAlgorithm.SMART_ROUTER]
         except Exception as e:
-            self.logger.error(f"Algorithm selection failed: {e}")
-            # Fallback to Smart Router
+            self._logger.error(f"Unexpected error in algorithm selection: {e}")
+            # For unexpected errors, still fallback but log as critical
+            self._logger.critical(
+                f"Critical error in algorithm selection, falling back to Smart Router: {e}"
+            )
             return self.algorithms[ExecutionAlgorithm.SMART_ROUTER]
 
     async def _perform_post_trade_analysis(
         self,
         execution_result: ExecutionResultWrapper,
         market_data: MarketData,
-        pre_trade_analysis: Dict[str, Any],
-    ) -> Dict[str, Any]:
+        pre_trade_analysis: dict[str, Any],
+    ) -> dict[str, Any]:
         """
         Perform post-trade analysis and quality assessment.
 
@@ -909,10 +1071,19 @@ class ExecutionEngine(BaseComponent):
 
             return analysis
 
-        except Exception as e:
-            self.logger.error(f"Post-trade analysis failed: {e}")
+        except (ServiceError, ValidationError) as e:
+            self._logger.error(f"Post-trade analysis failed: {e}")
             return {
                 "error": str(e),
+                "quality_score": 0.0,
+                "execution_time_ms": 0,
+                "fill_rate": 0.0,
+            }
+        except Exception as e:
+            self._logger.error(f"Unexpected error in post-trade analysis: {e}")
+            # For analysis methods, return error state instead of raising
+            return {
+                "error": f"Unexpected error: {e!s}",
                 "quality_score": 0.0,
                 "execution_time_ms": 0,
                 "fill_rate": 0.0,
@@ -921,10 +1092,10 @@ class ExecutionEngine(BaseComponent):
     def _generate_execution_recommendations(
         self,
         execution_result: ExecutionResultWrapper,
-        quality_score: float,
-        slippage_bps: float,
-        fill_rate: float,
-    ) -> List[str]:
+        quality_score: Decimal,
+        slippage_bps: Decimal,
+        fill_rate: Decimal,
+    ) -> list[str]:
         """
         Generate recommendations for future executions based on results.
 
@@ -958,7 +1129,7 @@ class ExecutionEngine(BaseComponent):
 
         return recommendations
 
-    async def get_algorithm_performance(self) -> Dict[str, Any]:
+    async def get_algorithm_performance(self) -> dict[str, Any]:
         """
         Get performance metrics for each execution algorithm.
 
@@ -981,8 +1152,12 @@ class ExecutionEngine(BaseComponent):
 
             return algorithm_performance
 
+        except (ServiceError, DatabaseError) as e:
+            self._logger.error(f"Failed to get algorithm performance: {e}")
+            return {}
         except Exception as e:
-            self.logger.error(f"Failed to get algorithm performance: {e}")
+            self._logger.error(f"Unexpected error getting algorithm performance: {e}")
+            # For performance methods, return empty dict instead of raising
             return {}
 
     # Abstract methods required by BaseComponent

@@ -5,7 +5,6 @@ This adapter bridges the interface mismatch between what execution algorithms
 expect (risk_manager.validate_order) and what RiskService provides.
 """
 
-import logging
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
@@ -16,8 +15,11 @@ from src.core.exceptions import (
     SignalGenerationError,
     ValidationError,
 )
+from src.core.logging import get_logger
 from src.core.types import OrderRequest, OrderSide, Signal, SignalDirection
-from src.risk_management.service import RiskService
+
+# Use interface instead of concrete implementation
+from src.execution.interfaces import RiskValidationServiceInterface
 
 
 class RiskManagerAdapter:
@@ -32,7 +34,7 @@ class RiskManagerAdapter:
     - validate_signal(signal: Signal) -> bool
     """
 
-    def __init__(self, risk_service: RiskService):
+    def __init__(self, risk_service: RiskValidationServiceInterface):
         """
         Initialize adapter with RiskService instance.
 
@@ -40,7 +42,7 @@ class RiskManagerAdapter:
             risk_service: The RiskService instance to adapt
         """
         self.risk_service = risk_service
-        self._logger = logging.getLogger(__name__)
+        self._logger = get_logger(__name__)
 
     async def validate_order(self, order: OrderRequest, portfolio_value: Decimal) -> bool:
         """
@@ -56,6 +58,9 @@ class RiskManagerAdapter:
             bool: True if order is valid, False otherwise
         """
         try:
+            # Boundary validation: Ensure order has required fields
+            self._validate_order_boundary_fields(order)
+
             # order is already OrderRequest type
             order_request = order
 
@@ -161,9 +166,12 @@ class RiskManagerAdapter:
         )
 
         # Calculate position size
+        # Ensure we have non-null available_capital
+        capital = available_capital or Decimal("100000")  # Default $100k
+
         position_size = await self.risk_service.calculate_position_size(
             signal=signal,
-            available_capital=available_capital,
+            available_capital=capital,
             current_price=current_price,
         )
 
@@ -177,3 +185,37 @@ class RiskManagerAdapter:
     async def calculate_risk_metrics(self, positions: list, market_data: list) -> Any:
         """Calculate risk metrics using RiskService."""
         return await self.risk_service.calculate_risk_metrics(positions, market_data)
+
+    def _validate_order_boundary_fields(self, order: OrderRequest) -> None:
+        """
+        Validate order has required boundary fields for cross-module communication.
+
+        Args:
+            order: OrderRequest to validate
+
+        Raises:
+            ValidationError: If order lacks required boundary fields
+        """
+        # Validate required fields for module boundary
+        if not order.symbol:
+            raise ValidationError("Order symbol is required for cross-module validation")
+
+        if not hasattr(order, "side") or order.side is None:
+            raise ValidationError("Order side is required for cross-module validation")
+
+        if not hasattr(order, "quantity") or order.quantity is None or order.quantity <= 0:
+            raise ValidationError("Order quantity must be positive for cross-module validation")
+
+        if not hasattr(order, "order_type") or order.order_type is None:
+            raise ValidationError("Order type is required for cross-module validation")
+
+        # Log boundary validation success
+        self._logger.debug(
+            "Order boundary validation passed",
+            symbol=order.symbol,
+            side=order.side.value if hasattr(order.side, "value") else str(order.side),
+            quantity=str(order.quantity),
+            order_type=order.order_type.value
+            if hasattr(order.order_type, "value")
+            else str(order.order_type),
+        )

@@ -27,7 +27,6 @@ from src.core.exceptions import (
 # MANDATORY: Import from P-001
 from src.core.types import (
     ExecutionAlgorithm,
-    ExecutionInstruction,
     ExecutionResult,
     ExecutionStatus,
     OrderRequest,
@@ -35,6 +34,9 @@ from src.core.types import (
 
 # Import exchange interfaces
 from src.execution.exchange_interface import ExchangeFactoryInterface
+
+# Import internal execution instruction type
+from src.execution.types import ExecutionInstruction
 
 # MANDATORY: Import from P-002A
 # MANDATORY: Import from P-007A
@@ -93,7 +95,7 @@ class SmartOrderRouter(BaseAlgorithm):
         self.min_order_value_for_splitting = Decimal("1000")  # Minimum value to consider splitting
         self.max_slippage_tolerance_bps = 50  # 0.5% maximum slippage
 
-        self.logger.info("Smart Order Router initialized with multi-exchange support")
+        self._logger.info("Smart Order Router initialized with multi-exchange support")
 
     def get_algorithm_type(self) -> ExecutionAlgorithm:
         """Get the algorithm type enum."""
@@ -168,7 +170,7 @@ class SmartOrderRouter(BaseAlgorithm):
             # is_running is managed by BaseComponent/BaseAlgorithm
             execution_result.status = ExecutionStatus.RUNNING
 
-            self.logger.info(
+            self._logger.info(
                 "Starting Smart Router execution",
                 execution_id=execution_id,
                 symbol=instruction.order.symbol,
@@ -176,8 +178,7 @@ class SmartOrderRouter(BaseAlgorithm):
             )
 
             # Get exchange factory
-            if not exchange_factory:
-                raise ExecutionError("Exchange factory is required for Smart Router")
+            self._validate_exchange_factory(exchange_factory)
 
             # Analyze routing options
             routing_plan = await self._create_routing_plan(instruction, exchange_factory)
@@ -191,13 +192,9 @@ class SmartOrderRouter(BaseAlgorithm):
             await self._finalize_execution(execution_result)
 
             # Update statistics
-            if execution_result.status == ExecutionStatus.COMPLETED:
-                self.successful_executions += 1
-            else:
-                self.failed_executions += 1
-            self.total_executions += 1
+            self._update_execution_statistics(execution_result.status)
 
-            self.logger.info(
+            self._logger.info(
                 "Smart Router execution completed",
                 execution_id=execution_id,
                 status=execution_result.status.value,
@@ -209,20 +206,8 @@ class SmartOrderRouter(BaseAlgorithm):
 
         except Exception as e:
             # Handle execution failure
-            if "execution_id" in locals() and execution_id in self.current_executions:
-                await self._update_execution_result(
-                    self.current_executions[execution_id],
-                    status=ExecutionStatus.FAILED,
-                    error_message=str(e),
-                )
-                self.failed_executions += 1
-                self.total_executions += 1
-
-            self.logger.error(
-                "Smart Router execution failed",
-                execution_id=execution_id if "execution_id" in locals() else "unknown",
-                error=str(e),
-            )
+            execution_id_for_error = execution_id if "execution_id" in locals() else None
+            await self._handle_execution_error(e, execution_id_for_error, "Smart Router")
             raise ExecutionError(f"Smart Router execution failed: {e}")
 
         finally:
@@ -239,28 +224,7 @@ class SmartOrderRouter(BaseAlgorithm):
         Returns:
             bool: True if cancellation successful, False otherwise
         """
-        try:
-            if execution_id not in self.current_executions:
-                self.logger.warning(f"Execution not found for cancellation: {execution_id}")
-                return False
-
-            execution_result = self.current_executions[execution_id]
-
-            if execution_result.status not in [ExecutionStatus.RUNNING, ExecutionStatus.PENDING]:
-                self.logger.warning(
-                    f"Cannot cancel execution in status: {execution_result.status.value}"
-                )
-                return False
-
-            # Update status to cancelled
-            await self._update_execution_result(execution_result, status=ExecutionStatus.CANCELLED)
-
-            self.logger.info(f"Smart Router execution cancelled: {execution_id}")
-            return True
-
-        except Exception as e:
-            self.logger.error(f"Failed to cancel Smart Router execution: {e}")
-            return False
+        return await self._standard_cancel_execution(execution_id, "Smart Router")
 
     async def _create_routing_plan(
         self, instruction: ExecutionInstruction, exchange_factory
@@ -318,7 +282,7 @@ class SmartOrderRouter(BaseAlgorithm):
                 "candidate_exchanges": candidate_exchanges,
             }
 
-            self.logger.debug(
+            self._logger.debug(
                 "Routing plan created",
                 strategy=strategy,
                 num_routes=len(routes),
@@ -328,7 +292,7 @@ class SmartOrderRouter(BaseAlgorithm):
             return routing_plan
 
         except Exception as e:
-            self.logger.error(f"Failed to create routing plan: {e}")
+            self._logger.error(f"Failed to create routing plan: {e}")
             # Fallback to simple single-exchange routing
             return {
                 "strategy": "fallback",
@@ -440,7 +404,7 @@ class SmartOrderRouter(BaseAlgorithm):
                 self.exchange_scores[cache_key] = composite_score
                 self.last_score_update[cache_key] = current_time
 
-                self.logger.debug(
+                self._logger.debug(
                     "Exchange scored",
                     exchange=exchange_name,
                     composite_score=composite_score,
@@ -451,7 +415,7 @@ class SmartOrderRouter(BaseAlgorithm):
                 )
 
             except Exception as e:
-                self.logger.warning(f"Failed to score exchange {exchange_name}: {e}")
+                self._logger.warning(f"Failed to score exchange {exchange_name}: {e}")
                 scores[exchange_name] = 0.1  # Low but non-zero score
 
         return scores
@@ -474,7 +438,7 @@ class SmartOrderRouter(BaseAlgorithm):
             return fee_score
 
         except Exception as e:
-            self.logger.warning(f"Fee score calculation failed: {e}")
+            self._logger.warning(f"Fee score calculation failed: {e}")
             return 0.5
 
     async def _calculate_liquidity_score(self, exchange, symbol: str) -> float:
@@ -484,13 +448,13 @@ class SmartOrderRouter(BaseAlgorithm):
             try:
                 market_data = await exchange.get_market_data(symbol)
             except ExchangeRateLimitError:
-                self.logger.warning(f"Rate limit hit for {exchange.exchange_name} on {symbol}")
+                self._logger.warning(f"Rate limit hit for {exchange.exchange_name} on {symbol}")
                 return 0.2  # Very low score for rate limited exchange
             except ExchangeConnectionError:
-                self.logger.warning(f"Connection error for {exchange.exchange_name} on {symbol}")
+                self._logger.warning(f"Connection error for {exchange.exchange_name} on {symbol}")
                 return 0.1  # Minimal score for connection issues
             except ExchangeError as e:
-                self.logger.warning(f"Exchange error getting market data: {e}")
+                self._logger.warning(f"Exchange error getting market data: {e}")
                 return 0.3  # Low score for exchange errors
 
             if not market_data or not market_data.bid or not market_data.ask:
@@ -513,7 +477,7 @@ class SmartOrderRouter(BaseAlgorithm):
             return liquidity_score
 
         except Exception as e:
-            self.logger.warning(f"Liquidity score calculation failed: {e}")
+            self._logger.warning(f"Liquidity score calculation failed: {e}")
             return 0.5
 
     async def _calculate_reliability_score(self, exchange_name: str) -> float:
@@ -546,7 +510,7 @@ class SmartOrderRouter(BaseAlgorithm):
             return latency_score
 
         except Exception as e:
-            self.logger.warning(f"Latency score calculation failed: {e}")
+            self._logger.warning(f"Latency score calculation failed: {e}")
             return 0.5
 
     async def _create_split_routing(
@@ -636,7 +600,7 @@ class SmartOrderRouter(BaseAlgorithm):
                 )
 
         except Exception as e:
-            self.logger.error(f"Routing plan execution failed: {e}")
+            self._logger.error(f"Routing plan execution failed: {e}")
             raise ExecutionError(f"Routing execution failed: {e}")
 
     async def _execute_single_exchange_route(
@@ -678,7 +642,7 @@ class SmartOrderRouter(BaseAlgorithm):
                     timeout=30.0,  # 30 second timeout
                 )
             except asyncio.TimeoutError:
-                self.logger.error(
+                self._logger.error(
                     f"Timeout placing order on {route['exchange']}",
                     exchange=route["exchange"],
                     symbol=order.symbol,
@@ -692,7 +656,7 @@ class SmartOrderRouter(BaseAlgorithm):
                 )
                 return
             except ExchangeError as e:
-                self.logger.error(
+                self._logger.error(
                     f"Exchange error placing order on {route['exchange']}: {e}",
                     exchange=route["exchange"],
                     symbol=order.symbol,
@@ -707,13 +671,13 @@ class SmartOrderRouter(BaseAlgorithm):
                 )
                 return
             except NetworkError as e:
-                self.logger.error(f"Network error placing order on {route['exchange']}: {e}")
+                self._logger.error(f"Network error placing order on {route['exchange']}: {e}")
                 raise ExecutionError(f"Network error during smart routing: {e}")
 
             # Update execution result
             await self._update_execution_result(execution_result, child_order=order_response)
 
-            self.logger.info(
+            self._logger.info(
                 "Smart router single exchange execution completed",
                 exchange=route["exchange"],
                 quantity=str(route["quantity"]),
@@ -721,7 +685,7 @@ class SmartOrderRouter(BaseAlgorithm):
             )
 
         except Exception as e:
-            self.logger.error(f"Single exchange route execution failed: {e}")
+            self._logger.error(f"Single exchange route execution failed: {e}")
             raise
 
     async def _execute_split_routing(
@@ -749,7 +713,7 @@ class SmartOrderRouter(BaseAlgorithm):
             successful_routes = 0
             for i, result in enumerate(results):
                 if isinstance(result, Exception):
-                    self.logger.error(
+                    self._logger.error(
                         f"Route execution failed for {routes[i]['exchange']}: {result}"
                     )
                 else:
@@ -758,12 +722,12 @@ class SmartOrderRouter(BaseAlgorithm):
             if successful_routes == 0:
                 raise ExecutionError("All routes failed during split execution")
 
-            self.logger.info(
+            self._logger.info(
                 f"Split routing completed: {successful_routes}/{len(routes)} routes successful"
             )
 
         except Exception as e:
-            self.logger.error(f"Split routing execution failed: {e}")
+            self._logger.error(f"Split routing execution failed: {e}")
             raise
 
     async def _execute_route_async(
@@ -802,7 +766,7 @@ class SmartOrderRouter(BaseAlgorithm):
             try:
                 order_response = await exchange.place_order(order)
             except ExchangeError as e:
-                self.logger.error(
+                self._logger.error(
                     f"Exchange error placing order on {route['exchange']}: {e}",
                     exchange=route["exchange"],
                     symbol=order.symbol,
@@ -817,13 +781,13 @@ class SmartOrderRouter(BaseAlgorithm):
                 )
                 return
             except NetworkError as e:
-                self.logger.error(f"Network error placing order on {route['exchange']}: {e}")
+                self._logger.error(f"Network error placing order on {route['exchange']}: {e}")
                 raise ExecutionError(f"Network error during smart routing: {e}")
 
             # Update execution result (thread-safe update)
             await self._update_execution_result(execution_result, child_order=order_response)
 
-            self.logger.info(
+            self._logger.info(
                 "Route executed successfully",
                 exchange=route["exchange"],
                 quantity=str(route["quantity"]),
@@ -832,7 +796,7 @@ class SmartOrderRouter(BaseAlgorithm):
             )
 
         except Exception as e:
-            self.logger.error(f"Route execution failed for {route['exchange']}: {e}")
+            self._logger.error(f"Route execution failed for {route['exchange']}: {e}")
             raise
         finally:
             # Ensure exchange connection is properly handled
@@ -840,7 +804,7 @@ class SmartOrderRouter(BaseAlgorithm):
                 try:
                     await exchange.close()
                 except Exception as cleanup_error:
-                    self.logger.warning(f"Failed to close exchange connection: {cleanup_error}")
+                    self._logger.warning(f"Failed to close exchange connection: {cleanup_error}")
 
     async def _finalize_execution(self, execution_result: ExecutionResult) -> None:
         """
@@ -886,7 +850,7 @@ class SmartOrderRouter(BaseAlgorithm):
                     execution_result, expected_price=execution_result.original_order.price
                 )
 
-            self.logger.debug(
+            self._logger.debug(
                 "Smart Router execution finalized",
                 execution_id=execution_result.execution_id,
                 final_status=execution_result.status.value,
@@ -894,5 +858,5 @@ class SmartOrderRouter(BaseAlgorithm):
             )
 
         except Exception as e:
-            self.logger.error(f"Failed to finalize Smart Router execution: {e}")
+            self._logger.error(f"Failed to finalize Smart Router execution: {e}")
             execution_result.error_message = f"Finalization failed: {e}"

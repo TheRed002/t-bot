@@ -21,6 +21,7 @@ from src.core.exceptions import (
     ExchangeRateLimitError,
     ExecutionError,
     NetworkError,
+    ServiceError,
     ValidationError,
 )
 
@@ -81,13 +82,13 @@ class VWAPAlgorithm(BaseAlgorithm):
         self.max_participation_rate = 0.5  # Maximum 50% participation
 
         # Execution controls
-        self.min_slice_interval_seconds = 30  # Minimum 30 seconds between slices
+        self.min_slice_interval_seconds = config.execution.vwap_min_slice_interval_seconds
         self.volume_check_interval_seconds = 60  # Check volume every minute
 
         # Initialize volume patterns (would be loaded from historical data)
         self._initialize_default_volume_pattern()
 
-        self.logger.info("VWAP algorithm initialized with volume-based execution")
+        self._logger.info("VWAP algorithm initialized with volume-based execution")
 
     def get_algorithm_type(self) -> ExecutionAlgorithm:
         """Get the algorithm type enum."""
@@ -194,7 +195,7 @@ class VWAPAlgorithm(BaseAlgorithm):
             # is_running is managed by BaseComponent/BaseAlgorithm
             execution_result.status = ExecutionStatus.RUNNING
 
-            self.logger.info(
+            self._logger.info(
                 "Starting VWAP execution",
                 execution_id=execution_id,
                 symbol=instruction.order.symbol,
@@ -203,27 +204,8 @@ class VWAPAlgorithm(BaseAlgorithm):
             )
 
             # Get exchange for execution
-            if not exchange_factory:
-                raise ExecutionError("Exchange factory is required for VWAP execution")
-
-            # Determine which exchange to use
-            if instruction.preferred_exchanges:
-                exchange_name = instruction.preferred_exchanges[0]
-            else:
-                # Get first available exchange from factory
-                available_exchanges = exchange_factory.get_available_exchanges()
-                if not available_exchanges:
-                    raise ExecutionError("No exchanges available")
-                exchange_name = available_exchanges[0]
-
-            try:
-                exchange = await exchange_factory.get_exchange(exchange_name)
-            except ValidationError as e:
-                self.logger.error(f"Exchange not found: {exchange_name}")
-                raise ExecutionError(f"Exchange {exchange_name} not available: {e}")
-            except Exception as e:
-                self.logger.error(f"Failed to get exchange: {e}")
-                raise ExecutionError(f"Failed to access exchange {exchange_name}: {e}")
+            self._validate_exchange_factory(exchange_factory)
+            exchange = await self._get_exchange_from_factory(exchange_factory, instruction)
 
             # Create VWAP execution plan based on volume patterns
             execution_plan = await self._create_vwap_execution_plan(instruction, exchange)
@@ -235,13 +217,9 @@ class VWAPAlgorithm(BaseAlgorithm):
             await self._finalize_execution(execution_result)
 
             # Update statistics
-            if execution_result.status == ExecutionStatus.COMPLETED:
-                self.successful_executions += 1
-            else:
-                self.failed_executions += 1
-            self.total_executions += 1
+            self._update_execution_statistics(execution_result.status)
 
-            self.logger.info(
+            self._logger.info(
                 "VWAP execution completed",
                 execution_id=execution_id,
                 status=execution_result.status.value,
@@ -253,20 +231,8 @@ class VWAPAlgorithm(BaseAlgorithm):
 
         except Exception as e:
             # Handle execution failure
-            if "execution_id" in locals() and execution_id in self.current_executions:
-                await self._update_execution_result(
-                    self.current_executions[execution_id],
-                    status=ExecutionStatus.FAILED,
-                    error_message=str(e),
-                )
-                self.failed_executions += 1
-                self.total_executions += 1
-
-            self.logger.error(
-                "VWAP execution failed",
-                execution_id=execution_id if "execution_id" in locals() else "unknown",
-                error=str(e),
-            )
+            execution_id_for_error = execution_id if "execution_id" in locals() else None
+            await self._handle_execution_error(e, execution_id_for_error, "VWAP")
             raise ExecutionError(f"VWAP execution failed: {e}")
 
         finally:
@@ -283,28 +249,7 @@ class VWAPAlgorithm(BaseAlgorithm):
         Returns:
             bool: True if cancellation successful, False otherwise
         """
-        try:
-            if execution_id not in self.current_executions:
-                self.logger.warning(f"Execution not found for cancellation: {execution_id}")
-                return False
-
-            execution_result = self.current_executions[execution_id]
-
-            if execution_result.status not in [ExecutionStatus.RUNNING, ExecutionStatus.PENDING]:
-                self.logger.warning(
-                    f"Cannot cancel execution in status: {execution_result.status.value}"
-                )
-                return False
-
-            # Update status to cancelled
-            await self._update_execution_result(execution_result, status=ExecutionStatus.CANCELLED)
-
-            self.logger.info(f"VWAP execution cancelled: {execution_id}")
-            return True
-
-        except Exception as e:
-            self.logger.error(f"Failed to cancel VWAP execution: {e}")
-            return False
+        return await self._standard_cancel_execution(execution_id, "VWAP")
 
     async def _create_vwap_execution_plan(
         self, instruction: ExecutionInstruction, exchange
@@ -347,7 +292,7 @@ class VWAPAlgorithm(BaseAlgorithm):
             "adaptive_execution": True,  # Enable real-time adjustments
         }
 
-        self.logger.debug(
+        self._logger.debug(
             "VWAP execution plan created",
             num_slices=len(slices),
             time_horizon=time_horizon_minutes,
@@ -390,11 +335,15 @@ class VWAPAlgorithm(BaseAlgorithm):
             else:
                 volume_pattern = self.default_volume_pattern
 
-            self.logger.debug(f"Volume pattern retrieved for {symbol}")
+            self._logger.debug(f"Volume pattern retrieved for {symbol}")
             return volume_pattern
 
+        except (ServiceError, NetworkError) as e:
+            self._logger.warning(f"Failed to get volume pattern for {symbol}: {e}")
+            return self.default_volume_pattern
         except Exception as e:
-            self.logger.warning(f"Failed to get volume pattern for {symbol}: {e}")
+            self._logger.warning(f"Unexpected error getting volume pattern for {symbol}: {e}")
+            # Return default pattern for graceful degradation
             return self.default_volume_pattern
 
     async def _create_volume_based_slices(
@@ -515,7 +464,7 @@ class VWAPAlgorithm(BaseAlgorithm):
             for slice_info in execution_plan["slices"]:
                 # Check if execution was cancelled
                 if execution_result.status == ExecutionStatus.CANCELLED:
-                    self.logger.info("VWAP execution cancelled, stopping slice execution")
+                    self._logger.info("VWAP execution cancelled, stopping slice execution")
                     break
 
                 # Wait until it's time for this slice
@@ -525,11 +474,13 @@ class VWAPAlgorithm(BaseAlgorithm):
                 if current_time < execution_time:
                     wait_seconds = (execution_time - current_time).total_seconds()
                     if wait_seconds > 0:
-                        self.logger.debug(
+                        self._logger.debug(
                             f"Waiting {wait_seconds:.1f} seconds for next VWAP slice",
                             slice_number=slice_info["slice_number"],
                         )
-                        await asyncio.sleep(min(wait_seconds, 300))  # Max 5 minutes wait
+                        await asyncio.sleep(
+                            min(wait_seconds, self.config.execution.vwap_max_wait_seconds)
+                        )  # Max wait time
 
                 # Monitor current market volume and adjust if needed
                 adjusted_quantity = await self._adjust_slice_for_volume(
@@ -552,13 +503,13 @@ class VWAPAlgorithm(BaseAlgorithm):
                     try:
                         is_valid = await risk_manager.validate_order(slice_order, portfolio_value)
                         if not is_valid:
-                            self.logger.warning(
+                            self._logger.warning(
                                 "Risk manager rejected VWAP slice order",
                                 slice_number=slice_info["slice_number"],
                             )
                             continue
                     except Exception as e:
-                        self.logger.warning(
+                        self._logger.warning(
                             f"Risk validation failed for VWAP slice {slice_info['slice_number']}: {e}"
                         )
                         continue
@@ -571,48 +522,51 @@ class VWAPAlgorithm(BaseAlgorithm):
                     try:
                         order_response = await exchange.place_order(slice_order)
                     except ExchangeRateLimitError as e:
-                        self.logger.error(
-                            f"Rate limit error placing slice {slice_num}: {e}",
-                            slice_num=slice_num,
+                        self._logger.error(
+                            f"Rate limit error placing slice {slice_info['slice_number']}: {e}",
+                            slice_num=slice_info["slice_number"],
                             symbol=slice_order.symbol,
                         )
                         # Wait longer before retrying
-                        await asyncio.sleep(10)
+                        await asyncio.sleep(self.config.execution.vwap_error_delay_seconds)
                         continue
                     except ExchangeConnectionError as e:
-                        self.logger.error(
-                            f"Connection error placing slice {slice_num}: {e}",
-                            slice_num=slice_num,
+                        self._logger.error(
+                            f"Connection error placing slice {slice_info['slice_number']}: {e}",
+                            slice_num=slice_info["slice_number"],
                         )
                         # For connection errors, retry with backoff
-                        await asyncio.sleep(5)
+                        await asyncio.sleep(self.config.execution.vwap_slice_retry_delay_seconds)
                         continue
                     except ExchangeError as e:
-                        self.logger.error(
-                            f"Exchange error placing slice {slice_num}: {e}",
-                            slice_num=slice_num,
+                        self._logger.error(
+                            f"Exchange error placing slice {slice_info['slice_number']}: {e}",
+                            slice_num=slice_info["slice_number"],
                             symbol=slice_order.symbol,
                             quantity=str(slice_order.quantity),
                         )
                         # Continue with next slice, don't fail entire execution
                         execution_result.add_fill(
-                            price=slice_order.price or current_price,
+                            price=slice_order.price or execution_result.original_order.price,
                             quantity=Decimal("0"),
                             timestamp=datetime.now(timezone.utc),
-                            order_id=f"failed_slice_{slice_num}",
+                            order_id=f"failed_slice_{slice_info['slice_number']}",
                         )
-                        await asyncio.sleep(1)  # Brief pause before next slice
+                        await asyncio.sleep(
+                            self.config.execution.vwap_min_slice_interval_seconds
+                        )  # Brief pause before next slice
                         continue
                     except NetworkError as e:
-                        self.logger.error(
-                            f"Network error placing slice {slice_num}: {e}", slice_num=slice_num
+                        self._logger.error(
+                            f"Network error placing slice {slice_info['slice_number']}: {e}",
+                            slice_num=slice_info["slice_number"],
                         )
                         # For network errors, might want to retry or abort
                         raise ExecutionError(f"Network error during VWAP execution: {e}")
                     except asyncio.TimeoutError:
-                        self.logger.error(
-                            f"Timeout placing slice {slice_num}",
-                            slice_num=slice_num,
+                        self._logger.error(
+                            f"Timeout placing slice {slice_info['slice_number']}",
+                            slice_num=slice_info["slice_number"],
                         )
                         # Timeout - skip this slice
                         continue
@@ -626,7 +580,7 @@ class VWAPAlgorithm(BaseAlgorithm):
                     slice_info["order_response"] = order_response
                     slice_info["actual_quantity"] = adjusted_quantity
 
-                    self.logger.info(
+                    self._logger.info(
                         "VWAP slice executed",
                         slice_number=slice_info["slice_number"],
                         quantity=str(adjusted_quantity),
@@ -642,7 +596,7 @@ class VWAPAlgorithm(BaseAlgorithm):
                     slice_info["status"] = "failed"
                     slice_info["error"] = str(e)
 
-                    self.logger.error(
+                    self._logger.error(
                         "VWAP slice execution failed",
                         slice_number=slice_info["slice_number"],
                         error=str(e),
@@ -653,10 +607,10 @@ class VWAPAlgorithm(BaseAlgorithm):
                         continue
                     else:
                         # For rate limit errors, wait longer
-                        await asyncio.sleep(60)
+                        await asyncio.sleep(self.config.execution.vwap_monitoring_delay_seconds)
 
         except Exception as e:
-            self.logger.error(f"VWAP plan execution failed: {e}")
+            self._logger.error(f"VWAP plan execution failed: {e}")
             raise ExecutionError(f"VWAP plan execution failed: {e}")
 
     async def _adjust_slice_for_volume(
@@ -684,7 +638,7 @@ class VWAPAlgorithm(BaseAlgorithm):
 
             adjusted_quantity = original_quantity * Decimal(str(volume_adjustment_factor))
 
-            self.logger.debug(
+            self._logger.debug(
                 "Volume adjustment applied",
                 slice_number=slice_info["slice_number"],
                 original=str(original_quantity),
@@ -694,8 +648,12 @@ class VWAPAlgorithm(BaseAlgorithm):
 
             return adjusted_quantity
 
+        except (ValueError, ValidationError) as e:
+            self._logger.warning(f"Volume adjustment failed: {e}")
+            return slice_info["quantity"]
         except Exception as e:
-            self.logger.warning(f"Volume adjustment failed: {e}")
+            self._logger.warning(f"Unexpected error in volume adjustment: {e}")
+            # Return original quantity for graceful degradation
             return slice_info["quantity"]
 
     async def _finalize_execution(self, execution_result: ExecutionResult) -> None:
@@ -729,7 +687,7 @@ class VWAPAlgorithm(BaseAlgorithm):
                 # Calculate participation rate based on actual market volume
                 estimated_market_volume = Decimal("2000000")  # Placeholder
                 if estimated_market_volume > 0:
-                    execution_result.participation_rate = float(
+                    execution_result.participation_rate = (
                         execution_result.total_filled_quantity / estimated_market_volume
                     )
 
@@ -738,16 +696,18 @@ class VWAPAlgorithm(BaseAlgorithm):
                     execution_result, expected_price=execution_result.original_order.price
                 )
 
-            self.logger.debug(
+            self._logger.debug(
                 "VWAP execution finalized",
                 execution_id=execution_result.execution_id,
                 final_status=execution_result.status.value,
-                fill_rate=float(
-                    execution_result.total_filled_quantity
-                    / execution_result.original_order.quantity
-                ),
+                fill_rate=execution_result.total_filled_quantity
+                / execution_result.original_order.quantity,
             )
 
-        except Exception as e:
-            self.logger.error(f"Failed to finalize VWAP execution: {e}")
+        except (ExecutionError, ServiceError) as e:
+            self._logger.error(f"Failed to finalize VWAP execution: {e}")
             execution_result.error_message = f"Finalization failed: {e}"
+        except Exception as e:
+            self._logger.error(f"Unexpected error finalizing VWAP execution: {e}")
+            execution_result.error_message = f"Unexpected finalization error: {e}"
+            # Don't re-raise during finalization to allow graceful cleanup

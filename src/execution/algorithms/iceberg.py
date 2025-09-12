@@ -70,8 +70,8 @@ class IcebergAlgorithm(BaseAlgorithm):
         self.max_display_quantity_pct = 0.5  # Maximum 50% display
 
         # Refresh controls
-        self.refresh_delay_seconds = 2  # Delay between refreshes
-        self.random_delay_range = 3  # Random delay to avoid patterns
+        self.refresh_delay_seconds = config.execution.iceberg_refresh_delay_seconds
+        self.random_delay_range = config.execution.iceberg_random_delay_range
         self.max_refresh_attempts = 50  # Maximum refresh cycles
 
         # Price improvement
@@ -80,10 +80,10 @@ class IcebergAlgorithm(BaseAlgorithm):
         self.price_staleness_seconds = 30  # Refresh price after 30 seconds
 
         # Monitoring
-        self.fill_monitoring_interval = 1  # Check fills every second
+        self.fill_monitoring_interval = config.execution.iceberg_fill_monitoring_interval_seconds
         self.order_timeout_minutes = 60  # Cancel unfilled orders after 1 hour
 
-        self.logger.info("Iceberg algorithm initialized with stealth execution")
+        self._logger.info("Iceberg algorithm initialized with stealth execution")
 
     def get_algorithm_type(self) -> ExecutionAlgorithm:
         """Get the algorithm type enum."""
@@ -119,7 +119,7 @@ class IcebergAlgorithm(BaseAlgorithm):
 
         # Iceberg works best with limit orders
         if instruction.order.order_type == OrderType.MARKET:
-            self.logger.warning("Iceberg algorithm is more effective with limit orders")
+            self._logger.warning("Iceberg algorithm is more effective with limit orders")
 
     @time_execution
     @log_calls
@@ -160,7 +160,7 @@ class IcebergAlgorithm(BaseAlgorithm):
             # Calculate display quantity
             display_quantity = await self._calculate_display_quantity(instruction)
 
-            self.logger.info(
+            self._logger.info(
                 "Starting Iceberg execution",
                 execution_id=execution_id,
                 symbol=instruction.order.symbol,
@@ -169,17 +169,8 @@ class IcebergAlgorithm(BaseAlgorithm):
             )
 
             # Get exchange for execution
-            if not exchange_factory:
-                raise ExecutionError("Exchange factory is required for Iceberg execution")
-
-            # Determine which exchange to use
-            exchange_name = "binance"  # Default exchange
-            if instruction.preferred_exchanges:
-                exchange_name = instruction.preferred_exchanges[0]
-
-            exchange = await exchange_factory.get_exchange(exchange_name)
-            if not exchange:
-                raise ExecutionError(f"Failed to get exchange: {exchange_name}")
+            self._validate_exchange_factory(exchange_factory)
+            exchange = await self._get_exchange_from_factory(exchange_factory, instruction)
 
             # Execute Iceberg strategy
             await self._execute_iceberg_strategy(
@@ -190,13 +181,9 @@ class IcebergAlgorithm(BaseAlgorithm):
             await self._finalize_execution(execution_result)
 
             # Update statistics
-            if execution_result.status == ExecutionStatus.COMPLETED:
-                self.successful_executions += 1
-            else:
-                self.failed_executions += 1
-            self.total_executions += 1
+            self._update_execution_statistics(execution_result.status)
 
-            self.logger.info(
+            self._logger.info(
                 "Iceberg execution completed",
                 execution_id=execution_id,
                 status=execution_result.status.value,
@@ -208,20 +195,8 @@ class IcebergAlgorithm(BaseAlgorithm):
 
         except Exception as e:
             # Handle execution failure
-            if "execution_id" in locals() and execution_id in self.current_executions:
-                await self._update_execution_result(
-                    self.current_executions[execution_id],
-                    status=ExecutionStatus.FAILED,
-                    error_message=str(e),
-                )
-                self.failed_executions += 1
-                self.total_executions += 1
-
-            self.logger.error(
-                "Iceberg execution failed",
-                execution_id=execution_id if "execution_id" in locals() else "unknown",
-                error=str(e),
-            )
+            execution_id_for_error = execution_id if "execution_id" in locals() else None
+            await self._handle_execution_error(e, execution_id_for_error, "Iceberg")
             raise ExecutionError(f"Iceberg execution failed: {e}")
 
         finally:
@@ -238,28 +213,7 @@ class IcebergAlgorithm(BaseAlgorithm):
         Returns:
             bool: True if cancellation successful, False otherwise
         """
-        try:
-            if execution_id not in self.current_executions:
-                self.logger.warning(f"Execution not found for cancellation: {execution_id}")
-                return False
-
-            execution_result = self.current_executions[execution_id]
-
-            if execution_result.status not in [ExecutionStatus.RUNNING, ExecutionStatus.PENDING]:
-                self.logger.warning(
-                    f"Cannot cancel execution in status: {execution_result.status.value}"
-                )
-                return False
-
-            # Update status to cancelled
-            await self._update_execution_result(execution_result, status=ExecutionStatus.CANCELLED)
-
-            self.logger.info(f"Iceberg execution cancelled: {execution_id}")
-            return True
-
-        except Exception as e:
-            self.logger.error(f"Failed to cancel Iceberg execution: {e}")
-            return False
+        return await self._standard_cancel_execution(execution_id, "Iceberg")
 
     async def _calculate_display_quantity(self, instruction: ExecutionInstruction) -> Decimal:
         """
@@ -323,11 +277,11 @@ class IcebergAlgorithm(BaseAlgorithm):
                         try:
                             cancel_success = await exchange.cancel_order(current_order_id)
                             if not cancel_success:
-                                self.logger.warning(
+                                self._logger.warning(
                                     f"Cancel order returned False for {current_order_id}"
                                 )
                         except Exception as e:
-                            self.logger.warning(f"Failed to cancel order during cancellation: {e}")
+                            self._logger.warning(f"Failed to cancel order during cancellation: {e}")
                     break
 
                 # Determine quantity for this slice
@@ -362,12 +316,12 @@ class IcebergAlgorithm(BaseAlgorithm):
                     try:
                         is_valid = await risk_manager.validate_order(slice_order, portfolio_value)
                         if not is_valid:
-                            self.logger.warning(
+                            self._logger.warning(
                                 f"Risk manager rejected iceberg slice {refresh_count + 1}"
                             )
                             break
                     except Exception as e:
-                        self.logger.warning(
+                        self._logger.warning(
                             f"Risk validation failed for iceberg slice {refresh_count + 1}: {e}"
                         )
                         break
@@ -377,7 +331,7 @@ class IcebergAlgorithm(BaseAlgorithm):
                     order_response = await exchange.place_order(slice_order)
                     current_order_id = order_response.id
 
-                    self.logger.info(
+                    self._logger.info(
                         "Iceberg slice placed",
                         refresh_count=refresh_count + 1,
                         slice_quantity=str(slice_quantity),
@@ -404,30 +358,30 @@ class IcebergAlgorithm(BaseAlgorithm):
                         await asyncio.sleep(delay)
 
                 except Exception as e:
-                    self.logger.error(f"Failed to place iceberg slice {refresh_count + 1}: {e}")
+                    self._logger.error(f"Failed to place iceberg slice {refresh_count + 1}: {e}")
 
                     # For certain errors, stop execution
                     if "insufficient" in str(e).lower() or "rejected" in str(e).lower():
                         break
 
                     # For others, try again after a delay
-                    await asyncio.sleep(10)
+                    await asyncio.sleep(self.config.execution.iceberg_error_delay_seconds)
 
             # Cancel any remaining open order
             if current_order_id:
                 try:
                     await exchange.cancel_order(current_order_id)
                 except Exception as e:
-                    self.logger.warning(f"Failed to cancel final iceberg order: {e}")
+                    self._logger.warning(f"Failed to cancel final iceberg order: {e}")
 
-            self.logger.info(
+            self._logger.info(
                 "Iceberg strategy completed",
                 total_refreshes=refresh_count,
                 remaining_quantity=str(remaining_quantity),
             )
 
         except Exception as e:
-            self.logger.error(f"Iceberg strategy execution failed: {e}")
+            self._logger.error(f"Iceberg strategy execution failed: {e}")
             raise ExecutionError(f"Iceberg strategy failed: {e}")
 
     async def _monitor_order_fills(
@@ -458,7 +412,7 @@ class IcebergAlgorithm(BaseAlgorithm):
                 try:
                     # Check exchange health before making API call
                     if not await exchange.health_check():
-                        self.logger.warning(
+                        self._logger.warning(
                             f"Exchange {exchange.exchange_name} unhealthy, waiting..."
                         )
                         await asyncio.sleep(self.fill_monitoring_interval * 2)
@@ -476,7 +430,7 @@ class IcebergAlgorithm(BaseAlgorithm):
                             execution_result, child_order=order_response
                         )
 
-                        self.logger.debug(
+                        self._logger.debug(
                             f"Iceberg slice fully filled: {order_id}",
                             filled_quantity=str(total_filled),
                         )
@@ -490,7 +444,7 @@ class IcebergAlgorithm(BaseAlgorithm):
                         if partial_filled > total_filled:
                             total_filled = partial_filled
 
-                        self.logger.debug(
+                        self._logger.debug(
                             f"Iceberg slice partially filled: {order_id}",
                             filled_quantity=str(total_filled),
                         )
@@ -501,7 +455,7 @@ class IcebergAlgorithm(BaseAlgorithm):
                         OrderStatus.EXPIRED,
                     ]:
                         # Order terminated
-                        self.logger.info(
+                        self._logger.info(
                             f"Iceberg slice terminated: {order_id}",
                             status=order_status.value,
                             filled_quantity=str(total_filled),
@@ -512,8 +466,8 @@ class IcebergAlgorithm(BaseAlgorithm):
                     await asyncio.sleep(self.fill_monitoring_interval)
 
                 except Exception as e:
-                    self.logger.warning(f"Failed to check order status {order_id}: {e}")
-                    await asyncio.sleep(5)
+                    self._logger.warning(f"Failed to check order status {order_id}: {e}")
+                    await asyncio.sleep(self.config.execution.iceberg_retry_delay_seconds)
 
             # Update execution result with final filled amount
             if total_filled > 0:
@@ -524,7 +478,7 @@ class IcebergAlgorithm(BaseAlgorithm):
             return total_filled
 
         except Exception as e:
-            self.logger.error(f"Order monitoring failed: {e}")
+            self._logger.error(f"Order monitoring failed: {e}")
             return Decimal("0")
 
     async def _get_improved_price(self, symbol: str, side, exchange) -> Decimal | None:
@@ -566,7 +520,7 @@ class IcebergAlgorithm(BaseAlgorithm):
                 if improved_price <= market_data.bid:
                     improved_price = market_data.bid + tick_size
 
-            self.logger.debug(
+            self._logger.debug(
                 "Price improvement calculated",
                 symbol=symbol,
                 side=side.value,
@@ -578,7 +532,7 @@ class IcebergAlgorithm(BaseAlgorithm):
             return improved_price
 
         except Exception as e:
-            self.logger.warning(f"Failed to calculate improved price: {e}")
+            self._logger.warning(f"Failed to calculate improved price: {e}")
             return None
 
     async def _finalize_execution(self, execution_result: ExecutionResult) -> None:
@@ -617,7 +571,7 @@ class IcebergAlgorithm(BaseAlgorithm):
                     execution_result, expected_price=execution_result.original_order.price
                 )
 
-            self.logger.debug(
+            self._logger.debug(
                 "Iceberg execution finalized",
                 execution_id=execution_result.execution_id,
                 final_status=execution_result.status.value,
@@ -625,5 +579,5 @@ class IcebergAlgorithm(BaseAlgorithm):
             )
 
         except Exception as e:
-            self.logger.error(f"Failed to finalize Iceberg execution: {e}")
+            self._logger.error(f"Failed to finalize Iceberg execution: {e}")
             execution_result.error_message = f"Finalization failed: {e}"

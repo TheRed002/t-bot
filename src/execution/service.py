@@ -21,7 +21,10 @@ from typing import Any
 
 from src.core.base.interfaces import HealthStatus
 from src.core.base.service import TransactionalService
+from src.core.event_constants import TradeEvents
 from src.core.exceptions import (
+    ExecutionError,
+    RiskManagementError,
     ServiceError,
     ValidationError,
 )
@@ -48,24 +51,23 @@ from src.database.models import (
 # not imported directly to maintain proper abstraction
 # DatabaseService will be injected
 from src.error_handling.decorators import with_circuit_breaker, with_retry
+from src.execution.interfaces import ExecutionServiceInterface
+
+# Risk service should be injected through dependency injection
+# from src.risk_management.service import RiskService  # Removed - use interface instead
+from src.utils import cache_result, format_currency, time_execution
 
 # Import risk adapter for proper API usage
 # Import monitoring components
-from src.monitoring.financial_precision import safe_decimal_to_float
-from src.monitoring.interfaces import MetricsServiceInterface
-
-# Import risk management for integration
-from src.risk_management.service import RiskService
-from src.utils import cache_result, format_currency, time_execution
+from src.utils.decimal_utils import decimal_to_float, safe_decimal_conversion
 from src.utils.execution_utils import (
     calculate_order_value,
     calculate_slippage_bps,
-    safe_decimal_conversion,
 )
-from src.utils.interfaces import ValidationServiceInterface
+from src.utils.messaging_patterns import ErrorPropagationMixin
 
 
-class ExecutionService(TransactionalService):
+class ExecutionService(TransactionalService, ExecutionServiceInterface, ErrorPropagationMixin):
     """
     Enterprise-grade execution service for trade execution orchestration.
 
@@ -85,14 +87,11 @@ class ExecutionService(TransactionalService):
 
     def __init__(
         self,
-        db_service: Any = None,  # For backward compatibility
-        database_service: Any = None,  # New parameter name
-        redis_client: Any = None,
-        config: Any = None,
-        risk_service: RiskService | None = None,
-        metrics_service: MetricsServiceInterface | None = None,
-        validation_service: ValidationServiceInterface | None = None,
-        analytics_service: Any = None,
+        database_service: Any,  # Required dependency - injected
+        risk_service: Any | None = None,  # Optional dependency - injected
+        metrics_service: Any | None = None,  # Optional dependency - injected
+        validation_service: Any | None = None,  # Optional dependency - injected
+        analytics_service: Any | None = None,  # Optional dependency - injected
         correlation_id: str | None = None,
     ) -> None:
         """
@@ -111,10 +110,11 @@ class ExecutionService(TransactionalService):
             correlation_id=correlation_id,
         )
 
-        # Dependencies will be injected via constructor or resolved during start
+        # Dependencies are injected via constructor
+        if not database_service:
+            raise ValueError("Database service is required")
 
-        # Use new parameter name or fall back to old one for compatibility
-        self.database_service = database_service or db_service
+        self.database_service = database_service
         self.risk_service = risk_service
         self.metrics_service = metrics_service
         self.validation_service = validation_service
@@ -122,10 +122,11 @@ class ExecutionService(TransactionalService):
 
         # Initialize tracer for distributed tracing through monitoring service
         self._tracer = None
-        if metrics_service:
+        if self.metrics_service:
             try:
                 # Get tracer through monitoring service if available
                 from src.monitoring import get_tracer
+
                 self._tracer = get_tracer("execution.service")
             except (ImportError, AttributeError, RuntimeError) as e:
                 self._logger.warning(f"Failed to initialize tracer: {e}")
@@ -233,7 +234,9 @@ class ExecutionService(TransactionalService):
             self._logger.info(
                 "Execution metrics initialized",
                 recent_trades=len(recent_trades),
-                total_volume=format_currency(Decimal(str(self._performance_metrics["total_volume"]))),
+                total_volume=format_currency(
+                    Decimal(str(self._performance_metrics["total_volume"]))
+                ),
             )
 
         except Exception as e:
@@ -242,8 +245,8 @@ class ExecutionService(TransactionalService):
 
     # Core Execution Operations
 
-    @with_circuit_breaker(failure_threshold=10, recovery_timeout=60.0)
-    @with_retry(max_attempts=2, base_delay=0.5)
+    @with_circuit_breaker(failure_threshold=10, recovery_timeout=60)
+    @with_retry(max_attempts=2, base_delay=Decimal("0.5"))
     @time_execution
     async def record_trade_execution(
         self,
@@ -303,7 +306,7 @@ class ExecutionService(TransactionalService):
                 span_context = self._tracer.start_as_current_span("record_trade_execution")
                 span = span_context.__enter__()
             except Exception as e:
-                self.logger.warning(f"Failed to start tracing span: {e}")
+                self._logger.warning(f"Failed to start tracing span: {e}")
                 span_context = None
                 span = None
 
@@ -325,6 +328,25 @@ class ExecutionService(TransactionalService):
                     span.set_attribute("strategy.name", strategy_name)
 
             try:
+                # Apply boundary validation for execution data
+                from src.utils.messaging_patterns import BoundaryValidator
+
+                execution_boundary_data = {
+                    "component": "ExecutionService",
+                    "operation": "record_trade_execution",
+                    "processing_mode": "stream",
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "execution_id": execution_result.execution_id,
+                    "symbol": execution_result.original_order.symbol,
+                    "quantity": str(execution_result.total_filled_quantity),
+                    "price": str(execution_result.average_fill_price)
+                    if execution_result.average_fill_price
+                    else None,
+                }
+
+                # Validate execution to monitoring boundary
+                BoundaryValidator.validate_monitoring_to_error_boundary(execution_boundary_data)
+
                 # Validate execution result
                 self._validate_execution_result(execution_result)
 
@@ -354,7 +376,7 @@ class ExecutionService(TransactionalService):
                     "filled_quantity": self._convert_to_decimal_safe(
                         execution_result.total_filled_quantity
                     ),
-                    "average_fill_price": self._convert_to_decimal_safe(
+                    "average_price": self._convert_to_decimal_safe(
                         execution_result.average_fill_price or market_data.price
                     ),
                     "created_at": datetime.now(timezone.utc),
@@ -395,8 +417,8 @@ class ExecutionService(TransactionalService):
                     "status": saved_order.status,
                     "quantity": str(saved_order.quantity),
                     "filled_quantity": str(saved_order.filled_quantity),
-                    "average_fill_price": str(saved_order.average_fill_price)
-                    if saved_order.average_fill_price
+                    "average_fill_price": str(saved_order.average_price)
+                    if saved_order.average_price
                     else None,
                 }
 
@@ -428,21 +450,23 @@ class ExecutionService(TransactionalService):
 
                         trade = Trade(
                             trade_id=execution_result.execution_id,
+                            order_id=str(saved_order.id),  # Use the saved order ID
                             symbol=execution_result.original_order.symbol,
-                            exchange=execution_result.original_order.exchange or "binance",
                             side=execution_result.original_order.side,
-                            quantity=execution_result.total_filled_quantity,
                             price=execution_result.average_fill_price or market_data.price,
+                            quantity=execution_result.total_filled_quantity,
+                            fee=execution_result.total_fees or Decimal("0"),
+                            fee_currency="USDT",  # Default fee currency
                             timestamp=datetime.now(timezone.utc),
-                            fee=execution_result.total_fees or Decimal("0")
+                            exchange=execution_result.original_order.exchange or "binance",
+                            is_maker=False,  # Default to taker for execution
                         )
 
                         # Update analytics with trade data
                         self.analytics_service.update_trade(trade)
 
                         self._logger.debug(
-                            "Trade data sent to analytics",
-                            trade_id=execution_result.execution_id
+                            "Trade data sent to analytics", trade_id=execution_result.execution_id
                         )
 
                     except Exception as analytics_error:
@@ -481,30 +505,68 @@ class ExecutionService(TransactionalService):
 
                 self._performance_metrics["failed_executions"] += 1
 
-                self._logger.error(
-                    "Trade execution recording failed",
-                    execution_id=execution_result.execution_id,
-                    symbol=execution_result.original_order.symbol,
-                    error=str(e),
-                )
+                # Use consistent error propagation pattern from mixin
+                try:
+                    self.propagate_service_error(error=e, context="trade_execution_recording")
+                except ServiceError:
+                    # propagate_service_error always raises, so we catch the ServiceError
+                    # Emit error event with consistent error propagation patterns using pub/sub
+                    if hasattr(self, "_emitter") and self._emitter:
+                        try:
+                            # Apply cross-module validation for consistent data flow
+                            from src.execution.data_transformer import ExecutionDataTransformer
 
-                raise ServiceError(f"Trade execution recording failed: {e}")
+                            error_data = {
+                                "error_type": type(e).__name__,
+                                "error_message": str(e),
+                                "execution_id": execution_result.execution_id,
+                                "symbol": execution_result.original_order.symbol,
+                                "component": "ExecutionService",
+                                "severity": "high",
+                                "processing_mode": "stream",  # Consistent with web_interface
+                                "message_pattern": "pub_sub",  # Align messaging patterns
+                                "timestamp": datetime.now(timezone.utc).isoformat(),
+                            }
+
+                            # Transform using pub/sub pattern for consistency with web_interface
+                            transformed_error_data = ExecutionDataTransformer.transform_for_pub_sub(
+                                event_type="trade_execution_error",
+                                data=error_data,
+                                metadata={"source": "execution", "target": "error_handling"},
+                            )
+
+                            self._emitter.emit(
+                                event=TradeEvents.FAILED,
+                                data=transformed_error_data,
+                                source="execution",
+                            )
+                        except Exception as emit_error:
+                            self._logger.warning(f"Failed to emit error event: {emit_error}")
+
+                    self._logger.error(
+                        "Trade execution recording failed",
+                        execution_id=execution_result.execution_id,
+                        symbol=execution_result.original_order.symbol,
+                        error=str(e),
+                    )
+
+                    raise ServiceError(f"Trade execution recording failed: {e}") from e
         finally:
             # Properly close span context if it was opened
             if span_context:
                 try:
                     span_context.__exit__(None, None, None)
                 except Exception as e:
-                    self.logger.warning("Failed to close span context cleanly", error=str(e))
+                    self._logger.warning("Failed to close span context cleanly", error=str(e))
             elif span:
                 # Fallback cleanup for span without context
                 try:
                     span.end()
                 except Exception as e:
-                    self.logger.warning("Failed to end span cleanly", error=str(e))
+                    self._logger.warning("Failed to end span cleanly", error=str(e))
 
-    @with_circuit_breaker(failure_threshold=5, recovery_timeout=60.0)
-    @with_retry(max_attempts=3, base_delay=1.0)
+    @with_circuit_breaker(failure_threshold=5, recovery_timeout=60)
+    @with_retry(max_attempts=3, base_delay=Decimal("1.0"))
     @time_execution
     async def validate_order_pre_execution(
         self,
@@ -647,6 +709,13 @@ class ExecutionService(TransactionalService):
                 error=str(e),
             )
 
+            # Use consistent error propagation patterns
+            try:
+                self.propagate_service_error(e, "order_pre_execution_validation")
+            except ServiceError:
+                # Service error has been propagated, continue with validation result return
+                self._logger.debug("Service error propagated for order validation")
+
             # Return failed validation
             return {
                 "validation_id": validation_id,
@@ -659,7 +728,84 @@ class ExecutionService(TransactionalService):
                 "recommendations": ["Review order parameters and retry"],
             }
 
-    @with_circuit_breaker(failure_threshold=5, recovery_timeout=60.0)
+    async def validate_order_pre_execution_from_data(
+        self,
+        order_data: dict[str, Any],
+        market_data: dict[str, Any],
+        bot_id: str | None = None,
+        risk_context: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """
+        Validate order from raw data dictionaries.
+
+        This method handles data conversion internally, keeping business logic
+        out of the controller layer.
+
+        Args:
+            order_data: Raw order data dictionary
+            market_data: Raw market data dictionary
+            bot_id: Associated bot instance ID
+            risk_context: Risk assessment context
+
+        Returns:
+            dict: Validation results with risk assessment
+
+        Raises:
+            ValidationError: If order fails validation
+        """
+        # Convert raw data to typed objects
+        order = self._convert_to_order_request(order_data)
+        market_data_obj = self._convert_to_market_data(market_data)
+
+        # Delegate to existing typed method
+        return await self.validate_order_pre_execution(
+            order=order,
+            market_data=market_data_obj,
+            bot_id=bot_id,
+            risk_context=risk_context,
+        )
+
+    def _convert_to_order_request(self, order_data: dict[str, Any]) -> OrderRequest:
+        """Convert dictionary to OrderRequest."""
+        from decimal import Decimal
+
+        from src.core.types import OrderSide, OrderType
+
+        try:
+            return OrderRequest(
+                symbol=order_data["symbol"],
+                side=OrderSide(order_data["side"]),
+                order_type=OrderType(order_data.get("order_type", "MARKET")),
+                quantity=Decimal(str(order_data["quantity"])),
+                price=Decimal(str(order_data["price"])) if order_data.get("price") else None,
+                time_in_force=order_data.get("time_in_force"),
+                exchange=order_data.get("exchange"),
+                client_order_id=order_data.get("client_order_id"),
+            )
+        except (KeyError, ValueError, TypeError) as e:
+            raise ValidationError(f"Invalid order data: {e}") from e
+
+    def _convert_to_market_data(self, market_data: dict[str, Any]) -> MarketData:
+        """Convert dictionary to MarketData."""
+        from decimal import Decimal
+
+        try:
+            return MarketData(
+                symbol=market_data["symbol"],
+                price=Decimal(str(market_data["price"])),
+                volume=Decimal(str(market_data.get("volume", 0)))
+                if market_data.get("volume")
+                else None,
+                bid=Decimal(str(market_data["bid"])) if market_data.get("bid") else None,
+                ask=Decimal(str(market_data["ask"])) if market_data.get("ask") else None,
+                timestamp=datetime.fromisoformat(market_data["timestamp"])
+                if market_data.get("timestamp")
+                else datetime.now(timezone.utc),
+            )
+        except (KeyError, ValueError, TypeError) as e:
+            raise ValidationError(f"Invalid market data: {e}") from e
+
+    @with_circuit_breaker(failure_threshold=5, recovery_timeout=60)
     @cache_result(ttl=300)
     @time_execution
     async def get_execution_metrics(
@@ -702,8 +848,24 @@ class ExecutionService(TransactionalService):
             if symbol:
                 filters["symbol"] = symbol
 
-            # Get recent trades
+            # Get recent trades with consistent processing paradigm
             start_time = datetime.now(timezone.utc) - timedelta(hours=time_range_hours)
+
+            # Apply consistent processing paradigm for data queries
+            from src.execution.data_transformer import ExecutionDataTransformer
+
+            query_context = {
+                "processing_mode": "batch",  # Use batch for metrics aggregation
+                "data_format": "metrics_query_v1",
+                "time_range_hours": time_range_hours,
+                "component": "ExecutionService",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+
+            # Align to batch processing for metrics calculation
+            aligned_context = ExecutionDataTransformer.align_processing_paradigm(
+                query_context, "batch"
+            )
 
             # Add timestamp filter to database query
             if filters is None:
@@ -727,7 +889,7 @@ class ExecutionService(TransactionalService):
 
             # Calculate execution metrics from orders
             total_volume = sum(
-                order.filled_quantity * (order.average_fill_price or order.price or Decimal("0"))
+                order.filled_quantity * (order.average_price or order.price or Decimal("0"))
                 for order in filtered_orders
                 if order.filled_quantity and order.filled_quantity > 0
             )
@@ -1010,7 +1172,11 @@ class ExecutionService(TransactionalService):
                 )
 
                 # Validate using RiskService
-                risk_validation = await self.risk_service.validate_signal(trading_signal)
+                try:
+                    risk_validation = await self.risk_service.validate_signal(trading_signal)
+                except RiskManagementError as e:
+                    risk_validation = False
+                    warnings.append(f"Risk validation error: {e}")
 
                 if risk_validation:
                     checks.append(
@@ -1031,15 +1197,26 @@ class ExecutionService(TransactionalService):
                     )
 
                 # Get recommended position size
-                recommended_size = await self.risk_service.calculate_position_size(
-                    signal=trading_signal,
-                    available_capital=None,
-                    current_price=Decimal(str(order.price)) if order.price else None,
-                )
+                # Default to a reasonable available capital if not provided
+                available_capital = Decimal("100000")  # Default $100k available capital
+                current_price = (
+                    Decimal(str(order.price)) if order.price else Decimal("50000")
+                )  # Default price
+
+                try:
+                    recommended_size = await self.risk_service.calculate_position_size(
+                        signal=trading_signal,
+                        available_capital=available_capital,
+                        current_price=current_price,
+                    )
+                except RiskManagementError as e:
+                    recommended_size = None
+                    warnings.append(f"Position size calculation error: {e}")
 
                 if recommended_size and order.quantity > recommended_size:
                     warnings.append(
-                        f"Order quantity {order.quantity} exceeds risk-adjusted size {recommended_size}"
+                        f"Order quantity {order.quantity} exceeds "
+                        f"risk-adjusted size {recommended_size}"
                     )
 
             except Exception as e:
@@ -1143,24 +1320,35 @@ class ExecutionService(TransactionalService):
         if self.risk_service:
             try:
                 # Get risk metrics from RiskService
-                risk_metrics = await self.risk_service.calculate_risk_metrics(
-                    positions=[],  # Current positions will be fetched by RiskService
-                    market_data={
-                        order.symbol: {
-                            "price": str(market_data.price),
-                            "volume": str(market_data.volume) if market_data.volume else "0.0",
-                            "bid": (
-                                str(market_data.bid) if market_data.bid else str(market_data.price)
-                            ),
-                            "ask": (
-                                str(market_data.ask) if market_data.ask else str(market_data.price)
-                            ),
-                        }
-                    },
+                from src.core.types.market import MarketData as MarketDataType
+
+                market_data_obj = MarketDataType(
+                    symbol=order.symbol,
+                    timestamp=datetime.now(timezone.utc),
+                    open=market_data.price,
+                    high=market_data.price,
+                    low=market_data.price,
+                    close=market_data.price,
+                    volume=market_data.volume or Decimal("0.0"),
+                    exchange=order.exchange,
+                    bid_price=market_data.bid or market_data.price,
+                    ask_price=market_data.ask or market_data.price,
                 )
+                try:
+                    risk_metrics = await self.risk_service.calculate_risk_metrics(
+                        positions=[],  # Current positions will be fetched by RiskService
+                        market_data=[market_data_obj],
+                    )
+                except RiskManagementError as e:
+                    risk_metrics = None
+                    self._logger.warning(f"Risk metrics calculation failed: {e}")
 
                 # Extract risk information
-                portfolio_risk = risk_metrics.get("portfolio_var", 0.0)
+                portfolio_risk = (
+                    float(risk_metrics.var_1d)
+                    if risk_metrics and hasattr(risk_metrics, "var_1d")
+                    else 0.0
+                )
                 if portfolio_risk > 0.1:  # VaR > 10%
                     risk_score += 40.0
                     checks.append(
@@ -1180,8 +1368,12 @@ class ExecutionService(TransactionalService):
                     )
 
                 # Get risk summary
-                risk_summary = await self.risk_service.get_risk_summary()
-                if risk_summary.get("total_risk_level") == "high":
+                try:
+                    risk_summary = await self.risk_service.get_risk_summary()
+                except RiskManagementError as e:
+                    risk_summary = {}
+                    self._logger.warning(f"Risk summary retrieval failed: {e}")
+                if risk_summary.get("current_risk_level") == "high":
                     risk_score += 30.0
                     checks.append(
                         {
@@ -1323,31 +1515,31 @@ class ExecutionService(TransactionalService):
                 "exchange": order.exchange or "binance",
                 "side": order.side.value,
                 "order_type": order.order_type.value,
-                "requested_quantity": safe_decimal_to_float(
+                "requested_quantity": decimal_to_float(
                     self._convert_to_decimal_safe(order.quantity), "requested_quantity"
                 ),
-                "executed_quantity": safe_decimal_to_float(
+                "executed_quantity": decimal_to_float(
                     self._convert_to_decimal_safe(execution_result.total_filled_quantity),
                     "executed_quantity",
                 ),
-                "remaining_quantity": safe_decimal_to_float(
+                "remaining_quantity": decimal_to_float(
                     self._convert_to_decimal_safe(
                         order.quantity - execution_result.total_filled_quantity
                     ),
                     "remaining_quantity",
                 ),
-                "requested_price": safe_decimal_to_float(
+                "requested_price": decimal_to_float(
                     self._convert_to_decimal_safe(order.price), "requested_price"
                 )
                 if order.price
                 else None,
-                "executed_price": safe_decimal_to_float(
+                "executed_price": decimal_to_float(
                     self._convert_to_decimal_safe(execution_result.average_fill_price),
                     "executed_price",
                 )
                 if execution_result.average_fill_price
                 else None,
-                "market_price_at_time": safe_decimal_to_float(
+                "market_price_at_time": decimal_to_float(
                     self._convert_to_decimal_safe(market_data.price), "market_price_at_time"
                 ),
                 "slippage_bps": (
@@ -1364,7 +1556,7 @@ class ExecutionService(TransactionalService):
                 "operation_status": operation_status,
                 "success": success,
                 "error_message": error_message,
-                "total_fees": safe_decimal_to_float(
+                "total_fees": decimal_to_float(
                     self._convert_to_decimal_safe(execution_result.total_fees), "total_fees"
                 ),
                 "market_conditions": {
@@ -1410,7 +1602,9 @@ class ExecutionService(TransactionalService):
                     try:
                         fallback_file_handle.close()
                     except Exception as close_error:
-                        self._logger.warning(f"Failed to close audit log fallback file: {close_error}")
+                        self._logger.warning(
+                            f"Failed to close audit log fallback file: {close_error}"
+                        )
 
     async def _create_risk_audit_log(
         self,
@@ -1459,14 +1653,18 @@ class ExecutionService(TransactionalService):
                 fallback_file_handle.write(json.dumps(risk_audit_data) + "\n")
                 fallback_file_handle.flush()
             except Exception as fallback_error:
-                self._logger.warning("Failed to write risk audit fallback data", error=str(fallback_error))
+                self._logger.warning(
+                    "Failed to write risk audit fallback data", error=str(fallback_error)
+                )
             finally:
                 # Ensure file handle is closed
                 if fallback_file_handle:
                     try:
                         fallback_file_handle.close()
                     except Exception as close_error:
-                        self._logger.warning(f"Failed to close risk audit fallback file: {close_error}")
+                        self._logger.warning(
+                            f"Failed to close risk audit fallback file: {close_error}"
+                        )
 
     async def _update_execution_metrics(
         self,
@@ -1526,10 +1724,12 @@ class ExecutionService(TransactionalService):
                         value=1,
                         labels={
                             "exchange": execution_result.original_order.exchange or "unknown",
-                            "status": self._map_execution_status_to_order_status(execution_result.status).value,
+                            "status": self._map_execution_status_to_order_status(
+                                execution_result.status
+                            ).value,
                             "order_type": execution_result.original_order.order_type.value,
                             "symbol": execution_result.original_order.symbol,
-                        }
+                        },
                     )
                     self.metrics_service.record_counter(order_metric)
 
@@ -1540,7 +1740,7 @@ class ExecutionService(TransactionalService):
                         labels={
                             "exchange": execution_result.original_order.exchange or "unknown",
                             "symbol": execution_result.original_order.symbol,
-                        }
+                        },
                     )
                     self.metrics_service.record_counter(volume_metric)
 
@@ -1551,7 +1751,7 @@ class ExecutionService(TransactionalService):
                         labels={
                             "exchange": execution_result.original_order.exchange or "unknown",
                             "symbol": execution_result.original_order.symbol,
-                        }
+                        },
                     )
                     self.metrics_service.record_histogram(execution_time_metric)
 
@@ -1567,7 +1767,7 @@ class ExecutionService(TransactionalService):
                             labels={
                                 "exchange": execution_result.original_order.exchange or "unknown",
                                 "symbol": execution_result.original_order.symbol,
-                            }
+                            },
                         )
                         self.metrics_service.record_counter(trade_metric)
 
@@ -1655,3 +1855,158 @@ class ExecutionService(TransactionalService):
         }
 
         self._logger.info("Execution service metrics reset")
+
+    async def health_check(self) -> dict[str, Any]:
+        """
+        Perform comprehensive health check of the execution service.
+
+        Returns:
+            Dict containing health status and component information
+        """
+        try:
+            health_status = await self._service_health_check()
+
+            return {
+                "service_name": "ExecutionService",
+                "is_running": self.is_running,
+                "health_status": health_status.value
+                if hasattr(health_status, "value")
+                else str(health_status),
+                "dependencies": {
+                    "database_service": bool(self.database_service),
+                    "risk_service": bool(self.risk_service),
+                    "metrics_service": bool(self.metrics_service),
+                    "validation_service": bool(self.validation_service),
+                    "analytics_service": bool(self.analytics_service),
+                },
+                "performance_metrics": self._performance_metrics.copy(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+        except Exception as e:
+            self._logger.error(f"Health check failed: {e}")
+            return {
+                "service_name": "ExecutionService",
+                "is_running": self.is_running,
+                "health_status": "unhealthy",
+                "error": str(e),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+
+    # Bot-specific execution management methods
+    async def start_bot_execution(self, bot_id: str, bot_config: dict[str, Any]) -> bool:
+        """
+        Start execution engine for a specific bot.
+
+        Args:
+            bot_id: Bot identifier
+            bot_config: Bot configuration data
+
+        Returns:
+            bool: True if started successfully
+        """
+        try:
+            self._logger.info("Starting bot execution engine", bot_id=bot_id)
+
+            # Store bot configuration for execution context
+            if not hasattr(self, "_bot_contexts"):
+                self._bot_contexts = {}
+
+            self._bot_contexts[bot_id] = {
+                "config": bot_config,
+                "started_at": datetime.now(timezone.utc),
+                "status": "running",
+            }
+
+            self._logger.info("Bot execution engine started successfully", bot_id=bot_id)
+            return True
+
+        except (ServiceError, ValidationError, ExecutionError) as e:
+            self._logger.error(f"Failed to start bot execution: {e}", bot_id=bot_id)
+            return False
+        except Exception as e:
+            self._logger.error(f"Unexpected error starting bot execution: {e}", bot_id=bot_id)
+            # For bot operations, return False to indicate failure
+            return False
+
+    async def stop_bot_execution(self, bot_id: str) -> bool:
+        """
+        Stop execution engine for a specific bot.
+
+        Args:
+            bot_id: Bot identifier
+
+        Returns:
+            bool: True if stopped successfully
+        """
+        try:
+            self._logger.info("Stopping bot execution engine", bot_id=bot_id)
+
+            if not hasattr(self, "_bot_contexts"):
+                self._bot_contexts = {}
+
+            if bot_id in self._bot_contexts:
+                self._bot_contexts[bot_id]["status"] = "stopped"
+                self._bot_contexts[bot_id]["stopped_at"] = datetime.now(timezone.utc)
+
+            self._logger.info("Bot execution engine stopped successfully", bot_id=bot_id)
+            return True
+
+        except (ServiceError, ValidationError, ExecutionError) as e:
+            self._logger.error(f"Failed to stop bot execution: {e}", bot_id=bot_id)
+            return False
+        except Exception as e:
+            self._logger.error(f"Unexpected error stopping bot execution: {e}", bot_id=bot_id)
+            # For bot operations, return False to indicate failure
+            return False
+
+    async def get_bot_execution_status(self, bot_id: str) -> dict[str, Any]:
+        """
+        Get execution status for a specific bot.
+
+        Args:
+            bot_id: Bot identifier
+
+        Returns:
+            dict: Bot execution status and metrics
+        """
+        try:
+            if not hasattr(self, "_bot_contexts"):
+                self._bot_contexts = {}
+
+            if bot_id not in self._bot_contexts:
+                return {
+                    "bot_id": bot_id,
+                    "status": "not_found",
+                    "message": "Bot execution context not found",
+                }
+
+            context = self._bot_contexts[bot_id]
+            return {
+                "bot_id": bot_id,
+                "status": context.get("status", "unknown"),
+                "started_at": context.get("started_at", {}).isoformat()
+                if context.get("started_at")
+                else None,
+                "stopped_at": context.get("stopped_at", {}).isoformat()
+                if context.get("stopped_at")
+                else None,
+                "config": context.get("config", {}),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+
+        except (ServiceError, ValidationError) as e:
+            self._logger.error(f"Failed to get bot execution status: {e}", bot_id=bot_id)
+            return {
+                "bot_id": bot_id,
+                "status": "error",
+                "error": str(e),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+        except Exception as e:
+            self._logger.error(f"Unexpected error getting bot execution status: {e}", bot_id=bot_id)
+            return {
+                "bot_id": bot_id,
+                "status": "error",
+                "error": f"Unexpected error: {e!s}",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }

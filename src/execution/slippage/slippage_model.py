@@ -16,7 +16,7 @@ from typing import Any
 
 import numpy as np
 
-from src.core.base import BaseComponent
+from src.core.base.component import BaseComponent
 from src.core.config import Config
 from src.core.exceptions import ExecutionError, ValidationError
 
@@ -83,7 +83,7 @@ class SlippageModel(BaseComponent):
         # Default market volume estimates
         self.default_daily_volume = Decimal(config.execution.get("default_daily_volume", "1000000"))
 
-        self.logger.info("Slippage prediction model initialized")
+        self._logger.info("Slippage prediction model initialized")
 
     @time_execution
     async def predict_slippage(
@@ -120,7 +120,7 @@ class SlippageModel(BaseComponent):
             if not market_data.price or market_data.price <= 0:
                 raise ValidationError("Valid market price required")
 
-            self.logger.debug(
+            self._logger.debug(
                 "Predicting slippage",
                 symbol=order.symbol,
                 quantity=order.quantity,
@@ -177,7 +177,9 @@ class SlippageModel(BaseComponent):
                 spread_cost_bps=adjusted_spread_cost,
                 total_slippage_bps=total_slippage_bps,
                 small_order_slippage=total_slippage_bps if order.quantity < 10 else Decimal("0"),
-                medium_order_slippage=total_slippage_bps if 10 <= order.quantity < 100 else Decimal("0"),
+                medium_order_slippage=total_slippage_bps
+                if 10 <= order.quantity < 100
+                else Decimal("0"),
                 large_order_slippage=total_slippage_bps if order.quantity >= 100 else Decimal("0"),
                 market_open_slippage=Decimal("0.05"),
                 market_close_slippage=Decimal("0.05"),
@@ -195,24 +197,24 @@ class SlippageModel(BaseComponent):
                 updated_at=now,
                 metadata={
                     "volume_ratio": volume_ratio,
-                    "volatility_adjustment": float(volatility_adjustment),
-                    "execution_price": float(execution_price),
-                }
+                    "volatility_adjustment": volatility_adjustment,
+                    "execution_price": execution_price,
+                },
             )
 
-            self.logger.info(
+            self._logger.info(
                 "Slippage prediction completed",
                 symbol=order.symbol,
-                total_slippage_bps=float(total_slippage_bps),
-                market_impact_bps=float(adjusted_market_impact),
-                timing_cost_bps=float(adjusted_timing_cost),
+                total_slippage_bps=total_slippage_bps,
+                market_impact_bps=adjusted_market_impact,
+                timing_cost_bps=adjusted_timing_cost,
                 volume_ratio=volume_ratio,
             )
 
             return slippage_metrics
 
         except Exception as e:
-            self.logger.error(f"Slippage prediction failed: {e}")
+            self._logger.error(f"Slippage prediction failed: {e}")
             raise ExecutionError(f"Slippage prediction failed: {e}")
 
     async def _calculate_market_impact_slippage(
@@ -267,7 +269,7 @@ class SlippageModel(BaseComponent):
             return impact_bps
 
         except Exception as e:
-            self.logger.warning(f"Market impact calculation failed: {e}")
+            self._logger.warning(f"Market impact calculation failed: {e}")
             return Decimal("10")  # Default 10 bps
 
     async def _calculate_timing_cost_slippage(
@@ -289,8 +291,8 @@ class SlippageModel(BaseComponent):
             # In practice, this would use historical returns
             if market_data.high_price and market_data.low_price and market_data.price:
                 # Use high-low range as volatility proxy
-                daily_range = float(market_data.high_price - market_data.low_price)
-                daily_volatility = daily_range / market_data.price
+                daily_range = market_data.high_price - market_data.low_price
+                daily_volatility = float(daily_range / market_data.price)
             else:
                 # Default volatility assumption
                 daily_volatility = 0.02  # 2% daily volatility
@@ -314,7 +316,7 @@ class SlippageModel(BaseComponent):
             return timing_cost_bps
 
         except Exception as e:
-            self.logger.warning(f"Timing cost calculation failed: {e}")
+            self._logger.warning(f"Timing cost calculation failed: {e}")
             return Decimal("5")  # Default 5 bps
 
     async def _calculate_spread_cost(self, order: OrderRequest, market_data: MarketData) -> Decimal:
@@ -352,7 +354,7 @@ class SlippageModel(BaseComponent):
             return spread_cost_bps
 
         except Exception as e:
-            self.logger.warning(f"Spread cost calculation failed: {e}")
+            self._logger.warning(f"Spread cost calculation failed: {e}")
             return Decimal("15")  # Default 15 bps
 
     async def _calculate_volatility_adjustment(
@@ -371,8 +373,8 @@ class SlippageModel(BaseComponent):
         try:
             # Estimate current volatility
             if market_data.high_price and market_data.low_price and market_data.price:
-                daily_range = float(market_data.high_price - market_data.low_price)
-                current_volatility = daily_range / float(market_data.price)
+                daily_range = market_data.high_price - market_data.low_price
+                current_volatility = float(daily_range / market_data.price)
             else:
                 current_volatility = 0.02  # Default 2% volatility
 
@@ -381,7 +383,7 @@ class SlippageModel(BaseComponent):
                 if current_volatility <= regime_config["threshold"]:
                     adjustment_factor = regime_config["multiplier"]
 
-                    self.logger.debug(
+                    self._logger.debug(
                         "Volatility regime determined",
                         symbol=symbol,
                         volatility=current_volatility,
@@ -395,7 +397,7 @@ class SlippageModel(BaseComponent):
             return Decimal(str(self.volatility_regimes["extreme"]["multiplier"]))
 
         except Exception as e:
-            self.logger.warning(f"Volatility adjustment calculation failed: {e}")
+            self._logger.warning(f"Volatility adjustment calculation failed: {e}")
             return Decimal("1.0")  # No adjustment
 
     async def _calculate_expected_execution_price(
@@ -426,7 +428,7 @@ class SlippageModel(BaseComponent):
             return execution_price
 
         except Exception as e:
-            self.logger.warning(f"Execution price calculation failed: {e}")
+            self._logger.warning(f"Execution price calculation failed: {e}")
             return market_data.price
 
     @log_calls
@@ -474,7 +476,7 @@ class SlippageModel(BaseComponent):
                     -max_history_size:
                 ]
 
-            self.logger.debug(
+            self._logger.debug(
                 "Historical slippage data updated",
                 symbol=symbol,
                 data_points=len(self.historical_slippage[symbol]),
@@ -485,7 +487,7 @@ class SlippageModel(BaseComponent):
                 await self._update_model_parameters(symbol)
 
         except Exception as e:
-            self.logger.error(f"Failed to update historical data: {e}")
+            self._logger.error(f"Failed to update historical data: {e}")
 
     async def _update_model_parameters(self, symbol: str) -> None:
         """
@@ -539,7 +541,7 @@ class SlippageModel(BaseComponent):
                     "sample_size": len(data),
                 }
 
-                self.logger.info(
+                self._logger.info(
                     "Model parameters updated",
                     symbol=symbol,
                     sample_size=len(data),
@@ -547,12 +549,12 @@ class SlippageModel(BaseComponent):
                 )
 
             except np.linalg.LinAlgError:
-                self.logger.warning(
+                self._logger.warning(
                     f"Failed to update model parameters for {symbol}: singular matrix"
                 )
 
         except Exception as e:
-            self.logger.error(f"Model parameter update failed for {symbol}: {e}")
+            self._logger.error(f"Model parameter update failed for {symbol}: {e}")
 
     async def get_slippage_confidence_interval(
         self, predicted_slippage: SlippageMetrics, confidence_level: float = 0.95
@@ -617,7 +619,7 @@ class SlippageModel(BaseComponent):
             return lower_bound, upper_bound
 
         except Exception as e:
-            self.logger.warning(f"Confidence interval calculation failed: {e}")
+            self._logger.warning(f"Confidence interval calculation failed: {e}")
             # Return wide interval as fallback
             base = predicted_slippage.total_slippage_bps
             return base * Decimal("0.5"), base * Decimal("1.5")
@@ -661,5 +663,5 @@ class SlippageModel(BaseComponent):
             return summary
 
         except Exception as e:
-            self.logger.error(f"Model summary generation failed: {e}")
+            self._logger.error(f"Model summary generation failed: {e}")
             return {"error": str(e)}

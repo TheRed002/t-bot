@@ -14,7 +14,7 @@ import hashlib
 import json
 from datetime import datetime, timedelta, timezone
 from threading import RLock
-from typing import Any
+from typing import Any, Union
 from uuid import uuid4
 
 from src.core.base.component import BaseComponent
@@ -113,7 +113,7 @@ class OrderIdempotencyManager(BaseComponent):
     - Comprehensive audit trail for compliance
     """
 
-    def __init__(self, config: Config, redis_client=None):
+    def __init__(self, config: Config, redis_client: Any = None):
         """
         Initialize idempotency manager.
 
@@ -132,8 +132,10 @@ class OrderIdempotencyManager(BaseComponent):
         self._client_order_id_to_key: dict[
             str, str
         ] = {}  # client_order_id -> key mapping for O(1) lookup
-        self._order_data_cache: dict[str, dict[str, Any]] = {}  # client_order_id -> order_data mapping for tests
-        
+        self._order_data_cache: dict[
+            str, dict[str, Any]
+        ] = {}  # client_order_id -> order_data mapping for tests
+
         # Test compatibility attributes
         self._memory_store = self._in_memory_cache  # Alias for test compatibility
         self._lock = self._cache_lock  # Alias for test compatibility
@@ -141,12 +143,16 @@ class OrderIdempotencyManager(BaseComponent):
         # Configuration
         self.default_expiration_hours = 24
         self.max_retries = 3
-        self.cleanup_interval_minutes = 60  # Clean up expired keys every hour
+        self.cleanup_interval_minutes = getattr(
+            config.execution, "idempotency_cleanup_interval_minutes", 60
+        )
         self.use_redis = redis_client is not None
-        
+
         # Initialize TTL from config for test compatibility
         try:
-            self.ttl_seconds_config = config.execution.get("ttl_seconds", self.default_expiration_hours * 3600)
+            self.ttl_seconds_config = config.execution.get(
+                "ttl_seconds", self.default_expiration_hours * 3600
+            )
         except (AttributeError, TypeError):
             self.ttl_seconds_config = self.default_expiration_hours * 3600
 
@@ -167,7 +173,7 @@ class OrderIdempotencyManager(BaseComponent):
         self._is_running = False
         self._background_tasks: set[asyncio.Task] = set()
 
-        self.logger.info("Order idempotency manager initialized", use_redis=self.use_redis)
+        self._logger.info("Order idempotency manager initialized", use_redis=self.use_redis)
 
         # Register cleanup for proper resource management
         import weakref
@@ -180,7 +186,7 @@ class OrderIdempotencyManager(BaseComponent):
             self._is_running = True
             self._start_cleanup_task()
             self._cleanup_started = True
-            self.logger.info("Idempotency manager started")
+            self._logger.info("Idempotency manager started")
 
     def _start_cleanup_task(self) -> None:
         """Start the periodic cleanup task."""
@@ -192,10 +198,10 @@ class OrderIdempotencyManager(BaseComponent):
                     if self._is_running:  # Check again after sleep
                         await self._cleanup_expired_keys()
                 except asyncio.CancelledError:
-                    self.logger.debug("Cleanup task cancelled")
+                    self._logger.debug("Cleanup task cancelled")
                     break
                 except Exception as e:
-                    self.logger.error(f"Cleanup task error: {e}")
+                    self._logger.error(f"Cleanup task error: {e}")
                     # Continue running unless explicitly stopped
                     if not self._is_running:
                         break
@@ -308,13 +314,13 @@ class OrderIdempotencyManager(BaseComponent):
                 # Check if key is expired
                 if existing_key.is_expired():
                     await self._delete_idempotency_key(idempotency_key)
-                    self.logger.debug(f"Expired idempotency key removed: {idempotency_key}")
+                    self._logger.debug(f"Expired idempotency key removed: {idempotency_key}")
                 else:
                     # Duplicate order detected
                     self.stats["duplicate_orders_prevented"] += 1
                     self.stats["cache_hits"] += 1
 
-                    self.logger.warning(
+                    self._logger.warning(
                         "Duplicate order detected",
                         order_hash=order_hash,
                         existing_client_order_id=existing_key.client_order_id,
@@ -348,7 +354,7 @@ class OrderIdempotencyManager(BaseComponent):
             self.stats["total_keys_created"] += 1
             self.stats["cache_misses"] += 1
 
-            self.logger.info(
+            self._logger.info(
                 "New idempotency key created",
                 client_order_id=client_order_id,
                 order_hash=order_hash,
@@ -359,7 +365,7 @@ class OrderIdempotencyManager(BaseComponent):
 
         except Exception as e:
             self.stats["failed_operations"] += 1
-            self.logger.error(f"Failed to get/create idempotency key: {e}")
+            self._logger.error(f"Failed to get/create idempotency key: {e}")
             raise ExecutionError(f"Idempotency key operation failed: {e}") from e
 
     @log_calls
@@ -381,7 +387,7 @@ class OrderIdempotencyManager(BaseComponent):
             idempotency_key = await self._find_key_by_client_order_id(client_order_id)
 
             if not idempotency_key:
-                self.logger.warning(
+                self._logger.warning(
                     f"No idempotency key found for client_order_id: {client_order_id}"
                 )
                 return False
@@ -394,17 +400,17 @@ class OrderIdempotencyManager(BaseComponent):
             else:
                 # Full OrderResponse case
                 idempotency_key.mark_completed(order_response_or_id)
-                
+
             await self._store_idempotency_key(idempotency_key)
 
             if isinstance(order_response_or_id, str):
-                self.logger.info(
+                self._logger.info(
                     "Order marked as completed",
                     client_order_id=client_order_id,
                     order_id=order_response_or_id,
                 )
             else:
-                self.logger.info(
+                self._logger.info(
                     "Order marked as completed",
                     client_order_id=client_order_id,
                     order_id=order_response_or_id.id,
@@ -414,7 +420,7 @@ class OrderIdempotencyManager(BaseComponent):
             return True
 
         except Exception as e:
-            self.logger.error(f"Failed to mark order as completed: {e}")
+            self._logger.error(f"Failed to mark order as completed: {e}")
             return False
 
     @log_calls
@@ -436,9 +442,10 @@ class OrderIdempotencyManager(BaseComponent):
             if not idempotency_key:
                 # For test compatibility, create a failed order key if one doesn't exist
                 from datetime import timedelta
+
                 created_at = datetime.now(timezone.utc)
                 expires_at = created_at + timedelta(hours=self.default_expiration_hours)
-                
+
                 idempotency_key = IdempotencyKey(
                     key=f"idempotency:order:{client_order_id}",
                     client_order_id=client_order_id,
@@ -449,12 +456,14 @@ class OrderIdempotencyManager(BaseComponent):
                     status="failed",
                     metadata={"error": error_message},
                 )
-                
+
                 # Store the new failed key
                 await self._store_idempotency_key(idempotency_key)
-                
-                self.logger.info(
-                    "Created failed order entry", client_order_id=client_order_id, error=error_message
+
+                self._logger.info(
+                    "Created failed order entry",
+                    client_order_id=client_order_id,
+                    error=error_message,
                 )
                 return True
 
@@ -462,14 +471,14 @@ class OrderIdempotencyManager(BaseComponent):
             idempotency_key.mark_failed(error_message)
             await self._store_idempotency_key(idempotency_key)
 
-            self.logger.info(
+            self._logger.info(
                 "Order marked as failed", client_order_id=client_order_id, error=error_message
             )
 
             return True
 
         except Exception as e:
-            self.logger.error(f"Failed to mark order as failed: {e}")
+            self._logger.error(f"Failed to mark order as failed: {e}")
             return False
 
     @log_calls
@@ -488,17 +497,17 @@ class OrderIdempotencyManager(BaseComponent):
             idempotency_key = await self._find_key_by_client_order_id(client_order_id)
 
             if not idempotency_key:
-                self.logger.warning(f"No idempotency key found for retry check: {client_order_id}")
+                self._logger.warning(f"No idempotency key found for retry check: {client_order_id}")
                 return False, 0
 
             # Check if expired
             if idempotency_key.is_expired():
-                self.logger.warning(f"Cannot retry expired order: {client_order_id}")
+                self._logger.warning(f"Cannot retry expired order: {client_order_id}")
                 return False, idempotency_key.retry_count
 
             # Check retry limit
             if idempotency_key.retry_count >= self.max_retries:
-                self.logger.warning(
+                self._logger.warning(
                     f"Maximum retries exceeded for order: {client_order_id}",
                     retry_count=idempotency_key.retry_count,
                     max_retries=self.max_retries,
@@ -509,7 +518,7 @@ class OrderIdempotencyManager(BaseComponent):
             idempotency_key.increment_retry()
             await self._store_idempotency_key(idempotency_key)
 
-            self.logger.info(
+            self._logger.info(
                 "Order retry allowed",
                 client_order_id=client_order_id,
                 retry_count=idempotency_key.retry_count,
@@ -518,7 +527,7 @@ class OrderIdempotencyManager(BaseComponent):
             return True, idempotency_key.retry_count
 
         except Exception as e:
-            self.logger.error(f"Failed to check retry eligibility: {e}")
+            self._logger.error(f"Failed to check retry eligibility: {e}")
             return False, 0
 
     async def _get_idempotency_key(self, key: str) -> IdempotencyKey | None:
@@ -555,12 +564,12 @@ class OrderIdempotencyManager(BaseComponent):
 
                         return idempotency_key
                 except Exception as e:
-                    self.logger.warning(f"Redis get operation failed: {e}")
+                    self._logger.warning(f"Redis get operation failed: {e}")
 
             return None
 
         except Exception as e:
-            self.logger.error(f"Failed to get idempotency key: {e}")
+            self._logger.error(f"Failed to get idempotency key: {e}")
             return None
 
     async def _store_idempotency_key(self, idempotency_key: IdempotencyKey) -> bool:
@@ -586,12 +595,12 @@ class OrderIdempotencyManager(BaseComponent):
                         await self.redis_client.set(key, data, ttl=ttl_seconds)
                         self.stats["redis_operations"] += 1
                 except Exception as e:
-                    self.logger.warning(f"Redis store operation failed: {e}")
+                    self._logger.warning(f"Redis store operation failed: {e}")
 
             return True
 
         except Exception as e:
-            self.logger.error(f"Failed to store idempotency key: {e}")
+            self._logger.error(f"Failed to store idempotency key: {e}")
             return False
 
     async def _delete_idempotency_key(self, key: str) -> bool:
@@ -610,12 +619,12 @@ class OrderIdempotencyManager(BaseComponent):
                     await self.redis_client.delete(key)
                     self.stats["redis_operations"] += 1
                 except Exception as e:
-                    self.logger.warning(f"Redis delete operation failed: {e}")
+                    self._logger.warning(f"Redis delete operation failed: {e}")
 
             return True
 
         except Exception as e:
-            self.logger.error(f"Failed to delete idempotency key: {e}")
+            self._logger.error(f"Failed to delete idempotency key: {e}")
             return False
 
     async def _find_key_by_client_order_id(self, client_order_id: str) -> IdempotencyKey | None:
@@ -634,7 +643,7 @@ class OrderIdempotencyManager(BaseComponent):
             return None
 
         except Exception as e:
-            self.logger.error(f"Failed to find key by client_order_id: {e}")
+            self._logger.error(f"Failed to find key by client_order_id: {e}")
             return None
 
     async def _cleanup_expired_keys(self) -> int:
@@ -660,12 +669,12 @@ class OrderIdempotencyManager(BaseComponent):
             self.stats["expired_keys_cleaned"] += expired_count
 
             if expired_count > 0:
-                self.logger.info(f"Cleaned up {expired_count} expired idempotency keys")
+                self._logger.info(f"Cleaned up {expired_count} expired idempotency keys")
 
             return expired_count
 
         except Exception as e:
-            self.logger.error(f"Cleanup operation failed: {e}")
+            self._logger.error(f"Cleanup operation failed: {e}")
             return 0
 
     def get_statistics(self) -> dict[str, Any]:
@@ -697,7 +706,10 @@ class OrderIdempotencyManager(BaseComponent):
 
             with self._cache_lock:
                 for idempotency_key in self._in_memory_cache.values():
-                    if not idempotency_key.is_expired() and idempotency_key.status in ["pending", "active"]:
+                    if not idempotency_key.is_expired() and idempotency_key.status in [
+                        "pending",
+                        "active",
+                    ]:
                         key_info = {
                             "client_order_id": idempotency_key.client_order_id,
                             "order_hash": idempotency_key.order_hash[:16] + "...",  # Truncate
@@ -715,7 +727,7 @@ class OrderIdempotencyManager(BaseComponent):
             return active_keys
 
         except Exception as e:
-            self.logger.error(f"Failed to get active keys: {e}")
+            self._logger.error(f"Failed to get active keys: {e}")
             return []
 
     async def force_expire_key(self, client_order_id: str) -> bool:
@@ -724,23 +736,23 @@ class OrderIdempotencyManager(BaseComponent):
             idempotency_key = await self._find_key_by_client_order_id(client_order_id)
 
             if not idempotency_key:
-                self.logger.warning(f"No idempotency key found to expire: {client_order_id}")
+                self._logger.warning(f"No idempotency key found to expire: {client_order_id}")
                 return False
 
             # Delete the key immediately
             await self._delete_idempotency_key(idempotency_key.key)
 
-            self.logger.info(f"Forced expiration of idempotency key: {client_order_id}")
+            self._logger.info(f"Forced expiration of idempotency key: {client_order_id}")
             return True
 
         except Exception as e:
-            self.logger.error(f"Failed to force expire key: {e}")
+            self._logger.error(f"Failed to force expire key: {e}")
             return False
 
     async def stop(self) -> None:
         """Stop the idempotency manager and cancel all background tasks."""
         try:
-            self.logger.info("Stopping idempotency manager...")
+            self._logger.info("Stopping idempotency manager...")
 
             # Signal shutdown to background tasks
             self._is_running = False
@@ -754,11 +766,11 @@ class OrderIdempotencyManager(BaseComponent):
                 except asyncio.CancelledError:
                     pass
                 except Exception as e:
-                    self.logger.warning(f"Error during cleanup task cancellation: {e}")
+                    self._logger.warning(f"Error during cleanup task cancellation: {e}")
 
             # Cancel all background tasks
             if self._background_tasks:
-                self.logger.debug(f"Cancelling {len(self._background_tasks)} background tasks")
+                self._logger.debug(f"Cancelling {len(self._background_tasks)} background tasks")
                 for task in list(self._background_tasks):
                     if not task.done():
                         task.cancel()
@@ -771,7 +783,7 @@ class OrderIdempotencyManager(BaseComponent):
                             timeout=5.0,
                         )
                     except asyncio.TimeoutError:
-                        self.logger.warning("Background tasks did not complete within timeout")
+                        self._logger.warning("Background tasks did not complete within timeout")
 
                 self._background_tasks.clear()
 
@@ -779,7 +791,7 @@ class OrderIdempotencyManager(BaseComponent):
             try:
                 await self._cleanup_expired_keys()
             except Exception as e:
-                self.logger.warning(f"Final cleanup failed: {e}")
+                self._logger.warning(f"Final cleanup failed: {e}")
 
             # Clear all caches
             with self._cache_lock:
@@ -787,10 +799,10 @@ class OrderIdempotencyManager(BaseComponent):
                 self._order_hash_to_key.clear()
                 self._client_order_id_to_key.clear()
 
-            self.logger.info("Idempotency manager stopped successfully")
+            self._logger.info("Idempotency manager stopped successfully")
 
         except Exception as e:
-            self.logger.error(f"Idempotency manager stop failed: {e}")
+            self._logger.error(f"Idempotency manager stop failed: {e}")
             raise
 
     async def shutdown(self) -> None:
@@ -807,22 +819,23 @@ class OrderIdempotencyManager(BaseComponent):
     ) -> dict[str, Any] | None:
         """
         Check if order already exists and store it if new.
-        
+
         This method provides compatibility with test expectations.
-        
+
         Args:
             client_order_id: Client order ID
             order_data: Order data dictionary
             expiration_hours: Custom expiration time
-            
+
         Returns:
-            dict | None: order data if duplicate, None if new
+            Optional[dict]: order data if duplicate, None if new
         """
         try:
             # Convert order_data to OrderRequest
             from decimal import Decimal
+
             from src.core.types import OrderSide, OrderType
-            
+
             # Map string values to enums
             side = OrderSide.BUY if order_data.get("side", "").upper() == "BUY" else OrderSide.SELL
             order_type_str = order_data.get("type", "MARKET").upper()
@@ -831,7 +844,7 @@ class OrderIdempotencyManager(BaseComponent):
                 order_type = OrderType.LIMIT
             elif order_type_str == "STOP_LOSS":
                 order_type = OrderType.STOP_LOSS
-                
+
             order_request = OrderRequest(
                 symbol=order_data.get("symbol", ""),
                 side=side,
@@ -840,12 +853,12 @@ class OrderIdempotencyManager(BaseComponent):
                 price=Decimal(str(order_data.get("price"))) if order_data.get("price") else None,
                 client_order_id=client_order_id,
             )
-            
+
             # Use existing idempotency logic
             returned_client_order_id, is_duplicate = await self.get_or_create_idempotency_key(
                 order_request, expiration_hours
             )
-            
+
             # Return in format expected by tests
             if is_duplicate:
                 # Return the original order data for duplicate
@@ -854,30 +867,30 @@ class OrderIdempotencyManager(BaseComponent):
                 # Store the order data for future duplicate checks
                 with self._cache_lock:
                     # Create a key using client_order_id for simple storage
-                    self._order_data_cache = getattr(self, '_order_data_cache', {})
+                    self._order_data_cache = getattr(self, "_order_data_cache", {})
                     self._order_data_cache[client_order_id] = order_data
                 return None
-                
+
         except Exception as e:
-            self.logger.error(f"Failed to check and store order: {e}")
+            self._logger.error(f"Failed to check and store order: {e}")
             return None
-    
+
     async def get_order_status(self, client_order_id: str) -> dict[str, Any] | None:
         """
         Get the status of an order by client_order_id.
-        
+
         Args:
             client_order_id: Client order ID to check
-            
+
         Returns:
-            dict | None: Order status information or None if not found
+            Optional[dict]: Order status information or None if not found
         """
         try:
             idempotency_key = await self._find_key_by_client_order_id(client_order_id)
-            
+
             if not idempotency_key:
                 return None
-                
+
             return {
                 "client_order_id": client_order_id,
                 "status": idempotency_key.status,
@@ -886,59 +899,59 @@ class OrderIdempotencyManager(BaseComponent):
                 "metadata": idempotency_key.metadata,
             }
         except Exception as e:
-            self.logger.error(f"Failed to get order status: {e}")
+            self._logger.error(f"Failed to get order status: {e}")
             return None
-    
+
     async def cleanup_expired_orders(self) -> int:
         """
         Clean up expired orders.
-        
+
         Returns:
             int: Number of expired orders cleaned up
         """
         try:
             return await self._cleanup_expired_keys()
         except Exception as e:
-            self.logger.error(f"Failed to cleanup expired orders: {e}")
+            self._logger.error(f"Failed to cleanup expired orders: {e}")
             return 0
-    
+
     def _generate_idempotency_key(self, client_order_id: str) -> str:
         """
         Generate an idempotency key for tests compatibility.
-        
+
         Args:
             client_order_id: Client order ID
-            
+
         Returns:
             str: Idempotency key
         """
         return f"idempotency:order:{client_order_id}"
-    
+
     @property
     def memory_store(self) -> dict[str, Any]:
         """
         Memory store property for test compatibility.
-        
+
         Returns:
             dict: In-memory cache
         """
         return self._in_memory_cache
-    
+
     @property
     def ttl_seconds(self) -> int:
         """
         TTL in seconds property for test compatibility.
-        
+
         Returns:
             int: TTL in seconds
         """
         return self.default_expiration_hours * 3600
-    
+
     @property
     def running(self) -> bool:
         """
         Running property for test compatibility.
-        
+
         Returns:
             bool: Whether the manager is running
         """
@@ -947,53 +960,53 @@ class OrderIdempotencyManager(BaseComponent):
     def _hash_order_data(self, order_data: dict[str, Any]) -> str:
         """
         Hash order data for test compatibility.
-        
+
         Args:
             order_data: Order data dictionary
-            
+
         Returns:
             str: Hash of order data
         """
-        import json
         import hashlib
-        
+        import json
+
         # Sort keys for consistent hashing
         order_json = json.dumps(order_data, sort_keys=True, default=str)
         return hashlib.sha256(order_json.encode()).hexdigest()
-    
+
     def _generate_key(self, client_order_id: str, order_hash: str) -> str:
         """
         Generate idempotency key for test compatibility.
-        
+
         Args:
             client_order_id: Client order ID
             order_hash: Order hash
-            
+
         Returns:
             str: Idempotency key
         """
         return f"idempotency:order:{client_order_id}:{order_hash}"
-    
+
     async def get_or_create_idempotency_key(
         self,
         client_order_id_or_order: str | OrderRequest,
         order_or_expiration: OrderRequest | int | None = None,
         expiration_hours: int | None = None,
         metadata: dict[str, Any] | None = None,
-    ) -> tuple[str, bool] | IdempotencyKey:
+    ) -> Union[tuple[str, bool], "IdempotencyKey"]:
         """
         Overloaded get_or_create_idempotency_key for test compatibility.
-        
+
         This method handles multiple call signatures:
         1. get_or_create_idempotency_key(client_order_id: str, order: OrderRequest)
         2. get_or_create_idempotency_key(order: OrderRequest, expiration_hours: int, metadata: dict)
-        
+
         Args:
             client_order_id_or_order: Either client_order_id string or OrderRequest
             order_or_expiration: Either OrderRequest or expiration hours
             expiration_hours: Expiration hours
             metadata: Additional metadata
-            
+
         Returns:
             tuple[str, bool] or IdempotencyKey: Result depends on call signature
         """
@@ -1001,34 +1014,45 @@ class OrderIdempotencyManager(BaseComponent):
             # Handle different call signatures
             if isinstance(client_order_id_or_order, str):
                 # Signature: get_or_create_idempotency_key(client_order_id: str, order: OrderRequest)
-                client_order_id = client_order_id_or_order
+                client_order_id = client_order_id_or_order  # Used for validation and readability
                 order = order_or_expiration
-                
+
                 if not isinstance(order, OrderRequest):
-                    raise ValidationError("Second argument must be OrderRequest when first is string")
-                
+                    raise ValidationError(
+                        "Second argument must be OrderRequest when first is string"
+                    )
+
                 # Call the original method implementation directly
-                client_order_id_result, is_duplicate = await self._get_or_create_idempotency_key_original(
+                (
+                    client_order_id_result,
+                    is_duplicate,
+                ) = await self._get_or_create_idempotency_key_original(
                     order, expiration_hours, metadata
                 )
-                
+
                 # Find and return the created key
                 key = await self._find_key_by_client_order_id(client_order_id_result)
                 return key
-                
+
             elif isinstance(client_order_id_or_order, OrderRequest):
                 # Signature: get_or_create_idempotency_key(order: OrderRequest, expiration_hours: int, metadata: dict)
                 order = client_order_id_or_order
-                expiration = order_or_expiration if isinstance(order_or_expiration, int) else expiration_hours
-                
+                expiration = (
+                    order_or_expiration
+                    if isinstance(order_or_expiration, int)
+                    else expiration_hours
+                )
+
                 # Call the original method implementation directly
-                return await self._get_or_create_idempotency_key_original(order, expiration, metadata)
-                
+                return await self._get_or_create_idempotency_key_original(
+                    order, expiration, metadata
+                )
+
             else:
                 raise ValidationError("First argument must be either string or OrderRequest")
-                
+
         except Exception as e:
-            self.logger.error(f"Failed to get/create idempotency key: {e}")
+            self._logger.error(f"Failed to get/create idempotency key: {e}")
             raise ExecutionError(f"Idempotency key operation failed: {e}") from e
 
     def _cleanup_on_del(self) -> None:
@@ -1040,4 +1064,4 @@ class OrderIdempotencyManager(BaseComponent):
                 if not task.done():
                     task.cancel()
         except Exception as e:
-            self.logger.warning("Error during idempotency manager emergency cleanup", error=str(e))
+            self._logger.warning("Error during idempotency manager emergency cleanup", error=str(e))

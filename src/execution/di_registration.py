@@ -8,8 +8,8 @@ properly configuring the service layer architecture.
 from typing import TYPE_CHECKING, Any
 
 from src.core.config import Config
+from src.core.exceptions import ServiceError
 from src.core.logging import get_logger
-from src.core.types import ExecutionAlgorithm
 from src.execution.algorithm_factory import (
     ExecutionAlgorithmFactory,
 )
@@ -22,9 +22,10 @@ from src.execution.algorithms.vwap import VWAPAlgorithm
 # from src.execution.controller import ExecutionController
 from src.execution.execution_engine import ExecutionEngine
 from src.execution.execution_orchestration_service import ExecutionOrchestrationService
-from src.execution.high_performance_executor import HighPerformanceExecutor
-from src.execution.interfaces import ExecutionAlgorithmFactoryInterface
-from src.execution.order_management_service import OrderManagementService
+from src.execution.interfaces import (
+    ExecutionAlgorithmFactoryInterface,
+    ExecutionEngineServiceInterface,
+)
 from src.execution.order_manager import OrderManager
 from src.execution.repository import (
     DatabaseExecutionRepository,
@@ -33,11 +34,6 @@ from src.execution.repository import (
     OrderRepositoryInterface,
 )
 from src.execution.service import ExecutionService
-from src.execution.service_adapters import (
-    ExecutionEngineServiceAdapter,
-    OrderManagementServiceAdapter,
-    RiskValidationServiceAdapter,
-)
 from src.execution.slippage.cost_analyzer import CostAnalyzer
 from src.execution.slippage.slippage_model import SlippageModel
 
@@ -48,7 +44,7 @@ class ExecutionModuleDIRegistration:
     def __init__(self, container, config: Config):
         """
         Initialize DI registration.
-        
+
         Args:
             container: DI container instance
             config: Application configuration
@@ -56,6 +52,28 @@ class ExecutionModuleDIRegistration:
         self.container = container
         self.config = config
         self.logger = get_logger(__name__)
+
+    def _register_dependency(
+        self, name_or_interface, service_factory, singleton: bool = True
+    ) -> None:
+        """Helper method to register dependencies with different container types."""
+        if hasattr(self.container, "register_service"):
+            # DependencyInjector style
+            self.container.register_service(name_or_interface, service_factory, singleton=singleton)
+        elif hasattr(self.container, "register"):
+            # DependencyContainer style
+            self.container.register(name_or_interface, service_factory, singleton=singleton)
+        else:
+            raise ServiceError(f"Unsupported container type: {type(self.container)}")
+
+    def _is_registered(self, name_or_interface) -> bool:
+        """Helper method to check if dependency is registered with different container types."""
+        if hasattr(self.container, "is_registered"):
+            return self.container.is_registered(name_or_interface)
+        elif hasattr(self.container, "has"):
+            return self.container.has(name_or_interface)
+        else:
+            return False
 
     def register_all(self) -> None:
         """Register all execution module dependencies."""
@@ -77,101 +95,107 @@ class ExecutionModuleDIRegistration:
     def _register_repositories(self) -> None:
         """Register repository interfaces and implementations."""
         # Register repository interfaces
-        self.container.register(
+        self._register_dependency(
             ExecutionRepositoryInterface,
-            lambda c: DatabaseExecutionRepository(
-                database_service=c.get("DatabaseService")
-            ),
-            singleton=True
+            lambda c: DatabaseExecutionRepository(database_service=c.get("DatabaseService")),
+            singleton=True,
         )
 
-        self.container.register(
+        self._register_dependency(
             OrderRepositoryInterface,
-            lambda c: DatabaseOrderRepository(
-                database_service=c.get("DatabaseService")
-            ),
-            singleton=True
+            lambda c: DatabaseOrderRepository(database_service=c.get("DatabaseService")),
+            singleton=True,
         )
 
         # Register concrete implementations
-        self.container.register(
-            "ExecutionRepository",
-            lambda c: c.get(ExecutionRepositoryInterface),
-            singleton=True
+        self._register_dependency(
+            "ExecutionRepository", lambda c: c.get(ExecutionRepositoryInterface), singleton=True
         )
 
-        self.container.register(
-            "OrderRepository",
-            lambda c: c.get(OrderRepositoryInterface),
-            singleton=True
+        self._register_dependency(
+            "OrderRepository", lambda c: c.get(OrderRepositoryInterface), singleton=True
         )
 
     def _register_components(self) -> None:
         """Register core execution components."""
-        # Register OrderManager
-        self.container.register(
+        # Register OrderManager with ExchangeService dependency
+        self._register_dependency(
             OrderManager,
             lambda c: OrderManager(
                 config=self.config,
+                exchange_service=c.get_optional("ExchangeService"),  # Inject ExchangeService
                 redis_client=c.get_optional("RedisClient"),
                 state_service=c.get_optional("StateService"),
                 metrics_collector=c.get_optional("MetricsCollector"),
             ),
-            singleton=True
+            singleton=True,
         )
 
         # Register SlippageModel
-        self.container.register(
-            "SlippageModel",
-            lambda c: SlippageModel(config=self.config),
-            singleton=True
+        self._register_dependency(
+            "SlippageModel", lambda c: SlippageModel(config=self.config), singleton=True
         )
 
         # Register CostAnalyzer using dependency injection
-        self.container.register(
+        self._register_dependency(
             "CostAnalyzer",
             lambda c: CostAnalyzer(
-                execution_service=c.get_optional("ExecutionService"),
-                config=self.config
+                execution_service=c.get_optional("ExecutionService"), config=self.config
             ),
-            singleton=True
+            singleton=True,
         )
 
-        # Register algorithm factory interface
-        self.container.register(
+        # Register algorithm factory interface using dependency injection
+        self._register_dependency(
             ExecutionAlgorithmFactoryInterface,
-            lambda c: ExecutionAlgorithmFactory(self.config),
-            singleton=True
+            lambda c: ExecutionAlgorithmFactory(injector=c),
+            singleton=True,
         )
 
         # Register concrete algorithm factory
-        self.container.register(
+        self._register_dependency(
             "ExecutionAlgorithmFactory",
             lambda c: c.get(ExecutionAlgorithmFactoryInterface),
-            singleton=True
+            singleton=True,
+        )
+
+        # Register individual execution algorithms for direct resolution
+        self._register_dependency(
+            "TWAPAlgorithm",
+            lambda c: TWAPAlgorithm(config=c.get("Config")),
+            singleton=False,  # Create new instances as needed
+        )
+
+        self._register_dependency(
+            "VWAPAlgorithm",
+            lambda c: VWAPAlgorithm(config=c.get("Config")),
+            singleton=False,
+        )
+
+        self._register_dependency(
+            "IcebergAlgorithm",
+            lambda c: IcebergAlgorithm(config=c.get("Config")),
+            singleton=False,
+        )
+
+        self._register_dependency(
+            "SmartOrderRouter",
+            lambda c: SmartOrderRouter(config=c.get("Config")),
+            singleton=False,
         )
 
         # Register execution algorithms using factory pattern
-        self.container.register(
+        self._register_dependency(
             "ExecutionAlgorithms",
             lambda c: c.get(ExecutionAlgorithmFactoryInterface).create_all_algorithms(),
-            singleton=True
-        )
-
-        # Register HighPerformanceExecutor
-        self.container.register(
-            HighPerformanceExecutor,
-            lambda c: HighPerformanceExecutor(
-                config=self.config
-            ),
-            singleton=True
+            singleton=True,
         )
 
     def _register_services(self) -> None:
         """Register service layer components."""
-        # Register ExecutionService (should already be registered by database module)
-        if not self.container.is_registered("ExecutionService"):
-            self.container.register(
+        # Register ExecutionService with proper interface-based dependencies
+        if not self._is_registered("ExecutionService"):
+            self._register_dependency(
                 "ExecutionService",
                 lambda c: ExecutionService(
                     database_service=c.get("DatabaseService"),
@@ -180,88 +204,67 @@ class ExecutionModuleDIRegistration:
                     validation_service=c.get_optional("ValidationService"),
                     analytics_service=c.get_optional("AnalyticsService"),
                 ),
-                singleton=True
+                singleton=True,
             )
 
-        # Register OrderManagementService
-        self.container.register(
-            OrderManagementService,
-            lambda c: OrderManagementService(
-                order_manager=c.get(OrderManager)
-            ),
-            singleton=True
+        # Register ExecutionService interface
+        self._register_dependency(
+            "ExecutionServiceInterface",
+            lambda c: c.get("ExecutionService"),
+            singleton=True,
         )
 
     def _register_service_adapters(self) -> None:
         """Register service adapters that wrap existing components."""
-        # Register ExecutionEngineServiceAdapter
-        self.container.register(
-            "ExecutionEngineServiceAdapter",
-            lambda c: ExecutionEngineServiceAdapter(
-                execution_engine=c.get_optional("ExecutionEngine")  # Will be None initially
-            ),
-            singleton=True
-        )
-
-        # Register OrderManagementServiceAdapter
-        self.container.register(
-            "OrderManagementServiceAdapter",
-            lambda c: OrderManagementServiceAdapter(
-                order_manager=c.get(OrderManager)
-            ),
-            singleton=True
-        )
-
-        # Register RiskValidationServiceAdapter
-        self.container.register(
-            "RiskValidationServiceAdapter",
-            lambda c: RiskValidationServiceAdapter(
-                risk_service=c.get_optional("RiskService")
-            ),
-            singleton=True
-        )
+        # Simplified after removing unnecessary service adapters
+        pass
 
     def _register_orchestration_services(self) -> None:
         """Register orchestration services."""
         # First register ExecutionEngine without orchestration service to break circular dependency
-        self.container.register(
+        self._register_dependency(
             ExecutionEngine,
             lambda c: ExecutionEngine(
-                orchestration_service=None,  # Will be set later via property injection
                 execution_service=c.get_optional("ExecutionService"),
                 risk_service=c.get_optional("RiskService"),
                 config=self.config,
+                orchestration_service=None,  # Will be set later via property injection
                 exchange_factory=c.get_optional("ExchangeFactory"),
                 state_service=c.get_optional("StateService"),
                 trade_lifecycle_manager=c.get_optional("TradeLifecycleManager"),
                 metrics_collector=c.get_optional("MetricsCollector"),
                 order_manager=c.get(OrderManager),
                 slippage_model=c.get("SlippageModel"),
-                cost_analyzer=c.get_optional("CostAnalyzer"),
+                cost_analyzer=c.get("CostAnalyzer"),
                 algorithms=c.get("ExecutionAlgorithms"),
             ),
-            singleton=True
+            singleton=True,
         )
 
-        # Register ExecutionEngineServiceAdapter with the actual engine
-        self.container.register(
-            "ExecutionEngineServiceAdapter",
-            lambda c: ExecutionEngineServiceAdapter(
-                execution_engine=c.get(ExecutionEngine)
-            ),
-            singleton=True
-        )
-
-        # Register ExecutionOrchestrationService
-        self.container.register(
+        # Register ExecutionOrchestrationService - simplified to use direct components
+        self._register_dependency(
             ExecutionOrchestrationService,
             lambda c: ExecutionOrchestrationService(
-                execution_service=c.get("ExecutionService"),
-                order_management_service=c.get(OrderManagementService),
-                execution_engine_service=c.get("ExecutionEngineServiceAdapter"),
-                risk_validation_service=c.get_optional("RiskValidationServiceAdapter"),
+                execution_service=c.get("ExecutionServiceInterface"),
+                order_manager=c.get(OrderManager),
+                execution_engine=c.get(ExecutionEngine),
+                risk_service=c.get_optional("RiskService"),
             ),
-            singleton=True
+            singleton=True,
+        )
+
+        # Register ExecutionOrchestrationService interface
+        self._register_dependency(
+            "ExecutionOrchestrationServiceInterface",
+            lambda c: c.get(ExecutionOrchestrationService),
+            singleton=True,
+        )
+
+        # Register ExecutionEngineServiceInterface
+        self._register_dependency(
+            ExecutionEngineServiceInterface,
+            lambda c: c.get(ExecutionEngine),
+            singleton=True,
         )
 
         # Set up lazy resolution for circular dependency
@@ -272,17 +275,17 @@ class ExecutionModuleDIRegistration:
 
             # Create ExecutionEngine without orchestration service first
             execution_engine = ExecutionEngine(
-                orchestration_service=None,
                 execution_service=container.get_optional("ExecutionService"),
                 risk_service=container.get_optional("RiskService"),
                 config=self.config,
+                orchestration_service=None,
                 exchange_factory=container.get_optional("ExchangeFactory"),
                 state_service=container.get_optional("StateService"),
                 trade_lifecycle_manager=container.get_optional("TradeLifecycleManager"),
                 metrics_collector=container.get_optional("MetricsCollector"),
                 order_manager=container.get(OrderManager),
                 slippage_model=container.get("SlippageModel"),
-                cost_analyzer=container.get_optional("CostAnalyzer"),
+                cost_analyzer=container.get("CostAnalyzer"),
                 algorithms=container.get("ExecutionAlgorithms"),
             )
 
@@ -301,25 +304,38 @@ class ExecutionModuleDIRegistration:
             return execution_engine
 
         # Override ExecutionEngine registration with lazy setup
-        self.container.register(
-            ExecutionEngine,
-            _get_execution_engine_with_orchestration,
-            singleton=True,
-            force=True
+        self._register_dependency(
+            ExecutionEngine, _get_execution_engine_with_orchestration, singleton=True
         )
 
     def _register_controllers(self) -> None:
         """Register controller layer components."""
-        # ExecutionController registration commented out until BaseController is available
-        # self.container.register(
-        #     ExecutionController,
-        #     lambda c: ExecutionController(
-        #         orchestration_service=c.get(ExecutionOrchestrationService),
-        #         execution_service=c.get('ExecutionService'),
-        #     ),
-        #     singleton=True
-        # )
-        pass
+        # Import ExecutionController locally to avoid circular dependencies
+        try:
+            from src.execution.controller import ExecutionController
+
+            self._register_dependency(
+                ExecutionController,
+                lambda c: ExecutionController(
+                    orchestration_service=c.get("ExecutionOrchestrationServiceInterface"),
+                    execution_service=c.get("ExecutionServiceInterface"),
+                ),
+                singleton=True,
+            )
+
+            # Register controller interface
+            self._register_dependency(
+                "ExecutionControllerInterface",
+                lambda c: c.get(ExecutionController),
+                singleton=True,
+            )
+
+            self.logger.info("ExecutionController registered successfully")
+
+        except ImportError as e:
+            self.logger.warning(f"ExecutionController not available: {e}")
+        except Exception as e:
+            self.logger.error(f"Failed to register ExecutionController: {e}")
 
     def register_for_testing(self) -> None:
         """Register components specifically for testing scenarios."""
@@ -330,16 +346,12 @@ class ExecutionModuleDIRegistration:
             else:
                 from src.execution.mocks import MockExecutionRepository, MockOrderRepository
 
-            self.container.register(
-                "MockExecutionRepository",
-                lambda c: MockExecutionRepository(),
-                singleton=True
+            self._register_dependency(
+                "MockExecutionRepository", lambda c: MockExecutionRepository(), singleton=True
             )
 
-            self.container.register(
-                "MockOrderRepository",
-                lambda c: MockOrderRepository(),
-                singleton=True
+            self._register_dependency(
+                "MockOrderRepository", lambda c: MockOrderRepository(), singleton=True
             )
 
             self.logger.info("Execution module test dependencies registered")
@@ -353,7 +365,6 @@ class ExecutionModuleDIRegistration:
         """Validate that all required dependencies are registered."""
         required_components = [
             "ExecutionService",
-            OrderManagementService,
             ExecutionOrchestrationService,
             ExecutionEngine,
             # ExecutionController,  # Commented out until BaseController available
@@ -364,7 +375,7 @@ class ExecutionModuleDIRegistration:
 
         try:
             for component in required_components:
-                if not self.container.is_registered(component):
+                if not self._is_registered(component):
                     self.logger.error(f"Required component not registered: {component}")
                     return False
 
@@ -385,7 +396,6 @@ class ExecutionModuleDIRegistration:
             ],
             "services": [
                 "ExecutionService",
-                "OrderManagementService",
                 "ExecutionOrchestrationService",
             ],
             "factories": [
@@ -394,33 +404,30 @@ class ExecutionModuleDIRegistration:
             "components": [
                 "ExecutionEngine",
                 "OrderManager",
-                "HighPerformanceExecutor",
             ],
             "controllers": [
                 # "ExecutionController",  # Commented out until BaseController available
             ],
             "service_adapters": [
-                "ExecutionEngineServiceAdapter",
-                "OrderManagementServiceAdapter",
-                "RiskValidationServiceAdapter",
+                # Removed unnecessary service adapters for simplification
             ],
             "configuration": {
                 "follows_service_patterns": True,
                 "has_repository_interfaces": True,
                 "has_service_orchestration": True,
                 "controller_service_only": True,
-            }
+            },
         }
 
 
 def register_execution_module(container, config: Config) -> ExecutionModuleDIRegistration:
     """
     Register execution module with DI container.
-    
+
     Args:
         container: DI container instance
         config: Application configuration
-        
+
     Returns:
         ExecutionModuleDIRegistration instance
     """
@@ -428,99 +435,6 @@ def register_execution_module(container, config: Config) -> ExecutionModuleDIReg
     registration.register_all()
 
     if not registration.validate_registrations():
-        raise RuntimeError("Execution module DI registration validation failed")
+        raise ServiceError("Execution module DI registration validation failed")
 
     return registration
-
-
-    def _create_execution_algorithms_factory(self, container) -> dict:
-        """Factory method to create execution algorithms using dependency injection."""
-        try:
-            return {
-                ExecutionAlgorithm.TWAP: TWAPAlgorithm(self.config),
-                ExecutionAlgorithm.VWAP: VWAPAlgorithm(self.config),
-                ExecutionAlgorithm.ICEBERG: IcebergAlgorithm(self.config),
-                ExecutionAlgorithm.SMART_ROUTER: SmartOrderRouter(self.config),
-            }
-        except Exception as e:
-            self.logger.error(f"Failed to create execution algorithms: {e}")
-            # Fallback to minimal algorithms if config issues - import locally to avoid circular dependencies
-            if TYPE_CHECKING:
-                from src.execution.algorithms.base_algorithm import BaseAlgorithm
-            else:
-                from src.execution.algorithms.base_algorithm import BaseAlgorithm
-
-            class MockAlgorithm(BaseAlgorithm):
-                def __init__(self, algorithm_type):
-                    super().__init__(self.config)
-                    self.algorithm_type = algorithm_type
-
-                def get_algorithm_type(self):
-                    return self.algorithm_type
-
-                async def execute(self, instruction, exchange_factory=None, risk_manager=None):
-                    # Local import to avoid circular dependency
-                    if TYPE_CHECKING:
-                        from src.execution.execution_result_wrapper import ExecutionResultWrapper
-                    else:
-                        from src.execution.execution_result_wrapper import ExecutionResultWrapper
-                    return ExecutionResultWrapper(None)
-
-                async def cancel_execution(self, execution_id):
-                    return True
-
-                async def _validate_algorithm_parameters(self, instruction):
-                    pass
-
-            return {
-                ExecutionAlgorithm.TWAP: MockAlgorithm(ExecutionAlgorithm.TWAP),
-                ExecutionAlgorithm.VWAP: MockAlgorithm(ExecutionAlgorithm.VWAP),
-                ExecutionAlgorithm.ICEBERG: MockAlgorithm(ExecutionAlgorithm.ICEBERG),
-                ExecutionAlgorithm.SMART_ROUTER: MockAlgorithm(ExecutionAlgorithm.SMART_ROUTER),
-            }
-
-
-def _create_execution_algorithms(config: Config) -> dict:
-    """Legacy factory method for backward compatibility."""
-    try:
-        return {
-            ExecutionAlgorithm.TWAP: TWAPAlgorithm(config),
-            ExecutionAlgorithm.VWAP: VWAPAlgorithm(config),
-            ExecutionAlgorithm.ICEBERG: IcebergAlgorithm(config),
-            ExecutionAlgorithm.SMART_ROUTER: SmartOrderRouter(config),
-        }
-    except Exception:
-        # Fallback to minimal algorithms if config issues - import locally to avoid circular dependencies
-        if TYPE_CHECKING:
-            from src.execution.algorithms.base_algorithm import BaseAlgorithm
-        else:
-            from src.execution.algorithms.base_algorithm import BaseAlgorithm
-
-        class MockAlgorithm(BaseAlgorithm):
-            def __init__(self, algorithm_type):
-                super().__init__(config)
-                self.algorithm_type = algorithm_type
-
-            def get_algorithm_type(self):
-                return self.algorithm_type
-
-            async def execute(self, instruction, exchange_factory=None, risk_manager=None):
-                # Local import to avoid circular dependency
-                if TYPE_CHECKING:
-                    from src.execution.execution_result_wrapper import ExecutionResultWrapper
-                else:
-                    from src.execution.execution_result_wrapper import ExecutionResultWrapper
-                return ExecutionResultWrapper(None)
-
-            async def cancel_execution(self, execution_id):
-                return True
-
-            async def _validate_algorithm_parameters(self, instruction):
-                pass
-
-        return {
-            ExecutionAlgorithm.TWAP: MockAlgorithm(ExecutionAlgorithm.TWAP),
-            ExecutionAlgorithm.VWAP: MockAlgorithm(ExecutionAlgorithm.VWAP),
-            ExecutionAlgorithm.ICEBERG: MockAlgorithm(ExecutionAlgorithm.ICEBERG),
-            ExecutionAlgorithm.SMART_ROUTER: MockAlgorithm(ExecutionAlgorithm.SMART_ROUTER),
-        }

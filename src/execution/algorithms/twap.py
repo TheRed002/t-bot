@@ -15,7 +15,13 @@ from decimal import Decimal
 from typing import Any
 
 from src.core.config import Config
-from src.core.exceptions import ExchangeError, ExecutionError, NetworkError, ValidationError
+from src.core.exceptions import (
+    ExchangeError,
+    ExecutionError,
+    NetworkError,
+    ServiceError,
+    ValidationError,
+)
 
 # MANDATORY: Import from P-001
 from src.core.types import (
@@ -72,7 +78,7 @@ class TWAPAlgorithm(BaseAlgorithm):
         self.max_slices = 100  # Maximum number of slices
 
         # Timing controls
-        self.slice_interval_buffer = 5  # 5 seconds buffer between slices
+        self.slice_interval_buffer = config.execution.twap_slice_interval_buffer_seconds
         self.market_close_buffer_minutes = 30  # Stop 30 minutes before market close
 
         # Risk validation configuration
@@ -80,7 +86,7 @@ class TWAPAlgorithm(BaseAlgorithm):
             config.execution.get("default_portfolio_value", "100000")
         )
 
-        self.logger.info("TWAP algorithm initialized with default parameters")
+        self._logger.info("TWAP algorithm initialized with default parameters")
 
     def get_algorithm_type(self) -> ExecutionAlgorithm:
         """Get the algorithm type enum."""
@@ -154,7 +160,7 @@ class TWAPAlgorithm(BaseAlgorithm):
             # is_running is managed by BaseComponent/BaseAlgorithm
             execution_result.status = ExecutionStatus.RUNNING
 
-            self.logger.info(
+            self._logger.info(
                 "Starting TWAP execution",
                 execution_id=execution_id,
                 symbol=instruction.order.symbol,
@@ -163,41 +169,11 @@ class TWAPAlgorithm(BaseAlgorithm):
             )
 
             # Get exchange for execution
-            if not exchange_factory:
-                raise ExecutionError("Exchange factory is required for TWAP execution")
-
-            # Determine which exchange to use
-            if instruction.preferred_exchanges:
-                exchange_name = instruction.preferred_exchanges[0]
-            else:
-                # Get first available exchange from factory
-                available_exchanges = exchange_factory.get_available_exchanges()
-                if not available_exchanges:
-                    raise ExecutionError("No exchanges available")
-                exchange_name = available_exchanges[0]
-
-            try:
-                exchange = await exchange_factory.get_exchange(exchange_name)
-
-                # Validate exchange instance
-                if not exchange:
-                    raise ExecutionError(f"Exchange factory returned None for {exchange_name}")
-
-                # Type check the exchange
-                if not hasattr(exchange, "place_order") or not hasattr(exchange, "health_check"):
-                    raise ExecutionError(
-                        f"Exchange {exchange_name} does not implement required interface methods"
-                    )
-
-            except ValidationError as e:
-                self.logger.error(f"Exchange not found: {exchange_name}")
-                raise ExecutionError(f"Exchange {exchange_name} not available: {e}")
-            except Exception as e:
-                self.logger.error(f"Failed to get exchange: {e}")
-                raise ExecutionError(f"Failed to access exchange {exchange_name}: {e}")
+            self._validate_exchange_factory(exchange_factory)
+            exchange = await self._get_exchange_from_factory(exchange_factory, instruction)
 
             # Calculate TWAP execution plan
-            execution_plan = await self._create_execution_plan(instruction)
+            execution_plan = self._create_execution_plan(instruction)
 
             # Execute TWAP strategy
             await self._execute_twap_plan(execution_plan, execution_result, exchange, risk_manager)
@@ -210,13 +186,9 @@ class TWAPAlgorithm(BaseAlgorithm):
                 execution_result = self._state_to_result(execution_state)
 
             # Update statistics
-            if execution_result.status == ExecutionStatus.COMPLETED:
-                self.successful_executions += 1
-            else:
-                self.failed_executions += 1
-            self.total_executions += 1
+            self._update_execution_statistics(execution_result.status)
 
-            self.logger.info(
+            self._logger.info(
                 "TWAP execution completed",
                 execution_id=execution_id,
                 status=execution_result.status.value,
@@ -228,20 +200,8 @@ class TWAPAlgorithm(BaseAlgorithm):
 
         except Exception as e:
             # Handle execution failure
-            if "execution_id" in locals() and execution_id in self.current_executions:
-                await self._update_execution_result(
-                    self.current_executions[execution_id],
-                    status=ExecutionStatus.FAILED,
-                    error_message=str(e),
-                )
-                self.failed_executions += 1
-                self.total_executions += 1
-
-            self.logger.error(
-                "TWAP execution failed",
-                execution_id=execution_id if "execution_id" in locals() else "unknown",
-                error=str(e),
-            )
+            execution_id_for_error = execution_id if "execution_id" in locals() else None
+            await self._handle_execution_error(e, execution_id_for_error, "TWAP")
             raise ExecutionError(f"TWAP execution failed: {e}")
 
         finally:
@@ -258,30 +218,9 @@ class TWAPAlgorithm(BaseAlgorithm):
         Returns:
             bool: True if cancellation successful, False otherwise
         """
-        try:
-            if execution_id not in self.current_executions:
-                self.logger.warning(f"Execution not found for cancellation: {execution_id}")
-                return False
+        return await self._standard_cancel_execution(execution_id, "TWAP")
 
-            execution_result = self.current_executions[execution_id]
-
-            if execution_result.status not in [ExecutionStatus.RUNNING, ExecutionStatus.PENDING]:
-                self.logger.warning(
-                    f"Cannot cancel execution in status: {execution_result.status.value}"
-                )
-                return False
-
-            # Update status to cancelled
-            await self._update_execution_result(execution_result, status=ExecutionStatus.CANCELLED)
-
-            self.logger.info(f"TWAP execution cancelled: {execution_id}")
-            return True
-
-        except Exception as e:
-            self.logger.error(f"Failed to cancel TWAP execution: {e}")
-            return False
-
-    async def _create_execution_plan(self, instruction: ExecutionInstruction) -> dict[str, Any]:
+    def _create_execution_plan(self, instruction: ExecutionInstruction) -> dict[str, Any]:
         """
         Create detailed execution plan for TWAP strategy.
 
@@ -367,7 +306,7 @@ class TWAPAlgorithm(BaseAlgorithm):
             "end_time": start_time + timedelta(minutes=time_horizon_minutes),
         }
 
-        self.logger.debug(
+        self._logger.debug(
             "TWAP execution plan created",
             num_slices=len(slices),
             slice_size=str(slice_size),
@@ -396,7 +335,7 @@ class TWAPAlgorithm(BaseAlgorithm):
             for slice_info in execution_plan["slices"]:
                 # Check if execution was cancelled
                 if execution_result.status == ExecutionStatus.CANCELLED:
-                    self.logger.info("TWAP execution cancelled, stopping slice execution")
+                    self._logger.info("TWAP execution cancelled, stopping slice execution")
                     break
 
                 # Wait until it's time for this slice
@@ -406,11 +345,13 @@ class TWAPAlgorithm(BaseAlgorithm):
                 if current_time < execution_time:
                     wait_seconds = (execution_time - current_time).total_seconds()
                     if wait_seconds > 0:
-                        self.logger.debug(
+                        self._logger.debug(
                             f"Waiting {wait_seconds:.1f} seconds for next slice",
                             slice_number=slice_info["slice_number"],
                         )
-                        await asyncio.sleep(wait_seconds)
+                        await asyncio.sleep(
+                            min(wait_seconds, self.config.execution.twap_max_wait_seconds)
+                        )
 
                 # Create order for this slice
                 slice_order = OrderRequest(
@@ -428,13 +369,13 @@ class TWAPAlgorithm(BaseAlgorithm):
                     try:
                         is_valid = await risk_manager.validate_order(slice_order, portfolio_value)
                         if not is_valid:
-                            self.logger.warning(
+                            self._logger.warning(
                                 "Risk manager rejected slice order",
                                 slice_number=slice_info["slice_number"],
                             )
                             continue
                     except Exception as e:
-                        self.logger.warning(
+                        self._logger.warning(
                             f"Risk validation failed for slice {slice_info['slice_number']}: {e}"
                         )
                         continue
@@ -452,7 +393,7 @@ class TWAPAlgorithm(BaseAlgorithm):
                             raise ExecutionError("Invalid order response from exchange")
 
                     except ExchangeError as e:
-                        self.logger.error(
+                        self._logger.error(
                             f"Exchange error placing slice {slice_info['slice_number']}: {e}",
                             slice_num=slice_info["slice_number"],
                             symbol=slice_order.symbol,
@@ -468,7 +409,7 @@ class TWAPAlgorithm(BaseAlgorithm):
                         await asyncio.sleep(self.slice_interval_buffer)
                         continue
                     except NetworkError as e:
-                        self.logger.error(
+                        self._logger.error(
                             f"Network error placing slice {slice_info['slice_number']}: {e}",
                             slice_num=slice_info["slice_number"],
                         )
@@ -483,7 +424,7 @@ class TWAPAlgorithm(BaseAlgorithm):
                     slice_info["status"] = "completed"
                     slice_info["order_response"] = order_response
 
-                    self.logger.info(
+                    self._logger.info(
                         "TWAP slice executed",
                         slice_number=slice_info["slice_number"],
                         quantity=str(slice_info["quantity"]),
@@ -499,7 +440,7 @@ class TWAPAlgorithm(BaseAlgorithm):
                     slice_info["status"] = "failed"
                     slice_info["error"] = str(e)
 
-                    self.logger.error(
+                    self._logger.error(
                         "TWAP slice execution failed",
                         slice_number=slice_info["slice_number"],
                         error=str(e),
@@ -510,10 +451,10 @@ class TWAPAlgorithm(BaseAlgorithm):
                         continue
                     else:
                         # For rate limit errors, wait longer before next slice
-                        await asyncio.sleep(30)
+                        await asyncio.sleep(self.config.execution.twap_error_recovery_delay_seconds)
 
         except Exception as e:
-            self.logger.error(f"TWAP plan execution failed: {e}")
+            self._logger.error(f"TWAP plan execution failed: {e}")
             raise ExecutionError(f"TWAP plan execution failed: {e}")
 
     async def _finalize_execution(self, execution_state: ExecutionState) -> None:
@@ -550,8 +491,8 @@ class TWAPAlgorithm(BaseAlgorithm):
                     estimated_market_volume = self.config.execution.get(
                         "default_daily_volume", "1000000"
                     )
-                    participation_rate = float(
-                        execution_state.total_filled_quantity / Decimal(estimated_market_volume)
+                    participation_rate = execution_state.total_filled_quantity / Decimal(
+                        estimated_market_volume
                     )
                     # Store in metadata
                     execution_state.metadata["participation_rate"] = participation_rate
@@ -561,15 +502,18 @@ class TWAPAlgorithm(BaseAlgorithm):
                     execution_state, expected_price=execution_state.original_order.price
                 )
 
-            self.logger.debug(
+            self._logger.debug(
                 "TWAP execution finalized",
                 execution_id=execution_state.execution_id,
                 final_status=execution_state.status.value,
-                fill_rate=float(
-                    execution_state.total_filled_quantity / execution_state.original_order.quantity
-                ),
+                fill_rate=execution_state.total_filled_quantity
+                / execution_state.original_order.quantity,
             )
 
-        except Exception as e:
-            self.logger.error(f"Failed to finalize TWAP execution: {e}")
+        except (ExecutionError, ServiceError) as e:
+            self._logger.error(f"Failed to finalize TWAP execution: {e}")
             execution_state.error_message = f"Finalization failed: {e}"
+        except Exception as e:
+            self._logger.error(f"Unexpected error finalizing TWAP execution: {e}")
+            execution_state.error_message = f"Unexpected finalization error: {e}"
+            # Don't re-raise during finalization to allow graceful cleanup

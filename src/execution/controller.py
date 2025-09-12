@@ -11,10 +11,10 @@ from typing import Any
 
 from src.core.base.component import BaseComponent
 from src.core.exceptions import ServiceError, ValidationError
-from src.core.logging import get_logger
-from src.core.types import MarketData, OrderRequest
-from src.execution.execution_orchestration_service import ExecutionOrchestrationService
-from src.execution.interfaces import ExecutionServiceInterface
+from src.execution.interfaces import (
+    ExecutionOrchestrationServiceInterface,
+    ExecutionServiceInterface,
+)
 
 try:
     from src.utils import time_execution
@@ -27,7 +27,7 @@ except ImportError:
 class ExecutionController(BaseComponent):
     """
     Execution module controller.
-    
+
     This controller provides the API interface for execution operations,
     strictly following service layer patterns by only calling services
     and never accessing repositories directly.
@@ -35,12 +35,12 @@ class ExecutionController(BaseComponent):
 
     def __init__(
         self,
-        orchestration_service: ExecutionOrchestrationService,
+        orchestration_service: ExecutionOrchestrationServiceInterface,
         execution_service: ExecutionServiceInterface,
     ):
         """
         Initialize execution controller.
-        
+
         Args:
             orchestration_service: Main orchestration service
             execution_service: Core execution service
@@ -67,17 +67,17 @@ class ExecutionController(BaseComponent):
     ) -> dict[str, Any]:
         """
         Execute an order through the service layer.
-        
+
         Args:
             order_data: Order data dictionary
             market_data: Market data dictionary
             bot_id: Bot identifier
             strategy_name: Strategy name
             execution_params: Execution parameters
-            
+
         Returns:
             Dict containing execution result
-            
+
         Raises:
             ValidationError: If input validation fails
             ServiceError: If execution fails
@@ -89,14 +89,13 @@ class ExecutionController(BaseComponent):
             if not market_data:
                 raise ValidationError("Market data is required")
 
-            # Convert dictionaries to proper types
-            order_request = self._convert_to_order_request(order_data)
-            market_data_obj = self._convert_to_market_data(market_data)
+            # Delegate data conversion to orchestration service
+            # Services should handle their own data validation and conversion
 
-            # Execute through orchestration service
-            execution_result = await self.orchestration_service.execute_order(
-                order=order_request,
-                market_data=market_data_obj,
+            # Execute through orchestration service - pass raw data, let service handle conversion
+            execution_result = await self.orchestration_service.execute_order_from_data(
+                order_data=order_data,
+                market_data=market_data,
                 bot_id=bot_id,
                 strategy_name=strategy_name,
                 execution_params=execution_params,
@@ -110,25 +109,30 @@ class ExecutionController(BaseComponent):
                 "filled_quantity": str(execution_result.total_filled_quantity),
                 "average_price": (
                     str(execution_result.average_fill_price)
-                    if execution_result.average_fill_price else None
+                    if execution_result.average_fill_price
+                    else None
                 ),
-                "total_fees": str(execution_result.total_fees) if execution_result.total_fees else "0",
+                "total_fees": str(execution_result.total_fees)
+                if execution_result.total_fees
+                else "0",
                 "execution_time": execution_result.execution_duration,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
-                "algorithm": execution_result.algorithm.value if execution_result.algorithm else None,
+                "algorithm": execution_result.algorithm.value
+                if execution_result.algorithm
+                else None,
             }
 
-            self.logger.info(
+            self._logger.info(
                 "Order execution completed via controller",
                 execution_id=execution_result.execution_id,
-                symbol=order_request.symbol,
+                symbol=execution_result.original_order.symbol,
                 bot_id=bot_id,
             )
 
             return response
 
         except ValidationError as e:
-            self.logger.error("Order validation failed in controller", error=str(e))
+            self._logger.error("Order validation failed in controller", error=str(e))
             return {
                 "success": False,
                 "error": "validation_error",
@@ -136,7 +140,7 @@ class ExecutionController(BaseComponent):
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             }
         except ServiceError as e:
-            self.logger.error("Service error in order execution", error=str(e))
+            self._logger.error("Service error in order execution", error=str(e))
             return {
                 "success": False,
                 "error": "service_error",
@@ -144,7 +148,7 @@ class ExecutionController(BaseComponent):
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             }
         except Exception as e:
-            self.logger.error("Unexpected error in order execution controller", error=str(e))
+            self._logger.error("Unexpected error in order execution controller", error=str(e))
             return {
                 "success": False,
                 "error": "internal_error",
@@ -161,12 +165,12 @@ class ExecutionController(BaseComponent):
     ) -> dict[str, Any]:
         """
         Get execution metrics through service layer.
-        
+
         Args:
             bot_id: Optional bot ID filter
             symbol: Optional symbol filter
             time_range_hours: Time range for metrics
-            
+
         Returns:
             Dict containing metrics data
         """
@@ -185,7 +189,7 @@ class ExecutionController(BaseComponent):
             }
 
         except Exception as e:
-            self.logger.error("Failed to get execution metrics", error=str(e))
+            self._logger.error("Failed to get execution metrics", error=str(e))
             return {
                 "success": False,
                 "error": str(e),
@@ -194,17 +198,15 @@ class ExecutionController(BaseComponent):
 
     @time_execution
     async def cancel_execution(
-        self,
-        execution_id: str,
-        reason: str = "user_request"
+        self, execution_id: str, reason: str = "user_request"
     ) -> dict[str, Any]:
         """
         Cancel execution through service layer.
-        
+
         Args:
             execution_id: Execution ID to cancel
             reason: Cancellation reason
-            
+
         Returns:
             Dict containing cancellation result
         """
@@ -234,7 +236,9 @@ class ExecutionController(BaseComponent):
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             }
         except Exception as e:
-            self.logger.error("Failed to cancel execution", execution_id=execution_id, error=str(e))
+            self._logger.error(
+                "Failed to cancel execution", execution_id=execution_id, error=str(e)
+            )
             return {
                 "success": False,
                 "error": str(e),
@@ -245,7 +249,7 @@ class ExecutionController(BaseComponent):
     async def get_active_executions(self) -> dict[str, Any]:
         """
         Get active executions through service layer.
-        
+
         Returns:
             Dict containing active executions
         """
@@ -260,7 +264,7 @@ class ExecutionController(BaseComponent):
             }
 
         except Exception as e:
-            self.logger.error("Failed to get active executions", error=str(e))
+            self._logger.error("Failed to get active executions", error=str(e))
             return {
                 "success": False,
                 "error": str(e),
@@ -276,12 +280,12 @@ class ExecutionController(BaseComponent):
     ) -> dict[str, Any]:
         """
         Validate order through service layer.
-        
+
         Args:
             order_data: Order data to validate
             market_data: Current market data
             bot_id: Optional bot ID
-            
+
         Returns:
             Dict containing validation results
         """
@@ -292,16 +296,12 @@ class ExecutionController(BaseComponent):
             if not market_data:
                 raise ValidationError("Market data is required")
 
-            # Convert to proper types
-            order_request = self._convert_to_order_request(order_data)
-            market_data_obj = self._convert_to_market_data(market_data)
-
-            # Validate through execution service
-            validation_result = await self.execution_service.validate_order_pre_execution(
-                order=order_request,
-                market_data=market_data_obj,
+            # Validate through execution service - pass raw data, let service handle conversion
+            validation_result = await self.execution_service.validate_order_pre_execution_from_data(
+                order_data=order_data,
+                market_data=market_data,
                 bot_id=bot_id,
-                risk_context={"component": "ExecutionController"}
+                risk_context={"component": "ExecutionController"},
             )
 
             return {
@@ -318,7 +318,7 @@ class ExecutionController(BaseComponent):
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             }
         except Exception as e:
-            self.logger.error("Order validation failed", error=str(e))
+            self._logger.error("Order validation failed", error=str(e))
             return {
                 "success": False,
                 "error": str(e),
@@ -328,7 +328,7 @@ class ExecutionController(BaseComponent):
     async def health_check(self) -> dict[str, Any]:
         """
         Perform health check through service layer.
-        
+
         Returns:
             Dict containing health status
         """
@@ -345,7 +345,7 @@ class ExecutionController(BaseComponent):
             }
 
         except Exception as e:
-            self.logger.error("Health check failed", error=str(e))
+            self._logger.error("Health check failed", error=str(e))
             return {
                 "success": False,
                 "controller": "ExecutionController",
@@ -353,40 +353,3 @@ class ExecutionController(BaseComponent):
                 "error": str(e),
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             }
-
-    # Private helper methods for data conversion
-    def _convert_to_order_request(self, order_data: dict[str, Any]) -> OrderRequest:
-        """Convert dictionary to OrderRequest."""
-        from decimal import Decimal
-
-        from src.core.types import OrderSide, OrderType
-
-        try:
-            return OrderRequest(
-                symbol=order_data["symbol"],
-                side=OrderSide(order_data["side"]),
-                order_type=OrderType(order_data.get("order_type", "MARKET")),
-                quantity=Decimal(str(order_data["quantity"])),
-                price=Decimal(str(order_data["price"])) if order_data.get("price") else None,
-                time_in_force=order_data.get("time_in_force"),
-                exchange=order_data.get("exchange"),
-                client_order_id=order_data.get("client_order_id"),
-            )
-        except (KeyError, ValueError, TypeError) as e:
-            raise ValidationError(f"Invalid order data: {e}") from e
-
-    def _convert_to_market_data(self, market_data: dict[str, Any]) -> MarketData:
-        """Convert dictionary to MarketData."""
-        from decimal import Decimal
-
-        try:
-            return MarketData(
-                symbol=market_data["symbol"],
-                price=Decimal(str(market_data["price"])),
-                volume=Decimal(str(market_data.get("volume", 0))) if market_data.get("volume") else None,
-                bid=Decimal(str(market_data["bid"])) if market_data.get("bid") else None,
-                ask=Decimal(str(market_data["ask"])) if market_data.get("ask") else None,
-                timestamp=datetime.fromisoformat(market_data["timestamp"]) if market_data.get("timestamp") else datetime.now(timezone.utc),
-            )
-        except (KeyError, ValueError, TypeError) as e:
-            raise ValidationError(f"Invalid market data: {e}") from e
