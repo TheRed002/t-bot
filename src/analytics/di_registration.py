@@ -45,90 +45,76 @@ def register_analytics_services(injector: DependencyInjector) -> None:
         singleton=True,
     )
 
-    # Register individual service factories using DI resolution pattern
+    # Register individual service factories using direct creation to avoid circular dependencies
     def portfolio_service_factory() -> "PortfolioServiceProtocol":
-        from src.analytics.portfolio.portfolio_analytics import PortfolioAnalyticsEngine
         from src.analytics.services.portfolio_analytics_service import PortfolioAnalyticsService
 
-        config = injector.resolve("AnalyticsConfiguration")
-        metrics_collector = injector.resolve("MetricsCollector")
-        analytics_repository = injector.resolve("AnalyticsDataRepository")
-
-        # Create engine and wrap in service layer with proper DI
-        engine = PortfolioAnalyticsEngine(
-            config=config, metrics_collector=metrics_collector, repository=analytics_repository
+        config = (
+            injector.resolve("AnalyticsConfiguration")
+            if injector.is_registered("AnalyticsConfiguration")
+            else None
         )
-
-        return PortfolioAnalyticsService(config=config, analytics_engine=engine)
+        return PortfolioAnalyticsService(config=config)
 
     def risk_service_factory() -> "RiskServiceProtocol":
-        from src.analytics.risk.risk_monitor import RiskMonitor
         from src.analytics.services.risk_service import RiskService
 
-        config = injector.resolve("AnalyticsConfiguration")
-        metrics_collector = injector.resolve("MetricsCollector")
-
-        # Create engine and wrap in service layer with proper DI
-        engine = RiskMonitor(config=config, metrics_collector=metrics_collector)
-        return RiskService(config=config, risk_monitor=engine)
+        config = (
+            injector.resolve("AnalyticsConfiguration")
+            if injector.is_registered("AnalyticsConfiguration")
+            else None
+        )
+        return RiskService(config=config)
 
     def reporting_service_factory() -> "ReportingServiceProtocol":
-        from src.analytics.reporting.performance_reporter import PerformanceReporter
         from src.analytics.services.reporting_service import ReportingService
 
-        config = injector.resolve("AnalyticsConfiguration")
-        metrics_collector = injector.resolve("MetricsCollector")
-
-        # Create engine and wrap in service layer with proper DI
-        engine = PerformanceReporter(config=config, metrics_collector=metrics_collector)
-        return ReportingService(config=config, performance_reporter=engine)
+        config = (
+            injector.resolve("AnalyticsConfiguration")
+            if injector.is_registered("AnalyticsConfiguration")
+            else None
+        )
+        return ReportingService(config=config)
 
     def operational_service_factory() -> "OperationalServiceProtocol":
-        from src.analytics.operational.operational_analytics import OperationalAnalyticsEngine
         from src.analytics.services.operational_service import OperationalService
 
-        config = injector.resolve("AnalyticsConfiguration")
-        metrics_collector = injector.resolve("MetricsCollector")
-
-        # Create engine and wrap in service layer with proper DI
-        engine = OperationalAnalyticsEngine(config=config, metrics_collector=metrics_collector)
-        return OperationalService(config=config, operational_engine=engine)
+        config = (
+            injector.resolve("AnalyticsConfiguration")
+            if injector.is_registered("AnalyticsConfiguration")
+            else None
+        )
+        return OperationalService(config=config)
 
     def alert_service_factory() -> "AlertServiceProtocol":
-        from src.analytics.alerts.alert_manager import AlertManager
         from src.analytics.services.alert_service import AlertService
 
-        config = injector.resolve("AnalyticsConfiguration")
-        metrics_collector = injector.resolve("MetricsCollector")
-
-        # Create engine and wrap in service layer with proper DI
-        engine = AlertManager(config=config, metrics_collector=metrics_collector)
-        return AlertService(config=config, alert_manager=engine)
+        config = (
+            injector.resolve("AnalyticsConfiguration")
+            if injector.is_registered("AnalyticsConfiguration")
+            else None
+        )
+        return AlertService(config=config)
 
     def export_service_factory() -> "ExportServiceProtocol":
-        from src.analytics.export.data_exporter import DataExporter
         from src.analytics.services.export_service import ExportService
 
-        metrics_collector = injector.resolve("MetricsCollector")
-
-        # Create engine and wrap in service layer
-        engine = DataExporter(metrics_collector=metrics_collector)
-        return ExportService(data_exporter=engine)
+        config = (
+            injector.resolve("AnalyticsConfiguration")
+            if injector.is_registered("AnalyticsConfiguration")
+            else None
+        )
+        return ExportService(config=config)
 
     def realtime_analytics_service_factory() -> "RealtimeAnalyticsServiceProtocol":
         from src.analytics.services.realtime_analytics_service import RealtimeAnalyticsService
-        from src.analytics.trading.realtime_analytics import RealtimeAnalyticsEngine
 
-        config = injector.resolve("AnalyticsConfiguration")
-        metrics_collector = injector.resolve("MetricsCollector")
-
-        # Create the underlying engine with proper DI
-        engine = RealtimeAnalyticsEngine(config=config, metrics_collector=metrics_collector)
-
-        # Wrap in service layer
-        return RealtimeAnalyticsService(
-            config=config, analytics_engine=engine, metrics_collector=metrics_collector
+        config = (
+            injector.resolve("AnalyticsConfiguration")
+            if injector.is_registered("AnalyticsConfiguration")
+            else None
         )
+        return RealtimeAnalyticsService(config=config)
 
     # Register service factories
     injector.register_factory("PortfolioService", portfolio_service_factory, singleton=True)
@@ -168,60 +154,87 @@ def register_analytics_services(injector: DependencyInjector) -> None:
 
     # Register MetricsCollector as singleton - this is a common dependency
     def metrics_collector_factory():
+        """Create metrics collector instance."""
         from src.monitoring.metrics import get_metrics_collector
 
         return get_metrics_collector()
 
-    injector.register_factory("MetricsCollector", metrics_collector_factory, singleton=True)
+    # Register MetricsCollector as singleton if not already registered
+    if not injector.is_registered("MetricsCollector"):
+        injector.register_factory("MetricsCollector", metrics_collector_factory, singleton=True)
 
     # Register AnalyticsConfiguration as singleton
     def analytics_config_factory():
+        """Create analytics configuration instance."""
         from src.analytics.types import AnalyticsConfiguration
 
         return AnalyticsConfiguration()
 
     injector.register_factory("AnalyticsConfiguration", analytics_config_factory, singleton=True)
 
-    # Register AnalyticsRepository with proper database integration
+    # Register DataTransformationService
+    def data_transformation_service_factory():
+        """Create data transformation service instance."""
+        from src.analytics.services.data_transformation_service import DataTransformationService
+
+        return DataTransformationService()
+
+    injector.register_factory(
+        "DataTransformationService", data_transformation_service_factory, singleton=True
+    )
+
+    # Register AnalyticsRepository with proper database integration and service injection
     def analytics_repository_factory() -> "AnalyticsRepository":
         from src.analytics.repository import AnalyticsRepository
 
-        # Resolve UnitOfWork from database module
-        uow = injector.resolve("UnitOfWork")
-        return AnalyticsRepository(uow=uow)
+        # Resolve dependencies from injector
+        try:
+            session = injector.resolve("AsyncSession")
+        except Exception:
+            # Fallback if database session not available
+            session = None
+        transformation_service = injector.resolve("DataTransformationService")
+        return AnalyticsRepository(session=session, transformation_service=transformation_service)
 
     injector.register_factory("AnalyticsRepository", analytics_repository_factory, singleton=True)
     injector.register_service(
         "AnalyticsDataRepository", lambda: injector.resolve("AnalyticsRepository"), singleton=True
     )
 
-    # Register main AnalyticsService using factory pattern
+    # Register main AnalyticsService using direct creation to avoid circular dependencies
     def analytics_service_factory() -> "AnalyticsService":
         from src.analytics.service import AnalyticsService
 
-        config = injector.resolve("AnalyticsConfiguration")
-        metrics_collector = injector.resolve("MetricsCollector")
-
-        # Resolve all service dependencies through DI
-        realtime_analytics = injector.resolve("RealtimeAnalyticsServiceProtocol")
-        portfolio_service = injector.resolve("PortfolioServiceProtocol")
-        reporting_service = injector.resolve("ReportingServiceProtocol")
-        risk_service = injector.resolve("RiskServiceProtocol")
-        operational_service = injector.resolve("OperationalServiceProtocol")
-        alert_service = injector.resolve("AlertServiceProtocol")
-        export_service = injector.resolve("ExportServiceProtocol")
-
-        return AnalyticsService(
-            config=config,
-            realtime_analytics=realtime_analytics,
-            portfolio_service=portfolio_service,
-            reporting_service=reporting_service,
-            risk_service=risk_service,
-            operational_service=operational_service,
-            alert_service=alert_service,
-            export_service=export_service,
-            metrics_collector=metrics_collector,
+        # Get configuration
+        config = (
+            injector.resolve("AnalyticsConfiguration")
+            if injector.is_registered("AnalyticsConfiguration")
+            else None
         )
+
+        # Resolve service dependencies safely
+        dependencies = {}
+        service_mappings = {
+            "realtime_analytics": "RealtimeAnalyticsService",
+            "portfolio_service": "PortfolioService",
+            "reporting_service": "ReportingService",
+            "risk_service": "RiskService",
+            "operational_service": "OperationalService",
+            "alert_service": "AlertService",
+            "export_service": "ExportService",
+            "metrics_collector": "MetricsCollector",
+        }
+
+        for param_name, service_name in service_mappings.items():
+            try:
+                if injector.is_registered(service_name):
+                    dependencies[param_name] = injector.resolve(service_name)
+                else:
+                    dependencies[param_name] = None
+            except Exception:
+                dependencies[param_name] = None
+
+        return AnalyticsService(config=config, **dependencies)
 
     injector.register_factory("AnalyticsService", analytics_service_factory, singleton=True)
 

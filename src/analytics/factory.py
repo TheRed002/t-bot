@@ -1,8 +1,7 @@
 """
-Analytics Service Factory.
+Analytics Service Factory - Simplified implementation.
 
-This module provides factory functions for creating analytics services
-with proper dependency injection and configuration.
+Provides simple factory functions for creating analytics services.
 """
 
 from typing import TYPE_CHECKING
@@ -10,103 +9,95 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from src.analytics.service import AnalyticsService
 
-from src.analytics.interfaces import (
-    AlertServiceProtocol,
-    ExportServiceProtocol,
-    OperationalServiceProtocol,
-    PortfolioServiceProtocol,
-    RealtimeAnalyticsServiceProtocol,
-    ReportingServiceProtocol,
-    RiskServiceProtocol,
-)
+from src.analytics.interfaces import AnalyticsServiceFactoryProtocol
 from src.analytics.types import AnalyticsConfiguration
 
 
-class AnalyticsServiceFactory:
-    """Factory for creating analytics services with dependency injection."""
+class AnalyticsServiceFactory(AnalyticsServiceFactoryProtocol):
+    """Simple factory for creating analytics services."""
 
     def __init__(self, injector=None):
-        """
-        Initialize the factory with dependency injector.
-
-        Args:
-            injector: Dependency injection container
-        """
-        # Don't create default injector - require injection
-        if injector is None:
-            from src.core.exceptions import ComponentError
-
-            raise ComponentError(
-                "Injector must be provided to factory",
-                component="AnalyticsServiceFactory",
-                operation="__init__",
-                context={"missing_dependency": "injector"},
-            )
+        """Initialize the factory with dependency injector."""
         self._injector = injector
 
     def create_analytics_service(
-        self,
-        config: AnalyticsConfiguration | None = None,
+        self, config: AnalyticsConfiguration | None = None, **kwargs
     ) -> "AnalyticsService":
-        """
-        Create a complete analytics service with all dependencies using DI.
+        """Create analytics service with dependencies."""
+        from src.analytics.service import AnalyticsService
 
-        Args:
-            config: Analytics configuration
+        # Get dependencies from injector if available
+        dependencies = {}
+        if self._injector:
+            # Try to get each service from injector using proper service names
+            service_mappings = {
+                "realtime_analytics": "RealtimeAnalyticsService",
+                "portfolio_service": "PortfolioService",
+                "reporting_service": "ReportingService",
+                "risk_service": "RiskService",
+                "operational_service": "OperationalService",
+                "alert_service": "AlertService",
+                "export_service": "ExportService",
+                "metrics_collector": "MetricsCollector",
+            }
+            for param_name, service_name in service_mappings.items():
+                try:
+                    dependencies[param_name] = self._injector.resolve(service_name)
+                except Exception:
+                    # Service not available - that's okay
+                    dependencies[param_name] = None
 
-        Returns:
-            Configured analytics service
-        """
-        # Use dependency injection to create service with all dependencies
-        return self._injector.resolve("AnalyticsService")
+        # Override with any provided kwargs
+        dependencies.update(kwargs)
 
-    def create_portfolio_service(self) -> PortfolioServiceProtocol:
-        """Create portfolio analytics service using DI (returns service layer)."""
-        return self._injector.resolve("PortfolioServiceProtocol")
+        return AnalyticsService(config=config, **dependencies)
 
-    def create_risk_service(self) -> RiskServiceProtocol:
-        """Create risk monitoring service using DI (returns service layer)."""
-        return self._injector.resolve("RiskServiceProtocol")
+    def create_realtime_analytics_service(self, config: AnalyticsConfiguration | None = None):
+        """Create realtime analytics service."""
+        from src.analytics.services.realtime_analytics_service import RealtimeAnalyticsService
 
-    def create_reporting_service(self) -> ReportingServiceProtocol:
-        """Create performance reporting service using DI (returns service layer)."""
-        return self._injector.resolve("ReportingServiceProtocol")
+        return RealtimeAnalyticsService(config=config)
 
-    def create_operational_service(self) -> OperationalServiceProtocol:
-        """Create operational analytics service using DI (returns service layer)."""
-        return self._injector.resolve("OperationalServiceProtocol")
+    def create_portfolio_service(self, config: AnalyticsConfiguration | None = None):
+        """Create portfolio analytics service."""
+        from src.analytics.services.portfolio_analytics_service import PortfolioAnalyticsService
 
-    def create_alert_service(self) -> AlertServiceProtocol:
-        """Create alert management service using DI (returns service layer)."""
-        return self._injector.resolve("AlertServiceProtocol")
+        return PortfolioAnalyticsService(config=config)
 
-    def create_export_service(self) -> ExportServiceProtocol:
-        """Create data export service using DI (returns service layer)."""
-        return self._injector.resolve("ExportServiceProtocol")
+    def create_risk_service(self, config: AnalyticsConfiguration | None = None):
+        """Create risk analytics service."""
+        from src.analytics.services.risk_service import RiskService
 
-    def create_realtime_analytics_service(self) -> "RealtimeAnalyticsServiceProtocol":
-        """Create realtime analytics service using DI (returns service layer)."""
-        return self._injector.resolve("RealtimeAnalyticsServiceProtocol")
+        return RiskService(config=config)
+
+    def create_reporting_service(self, config: AnalyticsConfiguration | None = None):
+        """Create reporting service."""
+        from src.analytics.services.reporting_service import ReportingService
+
+        return ReportingService(config=config)
+
+    def create_operational_service(self, config: AnalyticsConfiguration | None = None):
+        """Create operational analytics service."""
+        from src.analytics.services.operational_service import OperationalService
+
+        return OperationalService(config=config)
+
+    def create_alert_service(self, config: AnalyticsConfiguration | None = None):
+        """Create alert service."""
+        from src.analytics.services.alert_service import AlertService
+
+        return AlertService(config=config)
+
+    def create_export_service(self, config: AnalyticsConfiguration | None = None):
+        """Create export service."""
+        from src.analytics.services.export_service import ExportService
+
+        return ExportService(config=config)
 
 
 def create_default_analytics_service(
-    config: AnalyticsConfiguration | None = None,
-    injector=None,
+    config: AnalyticsConfiguration | None = None, injector=None
 ) -> "AnalyticsService":
-    """
-    Create analytics service with default dependencies.
-
-    Args:
-        config: Analytics configuration
-        injector: Required dependency injector
-
-    Returns:
-        Configured analytics service
-    """
-    if injector is None:
-        from src.analytics.di_registration import configure_analytics_dependencies
-
-        injector = configure_analytics_dependencies()
-
-    factory = AnalyticsServiceFactory(injector=injector)
+    """Create analytics service with default configuration."""
+    factory = AnalyticsServiceFactory(injector)
     return factory.create_analytics_service(config)

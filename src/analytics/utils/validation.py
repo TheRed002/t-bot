@@ -243,11 +243,11 @@ class ValidationHelper(BaseComponent):
             raise ValidationError(
                 f"Validation failed for {field_name}: {e!s}",
                 details={"field_name": field_name, "validation_error": str(e)},
-            )
+            ) from e
 
         if not is_valid:
             message = error_message or f"Invalid {field_name} structure"
-            raise ValidationError(message, details={"field_name": field_name})
+            raise ValidationError(message, context={"field_name": field_name})
 
     def validate_alert_severity(self, severity: str) -> str:
         """Validate alert severity level.

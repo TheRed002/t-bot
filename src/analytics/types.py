@@ -12,6 +12,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
+from src.core.types import AlertSeverity
+
 
 class AnalyticsFrequency(Enum):
     """Analytics calculation and reporting frequency."""
@@ -56,9 +58,6 @@ class PerformanceMetricType(Enum):
     WIN_RATE = "win_rate"
     PROFIT_FACTOR = "profit_factor"
     PAYOFF_RATIO = "payoff_ratio"
-
-
-from src.core.types import AlertSeverity
 
 
 class ReportType(Enum):
@@ -130,6 +129,7 @@ class PortfolioMetrics(BaseModel):
     """Portfolio-level metrics and analytics."""
 
     timestamp: datetime
+    bot_id: str | None = None  # Required for database storage
     total_value: Decimal
     cash: Decimal
     invested_capital: Decimal
@@ -158,6 +158,8 @@ class PositionMetrics(BaseModel):
     """Individual position metrics and analytics."""
 
     timestamp: datetime
+    bot_id: str | None = None  # Required for database storage
+    position_id: str | None = None  # Link to position record
     symbol: str
     exchange: str
     side: str
@@ -229,6 +231,7 @@ class RiskMetrics(BaseModel):
     """Comprehensive risk metrics."""
 
     timestamp: datetime
+    bot_id: str | None = None  # Required for database storage
     portfolio_var_95: Decimal | None = None
     portfolio_var_99: Decimal | None = None
     portfolio_cvar_95: Decimal | None = None

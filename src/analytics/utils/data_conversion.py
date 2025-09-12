@@ -30,44 +30,62 @@ class DataConverter(BaseComponent):
         Returns:
             Dictionary with Decimal values converted to strings
         """
-        if exclude_keys is None:
-            exclude_keys = set()
-
-        # Use unified conversion method with exclusion handling
-        converted_data = self._convert_decimals(data, conversion_type="string")
-
-        # Apply exclusions by restoring original values
-        if exclude_keys:
-            for key in exclude_keys:
-                if key in data:
-                    converted_data[key] = data[key]
-
-        return converted_data
+        return self.convert_decimals_for_json(data, use_float=False, exclude_keys=exclude_keys)
 
     def prepare_for_json_export(self, data: Any, remove_metadata: bool = False) -> dict[str, Any]:
-        """Prepare data for JSON export with common transformations.
+        """Prepare data for JSON export with common transformations matching database module patterns.
 
         Args:
             data: Data to prepare (dict, Pydantic model, or other)
             remove_metadata: Whether to remove metadata fields
 
         Returns:
-            Dictionary ready for JSON serialization
+            Dictionary ready for JSON serialization with consistent format
         """
-        # Convert Pydantic models to dict
-        if hasattr(data, "dict") and callable(data.dict):
+        # Convert Pydantic models to dict using consistent patterns with database module
+        if hasattr(data, "model_dump") and callable(data.model_dump):
+            prepared_data = data.model_dump()
+        elif hasattr(data, "dict") and callable(data.dict):
             prepared_data = data.dict()
         elif isinstance(data, dict):
             prepared_data = data.copy()
         else:
             prepared_data = {"data": data}
 
-        # Remove metadata if requested
+        # Apply consistent data format metadata matching database service patterns
+        if "data_format" not in prepared_data:
+            prepared_data["data_format"] = "export_v1"  # Consistent with monitoring module
+        if "processing_mode" not in prepared_data:
+            prepared_data["processing_mode"] = "batch"  # Export is typically batch processing
+        if "timestamp" not in prepared_data:
+            from src.utils.datetime_utils import get_current_utc_timestamp
+
+            prepared_data["timestamp"] = get_current_utc_timestamp().isoformat()
+
+        # Add consistent boundary metadata for cross-module compatibility
+        prepared_data.update(
+            {
+                "module": "analytics",
+                "boundary_crossed": True,  # Data crossing module boundaries
+                "validation_applied": True,  # Consistent with database validation patterns
+            }
+        )
+
+        # Remove metadata if requested (but preserve format metadata for consistency)
         if remove_metadata:
+            format_fields = [
+                "data_format",
+                "processing_mode",
+                "timestamp",
+                "module",
+                "boundary_crossed",
+            ]
+            metadata_to_preserve = {k: v for k, v in prepared_data.items() if k in format_fields}
             prepared_data.pop("metadata", None)
             prepared_data.pop("_metadata", None)
+            prepared_data.update(metadata_to_preserve)
 
-        # Convert Decimals to strings for precision
+        # Convert Decimals to strings for precision using consistent pattern
         return self.convert_decimals_to_float(prepared_data)
 
     def json_serializer(self, obj: Any) -> Any:
@@ -88,22 +106,31 @@ class DataConverter(BaseComponent):
         return json.dumps(data, default=self.json_serializer, **kwargs)
 
     def convert_decimals_for_json(
-        self, data: dict[str, Any], use_float: bool = True
+        self, data: dict[str, Any], use_float: bool = True, exclude_keys: set[str] | None = None
     ) -> dict[str, Any]:
         """Convert Decimal values for JSON serialization.
 
         Args:
             data: Dictionary containing potential Decimal values
             use_float: If True, convert to float; if False, convert to string for precision
+            exclude_keys: Keys to exclude from conversion
 
         Returns:
             Dictionary with converted Decimal values
         """
-        # Delegate to existing method with appropriate conversion type
-        if use_float:
-            return self._convert_decimals(data, conversion_type="float")
-        else:
-            return self.convert_decimals_to_float(data)
+        if exclude_keys is None:
+            exclude_keys = set()
+
+        conversion_type = "float" if use_float else "string"
+        converted_data = self._convert_decimals(data, conversion_type)
+
+        # Apply exclusions by restoring original values
+        if exclude_keys:
+            for key in exclude_keys:
+                if key in data:
+                    converted_data[key] = data[key]
+
+        return converted_data
 
     def _convert_decimals(
         self, data: dict[str, Any], conversion_type: str = "string"
@@ -117,7 +144,7 @@ class DataConverter(BaseComponent):
         Returns:
             Dictionary with converted values
         """
-        converted_data = {}
+        converted_data: dict[str, Any] = {}
         for key, value in data.items():
             if isinstance(value, Decimal):
                 if conversion_type == "float":

@@ -17,6 +17,15 @@ professional trading operations.
 
 from src.analytics import services
 
+# Export refactored common utilities
+from src.analytics.common import (
+    AnalyticsCalculations,
+    AnalyticsErrorHandler,
+    ConfigurationDefaults,
+    MetricsDefaults,
+    ServiceInitializationHelper,
+)
+
 # Dependency injection registration
 from src.analytics.di_registration import (
     configure_analytics_dependencies,
@@ -35,19 +44,34 @@ from src.analytics.interfaces import (
     ReportingServiceProtocol,
     RiskServiceProtocol,
 )
+from src.analytics.mixins import (
+    ErrorHandlingMixin,
+    OrderTrackingMixin,
+    PositionTrackingMixin,
+)
 from src.analytics.service import AnalyticsService
+from src.analytics.types import AnalyticsConfiguration
 
 __all__ = [
     "AlertServiceProtocol",
+    "AnalyticsCalculations",
+    "AnalyticsConfiguration",
+    "AnalyticsErrorHandler",
     "AnalyticsService",
     "AnalyticsServiceFactory",
     "AnalyticsServiceProtocol",
+    "ConfigurationDefaults",
+    "ErrorHandlingMixin",
     "ExportServiceProtocol",
+    "MetricsDefaults",
     "OperationalServiceProtocol",
+    "OrderTrackingMixin",
     "PortfolioServiceProtocol",
+    "PositionTrackingMixin",
     "RealtimeAnalyticsServiceProtocol",
     "ReportingServiceProtocol",
     "RiskServiceProtocol",
+    "ServiceInitializationHelper",
     "configure_analytics_dependencies",
     "create_default_analytics_service",
     "get_analytics_factory",

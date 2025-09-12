@@ -5,9 +5,12 @@ that integrates with the database module following proper architectural patterns
 """
 
 from datetime import datetime
-from decimal import Decimal
+
+from sqlalchemy import desc, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.analytics.interfaces import AnalyticsDataRepository
+from src.analytics.services.data_transformation_service import DataTransformationService
 from src.analytics.types import PortfolioMetrics, PositionMetrics, RiskMetrics
 from src.core.base.component import BaseComponent
 from src.core.exceptions import DataError, ValidationError
@@ -16,7 +19,7 @@ from src.database.models.analytics import (
     AnalyticsPositionMetrics,
     AnalyticsRiskMetrics,
 )
-from src.database.uow import UnitOfWork
+from src.database.repository.base import DatabaseRepository
 
 
 class AnalyticsRepository(BaseComponent, AnalyticsDataRepository):
@@ -24,22 +27,66 @@ class AnalyticsRepository(BaseComponent, AnalyticsDataRepository):
     Concrete implementation of analytics data repository.
 
     Integrates analytics data storage with the database module using
-    proper repository patterns and unit of work.
+    proper repository patterns.
     """
 
-    def __init__(self, uow: UnitOfWork):
+    def __init__(
+        self,
+        session: AsyncSession | None,
+        transformation_service: DataTransformationService | None = None,
+    ):
         """
         Initialize analytics repository.
 
         Args:
-            uow: Unit of work for database transactions
+            session: Database session for operations (can be None for testing)
+            transformation_service: Data transformation service (injected dependency)
         """
         super().__init__()
-        self.uow = uow
+        self.session = session
+
+        # Use dependency injection for transformation service
+        if transformation_service is None:
+            from src.core.exceptions import ComponentError
+
+            raise ComponentError(
+                "transformation_service must be injected via dependency injection",
+                component="AnalyticsRepository",
+                operation="__init__",
+                context={"missing_dependency": "transformation_service"},
+            )
+        self.transformation_service = transformation_service
+
+        # Initialize specific repositories for different metrics only if session is available
+        if session is not None:
+            self.portfolio_repo = DatabaseRepository(
+                session=session,
+                model=AnalyticsPortfolioMetrics,
+                entity_type=AnalyticsPortfolioMetrics,
+                name="AnalyticsPortfolioRepository",
+            )
+
+            self.position_repo = DatabaseRepository(
+                session=session,
+                model=AnalyticsPositionMetrics,
+                entity_type=AnalyticsPositionMetrics,
+                name="AnalyticsPositionRepository",
+            )
+
+            self.risk_repo = DatabaseRepository(
+                session=session,
+                model=AnalyticsRiskMetrics,
+                entity_type=AnalyticsRiskMetrics,
+                name="AnalyticsRiskRepository",
+            )
+        else:
+            self.portfolio_repo = None
+            self.position_repo = None
+            self.risk_repo = None
 
     async def store_portfolio_metrics(self, metrics: PortfolioMetrics) -> None:
         """
-        Store portfolio metrics in database.
+        Store portfolio metrics in database using transformation service.
 
         Args:
             metrics: Portfolio metrics to store
@@ -49,26 +96,30 @@ class AnalyticsRepository(BaseComponent, AnalyticsDataRepository):
             DataError: If storage fails
         """
         try:
-            async with self.uow:
-                db_metrics = AnalyticsPortfolioMetrics(
-                    timestamp=metrics.timestamp,
-                    total_value=metrics.total_value,
-                    unrealized_pnl=metrics.unrealized_pnl,
-                    realized_pnl=metrics.realized_pnl,
-                    daily_pnl=metrics.daily_return,
-                    number_of_positions=metrics.positions_count,
-                    leverage_ratio=metrics.leverage,
-                    margin_usage=metrics.margin_used,
-                    cash_balance=metrics.cash,
+            if self.portfolio_repo is None:
+                raise DataError("Database session not available for portfolio metrics storage")
+
+            # Extract bot_id and validate using consistent patterns
+            bot_id = getattr(metrics, "bot_id", None)
+            if not bot_id:
+                raise ValidationError(
+                    "bot_id is required for analytics portfolio metrics storage",
+                    field_name="bot_id",
+                    field_value=bot_id,
+                    expected_type="UUID",
                 )
 
-                await self.uow.analytics_repository.create(db_metrics)
-                await self.uow.commit()
+            # Use transformation service for data conversion
+            db_metrics = self.transformation_service.transform_portfolio_metrics_to_db(
+                metrics, bot_id
+            )
 
-                self.logger.debug(f"Stored portfolio metrics for timestamp {metrics.timestamp}")
+            await self.portfolio_repo.create(db_metrics)
+            self.logger.debug(f"Stored portfolio metrics for timestamp {metrics.timestamp}")
 
+        except ValidationError:
+            raise
         except Exception as e:
-            await self.uow.rollback()
             raise DataError(
                 f"Failed to store portfolio metrics: {e}", context={"timestamp": metrics.timestamp}
             ) from e
@@ -88,32 +139,32 @@ class AnalyticsRepository(BaseComponent, AnalyticsDataRepository):
             return
 
         try:
-            async with self.uow:
-                db_metrics_list = []
-                for metric in metrics:
-                    db_metric = AnalyticsPositionMetrics(
-                        timestamp=metric.timestamp,
-                        symbol=metric.symbol,
-                        exchange=metric.exchange,
-                        quantity=metric.quantity,
-                        market_value=metric.market_value,
-                        unrealized_pnl=metric.unrealized_pnl,
-                        realized_pnl=metric.realized_pnl,
-                        average_price=metric.entry_price,
-                        current_price=metric.current_price,
-                        position_side=metric.side,
+            if self.position_repo is None:
+                raise DataError("Database session not available for position metrics storage")
+
+            for metric in metrics:
+                # Extract and validate bot_id
+                bot_id = getattr(metric, "bot_id", None)
+                if not bot_id:
+                    raise ValidationError(
+                        "bot_id is required for analytics position metrics storage",
+                        field_name="bot_id",
+                        field_value=bot_id,
+                        expected_type="UUID",
                     )
-                    db_metrics_list.append(db_metric)
 
-                for db_metric in db_metrics_list:
-                    await self.uow.analytics_repository.create(db_metric)
+                # Use transformation service for data conversion
+                db_metric = self.transformation_service.transform_position_metrics_to_db(
+                    metric, bot_id
+                )
 
-                await self.uow.commit()
+                await self.position_repo.create(db_metric)
 
-                self.logger.debug(f"Stored {len(metrics)} position metrics")
+            self.logger.debug(f"Stored {len(metrics)} position metrics")
 
+        except ValidationError:
+            raise
         except Exception as e:
-            await self.uow.rollback()
             raise DataError(
                 f"Failed to store position metrics: {e}", context={"count": len(metrics)}
             ) from e
@@ -130,27 +181,28 @@ class AnalyticsRepository(BaseComponent, AnalyticsDataRepository):
             DataError: If storage fails
         """
         try:
-            async with self.uow:
-                db_metrics = AnalyticsRiskMetrics(
-                    timestamp=metrics.timestamp,
-                    portfolio_var_95=metrics.portfolio_var_95,
-                    portfolio_var_99=metrics.portfolio_var_99,
-                    expected_shortfall_95=metrics.expected_shortfall,
-                    maximum_drawdown=metrics.max_drawdown,
-                    volatility=metrics.volatility,
-                    sharpe_ratio=None,  # Not available in RiskMetrics
-                    sortino_ratio=None,  # Not available in RiskMetrics
-                    correlation_risk=metrics.correlation_risk,
-                    concentration_risk=metrics.concentration_risk,
+            if self.risk_repo is None:
+                raise DataError("Database session not available for risk metrics storage")
+
+            # Extract and validate bot_id
+            bot_id = getattr(metrics, "bot_id", None)
+            if not bot_id:
+                raise ValidationError(
+                    "bot_id is required for analytics risk metrics storage",
+                    field_name="bot_id",
+                    field_value=bot_id,
+                    expected_type="UUID",
                 )
 
-                await self.uow.analytics_repository.create(db_metrics)
-                await self.uow.commit()
+            # Use transformation service for data conversion
+            db_metrics = self.transformation_service.transform_risk_metrics_to_db(metrics, bot_id)
 
-                self.logger.debug(f"Stored risk metrics for timestamp {metrics.timestamp}")
+            await self.risk_repo.create(db_metrics)
+            self.logger.debug(f"Stored risk metrics for timestamp {metrics.timestamp}")
 
+        except ValidationError:
+            raise
         except Exception as e:
-            await self.uow.rollback()
             raise DataError(
                 f"Failed to store risk metrics: {e}", context={"timestamp": metrics.timestamp}
             ) from e
@@ -180,30 +232,30 @@ class AnalyticsRepository(BaseComponent, AnalyticsDataRepository):
             )
 
         try:
-            async with self.uow:
-                db_metrics = await self.uow.analytics_repository.find_by_date_range(
-                    model_class=AnalyticsPortfolioMetrics, start_date=start_date, end_date=end_date
+            if self.session is None:
+                raise DataError("Database session not available for historical metrics retrieval")
+
+            # Use SQLAlchemy directly for date range query
+            stmt = (
+                select(AnalyticsPortfolioMetrics)
+                .where(
+                    AnalyticsPortfolioMetrics.timestamp >= start_date,
+                    AnalyticsPortfolioMetrics.timestamp <= end_date,
                 )
+                .order_by(AnalyticsPortfolioMetrics.timestamp)
+            )
 
-                result = []
-                for db_metric in db_metrics:
-                    metric = PortfolioMetrics(
-                        timestamp=db_metric.timestamp,
-                        total_value=db_metric.total_value,
-                        cash=db_metric.cash_balance or Decimal("0"),
-                        invested_capital=db_metric.total_value
-                        - (db_metric.cash_balance or Decimal("0")),
-                        unrealized_pnl=db_metric.unrealized_pnl,
-                        realized_pnl=db_metric.realized_pnl,
-                        total_pnl=db_metric.unrealized_pnl + db_metric.realized_pnl,
-                        daily_return=db_metric.daily_pnl,
-                        leverage=db_metric.leverage_ratio,
-                        margin_used=db_metric.margin_usage,
-                    )
-                    result.append(metric)
+            result_proxy = await self.session.execute(stmt)
+            db_metrics = result_proxy.scalars().all()
 
-                self.logger.debug(f"Retrieved {len(result)} historical portfolio metrics")
-                return result
+            # Use transformation service for data conversion
+            result = [
+                self.transformation_service.transform_db_to_portfolio_metrics(db_metric)
+                for db_metric in db_metrics
+            ]
+
+            self.logger.debug(f"Retrieved {len(result)} historical portfolio metrics")
+            return result
 
         except Exception as e:
             raise DataError(
@@ -219,27 +271,24 @@ class AnalyticsRepository(BaseComponent, AnalyticsDataRepository):
             Latest portfolio metrics or None if none exist
         """
         try:
-            async with self.uow:
-                db_metric = await self.uow.analytics_repository.find_latest(
-                    AnalyticsPortfolioMetrics
-                )
+            if self.session is None:
+                return None
 
-                if not db_metric:
-                    return None
+            # Use SQLAlchemy directly for latest query
+            stmt = (
+                select(AnalyticsPortfolioMetrics)
+                .order_by(desc(AnalyticsPortfolioMetrics.timestamp))
+                .limit(1)
+            )
 
-                return PortfolioMetrics(
-                    timestamp=db_metric.timestamp,
-                    total_value=db_metric.total_value,
-                    cash=db_metric.cash_balance or Decimal("0"),
-                    invested_capital=db_metric.total_value
-                    - (db_metric.cash_balance or Decimal("0")),
-                    unrealized_pnl=db_metric.unrealized_pnl,
-                    realized_pnl=db_metric.realized_pnl,
-                    total_pnl=db_metric.unrealized_pnl + db_metric.realized_pnl,
-                    daily_return=db_metric.daily_pnl,
-                    leverage=db_metric.leverage_ratio,
-                    margin_used=db_metric.margin_usage,
-                )
+            result_proxy = await self.session.execute(stmt)
+            db_metric = result_proxy.scalar_one_or_none()
+
+            if not db_metric:
+                return None
+
+            # Use transformation service for data conversion
+            return self.transformation_service.transform_db_to_portfolio_metrics(db_metric)
 
         except Exception as e:
             raise DataError(f"Failed to retrieve latest portfolio metrics: {e}") from e
@@ -252,19 +301,22 @@ class AnalyticsRepository(BaseComponent, AnalyticsDataRepository):
             Latest risk metrics or None if none exist
         """
         try:
-            async with self.uow:
-                db_metric = await self.uow.analytics_repository.find_latest(AnalyticsRiskMetrics)
+            if self.session is None:
+                return None
 
-                if not db_metric:
-                    return None
+            # Use SQLAlchemy directly for latest query
+            stmt = (
+                select(AnalyticsRiskMetrics).order_by(desc(AnalyticsRiskMetrics.timestamp)).limit(1)
+            )
 
-                return RiskMetrics(
-                    timestamp=db_metric.timestamp,
-                    portfolio_var_95=db_metric.portfolio_var_95,
-                    portfolio_var_99=db_metric.portfolio_var_99,
-                    max_drawdown=db_metric.maximum_drawdown,
-                    volatility=db_metric.volatility,
-                )
+            result_proxy = await self.session.execute(stmt)
+            db_metric = result_proxy.scalar_one_or_none()
+
+            if not db_metric:
+                return None
+
+            # Use transformation service for data conversion
+            return self.transformation_service.transform_db_to_risk_metrics(db_metric)
 
         except Exception as e:
             raise DataError(f"Failed to retrieve latest risk metrics: {e}") from e

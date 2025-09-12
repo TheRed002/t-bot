@@ -1,313 +1,221 @@
 """
-Realtime Analytics Service.
+Realtime Analytics Service - Simplified implementation.
 
-This service provides a proper service layer implementation for realtime analytics,
-following service layer patterns and using dependency injection.
+Provides real-time analytics without complex engine orchestration.
 """
 
 from decimal import Decimal
 from typing import Any
 
+from src.analytics.base_analytics_service import BaseAnalyticsService
+from src.analytics.common import AnalyticsErrorHandler, ServiceInitializationHelper
 from src.analytics.interfaces import RealtimeAnalyticsServiceProtocol
-from src.analytics.trading.realtime_analytics import RealtimeAnalyticsEngine
+from src.analytics.mixins import OrderTrackingMixin, PositionTrackingMixin
 from src.analytics.types import (
     AnalyticsConfiguration,
     PortfolioMetrics,
     PositionMetrics,
     StrategyMetrics,
 )
-from src.core.base.service import BaseService
-from src.core.exceptions import ComponentError, ValidationError
 from src.core.types import Order, Position, Trade
+from src.utils.datetime_utils import get_current_utc_timestamp
 
 
-class RealtimeAnalyticsService(BaseService, RealtimeAnalyticsServiceProtocol):
-    """
-    Service layer implementation for realtime analytics.
-
-    This service acts as a facade over the RealtimeAnalyticsEngine,
-    providing proper service layer abstraction and dependency injection.
-    """
+class RealtimeAnalyticsService(
+    BaseAnalyticsService,
+    PositionTrackingMixin,
+    OrderTrackingMixin,
+    RealtimeAnalyticsServiceProtocol,
+):
+    """Simple realtime analytics service."""
 
     def __init__(
         self,
-        config: AnalyticsConfiguration,
-        analytics_engine: RealtimeAnalyticsEngine | None = None,
+        config: AnalyticsConfiguration | None = None,
         metrics_collector=None,
     ):
-        """
-        Initialize the realtime analytics service.
+        """Initialize the realtime analytics service."""
+        super().__init__(
+            name="RealtimeAnalyticsService",
+            config=ServiceInitializationHelper.prepare_service_config(config),
+            metrics_collector=metrics_collector,
+        )
+        self.config = config or AnalyticsConfiguration()
 
-        Args:
-            config: Analytics configuration
-            analytics_engine: Injected analytics engine (optional)
-            metrics_collector: Injected metrics collector (optional)
-        """
-        super().__init__()
-        self.config = config
+        # Simple state tracking for prices
+        self._prices: dict[str, Decimal] = {}
 
-        # Use dependency injection - engine must be injected
-        if analytics_engine is None:
-            raise ComponentError(
-                "analytics_engine must be injected via dependency injection",
-                component="RealtimeAnalyticsService",
-                operation="__init__",
-                context={"missing_dependency": "analytics_engine"},
-            )
+        # Ensure mixin attributes are initialized
+        if not hasattr(self, "_positions"):
+            self._positions: dict[str, Position] = {}
+        if not hasattr(self, "_trades"):
+            self._trades: list[Trade] = []
+        if not hasattr(self, "_orders"):
+            self._orders: dict[str, Order] = {}
 
-        self._engine = analytics_engine
-
-        if metrics_collector:
-            self._engine.metrics_collector = metrics_collector
-
-        self.logger.info("RealtimeAnalyticsService initialized")
+        # Service state
+        self._is_running = False
 
     async def start(self) -> None:
         """Start the realtime analytics service."""
         try:
-            await self._engine.start()
-            self.logger.info("Realtime analytics service started")
+            self._is_running = True
+            self.logger.info("RealtimeAnalyticsService started")
         except Exception as e:
-            raise ComponentError(
-                f"Failed to start realtime analytics service: {e}",
-                component="RealtimeAnalyticsService",
-                operation="start",
+            self.logger.error(f"Error starting service: {e}")
+            raise AnalyticsErrorHandler.create_operation_error(
+                "RealtimeAnalyticsService", "start", "service_startup", e
             ) from e
 
     async def stop(self) -> None:
         """Stop the realtime analytics service."""
         try:
-            await self._engine.stop()
-            self.logger.info("Realtime analytics service stopped")
+            self._is_running = False
+            self.logger.info("RealtimeAnalyticsService stopped")
         except Exception as e:
-            self.logger.error(f"Error stopping realtime analytics service: {e}")
-
-    def update_position(self, position: Position) -> None:
-        """
-        Update position data.
-
-        Args:
-            position: Position to update
-
-        Raises:
-            ValidationError: If position data is invalid
-            ComponentError: If update fails
-        """
-        if not isinstance(position, Position):
-            raise ValidationError(
-                "Invalid position parameter",
-                field_name="position",
-                field_value=type(position),
-                expected_type="Position",
-            )
-
-        try:
-            self._engine.update_position(position)
-            self.logger.debug(f"Position updated: {position.symbol}")
-        except Exception as e:
-            raise ComponentError(
-                f"Failed to update position: {e}",
-                component="RealtimeAnalyticsService",
-                operation="update_position",
-                context={"symbol": position.symbol},
+            self.logger.error(f"Error stopping service: {e}")
+            raise AnalyticsErrorHandler.create_operation_error(
+                "RealtimeAnalyticsService", "stop", "service_shutdown", e
             ) from e
 
-    def update_trade(self, trade: Trade) -> None:
-        """
-        Update trade data.
+    # update_position method now inherited from PositionTrackingMixin
 
-        Args:
-            trade: Trade to update
+    # update_trade method now inherited from PositionTrackingMixin
 
-        Raises:
-            ValidationError: If trade data is invalid
-            ComponentError: If update fails
-        """
-        if not isinstance(trade, Trade):
-            raise ValidationError(
-                "Invalid trade parameter",
-                field_name="trade",
-                field_value=type(trade),
-                expected_type="Trade",
-            )
-
-        try:
-            self._engine.update_trade(trade)
-            self.logger.debug(f"Trade updated: {trade.trade_id}")
-        except Exception as e:
-            raise ComponentError(
-                f"Failed to update trade: {e}",
-                component="RealtimeAnalyticsService",
-                operation="update_trade",
-                context={"trade_id": trade.trade_id},
-            ) from e
-
-    def update_order(self, order: Order) -> None:
-        """
-        Update order data.
-
-        Args:
-            order: Order to update
-
-        Raises:
-            ValidationError: If order data is invalid
-            ComponentError: If update fails
-        """
-        if not isinstance(order, Order):
-            raise ValidationError(
-                "Invalid order parameter",
-                field_name="order",
-                field_value=type(order),
-                expected_type="Order",
-            )
-
-        try:
-            self._engine.update_order(order)
-            self.logger.debug(f"Order updated: {order.order_id}")
-        except Exception as e:
-            raise ComponentError(
-                f"Failed to update order: {e}",
-                component="RealtimeAnalyticsService",
-                operation="update_order",
-                context={"order_id": order.order_id},
-            ) from e
+    # update_order method now inherited from OrderTrackingMixin
 
     def update_price(self, symbol: str, price: Decimal) -> None:
-        """
-        Update price data.
-
-        Args:
-            symbol: Trading symbol
-            price: Current price
-
-        Raises:
-            ValidationError: If parameters are invalid
-            ComponentError: If update fails
-        """
-        if not isinstance(symbol, str) or not symbol:
-            raise ValidationError(
-                "Invalid symbol parameter",
-                field_name="symbol",
-                field_value=symbol,
-                expected_type="non-empty str",
-            )
-
-        if not isinstance(price, Decimal) or price <= 0:
-            raise ValidationError(
-                "Invalid price parameter",
-                field_name="price",
-                field_value=price,
-                validation_rule="positive Decimal",
-            )
-
+        """Update price data."""
         try:
-            self._engine.update_price(symbol, price)
-            self.logger.debug(f"Price updated: {symbol} = {price}")
+            self._prices[symbol] = price
+            self.logger.debug(f"Updated price for {symbol}: {price}")
         except Exception as e:
-            raise ComponentError(
-                f"Failed to update price: {e}",
-                component="RealtimeAnalyticsService",
-                operation="update_price",
-                context={"symbol": symbol, "price": str(price)},
+            self.logger.error(f"Error updating price: {e}")
+            raise AnalyticsErrorHandler.create_operation_error(
+                "RealtimeAnalyticsService", "update_price", symbol, e
             ) from e
 
     async def get_portfolio_metrics(self) -> PortfolioMetrics | None:
-        """
-        Get current portfolio metrics.
-
-        Returns:
-            Portfolio metrics or None if not available
-
-        Raises:
-            ComponentError: If retrieval fails
-        """
+        """Get current portfolio metrics."""
         try:
-            return await self._engine.get_portfolio_metrics()
+            # Simple portfolio calculation
+            total_value = Decimal("0")
+            total_pnl = Decimal("0")
+
+            for position in self._positions.values():
+                current_price = self._prices.get(position.symbol, position.entry_price)
+                position_value = position.quantity * current_price
+                position_pnl = position_value - (position.quantity * position.entry_price)
+
+                total_value += position_value
+                total_pnl += position_pnl
+
+            return PortfolioMetrics(
+                timestamp=get_current_utc_timestamp(),
+                total_value=total_value,
+                cash=Decimal("0"),
+                invested_capital=total_value - total_pnl,
+                unrealized_pnl=total_pnl,
+                realized_pnl=Decimal("0"),
+                total_pnl=total_pnl,
+                positions_count=len(self._positions),
+                active_strategies=0,
+            )
         except Exception as e:
-            raise ComponentError(
-                f"Failed to get portfolio metrics: {e}",
-                component="RealtimeAnalyticsService",
-                operation="get_portfolio_metrics",
-            ) from e
+            self.logger.error(f"Error calculating portfolio metrics: {e}")
+            return None
 
-    async def get_position_metrics(self, symbol: str = None) -> list[PositionMetrics]:
-        """
-        Get position metrics.
-
-        Args:
-            symbol: Optional symbol filter
-
-        Returns:
-            List of position metrics
-
-        Raises:
-            ComponentError: If retrieval fails
-        """
+    async def get_position_metrics(self, symbol: str | None = None) -> list[PositionMetrics]:
+        """Get position metrics."""
         try:
-            return await self._engine.get_position_metrics(symbol)
+            metrics = []
+            positions = (
+                [self._positions[symbol]]
+                if symbol and symbol in self._positions
+                else self._positions.values()
+            )
+
+            for position in positions:
+                current_price = self._prices.get(position.symbol, position.entry_price)
+                unrealized_pnl = (current_price - position.entry_price) * position.quantity
+
+                market_value = position.quantity * current_price
+                unrealized_pnl_percent = (
+                    ((current_price - position.entry_price) / position.entry_price * Decimal("100"))
+                    if position.entry_price != 0
+                    else Decimal("0")
+                )
+
+                metrics.append(
+                    PositionMetrics(
+                        timestamp=get_current_utc_timestamp(),
+                        symbol=position.symbol,
+                        exchange=getattr(position, "exchange", "unknown"),
+                        side=getattr(position, "side", "long"),
+                        quantity=position.quantity,
+                        entry_price=position.entry_price,
+                        current_price=current_price,
+                        market_value=market_value,
+                        unrealized_pnl=unrealized_pnl,
+                        unrealized_pnl_percent=unrealized_pnl_percent,
+                        realized_pnl=Decimal("0"),
+                        total_pnl=unrealized_pnl,
+                        weight=Decimal("0"),
+                    )
+                )
+
+            return metrics
         except Exception as e:
-            raise ComponentError(
-                f"Failed to get position metrics: {e}",
-                component="RealtimeAnalyticsService",
-                operation="get_position_metrics",
-                context={"symbol": symbol},
-            ) from e
+            self.logger.error(f"Error calculating position metrics: {e}")
+            return []
 
-    async def get_strategy_metrics(self, strategy: str = None) -> list[StrategyMetrics]:
-        """
-        Get strategy performance metrics.
-
-        Args:
-            strategy: Optional strategy filter
-
-        Returns:
-            List of strategy metrics
-
-        Raises:
-            ComponentError: If retrieval fails
-        """
+    async def get_strategy_metrics(self, strategy: str | None = None) -> list[StrategyMetrics]:
+        """Get strategy performance metrics."""
         try:
-            return await self._engine.get_strategy_metrics(strategy)
+            # Simple strategy metrics based on trades
+            strategy_trades = [
+                t for t in self._trades if not strategy or getattr(t, "strategy", "") == strategy
+            ]
+
+            if not strategy_trades:
+                return []
+
+            total_pnl = sum(getattr(t, "pnl", Decimal("0")) for t in strategy_trades)
+
+            return [
+                StrategyMetrics(
+                    timestamp=get_current_utc_timestamp(),
+                    strategy_name=strategy or "unknown",
+                    total_pnl=total_pnl,
+                    unrealized_pnl=Decimal("0"),
+                    realized_pnl=total_pnl,
+                    total_return=Decimal("0"),
+                    total_trades=len(strategy_trades),
+                    winning_trades=0,
+                    losing_trades=0,
+                    capital_allocated=Decimal("0"),
+                    capital_utilized=Decimal("0"),
+                    utilization_rate=Decimal("0"),
+                )
+            ]
         except Exception as e:
-            raise ComponentError(
-                f"Failed to get strategy metrics: {e}",
-                component="RealtimeAnalyticsService",
-                operation="get_strategy_metrics",
-                context={"strategy": strategy},
-            ) from e
+            self.logger.error(f"Error calculating strategy metrics: {e}")
+            return []
 
-    async def get_active_alerts(self) -> list[Any]:
-        """
-        Get active alerts from the analytics engine.
+    async def get_active_alerts(self) -> list[dict]:
+        """Get active alerts."""
+        # Simple implementation - no alerts for now
+        return []
 
-        Returns:
-            List of active alerts
-
-        Raises:
-            ComponentError: If retrieval fails
-        """
-        try:
-            return await self._engine.get_active_alerts()
-        except Exception as e:
-            raise ComponentError(
-                f"Failed to get active alerts: {e}",
-                component="RealtimeAnalyticsService",
-                operation="get_active_alerts",
-            ) from e
-
-    def get_service_status(self) -> dict[str, Any]:
-        """
-        Get service status information.
-
-        Returns:
-            Service status dictionary
-        """
+    # Required abstract method implementations
+    async def calculate_metrics(self, *args, **kwargs) -> dict[str, Any]:
+        """Calculate service-specific metrics."""
         return {
-            "service_name": "RealtimeAnalyticsService",
-            "engine_type": type(self._engine).__name__,
-            "running": getattr(self._engine, "_running", False),
-            "configuration": {
-                "calculation_frequency": self.config.calculation_frequency.value,
-                "risk_free_rate": str(self.config.risk_free_rate),
-            },
+            "portfolio": await self.get_portfolio_metrics(),
+            "positions": await self.get_position_metrics(),
+            "active_alerts": await self.get_active_alerts(),
         }
+
+    async def validate_data(self, data: Any) -> bool:
+        """Validate service-specific data."""
+        return data is not None

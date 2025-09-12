@@ -8,7 +8,7 @@ ensuring proper abstraction and dependency inversion.
 from abc import ABC, abstractmethod
 from datetime import datetime
 from decimal import Decimal
-from typing import Any, Protocol
+from typing import Any, Protocol, runtime_checkable
 
 from src.analytics.types import (
     AnalyticsAlert,
@@ -68,22 +68,22 @@ class AlertServiceProtocol(Protocol):
 
     async def generate_alert(
         self,
-        alert_id: str,
+        rule_name: str,
         severity: str,
-        title: str,
         message: str,
-        metric_name: str,
+        labels: dict[str, str],
+        annotations: dict[str, str],
         **kwargs,
     ) -> AnalyticsAlert:
-        """Generate a new alert."""
+        """Generate a new alert with parameters aligned to monitoring AlertRequest."""
         ...
 
     def get_active_alerts(self) -> list[AnalyticsAlert]:
         """Get active alerts."""
         ...
 
-    async def acknowledge_alert(self, alert_id: str, acknowledged_by: str) -> bool:
-        """Acknowledge an alert."""
+    async def acknowledge_alert(self, fingerprint: str, acknowledged_by: str) -> bool:
+        """Acknowledge an alert using consistent fingerprint parameter."""
         ...
 
 
@@ -91,14 +91,14 @@ class RiskServiceProtocol(Protocol):
     """Protocol for risk calculation service."""
 
     async def calculate_var(
-        self, confidence_level: float, time_horizon: int, method: str
-    ) -> dict[str, float]:
+        self, confidence_level: Decimal, time_horizon: int, method: str
+    ) -> dict[str, Decimal]:
         """Calculate Value at Risk."""
         ...
 
     async def run_stress_test(
         self, scenario_name: str, scenario_params: dict[str, Any]
-    ) -> dict[str, float]:
+    ) -> dict[str, Decimal]:
         """Run stress test scenario."""
         ...
 
@@ -109,6 +109,14 @@ class RiskServiceProtocol(Protocol):
 
 class PortfolioServiceProtocol(Protocol):
     """Protocol for portfolio analytics service."""
+
+    def update_position(self, position: Position) -> None:
+        """Update position data."""
+        ...
+
+    def update_trade(self, trade: Trade) -> None:
+        """Update trade data."""
+        ...
 
     async def calculate_portfolio_metrics(self) -> PortfolioMetrics:
         """Calculate portfolio metrics."""
@@ -268,16 +276,53 @@ class RiskCalculationService(ABC):
     async def calculate_portfolio_var(
         self,
         positions: dict[str, Position],
-        confidence_level: float,
+        confidence_level: Decimal,
         time_horizon: int,
         method: str = "historical",
-    ) -> dict[str, float]:
+    ) -> dict[str, Decimal]:
         """Calculate portfolio Value at Risk."""
         pass
 
     @abstractmethod
     async def calculate_risk_metrics(
-        self, positions: dict[str, Position], price_history: dict[str, list[float]]
+        self, positions: dict[str, Position], price_history: dict[str, list[Decimal]]
     ) -> RiskMetrics:
         """Calculate comprehensive risk metrics."""
         pass
+
+
+@runtime_checkable
+class AnalyticsServiceFactoryProtocol(Protocol):
+    """Protocol defining the analytics service factory interface."""
+
+    def create_analytics_service(self, config=None) -> AnalyticsServiceProtocol:
+        """Create main analytics service."""
+        ...
+
+    def create_portfolio_service(self) -> PortfolioServiceProtocol:
+        """Create portfolio analytics service."""
+        ...
+
+    def create_risk_service(self) -> RiskServiceProtocol:
+        """Create risk monitoring service."""
+        ...
+
+    def create_reporting_service(self) -> ReportingServiceProtocol:
+        """Create performance reporting service."""
+        ...
+
+    def create_operational_service(self) -> OperationalServiceProtocol:
+        """Create operational analytics service."""
+        ...
+
+    def create_alert_service(self) -> AlertServiceProtocol:
+        """Create alert management service."""
+        ...
+
+    def create_export_service(self) -> ExportServiceProtocol:
+        """Create data export service."""
+        ...
+
+    def create_realtime_analytics_service(self) -> RealtimeAnalyticsServiceProtocol:
+        """Create realtime analytics service."""
+        ...

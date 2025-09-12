@@ -201,7 +201,7 @@ class TestAlertServiceProtocol:
         method = AlertServiceProtocol.generate_alert
         sig = inspect.signature(method)
 
-        expected_params = ["alert_id", "severity", "title", "message", "metric_name"]
+        expected_params = ["rule_name", "severity", "message", "labels", "annotations"]
         for param in expected_params:
             assert param in sig.parameters
 
@@ -224,7 +224,7 @@ class TestAlertServiceProtocol:
         method = AlertServiceProtocol.acknowledge_alert
         sig = inspect.signature(method)
 
-        assert "alert_id" in sig.parameters
+        assert "fingerprint" in sig.parameters
         assert "acknowledged_by" in sig.parameters
 
         hints = get_type_hints(method)

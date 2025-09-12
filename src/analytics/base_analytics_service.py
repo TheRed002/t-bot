@@ -13,8 +13,7 @@ from typing import Any, TypeVar
 
 from src.core.base.service import BaseService
 from src.core.exceptions import ServiceError, ValidationError
-from src.core.logging import get_logger
-from src.monitoring.metrics import get_metrics_collector
+from src.utils.decimal_utils import to_decimal
 
 T = TypeVar("T")
 
@@ -49,19 +48,18 @@ class BaseAnalyticsService(BaseService, ABC):
         """
         super().__init__(name or self.__class__.__name__, config, correlation_id)
 
-        # Initialize metrics collector
-        self.metrics_collector = metrics_collector or get_metrics_collector()
-        self.logger = get_logger(self._name)
+        # Initialize metrics collector - must be injected
+        self.metrics_collector = metrics_collector
 
         # Common analytics state
-        self._cache = {}
+        self._cache: dict[str, dict[str, Any]] = {}
         self._cache_ttl = config.get("cache_ttl", 300) if config else 300
         self._last_update = datetime.now(timezone.utc)
         self._update_frequency = config.get("update_frequency", 60) if config else 60
 
         # Performance tracking
-        self._calculation_times = {}
-        self._error_counts = {}
+        self._calculation_times: dict[str, list[float]] = {}
+        self._error_counts: dict[str, dict[str, int]] = {}
 
     # Common validation methods
     def validate_time_range(self, start_time: datetime, end_time: datetime) -> None:
@@ -78,21 +76,26 @@ class BaseAnalyticsService(BaseService, ABC):
         if not start_time or not end_time:
             raise ValidationError(
                 "Time range parameters required",
-                details={"start_time": start_time, "end_time": end_time},
+                context={"start_time": start_time, "end_time": end_time},
             )
 
         if start_time >= end_time:
             raise ValidationError(
                 "Invalid time range: start_time must be before end_time",
-                details={"start_time": start_time, "end_time": end_time},
+                context={"start_time": start_time, "end_time": end_time},
             )
 
-        # Check for reasonable time ranges (e.g., not more than 1 year)
-        max_range = 365 * 24 * 3600  # seconds
+        # Check for reasonable time ranges (configurable max range)
+        max_range_days = self.config.get("max_time_range_days", 365) if self.config else 365
+        max_range = max_range_days * 24 * 3600  # seconds
         if (end_time - start_time).total_seconds() > max_range:
             raise ValidationError(
-                "Time range too large (max 1 year)",
-                details={"start_time": start_time, "end_time": end_time},
+                f"Time range too large (max {max_range_days} days)",
+                context={
+                    "start_time": start_time,
+                    "end_time": end_time,
+                    "max_days": max_range_days,
+                },
             )
 
     def validate_decimal_value(
@@ -117,24 +120,31 @@ class BaseAnalyticsService(BaseService, ABC):
         Raises:
             ValidationError: If value is invalid
         """
+        # Use core utility for decimal conversion with proper error handling
         try:
-            decimal_value = Decimal(str(value))
-        except (ValueError, TypeError):
+            decimal_value = to_decimal(value)
+        except (ValueError, TypeError) as e:
             raise ValidationError(
                 f"Invalid decimal value for {field_name}",
-                details={"value": value, "field": field_name},
-            )
+                field_name=field_name,
+                field_value=value,
+            ) from e
 
+        # Validate range constraints
         if min_value is not None and decimal_value < min_value:
             raise ValidationError(
                 f"{field_name} below minimum value",
-                details={"value": decimal_value, "min_value": min_value, "field": field_name},
+                field_name=field_name,
+                field_value=decimal_value,
+                context={"min_value": min_value},
             )
 
         if max_value is not None and decimal_value > max_value:
             raise ValidationError(
                 f"{field_name} above maximum value",
-                details={"value": decimal_value, "max_value": max_value, "field": field_name},
+                field_name=field_name,
+                field_value=decimal_value,
+                context={"max_value": max_value},
             )
 
         return decimal_value
@@ -193,10 +203,10 @@ class BaseAnalyticsService(BaseService, ABC):
 
         # Record to metrics collector
         if self.metrics_collector:
-            self.metrics_collector.histogram(
+            self.metrics_collector.observe_histogram(
                 f"analytics_{self._name}_{operation}_duration_seconds",
                 duration,
-                tags={"service": self._name, "operation": operation},
+                {"service": self._name, "operation": operation},
             )
 
     def record_error(self, operation: str, error: Exception) -> None:
@@ -219,9 +229,9 @@ class BaseAnalyticsService(BaseService, ABC):
 
         # Record to metrics collector
         if self.metrics_collector:
-            self.metrics_collector.increment(
+            self.metrics_collector.increment_counter(
                 f"analytics_{self._name}_errors_total",
-                tags={"service": self._name, "operation": operation, "error_type": error_type},
+                {"service": self._name, "operation": operation, "error_type": error_type},
             )
 
     # Common data conversion
@@ -240,7 +250,8 @@ class BaseAnalyticsService(BaseService, ABC):
         elif hasattr(obj, "dict"):
             return obj.dict()
         elif isinstance(obj, Decimal):
-            return float(obj)
+            # Convert to string to preserve precision for financial data
+            return str(obj)
         elif isinstance(obj, datetime):
             return obj.isoformat()
         elif isinstance(obj, list):
@@ -307,12 +318,12 @@ class BaseAnalyticsService(BaseService, ABC):
 
             raise ServiceError(
                 f"{operation_name} failed in {self._name}",
-                details={"operation": operation_name, "error": str(e), "service": self._name},
+                context={"operation": operation_name, "error": str(e), "service": self._name},
             ) from e
 
     # Abstract methods for subclasses
     @abstractmethod
-    async def calculate_metrics(self, *args, **kwargs) -> dict:
+    async def calculate_metrics(self, *args, **kwargs) -> dict[str, Any]:
         """
         Calculate service-specific metrics.
 
@@ -340,16 +351,23 @@ class BaseAnalyticsService(BaseService, ABC):
         from src.core.base.interfaces import HealthStatus
 
         try:
-            # Check cache health
-            if len(self._cache) > 10000:  # Too many cached items
+            # Check cache health (configurable thresholds)
+            max_cache_items = self.config.get("max_cache_items", 10000) if self.config else 10000
+            if len(self._cache) > max_cache_items:
                 return HealthStatus.DEGRADED
 
-            # Check error rates
+            # Check error rates (configurable thresholds)
             total_errors = sum(sum(counts.values()) for counts in self._error_counts.values())
+            error_threshold_degraded = (
+                self.config.get("error_threshold_degraded", 100) if self.config else 100
+            )
+            error_threshold_unhealthy = (
+                self.config.get("error_threshold_unhealthy", 500) if self.config else 500
+            )
 
-            if total_errors > 100:  # Too many recent errors
+            if total_errors > error_threshold_degraded:
                 return HealthStatus.DEGRADED
-            elif total_errors > 500:
+            elif total_errors > error_threshold_unhealthy:
                 return HealthStatus.UNHEALTHY
 
             # Check last update time
