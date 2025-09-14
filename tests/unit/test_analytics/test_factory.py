@@ -84,7 +84,7 @@ class TestAnalyticsServiceFactory:
             result = factory_with_mock_injector.create_analytics_service(config)
 
             # Factory creates AnalyticsService directly with config
-            mock_service_class.assert_called_once_with(config=config, realtime_analytics=None, portfolio_service=None, reporting_service=None, risk_service=None, operational_service=None, alert_service=None, export_service=None, metrics_collector=None)
+            mock_service_class.assert_called_once_with(config=config, realtime_analytics=None, portfolio_service=None, reporting_service=None, risk_service=None, operational_service=None, alert_service=None, export_service=None, dashboard_service=None, metrics_collector=None)
             assert result == mock_service
 
     def test_create_portfolio_service(self, factory_with_mock_injector, mock_injector):

@@ -279,21 +279,27 @@ class PartialFillRecovery(RecoveryScenario):
             if strategy_name:
                 from src.strategies.service import StrategyService
 
+                # Create strategy service with proper initialization
                 strategy_service = StrategyService()
-                factory = StrategyFactory(strategy_service)
+                # Factory expects no parameters for backward compatibility
+                factory = StrategyFactory()
                 strategy = await factory.create_strategy(strategy_name)
 
                 # Re-evaluate current market conditions
                 market_data = signal.get("market_data", {})
-                new_signal = await strategy.generate_signal(market_data)
+                # Use correct method name - generate_signals (plural), not generate_signal
+                new_signals = await strategy.generate_signals(market_data)
 
                 # Compare with original signal
-                if new_signal and new_signal.get("direction") != signal.get("direction"):
-                    self._logger.warning(
-                        "Signal direction changed",
-                        signal_id=signal.get("id"),
+                # Strategy returns list of signals, check the first one
+                if new_signals and len(new_signals) > 0:
+                    new_signal = new_signals[0]
+                    if new_signal.direction != signal.get("direction"):
+                        self._logger.warning(
+                            "Signal direction changed",
+                            signal_id=signal.get("id"),
                         original=signal.get("direction"),
-                        new=new_signal.get("direction"),
+                        new=new_signal.direction,
                     )
                     # Update signal in database
                     signal["reevaluated"] = True

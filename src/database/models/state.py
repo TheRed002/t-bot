@@ -100,9 +100,9 @@ class StateSnapshot(Base, AuditMixin, MetadataMixin, SoftDeleteMixin):
     checkpoints = relationship(
         "StateCheckpoint", back_populates="snapshot", cascade="all, delete-orphan"
     )
-    bot = relationship("Bot", foreign_keys="StateSnapshot.bot_id")
-    strategy = relationship("Strategy", foreign_keys="StateSnapshot.strategy_id")
-    position = relationship("Position", foreign_keys="StateSnapshot.position_id")
+    bot = relationship("Bot", foreign_keys=[bot_id], back_populates="state_snapshots")
+    strategy = relationship("Strategy", foreign_keys=[strategy_id], back_populates="state_snapshots")
+    position = relationship("Position", foreign_keys=[position_id], back_populates="state_snapshots")
 
     # Indexes and constraints for performance and data integrity
     __table_args__ = (

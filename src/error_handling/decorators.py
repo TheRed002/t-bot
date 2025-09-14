@@ -67,7 +67,7 @@ _error_counts: dict[str, int] = {}
 _active_handlers: set[str] = set()
 
 
-def enhanced_error_handler(
+def error_handler(
     retry_config: RetryConfig | None = None,
     circuit_breaker_config: CircuitBreakerConfig | None = None,
     fallback_config: FallbackConfig | None = None,
@@ -75,7 +75,7 @@ def enhanced_error_handler(
     enable_logging: bool = True,
     **kwargs,
 ):
-    """Simplified error handler decorator."""
+    """Error handler decorator."""
 
     def decorator(func: F) -> F:
         @functools.wraps(func)
@@ -260,7 +260,7 @@ def with_retry(
         max_delay=max_delay,
         exponential=exponential,
     )
-    return enhanced_error_handler(retry_config=retry_config, exceptions=exceptions)
+    return error_handler(retry_config=retry_config, exceptions=exceptions)
 
 
 def with_circuit_breaker(
@@ -284,7 +284,7 @@ def with_circuit_breaker(
     circuit_config = CircuitBreakerConfig(
         failure_threshold=failure_threshold, recovery_timeout=recovery_timeout
     )
-    return enhanced_error_handler(circuit_breaker_config=circuit_config)
+    return error_handler(circuit_breaker_config=circuit_config)
 
 
 def with_fallback(
@@ -311,7 +311,7 @@ def with_fallback(
     fallback_config = FallbackConfig(
         strategy=strategy, fallback_value=actual_fallback_value, fallback_function=fallback_function
     )
-    return enhanced_error_handler(fallback_config=fallback_config)
+    return error_handler(fallback_config=fallback_config)
 
 
 def with_error_context(**context_kwargs):

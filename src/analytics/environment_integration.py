@@ -213,7 +213,10 @@ class EnvironmentAwareAnalyticsManager(EnvironmentAwareServiceMixin):
                     exchange, time_period, reporting_level, include_raw_data
                 )
             else:
-                raise AnalyticsError(f"Unknown report type: {report_type}")
+                raise AnalyticsError(
+                    f"Unknown report type: {report_type}",
+                    error_code="ANL_015"
+                )
 
             # Add environment context to report
             report["environment_context"] = {
@@ -241,7 +244,10 @@ class EnvironmentAwareAnalyticsManager(EnvironmentAwareServiceMixin):
         except Exception as e:
             await self._update_analytics_metrics(exchange, start_time, False, False)
             logger.error(f"Failed to generate {report_type} report for {exchange}: {e}")
-            raise AnalyticsError(f"Report generation failed: {e}") from e
+            raise AnalyticsError(
+                f"Report generation failed: {e}",
+                error_code="ANL_016"
+            ) from e
 
     async def _generate_performance_report(
         self,

@@ -635,35 +635,68 @@ class BaseService(BaseComponent, ServiceComponent):
     def _propagate_service_error_consistently(
         self, error: Exception, operation: str, execution_time: float
     ) -> None:
-        """Propagate service errors with consistent patterns across modules."""
-        # Check error type and apply consistent error propagation
-        from src.core.exceptions import DataValidationError, RepositoryError, ValidationError
+        """Propagate service errors with consistent patterns aligned with execution module."""
+        # Apply consistent error data transformation like execution module
+        from src.core.exceptions import DataValidationError, RepositoryError, ServiceError, ValidationError
+        
+        # Use consistent data transformation for error propagation
+        try:
+            from src.core.data_transformer import CoreDataTransformer
+            
+            error_data = CoreDataTransformer.transform_for_pub_sub_pattern(
+                event_type="service_error",
+                data={
+                    "error": str(error),
+                    "error_type": type(error).__name__,
+                    "service": self._name,
+                    "operation": operation,
+                    "execution_time": execution_time,
+                },
+                metadata={
+                    "severity": "high" if isinstance(error, ServiceError) else "medium",
+                    "component": "BaseService",
+                    "boundary_crossed": True,
+                }
+            )
+        except Exception:
+            # Fallback to basic error data if transformation fails
+            error_data = {
+                "error": str(error),
+                "service": self._name,
+                "operation": operation,
+                "execution_time": execution_time,
+            }
 
         if isinstance(error, (ValidationError, DataValidationError)):
             # Validation errors are re-raised as-is for consistency
             self._logger.debug(
                 f"Validation error in {self._name}.{operation} - propagating as validation error",
-                service=self._name,
-                operation=operation,
-                error_type=type(error).__name__,
+                extra=error_data
             )
+            # Re-raise validation errors with consistent propagation patterns
+            raise error
         elif isinstance(error, RepositoryError):
             # Repository errors are propagated with service context
             self._logger.warning(
                 f"Repository error in {self._name}.{operation} - adding service context",
-                service=self._name,
-                operation=operation,
-                execution_time=execution_time,
+                extra=error_data
             )
+            # Wrap repository errors in ServiceError for consistency
+            raise ServiceError(
+                f"Repository error in {self._name}.{operation}: {error}",
+                details={"original_error": str(error), "service": self._name, "operation": operation}
+            ) from error
         else:
-            # Generic errors get service-level error propagation
+            # Generic errors get service-level error propagation consistent with execution module
             self._logger.error(
                 f"Service error in {self._name}.{operation} - wrapping in ServiceError",
-                service=self._name,
-                operation=operation,
-                execution_time=execution_time,
-                original_error=str(error),
+                extra=error_data
             )
+            # Always wrap in ServiceError for consistent error handling across modules
+            raise ServiceError(
+                f"Service error in {self._name}.{operation}: {error}",
+                details={"original_error": str(error), "service": self._name, "operation": operation}
+            ) from error
 
 
 class TransactionalService(BaseService):

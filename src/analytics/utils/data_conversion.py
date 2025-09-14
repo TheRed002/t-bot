@@ -5,7 +5,7 @@ from datetime import date, datetime
 from decimal import ROUND_HALF_UP, Decimal, getcontext
 from typing import Any
 
-from src.core.base import BaseComponent
+from src.core.base.component import BaseComponent
 
 
 class DataConverter(BaseComponent):
@@ -33,7 +33,7 @@ class DataConverter(BaseComponent):
         return self.convert_decimals_for_json(data, use_float=False, exclude_keys=exclude_keys)
 
     def prepare_for_json_export(self, data: Any, remove_metadata: bool = False) -> dict[str, Any]:
-        """Prepare data for JSON export with common transformations matching database module patterns.
+        """Prepare data for JSON export with consistent transformations aligned with core module patterns.
 
         Args:
             data: Data to prepare (dict, Pydantic model, or other)
@@ -42,7 +42,7 @@ class DataConverter(BaseComponent):
         Returns:
             Dictionary ready for JSON serialization with consistent format
         """
-        # Convert Pydantic models to dict using consistent patterns with database module
+        # Convert Pydantic models to dict using consistent patterns with core module
         if hasattr(data, "model_dump") and callable(data.model_dump):
             prepared_data = data.model_dump()
         elif hasattr(data, "dict") and callable(data.dict):
@@ -52,22 +52,26 @@ class DataConverter(BaseComponent):
         else:
             prepared_data = {"data": data}
 
-        # Apply consistent data format metadata matching database service patterns
+        # Apply consistent data format metadata aligned with core data transformer
         if "data_format" not in prepared_data:
-            prepared_data["data_format"] = "export_v1"  # Consistent with monitoring module
+            prepared_data["data_format"] = "analytics_export_data_v1"  # Consistent with core patterns
         if "processing_mode" not in prepared_data:
             prepared_data["processing_mode"] = "batch"  # Export is typically batch processing
+        if "message_pattern" not in prepared_data:
+            prepared_data["message_pattern"] = "pub_sub"  # Align with core messaging patterns
         if "timestamp" not in prepared_data:
             from src.utils.datetime_utils import get_current_utc_timestamp
 
             prepared_data["timestamp"] = get_current_utc_timestamp().isoformat()
 
-        # Add consistent boundary metadata for cross-module compatibility
+        # Add consistent boundary metadata for cross-module compatibility aligned with core
         prepared_data.update(
             {
-                "module": "analytics",
+                "module": "analytics",  # Module identification for compatibility
+                "source": "analytics",
                 "boundary_crossed": True,  # Data crossing module boundaries
-                "validation_applied": True,  # Consistent with database validation patterns
+                "validation_applied": True,  # Consistent with core validation patterns
+                "cross_module_consistency": True,  # Flag for core compatibility
             }
         )
 
@@ -76,9 +80,11 @@ class DataConverter(BaseComponent):
             format_fields = [
                 "data_format",
                 "processing_mode",
+                "message_pattern",
                 "timestamp",
-                "module",
+                "source",
                 "boundary_crossed",
+                "cross_module_consistency",
             ]
             metadata_to_preserve = {k: v for k, v in prepared_data.items() if k in format_fields}
             prepared_data.pop("metadata", None)

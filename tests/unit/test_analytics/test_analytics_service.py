@@ -1014,6 +1014,7 @@ class TestAdvancedFeatures:
         mock_export = Mock()
         mock_alert = Mock()
         mock_operational = Mock()
+        mock_dashboard = Mock()
 
         # Set up portfolio metrics
         portfolio_metrics = PortfolioMetrics(
@@ -1053,6 +1054,20 @@ class TestAdvancedFeatures:
         )
         mock_alert.get_active_alerts = Mock(return_value=[])
 
+        # Mock dashboard service with expected dashboard structure
+        mock_dashboard.generate_comprehensive_dashboard = AsyncMock(
+            return_value={
+                "timestamp": datetime.utcnow(),
+                "status": "healthy",
+                "system_health": {"uptime": "24h", "status": "healthy"},
+                "realtime_analytics": {"portfolio": {}, "positions": {}},
+                "portfolio_analytics": {"total_value": "100000.00"},
+                "risk_analytics": {"var_95": "5000.00"},
+                "operational_analytics": {"system_status": "healthy"},
+                "alerts_summary": {"active_alerts": []},
+            }
+        )
+
         # Create service with mocked dependencies
         service = AnalyticsService(
             config=config,
@@ -1063,6 +1078,7 @@ class TestAdvancedFeatures:
             export_service=mock_export,
             alert_service=mock_alert,
             operational_service=mock_operational,
+            dashboard_service=mock_dashboard,
         )
 
         # Call the method

@@ -161,6 +161,9 @@ class Position(Base, AuditMixin, MetadataMixin):
     position_metrics = relationship(
         "AnalyticsPositionMetrics", back_populates="position", cascade="all, delete-orphan"
     )
+    
+    # State management relationships  
+    state_snapshots = relationship("StateSnapshot", back_populates="position")
 
     # Indexes
     __table_args__ = (
@@ -169,7 +172,7 @@ class Position(Base, AuditMixin, MetadataMixin):
         Index("idx_positions_bot_id", "bot_id"),
         Index(
             "idx_positions_exchange_status", "exchange", "status"
-        ),  # Exchange position monitoring
+        ),  # Exchange position monitoringw
         Index(
             "idx_positions_strategy_exchange", "strategy_id", "exchange"
         ),  # Strategy-exchange performance

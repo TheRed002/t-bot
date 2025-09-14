@@ -647,11 +647,11 @@ class UnifiedDecorator:
 
             @functools.wraps(func)
             async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
-                return await cls._execute_async_enhanced(func, args, kwargs, config)
+                return await cls._execute_async(func, args, kwargs, config)
 
             @functools.wraps(func)
             def sync_wrapper(*args: Any, **kwargs: Any) -> Any:
-                return cls._execute_sync_enhanced(func, args, kwargs, config)
+                return cls._execute_sync(func, args, kwargs, config)
 
             # Return appropriate wrapper based on function type
             if asyncio.iscoroutinefunction(func):
@@ -662,7 +662,7 @@ class UnifiedDecorator:
         return decorator
 
     @classmethod
-    async def _execute_async_enhanced(
+    async def _execute_async(
         cls,
         func: Callable[..., Any],
         args: tuple[Any, ...],
@@ -719,7 +719,7 @@ class UnifiedDecorator:
             return await cls._handle_execution_error_async(func, args, kwargs, e, config, context)
 
     @classmethod
-    def _execute_sync_enhanced(
+    def _execute_sync(
         cls,
         func: Callable[..., Any],
         args: tuple[Any, ...],

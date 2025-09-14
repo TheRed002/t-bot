@@ -49,7 +49,12 @@ class ModuleBoundaryValidator:
             if field in data and data[field] is not None:
                 try:
                     # Convert to Decimal with proper precision
-                    data[field] = validate_decimal_precision(data[field])
+                    # validate_decimal_precision returns bool, so convert separately
+                    decimal_value = Decimal(str(data[field]))
+                    if not decimal_value.is_finite():
+                        raise DataValidationError(f"Non-finite value for {field}")
+                    # Use 8 decimal places for crypto precision
+                    data[field] = decimal_value.quantize(Decimal("0.00000001"))
                 except Exception as e:
                     raise DataValidationError(
                         f"Invalid decimal format for {field} in {self.source_module}→{self.target_module}: {e}"

@@ -20,7 +20,7 @@ from src.error_handling.decorators import (
     _handle_fallback,
     _should_circuit_break,
     _should_retry,
-    enhanced_error_handler,
+    error_handler,
     get_active_handler_count,
     shutdown_all_error_handlers,
     with_circuit_breaker,
@@ -296,7 +296,7 @@ class TestHandleFallback:
         assert result == "fallback_value"
 
 
-class TestEnhancedErrorHandler:
+class TestErrorHandler:
     """Test enhanced error handler decorator."""
 
     def setUp(self):
@@ -304,20 +304,20 @@ class TestEnhancedErrorHandler:
         _error_counts.clear()
         _active_handlers.clear()
 
-    def test_enhanced_error_handler_sync_success(self):
+    def test_error_handler_sync_success(self):
         """Test enhanced error handler with sync function success."""
-        @enhanced_error_handler()
+        @error_handler()
         def test_func():
             return "success"
         
         result = test_func()
         assert result == "success"
 
-    def test_enhanced_error_handler_sync_with_retry(self):
+    def test_error_handler_sync_with_retry(self):
         """Test enhanced error handler with sync function and retry."""
         call_count = 0
         
-        @enhanced_error_handler(retry_config=RetryConfig(max_attempts=3))
+        @error_handler(retry_config=RetryConfig(max_attempts=3))
         def test_func():
             nonlocal call_count
             call_count += 1
@@ -330,9 +330,9 @@ class TestEnhancedErrorHandler:
         assert call_count == 3
 
     @pytest.mark.asyncio
-    async def test_enhanced_error_handler_async_success(self):
+    async def test_error_handler_async_success(self):
         """Test enhanced error handler with async function success."""
-        @enhanced_error_handler()
+        @error_handler()
         async def test_func():
             return "async_success"
         
@@ -340,11 +340,11 @@ class TestEnhancedErrorHandler:
         assert result == "async_success"
 
     @pytest.mark.asyncio
-    async def test_enhanced_error_handler_async_with_retry(self):
+    async def test_error_handler_async_with_retry(self):
         """Test enhanced error handler with async function and retry."""
         call_count = 0
         
-        @enhanced_error_handler(retry_config=RetryConfig(max_attempts=2, base_delay=0.01))
+        @error_handler(retry_config=RetryConfig(max_attempts=2, base_delay=0.01))
         async def test_func():
             nonlocal call_count
             call_count += 1
@@ -356,12 +356,12 @@ class TestEnhancedErrorHandler:
         assert result == "success"
         assert call_count == 2
 
-    def test_enhanced_error_handler_with_circuit_breaker(self):
+    def test_error_handler_with_circuit_breaker(self):
         """Test enhanced error handler with circuit breaker."""
-        func_name = f"{TestEnhancedErrorHandler.__module__}.TestEnhancedErrorHandler.test_enhanced_error_handler_with_circuit_breaker.<locals>.test_func"
+        func_name = f"{TestErrorHandler.__module__}.TestErrorHandler.test_error_handler_with_circuit_breaker.<locals>.test_func"
         _error_counts[func_name] = 10  # Above threshold
         
-        @enhanced_error_handler(
+        @error_handler(
             circuit_breaker_config=CircuitBreakerConfig(failure_threshold=5),
             fallback_config=FallbackConfig(strategy=FallbackStrategy.RETURN_NONE)
         )
@@ -371,9 +371,9 @@ class TestEnhancedErrorHandler:
         result = test_func()
         assert result is None
 
-    def test_enhanced_error_handler_with_fallback_on_failure(self):
+    def test_error_handler_with_fallback_on_failure(self):
         """Test enhanced error handler with fallback on all retries failed."""
-        @enhanced_error_handler(
+        @error_handler(
             retry_config=RetryConfig(max_attempts=2),
             fallback_config=FallbackConfig(
                 strategy=FallbackStrategy.NONE,
@@ -386,19 +386,19 @@ class TestEnhancedErrorHandler:
         result = test_func()
         assert result == "fallback_result"
 
-    def test_enhanced_error_handler_reraises_without_fallback(self):
+    def test_error_handler_reraises_without_fallback(self):
         """Test enhanced error handler reraises error without fallback."""
-        @enhanced_error_handler(retry_config=RetryConfig(max_attempts=1))
+        @error_handler(retry_config=RetryConfig(max_attempts=1))
         def test_func():
             raise ValueError("Test error")
         
         with pytest.raises(ValueError, match="Test error"):
             test_func()
 
-    def test_enhanced_error_handler_logging_disabled(self):
+    def test_error_handler_logging_disabled(self):
         """Test enhanced error handler with logging disabled."""
         with patch('src.error_handling.decorators.logger') as mock_logger:
-            @enhanced_error_handler(
+            @error_handler(
                 retry_config=RetryConfig(max_attempts=1),
                 enable_logging=False
             )
@@ -411,9 +411,9 @@ class TestEnhancedErrorHandler:
             mock_logger.warning.assert_not_called()
 
     @patch('src.error_handling.decorators.logger')
-    def test_enhanced_error_handler_logging_enabled(self, mock_logger):
+    def test_error_handler_logging_enabled(self, mock_logger):
         """Test enhanced error handler with logging enabled."""
-        @enhanced_error_handler(
+        @error_handler(
             retry_config=RetryConfig(max_attempts=2),
             enable_logging=True
         )

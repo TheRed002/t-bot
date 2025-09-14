@@ -116,6 +116,42 @@ def register_analytics_services(injector: DependencyInjector) -> None:
         )
         return RealtimeAnalyticsService(config=config)
 
+    def dashboard_service_factory():
+        from src.analytics.services.dashboard_service import DashboardService
+
+        config = (
+            injector.resolve("AnalyticsConfiguration")
+            if injector.is_registered("AnalyticsConfiguration")
+            else None
+        )
+
+        # Safely resolve services
+        portfolio_service = None
+        risk_service = None
+        operational_service = None
+
+        try:
+            portfolio_service = injector.resolve("PortfolioService")
+        except Exception:
+            pass
+
+        try:
+            risk_service = injector.resolve("RiskService")
+        except Exception:
+            pass
+
+        try:
+            operational_service = injector.resolve("OperationalService")
+        except Exception:
+            pass
+
+        return DashboardService(
+            config=config,
+            portfolio_service=portfolio_service,
+            risk_service=risk_service,
+            operational_service=operational_service,
+        )
+
     # Register service factories
     injector.register_factory("PortfolioService", portfolio_service_factory, singleton=True)
     injector.register_factory("RiskService", risk_service_factory, singleton=True)
@@ -126,6 +162,7 @@ def register_analytics_services(injector: DependencyInjector) -> None:
     injector.register_factory(
         "RealtimeAnalyticsService", realtime_analytics_service_factory, singleton=True
     )
+    injector.register_factory("DashboardService", dashboard_service_factory, singleton=True)
 
     # Register interface implementations
     injector.register_service(
@@ -172,18 +209,9 @@ def register_analytics_services(injector: DependencyInjector) -> None:
 
     injector.register_factory("AnalyticsConfiguration", analytics_config_factory, singleton=True)
 
-    # Register DataTransformationService
-    def data_transformation_service_factory():
-        """Create data transformation service instance."""
-        from src.analytics.services.data_transformation_service import DataTransformationService
+    # DataTransformationService removed - transformation logic moved to repository layer
 
-        return DataTransformationService()
-
-    injector.register_factory(
-        "DataTransformationService", data_transformation_service_factory, singleton=True
-    )
-
-    # Register AnalyticsRepository with proper database integration and service injection
+    # Register AnalyticsRepository with proper database integration
     def analytics_repository_factory() -> "AnalyticsRepository":
         from src.analytics.repository import AnalyticsRepository
 
@@ -193,8 +221,7 @@ def register_analytics_services(injector: DependencyInjector) -> None:
         except Exception:
             # Fallback if database session not available
             session = None
-        transformation_service = injector.resolve("DataTransformationService")
-        return AnalyticsRepository(session=session, transformation_service=transformation_service)
+        return AnalyticsRepository(session=session)
 
     injector.register_factory("AnalyticsRepository", analytics_repository_factory, singleton=True)
     injector.register_service(
@@ -222,6 +249,7 @@ def register_analytics_services(injector: DependencyInjector) -> None:
             "operational_service": "OperationalService",
             "alert_service": "AlertService",
             "export_service": "ExportService",
+            "dashboard_service": "DashboardService",
             "metrics_collector": "MetricsCollector",
         }
 

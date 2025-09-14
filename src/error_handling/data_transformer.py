@@ -216,6 +216,7 @@ class ErrorDataTransformer:
         # Add request/reply specific fields
         transformed["request_type"] = request_type
         transformed["correlation_id"] = correlation_id or datetime.now(timezone.utc).isoformat()
+        transformed["message_pattern"] = "req_reply"  # Override message pattern for req/reply
         transformed["processing_mode"] = "request_reply"  # Override processing mode
 
         return transformed
@@ -244,14 +245,12 @@ class ErrorDataTransformer:
             source_mode=source_mode, target_mode=target_mode, data=aligned_data
         )
 
-        # Add mode-specific fields with enhanced boundary metadata (aligned with core events)
+        # Add mode-specific fields with enhanced boundary metadata (aligned with execution module)
         if target_mode == "stream":
             aligned_data.update(
                 {
-                    "stream_processing": True,  # Align with core events stream processing
                     "stream_position": datetime.now(timezone.utc).timestamp(),
-                    "processing_paradigm": "stream",  # Match core events paradigm field
-                    "data_format": "bot_event_v1",  # Align with core events
+                    "data_format": "bot_event_v1",  # Align with execution module
                     "message_pattern": "pub_sub",  # Consistent messaging pattern
                     "boundary_crossed": True,
                 }
@@ -261,9 +260,7 @@ class ErrorDataTransformer:
                 aligned_data["batch_id"] = datetime.now(timezone.utc).isoformat()
             aligned_data.update(
                 {
-                    "batch_processing": True,  # Align with core events batch processing
-                    "processing_paradigm": "batch",  # Match core events paradigm field
-                    "data_format": "bot_event_v1",  # Align with core events
+                    "data_format": "bot_event_v1",  # Align with execution module
                     "message_pattern": "batch",  # Batch messaging pattern
                     "boundary_crossed": True,
                 }
@@ -273,7 +270,7 @@ class ErrorDataTransformer:
                 aligned_data["correlation_id"] = datetime.now(timezone.utc).isoformat()
             aligned_data.update(
                 {
-                    "data_format": "bot_event_v1",  # Align with core events
+                    "data_format": "bot_event_v1",  # Align with execution module
                     "message_pattern": "req_reply",  # Request-reply messaging pattern
                     "boundary_crossed": True,
                 }
@@ -347,10 +344,11 @@ class ErrorDataTransformer:
                 }
 
                 # Apply appropriate boundary validation based on target
-                if target_module == "core":
+                if target_module in ["execution", "monitoring", "web_interface"]:
+                    # Use correct validation for error_handling -> other modules
                     BoundaryValidator.validate_monitoring_to_error_boundary(boundary_data)
                 elif target_module == "risk_management":
-                    BoundaryValidator.validate_monitoring_to_error_boundary(boundary_data)
+                    BoundaryValidator.validate_risk_to_state_boundary(boundary_data)
                 else:
                     BoundaryValidator.validate_monitoring_to_error_boundary(boundary_data)
 

@@ -40,11 +40,22 @@ class MessageType(Enum):
 
 
 class MessagePattern(Enum):
-    """Message communication patterns."""
+    """Message communication patterns aligned with core data transformer standards."""
     PUB_SUB = "pub_sub"
     REQ_REPLY = "req_reply"
     STREAM = "stream"
     BATCH = "batch"
+
+    @classmethod
+    def from_core_standard(cls, core_pattern: str) -> "MessagePattern":
+        """Convert core module pattern strings to enum."""
+        pattern_mapping = {
+            "pub_sub": cls.PUB_SUB,
+            "req_reply": cls.REQ_REPLY,
+            "stream": cls.STREAM,
+            "batch": cls.BATCH,
+        }
+        return pattern_mapping.get(core_pattern, cls.STREAM)
 
 
 @dataclass
@@ -536,14 +547,14 @@ class ErrorPropagationMixin:
 
     def propagate_validation_error(self, error: Exception, context: str) -> None:
         """Propagate validation errors consistently with enhanced logging and boundary validation."""
-        # Apply consistent error propagation metadata
+        # Apply consistent error propagation metadata aligned with core data transformer
         error_metadata = {
             "error_type": type(error).__name__,
             "context": context,
             "propagation_pattern": "validation_direct",
             "data_format": "error_propagation_v1",
             "processing_mode": "stream",  # Align with core events default processing mode
-            "message_pattern": "pub_sub",
+            "message_pattern": MessagePattern.PUB_SUB.value,  # Use enum value for consistency
             "boundary_crossed": True,
             "validation_status": "failed",
             "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -1113,6 +1124,100 @@ class BoundaryValidator:
                 field_value=data["data_format"],
                 expected_type="bot_event_v*",
             )
+
+    @staticmethod
+    def validate_utils_to_ml_boundary(data: dict[str, Any]) -> None:
+        """Validate data at utils -> ml boundary."""
+        if not isinstance(data, dict):
+            raise ValidationError(
+                "Utils to ML boundary data must be a dictionary",
+                field_name="boundary_data",
+                field_value=type(data).__name__,
+                expected_type="dict",
+            )
+        
+        # Required fields for utils to ML flow
+        required_fields = ["processing_mode", "data_format"]
+        for field in required_fields:
+            if field not in data:
+                raise ValidationError(
+                    f"Missing required field '{field}' at utils -> ml boundary",
+                    field_name=field,
+                    field_value=None,
+                    expected_type="string",
+                )
+        
+        # Validate processing mode compatibility with ML
+        valid_ml_modes = ["stream", "batch", "request_reply"]
+        if data["processing_mode"] not in valid_ml_modes:
+            raise ValidationError(
+                f"Invalid processing mode for ML: {data['processing_mode']}",
+                field_name="processing_mode",
+                field_value=data["processing_mode"],
+                expected_type=f"one of {valid_ml_modes}",
+            )
+        
+        # Validate ML-compatible data format
+        if not data["data_format"].endswith("_v1"):
+            raise ValidationError(
+                f"ML requires versioned data format: {data['data_format']}",
+                field_name="data_format",
+                field_value=data["data_format"],
+                expected_type="format ending with _v1",
+            )
+
+    @staticmethod
+    def validate_ml_to_utils_boundary(data: dict[str, Any]) -> None:
+        """Validate data at ml -> utils boundary."""
+        if not isinstance(data, dict):
+            raise ValidationError(
+                "ML to utils boundary data must be a dictionary",
+                field_name="boundary_data",
+                field_value=type(data).__name__,
+                expected_type="dict",
+            )
+        
+        # Required fields for ML to utils flow
+        required_fields = ["ml_operation_type", "processing_mode"]
+        for field in required_fields:
+            if field not in data:
+                raise ValidationError(
+                    f"Missing required field '{field}' at ml -> utils boundary",
+                    field_name=field,
+                    field_value=None,
+                    expected_type="string",
+                )
+        
+        # Validate ML operation types
+        valid_operations = ["prediction", "training", "inference", "batch_processing"]
+        if data["ml_operation_type"] not in valid_operations:
+            raise ValidationError(
+                f"Invalid ML operation type: {data['ml_operation_type']}",
+                field_name="ml_operation_type",
+                field_value=data["ml_operation_type"],
+                expected_type=f"one of {valid_operations}",
+            )
+        
+        # Validate ML-specific financial fields if present
+        ml_financial_fields = ["prediction_value", "confidence_threshold", "model_score"]
+        for field in ml_financial_fields:
+            if field in data and data[field] is not None:
+                try:
+                    value = float(data[field])
+                    if field in ["confidence_threshold"] and not (0 <= value <= 1):
+                        raise ValidationError(
+                            f"ML confidence threshold must be 0-1: {value}",
+                            field_name=field,
+                            field_value=value,
+                            expected_type="float between 0 and 1",
+                        )
+                except (ValueError, TypeError):
+                    raise ValidationError(
+                        f"ML field {field} must be numeric",
+                        field_name=field,
+                        field_value=data[field],
+                        expected_type="numeric",
+                    )
 
     @staticmethod
     def validate_monitoring_to_state_boundary(data: dict[str, Any]) -> None:

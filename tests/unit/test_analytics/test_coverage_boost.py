@@ -317,7 +317,7 @@ class TestServiceMethods:
         service = AnalyticsService()
         
         # Test record_strategy_event
-        service.record_strategy_event('signal_generated', {'strategy': 'test'}, success=True)
+        service.record_strategy_event('test_strategy', 'signal_generated', success=True)
         
         # Test record_market_data_event
         service.record_market_data_event('BTC/USDT', {'price': Decimal('50000')}, event_type='price_update', latency_ms=10.5, success=True)

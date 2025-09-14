@@ -57,6 +57,9 @@ class DataFlowConsistencyValidator:
             # 6. Financial data type consistency
             results["checks"]["financial_types"] = self._validate_financial_types()
 
+            # 7. ML-utils error propagation consistency
+            results["checks"]["ml_error_propagation"] = self._validate_ml_error_propagation()
+
             # Calculate overall status
             all_passed = all(check["status"] == "passed" for check in results["checks"].values())
             results["validation_status"] = "passed" if all_passed else "failed"
@@ -335,6 +338,66 @@ class DataFlowConsistencyValidator:
                 "status": "error",
                 "error": str(e),
                 "details": "Financial type validation failed",
+            }
+
+    def _validate_ml_error_propagation(self) -> dict[str, Any]:
+        """Validate ML-specific error propagation consistency."""
+        try:
+            checks = []
+
+            # Test ML error propagation mixin
+            try:
+                from src.ml.data_transformer import MLErrorPropagationMixin
+
+                handler = MLErrorPropagationMixin()
+
+                # Test ML validation error propagation
+                try:
+                    handler.propagate_ml_validation_error(ValueError("test"), "test_context")
+                except Exception:
+                    # Should raise an exception
+                    checks.append(("ml_validation_error_propagation", True))
+                else:
+                    checks.append(("ml_validation_error_propagation", False))
+
+            except Exception:
+                checks.append(("ml_validation_error_propagation", False))
+
+            # Test ML model error propagation
+            try:
+                handler = MLErrorPropagationMixin()
+                try:
+                    handler.propagate_ml_model_error(RuntimeError("test"), "test_context")
+                except Exception:
+                    checks.append(("ml_model_error_propagation", True))
+                else:
+                    checks.append(("ml_model_error_propagation", False))
+            except Exception:
+                checks.append(("ml_model_error_propagation", False))
+
+            # Test ML boundary validation
+            try:
+                from src.ml.data_transformer import MLDataTransformer
+
+                test_data = {"processing_mode": "stream", "data_format": "bot_event_v1", "ml_operation_type": "prediction"}
+                MLDataTransformer.validate_ml_to_utils_boundary(test_data)
+                checks.append(("ml_boundary_validation", True))
+            except Exception:
+                checks.append(("ml_boundary_validation", False))
+
+            passed = all(check[1] for check in checks)
+
+            return {
+                "status": "passed" if passed else "failed",
+                "checks": dict(checks),
+                "details": "ML error propagation consistency validated",
+            }
+
+        except Exception as e:
+            return {
+                "status": "error",
+                "error": str(e),
+                "details": "ML error propagation validation failed",
             }
 
 

@@ -157,6 +157,10 @@ class ExportServiceProtocol(Protocol):
         """Export risk data."""
         ...
 
+    async def export_metrics(self, format: str = "json") -> dict[str, Any]:
+        """Export all metrics in specified format."""
+        ...
+
 
 class OperationalServiceProtocol(Protocol):
     """Protocol for operational analytics service."""
@@ -172,7 +176,7 @@ class OperationalServiceProtocol(Protocol):
         ...
 
     def record_system_error(
-        self, component: str, error_type: str, error_message: str, **kwargs
+        self, component: str, error_type: str, error_message: str, severity: str = "ERROR", **kwargs
     ) -> None:
         """Record system error."""
         ...

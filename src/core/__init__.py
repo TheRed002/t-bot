@@ -11,6 +11,7 @@ from .base.health import HealthCheckResult
 from .base.interfaces import ServiceComponent
 from .caching import CacheKeys, CacheManager, cache_invalidate, cached, get_cache_manager
 from .config import Config, DatabaseConfig
+from .data_transformer import CoreDataTransformer
 from .config.service import ConfigService
 from .dependency_injection import get_container
 from .event_constants import (
@@ -107,6 +108,7 @@ __all__ = [
     "AlertEvents",
     "AuthenticationError",
     "BaseComponent",
+    "CoreDataTransformer",
     "BaseService",
     "BotConfiguration",
     "BotPriority",

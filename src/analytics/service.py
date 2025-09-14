@@ -43,7 +43,7 @@ class AnalyticsService(BaseAnalyticsService):
 
     def __init__(
         self,
-        config: AnalyticsConfiguration | None = None,
+        config: AnalyticsConfiguration | dict | None = None,
         realtime_analytics: RealtimeAnalyticsServiceProtocol | None = None,
         portfolio_service: PortfolioServiceProtocol | None = None,
         reporting_service: ReportingServiceProtocol | None = None,
@@ -51,6 +51,7 @@ class AnalyticsService(BaseAnalyticsService):
         operational_service: OperationalServiceProtocol | None = None,
         alert_service: AlertServiceProtocol | None = None,
         export_service: ExportServiceProtocol | None = None,
+        dashboard_service=None,
         metrics_collector=None,
     ):
         """Initialize analytics service with injected dependencies."""
@@ -70,6 +71,7 @@ class AnalyticsService(BaseAnalyticsService):
         self.operational_service = operational_service
         self.alert_service = alert_service
         self.export_service = export_service
+        self.dashboard_service = dashboard_service
 
         # Caching properties for tests
         self._cache_enabled = True
@@ -324,7 +326,7 @@ class AnalyticsService(BaseAnalyticsService):
             if self.export_service:
                 return await self.export_service.export_metrics(format)
 
-            # Return empty export structure when no service is available
+            # Fallback: delegate to export service if available, otherwise return basic metrics
             current_time = get_current_utc_timestamp()
             return {
                 "timestamp": current_time,
@@ -333,7 +335,7 @@ class AnalyticsService(BaseAnalyticsService):
                 "operational_metrics": await self.get_operational_metrics(),
                 "position_metrics": await self.get_position_metrics(),
                 "strategy_metrics": await self.get_strategy_metrics(),
-                "active_alerts": [],
+                "format": format,
             }
         except Exception as e:
             self.logger.error(f"Error exporting metrics: {e}")
@@ -511,57 +513,33 @@ class AnalyticsService(BaseAnalyticsService):
             self.logger.error(f"Error recording API call: {e}")
 
     async def generate_comprehensive_analytics_dashboard(self) -> dict[str, Any]:
-        """Generate comprehensive analytics dashboard."""
+        """Generate comprehensive analytics dashboard by delegating to dashboard service."""
         try:
-            current_time = get_current_utc_timestamp()
+            if self.dashboard_service:
+                # Delegate to dashboard service which contains the business logic
+                portfolio_metrics = await self.get_portfolio_metrics()
+                risk_metrics = await self.get_risk_metrics()
+                operational_metrics = await self.get_operational_metrics()
+                position_metrics = await self.get_position_metrics()
+                strategy_metrics = await self.get_strategy_metrics()
+                active_alerts = self.get_active_alerts()
 
-            # Gather all analytics data
-            portfolio_metrics = await self.get_portfolio_metrics()
-            risk_metrics = await self.get_risk_metrics()
-            operational_metrics = await self.get_operational_metrics()
-            position_metrics = await self.get_position_metrics()
-            strategy_metrics = await self.get_strategy_metrics()
-            active_alerts = self.get_active_alerts()
-
-            # Generate comprehensive dashboard
-            dashboard = {
-                "timestamp": current_time,
-                "status": "healthy" if len(active_alerts) == 0 else "warning",
-                "system_health": {
-                    "uptime": operational_metrics.system_uptime,
-                    "cpu_usage": operational_metrics.cpu_usage_percent,
-                    "memory_usage": operational_metrics.memory_usage_percent,
-                    "error_rate": operational_metrics.error_rate,
-                },
-                "realtime_analytics": {
-                    "portfolio_value": portfolio_metrics.total_value if portfolio_metrics else Decimal("0"),
-                    "daily_pnl": portfolio_metrics.total_pnl if portfolio_metrics else Decimal("0"),
-                    "position_count": len(position_metrics),
-                    "strategy_count": len(strategy_metrics),
-                },
-                "portfolio_analytics": {
-                    "total_value": portfolio_metrics.total_value if portfolio_metrics else Decimal("0"),
-                    "unrealized_pnl": portfolio_metrics.unrealized_pnl if portfolio_metrics else Decimal("0"),
-                    "realized_pnl": portfolio_metrics.realized_pnl if portfolio_metrics else Decimal("0"),
-                    "cash": portfolio_metrics.cash if portfolio_metrics else Decimal("0"),
-                },
-                "risk_analytics": {
-                    "var_95": risk_metrics.var_95 if hasattr(risk_metrics, "var_95") else Decimal("0"),
-                    "max_drawdown": risk_metrics.max_drawdown if hasattr(risk_metrics, "max_drawdown") else Decimal("0"),
-                },
-                "operational_analytics": {
-                    "orders_today": operational_metrics.orders_placed_today,
-                    "fill_rate": operational_metrics.order_fill_rate,
-                    "api_success_rate": operational_metrics.api_call_success_rate,
-                    "active_strategies": operational_metrics.strategies_active,
-                },
-                "alerts_summary": {
-                    "active_count": len(active_alerts),
-                    "alerts": active_alerts[:5]  # Show first 5 alerts
+                return await self.dashboard_service.generate_comprehensive_dashboard(
+                    portfolio_metrics=portfolio_metrics,
+                    risk_metrics=risk_metrics,
+                    operational_metrics=operational_metrics,
+                    position_metrics=position_metrics,
+                    strategy_metrics=strategy_metrics,
+                    active_alerts=active_alerts,
+                )
+            else:
+                # Fallback to basic dashboard when no dashboard service is available
+                current_time = get_current_utc_timestamp()
+                return {
+                    "timestamp": current_time,
+                    "status": "unknown",
+                    "message": "Dashboard service not available",
                 }
-            }
-
-            return dashboard
 
         except Exception as e:
             self.logger.error(f"Error generating comprehensive analytics dashboard: {e}")

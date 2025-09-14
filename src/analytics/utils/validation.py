@@ -6,7 +6,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
-from src.core.base import BaseComponent
+from src.core.base.component import BaseComponent
 from src.core.exceptions import ValidationError
 
 
@@ -290,3 +290,123 @@ class ValidationHelper(BaseComponent):
 
         multipliers = {"s": 1, "m": 60, "h": 3600, "d": 86400}
         return value * multipliers[unit]
+
+    def validate_analytics_boundary(self, data: dict[str, Any], target_module: str) -> None:
+        """Validate data at analytics module boundary with core consistency patterns.
+        
+        Args:
+            data: Data crossing module boundary
+            target_module: Target module name
+            
+        Raises:
+            ValidationError: If boundary validation fails
+        """
+        if not isinstance(data, dict):
+            raise ValidationError(
+                "Analytics boundary data must be a dictionary",
+                field_name="boundary_data",
+                field_value=type(data).__name__,
+                expected_type="dict",
+            )
+
+        # Required fields for analytics module boundaries
+        required_fields = ["processing_mode", "data_format", "message_pattern", "source"]
+        for field in required_fields:
+            if field not in data:
+                raise ValidationError(
+                    f"Missing required boundary field '{field}' in analytics data",
+                    field_name=field,
+                    field_value=None,
+                    expected_type="string",
+                )
+
+        # Validate processing mode consistency
+        valid_modes = ["stream", "batch", "request_reply"]
+        if data["processing_mode"] not in valid_modes:
+            raise ValidationError(
+                f"Invalid processing_mode for analytics boundary: {data['processing_mode']}",
+                field_name="processing_mode",
+                field_value=data["processing_mode"],
+                expected_type=f"one of {valid_modes}",
+            )
+
+        # Validate message pattern alignment
+        valid_patterns = ["pub_sub", "req_reply", "batch", "stream"]
+        if data["message_pattern"] not in valid_patterns:
+            raise ValidationError(
+                f"Invalid message_pattern for analytics boundary: {data['message_pattern']}",
+                field_name="message_pattern",
+                field_value=data["message_pattern"],
+                expected_type=f"one of {valid_patterns}",
+            )
+
+        # Validate data format consistency
+        if not data["data_format"].startswith("analytics_") or not data["data_format"].endswith("_v1"):
+            raise ValidationError(
+                f"Invalid analytics data_format: {data['data_format']}. Must start with 'analytics_' and end with '_v1'",
+                field_name="data_format",
+                field_value=data["data_format"],
+                expected_type="analytics_*_v1",
+            )
+
+        # Apply financial field validation if present
+        financial_fields = ["price", "quantity", "volume", "value", "amount"]
+        for field in financial_fields:
+            if field in data and data[field] is not None:
+                try:
+                    from decimal import Decimal
+                    value = Decimal(str(data[field]))
+                    if value < 0:
+                        raise ValidationError(
+                            f"Financial field {field} cannot be negative at analytics boundary",
+                            field_name=field,
+                            field_value=value,
+                            validation_rule="must be non-negative",
+                        )
+                except (ValueError, TypeError):
+                    raise ValidationError(
+                        f"Financial field {field} must be numeric at analytics boundary",
+                        field_name=field,
+                        field_value=data[field],
+                        expected_type="numeric",
+                    )
+
+    def validate_cross_module_data(self, data: dict[str, Any], source_module: str, target_module: str) -> None:
+        """Validate data for cross-module consistency aligned with core patterns.
+        
+        Args:
+            data: Data to validate
+            source_module: Source module name
+            target_module: Target module name
+            
+        Raises:
+            ValidationError: If cross-module validation fails
+        """
+        # Use existing boundary validation utilities for consistency
+        try:
+            from src.utils.messaging_patterns import BoundaryValidator
+
+            if source_module == "analytics" and target_module == "core":
+                # Validate analytics -> core boundary using consistent patterns
+                boundary_data = {
+                    "component": "analytics",
+                    "operation": data.get("operation", "analytics_operation"),
+                    "timestamp": data.get("timestamp", datetime.now().isoformat()),
+                    "processing_mode": data.get("processing_mode", "stream"),
+                    "data_format": data.get("data_format", "analytics_data_v1"),
+                    "message_pattern": data.get("message_pattern", "pub_sub"),
+                    "boundary_crossed": True,
+                }
+                BoundaryValidator.validate_error_to_monitoring_boundary(boundary_data)
+
+            elif source_module == "core" and target_module == "analytics":
+                # Validate core -> analytics boundary
+                self.validate_analytics_boundary(data, target_module)
+
+        except Exception as e:
+            raise ValidationError(
+                f"Cross-module validation failed for {source_module} -> {target_module}: {e}",
+                field_name="cross_module_data",
+                field_value=str(data),
+                expected_type="valid cross-module data",
+            ) from e

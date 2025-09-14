@@ -39,6 +39,34 @@ if TYPE_CHECKING:
 T = TypeVar("T")
 
 
+class CacheOptimizedList:
+    """Cache-optimized list implementation."""
+    
+    def __init__(self):
+        """Initialize cache-optimized list."""
+        self._data: list = []
+    
+    def clear(self):
+        """Clear the list."""
+        self._data.clear()
+    
+    def append(self, item):
+        """Append item to list."""
+        self._data.append(item)
+    
+    def __len__(self):
+        """Get length of list."""
+        return len(self._data)
+    
+    def __getitem__(self, key):
+        """Get item by index."""
+        return self._data[key]
+    
+    def __setitem__(self, key, value):
+        """Set item by index."""
+        self._data[key] = value
+
+
 class DependencyInjectionMixin:
     """Simple mixin for dependency injection to avoid circular imports."""
 
@@ -316,51 +344,6 @@ class MemoryLeakDetector:
             "current_usage_mb": round(latest["total_mb"], 2),
         }
 
-
-class CacheOptimizedList:
-    """Cache-friendly list implementation for better performance."""
-
-    def __init__(self, initial_capacity: int = 1000, growth_factor: float = 1.5):
-        self.data = [None] * initial_capacity
-        self.size = 0
-        self.capacity = initial_capacity
-        self.growth_factor = growth_factor
-
-    def append(self, item):
-        """Add item to list."""
-        if self.size >= self.capacity:
-            self._grow()
-
-        self.data[self.size] = item
-        self.size += 1
-
-    def _grow(self):
-        """Grow internal storage."""
-        new_capacity = int(self.capacity * self.growth_factor)
-        new_data = [None] * new_capacity
-
-        # Copy existing data
-        for i in range(self.size):
-            new_data[i] = self.data[i]
-
-        self.data = new_data
-        self.capacity = new_capacity
-
-    def get(self, index: int):
-        """Get item at index."""
-        if 0 <= index < self.size:
-            return self.data[index]
-        raise IndexError("Index out of range")
-
-    def clear(self):
-        """Clear all items."""
-        # Set to None to help GC
-        for i in range(self.size):
-            self.data[i] = None
-        self.size = 0
-
-    def __len__(self):
-        return self.size
 
 
 class MemoryMappedCache:

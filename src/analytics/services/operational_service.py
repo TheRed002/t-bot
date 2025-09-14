@@ -44,12 +44,12 @@ class OperationalService(BaseAnalyticsService, OperationalServiceProtocol):
         )
 
     def record_system_error(
-        self, component: str, error_type: str, error_message: str, **kwargs
+        self, component: str, error_type: str, error_message: str, severity: str = "ERROR", **kwargs
     ) -> None:
         """Record system error."""
         self.logger.error(
-            f"System error recorded: {component} - {error_type}: {error_message}",
-            extra={"component": component, "error_type": error_type, "error_message": error_message, **kwargs}
+            f"System error recorded: {component} - {error_type}: {error_message} (severity: {severity})",
+            extra={"component": component, "error_type": error_type, "error_message": error_message, "severity": severity, **kwargs}
         )
 
     # Required abstract method implementations

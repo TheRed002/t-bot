@@ -22,7 +22,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from src.core import BaseComponent
 from src.core.config import Config
 from src.core.types import MarketData
-from src.data.pipeline.data_pipeline import EnhancedDataPipeline as DataPipeline
+from src.data.pipeline.data_pipeline import DataPipeline
 from src.data.validation.data_validator import DataValidator, MarketDataValidationResult
 from src.utils.decorators import time_execution
 from src.utils.pipeline_utilities import (

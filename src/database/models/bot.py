@@ -90,6 +90,9 @@ class Bot(Base, AuditMixin, MetadataMixin, SoftDeleteMixin):
 
     # Capital management relationships
     fund_flows = relationship("FundFlowDB", back_populates="bot", cascade="all, delete-orphan")
+    
+    # State management relationships
+    state_snapshots = relationship("StateSnapshot", back_populates="bot")
 
     # Indexes and constraints
     __table_args__ = (
@@ -185,6 +188,9 @@ class Strategy(Base, AuditMixin, MetadataMixin):
     backtest_runs = relationship(
         "BacktestRun", back_populates="strategy", cascade="all, delete-orphan"
     )
+    
+    # State management relationships
+    state_snapshots = relationship("StateSnapshot", back_populates="strategy")
 
     # Indexes and constraints
     __table_args__ = (

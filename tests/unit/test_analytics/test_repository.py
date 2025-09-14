@@ -54,8 +54,7 @@ def repository(mock_session):
     """Create repository instance with mocked dependencies."""
     from unittest.mock import Mock
     
-    mock_transformation_service = Mock()
-    repo = AnalyticsRepository(session=mock_session, transformation_service=mock_transformation_service)
+    repo = AnalyticsRepository(session=mock_session)
     
     # Mock the individual repository methods to match the test expectations
     repo.portfolio_repo = Mock()
@@ -84,7 +83,6 @@ def sample_portfolio_metrics():
         total_pnl=Decimal("7000.75"),
         daily_return=Decimal("0.0125"),
         leverage=Decimal("1.5"),
-        margin_used=Decimal("50000.00"),
         positions_count=5,
     )
 
@@ -151,10 +149,7 @@ class TestAnalyticsRepositoryInitialization:
 
     def test_initialization_with_session(self, mock_session):
         """Test repository initialization with async session."""
-        from unittest.mock import Mock
-        
-        mock_transformation_service = Mock()
-        repo = AnalyticsRepository(session=mock_session, transformation_service=mock_transformation_service)
+        repo = AnalyticsRepository(session=mock_session)
 
         assert repo.session is mock_session
         assert hasattr(repo, "logger")
@@ -272,15 +267,12 @@ class TestPortfolioMetricsOperations:
         result = await repository.get_historical_portfolio_metrics(start_date, end_date)
 
         assert len(result) == 1
-        # Validate that transformation service was called with correct data types
-        repository.transformation_service.transform_db_to_portfolio_metrics.assert_called()
-        call_args = repository.transformation_service.transform_db_to_portfolio_metrics.call_args[0][0]
-        
-        # Validate the input data structure (what we passed to the transformation service)
-        assert hasattr(call_args, 'timestamp')
-        assert hasattr(call_args, 'total_value') 
-        assert hasattr(call_args, 'cash_balance')
-        assert hasattr(call_args, 'unrealized_pnl')
+        # Validate the transformation was successful and data integrity maintained
+        portfolio_metric = result[0]
+        assert hasattr(portfolio_metric, 'timestamp')
+        assert hasattr(portfolio_metric, 'total_value')
+        assert hasattr(portfolio_metric, 'cash')
+        assert hasattr(portfolio_metric, 'unrealized_pnl')
         
         # Verify session.execute was called
         repository.session.execute.assert_called_once()
@@ -361,13 +353,11 @@ class TestPortfolioMetricsOperations:
         result = await repository.get_historical_portfolio_metrics(start_date, end_date)
 
         assert len(result) == 1
-        # Validate that transformation service was called with null cash_balance
-        repository.transformation_service.transform_db_to_portfolio_metrics.assert_called()
-        call_args = repository.transformation_service.transform_db_to_portfolio_metrics.call_args[0][0]
-        
-        # Validate the input data structure (what we passed to the transformation service)
-        assert call_args.cash_balance is None  # Input should be None
-        assert call_args.total_value == Decimal("100000.00")
+        # Validate that null cash_balance was handled correctly (transformed to 0)
+        portfolio_metrics = result[0]
+        assert portfolio_metrics.cash == Decimal("0")  # None was converted to 0
+        assert portfolio_metrics.total_value == Decimal("100000.00")
+        assert portfolio_metrics.invested_capital == Decimal("100000.00")  # total_value - cash (0)
 
     @pytest.mark.asyncio
     async def test_get_latest_portfolio_metrics_success(self, repository, mock_uow):
@@ -391,13 +381,9 @@ class TestPortfolioMetricsOperations:
         result = await repository.get_latest_portfolio_metrics()
 
         assert result is not None
-        # Validate that transformation service was called with correct data types
-        repository.transformation_service.transform_db_to_portfolio_metrics.assert_called()
-        call_args = repository.transformation_service.transform_db_to_portfolio_metrics.call_args[0][0]
-        
-        # Validate the input data structure (what we passed to the transformation service)
-        assert call_args.total_value == Decimal("100000.00")
-        assert call_args.cash_balance == Decimal("25000.00")
+        # Validate that transformation was successful and data integrity maintained  
+        assert result.total_value == Decimal("100000.00")
+        assert result.cash == Decimal("25000.00")
         
         # Verify session.execute was called
         repository.session.execute.assert_called_once()
@@ -439,8 +425,8 @@ class TestPositionMetricsOperations:
         # Verify database operations
         assert repository.position_repo.create.call_count == 2  # Two positions
         
-        # Verify transformation service was called
-        repository.transformation_service.transform_position_metrics_to_db.assert_called()
+        # Verify database operations were called
+        repository.position_repo.create.assert_called()
         
         # Verify that the input data has the correct structure (from sample_position_metrics)
         assert len(sample_position_metrics) == 2
@@ -499,8 +485,8 @@ class TestPositionMetricsOperations:
         # Verify the position_repo was called with the correct data
         repository.position_repo.create.assert_called_once()
         
-        # Verify transformation service was called
-        repository.transformation_service.transform_position_metrics_to_db.assert_called()
+        # Verify database operations were called
+        repository.position_repo.create.assert_called()
 
         # Verify decimal precision is preserved in the input data
         assert isinstance(position_metrics[0].quantity, Decimal)
@@ -554,7 +540,7 @@ class TestRiskMetricsOperations:
         repository.risk_repo.create.assert_called_once()
 
         # Verify transformation service was called
-        repository.transformation_service.transform_risk_metrics_to_db.assert_called()
+        repository.risk_repo.create.assert_called()
 
         # Verify input data structure
         assert sample_risk_metrics.portfolio_var_95 == Decimal("5000.00")
@@ -596,7 +582,7 @@ class TestRiskMetricsOperations:
         repository.risk_repo.create.assert_called_once()
         
         # Verify transformation service was called
-        repository.transformation_service.transform_risk_metrics_to_db.assert_called()
+        repository.risk_repo.create.assert_called()
         
         # Verify decimal precision is preserved in the input data
         assert isinstance(risk_metrics.portfolio_var_95, Decimal)
@@ -628,15 +614,11 @@ class TestRiskMetricsOperations:
         result = await repository.get_latest_risk_metrics()
 
         assert result is not None
-        # Verify transformation service was called with correct data types
-        repository.transformation_service.transform_db_to_risk_metrics.assert_called()
-        call_args = repository.transformation_service.transform_db_to_risk_metrics.call_args[0][0]
-        
-        # Validate the input data structure (what we passed to the transformation service)
-        assert call_args.portfolio_var_95 == Decimal("5000.00")
-        assert call_args.portfolio_var_99 == Decimal("8000.00")
-        assert call_args.maximum_drawdown == Decimal("0.15")
-        assert call_args.volatility == Decimal("0.25")
+        # Verify transformation was successful and data integrity maintained
+        assert result.portfolio_var_95 == Decimal("5000.00")
+        assert result.portfolio_var_99 == Decimal("8000.00")
+        assert result.max_drawdown == Decimal("0.15")
+        assert result.volatility == Decimal("0.25")
 
         # Verify session.execute was called
         repository.session.execute.assert_called_once()
@@ -731,9 +713,6 @@ class TestErrorHandlingAndEdgeCases:
 
         # Verify the portfolio repo was called
         repository.portfolio_repo.create.assert_called_once()
-        
-        # Verify transformation service was called
-        repository.transformation_service.transform_portfolio_metrics_to_db.assert_called()
         
         # Verify edge case values are handled correctly in the input data
         assert metrics.total_value == Decimal("0.00")

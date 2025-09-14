@@ -144,15 +144,31 @@ class EventPublisher:
 
             # Execute handlers based on processing mode with consistent message patterns
             if handlers:
-                # Add message pattern metadata for consistency with state module
+                # Apply consistent data transformation aligned with execution module patterns
+                from src.core.data_transformer import CoreDataTransformer
+                
+                # Transform event data using consistent patterns
                 if transformed_event.data is None:
                     transformed_event.data = {}
-
-                transformed_event.data.update({
-                    "message_pattern": "pub_sub",  # Consistent with state module
-                    "boundary_crossed": True,  # Cross-module event
-                    "data_format": "bot_event_v1"  # Consistent versioning
-                })
+                    
+                # Apply cross-module consistency for data flow alignment
+                event_data = CoreDataTransformer.apply_cross_module_consistency(
+                    data={
+                        "event_type": transformed_event.event_type.value,
+                        "bot_id": transformed_event.bot_id,
+                        "data": transformed_event.data,
+                        "processing_mode": "stream",  # Default for real-time events
+                        "data_format": "bot_event_v1",
+                        "message_pattern": "pub_sub",
+                        "timestamp": transformed_event.timestamp.isoformat() if transformed_event.timestamp else datetime.now(timezone.utc).isoformat(),
+                        "source": "core",
+                    },
+                    target_module="execution",  # Default target for consistency
+                    source_module="core"
+                )
+                
+                # Update event data with consistent transformation
+                transformed_event.data.update(event_data)
 
                 if processing_mode == "batch":
                     # Process in batches for better throughput
@@ -243,16 +259,27 @@ class EventPublisher:
         # Apply consistent batch processing matching state module patterns
         batch_size = 10  # Process handlers in small batches
 
-        # Apply batch metadata for consistency with state module processing
+        # Apply batch metadata for consistency with execution and state modules
+        from src.core.data_transformer import CoreDataTransformer
+        
         if event.data is None:
             event.data = {}
 
-        event.data.update({
+        # Align processing paradigm for batch mode consistency
+        batch_data = CoreDataTransformer.align_processing_paradigm(
+            data=event.data,
+            target_mode="batch"
+        )
+        
+        batch_data.update({
             "batch_processing": True,
             "batch_size": min(batch_size, len(handlers)),
             "total_handlers": len(handlers),
-            "processing_paradigm": "batch"
+            "processing_paradigm": "batch",
+            "handler_processing_mode": "batch"
         })
+        
+        event.data.update(batch_data)
 
         for i in range(0, len(handlers), batch_size):
             batch = handlers[i:i + batch_size]
@@ -274,15 +301,26 @@ class EventPublisher:
     async def _process_handlers_stream(self, handlers: list[EventHandler], event: BotEvent) -> None:
         """Process handlers in stream mode for real-time requirements aligned with state processing paradigms."""
         # Apply consistent stream processing matching state module patterns
+        from src.core.data_transformer import CoreDataTransformer
+        
         if event.data is None:
             event.data = {}
 
-        event.data.update({
+        # Align processing paradigm for stream mode consistency
+        stream_data = CoreDataTransformer.align_processing_paradigm(
+            data=event.data,
+            target_mode="stream"
+        )
+        
+        stream_data.update({
             "stream_processing": True,
             "stream_id": event.event_id,
             "handler_count": len(handlers),
-            "processing_paradigm": "stream"
+            "processing_paradigm": "stream",
+            "handler_processing_mode": "stream"
         })
+        
+        event.data.update(stream_data)
 
         # Add stream context to handlers that support it
         for handler in handlers:
@@ -364,12 +402,26 @@ class AnalyticsEventHandler(EventHandler):
         """Handle events for analytics recording with consistent data validation."""
         if not self.analytics_service:
             return
-
+            
         try:
-            # Validate event data at boundary
-            processing_mode = "stream"  # Use stream for consistency with core patterns
-            if event.data and isinstance(event.data, dict):
-                processing_mode = event.data.get("processing_mode", "stream")
+            # Apply consistent data transformation for analytics module boundary
+            from src.core.data_transformer import CoreDataTransformer
+            
+            # Transform event data for analytics module consistency
+            analytics_data = CoreDataTransformer.apply_cross_module_consistency(
+                data={
+                    "event_type": event.event_type.value,
+                    "bot_id": event.bot_id,
+                    "data": event.data or {},
+                    "processing_mode": "stream",  # Analytics prefers stream for real-time
+                    "data_format": "analytics_event_v1",
+                    "message_pattern": "pub_sub",
+                    "timestamp": event.timestamp.isoformat() if event.timestamp else datetime.now(timezone.utc).isoformat(),
+                    "source": "core",
+                },
+                target_module="analytics",
+                source_module="core"
+            )
 
             # Record different types of events in analytics with consistent patterns
             if event.event_type in [
@@ -378,26 +430,22 @@ class AnalyticsEventHandler(EventHandler):
                 BotEventType.BOT_STOPPED
             ]:
                 if hasattr(self.analytics_service, "record_strategy_event"):
-                    # Use existing record_strategy_event method for bot lifecycle events
-                    event_data = event.data or {}
-                    event_data.update({
-                        "processing_mode": processing_mode,
-                        "data_format": "bot_lifecycle_event_v1"
-                    })
+                    # Use consistent data format for bot lifecycle events
+                    lifecycle_data = analytics_data.copy()
+                    lifecycle_data["data_format"] = "bot_lifecycle_event_v1"
+                    
                     self.analytics_service.record_strategy_event(
+                        strategy_name=str(event.bot_id),
                         event_type=event.event_type.value,
-                        bot_id=event.bot_id,
-                        data=event_data
+                        success=True
                     )
 
             elif event.event_type == BotEventType.BOT_METRICS_UPDATE:
                 if hasattr(self.analytics_service, "record_market_data_event"):
-                    # Use record_market_data_event for metrics data
-                    metrics_data = event.data or {}
-                    metrics_data.update({
-                        "processing_mode": processing_mode,
-                        "data_format": "bot_metrics_v1"
-                    })
+                    # Use consistent data format for metrics data
+                    metrics_data = analytics_data.copy()
+                    metrics_data["data_format"] = "bot_metrics_v1"
+                    
                     self.analytics_service.record_market_data_event(
                         data_type="bot_metrics",
                         data=metrics_data
@@ -408,29 +456,40 @@ class AnalyticsEventHandler(EventHandler):
                 BotEventType.BOT_RISK_LIMIT_EXCEEDED
             ]:
                 if hasattr(self.analytics_service, "record_system_error"):
-                    # Use record_system_error for risk events
-                    risk_data = event.data or {}
-                    risk_data.update({
-                        "processing_mode": processing_mode,
-                        "data_format": "risk_event_v1"
-                    })
+                    # Use consistent data format for risk events
+                    risk_data = analytics_data.copy()
+                    risk_data["data_format"] = "risk_event_v1"
+                    
                     self.analytics_service.record_system_error(
-                        error_type=event.event_type.value,
                         component="risk_management",
-                        details=risk_data
+                        error_type=event.event_type.value,
+                        error_message=str(risk_data),
+                        severity="WARNING"
                     )
 
         except Exception as e:
             self.logger.warning(f"Failed to record analytics event: {e}")
-            # Apply consistent error propagation
+            # Apply consistent error propagation aligned with execution module
             from src.core.exceptions import ValidationError
             if not isinstance(e, ValidationError):
-                # Only log generic errors, validation errors should be re-raised
-                self.logger.error(
-                    f"Analytics handler error for {event.event_type.value}: {e!s}",
-                    event_id=event.event_id,
-                    bot_id=event.bot_id
-                )
+                # Apply consistent error propagation patterns
+                try:
+                    from src.core.data_transformer import CoreDataTransformer
+                    error_data = CoreDataTransformer.transform_for_pub_sub_pattern(
+                        event_type="analytics_handler_error",
+                        data={"error": str(e), "original_event_type": event.event_type.value}
+                    )
+                    self.logger.error(
+                        f"Analytics handler error for {event.event_type.value}: {e!s}",
+                        extra=error_data
+                    )
+                except Exception:
+                    # Fallback to simple logging if transformation fails
+                    self.logger.error(
+                        f"Analytics handler error for {event.event_type.value}: {e!s}",
+                        event_id=event.event_id,
+                        bot_id=event.bot_id
+                    )
 
 
 class RiskMonitoringEventHandler(EventHandler):
@@ -446,10 +505,24 @@ class RiskMonitoringEventHandler(EventHandler):
             return
 
         try:
-            # Validate event data at boundary for risk monitoring
-            processing_mode = "stream"  # Risk monitoring typically needs real-time processing
-            if event.data and isinstance(event.data, dict):
-                processing_mode = event.data.get("processing_mode", "stream")
+            # Apply consistent data transformation for risk monitoring module boundary
+            from src.core.data_transformer import CoreDataTransformer
+            
+            # Transform event data for risk management module consistency
+            risk_data = CoreDataTransformer.apply_cross_module_consistency(
+                data={
+                    "event_type": event.event_type.value,
+                    "bot_id": event.bot_id,
+                    "data": event.data or {},
+                    "processing_mode": "stream",  # Risk monitoring needs real-time processing
+                    "data_format": "risk_monitoring_event_v1",
+                    "message_pattern": "pub_sub",
+                    "timestamp": event.timestamp.isoformat() if event.timestamp else datetime.now(timezone.utc).isoformat(),
+                    "source": "core",
+                },
+                target_module="risk_management",
+                source_module="core"
+            )
 
             # Monitor risk-related events with consistent data patterns
             if event.event_type == BotEventType.BOT_STARTED:
@@ -460,12 +533,10 @@ class RiskMonitoringEventHandler(EventHandler):
             elif event.event_type == BotEventType.BOT_TRADE_EXECUTED:
                 # Check risk after each trade
                 if hasattr(self.risk_service, "post_trade_risk_check"):
-                    # Ensure trade data has consistent format
-                    trade_data = event.data or {}
-                    trade_data.update({
-                        "processing_mode": processing_mode,
-                        "data_format": "trade_data_v1"
-                    })
+                    # Use consistent data format for trade data
+                    trade_data = risk_data.copy()
+                    trade_data["data_format"] = "trade_data_v1"
+                    
                     await self.risk_service.post_trade_risk_check(
                         bot_id=event.bot_id,
                         trade_data=trade_data
@@ -474,13 +545,14 @@ class RiskMonitoringEventHandler(EventHandler):
             elif event.event_type == BotEventType.BOT_RISK_ALERT:
                 # Handle risk alerts
                 if hasattr(self.risk_service, "handle_risk_alert"):
-                    # Ensure alert data has consistent format
-                    alert_data = event.data or {}
+                    # Use consistent data format for alert data
+                    alert_data = risk_data.copy()
                     alert_data.update({
-                        "processing_mode": processing_mode,
                         "data_format": "risk_alert_v1",
-                        "priority": "high"  # Risk alerts are high priority
+                        "priority": "high",  # Risk alerts are high priority
+                        "severity": "critical"  # Align with execution module patterns
                     })
+                    
                     await self.risk_service.handle_risk_alert(
                         bot_id=event.bot_id,
                         alert_data=alert_data
@@ -488,15 +560,27 @@ class RiskMonitoringEventHandler(EventHandler):
 
         except Exception as e:
             self.logger.warning(f"Risk monitoring event handling failed: {e}")
-            # Apply consistent error propagation
+            # Apply consistent error propagation aligned with execution module
             from src.core.exceptions import ValidationError
             if not isinstance(e, ValidationError):
-                # Only log generic errors, validation errors should be re-raised
-                self.logger.error(
-                    f"Risk handler error for {event.event_type.value}: {e!s}",
-                    event_id=event.event_id,
-                    bot_id=event.bot_id
-                )
+                # Apply consistent error propagation patterns
+                try:
+                    from src.core.data_transformer import CoreDataTransformer
+                    error_data = CoreDataTransformer.transform_for_pub_sub_pattern(
+                        event_type="risk_monitoring_handler_error",
+                        data={"error": str(e), "original_event_type": event.event_type.value}
+                    )
+                    self.logger.error(
+                        f"Risk monitoring handler error for {event.event_type.value}: {e!s}",
+                        extra=error_data
+                    )
+                except Exception:
+                    # Fallback to simple logging if transformation fails
+                    self.logger.error(
+                        f"Risk monitoring handler error for {event.event_type.value}: {e!s}",
+                        event_id=event.event_id,
+                        bot_id=event.bot_id
+                    )
 
 
 # Global event publisher instance

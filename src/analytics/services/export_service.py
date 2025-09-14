@@ -84,6 +84,22 @@ class ExportService(BaseAnalyticsService, ExportServiceProtocol):
             self.logger.error(f"Error exporting risk data: {e}")
             return ""
 
+    async def export_metrics(self, format: str = "json") -> dict[str, Any]:
+        """Export all metrics in specified format."""
+        try:
+            # Collect all available metrics
+            metrics_data = {
+                "portfolio_data": await self.export_portfolio_data(format, include_metadata=False),
+                "risk_data": await self.export_risk_data(format, include_metadata=False),
+                "export_format": format,
+                "timestamp": "current_timestamp"
+            }
+
+            return metrics_data
+        except Exception as e:
+            self.logger.error(f"Error exporting metrics: {e}")
+            return {}
+
     # Required abstract method implementations
     async def calculate_metrics(self, *args, **kwargs) -> dict[str, Any]:
         """Calculate service-specific metrics."""

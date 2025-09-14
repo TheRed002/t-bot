@@ -31,6 +31,7 @@ class PositionTrackingMixin:
             self.logger.error(f"Error updating position: {e}")
             raise ComponentError(
                 f"Failed to update position {position.symbol}",
+                error_code="ANL_017",
                 component=self.__class__.__name__,
                 operation="update_position",
             ) from e
@@ -47,6 +48,7 @@ class PositionTrackingMixin:
             self.logger.error(f"Error updating trade: {e}")
             raise ComponentError(
                 f"Failed to update trade {trade.trade_id}",
+                error_code="ANL_018",
                 component=self.__class__.__name__,
                 operation="update_trade",
             ) from e
@@ -82,6 +84,7 @@ class OrderTrackingMixin:
             self.logger.error(f"Error updating order: {e}")
             raise ComponentError(
                 f"Failed to update order {order.order_id}",
+                error_code="ANL_019",
                 component=self.__class__.__name__,
                 operation="update_order",
             ) from e
@@ -96,33 +99,63 @@ class OrderTrackingMixin:
 
 
 class ErrorHandlingMixin:
-    """Mixin for standardized error handling patterns."""
+    """Mixin for standardized error handling patterns aligned with core."""
 
     def handle_operation_error(
         self, operation_name: str, error: Exception, context: dict[str, Any] | None = None
     ) -> ComponentError:
-        """Standardize error handling across analytics services."""
+        """Standardize error handling across analytics services aligned with core patterns."""
+        from datetime import datetime, timezone
+
         self.logger.error(f"Error in {operation_name}: {error}")
+
+        # Apply consistent error metadata aligned with core patterns
+        error_details = {
+            "original_error": str(error),
+            "context": context or {},
+            "processing_mode": "stream",  # Align with core default
+            "message_pattern": "pub_sub",  # Consistent messaging
+            "data_format": "analytics_mixin_error_v1",
+            "boundary_crossed": True,
+            "source_module": "analytics",
+            "error_code": "ANL_020",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
 
         return ComponentError(
             f"Failed to execute {operation_name}",
+            error_code="ANL_020",
             component=self.__class__.__name__,
             operation=operation_name,
-            context=context or {},
+            details=error_details,
         )
 
     def safe_execute_operation(self, operation_name: str, operation_func, *args, **kwargs):
-        """Execute operation with standardized error handling."""
+        """Execute operation with standardized error handling aligned with core patterns."""
         try:
             return operation_func(*args, **kwargs)
         except Exception as e:
+            # Apply consistent error propagation before raising
+            try:
+                from src.analytics.common import AnalyticsErrorHandler
+                AnalyticsErrorHandler.propagate_analytics_error(e, operation_name)
+            except Exception:
+                # Don't fail if error propagation fails
+                pass
             raise self.handle_operation_error(operation_name, e) from e
 
     async def safe_execute_async_operation(
         self, operation_name: str, operation_func, *args, **kwargs
     ):
-        """Execute async operation with standardized error handling."""
+        """Execute async operation with standardized error handling aligned with core patterns."""
         try:
             return await operation_func(*args, **kwargs)
         except Exception as e:
+            # Apply consistent error propagation before raising
+            try:
+                from src.analytics.common import AnalyticsErrorHandler
+                AnalyticsErrorHandler.propagate_analytics_error(e, operation_name)
+            except Exception:
+                # Don't fail if error propagation fails
+                pass
             raise self.handle_operation_error(operation_name, e) from e

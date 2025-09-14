@@ -356,9 +356,9 @@ class DataQualityChecker:
             )
 
 
-class EnhancedDataPipeline(BaseComponent):
+class DataPipeline(BaseComponent):
     """
-    Enterprise-grade data pipeline for financial data processing.
+    Data pipeline for financial data processing.
 
     This pipeline provides:
     - Multi-stage processing with exactly-once semantics
@@ -375,7 +375,7 @@ class EnhancedDataPipeline(BaseComponent):
         feature_store=None,
         metrics_collector: MetricsCollector | None = None,
     ):
-        """Initialize the Enhanced Data Pipeline."""
+        """Initialize the Data Pipeline."""
         super().__init__()
         self.config = config
 

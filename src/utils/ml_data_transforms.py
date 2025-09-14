@@ -170,20 +170,23 @@ def create_returns_series(prices: pd.Series, horizon: int = 1, return_type: str 
     return returns
 
 
-def batch_transform_requests_to_aligned_format(requests: list[Any]) -> list[dict[str, Any]]:
+def batch_transform_requests_to_aligned_format(requests: list[Any]) -> dict[str, Any]:
     """
-    Transform batch requests to aligned format for consistent processing.
+    Transform batch requests to aligned format for consistent processing with messaging patterns.
     
     Args:
         requests: List of request objects
         
     Returns:
-        List of aligned request dictionaries
+        Dict with standardized batch format aligned with messaging patterns
     """
+    from datetime import datetime, timezone
+    from uuid import uuid4
+    
     aligned_requests = []
 
     for request in requests:
-        # Apply consistent data transformation aligned with data module
+        # Apply consistent data transformation aligned with messaging patterns
         market_data = request.market_data
         if hasattr(request.market_data, "model_dump"):
             market_data = request.market_data.model_dump()
@@ -196,7 +199,175 @@ def batch_transform_requests_to_aligned_format(requests: list[Any]) -> list[dict
             "model_id": getattr(request, "model_id", None),
             "model_name": getattr(request, "model_name", None),
             "market_data": market_data,
+            # Add messaging pattern metadata for consistency
+            "processing_mode": "batch",
+            "message_pattern": "batch",
+            "data_format": "bot_event_v1",
         }
         aligned_requests.append(request_dict)
 
-    return aligned_requests
+    # Return in batch format aligned with messaging patterns
+    return {
+        "items": aligned_requests,
+        "batch_id": str(uuid4()),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "size": len(aligned_requests),
+        "processing_mode": "batch",
+        "message_pattern": "batch",
+        "data_format": "bot_event_v1",
+        "operation_type": "ml_batch_request_processing",
+        "boundary_crossed": True,
+    }
+
+
+def stream_transform_request_to_aligned_format(request: Any) -> dict[str, Any]:
+    """
+    Transform single request to aligned stream format for consistent processing.
+    
+    Args:
+        request: Single request object
+        
+    Returns:
+        Dict with standardized stream format aligned with messaging patterns
+    """
+    from datetime import datetime, timezone
+    from uuid import uuid4
+    
+    # Apply consistent data transformation aligned with messaging patterns
+    market_data = request.market_data
+    if hasattr(request.market_data, "model_dump"):
+        market_data = request.market_data.model_dump()
+    elif isinstance(request.market_data, dict):
+        market_data = transform_market_data_to_decimal(request.market_data)
+
+    return {
+        "request_id": request.request_id,
+        "symbol": request.symbol,
+        "model_id": getattr(request, "model_id", None),
+        "model_name": getattr(request, "model_name", None),
+        "market_data": market_data,
+        # Add messaging pattern metadata for stream consistency
+        "stream_id": str(uuid4()),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "processing_mode": "stream",
+        "message_pattern": "stream",
+        "data_format": "bot_event_v1",
+        "operation_type": "ml_stream_request_processing",
+        "boundary_crossed": True,
+    }
+
+
+def convert_batch_to_stream_ml_data(batch_data: dict[str, Any]) -> list[dict[str, Any]]:
+    """
+    Convert batch ML data to stream format aligned with messaging patterns.
+    
+    Args:
+        batch_data: Batch data dictionary with 'items' key
+        
+    Returns:
+        List of stream-formatted dictionaries
+    """
+    from datetime import datetime, timezone
+    from uuid import uuid4
+    
+    if not isinstance(batch_data, dict) or "items" not in batch_data:
+        raise ValueError("Invalid batch data format - must contain 'items' key")
+    
+    stream_items = []
+    batch_id = batch_data.get("batch_id", str(uuid4()))
+    
+    for item in batch_data["items"]:
+        stream_item = item.copy() if isinstance(item, dict) else {"data": item}
+        
+        # Add stream metadata aligned with messaging patterns
+        stream_item.update({
+            "stream_id": str(uuid4()),
+            "batch_id": batch_id,
+            "stream_timestamp": datetime.now(timezone.utc).isoformat(),
+            "processing_mode": "stream",
+            "message_pattern": "stream",
+            "data_format": "bot_event_v1",
+            "converted_from_batch": True,
+            "boundary_crossed": True,
+        })
+        
+        stream_items.append(stream_item)
+    
+    return stream_items
+
+
+def align_ml_processing_modes(
+    source_mode: str, 
+    target_mode: str, 
+    data: dict[str, Any]
+) -> dict[str, Any]:
+    """
+    Align ML processing modes between source and target for consistent data flow.
+    
+    Args:
+        source_mode: Source processing mode (stream, batch, request_reply)
+        target_mode: Target processing mode
+        data: ML data to align
+        
+    Returns:
+        Dict with aligned processing mode and metadata
+    """
+    from datetime import datetime, timezone
+    from uuid import uuid4
+    
+    aligned_data = data.copy()
+    
+    # Add alignment metadata
+    aligned_data.update({
+        "source_processing_mode": source_mode,
+        "target_processing_mode": target_mode,
+        "alignment_timestamp": datetime.now(timezone.utc).isoformat(),
+        "paradigm_aligned": True,
+        "ml_cross_module_alignment": True,
+    })
+    
+    # Apply mode-specific transformations aligned with messaging patterns
+    if source_mode == "stream" and target_mode == "batch":
+        # Convert single stream item to batch format
+        aligned_data["batch_metadata"] = {
+            "converted_from_stream": True,
+            "original_stream_id": aligned_data.get("stream_id", str(uuid4())),
+            "batch_size": 1,
+            "ml_compatible": True,
+        }
+        aligned_data["processing_mode"] = "batch"
+        aligned_data["message_pattern"] = "batch"
+        
+    elif source_mode == "batch" and target_mode == "stream":
+        # Convert batch to stream format (keep first item)
+        aligned_data["stream_metadata"] = {
+            "converted_from_batch": True,
+            "original_batch_id": aligned_data.get("batch_id", str(uuid4())),
+            "stream_position": 0,
+            "ml_compatible": True,
+        }
+        aligned_data["processing_mode"] = "stream"
+        aligned_data["message_pattern"] = "stream"
+        
+    elif source_mode == "request_reply" and target_mode == "stream":
+        # Convert request_reply to stream format
+        aligned_data["stream_metadata"] = {
+            "converted_from_request_reply": True,
+            "original_correlation_id": aligned_data.get("correlation_id", str(uuid4())),
+            "ml_compatible": True,
+        }
+        aligned_data["processing_mode"] = "stream"
+        aligned_data["message_pattern"] = "stream"
+        
+    elif source_mode == "stream" and target_mode == "request_reply":
+        # Convert stream to request_reply format
+        aligned_data["request_reply_metadata"] = {
+            "converted_from_stream": True,
+            "original_stream_id": aligned_data.get("stream_id", str(uuid4())),
+            "response_expected": True,
+            "ml_compatible": True,
+        }
+        aligned_data["processing_mode"] = "request_reply"
+        aligned_data["message_pattern"] = "req_reply"
+    
+    return aligned_data

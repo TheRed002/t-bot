@@ -13,7 +13,7 @@ from src.utils.datetime_utils import get_current_utc_timestamp
 
 
 class AnalyticsErrorHandler:
-    """Centralized error handling for analytics operations."""
+    """Centralized error handling for analytics operations aligned with core patterns."""
 
     @staticmethod
     def create_operation_error(
@@ -22,16 +22,93 @@ class AnalyticsErrorHandler:
         target_entity: str | None = None,
         original_error: Exception | None = None,
     ) -> ComponentError:
-        """Create standardized ComponentError for analytics operations."""
+        """Create standardized ComponentError for analytics operations aligned with core patterns."""
+
         message = f"Failed to {operation}"
         if target_entity:
             message += f" {target_entity}"
+
+        # Apply consistent error metadata aligned with core patterns
+        error_details = {
+            "component": component_name,
+            "operation": operation,
+            "target_entity": target_entity,
+            "original_error": str(original_error) if original_error else None,
+            "error_type": type(original_error).__name__ if original_error else "AnalyticsError",
+            "timestamp": get_current_utc_timestamp().isoformat(),
+            "processing_mode": "stream",  # Align with core default
+            "message_pattern": "pub_sub",  # Consistent messaging pattern
+            "data_format": "analytics_error_v1",  # Versioned error format
+            "boundary_crossed": True,  # Error crossing module boundaries
+            "source_module": "analytics",  # Source identification
+        }
 
         return ComponentError(
             message,
             component=component_name,
             operation=operation,
+            details=error_details,
         )
+
+    @staticmethod
+    def propagate_analytics_error(
+        error: Exception,
+        context: str,
+        target_module: str = "core"
+    ) -> None:
+        """Propagate analytics errors with consistent patterns aligned with core."""
+        from datetime import datetime, timezone
+
+        from src.core.logging import get_logger
+
+        logger = get_logger(__name__)
+
+        # Apply consistent error propagation metadata aligned with core patterns
+        error_metadata = {
+            "error_type": type(error).__name__,
+            "context": context,
+            "propagation_pattern": "analytics_to_core",
+            "data_format": "analytics_error_propagation_v1",
+            "processing_mode": "stream",  # Align with core events
+            "message_pattern": "pub_sub",  # Consistent messaging
+            "boundary_crossed": True,
+            "validation_status": "failed",
+            "source_module": "analytics",
+            "target_module": target_module,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+        logger.error(f"Analytics error in {context}: {error}", extra=error_metadata)
+
+        # Add propagation metadata to error if supported (aligned with core patterns)
+        if hasattr(error, "__dict__"):
+            try:
+                error.__dict__.update({
+                    "propagation_metadata": error_metadata,
+                    "boundary_validation_applied": True,
+                    "core_alignment": True,
+                })
+            except (AttributeError, TypeError):
+                # Some exception types don't allow attribute modification
+                pass
+
+        # Apply boundary validation for consistency with core patterns
+        try:
+            from src.utils.messaging_patterns import BoundaryValidator
+            boundary_data = {
+                "component": "analytics",
+                "severity": "medium",
+                "timestamp": error_metadata["timestamp"],
+                "processing_mode": "stream",
+                "data_format": "analytics_error_propagation_v1",
+                "message_pattern": "pub_sub",
+                "boundary_crossed": True,
+            }
+            BoundaryValidator.validate_error_to_monitoring_boundary(boundary_data)
+        except Exception as validation_error:
+            logger.warning(f"Analytics error boundary validation failed: {validation_error}")
+
+        raise error
 
 
 class AnalyticsCalculations:
@@ -79,8 +156,15 @@ class ServiceInitializationHelper:
     """Helper for consistent service initialization patterns."""
 
     @staticmethod
-    def prepare_service_config(config: AnalyticsConfiguration | None) -> dict[str, Any]:
+    def prepare_service_config(config: AnalyticsConfiguration | dict | None) -> dict[str, Any]:
         """Prepare config dict for service initialization."""
+        if isinstance(config, dict):
+            # Convert dict to AnalyticsConfiguration first, then merge with defaults
+            try:
+                config = AnalyticsConfiguration(**config)
+            except Exception:
+                # If dict doesn't fit AnalyticsConfiguration, just return it
+                return config
         merged_config = ConfigurationDefaults.merge_config(config)
         return merged_config.model_dump()
 

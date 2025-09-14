@@ -38,6 +38,7 @@ class AnalyticsServiceFactory(AnalyticsServiceFactoryProtocol):
                 "operational_service": "OperationalService",
                 "alert_service": "AlertService",
                 "export_service": "ExportService",
+                "dashboard_service": "DashboardService",
                 "metrics_collector": "MetricsCollector",
             }
             for param_name, service_name in service_mappings.items():
@@ -93,6 +94,12 @@ class AnalyticsServiceFactory(AnalyticsServiceFactoryProtocol):
         from src.analytics.services.export_service import ExportService
 
         return ExportService(config=config)
+
+    def create_dashboard_service(self, config: AnalyticsConfiguration | None = None):
+        """Create dashboard service."""
+        from src.analytics.services.dashboard_service import DashboardService
+
+        return DashboardService(config=config)
 
 
 def create_default_analytics_service(
