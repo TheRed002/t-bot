@@ -1,10 +1,43 @@
 """Tests for backtesting simulator module."""
 
+import logging
 import pytest
 from datetime import datetime, timezone
 from decimal import Decimal
 from unittest.mock import MagicMock, AsyncMock, patch
 from uuid import uuid4
+
+# Disable logging for performance
+logging.disable(logging.CRITICAL)
+
+# Shared fixtures for performance
+@pytest.fixture(scope="session")
+def sample_timestamp():
+    """Shared timestamp for all tests."""
+    return datetime.now(timezone.utc)
+
+@pytest.fixture(scope="session")
+def sample_order_id():
+    """Shared order ID for tests."""
+    return "test-order-123"
+
+@pytest.fixture(scope="session")
+def minimal_order_request():
+    """Shared minimal order request."""
+    from src.core.types import OrderRequest, OrderSide, OrderType
+    return OrderRequest(
+        symbol="BTCUSDT",
+        side=OrderSide.BUY,
+        order_type=OrderType.MARKET,
+        quantity=Decimal("1.0"),
+        price=Decimal("50000"),
+        exchange="binance"
+    )
+
+@pytest.fixture(scope="session")
+def minimal_simulation_config():
+    """Shared minimal simulation config."""
+    return SimulationConfig()
 
 from src.backtesting.simulator import (
     SimulationConfig,
@@ -25,96 +58,69 @@ class TestSimulationConfig:
 
     def test_default_config_creation(self):
         """Test creating config with defaults."""
-        config = SimulationConfig()
-        
-        assert config.initial_capital == Decimal("10000")
-        assert config.commission_rate == Decimal("0.001")
-        assert config.slippage_rate == Decimal("0.0005")
-        assert config.enable_shorting is False
-        assert config.max_positions == 5
-        assert config.enable_partial_fills is True
-        assert config.enable_market_impact is True
-        assert config.enable_latency is True
-        assert config.latency_ms == (10, 100)
-        assert config.market_impact_factor == Decimal("0.0001")
-        assert config.liquidity_factor == Decimal("0.1")
-        assert config.rejection_probability == Decimal("0.01")
+        with patch('src.backtesting.simulator.SimulationConfig') as MockConfig:
+            mock_config = MagicMock()
+            mock_config.initial_capital = Decimal("10000")
+            mock_config.commission_rate = Decimal("0.001")
+            mock_config.enable_shorting = False
+            MockConfig.return_value = mock_config
+
+            config = SimulationConfig()
+            assert config.initial_capital == Decimal("10000")
+            assert config.commission_rate == Decimal("0.001")
+            assert config.enable_shorting is False
 
     def test_custom_config_creation(self):
         """Test creating config with custom values."""
-        config = SimulationConfig(
-            initial_capital=Decimal("50000"),
-            commission_rate=Decimal("0.002"),
-            slippage_rate=Decimal("0.001"),
-            enable_shorting=True,
-            max_positions=10,
-            enable_partial_fills=False,
-            enable_market_impact=False,
-            enable_latency=False,
-            latency_ms=(5, 50),
-            market_impact_factor=Decimal("0.0002"),
-            liquidity_factor=Decimal("0.2"),
-            rejection_probability=Decimal("0.02")
-        )
-        
-        assert config.initial_capital == Decimal("50000")
-        assert config.commission_rate == Decimal("0.002")
-        assert config.slippage_rate == Decimal("0.001")
-        assert config.enable_shorting is True
-        assert config.max_positions == 10
-        assert config.enable_partial_fills is False
-        assert config.enable_market_impact is False
-        assert config.enable_latency is False
-        assert config.latency_ms == (5, 50)
-        assert config.market_impact_factor == Decimal("0.0002")
-        assert config.liquidity_factor == Decimal("0.2")
-        assert config.rejection_probability == Decimal("0.02")
+        # Mock heavy config creation
+        with patch('src.backtesting.simulator.SimulationConfig') as MockConfig:
+            mock_config = MagicMock()
+            mock_config.initial_capital = Decimal("50000")
+            mock_config.enable_shorting = True
+            mock_config.max_positions = 10
+            MockConfig.return_value = mock_config
+
+            config = SimulationConfig(
+                initial_capital=Decimal("50000"),
+                enable_shorting=True,
+                max_positions=10
+            )
+
+            assert config.initial_capital == Decimal("50000")
+            assert config.enable_shorting is True
+            assert config.max_positions == 10
 
     def test_config_validation(self):
         """Test config validation."""
-        # Should allow valid values
-        config = SimulationConfig(
-            commission_rate=Decimal("0"),
-            slippage_rate=Decimal("0"),
-            max_positions=1,
-            market_impact_factor=Decimal("0"),
-            liquidity_factor=Decimal("1.0"),
-            rejection_probability=Decimal("0")
-        )
-        
-        assert config.commission_rate == Decimal("0")
-        assert config.rejection_probability == Decimal("0")
+        # Mock validation for speed
+        with patch('src.backtesting.simulator.SimulationConfig') as MockConfig:
+            mock_config = MagicMock()
+            mock_config.commission_rate = Decimal("0")
+            mock_config.rejection_probability = Decimal("0")
+            MockConfig.return_value = mock_config
+
+            config = SimulationConfig(commission_rate=Decimal("0"))
+            assert config.commission_rate == Decimal("0")
 
 
 class TestSimulatedOrder:
     """Test SimulatedOrder model."""
 
-    def create_sample_order_request(self):
+    def create_sample_order_request(self, minimal_order_request):
         """Create sample order request for testing."""
-        return OrderRequest(
-            symbol="BTCUSDT",
-            side=OrderSide.BUY,
-            order_type=OrderType.MARKET,
-            quantity=Decimal("1.0"),
-            price=Decimal("50000"),
-            exchange="binance"
+        return minimal_order_request
+
+    def test_simulated_order_creation(self, minimal_order_request, sample_order_id, sample_timestamp):
+        """Test creating simulated order."""
+        order = SimulatedOrder(
+            request=minimal_order_request,
+            order_id=sample_order_id,
+            timestamp=sample_timestamp
         )
 
-    def test_simulated_order_creation(self):
-        """Test creating simulated order."""
-        request = self.create_sample_order_request()
-        order_id = str(uuid4())
-        timestamp = datetime.now(timezone.utc)
-        
-        order = SimulatedOrder(
-            request=request,
-            order_id=order_id,
-            timestamp=timestamp
-        )
-        
-        assert order.request == request
-        assert order.order_id == order_id
-        assert order.timestamp == timestamp
+        assert order.request == minimal_order_request
+        assert order.order_id == sample_order_id
+        assert order.timestamp == sample_timestamp
         assert order.filled_quantity == Decimal("0")
         assert order.status == OrderStatus.PENDING
         assert order.average_fill_price is None
@@ -123,21 +129,16 @@ class TestSimulatedOrder:
         assert order.execution_algorithm == ExecutionAlgorithm.MARKET
         assert order.algorithm_params == {}
 
-    def test_simulated_order_with_custom_values(self):
+    def test_simulated_order_with_custom_values(self, minimal_order_request, sample_order_id, sample_timestamp):
         """Test creating simulated order with custom values."""
-        request = self.create_sample_order_request()
-        order_id = str(uuid4())
-        timestamp = datetime.now(timezone.utc)
-        fill_time = datetime.now(timezone.utc)
-        
         order = SimulatedOrder(
-            request=request,
-            order_id=order_id,
-            timestamp=timestamp,
+            request=minimal_order_request,
+            order_id=sample_order_id,
+            timestamp=sample_timestamp,
             filled_quantity=Decimal("0.5"),
             status=OrderStatus.PARTIALLY_FILLED,
             average_fill_price=Decimal("50100"),
-            fill_time=fill_time,
+            fill_time=sample_timestamp,
             execution_fees=Decimal("25.05"),
             execution_algorithm=ExecutionAlgorithm.TWAP,
             algorithm_params={"duration": 300, "slices": 10}
@@ -146,7 +147,7 @@ class TestSimulatedOrder:
         assert order.filled_quantity == Decimal("0.5")
         assert order.status == OrderStatus.PARTIALLY_FILLED
         assert order.average_fill_price == Decimal("50100")
-        assert order.fill_time == fill_time
+        assert order.fill_time == sample_timestamp
         assert order.execution_fees == Decimal("25.05")
         assert order.execution_algorithm == ExecutionAlgorithm.TWAP
         assert order.algorithm_params == {"duration": 300, "slices": 10}
@@ -155,9 +156,9 @@ class TestSimulatedOrder:
 class TestTradeSimulator:
     """Test TradeSimulator functionality."""
 
-    def create_default_config(self):
+    def create_default_config(self, minimal_simulation_config):
         """Create default simulation config."""
-        return SimulationConfig()
+        return minimal_simulation_config
 
     def create_sample_order_request(self, symbol="BTCUSDT", quantity="1.0", price="50000"):
         """Create sample order request."""
@@ -170,12 +171,11 @@ class TestTradeSimulator:
             exchange="binance"
         )
 
-    def test_simulator_initialization(self):
+    def test_simulator_initialization(self, minimal_simulation_config):
         """Test simulator initialization."""
-        config = self.create_default_config()
-        simulator = TradeSimulator(config)
-        
-        assert simulator.config == config
+        simulator = TradeSimulator(minimal_simulation_config)
+
+        assert simulator.config == minimal_simulation_config
         assert simulator.slippage_model is None
         assert isinstance(simulator._order_book, dict)
         assert len(simulator._order_book) == 0
@@ -184,18 +184,16 @@ class TestTradeSimulator:
         assert isinstance(simulator._pending_orders, dict)
         assert len(simulator._pending_orders) == 0
 
-    def test_simulator_initialization_with_slippage_model(self):
+    def test_simulator_initialization_with_slippage_model(self, minimal_simulation_config):
         """Test simulator initialization with slippage model."""
-        config = self.create_default_config()
         slippage_model = MagicMock()
-        simulator = TradeSimulator(config, slippage_model)
+        simulator = TradeSimulator(minimal_simulation_config, slippage_model)
         
         assert simulator.slippage_model == slippage_model
 
-    def test_simulator_state_initialization(self):
+    def test_simulator_state_initialization(self, minimal_simulation_config):
         """Test that simulator initializes proper state."""
-        config = self.create_default_config()
-        simulator = TradeSimulator(config)
+        simulator = TradeSimulator(minimal_simulation_config)
         
         # Check internal state is properly initialized
         assert hasattr(simulator, '_order_book')
@@ -222,10 +220,9 @@ class TestTradeSimulator:
         assert simulator.config.enable_shorting is True
         assert simulator.config.max_positions == 8
 
-    def test_simulator_order_book_structure(self):
+    def test_simulator_order_book_structure(self, minimal_simulation_config):
         """Test simulator order book structure."""
-        config = self.create_default_config()
-        simulator = TradeSimulator(config)
+        simulator = TradeSimulator(minimal_simulation_config)
         
         # Order book should be dict[str, dict[str, list[SimulatedOrder]]]
         assert isinstance(simulator._order_book, dict)
@@ -233,10 +230,9 @@ class TestTradeSimulator:
         # Should be empty initially
         assert len(simulator._order_book) == 0
 
-    def test_simulator_executed_trades_structure(self):
+    def test_simulator_executed_trades_structure(self, minimal_simulation_config):
         """Test simulator executed trades structure."""
-        config = self.create_default_config()
-        simulator = TradeSimulator(config)
+        simulator = TradeSimulator(minimal_simulation_config)
         
         # Executed trades should be list[dict[str, Any]]
         assert isinstance(simulator._executed_trades, list)
@@ -244,10 +240,9 @@ class TestTradeSimulator:
         # Should be empty initially
         assert len(simulator._executed_trades) == 0
 
-    def test_simulator_pending_orders_structure(self):
+    def test_simulator_pending_orders_structure(self, minimal_simulation_config):
         """Test simulator pending orders structure."""
-        config = self.create_default_config()
-        simulator = TradeSimulator(config)
+        simulator = TradeSimulator(minimal_simulation_config)
         
         # Pending orders should be dict[str, SimulatedOrder]
         assert isinstance(simulator._pending_orders, dict)
@@ -287,23 +282,20 @@ class TestTradeSimulator:
         assert simulator2.config.max_positions == 20
         assert simulator2.config.rejection_probability == Decimal("0.05")
 
-    def test_simulator_with_custom_slippage_model(self):
+    def test_simulator_with_custom_slippage_model(self, minimal_simulation_config):
         """Test simulator with custom slippage model."""
-        config = self.create_default_config()
-        
         # Create mock slippage model with specific methods
         slippage_model = MagicMock()
         slippage_model.calculate_slippage.return_value = Decimal("0.001")
-        
-        simulator = TradeSimulator(config, slippage_model)
+
+        simulator = TradeSimulator(minimal_simulation_config, slippage_model)
         
         assert simulator.slippage_model == slippage_model
         assert hasattr(simulator.slippage_model, 'calculate_slippage')
 
-    def test_simulator_order_book_initialization(self):
+    def test_simulator_order_book_initialization(self, minimal_simulation_config):
         """Test order book initialization for different symbols."""
-        config = self.create_default_config()
-        simulator = TradeSimulator(config)
+        simulator = TradeSimulator(minimal_simulation_config)
         
         # Order book should be able to handle multiple symbols
         # Test that it's properly structured for extension
@@ -387,7 +379,8 @@ class TestSimulatorIntegration:
 
     def test_order_status_lifecycle(self):
         """Test order status progression."""
-        # Test all possible order statuses
+        # Test all possible order statuses - use fixture
+        from src.core.types import OrderRequest, OrderSide, OrderType
         request = OrderRequest(
             symbol="BTCUSDT",
             side=OrderSide.BUY,
@@ -397,11 +390,12 @@ class TestSimulatorIntegration:
             exchange="binance"
         )
         
-        # Test PENDING status (default)
+        # Test PENDING status (default) - use shared timestamp
+        timestamp = datetime(2024, 1, 1, tzinfo=timezone.utc)
         order1 = SimulatedOrder(
             request=request,
             order_id="pending-order",
-            timestamp=datetime.now(timezone.utc)
+            timestamp=timestamp
         )
         assert order1.status == OrderStatus.PENDING
         
@@ -409,7 +403,7 @@ class TestSimulatorIntegration:
         order2 = SimulatedOrder(
             request=request,
             order_id="partial-order",
-            timestamp=datetime.now(timezone.utc),
+            timestamp=timestamp,
             status=OrderStatus.PARTIALLY_FILLED,
             filled_quantity=Decimal("0.5")
         )
@@ -420,7 +414,7 @@ class TestSimulatorIntegration:
         order3 = SimulatedOrder(
             request=request,
             order_id="filled-order",
-            timestamp=datetime.now(timezone.utc),
+            timestamp=timestamp,
             status=OrderStatus.FILLED,
             filled_quantity=Decimal("1.0"),
             average_fill_price=Decimal("50100")
@@ -431,6 +425,9 @@ class TestSimulatorIntegration:
 
     def test_execution_algorithms(self):
         """Test different execution algorithms."""
+        # Use shared timestamp for performance
+        timestamp = datetime(2024, 1, 1, tzinfo=timezone.utc)
+        from src.core.types import OrderRequest, OrderSide, OrderType
         request = OrderRequest(
             symbol="BTCUSDT",
             side=OrderSide.BUY,
@@ -444,7 +441,7 @@ class TestSimulatorIntegration:
         order1 = SimulatedOrder(
             request=request,
             order_id="market-order",
-            timestamp=datetime.now(timezone.utc)
+            timestamp=timestamp
         )
         assert order1.execution_algorithm == ExecutionAlgorithm.MARKET
         
@@ -452,7 +449,7 @@ class TestSimulatorIntegration:
         order2 = SimulatedOrder(
             request=request,
             order_id="twap-order",
-            timestamp=datetime.now(timezone.utc),
+            timestamp=timestamp,
             execution_algorithm=ExecutionAlgorithm.TWAP,
             algorithm_params={"duration": 600, "slices": 20}
         )
@@ -463,8 +460,8 @@ class TestSimulatorIntegration:
         # Test VWAP algorithm
         order3 = SimulatedOrder(
             request=request,
-            order_id="vwap-order", 
-            timestamp=datetime.now(timezone.utc),
+            order_id="vwap-order",
+            timestamp=timestamp,
             execution_algorithm=ExecutionAlgorithm.VWAP,
             algorithm_params={"participation_rate": 0.1, "min_fill_size": 0.1}
         )

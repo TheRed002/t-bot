@@ -16,27 +16,33 @@ from src.backtesting.utils import convert_market_records_to_dataframe
 
 if TYPE_CHECKING:
     pass  # For future type-only imports if needed
-from src.core.exceptions import TradingBotError
+from src.core.exceptions import (
+    BacktestServiceError,
+    BacktestValidationError,
+    DataValidationError,
+    ServiceError,
+)
 from src.core.logging import get_logger
 from src.core.types import (
     ExecutionAlgorithm,
     OrderRequest,
     OrderSide,
     OrderType,
+    PositionSide,
     Signal,
     SignalDirection,
     TimeInForce,
 )
 from src.data.interfaces import DataServiceInterface
 from src.data.types import DataRequest
-from src.error_handling.decorators import with_circuit_breaker, with_error_context, with_retry
 from src.execution.interfaces import ExecutionEngineServiceInterface
 from src.execution.order_manager import OrderManager
 from src.execution.types import ExecutionInstruction
 from src.risk_management.base import BaseRiskManager
 from src.strategies.interfaces import BaseStrategyInterface
+from src.utils.backtesting_decorators import backtesting_operation, data_loading_operation
+from src.utils.backtesting_validators import validate_date_range, validate_rate
 from src.utils.decimal_utils import to_decimal
-from src.utils.decorators import time_execution
 from src.utils.synthetic_data_generator import generate_synthetic_ohlcv_data
 from src.utils.timezone_utils import ensure_utc_timezone
 
@@ -54,37 +60,38 @@ class BacktestConfig(BaseModel):
     symbols: list[str] = Field(..., description="List of symbols to backtest")
     exchange: str = Field(default="binance", description="Exchange to use for backtesting")
     timeframe: str = Field(default="1h", description="Timeframe for backtesting")
-    commission: Decimal = Field(default_factory=lambda: to_decimal("0.001"), description="Commission rate (0.1%)")
-    slippage: Decimal = Field(default_factory=lambda: to_decimal("0.0005"), description="Slippage rate (0.05%)")
+    commission: Decimal = Field(
+        default_factory=lambda: to_decimal("0.001"), description="Commission rate (0.1%)"
+    )
+    slippage: Decimal = Field(
+        default_factory=lambda: to_decimal("0.0005"), description="Slippage rate (0.05%)"
+    )
     enable_shorting: bool = Field(default=False, description="Enable short selling")
     max_open_positions: int = Field(default=5, description="Maximum number of open positions")
-    use_tick_data: bool = Field(default=False, description="Use tick data for more accurate simulation")
+    use_tick_data: bool = Field(
+        default=False, description="Use tick data for more accurate simulation"
+    )
     warm_up_period: int = Field(default=100, description="Number of candles for indicator warm-up")
 
     # Execution configuration
     execution_algorithm: ExecutionAlgorithm = Field(
         default=ExecutionAlgorithm.TWAP, description="Default execution algorithm"
     )
-    execution_time_horizon_minutes: int = Field(default=5, description="Execution time horizon in minutes")
+    execution_time_horizon_minutes: int = Field(
+        default=5, description="Execution time horizon in minutes"
+    )
 
     @field_validator("end_date")
     @classmethod
     def validate_dates(cls, v: datetime, info) -> datetime:
         """Validate that end date is after start date."""
-        if "start_date" in info.data and v <= info.data["start_date"]:
-            raise ValueError("End date must be after start date")
-        return v
+        return validate_date_range(v, info)
 
     @field_validator("commission", "slippage")
     @classmethod
     def validate_rates(cls, v: Decimal) -> Decimal:
         """Validate commission and slippage rates."""
-        # Rates can be zero (no commission/slippage) but must be non-negative and <= 10%
-        if v < 0:
-            raise ValueError("Rate must be between 0 and 0.1 (10%)")
-        if v > Decimal("0.1"):
-            raise ValueError("Rate must be between 0 and 0.1 (10%)")
-        return v
+        return validate_rate(v)
 
 
 class BacktestResult(BaseModel):
@@ -147,7 +154,8 @@ class BacktestEngine:
             strategy: Strategy to backtest
             risk_manager: Optional risk manager for position sizing
             data_service: Optional data service interface for market data access
-            execution_engine_service: Optional execution engine service for realistic order execution
+            execution_engine_service: Optional execution engine service for realistic
+                order execution
             order_manager: Optional order manager for order lifecycle management
             metrics_calculator: Optional metrics calculator for performance analysis
         """
@@ -171,12 +179,12 @@ class BacktestEngine:
             "BacktestEngine initialized",
             config=config.model_dump(),
             strategy=strategy.name,
-            strategy_type=(strategy.strategy_type.value if hasattr(strategy, "strategy_type") else "unknown"),
+            strategy_type=(
+                strategy.strategy_type.value if hasattr(strategy, "strategy_type") else "unknown"
+            ),
         )
 
-    @time_execution
-    @with_error_context(component="backtesting", operation="run_backtest")
-    @with_retry(max_attempts=3)
+    @backtesting_operation(operation="run_backtest")
     async def run(self) -> BacktestResult:
         """
         Run the backtest.
@@ -196,12 +204,43 @@ class BacktestEngine:
         await self._run_simulation()
 
         # Calculate metrics
-        result = await self._calculate_results()
+        try:
+            result = await self._calculate_results()
+        except ServiceError as e:
+            if "MetricsCalculator not available" in str(e):
+                # Return default result when metrics calculator is not available
+                result = BacktestResult(
+                    total_return=to_decimal("0.0"),
+                    annual_return=to_decimal("0.0"),
+                    sharpe_ratio=0.0,
+                    sortino_ratio=0.0,
+                    max_drawdown=to_decimal("0.0"),
+                    win_rate=0.0,
+                    total_trades=len(self._trades),
+                    winning_trades=0,
+                    losing_trades=0,
+                    avg_win=to_decimal("0.0"),
+                    avg_loss=to_decimal("0.0"),
+                    profit_factor=0.0,
+                    volatility=0.0,
+                    var_95=to_decimal("0.0"),
+                    cvar_95=to_decimal("0.0"),
+                    equity_curve=self._equity_curve.copy(),
+                    trades=self._trades.copy(),
+                    daily_returns=[],
+                    metadata={
+                        "strategy": self.strategy.name,
+                        "config": self.config.model_dump(),
+                        "error": "MetricsCalculator not available"
+                    }
+                )
+            else:
+                raise
 
         logger.info("Backtest completed", total_trades=len(self._trades))
         return result
 
-    @with_circuit_breaker(failure_threshold=3, recovery_timeout=60)
+    @data_loading_operation(operation="load_historical_data")
     async def _load_historical_data(self) -> None:
         """Load historical market data for all symbols."""
         logger.info("Loading historical data", symbols=self.config.symbols)
@@ -217,11 +256,11 @@ class BacktestEngine:
             self._market_data[symbol] = data
             logger.info("Market data loaded", symbol=symbol, rows=len(data))
 
-    @with_error_context(component="data_loading", operation="load_symbol_data")
+    @data_loading_operation(operation="load_symbol_data")
     async def _load_from_data_service(self, symbol: str) -> pd.DataFrame:
         """Load data using DataService."""
         if not self.data_service:
-            raise TradingBotError("Data service not configured", "BACKTEST_005")
+            raise BacktestServiceError("Data service not configured for backtesting")
 
         # DataServiceInterface guarantees get_market_data method exists
 
@@ -248,15 +287,18 @@ class BacktestEngine:
 
     async def _load_default_data(self, symbol: str) -> pd.DataFrame:
         """Load default/sample data for testing."""
-        # Use shared synthetic data generator
-        return generate_synthetic_ohlcv_data(
-            symbol=symbol,
-            start_date=self.config.start_date,
-            end_date=self.config.end_date,
-            timeframe=self.config.timeframe,
-            initial_price=100.0,
-            seed=42,  # Deterministic seed for consistent testing
-        )
+        try:
+            # Use shared synthetic data generator
+            return generate_synthetic_ohlcv_data(
+                symbol=symbol,
+                start_date=self.config.start_date,
+                end_date=self.config.end_date,
+                timeframe=self.config.timeframe,
+                initial_price=100.0,
+                seed=42,  # Deterministic seed for consistent testing
+            )
+        except Exception as e:
+            raise BacktestValidationError(f"Failed to generate synthetic data for {symbol}") from e
 
     async def _initialize_strategy(self) -> None:
         """Initialize the strategy with warm-up data."""
@@ -273,7 +315,9 @@ class BacktestEngine:
                     error=str(e),
                 )
         else:
-            logger.info("Strategy initialization", strategy=self.strategy.name, has_start_method=False)
+            logger.info(
+                "Strategy initialization", strategy=self.strategy.name, has_start_method=False
+            )
 
         # Prepare strategy for backtesting if it supports the interface
         if hasattr(self.strategy, "prepare_for_backtest"):
@@ -300,7 +344,10 @@ class BacktestEngine:
                 # Process warm-up data for indicator initialization
                 # Process warm-up data to initialize strategy state and indicators
                 logger.info(
-                    "Strategy warm-up", strategy=self.strategy.name, symbol=symbol, periods=self.config.warm_up_period
+                    "Strategy warm-up",
+                    strategy=self.strategy.name,
+                    symbol=symbol,
+                    periods=self.config.warm_up_period,
                 )
 
     async def _run_simulation(self) -> None:
@@ -404,22 +451,21 @@ class BacktestEngine:
             if self.execution_engine_service and self.order_manager:
                 await self._execute_with_engine(symbol, signal, market_data[symbol])
             else:
-                # Fallback to simple execution
-                # Apply slippage based on signal direction
+                # Fallback to simple execution with direct price calculation
                 if signal.direction == SignalDirection.BUY:
                     execution_price = price * (to_decimal("1") + self.config.slippage)
-                    await self._open_position(symbol, float(execution_price), signal.direction)
+                    await self._open_position(symbol, execution_price, signal.direction)
                 elif signal.direction == SignalDirection.SELL:
                     # Check if we have a position to close
                     if symbol in self._positions:
                         execution_price = price * (to_decimal("1") - self.config.slippage)
-                        await self._close_position(symbol, float(execution_price))
+                        await self._close_position(symbol, execution_price)
                     elif self.config.enable_shorting:
                         # Open short position if shorting is enabled
                         execution_price = price * (to_decimal("1") - self.config.slippage)
-                        await self._open_position(symbol, float(execution_price), signal.direction)
+                        await self._open_position(symbol, execution_price, signal.direction)
 
-    @with_error_context(component="backtesting", operation="execute_with_engine")
+    @backtesting_operation(operation="execute_with_engine", max_retries=1)
     async def _execute_with_engine(
         self,
         symbol: str,
@@ -452,7 +498,9 @@ class BacktestEngine:
 
         # Calculate position size
         if self.risk_manager:
-            position_size = await self.risk_manager.calculate_position_size(signal, self._capital, market_data.close)
+            position_size = await self.risk_manager.calculate_position_size(
+                signal, self._capital, market_data.close
+            )
         else:
             # Default position sizing
             position_size = self._capital / to_decimal(self.config.max_open_positions)
@@ -477,39 +525,42 @@ class BacktestEngine:
             algorithm=self.config.execution_algorithm,
             strategy_name=self.strategy.name,
             time_horizon_minutes=self.config.execution_time_horizon_minutes,
-            max_slippage_bps=to_decimal(float(self.config.slippage) * 10000),  # Convert to basis points
+            max_slippage_bps=self.config.slippage * to_decimal("10000"),  # Convert to basis points
         )
 
         try:
             # Execute through ExecutionEngineService
             if self.execution_engine_service is None:
-                raise ValueError("ExecutionEngineService is None")
+                raise ServiceError("ExecutionEngineService is None", error_code="SERVICE_001")
             result = await self.execution_engine_service.execute_instruction(
                 instruction=execution_instruction,
                 market_data=market_data,
+                bot_id=None,  # No bot ID in backtesting
                 strategy_name=self.strategy.name,
             )
 
             # Validate execution result structure
             if not hasattr(result, "status"):
                 logger.error("Execution result missing status field", result=result)
-                raise ValueError("Invalid execution result: missing status")
+                raise BacktestValidationError("Invalid execution result: missing status")
 
             # Process execution result
-            if result.status == "completed":
+            from src.core.types import ExecutionStatus
+
+            if result.status == ExecutionStatus.COMPLETED:
                 # Validate required fields for completed orders
-                required_fields = ["average_price", "total_quantity", "total_cost"]
+                required_fields = ["average_price", "filled_quantity", "total_fees"]
                 for field in required_fields:
                     if not hasattr(result, field):
                         logger.error(f"Execution result missing {field}", result=result)
-                        raise ValueError(f"Invalid execution result: missing {field}")
+                        raise BacktestValidationError(f"Invalid execution result: missing {field}")
 
                 # Update position tracking
                 if order_side == OrderSide.BUY:
                     self._positions[symbol] = {
                         "entry_time": self._current_time,
-                        "entry_price": float(result.average_price),
-                        "size": float(result.total_quantity),
+                        "entry_price": result.average_price,
+                        "size": result.filled_quantity,
                         "side": order_side,
                     }
                 else:
@@ -517,10 +568,14 @@ class BacktestEngine:
                     if symbol in self._positions:
                         position = self._positions[symbol]
                         # Calculate P&L
-                        if position["side"] == OrderSide.BUY:
-                            pnl = (float(result.average_price) - position["entry_price"]) * position["size"]
+                        if position["side"] == PositionSide.LONG:
+                            pnl = (result.average_price - position["entry_price"]) * position[
+                                "size"
+                            ]
                         else:
-                            pnl = (position["entry_price"] - float(result.average_price)) * position["size"]
+                            pnl = (position["entry_price"] - result.average_price) * position[
+                                "size"
+                            ]
 
                         # Record trade
                         self._trades.append(
@@ -529,11 +584,11 @@ class BacktestEngine:
                                 "entry_time": position["entry_time"],
                                 "exit_time": self._current_time,
                                 "entry_price": position["entry_price"],
-                                "exit_price": float(result.average_price),
+                                "exit_price": result.average_price,
                                 "size": position["size"],
-                                "pnl": pnl - float(result.total_cost),  # Include execution costs
+                                "pnl": pnl - result.total_fees,  # Include execution costs
                                 "side": position["side"].value,
-                                "execution_cost": float(result.total_cost),
+                                "execution_cost": result.total_fees,
                             }
                         )
 
@@ -541,9 +596,9 @@ class BacktestEngine:
                         del self._positions[symbol]
 
                 # Update capital with execution costs
-                self._capital -= to_decimal(result.total_cost)
+                self._capital -= result.total_fees
 
-        except ValueError as e:
+        except (ValueError, DataValidationError) as e:
             # Validation errors should not fall back
             logger.error(
                 "Execution validation failed",
@@ -551,7 +606,10 @@ class BacktestEngine:
                 symbol=symbol,
                 signal=signal,
             )
-            raise  # Re-raise validation errors
+            # Convert ValueError to proper core exception if needed
+            if isinstance(e, ValueError):
+                raise BacktestValidationError(str(e)) from e
+            raise  # Re-raise DataValidationError as-is
         except AttributeError as e:
             # Missing attributes in result
             logger.error(
@@ -564,10 +622,10 @@ class BacktestEngine:
             price = to_decimal(market_data_row["close"])
             if signal.direction == SignalDirection.BUY:
                 execution_price = price * (to_decimal("1") + self.config.slippage)
-                await self._open_position(symbol, float(execution_price), signal.direction)
+                await self._open_position(symbol, execution_price, signal.direction)
             elif signal.direction == SignalDirection.SELL and symbol in self._positions:
                 execution_price = price * (to_decimal("1") - self.config.slippage)
-                await self._close_position(symbol, float(execution_price))
+                await self._close_position(symbol, execution_price)
         except Exception as e:
             logger.error(
                 "Execution engine failed in backtest",
@@ -580,12 +638,12 @@ class BacktestEngine:
             price = to_decimal(market_data_row["close"])
             if signal.direction == SignalDirection.BUY:
                 execution_price = price * (to_decimal("1") + self.config.slippage)
-                await self._open_position(symbol, float(execution_price), signal.direction)
+                await self._open_position(symbol, execution_price, signal.direction)
             elif signal.direction == SignalDirection.SELL and symbol in self._positions:
                 execution_price = price * (to_decimal("1") - self.config.slippage)
-                await self._close_position(symbol, float(execution_price))
+                await self._close_position(symbol, execution_price)
 
-    async def _open_position(self, symbol: str, price: float, signal: SignalDirection) -> None:
+    async def _open_position(self, symbol: str, price: Decimal, signal: SignalDirection) -> None:
         """Open a new position."""
         if symbol in self._positions:
             return  # Position already exists
@@ -611,7 +669,7 @@ class BacktestEngine:
                 source="backtest",
             )
             position_size = await self.risk_manager.calculate_position_size(
-                sizing_signal, self._capital, to_decimal(price)
+                sizing_signal, self._capital, price
             )
         else:
             # Default position sizing (equal weight)
@@ -623,9 +681,9 @@ class BacktestEngine:
         # Create position
         self._positions[symbol] = {
             "entry_time": self._current_time,
-            "entry_price": price,
-            "size": float(position_size),
-            "side": OrderSide.BUY if signal == SignalDirection.BUY else OrderSide.SELL,
+            "entry_price": to_decimal(price),
+            "size": position_size,
+            "side": PositionSide.LONG if signal == SignalDirection.BUY else PositionSide.SHORT,
         }
 
         # Update capital (deduct position size AND commission)
@@ -639,7 +697,7 @@ class BacktestEngine:
             side=signal,
         )
 
-    async def _close_position(self, symbol: str, price: float) -> None:
+    async def _close_position(self, symbol: str, price: Decimal) -> None:
         """Close an existing position."""
         if symbol not in self._positions:
             return
@@ -647,7 +705,7 @@ class BacktestEngine:
         position = self._positions[symbol]
 
         # Calculate P&L
-        if position["side"] == OrderSide.BUY:
+        if position["side"] == PositionSide.LONG:
             # For long: profit = (exit_price - entry_price) * size
             pnl = (to_decimal(price) - to_decimal(position["entry_price"])) * to_decimal(position["size"])
         else:
@@ -670,7 +728,7 @@ class BacktestEngine:
                 "entry_price": position["entry_price"],
                 "exit_price": price,
                 "size": position["size"],
-                "pnl": float(pnl_after_commission),
+                "pnl": pnl_after_commission,
                 "side": position["side"].value,
             }
         )
@@ -694,13 +752,15 @@ class BacktestEngine:
                 position["current_price"] = current_price
 
                 # Calculate unrealized P&L
-                if position["side"] == OrderSide.BUY:
+                if position["side"] == PositionSide.LONG:
                     position["unrealized_pnl"] = float(
-                        (to_decimal(current_price) - to_decimal(position["entry_price"])) * to_decimal(position["size"])
+                        (to_decimal(current_price) - to_decimal(position["entry_price"]))
+                        * to_decimal(position["size"])
                     )
                 else:
                     position["unrealized_pnl"] = float(
-                        (to_decimal(position["entry_price"]) - to_decimal(current_price)) * to_decimal(position["size"])
+                        (to_decimal(position["entry_price"]) - to_decimal(current_price))
+                        * to_decimal(position["size"])
                     )
 
     def _record_equity(self) -> None:
@@ -709,7 +769,7 @@ class BacktestEngine:
         total_equity = float(self._capital)
 
         for position in self._positions.values():
-            total_equity += position["size"] + position.get("unrealized_pnl", 0)
+            total_equity += float(position["size"]) + float(position.get("unrealized_pnl", 0))
 
         self._equity_curve.append({"timestamp": self._current_time, "equity": total_equity})
 
@@ -772,15 +832,9 @@ class BacktestEngine:
                 initial_capital=float(self.config.initial_capital),
             )
         else:
-            # Fallback to direct creation
-            from .metrics import MetricsCalculator
-
-            calculator = MetricsCalculator()
-            metrics = calculator.calculate_all(
-                equity_curve=self._equity_curve,
-                trades=self._trades,
-                daily_returns=daily_returns,
-                initial_capital=float(self.config.initial_capital),
+            raise ServiceError(
+                "MetricsCalculator not available - cannot calculate backtest metrics",
+                error_code="ENGINE_001",
             )
 
         # Get strategy-specific backtest metrics if available
@@ -818,7 +872,9 @@ class BacktestEngine:
                 "config": self.config.model_dump(),
                 "strategy": self.strategy.name,
                 "strategy_type": (
-                    self.strategy.strategy_type.value if hasattr(self.strategy, "strategy_type") else "unknown"
+                    self.strategy.strategy_type.value
+                    if hasattr(self.strategy, "strategy_type")
+                    else "unknown"
                 ),
                 "backtest_duration": str(self.config.end_date - self.config.start_date),
                 "strategy_metrics": strategy_metrics,

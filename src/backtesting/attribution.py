@@ -36,7 +36,7 @@ class PerformanceAttributor(BaseComponent):
         """Initialize performance attributor."""
         # Convert config to dict using shared utility
         config_dict = convert_config_to_dict(config)
-        super().__init__(name="PerformanceAttributor", config=config_dict)
+        super().__init__(name="PerformanceAttributor", config=config_dict)  # type: ignore
         self.config = config
         self.logger.info("PerformanceAttributor initialized")
 
@@ -90,7 +90,9 @@ class PerformanceAttributor(BaseComponent):
                 "timing_attribution": timing_attribution,
                 "factor_attribution": factor_attribution,
                 "cost_attribution": cost_attribution,
-                "summary": self._calculate_summary(symbol_attribution, timing_attribution, cost_attribution),
+                "summary": self._calculate_summary(
+                    symbol_attribution, timing_attribution, cost_attribution
+                ),
             }
         except Exception as e:
             self.logger.error(f"Failed to aggregate attribution results: {e}")
@@ -103,7 +105,9 @@ class PerformanceAttributor(BaseComponent):
         """Return empty attribution structure."""
         return create_empty_attribution_structure()
 
-    def _group_trades_by_symbol(self, trades: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    def _group_trades_by_symbol(
+        self, trades: list[dict[str, Any]]
+    ) -> dict[str, list[dict[str, Any]]]:
         """Group trades by symbol."""
         symbol_trades: dict[str, list[dict[str, Any]]] = {}
 
@@ -115,44 +119,64 @@ class PerformanceAttributor(BaseComponent):
 
         return symbol_trades
 
-    def _attribute_by_symbol(self, symbol_trades: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
+    def _attribute_by_symbol(
+        self, symbol_trades: dict[str, list[dict[str, Any]]]
+    ) -> dict[str, Any]:
         """Attribute returns by symbol."""
         attribution = {}
 
-        total_pnl = 0
+        total_pnl = 0.0
         total_trades = 0
 
         for symbol, trades in symbol_trades.items():
             symbol_pnl = sum(to_decimal(str(t["pnl"])) for t in trades)
-            symbol_return = symbol_pnl / to_decimal(str(abs(trades[0]["size"]))) if trades else to_decimal("0")
+            symbol_return = (
+                symbol_pnl / to_decimal(str(abs(trades[0]["size"]))) if trades else to_decimal("0")
+            )
 
             winning_trades = [t for t in trades if to_decimal(str(t["pnl"])) > 0]
             losing_trades = [t for t in trades if to_decimal(str(t["pnl"])) <= 0]
 
             attribution[symbol] = {
-                "total_pnl": float(symbol_pnl),
-                "return_pct": float(symbol_return * to_decimal("100")),
+                "total_pnl": symbol_pnl,
+                "return_pct": symbol_return * to_decimal("100"),
                 "num_trades": len(trades),
-                "win_rate": len(winning_trades) / len(trades) if trades else 0.0,
-                "avg_win": float(np.mean([float(t["pnl"]) for t in winning_trades])) if winning_trades else 0.0,
-                "avg_loss": float(np.mean([float(t["pnl"]) for t in losing_trades])) if losing_trades else 0.0,
-                "contribution_pct": 0.0,  # Will be calculated after
+                "win_rate": to_decimal(len(winning_trades)) / to_decimal(len(trades))
+                if trades
+                else to_decimal("0"),
+                "avg_win": to_decimal(str(np.mean([float(t["pnl"]) for t in winning_trades])))
+                if winning_trades
+                else to_decimal("0"),
+                "avg_loss": to_decimal(str(np.mean([float(t["pnl"]) for t in losing_trades])))
+                if losing_trades
+                else to_decimal("0"),
+                "contribution_pct": to_decimal("0"),  # Will be calculated after
             }
 
-            total_pnl += float(symbol_pnl)
+            total_pnl += symbol_pnl
             total_trades += len(trades)
 
         # Calculate contribution percentages
         if total_pnl != 0:
             for symbol in attribution:
-                attribution[symbol]["contribution_pct"] = attribution[symbol]["total_pnl"] / abs(total_pnl) * 100
+                attribution[symbol]["contribution_pct"] = (
+                    attribution[symbol]["total_pnl"] / abs(total_pnl) * to_decimal("100")
+                )
 
         # Add summary
+        filtered_attribution = {k: v for k, v in attribution.items() if k != "_summary"}
+        top_contributor: str | None = None
+        worst_performer: str | None = None
+
+        if filtered_attribution:
+            top_contributor = max(filtered_attribution.items(), key=lambda x: x[1]["total_pnl"])[0]
+            worst_performer = min(filtered_attribution.items(), key=lambda x: x[1]["total_pnl"])[0]
+
         attribution["_summary"] = {
             "total_pnl": float(total_pnl),
             "total_trades": total_trades,
-            "top_contributor": (max(attribution.items(), key=lambda x: x[1]["total_pnl"])[0] if attribution else None),
-            "worst_performer": (min(attribution.items(), key=lambda x: x[1]["total_pnl"])[0] if attribution else None),
+            "top_contributor": top_contributor or "",  # type: ignore
+            "worst_performer": worst_performer or "",  # type: ignore
         }
 
         return attribution
@@ -178,7 +202,7 @@ class PerformanceAttributor(BaseComponent):
 
             # Strategy return
             strategy_return = to_decimal(str(trade["pnl"])) / to_decimal(str(trade["size"]))
-            strategy_returns.append(float(strategy_return))
+            strategy_returns.append(strategy_return)
 
             # Market return for same period
             entry_time = trade["entry_time"]
@@ -191,15 +215,28 @@ class PerformanceAttributor(BaseComponent):
             exit_idx = market_data.index.get_indexer([exit_time], method="nearest")[0]
 
             if exit_idx > entry_idx:
-                period_return = (market_data.iloc[exit_idx] - market_data.iloc[entry_idx]) / market_data.iloc[entry_idx]
+                period_return = to_decimal(
+                    str(
+                        (market_data.iloc[exit_idx] - market_data.iloc[entry_idx])
+                        / market_data.iloc[entry_idx]
+                    )
+                )
             else:
-                period_return = 0
+                period_return = to_decimal("0.0")
 
             market_period_returns.append(period_return)
 
         # Calculate timing and selection components
-        avg_strategy_return = np.mean(strategy_returns) if strategy_returns else 0
-        avg_market_return = np.mean(market_period_returns) if market_period_returns else 0
+        avg_strategy_return = (
+            to_decimal(str(np.mean([float(r) for r in strategy_returns])))
+            if strategy_returns
+            else to_decimal("0")
+        )
+        avg_market_return = (
+            to_decimal(str(np.mean([float(r) for r in market_period_returns])))
+            if market_period_returns
+            else to_decimal("0")
+        )
 
         # Timing: Ability to enter/exit at right times
         timing_skill = avg_strategy_return - avg_market_return
@@ -209,14 +246,14 @@ class PerformanceAttributor(BaseComponent):
         selection_skill = avg_market_return
 
         return {
-            "average_strategy_return": float(avg_strategy_return * 100),
-            "average_market_return": float(avg_market_return * 100),
-            "timing_skill": float(timing_skill * 100),
-            "selection_skill": float(selection_skill * 100),
-            "timing_contribution_pct": float(
-                abs(timing_skill) / (abs(timing_skill) + abs(selection_skill)) * 100
+            "average_strategy_return": avg_strategy_return * to_decimal("100"),
+            "average_market_return": avg_market_return * to_decimal("100"),
+            "timing_skill": timing_skill * to_decimal("100"),
+            "selection_skill": selection_skill * to_decimal("100"),
+            "timing_contribution_pct": (
+                abs(timing_skill) / (abs(timing_skill) + abs(selection_skill)) * to_decimal("100")
                 if (timing_skill + selection_skill) != 0
-                else 50
+                else to_decimal("50.0")
             ),
         }
 
@@ -257,7 +294,9 @@ class PerformanceAttributor(BaseComponent):
             beta = 1.0
 
         # Alpha (excess return)
-        daily_risk_free_rate = float(DEFAULT_RISK_FREE_RATE) / TRADING_DAYS_PER_YEAR  # Daily risk-free rate
+        daily_risk_free_rate = (
+            float(DEFAULT_RISK_FREE_RATE) / TRADING_DAYS_PER_YEAR
+        )  # Daily risk-free rate
         market_return = np.mean(market_vals) if market_vals else mean_return
         alpha = mean_return - (daily_risk_free_rate + beta * (market_return - daily_risk_free_rate))
 
@@ -267,13 +306,17 @@ class PerformanceAttributor(BaseComponent):
         residual = mean_return - (market_contribution + alpha_contribution)
 
         return {
-            "total_return": float(mean_return * 100),
-            "market_contribution": float(market_contribution * 100),
-            "alpha_contribution": float(alpha_contribution * 100),
-            "residual": float(residual * 100),
-            "beta": float(beta),
-            "alpha_annual": float(alpha * TRADING_DAYS_PER_YEAR * 100),
-            "information_ratio": float(alpha / std_return * np.sqrt(TRADING_DAYS_PER_YEAR)) if std_return > 0 else 0,
+            "total_return": mean_return * to_decimal("100"),
+            "market_contribution": market_contribution * to_decimal("100"),
+            "alpha_contribution": alpha_contribution * to_decimal("100"),
+            "residual": residual * to_decimal("100"),
+            "beta": beta,
+            "alpha_annual": alpha * to_decimal(str(TRADING_DAYS_PER_YEAR)) * to_decimal("100"),
+            "information_ratio": to_decimal(
+                str(alpha / std_return * np.sqrt(TRADING_DAYS_PER_YEAR))
+            )
+            if std_return > 0
+            else to_decimal("0"),
         }
 
     def _cost_analysis(self, trades: list[dict[str, Any]]) -> dict[str, Any]:
@@ -281,12 +324,12 @@ class PerformanceAttributor(BaseComponent):
         if not trades:
             return {}
 
-        total_pnl = sum(t["pnl"] for t in trades)
+        total_pnl = sum(to_decimal(str(t["pnl"])) for t in trades)
 
         # Extract cost components (if available in trade data)
-        commission_costs = 0
-        slippage_costs = 0
-        spread_costs = 0
+        commission_costs = to_decimal("0.0")
+        slippage_costs = to_decimal("0.0")
+        spread_costs = to_decimal("0.0")
 
         for trade in trades:
             # Estimate costs (would be tracked in real system)
@@ -294,28 +337,30 @@ class PerformanceAttributor(BaseComponent):
 
             # Commission (assumed 0.1%)
             commission = size * to_decimal("0.001")
-            commission_costs += float(commission)
+            commission_costs += commission
 
             # Slippage (if available)
             if "slippage" in trade:
-                slippage_costs += float(to_decimal(str(trade["slippage"])) * size)
+                slippage_costs += to_decimal(str(trade["slippage"])) * size
 
             # Spread (estimated)
             spread = size * to_decimal("0.0005")
-            spread_costs += float(spread)
+            spread_costs += spread
 
         total_costs = commission_costs + slippage_costs + spread_costs
         gross_pnl = total_pnl + total_costs
 
         return {
-            "gross_pnl": float(gross_pnl),
-            "total_costs": float(total_costs),
-            "net_pnl": float(total_pnl),
-            "commission_costs": float(commission_costs),
-            "slippage_costs": float(slippage_costs),
-            "spread_costs": float(spread_costs),
-            "cost_as_pct_of_gross": float(total_costs / abs(gross_pnl) * 100 if gross_pnl != 0 else 0),
-            "cost_per_trade": float(total_costs / len(trades)) if trades else 0,
+            "gross_pnl": gross_pnl,
+            "total_costs": total_costs,
+            "net_pnl": total_pnl,
+            "commission_costs": commission_costs,
+            "slippage_costs": slippage_costs,
+            "spread_costs": spread_costs,
+            "cost_as_pct_of_gross": total_costs / abs(gross_pnl) * to_decimal("100")
+            if gross_pnl != 0
+            else to_decimal("0"),
+            "cost_per_trade": total_costs / to_decimal(len(trades)) if trades else to_decimal("0"),
         }
 
     def _calculate_summary(
@@ -340,11 +385,11 @@ class PerformanceAttributor(BaseComponent):
             alpha = timing_attr.get("timing_skill", 0)
 
         return {
-            "total_return": float(total_return),
-            "alpha": float(alpha),
-            "beta": float(beta),
-            "sharpe_ratio": 0,  # Would need full return series
-            "information_ratio": 0,  # Would need benchmark
+            "total_return": to_decimal(str(total_return)),
+            "alpha": to_decimal(str(alpha)),
+            "beta": to_decimal(str(beta)),
+            "sharpe_ratio": to_decimal("0"),  # Would need full return series
+            "information_ratio": to_decimal("0"),  # Would need benchmark
         }
 
     def calculate_rolling_attribution(
@@ -454,7 +499,9 @@ class PerformanceAttributor(BaseComponent):
 
         return "\n".join(report)
 
-    async def analyze(self, simulation_result: dict[str, Any], market_data: dict[str, pd.DataFrame]) -> dict[str, Any]:
+    async def analyze(
+        self, simulation_result: dict[str, Any], market_data: dict[str, pd.DataFrame]
+    ) -> dict[str, Any]:
         """
         Analyze performance attribution for service interface.
 

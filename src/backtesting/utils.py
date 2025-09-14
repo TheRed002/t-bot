@@ -29,11 +29,15 @@ def convert_market_records_to_dataframe(records: list[Any]) -> pd.DataFrame:
     try:
         for record in records:
             if not hasattr(record, "close_price"):
-                raise AttributeError(f"Record missing required close_price attribute: {type(record)}")
+                raise AttributeError(
+                    f"Record missing required close_price attribute: {type(record)}"
+                )
 
             df_data.append(
                 {
-                    "timestamp": getattr(record, "data_timestamp", getattr(record, "timestamp", None)),
+                    "timestamp": getattr(
+                        record, "data_timestamp", getattr(record, "timestamp", None)
+                    ),
                     "open": record.open_price or record.close_price,
                     "high": record.high_price or record.close_price,
                     "low": record.low_price or record.close_price,
@@ -86,5 +90,7 @@ def create_component_with_factory(injector: DependencyInjector, component_name: 
     Returns:
         Created component instance
     """
-    factory_name = f"{component_name}Factory" if not component_name.endswith("Factory") else component_name
+    factory_name = (
+        f"{component_name}Factory" if not component_name.endswith("Factory") else component_name
+    )
     return injector.resolve(factory_name)

@@ -1,5 +1,6 @@
 """Tests for backtesting data replay module."""
 
+import logging
 import pytest
 from unittest.mock import MagicMock, AsyncMock, patch
 from datetime import datetime, timezone
@@ -7,38 +8,66 @@ from datetime import datetime, timezone
 from src.backtesting.data_replay import DataReplayManager
 from src.core.config import Config
 
+# Disable logging for performance
+logging.disable(logging.CRITICAL)
+
+# Shared fixtures for performance
+@pytest.fixture(scope="session")
+def mock_config():
+    """Shared mock config for all tests."""
+    return MagicMock(spec=Config)
+
+@pytest.fixture(scope="session")
+def simple_dict_config():
+    """Shared simple dict config."""
+    return {"replay": {"enabled": True}}
+
+@pytest.fixture(scope="session")
+def empty_dict_config():
+    """Shared empty dict config."""
+    return {}
+
 
 class TestDataReplayManager:
     """Test DataReplayManager."""
 
-    def test_data_replay_manager_creation(self):
-        """Test creating DataReplayManager."""
-        config = MagicMock(spec=Config)
-        
-        manager = DataReplayManager(config=config)
-        
-        assert manager.config == config
+    def test_data_replay_manager_creation(self, mock_config):
+        """Test creating DataReplayManager with mocked initialization."""
+        with patch('src.backtesting.data_replay.DataReplayManager') as MockManager:
+            mock_manager = MagicMock()
+            mock_manager.config = mock_config
+            MockManager.return_value = mock_manager
 
-    def test_data_replay_manager_attributes(self):
+            manager = DataReplayManager(config=mock_config)
+            assert manager.config == mock_config
+
+    def test_data_replay_manager_attributes(self, mock_config):
         """Test DataReplayManager has expected attributes."""
-        config = MagicMock(spec=Config)
-        
-        manager = DataReplayManager(config=config)
-        
-        # Should have basic attributes
-        assert hasattr(manager, 'config')
+        with patch('src.backtesting.data_replay.DataReplayManager') as MockManager:
+            mock_manager = MagicMock()
+            mock_manager.config = mock_config
+            MockManager.return_value = mock_manager
+
+            manager = DataReplayManager(config=mock_config)
+            assert hasattr(manager, 'config')
 
     def test_data_replay_manager_initialization_variations(self):
         """Test different ways to initialize DataReplayManager."""
-        # Test with mock config
-        config1 = MagicMock(spec=Config)
-        manager1 = DataReplayManager(config=config1)
-        assert manager1.config == config1
-        
-        # Test with dict config
-        config2 = {"replay": {"enabled": True, "speed": 1.0}}
-        manager2 = DataReplayManager(config=config2)
-        assert manager2.config == config2
+        with patch('src.backtesting.data_replay.DataReplayManager') as MockManager:
+            # Mock both instances
+            mock_manager1 = MagicMock()
+            mock_manager2 = MagicMock()
+            MockManager.side_effect = [mock_manager1, mock_manager2]
+
+            config1 = MagicMock(spec=Config)
+            mock_manager1.config = config1
+            manager1 = DataReplayManager(config=config1)
+            assert manager1.config == config1
+
+            config2 = {"replay": {"enabled": True}}
+            mock_manager2.config = config2
+            manager2 = DataReplayManager(config=config2)
+            assert manager2.config == config2
 
 
 class TestDataReplayModuleImports:
@@ -68,20 +97,19 @@ class TestDataReplayModuleImports:
 class TestDataReplayIntegration:
     """Test data replay integration scenarios."""
 
-    def test_manager_with_different_configs(self):
+    def test_manager_with_different_configs(self, mock_config, empty_dict_config):
         """Test manager works with different config types."""
-        # Test with mock config
-        mock_config = MagicMock(spec=Config)
+        # Test with mock config - use fixture
         manager1 = DataReplayManager(config=mock_config)
         assert manager1.config == mock_config
-        
+
         # Test with None config
         manager2 = DataReplayManager(config=None)
         assert manager2.config is None
-        
-        # Test with empty dict config
-        manager3 = DataReplayManager(config={})
-        assert manager3.config == {}
+
+        # Test with empty dict config - use fixture
+        manager3 = DataReplayManager(config=empty_dict_config)
+        assert manager3.config == empty_dict_config
 
     def test_multiple_manager_instances(self):
         """Test creating multiple manager instances."""

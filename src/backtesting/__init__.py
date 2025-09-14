@@ -12,73 +12,44 @@ CRITICAL: This module integrates with P-001 (types, exceptions, config),
 P-002A (error handling), P-007A (utils), and P-008/P-009 (risk management).
 """
 
-
 # Lazy imports to avoid circular dependencies
+_LAZY_IMPORTS = {
+    "MonteCarloAnalyzer": ("analysis", "MonteCarloAnalyzer"),
+    "WalkForwardAnalyzer": ("analysis", "WalkForwardAnalyzer"),
+    "PerformanceAttributor": ("attribution", "PerformanceAttributor"),
+    "DataReplayManager": ("data_replay", "DataReplayManager"),
+    "ReplayMode": ("data_replay", "ReplayMode"),
+    "BacktestConfig": ("engine", "BacktestConfig"),
+    "BacktestEngine": ("engine", "BacktestEngine"),
+    "BacktestResult": ("engine", "BacktestResult"),
+    "BacktestMetrics": ("metrics", "BacktestMetrics"),
+    "MetricsCalculator": ("metrics", "MetricsCalculator"),
+    "SimulationConfig": ("simulator", "SimulationConfig"),
+    "TradeSimulator": ("simulator", "TradeSimulator"),
+    "BacktestRequest": ("service", "BacktestRequest"),
+    "BacktestService": ("service", "BacktestService"),
+    "BacktestController": ("controller", "BacktestController"),
+    "BacktestRepository": ("repository", "BacktestRepository"),
+    "BacktestFactory": ("factory", "BacktestFactory"),
+    "get_backtest_service": ("di_registration", "get_backtest_service"),
+}
+
+
 def __getattr__(name: str):
-    if name == "MonteCarloAnalyzer":
-        from .analysis import MonteCarloAnalyzer
-
-        return MonteCarloAnalyzer
-    elif name == "WalkForwardAnalyzer":
-        from .analysis import WalkForwardAnalyzer
-
-        return WalkForwardAnalyzer
-    elif name == "PerformanceAttributor":
-        from .attribution import PerformanceAttributor
-
-        return PerformanceAttributor
-    elif name == "DataReplayManager":
-        from .data_replay import DataReplayManager
-
-        return DataReplayManager
-    elif name == "ReplayMode":
-        from .data_replay import ReplayMode
-
-        return ReplayMode
-    elif name == "BacktestConfig":
-        from .engine import BacktestConfig
-
-        return BacktestConfig
-    elif name == "BacktestEngine":
-        from .engine import BacktestEngine
-
-        return BacktestEngine
-    elif name == "BacktestResult":
-        from .engine import BacktestResult
-
-        return BacktestResult
-    elif name == "BacktestMetrics":
-        from .metrics import BacktestMetrics
-
-        return BacktestMetrics
-    elif name == "MetricsCalculator":
-        from .metrics import MetricsCalculator
-
-        return MetricsCalculator
-    elif name == "SimulationConfig":
-        from .simulator import SimulationConfig
-
-        return SimulationConfig
-    elif name == "TradeSimulator":
-        from .simulator import TradeSimulator
-
-        return TradeSimulator
-    elif name == "BacktestRequest":
-        from .service import BacktestRequest
-
-        return BacktestRequest
-    elif name == "BacktestService":
-        from .service import BacktestService
-
-        return BacktestService
-    else:
-        raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
+    if name in _LAZY_IMPORTS:
+        module_name, attr_name = _LAZY_IMPORTS[name]
+        module = __import__(f"{__name__}.{module_name}", fromlist=[attr_name])
+        return getattr(module, attr_name)
+    raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
 
 
 __all__ = [
     "BacktestConfig",
+    "BacktestController",
     "BacktestEngine",
+    "BacktestFactory",
     "BacktestMetrics",
+    "BacktestRepository",
     "BacktestRequest",
     "BacktestResult",
     "BacktestService",
@@ -90,6 +61,7 @@ __all__ = [
     "SimulationConfig",
     "TradeSimulator",
     "WalkForwardAnalyzer",
+    "get_backtest_service",
 ]
 
 # Version information

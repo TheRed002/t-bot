@@ -7,13 +7,15 @@ order book modeling, market impact, and latency simulation.
 
 import asyncio
 import random
+import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pandas as pd
 from pydantic import BaseModel, Field
 
+from src.core.exceptions import ValidationError
 from src.core.logging import get_logger
 from src.core.types import (
     ExecutionAlgorithm,
@@ -22,10 +24,13 @@ from src.core.types import (
     OrderStatus,
     OrderType,
 )
-from src.error_handling.decorators import with_error_context
+from src.utils.backtesting_decorators import trading_operation
 from src.utils.decimal_utils import to_decimal
-from src.utils.decorators import time_execution
-from src.utils.timezone_utils import ensure_utc_timezone
+from src.utils.financial_calculations import calculate_daily_returns, calculate_market_impact
+from src.utils.initialization_helpers import log_configuration_initialization
+
+if TYPE_CHECKING:
+    from src.core.types import MarketData as CoreMarketData
 
 logger = get_logger(__name__)
 
@@ -34,22 +39,35 @@ class SimulationConfig(BaseModel):
     """Configuration for trade simulation."""
 
     # Core simulation parameters
-    initial_capital: Decimal = Field(default_factory=lambda: to_decimal("10000"), description="Initial capital")
-    commission_rate: Decimal = Field(default_factory=lambda: to_decimal("0.001"), description="Commission rate")
-    slippage_rate: Decimal = Field(default_factory=lambda: to_decimal("0.0005"), description="Slippage rate")
+    initial_capital: Decimal = Field(
+        default_factory=lambda: to_decimal("10000"), description="Initial capital"
+    )
+    commission_rate: Decimal = Field(
+        default_factory=lambda: to_decimal("0.001"), description="Commission rate"
+    )
+    slippage_rate: Decimal = Field(
+        default_factory=lambda: to_decimal("0.0005"), description="Slippage rate"
+    )
     enable_shorting: bool = Field(default=False, description="Enable short selling")
     max_positions: int = Field(default=5, description="Maximum open positions")
 
     # Advanced simulation features
     enable_partial_fills: bool = Field(default=True, description="Enable partial order fills")
-    enable_market_impact: bool = Field(default=True, description="Model market impact of large orders")
-    enable_latency: bool = Field(default=True, description="Simulate network and processing latency")
-    latency_ms: tuple[int, int] = Field(default=(10, 100), description="Min and max latency in milliseconds")
+    enable_market_impact: bool = Field(
+        default=True, description="Model market impact of large orders"
+    )
+    enable_latency: bool = Field(
+        default=True, description="Simulate network and processing latency"
+    )
+    latency_ms: tuple[int, int] = Field(
+        default=(10, 100), description="Min and max latency in milliseconds"
+    )
     market_impact_factor: Decimal = Field(
         default_factory=lambda: to_decimal("0.0001"), description="Market impact per unit volume"
     )
     liquidity_factor: Decimal = Field(
-        default_factory=lambda: to_decimal("0.1"), description="Available liquidity as fraction of volume"
+        default_factory=lambda: to_decimal("0.1"),
+        description="Available liquidity as fraction of volume",
     )
     rejection_probability: Decimal = Field(
         default_factory=lambda: to_decimal("0.01"), description="Probability of order rejection"
@@ -97,10 +115,9 @@ class TradeSimulator:
         self._executed_trades: list[dict[str, Any]] = []
         self._pending_orders: dict[str, SimulatedOrder] = {}
 
-        logger.info("TradeSimulator initialized", config=config.model_dump())
+        log_configuration_initialization("TradeSimulator", config, logger_instance=logger)
 
-    @time_execution
-    @with_error_context(component="trading", operation="simulate_order_execution")
+    @trading_operation(operation="simulate_order_execution")
     async def execute_order(
         self,
         order_request: OrderRequest,
@@ -123,7 +140,6 @@ class TradeSimulator:
             Execution result with fill details
         """
         # Create simulated order
-        import uuid
 
         simulated_order = SimulatedOrder(
             request=order_request,
@@ -143,13 +159,19 @@ class TradeSimulator:
 
         # Apply execution algorithm modifications
         if execution_algorithm != ExecutionAlgorithm.MARKET:
-            result = await self._execute_with_algorithm(simulated_order, market_data, order_book_depth)
+            result = await self._execute_with_algorithm(
+                simulated_order, market_data, order_book_depth
+            )
         else:
             # Determine execution based on order type
             if order_request.order_type == OrderType.MARKET:
-                result = await self._execute_market_order(simulated_order, market_data, order_book_depth)
+                result = await self._execute_market_order(
+                    simulated_order, market_data, order_book_depth
+                )
             elif order_request.order_type == OrderType.LIMIT:
-                result = await self._execute_limit_order(simulated_order, market_data, order_book_depth)
+                result = await self._execute_limit_order(
+                    simulated_order, market_data, order_book_depth
+                )
             else:
                 result = await self._execute_stop_order(simulated_order, market_data)
 
@@ -196,7 +218,9 @@ class TradeSimulator:
 
         # Apply market impact
         if self.config.enable_market_impact:
-            impact = self._calculate_market_impact(order.request.quantity, to_decimal(market_data["volume"]))
+            impact = self._calculate_market_impact(
+                order.request.quantity, to_decimal(market_data["volume"])
+            )
             if order.request.side == OrderSide.BUY:
                 execution_price = base_price * (to_decimal("1") + impact)
             else:
@@ -206,7 +230,9 @@ class TradeSimulator:
 
         # Determine fill size (considering liquidity)
         if self.config.enable_partial_fills:
-            available_liquidity = to_decimal(market_data["volume"]) * to_decimal(self.config.liquidity_factor)
+            available_liquidity = to_decimal(market_data["volume"]) * to_decimal(
+                self.config.liquidity_factor
+            )
             filled_size = min(order.request.quantity, available_liquidity)
             status = "filled" if filled_size == order.request.quantity else "partial"
         else:
@@ -219,11 +245,11 @@ class TradeSimulator:
             "status": status,
             "side": order.request.side.value,
             "type": order.request.order_type.value,
-            "requested_size": float(order.request.quantity),
-            "filled_size": float(filled_size),
-            "average_price": float(execution_price),
+            "requested_size": order.request.quantity,
+            "filled_size": filled_size,
+            "average_price": execution_price,
             "timestamp": datetime.now(timezone.utc),
-            "slippage": float(abs(execution_price - base_price) / base_price),
+            "slippage": abs(execution_price - base_price) / base_price,
         }
 
     async def _execute_limit_order(
@@ -238,8 +264,13 @@ class TradeSimulator:
         # Check if limit price is met
         can_execute = False
         if order.request.price is None:
-            # Should not happen for limit orders
-            return self._create_rejection_result(order, "Limit order missing price")
+            # Should not happen for limit orders - use proper core exception
+            raise ValidationError(
+                "Limit order missing price",
+                field_name="price",
+                field_value=None,
+                error_code="ORDER_001",
+            )
 
         if order.request.side == OrderSide.BUY:
             # Buy limit: execute if market price <= limit price
@@ -265,7 +296,9 @@ class TradeSimulator:
 
         # Execute the order
         if self.config.enable_partial_fills:
-            available_liquidity = to_decimal(market_data["volume"]) * to_decimal(self.config.liquidity_factor)
+            available_liquidity = to_decimal(market_data["volume"]) * to_decimal(
+                self.config.liquidity_factor
+            )
             filled_size = min(order.request.quantity, available_liquidity)
             status = "filled" if filled_size == order.request.quantity else "partial"
         else:
@@ -278,14 +311,16 @@ class TradeSimulator:
             "status": status,
             "side": order.request.side.value,
             "type": order.request.order_type.value,
-            "requested_size": float(order.request.quantity),
-            "filled_size": float(filled_size),
-            "average_price": float(execution_price),
-            "limit_price": float(order.request.price),
+            "requested_size": order.request.quantity,
+            "filled_size": filled_size,
+            "average_price": execution_price,
+            "limit_price": order.request.price,
             "timestamp": datetime.now(timezone.utc),
         }
 
-    async def _execute_stop_order(self, order: SimulatedOrder, market_data: pd.Series) -> dict[str, Any]:
+    async def _execute_stop_order(
+        self, order: SimulatedOrder, market_data: pd.Series
+    ) -> dict[str, Any]:
         """Execute stop-loss or take-profit order."""
         current_price = to_decimal(market_data["close"])
 
@@ -293,7 +328,12 @@ class TradeSimulator:
         triggered = False
         stop_price = order.request.stop_price or order.request.price
         if stop_price is None:
-            return self._create_rejection_result(order, "Stop order missing price")
+            raise ValidationError(
+                "Stop order missing price",
+                field_name="stop_price",
+                field_value=None,
+                error_code="ORDER_002",
+            )
 
         if order.request.order_type == OrderType.STOP_LOSS:
             if order.request.side == OrderSide.SELL:
@@ -402,12 +442,12 @@ class TradeSimulator:
             "side": order.request.side.value,
             "type": order.request.order_type.value,
             "algorithm": order.execution_algorithm.value,
-            "requested_size": float(order.request.quantity),
-            "filled_size": float(total_filled),
-            "average_price": float(average_price),
+            "requested_size": order.request.quantity,
+            "filled_size": total_filled,
+            "average_price": average_price,
             "timestamp": datetime.now(timezone.utc),
             "num_slices": num_slices,
-            "slippage": float(abs(average_price - base_price) / base_price),
+            "slippage": abs(average_price - base_price) / base_price,
         }
 
     async def _execute_vwap(
@@ -420,7 +460,9 @@ class TradeSimulator:
 
         # Calculate execution price based on VWAP
         # In real VWAP, we'd use volume profile, but here we simulate
-        vwap_price = (to_decimal(market_data["high"]) + to_decimal(market_data["low"]) + base_price) / to_decimal("3")
+        vwap_price = (
+            to_decimal(market_data["high"]) + to_decimal(market_data["low"]) + base_price
+        ) / to_decimal("3")
 
         # Apply market impact
         impact = self._calculate_market_impact(order.request.quantity, volume)
@@ -436,12 +478,12 @@ class TradeSimulator:
             "side": order.request.side.value,
             "type": order.request.order_type.value,
             "algorithm": order.execution_algorithm.value,
-            "requested_size": float(order.request.quantity),
-            "filled_size": float(order.request.quantity),
-            "average_price": float(execution_price),
-            "vwap_price": float(vwap_price),
+            "requested_size": order.request.quantity,
+            "filled_size": order.request.quantity,
+            "average_price": execution_price,
+            "vwap_price": vwap_price,
             "timestamp": datetime.now(timezone.utc),
-            "slippage": float(abs(execution_price - base_price) / base_price),
+            "slippage": abs(execution_price - base_price) / base_price,
         }
 
     async def _execute_iceberg(
@@ -488,11 +530,15 @@ class TradeSimulator:
         )
 
         # Combine results
-        total_filled = to_decimal(visible_result["filled_size"]) + to_decimal(hidden_result["filled_size"])
+        total_filled = to_decimal(visible_result["filled_size"]) + to_decimal(
+            hidden_result["filled_size"]
+        )
         total_cost = to_decimal(visible_result["filled_size"]) * to_decimal(
             visible_result["average_price"]
         ) + to_decimal(hidden_result["filled_size"]) * to_decimal(hidden_result["average_price"])
-        average_price = total_cost / total_filled if total_filled > 0 else to_decimal(market_data["close"])
+        average_price = (
+            total_cost / total_filled if total_filled > 0 else to_decimal(market_data["close"])
+        )
 
         return {
             "order_id": order.order_id,
@@ -501,20 +547,20 @@ class TradeSimulator:
             "side": order.request.side.value,
             "type": order.request.order_type.value,
             "algorithm": order.execution_algorithm.value,
-            "requested_size": float(order.request.quantity),
-            "filled_size": float(total_filled),
-            "average_price": float(average_price),
-            "visible_size": float(visible_qty),
-            "hidden_size": float(hidden_qty),
+            "requested_size": order.request.quantity,
+            "filled_size": total_filled,
+            "average_price": average_price,
+            "visible_size": visible_qty,
+            "hidden_size": hidden_qty,
             "timestamp": datetime.now(timezone.utc),
-            "slippage": float(abs(average_price - to_decimal(market_data["close"])) / to_decimal(market_data["close"])),
+            "slippage": abs(average_price - to_decimal(market_data["close"]))
+            / to_decimal(market_data["close"]),
         }
 
     def _calculate_market_impact(self, order_size: Decimal, volume: Decimal) -> Decimal:
         """Calculate market impact based on order size."""
         if self.slippage_model:
             # Use sophisticated slippage model from execution module
-            from src.core.types import MarketData as CoreMarketData
 
             # Create a mock market data object for slippage calculation
             mock_market_data = CoreMarketData(
@@ -541,20 +587,9 @@ class TradeSimulator:
                 logger.warning("Slippage model doesn't have calculate_slippage method")
                 return self.config.market_impact_factor
         else:
-            # Fallback to simple square-root model
-            if volume == to_decimal("0"):
-                return self.config.market_impact_factor * to_decimal("10")  # High impact
-
-            # Square-root market impact model: impact = k * sqrt(order_size / volume)
-            relative_size = order_size / volume
-            # Use square root for more realistic impact
-            import math
-
-            sqrt_relative_size = to_decimal(str(math.sqrt(float(relative_size))))
-            impact = self.config.market_impact_factor * sqrt_relative_size
-
-            # Cap maximum impact
-            return min(impact, to_decimal("0.05"))  # Max 5% impact
+            # Use shared market impact calculation
+            base_impact = calculate_market_impact(order_size, volume)
+            return base_impact * self.config.market_impact_factor
 
     async def check_pending_orders(self, market_data: dict[str, pd.Series]) -> list[dict[str, Any]]:
         """
@@ -572,9 +607,13 @@ class TradeSimulator:
             if order.request.symbol in market_data:
                 # Re-check order conditions
                 if order.request.order_type == OrderType.LIMIT:
-                    result = await self._execute_limit_order(order, market_data[order.request.symbol])
+                    result = await self._execute_limit_order(
+                        order, market_data[order.request.symbol]
+                    )
                 else:
-                    result = await self._execute_stop_order(order, market_data[order.request.symbol])
+                    result = await self._execute_stop_order(
+                        order, market_data[order.request.symbol]
+                    )
 
                 # Remove from pending if executed
                 if result["status"] in ["filled", "partial", "rejected"]:
@@ -658,160 +697,13 @@ class TradeSimulator:
             logger.error(f"TradeSimulator cleanup error: {e}")
             # Don't re-raise cleanup errors to avoid masking original issues
 
-    @with_error_context(component="backtesting", operation="run_simulation")
-    async def run_simulation(
-        self,
-        config: SimulationConfig,
-        strategy: Any,
-        risk_manager: Any,
-        market_data: dict[str, pd.DataFrame],
-        start_date: datetime,
-        end_date: datetime,
-    ) -> dict[str, Any]:
-        """Run complete backtest simulation using internal simulation logic."""
-        from src.strategies.interfaces import BaseStrategyInterface
-
-        # Validate strategy type
-        if not isinstance(strategy, BaseStrategyInterface):
-            raise TypeError(f"Expected BaseStrategyInterface, got {type(strategy).__name__}")
-
-        # Initialize simulation state
-        capital = to_decimal(config.initial_capital)
-        positions: dict[str, dict[str, Any]] = {}
-        trades: list[dict[str, Any]] = []
-        equity_curve: list[dict[str, Any]] = []
-
-        # Get all timestamps from market data
-        all_timestamps = set()
-        for data in market_data.values():
-            all_timestamps.update(data.index)
-        timestamps = sorted(all_timestamps)
-
-        # Initialize strategy if it has initialization method
-        if hasattr(strategy, "start") and callable(strategy.start):
-            try:
-                await strategy.start()
-            except Exception as e:
-                logger.warning(f"Strategy start() failed: {e}")
-
-        # Run simulation loop
-        for timestamp in timestamps:
-            # Get current market data for all symbols
-            current_data = {}
-            for symbol, data in market_data.items():
-                if timestamp in data.index:
-                    current_data[symbol] = data.loc[timestamp]
-
-            if not current_data:
-                continue
-
-            # Generate signals for all symbols
-            all_signals = {}
-            for symbol, data_row in current_data.items():
-                try:
-                    # Create market data object for strategy
-                    from src.core.types import MarketData as CoreMarketData
-
-                    # Ensure timestamp has timezone using shared utility
-                    current_time_with_tz = ensure_utc_timezone(timestamp)
-
-                    market_data_obj = CoreMarketData(
-                        symbol=symbol,
-                        timestamp=current_time_with_tz,
-                        close=to_decimal(data_row["close"]),
-                        volume=to_decimal(data_row["volume"]),
-                        high=to_decimal(data_row["high"]),
-                        low=to_decimal(data_row["low"]),
-                        open=to_decimal(data_row["open"]),
-                        exchange="backtest",
-                    )
-
-                    # Generate signals
-                    signals = await strategy.generate_signals(market_data_obj)
-                    if signals:
-                        all_signals[symbol] = signals[0]
-                except Exception as e:
-                    logger.error(f"Signal generation failed for {symbol}: {e}")
-
-            # Execute trades based on signals
-            for symbol, signal in all_signals.items():
-                if symbol not in current_data:
-                    continue
-
-                price = float(current_data[symbol]["close"])
-
-                # Simple execution logic
-                if signal.direction.name == "BUY":
-                    if len(positions) < config.max_positions:
-                        # Open new position
-                        position_size = capital / to_decimal(config.max_positions)
-                        execution_price = to_decimal(price) * (to_decimal("1") + config.slippage_rate)
-
-                        positions[symbol] = {
-                            "entry_time": timestamp,
-                            "entry_price": float(execution_price),
-                            "size": float(position_size),
-                            "side": "BUY",
-                        }
-                        capital -= position_size
-
-                elif signal.direction.name == "SELL" and symbol in positions:
-                    # Close position
-                    position = positions[symbol]
-                    execution_price = to_decimal(price) * (to_decimal("1") - config.slippage_rate)
-                    pnl = (execution_price - to_decimal(position["entry_price"])) * to_decimal(position["size"])
-
-                    # Apply commission
-                    commission = to_decimal(position["size"]) * config.commission_rate
-                    pnl_after_commission = pnl - commission
-
-                    # Record trade
-                    trades.append(
-                        {
-                            "symbol": symbol,
-                            "entry_time": position["entry_time"],
-                            "exit_time": timestamp,
-                            "entry_price": position["entry_price"],
-                            "exit_price": execution_price,
-                            "size": position["size"],
-                            "pnl": pnl_after_commission,
-                            "side": position["side"],
-                        }
-                    )
-
-                    capital += to_decimal(position["size"]) + to_decimal(pnl_after_commission)
-                    del positions[symbol]
-
-            # Record equity
-            total_equity = float(capital)
-            for symbol, position in positions.items():
-                if symbol in current_data:
-                    current_price = float(current_data[symbol]["close"])
-                    unrealized_pnl = (current_price - position["entry_price"]) * position["size"]
-                    total_equity += unrealized_pnl
-
-            equity_curve.append({"timestamp": timestamp, "equity": total_equity})
-
-        # Return results in expected format
+    async def get_simulation_results(self) -> dict[str, Any]:
+        """Get current simulation results."""
         return {
-            "equity_curve": equity_curve,
-            "trades": trades,
-            "daily_returns": self._calculate_daily_returns(equity_curve),
-            "positions": positions,
+            "executed_trades": self._executed_trades.copy(),
             "execution_stats": self.get_execution_statistics(),
         }
 
     def _calculate_daily_returns(self, equity_curve: list[dict[str, Any]]) -> list[float]:
         """Calculate daily returns from equity curve."""
-        if not equity_curve:
-            return []
-
-        df = pd.DataFrame(equity_curve)
-        if df.empty:
-            return []
-
-        df.set_index("timestamp", inplace=True)
-        daily_equity = df.resample("D")["equity"].last()
-        daily_returns = daily_equity.pct_change().dropna().tolist()
-
-        return daily_returns
+        return calculate_daily_returns(equity_curve)

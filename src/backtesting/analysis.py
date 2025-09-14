@@ -13,13 +13,14 @@ import numpy as np
 import pandas as pd
 
 from src.core.base.component import BaseComponent
-
-if TYPE_CHECKING:
-    pass
-from src.core.exceptions import TradingBotError
+from src.core.exceptions import ServiceError, TradingBotError
 from src.utils.config_conversion import convert_config_to_dict
 from src.utils.decimal_utils import to_decimal
 from src.utils.decorators import time_execution
+from src.utils.financial_calculations import calculate_simulation_metrics
+
+if TYPE_CHECKING:
+    pass
 
 
 class MonteCarloAnalyzer(BaseComponent):
@@ -53,7 +54,7 @@ class MonteCarloAnalyzer(BaseComponent):
         """
         # Convert config to dict using shared utility
         config_dict = convert_config_to_dict(config)
-        super().__init__(name="MonteCarloAnalyzer", config=config_dict)
+        super().__init__(name="MonteCarloAnalyzer", config=config_dict)  # type: ignore
         self.config = config
         self.num_simulations = num_simulations
         self.confidence_level = confidence_level
@@ -70,7 +71,9 @@ class MonteCarloAnalyzer(BaseComponent):
         )
 
     @time_execution
-    async def analyze_trades(self, trades: list[dict[str, Any]], initial_capital: Decimal) -> dict[str, Any]:
+    async def analyze_trades(
+        self, trades: list[dict[str, Any]], initial_capital: Decimal
+    ) -> dict[str, Any]:
         """
         Perform Monte Carlo analysis on trade sequences.
 
@@ -91,7 +94,9 @@ class MonteCarloAnalyzer(BaseComponent):
             trade_returns = [to_decimal(t["pnl"]) / initial_capital for t in trades]
         except (KeyError, ZeroDivisionError, TypeError) as e:
             self.logger.error(f"Failed to extract trade returns: {e}")
-            raise TradingBotError(f"Invalid trade data or zero initial capital: {e}", "BACKTEST_002") from e
+            raise TradingBotError(
+                f"Invalid trade data or zero initial capital: {e}", "BACKTEST_002"
+            ) from e
 
         # Run simulations
         simulation_results = []
@@ -99,11 +104,15 @@ class MonteCarloAnalyzer(BaseComponent):
         for _i in range(self.num_simulations):
             try:
                 # Resample trades with replacement
-                resampled_indices = np.random.choice(len(trade_returns), size=len(trade_returns), replace=True)
+                resampled_indices = np.random.choice(
+                    len(trade_returns), size=len(trade_returns), replace=True
+                )
                 resampled_returns = [trade_returns[idx] for idx in resampled_indices]
 
                 # Calculate cumulative return
-                cumulative_return = float(np.prod([1 + float(r) for r in resampled_returns]) - 1)
+                cumulative_return = to_decimal(
+                    str(np.prod([1 + float(r) for r in resampled_returns]) - 1)
+                )
 
                 # Calculate metrics for this simulation
                 sim_metrics = self._calculate_simulation_metrics(resampled_returns, initial_capital)
@@ -185,7 +194,9 @@ class MonteCarloAnalyzer(BaseComponent):
                 self.num_simulations = original_num_sims
 
     @time_execution
-    async def analyze_returns(self, daily_returns: list[float], num_days: int = 252) -> dict[str, Any]:
+    async def analyze_returns(
+        self, daily_returns: list[float], num_days: int = 252
+    ) -> dict[str, Any]:
         """
         Perform Monte Carlo simulation on return paths.
 
@@ -250,41 +261,17 @@ class MonteCarloAnalyzer(BaseComponent):
 
         return results
 
-    def _calculate_simulation_metrics(self, returns: list[Decimal], initial_capital: Decimal) -> dict[str, Any]:
+    def _calculate_simulation_metrics(
+        self, returns: list[Decimal], initial_capital: Decimal
+    ) -> dict[str, Any]:
         """Calculate metrics for a single simulation."""
-        if not returns:
-            return {}
-
-        # Calculate equity curve
-        equity = initial_capital
-        equity_curve = [equity]
-
-        for ret in returns:
-            equity *= to_decimal("1") + ret
-            equity_curve.append(equity)
-
-        # Calculate drawdown
-        peak = initial_capital
-        max_dd: Decimal = to_decimal("0")
-
-        for value in equity_curve:
-            if value > peak:
-                peak = value
-            dd = (peak - value) / peak
-            max_dd = max(max_dd, dd)
-
-        # Calculate Sharpe ratio
-        returns_array = np.array([float(r) for r in returns])
-        if len(returns_array) > 1:
-            sharpe = np.mean(returns_array) / np.std(returns_array) * np.sqrt(252)
-        else:
-            sharpe = 0
-
+        metrics = calculate_simulation_metrics(returns, initial_capital)
+        # Convert Decimal values to float for compatibility
         return {
-            "final_equity": float(equity),
-            "max_drawdown": float(max_dd),
-            "sharpe_ratio": float(sharpe),
-            "volatility": float(np.std(returns_array)) if len(returns_array) > 1 else 0.0,
+            "final_equity": float(metrics.get("final_equity", 0)),
+            "max_drawdown": float(metrics.get("max_drawdown", 0)),
+            "sharpe_ratio": float(metrics.get("sharpe_ratio", 0)),
+            "volatility": float(metrics.get("volatility", 0)),
         }
 
     def _analyze_simulation_results(self, results: list[dict[str, Any]]) -> dict[str, Any]:
@@ -327,9 +314,13 @@ class MonteCarloAnalyzer(BaseComponent):
             },
             "risk_metrics": {
                 "probability_loss": float(np.mean([r < 0 for r in returns])),
-                "expected_shortfall": float(np.mean([r for r in returns if r < np.percentile(returns, 5)])),
+                "expected_shortfall": float(
+                    np.mean([r for r in returns if r < np.percentile(returns, 5)])
+                ),
                 "tail_ratio": float(
-                    np.percentile(returns, 95) / abs(np.percentile(returns, 5)) if np.percentile(returns, 5) != 0 else 0
+                    np.percentile(returns, 95) / abs(np.percentile(returns, 5))
+                    if np.percentile(returns, 5) != 0
+                    else 0
                 ),
             },
         }
@@ -368,7 +359,7 @@ class WalkForwardAnalyzer(BaseComponent):
         """
         # Convert config to dict using shared utility
         config_dict = convert_config_to_dict(config)
-        super().__init__(name="WalkForwardAnalyzer", config=config_dict)
+        super().__init__(name="WalkForwardAnalyzer", config=config_dict)  # type: ignore
         self.config = config
         self.optimization_window = optimization_window
         self.test_window = test_window
@@ -487,7 +478,9 @@ class WalkForwardAnalyzer(BaseComponent):
             "performance_degradation": 0.0,
         }
 
-    def _generate_windows(self, data: pd.DataFrame) -> list[tuple[datetime, datetime, datetime, datetime]]:
+    def _generate_windows(
+        self, data: pd.DataFrame
+    ) -> list[tuple[datetime, datetime, datetime, datetime]]:
         """Generate optimization and test windows."""
         windows: list[tuple[datetime, datetime, datetime, datetime]] = []
 
@@ -533,7 +526,7 @@ class WalkForwardAnalyzer(BaseComponent):
             # Run backtest with these parameters
             strategy = strategy_class(**params)
 
-            from src.backtesting.engine import BacktestConfig, BacktestEngine
+            from src.backtesting.engine import BacktestConfig
 
             config = BacktestConfig(
                 start_date=data.index[0],
@@ -544,7 +537,10 @@ class WalkForwardAnalyzer(BaseComponent):
             if self.engine_factory:
                 engine = self.engine_factory(config, strategy)
             else:
-                engine = BacktestEngine(config, strategy)
+                raise ServiceError(
+                    "BacktestEngineFactory not available - cannot create engine",
+                    error_code="ANALYSIS_001",
+                )
             result = await engine.run()
 
             # Get optimization metric
@@ -570,7 +566,7 @@ class WalkForwardAnalyzer(BaseComponent):
 
         # Run backtest
         strategy = strategy_class(**params)
-        from src.backtesting.engine import BacktestConfig, BacktestEngine
+        from src.backtesting.engine import BacktestConfig
 
         config = BacktestConfig(
             start_date=data.index[0],
@@ -581,7 +577,10 @@ class WalkForwardAnalyzer(BaseComponent):
         if self.engine_factory:
             engine = self.engine_factory(config, strategy)
         else:
-            engine = BacktestEngine(config, strategy)
+            raise ServiceError(
+                "BacktestEngineFactory not available - cannot create engine",
+                error_code="ANALYSIS_002",
+            )
         result = await engine.run()
 
         return {
@@ -591,10 +590,14 @@ class WalkForwardAnalyzer(BaseComponent):
             "win_rate": result.win_rate,
         }
 
-    def _analyze_results(self, window_results: list[dict[str, Any]], optimization_metric: str) -> dict[str, Any]:
+    def _analyze_results(
+        self, window_results: list[dict[str, Any]], optimization_metric: str
+    ) -> dict[str, Any]:
         """Analyze walk-forward results."""
         # Extract performance metrics
-        in_sample_scores = [w["in_sample_performance"].get(optimization_metric, 0) for w in window_results]
+        in_sample_scores = [
+            w["in_sample_performance"].get(optimization_metric, 0) for w in window_results
+        ]
         out_sample_scores = [
             w["out_of_sample_performance"].get(
                 optimization_metric.replace("_", " ").title().replace(" ", "_").lower(), 0
@@ -618,7 +621,9 @@ class WalkForwardAnalyzer(BaseComponent):
                 "avg_out_sample_performance": float(np.mean(out_sample_scores)),
                 "efficiency_ratio": float(efficiency_ratio),
                 "performance_degradation": float(
-                    (np.mean(in_sample_scores) - np.mean(out_sample_scores)) / np.mean(in_sample_scores) * 100
+                    (np.mean(in_sample_scores) - np.mean(out_sample_scores))
+                    / np.mean(in_sample_scores)
+                    * 100
                     if np.mean(in_sample_scores) > 0
                     else 0
                 ),
@@ -643,7 +648,11 @@ class WalkForwardAnalyzer(BaseComponent):
         stability = {}
 
         for param in all_params:
-            values = [w["best_parameters"].get(param) for w in window_results if param in w.get("best_parameters", {})]
+            values = [
+                w["best_parameters"].get(param)
+                for w in window_results
+                if param in w.get("best_parameters", {})
+            ]
 
             if values:
                 # Calculate stability metrics
@@ -653,7 +662,9 @@ class WalkForwardAnalyzer(BaseComponent):
                     stability[param] = {
                         "mean": float(np.mean(values)),
                         "std": float(np.std(values)),
-                        "cv": (float(np.std(values) / np.mean(values)) if np.mean(values) != 0 else 0),
+                        "cv": (
+                            float(np.std(values) / np.mean(values)) if np.mean(values) != 0 else 0
+                        ),
                     }
                 else:
                     # For non-numeric parameters
