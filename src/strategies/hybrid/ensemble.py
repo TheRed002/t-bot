@@ -15,7 +15,6 @@ Key Features:
 - Risk-adjusted performance evaluation
 """
 
-import asyncio
 from decimal import Decimal
 from typing import Any
 
@@ -33,6 +32,7 @@ from src.risk_management.regime_detection import MarketRegimeDetector
 
 # MANDATORY: Import from P-011
 from src.strategies.base import BaseStrategy
+from src.strategies.dependencies import StrategyServiceContainer
 
 # MANDATORY: Import from P-007A
 from src.utils.decorators import time_execution
@@ -44,9 +44,9 @@ class StrategyPerformanceTracker:
     def __init__(self, strategy_name: str):
         """Initialize performance tracker for a strategy."""
         self.strategy_name = strategy_name
-        self.trades = []
-        self.signals = []
-        self.returns = []
+        self.trades: list[Any] = []
+        self.signals: list[Any] = []
+        self.returns: list[Any] = []
         self.win_rate = 0.0
         self.sharpe_ratio = 0.0
         self.max_drawdown = 0.0
@@ -56,7 +56,7 @@ class StrategyPerformanceTracker:
 
         # Rolling metrics
         self.rolling_window = 50
-        self.recent_performance = []
+        self.recent_performance: list[Any] = []
 
     def add_signal(self, signal: Signal) -> None:
         """Add a signal from the strategy."""
@@ -184,7 +184,7 @@ class CorrelationAnalyzer:
     def calculate_correlation_matrix(self) -> dict[str, dict[str, float]]:
         """Calculate correlation matrix between all strategies."""
         strategies = list(self.strategy_returns.keys())
-        correlation_matrix = {}
+        correlation_matrix: dict[str, dict[str, float]] = {}
 
         for strategy1 in strategies:
             correlation_matrix[strategy1] = {}
@@ -289,11 +289,11 @@ class VotingMechanism:
         template_signal = signals[0][1]
 
         return Signal(
-            direction=direction,
-            confidence=confidence,
-            timestamp=template_signal.timestamp,
             symbol=template_signal.symbol,
-            strategy_name="EnsembleMajority",
+            direction=direction,
+            strength=Decimal(str(confidence)),
+            timestamp=template_signal.timestamp,
+            source="EnsembleMajority",
             metadata={
                 "voting_method": "majority",
                 "total_signals": len(signals),
@@ -345,11 +345,11 @@ class VotingMechanism:
         template_signal = signals[0][1]
 
         return Signal(
-            direction=direction,
-            confidence=confidence,
-            timestamp=template_signal.timestamp,
             symbol=template_signal.symbol,
-            strategy_name="EnsembleWeighted",
+            direction=direction,
+            strength=Decimal(str(confidence)),
+            timestamp=template_signal.timestamp,
+            source="EnsembleWeighted",
             metadata={
                 "voting_method": "weighted",
                 "total_signals": len(signals),
@@ -404,11 +404,11 @@ class VotingMechanism:
         template_signal = signals[0][1]
 
         return Signal(
-            direction=direction,
-            confidence=confidence,
-            timestamp=template_signal.timestamp,
             symbol=template_signal.symbol,
-            strategy_name="EnsembleConfidenceWeighted",
+            direction=direction,
+            strength=Decimal(str(confidence)),
+            timestamp=template_signal.timestamp,
+            source="EnsembleConfidenceWeighted",
             metadata={
                 "voting_method": "confidence_weighted",
                 "total_signals": len(signals),
@@ -433,14 +433,14 @@ class EnsembleStrategy(BaseStrategy):
     voting mechanisms to generate final signals.
     """
 
-    def __init__(self, config: dict[str, Any]):
+    def __init__(self, config: dict[str, Any], services: StrategyServiceContainer | None = None):
         """Initialize the ensemble strategy."""
         # Ensure strategy type is set correctly
         config["strategy_type"] = StrategyType.HYBRID
         if "name" not in config:
             config["name"] = "Ensemble"
 
-        super().__init__(config)
+        super().__init__(config, services)
 
         # Ensemble configuration
         self.voting_method = config.get("voting_method", "confidence_weighted")
@@ -817,9 +817,8 @@ class EnsembleStrategy(BaseStrategy):
 
             for _strategy_name, strategy in self.component_strategies.items():
                 try:
-                    asyncio.create_task(strategy.generate_signals(data))
-                    # Note: This is simplified - in practice you'd want to cache recent signals
-                    # rather than generate new ones for exit decisions
+                    # Note: Using cached signals instead of generating new ones for exit decisions
+                    # to avoid async calls in synchronous method
                     total_signals += 1
                     # Check for opposing signals (simplified logic)
                     if hasattr(strategy, "last_signal_direction"):
@@ -904,6 +903,19 @@ class EnsembleStrategy(BaseStrategy):
             )
 
     def get_ensemble_statistics(self) -> dict[str, Any]:
+        """Get comprehensive ensemble statistics."""
+        return {
+            "total_strategies": len(self.strategies),
+            "active_strategies": len([s for s in self.strategies if s.status == "active"]),
+            "ensemble_weights": dict(self.strategy_weights),
+            "total_signals": sum(getattr(s, "total_signals", 0) for s in self.strategies),
+            "consensus_threshold": self.consensus_threshold,
+            "last_rebalance": self.last_rebalance.isoformat() if self.last_rebalance else None,
+        }
+
+    # Helper methods for accessing data through data service
+
+    def get_strategy_info(self) -> dict[str, Any]:
         """Get comprehensive ensemble statistics."""
         try:
             strategy_metrics = {}

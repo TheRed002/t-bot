@@ -14,9 +14,11 @@ from typing import Any
 
 import numpy as np
 
-# Logger is provided by BaseStrategy (via BaseComponent)
+from src.core.logging import get_logger
+
 # MANDATORY: Import from P-001
 from src.core.types import MarketData, OrderBook
+from src.strategies.dependencies import StrategyServiceContainer
 
 # MANDATORY: Import from P-007A
 from src.utils.decorators import time_execution
@@ -35,7 +37,7 @@ class SpreadOptimizer:
     - Adaptive spread widening during high volatility
     """
 
-    def __init__(self, config: dict[str, Any]):
+    def __init__(self, config: dict[str, Any], services: StrategyServiceContainer | None = None):
         """
         Initialize Spread Optimizer.
 
@@ -43,6 +45,7 @@ class SpreadOptimizer:
             config: Configuration dictionary with spread optimization parameters
         """
         self.config = config
+        self.logger = get_logger(f"{__name__}.SpreadOptimizer")
 
         # Volatility parameters
         self.volatility_multiplier = config.get("volatility_multiplier", 2.0)
@@ -285,7 +288,8 @@ class SpreadOptimizer:
                 return Decimal("0")
 
             avg_competitor_spread = np.mean(valid_spreads)
-            current_spread = float(base_spread)
+            # Keep as Decimal for precision throughout calculations
+            current_spread = base_spread
 
             # Calculate adjustment to match competitor spread
             spread_diff = avg_competitor_spread - current_spread
@@ -361,6 +365,7 @@ class SpreadOptimizer:
         """
         try:
             # Update price history
+            # Store price as float for NumPy calculations
             self.price_history.append(float(market_data.price))
 
             # Keep only recent history
@@ -370,6 +375,7 @@ class SpreadOptimizer:
             # Update spread history
             if market_data.bid and market_data.ask:
                 spread = (market_data.ask - market_data.bid) / market_data.bid
+                # Store spread as float for NumPy calculations
                 self.spread_history.append(float(spread))
 
                 if len(self.spread_history) > 100:
@@ -463,7 +469,9 @@ class SpreadOptimizer:
             if len(self.spread_history) > 0:
                 recent_spreads = self.spread_history[-5:]
                 avg_recent_spread = np.mean(recent_spreads)
-                if avg_recent_spread > float(self.max_spread) * 0.8:
+                # Compare Decimal values properly
+                max_spread_threshold = self.max_spread * Decimal("0.8")
+                if Decimal(str(avg_recent_spread)) > max_spread_threshold:
                     self.logger.info(
                         "Spread widening due to wide recent spreads", avg_spread=avg_recent_spread
                     )

@@ -8,15 +8,20 @@ including integration with existing regime detection and adaptive risk managemen
 from datetime import datetime, timezone
 from decimal import Decimal
 from unittest.mock import AsyncMock, Mock, patch
+import logging
 
 import pytest
+
+# Disable logging during tests for performance
+logging.disable(logging.CRITICAL)
 
 # Import dependencies
 from src.core.types import (
     MarketData,
     MarketRegime,
-    OrderSide,
     Position,
+    PositionSide,
+    PositionStatus,
     Signal,
     SignalDirection,
     StrategyType,
@@ -103,7 +108,7 @@ class TestAdaptiveMomentumStrategy:
         """Create a sample signal."""
         return Signal(
             direction=SignalDirection.BUY,
-            strength=0.8,
+            strength=Decimal("0.8"),
             timestamp=datetime.now(timezone.utc),
             symbol="BTC/USD",
             source="adaptive_momentum",
@@ -175,15 +180,25 @@ class TestAdaptiveMomentumStrategy:
         """Test momentum score calculation via service layer."""
         # Mock technical indicators service
         mock_technical_indicators = Mock()
-        mock_technical_indicators.calculate_sma = AsyncMock(side_effect=[120.0, 110.0])  # fast_ma, slow_ma
+        mock_technical_indicators.calculate_sma = AsyncMock(
+            side_effect=[120.0, 110.0]
+        )  # fast_ma, slow_ma
         mock_technical_indicators.calculate_rsi = AsyncMock(return_value=65.0)
         mock_technical_indicators.calculate_momentum = AsyncMock(return_value=0.1)
         mock_technical_indicators.calculate_volume_ratio = AsyncMock(return_value=1.2)
         mock_technical_indicators.calculate_volatility = AsyncMock(return_value=0.02)
         strategy.set_technical_indicators(mock_technical_indicators)
         
-        indicators = await strategy._calculate_momentum_indicators_via_service("BTC/USD", sample_market_data)
-        
+        # Also mock data service for SMA calculations
+        mock_data_service = Mock()
+        mock_data_service.get_sma = AsyncMock(side_effect=[Decimal("120.0"), Decimal("110.0")])
+        mock_data_service.get_rsi = AsyncMock(return_value=Decimal("65.0"))
+        strategy.services.data_service = mock_data_service
+
+        indicators = await strategy._calculate_momentum_indicators_via_service(
+            "BTC/USD", sample_market_data
+        )
+
         assert indicators is not None
         assert "combined_momentum_score" in indicators
         assert isinstance(indicators["combined_momentum_score"], float)
@@ -194,7 +209,10 @@ class TestAdaptiveMomentumStrategy:
         """Test momentum score calculation with insufficient data."""
         # This strategy no longer has _calculate_momentum_score method
         # It's now done via service layer, so test the service integration
-        indicators = await strategy._calculate_momentum_indicators_via_service("BTC/USD", strategy.sample_market_data if hasattr(strategy, 'sample_market_data') else None)
+        indicators = await strategy._calculate_momentum_indicators_via_service(
+            "BTC/USD",
+            strategy.sample_market_data if hasattr(strategy, "sample_market_data") else None,
+        )
         # Should return None when no technical indicators service is set
         assert indicators is None
 
@@ -207,7 +225,7 @@ class TestAdaptiveMomentumStrategy:
         mock_technical_indicators = Mock()
         mock_technical_indicators.calculate_volume_ratio = AsyncMock(return_value=1.2)
         strategy.set_technical_indicators(mock_technical_indicators)
-        
+
         # Test via the service integration method
         sample_data = MarketData(
             symbol="BTC/USD",
@@ -219,15 +237,23 @@ class TestAdaptiveMomentumStrategy:
             timestamp=datetime.now(timezone.utc),
             exchange="binance",
         )
-        
+
         # Mock other required methods
         mock_technical_indicators.calculate_sma = AsyncMock(side_effect=[120.0, 110.0])
         mock_technical_indicators.calculate_rsi = AsyncMock(return_value=65.0)
         mock_technical_indicators.calculate_momentum = AsyncMock(return_value=0.1)
         mock_technical_indicators.calculate_volatility = AsyncMock(return_value=0.02)
         
-        indicators = await strategy._calculate_momentum_indicators_via_service("BTC/USD", sample_data)
-        
+        # Also mock data service for SMA calculations
+        mock_data_service = Mock()
+        mock_data_service.get_sma = AsyncMock(side_effect=[Decimal("120.0"), Decimal("110.0")])
+        mock_data_service.get_rsi = AsyncMock(return_value=Decimal("65.0"))
+        strategy.services.data_service = mock_data_service
+
+        indicators = await strategy._calculate_momentum_indicators_via_service(
+            "BTC/USD", sample_data
+        )
+
         assert indicators is not None
         assert "volume_score" in indicators
         assert isinstance(indicators["volume_score"], float)
@@ -241,7 +267,7 @@ class TestAdaptiveMomentumStrategy:
         mock_technical_indicators = Mock()
         mock_technical_indicators.calculate_rsi = AsyncMock(return_value=75.0)  # Overbought RSI
         strategy.set_technical_indicators(mock_technical_indicators)
-        
+
         # Test via the service integration method
         sample_data = MarketData(
             symbol="BTC/USD",
@@ -253,15 +279,23 @@ class TestAdaptiveMomentumStrategy:
             timestamp=datetime.now(timezone.utc),
             exchange="binance",
         )
-        
+
         # Mock other required methods
         mock_technical_indicators.calculate_sma = AsyncMock(side_effect=[120.0, 110.0])
         mock_technical_indicators.calculate_momentum = AsyncMock(return_value=0.1)
         mock_technical_indicators.calculate_volume_ratio = AsyncMock(return_value=1.2)
         mock_technical_indicators.calculate_volatility = AsyncMock(return_value=0.02)
         
-        indicators = await strategy._calculate_momentum_indicators_via_service("BTC/USD", sample_data)
-        
+        # Also mock data service for SMA calculations
+        mock_data_service = Mock()
+        mock_data_service.get_sma = AsyncMock(side_effect=[Decimal("120.0"), Decimal("110.0")])
+        mock_data_service.get_rsi = AsyncMock(return_value=Decimal("75.0"))
+        strategy.services.data_service = mock_data_service
+
+        indicators = await strategy._calculate_momentum_indicators_via_service(
+            "BTC/USD", sample_data
+        )
+
         assert indicators is not None
         assert "rsi_score" in indicators
         assert isinstance(indicators["rsi_score"], float)
@@ -276,19 +310,19 @@ class TestAdaptiveMomentumStrategy:
         # Need strong indicators to exceed min_confidence threshold of 0.6
         indicators = {
             "combined_momentum_score": 0.8,  # Strong positive momentum > 0.25 threshold
-            "volume_score": 1.0,             # Maximum volume score
+            "volume_score": 1.0,  # Maximum volume score
             "rsi_score": 0.3,
-            "volatility": 0.01               # Low volatility for higher confidence
+            "volatility": 0.01,  # Low volatility for higher confidence
         }
         regime = MarketRegime.LOW_VOLATILITY  # Use low volatility for higher confidence multiplier
 
-        signals = await strategy._generate_momentum_signals_enhanced(
+        signals = await strategy._generate_momentum_signals(
             sample_market_data, indicators, regime
         )
 
         # Test signal generation - signals may or may not be generated depending on confidence
         assert isinstance(signals, list)
-        
+
         # If signals are generated, they should be valid
         for signal in signals:
             assert signal.direction == SignalDirection.BUY
@@ -307,11 +341,11 @@ class TestAdaptiveMomentumStrategy:
             "combined_momentum_score": -0.8,
             "volume_score": 0.6,  # Volume score is always positive
             "rsi_score": -0.4,
-            "volatility": 0.02
+            "volatility": 0.02,
         }
         regime = MarketRegime.MEDIUM_VOLATILITY
 
-        signals = await strategy._generate_momentum_signals_enhanced(
+        signals = await strategy._generate_momentum_signals(
             sample_market_data, indicators, regime
         )
 
@@ -324,16 +358,16 @@ class TestAdaptiveMomentumStrategy:
     @pytest.mark.asyncio
     async def test_generate_momentum_signals_weak_momentum(self, strategy, sample_market_data):
         """Test signal generation with weak momentum."""
-        # Method was renamed to _generate_momentum_signals_enhanced with different signature  
+        # Method was renamed to _generate_momentum_signals_enhanced with different signature
         indicators = {
             "combined_momentum_score": 0.1,  # Weak momentum below 0.25 threshold
             "volume_score": 0.2,
-            "rsi_score": 0.1, 
-            "volatility": 0.02
+            "rsi_score": 0.1,
+            "volatility": 0.02,
         }
         regime = MarketRegime.MEDIUM_VOLATILITY
 
-        signals = await strategy._generate_momentum_signals_enhanced(
+        signals = await strategy._generate_momentum_signals(
             sample_market_data, indicators, regime
         )
 
@@ -349,15 +383,15 @@ class TestAdaptiveMomentumStrategy:
         signals = [
             Signal(
                 direction=SignalDirection.BUY,
-                strength=0.8,
+                strength=Decimal("0.8"),
                 timestamp=datetime.now(timezone.utc),
                 symbol="BTC/USD",
-                source="adaptive_momentum", 
+                source="adaptive_momentum",
                 metadata={"regime": "medium_volatility"},
             )
         ]
 
-        adjusted_signals = await strategy._apply_enhanced_confidence_adjustments(
+        adjusted_signals = await strategy._apply_confidence_adjustments(
             signals, MarketRegime.MEDIUM_VOLATILITY
         )
 
@@ -371,7 +405,7 @@ class TestAdaptiveMomentumStrategy:
         signals = [
             Signal(
                 direction=SignalDirection.BUY,
-                strength=0.8,
+                strength=Decimal("0.8"),
                 timestamp=datetime.now(timezone.utc),
                 symbol="BTC/USD",
                 source="adaptive_momentum",
@@ -379,15 +413,19 @@ class TestAdaptiveMomentumStrategy:
             )
         ]
 
-        adjusted_signals = await strategy._apply_enhanced_confidence_adjustments(
+        adjusted_signals = await strategy._apply_confidence_adjustments(
             signals, MarketRegime.MEDIUM_VOLATILITY
         )
 
         assert len(adjusted_signals) == 1
         # Signal should still be adjusted for regime confidence multiplier
         assert "regime_confidence_multiplier" in adjusted_signals[0].metadata
-        assert adjusted_signals[0].metadata["regime_confidence_multiplier"] == 1.0  # MEDIUM_VOLATILITY multiplier
-        assert adjusted_signals[0].metadata["adaptive_params"] is None  # No adaptive params without manager
+        assert (
+            adjusted_signals[0].metadata["regime_confidence_multiplier"] == 1.0
+        )  # MEDIUM_VOLATILITY multiplier
+        assert (
+            adjusted_signals[0].metadata["adaptive_params"] is None
+        )  # No adaptive params without manager
 
     def test_get_regime_confidence_multiplier(self, strategy):
         """Test regime confidence multiplier calculation."""
@@ -457,11 +495,12 @@ class TestAdaptiveMomentumStrategy:
         # Create position
         position = Position(
             symbol="BTC/USD",
-            side=OrderSide.BUY,
+            side=PositionSide.LONG,
             quantity=Decimal("0.1"),
             entry_price=Decimal("50000"),
             current_price=Decimal("50000"),
             unrealized_pnl=Decimal("0"),
+            status=PositionStatus.OPEN,
             opened_at=datetime.now(timezone.utc),
             exchange="binance",
             metadata={"entry_momentum": 0.8},
@@ -493,11 +532,12 @@ class TestAdaptiveMomentumStrategy:
         # Create position
         position = Position(
             symbol="BTC/USD",
-            side=OrderSide.BUY,
+            side=PositionSide.LONG,
             quantity=Decimal("0.1"),
             entry_price=Decimal("50000"),
             current_price=Decimal("50000"),
             unrealized_pnl=Decimal("0"),
+            status=PositionStatus.OPEN,
             opened_at=datetime.now(timezone.utc),
             exchange="binance",
             metadata={"entry_momentum": 0.8},
@@ -555,7 +595,9 @@ class TestAdaptiveMomentumStrategy:
     async def test_generate_signals_impl_exception_handling(self, strategy, sample_market_data):
         """Test signal generation exception handling."""
         # Mock data validation to raise exception
-        with patch.object(strategy, "_validate_data_availability", side_effect=Exception("Test error")):
+        with patch.object(
+            strategy, "_validate_data_availability", side_effect=Exception("Test error")
+        ):
             signals = await strategy._generate_signals_impl(sample_market_data)
             assert len(signals) == 0  # Should return empty list on error
 
@@ -597,7 +639,7 @@ class TestAdaptiveMomentumStrategy:
             assert signal.source == "adaptive_momentum"
             assert "momentum_score" in signal.metadata
             assert "regime" in signal.metadata
-            assert signal.confidence > 0
+            assert signal.strength > 0
 
     def test_strategy_configuration_validation(self):
         """Test strategy configuration validation."""

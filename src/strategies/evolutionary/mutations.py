@@ -86,8 +86,8 @@ class MutationOperator:
             # Float mutation: add Gaussian noise
             std = (max_val - min_val) * self.mutation_strength
             noise = np.random.normal(0, std)
-            new_value = value + noise
-            return max(min_val, min(max_val, new_value))
+            new_float_value: float = value + noise
+            return max(min_val, min(max_val, new_float_value))
 
         elif isinstance(value, str):
             # Categorical mutation: random choice
@@ -347,7 +347,7 @@ class AdvancedMutationOperator(MutationOperator):
 
     def _gaussian_mutation(self, value: Any, param_range: tuple[Any, Any]) -> Any:
         """Gaussian mutation with adaptive variance."""
-        if not isinstance(value, int | float):
+        if not isinstance(value, (int, float)):
             return value
 
         min_val, max_val = param_range
@@ -366,7 +366,7 @@ class AdvancedMutationOperator(MutationOperator):
 
     def _uniform_mutation(self, value: Any, param_range: tuple[Any, Any]) -> Any:
         """Uniform random mutation within range."""
-        if not isinstance(value, int | float):
+        if not isinstance(value, (int, float)):
             return value
 
         min_val, max_val = param_range
@@ -380,7 +380,7 @@ class AdvancedMutationOperator(MutationOperator):
         self, value: Any, param_range: tuple[Any, Any], eta: float = 20
     ) -> Any:
         """Polynomial bounded mutation."""
-        if not isinstance(value, int | float):
+        if not isinstance(value, (int, float)):
             return value
 
         min_val, max_val = param_range

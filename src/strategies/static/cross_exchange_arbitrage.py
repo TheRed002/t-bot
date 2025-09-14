@@ -13,7 +13,7 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
 
-from src.core.exceptions import ArbitrageError
+from src.core.exceptions import ArbitrageError, ValidationError
 
 # Logger is provided by BaseStrategy (via BaseComponent)
 # From P-001 - Use existing types
@@ -28,18 +28,14 @@ from src.core.types import (
 
 # MANDATORY: Import from P-011 - NEVER recreate the base strategy
 from src.strategies.base import BaseStrategy
+from src.strategies.dependencies import StrategyServiceContainer
 from src.utils.constants import GLOBAL_FEE_STRUCTURE, GLOBAL_MINIMUM_AMOUNTS, PRECISION_LEVELS
+from src.utils.decimal_utils import round_to_precision
 
 # From P-007A - Use decorators and validators
 from src.utils.decorators import log_errors, time_execution
 from src.utils.formatters import format_currency, format_percentage
-from src.utils.helpers import round_to_precision_decimal
-from src.utils.validators import (
-    validate_decimal,
-    validate_percentage,
-    validate_price,
-    validate_quantity,
-)
+from src.utils.validators import ValidationFramework
 
 # From P-008+ - Use risk management
 
@@ -54,13 +50,14 @@ class CrossExchangeArbitrageStrategy(BaseStrategy):
     simultaneous buy/sell orders when profitable spreads are detected.
     """
 
-    def __init__(self, config: dict):
+    def __init__(self, config: dict, services: "StrategyServiceContainer"):
         """Initialize cross-exchange arbitrage strategy.
 
         Args:
             config: Strategy configuration dictionary
+            services: Service container for dependencies
         """
-        super().__init__(config)
+        super().__init__(config, services)
         # Note: name, version, status are set by BaseStrategy
 
         # Strategy-specific configuration
@@ -146,7 +143,7 @@ class CrossExchangeArbitrageStrategy(BaseStrategy):
             # Check for arbitrage opportunities across all exchanges
             signals = await self._detect_arbitrage_opportunities(data.symbol)
 
-            # TODO: Remove in production - Debug logging
+            # Log cross-exchange arbitrage opportunities for monitoring
             if signals:
                 self.logger.debug(
                     "Arbitrage signals generated",
@@ -177,7 +174,7 @@ class CrossExchangeArbitrageStrategy(BaseStrategy):
         Returns:
             List of arbitrage signals
         """
-        signals = []
+        signals: list[Any] = []
 
         try:
             # Get all available prices for this symbol
@@ -221,26 +218,28 @@ class CrossExchangeArbitrageStrategy(BaseStrategy):
                 net_profit_percentage = (net_profit / best_ask_price) * 100
 
                 # Check if profit meets threshold
-                if net_profit_percentage >= float(self.min_profit_threshold * 100):
+                # Check if profit meets threshold - use Decimal comparison
+                threshold_percentage = self.min_profit_threshold * Decimal("100")
+                if net_profit_percentage >= threshold_percentage:
                     # Validate execution time constraints
                     if await self._validate_execution_timing(symbol):
                         # Create arbitrage signal
                         signal = Signal(
-                            direction=SignalDirection.BUY,  # Buy on lower price exchange
-                            # Scale confidence with profit
-                            confidence=min(0.9, net_profit_percentage / 2),
-                            timestamp=datetime.now(timezone.utc),
                             symbol=symbol,
-                            strategy_name=self.name,
+                            direction=SignalDirection.BUY,  # Buy on lower price exchange
+                            # Scale strength with profit
+                            strength=min(Decimal("0.9"), net_profit_percentage / Decimal("200")),
+                            timestamp=datetime.now(timezone.utc),
+                            source=self.name,
                             metadata={
                                 "arbitrage_type": "cross_exchange",
                                 "buy_exchange": best_ask_exchange,
                                 "sell_exchange": best_bid_exchange,
-                                "buy_price": float(best_ask_price),
-                                "sell_price": float(best_bid_price),
-                                "spread_percentage": float(spread_percentage),
-                                "net_profit_percentage": float(net_profit_percentage),
-                                "estimated_fees": float(estimated_fees),
+                                "buy_price": str(best_ask_price),
+                                "sell_price": str(best_bid_price),
+                                "spread_percentage": str(spread_percentage),
+                                "net_profit_percentage": str(net_profit_percentage),
+                                "estimated_fees": str(estimated_fees),
                                 "execution_timeout": self.max_execution_time,
                             },
                         )
@@ -285,28 +284,22 @@ class CrossExchangeArbitrageStrategy(BaseStrategy):
         """
         try:
             # Validate input prices using utils
-            validate_decimal(buy_price)
-            validate_decimal(sell_price)
-            validate_price(buy_price, "buy_price")
-            validate_price(sell_price, "sell_price")
+            ValidationFramework.validate_price(buy_price)
+            ValidationFramework.validate_price(sell_price)
 
             # Get fee structure from constants and convert to Decimal
             maker_fee_rate = Decimal(str(GLOBAL_FEE_STRUCTURE.get("maker_fee", 0.001)))  # 0.1%
             taker_fee_rate = Decimal(str(GLOBAL_FEE_STRUCTURE.get("taker_fee", 0.001)))  # 0.1%
 
             # Calculate fees using proper rounding
-            buy_fees = round_to_precision_decimal(
-                buy_price * taker_fee_rate, PRECISION_LEVELS["fee"]
-            )
-            sell_fees = round_to_precision_decimal(
-                sell_price * taker_fee_rate, PRECISION_LEVELS["fee"]
-            )
+            buy_fees = round_to_precision(buy_price * taker_fee_rate, PRECISION_LEVELS["fee"])
+            sell_fees = round_to_precision(sell_price * taker_fee_rate, PRECISION_LEVELS["fee"])
 
             # Calculate slippage cost (as percentage of prices, not spread)
-            buy_slippage = round_to_precision_decimal(
+            buy_slippage = round_to_precision(
                 buy_price * self.slippage_limit, PRECISION_LEVELS["price"]
             )
-            sell_slippage = round_to_precision_decimal(
+            sell_slippage = round_to_precision(
                 sell_price * self.slippage_limit, PRECISION_LEVELS["price"]
             )
             slippage_cost = buy_slippage + sell_slippage
@@ -315,7 +308,7 @@ class CrossExchangeArbitrageStrategy(BaseStrategy):
             total_fees = buy_fees + sell_fees + slippage_cost
 
             # Validate final result
-            validate_decimal(total_fees)
+            # total_fees is already a Decimal from calculations
 
             self.logger.debug(
                 "Fee calculation completed",
@@ -411,7 +404,7 @@ class CrossExchangeArbitrageStrategy(BaseStrategy):
                 return False
 
             # Check confidence threshold
-            if signal.confidence < self.config.min_confidence:
+            if signal.strength < self.config.min_confidence:
                 return False
 
             # Validate arbitrage-specific metadata
@@ -435,9 +428,10 @@ class CrossExchangeArbitrageStrategy(BaseStrategy):
                     )
                     return False
 
-            # Validate profit threshold
-            net_profit = metadata.get("net_profit_percentage", 0)
-            if net_profit < float(self.min_profit_threshold * 100):
+            # Validate profit threshold - use Decimal comparison
+            net_profit = Decimal(str(metadata.get("net_profit_percentage", 0)))
+            threshold_percentage = self.min_profit_threshold * Decimal("100")
+            if net_profit < threshold_percentage:
                 return False
 
             # Validate exchanges are different
@@ -469,7 +463,8 @@ class CrossExchangeArbitrageStrategy(BaseStrategy):
             if not signal:
                 raise ArbitrageError("Invalid signal for position sizing")
 
-            validate_percentage(signal.confidence, "signal_confidence")
+            if signal.strength < 0.0 or signal.strength > 1.0:
+                raise ValidationError(f"Invalid signal confidence: {signal.strength}")
 
             # Get configuration parameters
             total_capital = Decimal(str(self.config.parameters.get("total_capital", 10000)))
@@ -499,16 +494,18 @@ class CrossExchangeArbitrageStrategy(BaseStrategy):
             profit_potential = Decimal(str(metadata.get("net_profit_percentage", 0))) / Decimal(
                 "100"
             )
-            validate_percentage(profit_potential * 100, "profit_potential")
+            profit_potential_pct = float(profit_potential * 100)
+            if profit_potential_pct < 0.0 or profit_potential_pct > 1000.0:
+                raise ValidationError(f"Invalid profit potential: {profit_potential_pct}%")
 
             # Apply arbitrage-specific adjustments
             arbitrage_multiplier = min(
                 Decimal("2.0"), profit_potential * Decimal("10")
             )  # Scale with profit
-            confidence_multiplier = Decimal(str(signal.confidence))
+            confidence_multiplier = Decimal(str(signal.strength))
 
             # Calculate final position size with proper validation
-            position_size = round_to_precision_decimal(
+            position_size = round_to_precision(
                 base_size * confidence_multiplier * arbitrage_multiplier,
                 PRECISION_LEVELS["position"],
             )
@@ -519,15 +516,14 @@ class CrossExchangeArbitrageStrategy(BaseStrategy):
                 position_size = min_size
 
             # Validate final result
-            validate_decimal(position_size)
-            validate_quantity(position_size, "position_size")
+            ValidationFramework.validate_quantity(position_size)
 
             self.logger.debug(
                 "Position size calculated",
                 strategy=self.name,
                 base_size=format_currency(base_size),
                 profit_potential=format_percentage(profit_potential * 100),
-                confidence=format_percentage(signal.confidence * 100),
+                confidence=format_percentage(signal.strength * 100),
                 final_size=format_currency(position_size),
             )
 
@@ -537,7 +533,7 @@ class CrossExchangeArbitrageStrategy(BaseStrategy):
             self.logger.error(
                 "Position size calculation failed",
                 strategy=self.name,
-                signal_confidence=signal.confidence if signal else None,
+                signal_confidence=signal.strength if signal else None,
                 error=str(e),
             )
             raise ArbitrageError(f"Position size calculation failed: {e!s}")
@@ -560,7 +556,7 @@ class CrossExchangeArbitrageStrategy(BaseStrategy):
 
             # Check execution timeout
             execution_timeout = position.metadata.get("execution_timeout", self.max_execution_time)
-            position_age = (datetime.now(timezone.utc) - position.timestamp).total_seconds() * 1000
+            position_age = (datetime.now(timezone.utc) - position.opened_at).total_seconds() * 1000
 
             if position_age > execution_timeout:
                 self.logger.info(
@@ -646,6 +642,25 @@ class CrossExchangeArbitrageStrategy(BaseStrategy):
             return Decimal("0")
 
     async def post_trade_processing(self, trade_result: dict[str, Any]) -> None:
+        """Process completed arbitrage trade."""
+        try:
+            await super().post_trade_processing(trade_result)
+            # Add strategy-specific post-processing logic here
+            self.logger.info(
+                "Cross-exchange arbitrage trade completed",
+                strategy=self.name,
+                trade_result=trade_result
+            )
+        except Exception as e:
+            self.logger.error(
+                "Error in post-trade processing",
+                strategy=self.name,
+                error=str(e)
+            )
+
+    # Helper methods for accessing data through data service
+
+    async def _process_trade_result(self, trade_result: dict[str, Any]) -> None:
         """
         Process completed arbitrage trade.
 

@@ -1,0 +1,309 @@
+"""
+Comprehensive tests for StrategyRepository to achieve maximum coverage.
+Tests all repository functionality including CRUD operations, metrics, and signals.
+"""
+
+import asyncio
+from datetime import datetime, timedelta, timezone
+from decimal import Decimal
+from unittest.mock import AsyncMock, Mock, patch
+from uuid import uuid4, UUID
+
+import pytest
+from sqlalchemy.ext.asyncio import AsyncSession
+
+# Disable verbose logging for performance
+import logging
+logging.getLogger('src').setLevel(logging.CRITICAL)
+
+# Disable asyncio debug mode for performance
+asyncio.set_event_loop_policy(None)
+
+from src.core.exceptions import RepositoryError, ValidationError
+from src.core.types.strategy import StrategyConfig, StrategyMetrics
+from src.database.models import (
+    AnalyticsStrategyMetrics,
+    Signal,
+    StateSnapshot,
+    Strategy,
+    Trade,
+)
+from src.strategies.repository import StrategyRepository, StrategyRepositoryInterface
+
+
+class TestStrategyRepository:
+    """Test StrategyRepository comprehensive functionality."""
+    
+    @pytest.fixture(scope="session")
+    def mock_session(self):
+        """Mock database session."""
+        session = Mock(spec=AsyncSession)
+        return session
+    
+    @pytest.fixture(scope="session")
+    def strategy_repository(self, mock_session):
+        """Create StrategyRepository instance."""
+        return StrategyRepository(session=mock_session)
+    
+    @pytest.fixture(scope="session")
+    def mock_strategy(self):
+        """Mock strategy model."""
+        strategy = Strategy()
+        strategy.id = UUID('12345678-1234-5678-1234-567812345678')  # Fixed UUID for performance
+        strategy.name = "test_strategy"
+        strategy.status = "active"
+        strategy.params = {"risk_per_trade": 0.02}
+        strategy.max_position_size = Decimal("1000")
+        strategy.risk_per_trade = Decimal("0.02")
+        strategy.stop_loss_percentage = Decimal("0.05")
+        strategy.take_profit_percentage = Decimal("0.1")
+        strategy.created_at = datetime.now(timezone.utc)
+        return strategy
+    
+    @pytest.fixture
+    def mock_strategy_metrics(self):
+        """Mock StrategyMetrics."""
+        return StrategyMetrics(
+            total_return=0.15,
+            total_trades=50,
+            winning_trades=35,
+            losing_trades=15,
+            win_rate=0.7,
+            profit_factor=2.3,
+            sharpe_ratio=1.8,
+            max_drawdown=0.08,
+            average_win=Decimal("150"),
+            average_loss=Decimal("80")
+        )
+    
+    def test_strategy_repository_initialization(self, mock_session):
+        """Test StrategyRepository initialization."""
+        repo = StrategyRepository(session=mock_session)
+        
+        assert repo.session == mock_session
+        assert repo.model == Strategy
+        assert repo.entity_type == Strategy
+        assert repo.key_type == str
+        assert repo.name == "StrategyRepository"
+    
+    @pytest.mark.asyncio
+    async def test_create_strategy_success(self, strategy_repository, mock_strategy):
+        """Test creating a strategy successfully."""
+        strategy_repository.session.flush = AsyncMock()
+        strategy_repository.session.refresh = AsyncMock()
+        
+        result = await strategy_repository.create_strategy(mock_strategy)
+        
+        assert result == mock_strategy
+        strategy_repository.session.add.assert_called_once_with(mock_strategy)
+        strategy_repository.session.flush.assert_called_once()
+        strategy_repository.session.refresh.assert_called_once_with(mock_strategy)
+    
+    @pytest.mark.asyncio
+    async def test_create_strategy_failure(self, strategy_repository, mock_strategy):
+        """Test creating strategy with database error."""
+        strategy_repository.session.add.side_effect = Exception("Database error")
+        
+        with pytest.raises(RepositoryError, match="Failed to create strategy"):
+            await strategy_repository.create_strategy(mock_strategy)
+    
+    @pytest.mark.asyncio
+    async def test_get_strategy_success(self, strategy_repository, mock_strategy):
+        """Test getting strategy by ID successfully."""
+        # Mock query result
+        mock_result = Mock()
+        mock_result.unique.return_value.scalar_one_or_none.return_value = mock_strategy
+        strategy_repository.session.execute = AsyncMock(return_value=mock_result)
+        
+        result = await strategy_repository.get_strategy(str(mock_strategy.id))
+        
+        assert result == mock_strategy
+        strategy_repository.session.execute.assert_called_once()
+    
+    @pytest.mark.asyncio
+    async def test_get_strategy_not_found(self, strategy_repository):
+        """Test getting non-existent strategy."""
+        # Mock query result - not found
+        mock_result = Mock()
+        mock_result.unique.return_value.scalar_one_or_none.return_value = None
+        strategy_repository.session.execute = AsyncMock(return_value=mock_result)
+        
+        result = await strategy_repository.get_strategy(str(uuid4()))
+        
+        assert result is None
+    
+    @pytest.mark.asyncio
+    async def test_get_strategy_failure(self, strategy_repository):
+        """Test getting strategy with database error."""
+        strategy_repository.session.execute = AsyncMock(side_effect=Exception("Database error"))
+        
+        with pytest.raises(RepositoryError, match="Failed to get strategy"):
+            await strategy_repository.get_strategy(str(uuid4()))
+    
+    @pytest.mark.asyncio
+    async def test_update_strategy_success(self, strategy_repository, mock_strategy):
+        """Test updating strategy successfully."""
+        # Mock get_strategy to return existing strategy
+        with patch.object(strategy_repository, 'get_strategy', new_callable=AsyncMock) as mock_get:
+            mock_get.return_value = mock_strategy
+            strategy_repository.session.flush = AsyncMock()
+            
+            updates = {
+                "name": "updated_strategy",
+                "status": "inactive",
+                "max_position_size": Decimal("2000"),
+                "risk_per_trade": Decimal("0.01")
+            }
+            
+            result = await strategy_repository.update_strategy(str(mock_strategy.id), updates)
+            
+            assert result == mock_strategy
+            assert mock_strategy.name == "updated_strategy"
+            assert mock_strategy.status == "inactive"
+            assert mock_strategy.max_position_size == Decimal("2000")
+            assert mock_strategy.risk_per_trade == Decimal("0.01")
+    
+    @pytest.mark.asyncio
+    async def test_save_strategy_state(self, strategy_repository):
+        """Test saving strategy state."""
+        strategy_id = str(uuid4())
+        state_data = {"last_signal": "BUY", "position_size": 100}
+        
+        strategy_repository.session.add = Mock()
+        strategy_repository.session.flush = AsyncMock()
+        
+        result = await strategy_repository.save_strategy_state(strategy_id, state_data)
+        
+        assert result is True
+        strategy_repository.session.add.assert_called_once()
+        strategy_repository.session.flush.assert_called_once()
+    
+    @pytest.mark.asyncio
+    async def test_load_strategy_state(self, strategy_repository):
+        """Test loading strategy state."""
+        strategy_id = str(uuid4())
+        expected_data = {"last_signal": "BUY", "position_size": 100}
+        
+        # Mock state snapshot
+        mock_state = Mock()
+        mock_state.data = expected_data
+        
+        # Mock query result
+        mock_result = Mock()
+        mock_result.scalar_one_or_none.return_value = mock_state
+        strategy_repository.session.execute = AsyncMock(return_value=mock_result)
+        
+        result = await strategy_repository.load_strategy_state(strategy_id)
+        
+        assert result == expected_data
+        strategy_repository.session.execute.assert_called_once()
+    
+    @pytest.mark.asyncio
+    async def test_save_strategy_metrics(self, strategy_repository, mock_strategy, mock_strategy_metrics):
+        """Test saving strategy metrics."""
+        with patch.object(strategy_repository, 'get_strategy', new_callable=AsyncMock) as mock_get:
+            mock_get.return_value = mock_strategy
+            strategy_repository.session.add = Mock()
+            strategy_repository.session.flush = AsyncMock()
+            
+            result = await strategy_repository.save_strategy_metrics(str(mock_strategy.id), mock_strategy_metrics)
+            
+            assert result is True
+            strategy_repository.session.add.assert_called_once()
+            strategy_repository.session.flush.assert_called_once()
+    
+    @pytest.mark.asyncio
+    async def test_get_strategy_metrics(self, strategy_repository):
+        """Test getting strategy metrics."""
+        strategy_id = str(uuid4())
+        
+        # Mock metrics
+        mock_metrics = [Mock(), Mock()]
+        
+        # Mock query result
+        mock_result = Mock()
+        mock_result.scalars.return_value.all.return_value = mock_metrics
+        strategy_repository.session.execute = AsyncMock(return_value=mock_result)
+        
+        result = await strategy_repository.get_strategy_metrics(strategy_id)
+        
+        assert result == mock_metrics
+        strategy_repository.session.execute.assert_called_once()
+    
+    @pytest.mark.asyncio
+    async def test_save_strategy_signals(self, strategy_repository):
+        """Test saving strategy signals."""
+        # Mock signals
+        signals = [Mock(), Mock()]
+        
+        strategy_repository.session.add = Mock()
+        strategy_repository.session.flush = AsyncMock()
+        strategy_repository.session.refresh = AsyncMock()
+        
+        result = await strategy_repository.save_strategy_signals(signals)
+        
+        assert result == signals
+        assert strategy_repository.session.add.call_count == 2
+        strategy_repository.session.flush.assert_called_once()
+        assert strategy_repository.session.refresh.call_count == 2
+    
+    @pytest.mark.asyncio
+    async def test_get_strategy_signals(self, strategy_repository):
+        """Test getting strategy signals."""
+        strategy_id = str(uuid4())
+        
+        # Mock signals
+        mock_signals = [Mock(), Mock()]
+        
+        # Mock query result
+        mock_result = Mock()
+        mock_result.scalars.return_value.all.return_value = mock_signals
+        strategy_repository.session.execute = AsyncMock(return_value=mock_result)
+        
+        result = await strategy_repository.get_strategy_signals(strategy_id)
+        
+        assert result == mock_signals
+        strategy_repository.session.execute.assert_called_once()
+    
+    @pytest.mark.asyncio
+    async def test_get_strategy_performance_summary(self, strategy_repository, mock_strategy):
+        """Test getting strategy performance summary."""
+        strategy_id = str(uuid4())
+        
+        # Mock latest metrics
+        mock_metrics_record = Mock()
+        mock_metrics_record.total_return = Decimal("0.15")
+        mock_metrics_record.total_trades = 50
+        mock_metrics_record.winning_trades = 35
+        mock_metrics_record.losing_trades = 15
+        mock_metrics_record.win_rate = Decimal("0.7")
+        mock_metrics_record.profit_factor = Decimal("2.3")
+        mock_metrics_record.sharpe_ratio = Decimal("1.8")
+        mock_metrics_record.max_drawdown = Decimal("0.08")
+        mock_metrics_record.timestamp = datetime.now(timezone.utc)
+        
+        # Mock trades
+        mock_trade1 = Mock()
+        mock_trade1.pnl = Decimal("150")
+        mock_trade2 = Mock()
+        mock_trade2.pnl = Decimal("-80")
+        mock_trades = [mock_trade1, mock_trade2]
+        
+        # Mock signals
+        mock_signals = [Mock(), Mock(), Mock()]
+        
+        with patch.object(strategy_repository, 'get_strategy_metrics', new_callable=AsyncMock) as mock_get_metrics:
+            with patch.object(strategy_repository, 'get_strategy_trades', new_callable=AsyncMock) as mock_get_trades:
+                with patch.object(strategy_repository, 'get_strategy_signals', new_callable=AsyncMock) as mock_get_signals:
+                    mock_get_metrics.return_value = [mock_metrics_record]
+                    mock_get_trades.return_value = mock_trades
+                    mock_get_signals.return_value = mock_signals
+                    
+                    result = await strategy_repository.get_strategy_performance_summary(strategy_id)
+                    
+                    assert isinstance(result, dict)
+                    assert result["strategy_id"] == strategy_id
+                    assert result["total_return"] == 0.15
+                    assert result["total_trades"] == 50
+                    assert result["total_pnl"] == 70.0  # 150 - 80
+                    assert result["total_signals"] == 3

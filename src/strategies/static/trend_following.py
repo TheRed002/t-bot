@@ -12,8 +12,6 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
-import numpy as np
-
 # From P-001 - Use structured logging
 # Logger is provided by BaseStrategy (via BaseComponent)
 # From P-001 - Use existing types
@@ -25,13 +23,18 @@ from src.core.types import (
     StrategyType,
 )
 
+# From P-002A - Use error handling decorators
+from src.error_handling.decorators import with_circuit_breaker, with_error_context, with_retry
+
 # From P-008+ - Use risk management
 # MANDATORY: Import from P-011 - NEVER recreate the base strategy
 from src.strategies.base import BaseStrategy
+from src.strategies.dependencies import StrategyServiceContainer
 
 # From P-007A - Use decorators and validators
 from src.utils.decorators import time_execution
-from src.utils.helpers import calculate_rsi
+
+# RSI calculation is implemented inline to avoid import issues
 
 # Logger is now provided by BaseStrategy (via BaseComponent)
 
@@ -53,15 +56,14 @@ class TrendFollowingStrategy(BaseStrategy):
     - Time-based exit rules
     """
 
-    def __init__(self, config: dict[str, Any]):
+    def __init__(self, config: dict[str, Any], services: StrategyServiceContainer | None = None):
         """Initialize Trend Following Strategy.
 
         Args:
             config: Strategy configuration dictionary
         """
-        super().__init__(config)
+        super().__init__(config, services)
         # Use the name from config (already set by BaseStrategy)
-        self.strategy_type = StrategyType.STATIC
 
         # Strategy-specific parameters with defaults
         self.fast_ma = self.config.parameters.get("fast_ma", 20)
@@ -93,7 +95,15 @@ class TrendFollowingStrategy(BaseStrategy):
             rsi_period=self.rsi_period,
         )
 
+    @property
+    def strategy_type(self) -> StrategyType:
+        """Get the strategy type."""
+        return StrategyType.TREND_FOLLOWING
+
     @time_execution
+    @with_circuit_breaker(failure_threshold=5, recovery_timeout=30)
+    @with_error_context(operation="trend_following_signals")
+    @with_retry(max_attempts=3)
     async def _generate_signals_impl(self, data: MarketData) -> list[Signal]:
         """Generate trend following signals from market data.
 
@@ -117,8 +127,7 @@ class TrendFollowingStrategy(BaseStrategy):
                 self.logger.warning("Invalid price value", strategy=self.name, price=price)
                 return []
 
-            # Update price history with current data
-            self._update_price_history(data)
+            # Data is managed by the indicators service, no manual tracking needed
 
             # Check if we have enough data for calculations
             min_required = max(self.slow_ma, self.rsi_period) + 10
@@ -132,15 +141,20 @@ class TrendFollowingStrategy(BaseStrategy):
                 return []
 
             # Calculate technical indicators
-            fast_ma = self._calculate_fast_ma()
-            slow_ma = self._calculate_slow_ma()
-            rsi = self._calculate_rsi()
+            # Use shared BaseStrategy methods for technical indicators (eliminates code duplication)
+            fast_ma_decimal = await self.get_sma(data.symbol, self.fast_ma)
+            slow_ma_decimal = await self.get_sma(data.symbol, self.slow_ma)
+            rsi_decimal = await self.get_rsi(data.symbol, self.rsi_period)
+
+            fast_ma = float(fast_ma_decimal) if fast_ma_decimal else None
+            slow_ma = float(slow_ma_decimal) if slow_ma_decimal else None
+            rsi = float(rsi_decimal) if rsi_decimal else None
 
             if fast_ma is None or slow_ma is None or rsi is None:
                 return []
 
             # Check volume confirmation if enabled
-            if self.volume_confirmation and not self._check_volume_confirmation(data):
+            if self.volume_confirmation and not await self._check_volume_confirmation(data):
                 self.logger.debug(
                     "Volume confirmation failed",
                     strategy=self.name,
@@ -202,84 +216,13 @@ class TrendFollowingStrategy(BaseStrategy):
             )
             return []  # MANDATORY: Graceful degradation
 
-    def _update_price_history(self, data: MarketData) -> None:
-        """Update price and volume history for calculations.
 
-        Args:
-            data: Market data to add to history
-        """
-        price = float(data.price)
-        volume = float(data.volume) if data.volume else 0.0
-        high = float(data.high_price) if data.high_price else price
-        low = float(data.low_price) if data.low_price else price
+    # REMOVED: Duplicated technical indicator methods
+    # Now using shared BaseStrategy methods (get_sma, get_rsi) to eliminate code duplication
+    # This reduces maintenance burden and ensures consistency across all strategies
 
-        self.price_history.append(price)
-        self.volume_history.append(volume)
-        self.high_history.append(high)
-        self.low_history.append(low)
-
-        # Keep only the required history length
-        max_length = max(self.slow_ma, self.rsi_period) + 50
-        if len(self.price_history) > max_length:
-            self.price_history = self.price_history[-max_length:]
-            self.volume_history = self.volume_history[-max_length:]
-            self.high_history = self.high_history[-max_length:]
-            self.low_history = self.low_history[-max_length:]
-
-    def _calculate_fast_ma(self) -> float | None:
-        """Calculate fast moving average.
-
-        Returns:
-            Fast moving average value or None if calculation fails
-        """
-        try:
-            if len(self.price_history) < self.fast_ma:
-                return None
-
-            recent_prices = self.price_history[-self.fast_ma :]
-            return np.mean(recent_prices)
-
-        except Exception as e:
-            self.logger.error("Fast MA calculation failed", strategy=self.name, error=str(e))
-            return None
-
-    def _calculate_slow_ma(self) -> float | None:
-        """Calculate slow moving average.
-
-        Returns:
-            Slow moving average value or None if calculation fails
-        """
-        try:
-            if len(self.price_history) < self.slow_ma:
-                return None
-
-            recent_prices = self.price_history[-self.slow_ma :]
-            return np.mean(recent_prices)
-
-        except Exception as e:
-            self.logger.error("Slow MA calculation failed", strategy=self.name, error=str(e))
-            return None
-
-    def _calculate_rsi(self) -> float | None:
-        """Calculate RSI indicator.
-
-        Returns:
-            RSI value or None if calculation fails
-        """
-        try:
-            if len(self.price_history) < self.rsi_period + 1:
-                return None
-
-            # Calculate RSI using helper function with price data
-            rsi = calculate_rsi(self.price_history, self.rsi_period)
-            return rsi
-
-        except Exception as e:
-            self.logger.error("RSI calculation failed", strategy=self.name, error=str(e))
-            return None
-
-    def _check_volume_confirmation(self, data: MarketData) -> bool:
-        """Check if volume confirms the trend.
+    async def _check_volume_confirmation(self, data: MarketData) -> bool:
+        """Check if volume confirms the trend using indicators service.
 
         Args:
             data: Current market data
@@ -288,23 +231,21 @@ class TrendFollowingStrategy(BaseStrategy):
             True if volume confirms trend, False otherwise
         """
         try:
-            if len(self.volume_history) < self.fast_ma:
-                return True  # Pass if insufficient data
-
             current_volume = float(data.volume) if data.volume else 0.0
             if current_volume <= 0:
                 return False
 
-            # Calculate average volume
-            recent_volumes = self.volume_history[-self.fast_ma :]
-            avg_volume = np.mean(recent_volumes)
+            # Get volume ratio from indicators service
+            volume_ratio = await self._indicators.calculate_volume_ratio(
+                symbol=self.config.symbol,
+                period=self.fast_ma
+            )
 
-            if avg_volume <= 0:
-                return True  # Pass if no historical volume data
+            if volume_ratio is None:
+                return True  # Pass if insufficient data
 
             # Check if current volume is above threshold
-            volume_ratio = current_volume / avg_volume
-            return volume_ratio >= self.min_volume_ratio
+            return float(volume_ratio) >= self.min_volume_ratio
 
         except Exception as e:
             self.logger.error("Volume confirmation check failed", strategy=self.name, error=str(e))
@@ -347,10 +288,10 @@ class TrendFollowingStrategy(BaseStrategy):
 
             signal = Signal(
                 direction=SignalDirection.BUY,
-                confidence=confidence,
+                strength=Decimal(str(confidence)),
                 timestamp=data.timestamp,
                 symbol=data.symbol,
-                strategy_name=self.name,
+                source=self.name,
                 metadata={
                     "fast_ma": fast_ma,
                     "slow_ma": slow_ma,
@@ -418,10 +359,10 @@ class TrendFollowingStrategy(BaseStrategy):
 
             signal = Signal(
                 direction=SignalDirection.SELL,
-                confidence=confidence,
+                strength=Decimal(str(confidence)),
                 timestamp=data.timestamp,
                 symbol=data.symbol,
-                strategy_name=self.name,
+                source=self.name,
                 metadata={
                     "fast_ma": fast_ma,
                     "slow_ma": slow_ma,
@@ -468,16 +409,16 @@ class TrendFollowingStrategy(BaseStrategy):
         try:
             signal = Signal(
                 direction=direction,
-                confidence=0.8,  # High confidence for exits
+                strength=Decimal("0.8"),  # High confidence for exits
                 timestamp=data.timestamp,
                 symbol=data.symbol,
-                strategy_name=self.name,
+                source=self.name,
                 metadata={
                     "signal_type": "trend_exit",
                     "exit_reason": reason,
-                    "fast_ma": self._calculate_fast_ma(),
-                    "slow_ma": self._calculate_slow_ma(),
-                    "rsi": self._calculate_rsi(),
+                    "fast_ma": float(fast_ma_result) if (fast_ma_result := await self.get_sma(data.symbol, self.fast_ma)) else None,
+                    "slow_ma": float(slow_ma_result) if (slow_ma_result := await self.get_sma(data.symbol, self.slow_ma)) else None,
+                    "rsi": float(rsi_result) if (rsi_result := await self.get_rsi(data.symbol, self.rsi_period)) else None,
                 },
             )
 
@@ -510,11 +451,11 @@ class TrendFollowingStrategy(BaseStrategy):
         """
         try:
             # Basic signal validation
-            if not signal or signal.confidence < self.config.min_confidence:
+            if not signal or signal.strength < self.config.min_confidence:
                 self.logger.debug(
                     "Signal confidence below threshold",
                     strategy=self.name,
-                    confidence=signal.confidence if signal else 0,
+                    confidence=signal.strength if signal else 0,
                     min_confidence=self.config.min_confidence,
                 )
                 return False
@@ -567,7 +508,7 @@ class TrendFollowingStrategy(BaseStrategy):
             base_size = Decimal(str(self.config.position_size_pct))
 
             # Adjust based on signal confidence
-            confidence_factor = signal.confidence
+            confidence_factor = signal.strength
 
             # Adjust based on trend strength
             metadata = signal.metadata
@@ -609,7 +550,7 @@ class TrendFollowingStrategy(BaseStrategy):
             # Return minimum position size on error
             return Decimal(str(self.config.position_size_pct * 0.5))
 
-    def should_exit(self, position: Position, data: MarketData) -> bool:
+    async def should_exit(self, position: Position, data: MarketData) -> bool:
         """Determine if position should be closed.
 
         Args:
@@ -620,8 +561,7 @@ class TrendFollowingStrategy(BaseStrategy):
             True if position should be closed, False otherwise
         """
         try:
-            # Update price history for calculations
-            self._update_price_history(data)
+            # Data is managed by the indicators service, no manual tracking needed
 
             # Check time-based exit
             if self._should_exit_by_time(position):
@@ -638,15 +578,20 @@ class TrendFollowingStrategy(BaseStrategy):
                 return True
 
             # Check trend reversal
-            fast_ma = self._calculate_fast_ma()
-            slow_ma = self._calculate_slow_ma()
-            rsi = self._calculate_rsi()
+            # Use shared BaseStrategy methods for technical indicators (eliminates code duplication)
+            fast_ma_decimal = await self.get_sma(position.symbol, self.fast_ma)
+            slow_ma_decimal = await self.get_sma(position.symbol, self.slow_ma)
+            rsi_decimal = await self.get_rsi(position.symbol, self.rsi_period)
+
+            fast_ma = float(fast_ma_decimal) if fast_ma_decimal else None
+            slow_ma = float(slow_ma_decimal) if slow_ma_decimal else None
+            rsi = float(rsi_decimal) if rsi_decimal else None
 
             if fast_ma is None or slow_ma is None or rsi is None:
                 return False
 
             # Exit if trend has reversed
-            if position.side.value == "buy":
+            if position.side.value == "LONG":
                 if fast_ma < slow_ma and rsi < 50:
                     self.logger.info(
                         "Trend reversal exit triggered",
@@ -657,7 +602,7 @@ class TrendFollowingStrategy(BaseStrategy):
                         rsi=rsi,
                     )
                     return True
-            else:  # sell position
+            else:  # SHORT position
                 if fast_ma > slow_ma and rsi > 50:
                     self.logger.info(
                         "Trend reversal exit triggered",
@@ -686,7 +631,7 @@ class TrendFollowingStrategy(BaseStrategy):
         """
         try:
             # Get position entry time
-            entry_time = position.timestamp
+            entry_time = position.opened_at
 
             # Check if position has been open too long
             current_time = datetime.now(entry_time.tzinfo)
@@ -709,25 +654,28 @@ class TrendFollowingStrategy(BaseStrategy):
             True if trailing stop triggered, False otherwise
         """
         try:
-            current_price = float(data.price)
-            entry_price = float(position.entry_price)
+            current_price = data.price
+            entry_price = position.entry_price
 
-            if position.side.value == "buy":
+            trailing_stop_decimal = Decimal(str(self.trailing_stop_pct))
+
+            if position.side.value == "LONG":
                 # For long positions, exit if price falls below trailing stop
-                # Trailing stop is entry_price - (entry_price *
-                # trailing_stop_pct)
-                trailing_stop = entry_price - (entry_price * self.trailing_stop_pct)
+                # Trailing stop is entry_price - (entry_price * trailing_stop_pct)
+                trailing_stop = entry_price - (entry_price * trailing_stop_decimal)
                 return current_price <= trailing_stop
-            else:
+            else:  # SHORT
                 # For short positions, exit if price rises above trailing stop
-                # Trailing stop is entry_price + (entry_price *
-                # trailing_stop_pct)
-                trailing_stop = entry_price + (entry_price * self.trailing_stop_pct)
+                # Trailing stop is entry_price + (entry_price * trailing_stop_pct)
+                trailing_stop = entry_price + (entry_price * trailing_stop_decimal)
                 return current_price >= trailing_stop
 
         except Exception as e:
             self.logger.error("Trailing stop check failed", strategy=self.name, error=str(e))
             return False
+
+
+    # Helper methods for accessing data through data service
 
     def get_strategy_info(self) -> dict[str, Any]:
         """Get trend following strategy information.

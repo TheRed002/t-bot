@@ -25,7 +25,7 @@ Dependencies:
 import asyncio
 import math
 import random
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
@@ -104,11 +104,7 @@ class ParetoSolution:
     crowding_distance: float = 0.0
     rank: int = 0
     is_feasible: bool = True
-    metadata: dict[str, Any] = None
-
-    def __post_init__(self):
-        if self.metadata is None:
-            self.metadata = {}
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 class ConstraintHandler:
@@ -296,8 +292,8 @@ class DominanceComparator:
         """
         n = len(solutions)
         domination_count = [0] * n  # Number of solutions that dominate each solution
-        dominated_solutions = [[] for _ in range(n)]  # Solutions dominated by each solution
-        fronts = [[]]
+        dominated_solutions: list[list[int]] = [[] for _ in range(n)]  # Solutions dominated by each solution
+        fronts: list[list[int]] = [[]]
 
         # Calculate domination relationships
         for i in range(n):
@@ -423,7 +419,7 @@ class ParetoFrontierManager:
         self.config = config
         self.current_frontier: list[ParetoSolution] = []
         self.frontier_history: list[list[ParetoSolution]] = []
-        self.convergence_metrics: list[dict[str, float]] = []
+        self.convergence_metrics: list[dict[str, Any]] = []
 
         # Initialize components
         self.dominance_comparator = DominanceComparator(config.objectives)
@@ -561,7 +557,7 @@ class ParetoFrontierManager:
         if not distances:
             return 0.0
 
-        return np.mean(distances)
+        return float(np.mean(distances))
 
     def _calculate_convergence(
         self, current: list[ParetoSolution], previous: list[ParetoSolution]
@@ -790,11 +786,11 @@ class NSGAIIOptimizer:
             # Generate random parameters
             genes = {}
             for param, (min_val, max_val) in self.parameter_ranges.items():
-                if isinstance(min_val, int | float):
-                    if isinstance(min_val, int):
+                if isinstance(min_val, (int, float)):
+                    if isinstance(min_val, int) and isinstance(max_val, int):
                         value = random.randint(min_val, max_val)
                     else:
-                        value = random.uniform(min_val, max_val)
+                        value = random.uniform(float(min_val), float(max_val))
                 elif isinstance(min_val, list):
                     value = random.choice(min_val)
                 else:
@@ -938,7 +934,7 @@ class NSGAIIOptimizer:
         Returns:
             Offspring population
         """
-        offspring = []
+        offspring: list[Individual] = []
 
         # Tournament selection and reproduction
         for _ in range(self.config.population_size):
@@ -989,11 +985,11 @@ class NSGAIIOptimizer:
         """Create a random solution as fallback."""
         genes = {}
         for param, (min_val, max_val) in self.parameter_ranges.items():
-            if isinstance(min_val, int | float):
-                if isinstance(min_val, int):
+            if isinstance(min_val, (int, float)):
+                if isinstance(min_val, int) and isinstance(max_val, int):
                     value = random.randint(min_val, max_val)
                 else:
-                    value = random.uniform(min_val, max_val)
+                    value = random.uniform(float(min_val), float(max_val))
             else:
                 value = random.choice([min_val, max_val])
             genes[param] = value
@@ -1050,7 +1046,7 @@ class NSGAIIOptimizer:
             if param in self.parameter_ranges:
                 min_val, max_val = self.parameter_ranges[param]
 
-                if isinstance(value, int | float):
+                if isinstance(value, (int, float)):
                     # Gaussian mutation for numeric parameters
                     if isinstance(value, int):
                         mutation = random.gauss(0, (max_val - min_val) * 0.1)
@@ -1328,13 +1324,12 @@ class MultiObjectiveOptimizer:
             "pareto_frontier": self.get_pareto_frontier_data(),
         }
 
-        f = None
         try:
-            f = open(filepath, "w")
-            json.dump(results, f, indent=2, default=str)
-        finally:
-            if f:
-                f.close()
+            with open(filepath, "w") as f:
+                json.dump(results, f, indent=2, default=str)
+        except Exception as e:
+            logger.error(f"Failed to export optimization results: {e}")
+            raise
 
         self.logger.info("Optimization results exported", filepath=filepath)
 

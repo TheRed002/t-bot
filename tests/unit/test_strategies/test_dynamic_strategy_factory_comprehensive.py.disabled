@@ -1,0 +1,557 @@
+"""
+Comprehensive tests for Dynamic Strategy Factory.
+
+This module provides complete test coverage for the DynamicStrategyFactory,
+covering all methods, error paths, and edge cases to maximize coverage.
+"""
+
+import pytest
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
+from decimal import Decimal
+from typing import Any, Dict
+
+from src.strategies.dynamic.strategy_factory import DynamicStrategyFactory
+from src.strategies.base import BaseStrategy
+from src.core.types import StrategyType
+from src.core.exceptions import StrategyError, ValidationError
+
+
+class MockStrategy(BaseStrategy):
+    """Mock strategy for testing."""
+    
+    def __init__(self, config: Dict[str, Any]):
+        super().__init__(config)
+        self.technical_indicators = None
+        self.strategy_service = None
+        self.regime_detector = None
+        self.adaptive_risk_manager = None
+        self.data_service = None
+    
+    def set_technical_indicators(self, indicators):
+        self.technical_indicators = indicators
+    
+    def set_strategy_service(self, service):
+        self.strategy_service = service
+    
+    def set_regime_detector(self, detector):
+        self.regime_detector = detector
+    
+    def set_adaptive_risk_manager(self, manager):
+        self.adaptive_risk_manager = manager
+    
+    def set_data_service(self, service):
+        self.data_service = service
+    
+    async def _generate_signals_impl(self, data):
+        return []
+    
+    def validate_signal(self, signal):
+        return True
+    
+    def get_position_size(self, signal):
+        return Decimal('0.01')
+    
+    def should_exit(self, position, data):
+        return False
+
+
+class TestDynamicStrategyFactory:
+    """Test suite for DynamicStrategyFactory."""
+
+    @pytest.fixture
+    def mock_technical_indicators(self):
+        """Mock technical indicators service."""
+        return Mock()
+
+    @pytest.fixture
+    def mock_strategy_service(self):
+        """Mock strategy service."""
+        mock_service = Mock()
+        mock_service._data_service = Mock()
+        return mock_service
+
+    @pytest.fixture
+    def mock_regime_detector(self):
+        """Mock market regime detector."""
+        return Mock()
+
+    @pytest.fixture
+    def mock_adaptive_risk_manager(self):
+        """Mock adaptive risk manager."""
+        return Mock()
+
+    @pytest.fixture
+    def factory(self, mock_technical_indicators, mock_strategy_service, 
+                mock_regime_detector, mock_adaptive_risk_manager):
+        """Create factory instance with mocked dependencies."""
+        return DynamicStrategyFactory(
+            technical_indicators=mock_technical_indicators,
+            strategy_service=mock_strategy_service,
+            regime_detector=mock_regime_detector,
+            adaptive_risk_manager=mock_adaptive_risk_manager
+        )
+
+    @pytest.fixture
+    def factory_no_deps(self):
+        """Create factory instance without dependencies."""
+        return DynamicStrategyFactory()
+
+    @pytest.fixture
+    def basic_config(self):
+        """Basic strategy configuration."""
+        return {
+            'name': 'test_strategy',
+            'strategy_id': 'test-123',
+            'parameters': {
+                'fast_ma_period': 10,
+                'slow_ma_period': 20
+            },
+            'min_confidence': 0.5,
+            'position_size_pct': 0.02,
+            'enabled': True
+        }
+
+    def test_factory_initialization_with_dependencies(self, factory, mock_technical_indicators):
+        """Test factory initialization with all dependencies."""
+        assert factory._technical_indicators == mock_technical_indicators
+        assert factory._strategy_service is not None
+        assert factory._regime_detector is not None
+        assert factory._adaptive_risk_manager is not None
+        assert 'adaptive_momentum' in factory._strategy_mappings
+        assert 'volatility_breakout' in factory._strategy_mappings
+        assert StrategyType.MOMENTUM in factory._default_mappings
+
+    def test_factory_initialization_without_dependencies(self, factory_no_deps):
+        """Test factory initialization without dependencies."""
+        assert factory_no_deps._technical_indicators is None
+        assert factory_no_deps._strategy_service is None
+        assert factory_no_deps._regime_detector is None
+        assert factory_no_deps._adaptive_risk_manager is None
+        assert len(factory_no_deps._strategy_mappings) > 0
+
+    @pytest.mark.asyncio
+    async def test_create_strategy_adaptive_momentum_success(self, factory, basic_config):
+        """Test successful creation of adaptive momentum strategy."""
+        with patch.object(factory, '_resolve_strategy_class', return_value=MockStrategy), \
+             patch.object(factory, '_enhance_configuration', return_value=basic_config), \
+             patch.object(factory, '_inject_dependencies'), \
+             patch.object(factory, '_validate_strategy_setup', return_value=True):
+            
+            result = await factory.create_strategy('adaptive_momentum', basic_config)
+            
+            assert result is not None
+            assert isinstance(result, MockStrategy)
+            assert result.name == 'test_strategy'
+
+    @pytest.mark.asyncio
+    async def test_create_strategy_volatility_breakout_success(self, factory, basic_config):
+        """Test successful creation of volatility breakout strategy."""
+        with patch.object(factory, '_resolve_strategy_class', return_value=MockStrategy), \
+             patch.object(factory, '_enhance_configuration', return_value=basic_config), \
+             patch.object(factory, '_inject_dependencies'), \
+             patch.object(factory, '_validate_strategy_setup', return_value=True):
+            
+            result = await factory.create_strategy('volatility_breakout', basic_config)
+            
+            assert result is not None
+            assert isinstance(result, MockStrategy)
+
+    @pytest.mark.asyncio
+    async def test_create_strategy_unknown_type(self, factory, basic_config):
+        """Test creation of unknown strategy type."""
+        result = await factory.create_strategy('unknown_strategy', basic_config)
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_create_strategy_enhanced_version(self, factory, basic_config):
+        """Test creation using enhanced version preference."""
+        with patch.object(factory, '_resolve_strategy_class', return_value=MockStrategy), \
+             patch.object(factory, '_enhance_configuration', return_value=basic_config), \
+             patch.object(factory, '_inject_dependencies'), \
+             patch.object(factory, '_validate_strategy_setup', return_value=True):
+            
+            result = await factory.create_strategy('adaptive_momentum', basic_config, use_enhanced=True)
+            assert result is not None
+
+    @pytest.mark.asyncio
+    async def test_create_strategy_legacy_version(self, factory, basic_config):
+        """Test creation using legacy version preference."""
+        with patch.object(factory, '_resolve_strategy_class', return_value=MockStrategy), \
+             patch.object(factory, '_enhance_configuration', return_value=basic_config), \
+             patch.object(factory, '_inject_dependencies'), \
+             patch.object(factory, '_validate_strategy_setup', return_value=True):
+            
+            result = await factory.create_strategy('adaptive_momentum', basic_config, use_enhanced=False)
+            assert result is not None
+
+    @pytest.mark.asyncio
+    async def test_create_strategy_validation_failure(self, factory, basic_config):
+        """Test strategy creation with validation failure."""
+        with patch.object(factory, '_resolve_strategy_class', return_value=MockStrategy), \
+             patch.object(factory, '_enhance_configuration', return_value=basic_config), \
+             patch.object(factory, '_inject_dependencies'), \
+             patch.object(factory, '_validate_strategy_setup', return_value=False):
+            
+            result = await factory.create_strategy('adaptive_momentum', basic_config)
+            assert result is None
+
+    @pytest.mark.asyncio
+    async def test_create_strategy_exception_handling(self, factory, basic_config):
+        """Test strategy creation with exception during instantiation."""
+        with patch.object(factory, '_resolve_strategy_class', side_effect=Exception("Test error")):
+            result = await factory.create_strategy('adaptive_momentum', basic_config)
+            assert result is None
+
+    def test_resolve_strategy_class_direct_mapping(self, factory):
+        """Test strategy class resolution with direct mapping."""
+        result = factory._resolve_strategy_class('adaptive_momentum', True)
+        assert result is not None
+
+    def test_resolve_strategy_class_enhanced_mapping(self, factory):
+        """Test strategy class resolution with enhanced mapping preference."""
+        # Test case where enhanced version exists
+        result = factory._resolve_strategy_class('adaptive_momentum', True)
+        assert result is not None
+
+    def test_resolve_strategy_class_default_mapping(self, factory):
+        """Test strategy class resolution with default mapping."""
+        # Test fallback to default mappings
+        result = factory._resolve_strategy_class('adaptive_momentum', False)
+        assert result is not None
+
+    def test_resolve_strategy_class_not_found(self, factory):
+        """Test strategy class resolution for non-existent strategy."""
+        result = factory._resolve_strategy_class('non_existent_strategy', True)
+        assert result is None
+
+    def test_resolve_strategy_class_exception_handling(self, factory):
+        """Test strategy class resolution with exception."""
+        # Force an exception by patching the strategy mappings
+        with patch.object(factory, '_strategy_mappings', side_effect=Exception("Test error")):
+            result = factory._resolve_strategy_class('adaptive_momentum', True)
+            assert result is None
+
+    @pytest.mark.asyncio
+    async def test_enhance_configuration_adaptive_momentum(self, factory):
+        """Test configuration enhancement for adaptive momentum strategy."""
+        config = {'parameters': {}}
+        
+        result = await factory._enhance_configuration('adaptive_momentum', config)
+        
+        assert 'name' in result
+        assert 'strategy_id' in result
+        assert result['parameters']['fast_ma_period'] == 20
+        assert result['parameters']['slow_ma_period'] == 50
+        assert result['parameters']['rsi_period'] == 14
+        assert result['min_confidence'] == 0.3
+
+    @pytest.mark.asyncio
+    async def test_enhance_configuration_volatility_breakout(self, factory):
+        """Test configuration enhancement for volatility breakout strategy."""
+        config = {'parameters': {}}
+        
+        result = await factory._enhance_configuration('volatility_breakout', config)
+        
+        assert result['parameters']['atr_period'] == 14
+        assert result['parameters']['breakout_multiplier'] == 2.0
+        assert result['parameters']['consolidation_period'] == 20
+        assert result['parameters']['time_decay_factor'] == 0.95
+
+    @pytest.mark.asyncio
+    async def test_enhance_configuration_enhanced_versions(self, factory):
+        """Test configuration enhancement for enhanced strategy versions."""
+        config = {'parameters': {}}
+        
+        # Test enhanced adaptive momentum
+        result = await factory._enhance_configuration('adaptive_momentum_enhanced', config)
+        assert result['parameters']['fast_ma_period'] == 20
+
+        # Test enhanced volatility breakout
+        result = await factory._enhance_configuration('volatility_breakout_enhanced', config)
+        assert result['parameters']['atr_period'] == 14
+
+    @pytest.mark.asyncio
+    async def test_enhance_configuration_preserves_existing_values(self, factory):
+        """Test that configuration enhancement preserves existing values."""
+        config = {
+            'name': 'existing_name',
+            'strategy_id': 'existing_id',
+            'parameters': {
+                'fast_ma_period': 15,  # Custom value
+                'custom_param': 'custom_value'
+            },
+            'min_confidence': 0.8,  # Custom value
+        }
+        
+        result = await factory._enhance_configuration('adaptive_momentum', config)
+        
+        assert result['name'] == 'existing_name'
+        assert result['strategy_id'] == 'existing_id'
+        assert result['parameters']['fast_ma_period'] == 15  # Preserved
+        assert result['parameters']['custom_param'] == 'custom_value'
+        assert result['min_confidence'] == 0.8  # Preserved
+
+    @pytest.mark.asyncio
+    async def test_enhance_configuration_exception_handling(self, factory):
+        """Test configuration enhancement with exception."""
+        config = {'parameters': {}}
+        
+        # Mock uuid4 to raise an exception
+        with patch('src.strategies.dynamic.strategy_factory.uuid4', side_effect=Exception("UUID error")):
+            result = await factory._enhance_configuration('adaptive_momentum', config)
+            # Should return original config on exception
+            assert result == config
+
+    @pytest.mark.asyncio
+    async def test_inject_dependencies_all_services(self, factory):
+        """Test dependency injection with all services available."""
+        strategy = MockStrategy({'name': 'test'})
+        
+        await factory._inject_dependencies(strategy, 'test_strategy')
+        
+        assert strategy.technical_indicators == factory._technical_indicators
+        assert strategy.strategy_service == factory._strategy_service
+        assert strategy.regime_detector == factory._regime_detector
+        assert strategy.adaptive_risk_manager == factory._adaptive_risk_manager
+
+    @pytest.mark.asyncio
+    async def test_inject_dependencies_data_service(self, factory, mock_strategy_service):
+        """Test injection of data service from strategy service."""
+        strategy = MockStrategy({'name': 'test'})
+        mock_data_service = Mock()
+        mock_strategy_service._data_service = mock_data_service
+        
+        await factory._inject_dependencies(strategy, 'test_strategy')
+        
+        assert strategy.data_service == mock_data_service
+
+    @pytest.mark.asyncio
+    async def test_inject_dependencies_no_services(self, factory_no_deps):
+        """Test dependency injection without services."""
+        strategy = MockStrategy({'name': 'test'})
+        
+        await factory_no_deps._inject_dependencies(strategy, 'test_strategy')
+        
+        # Should complete without errors even with no services
+        assert strategy.technical_indicators is None
+
+    @pytest.mark.asyncio
+    async def test_inject_dependencies_missing_methods(self, factory):
+        """Test dependency injection with strategy missing setter methods."""
+        strategy = Mock()  # Mock without the expected methods
+        
+        # Should not raise exception
+        await factory._inject_dependencies(strategy, 'test_strategy')
+
+    @pytest.mark.asyncio
+    async def test_inject_dependencies_exception_handling(self, factory):
+        """Test dependency injection with exception."""
+        strategy = Mock()
+        strategy.set_technical_indicators.side_effect = Exception("Injection error")
+        
+        # Should not raise exception
+        await factory._inject_dependencies(strategy, 'test_strategy')
+
+    @pytest.mark.asyncio
+    async def test_validate_strategy_setup_success(self, factory):
+        """Test successful strategy setup validation."""
+        strategy = MockStrategy({'name': 'test_strategy'})
+        strategy.config = Mock()
+        strategy.config.min_confidence = 0.5
+        strategy.config.position_size_pct = 0.02
+        
+        result = await factory._validate_strategy_setup(strategy)
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_validate_strategy_setup_missing_name(self, factory):
+        """Test strategy setup validation with missing name."""
+        strategy = Mock()
+        strategy.name = None
+        
+        result = await factory._validate_strategy_setup(strategy)
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_validate_strategy_setup_missing_strategy_type(self, factory):
+        """Test strategy setup validation with missing strategy_type."""
+        strategy = MockStrategy({'name': 'test_strategy'})
+        delattr(strategy, 'strategy_type')
+        
+        result = await factory._validate_strategy_setup(strategy)
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_validate_strategy_setup_missing_methods(self, factory):
+        """Test strategy setup validation with missing required methods."""
+        strategy = MockStrategy({'name': 'test_strategy'})
+        # Remove a required method
+        delattr(strategy, '_generate_signals_impl')
+        
+        result = await factory._validate_strategy_setup(strategy)
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_validate_strategy_setup_invalid_config_values(self, factory):
+        """Test strategy setup validation with invalid configuration values."""
+        strategy = MockStrategy({'name': 'test_strategy'})
+        strategy.config = Mock()
+        strategy.config.min_confidence = -0.1  # Invalid
+        
+        result = await factory._validate_strategy_setup(strategy)
+        assert result is False
+        
+        # Test invalid position size
+        strategy.config.min_confidence = 0.5
+        strategy.config.position_size_pct = -0.01  # Invalid
+        
+        result = await factory._validate_strategy_setup(strategy)
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_validate_strategy_setup_exception_handling(self, factory):
+        """Test strategy setup validation with exception."""
+        strategy = Mock()
+        strategy.name = Mock(side_effect=Exception("Name access error"))
+        
+        result = await factory._validate_strategy_setup(strategy)
+        assert result is False
+
+    def test_get_available_strategies(self, factory):
+        """Test getting list of available strategies."""
+        strategies = factory.get_available_strategies()
+        
+        assert isinstance(strategies, dict)
+        assert 'adaptive_momentum' in strategies
+        assert 'volatility_breakout' in strategies
+        assert 'adaptive_momentum_enhanced' in strategies
+        assert 'volatility_breakout_enhanced' in strategies
+        
+        # Check descriptions
+        assert 'Legacy' in strategies['adaptive_momentum']
+        assert 'Enhanced' in strategies['adaptive_momentum_enhanced']
+
+    def test_get_strategy_requirements_adaptive_momentum(self, factory):
+        """Test getting requirements for adaptive momentum strategy."""
+        requirements = factory.get_strategy_requirements('adaptive_momentum')
+        
+        assert 'TechnicalIndicators' in requirements['required_services']
+        assert 'DataService' in requirements['required_services']
+        assert 'RegimeDetector' in requirements['recommended_services']
+        assert 'fast_ma_period' in requirements['required_parameters']
+        assert 'volume_threshold' in requirements['optional_parameters']
+
+    def test_get_strategy_requirements_volatility_breakout(self, factory):
+        """Test getting requirements for volatility breakout strategy."""
+        requirements = factory.get_strategy_requirements('volatility_breakout')
+        
+        assert 'TechnicalIndicators' in requirements['required_services']
+        assert 'atr_period' in requirements['required_parameters']
+        assert 'breakout_multiplier' in requirements['required_parameters']
+        assert 'consolidation_period' in requirements['optional_parameters']
+
+    def test_get_strategy_requirements_enhanced_versions(self, factory):
+        """Test getting requirements for enhanced strategy versions."""
+        requirements = factory.get_strategy_requirements('adaptive_momentum_enhanced')
+        
+        assert 'TechnicalIndicators' in requirements['required_services']
+        assert 'AdaptiveRiskManager' in requirements['recommended_services']
+
+    def test_get_strategy_requirements_unknown_strategy(self, factory):
+        """Test getting requirements for unknown strategy."""
+        requirements = factory.get_strategy_requirements('unknown_strategy')
+        
+        # Should return empty structure
+        assert requirements['required_services'] == []
+        assert requirements['recommended_services'] == []
+        assert requirements['required_parameters'] == []
+        assert requirements['optional_parameters'] == []
+
+    @pytest.mark.asyncio
+    async def test_create_multiple_strategies_success(self, factory):
+        """Test successful creation of multiple strategies."""
+        strategy_configs = {
+            'momentum1': {'name': 'momentum1', 'parameters': {}},
+            'momentum2': {'name': 'momentum2', 'parameters': {}},
+        }
+        
+        with patch.object(factory, 'create_strategy', return_value=MockStrategy({'name': 'test'})):
+            result = await factory.create_multiple_strategies(strategy_configs)
+            
+            assert len(result) == 2
+            assert 'momentum1' in result
+            assert 'momentum2' in result
+            assert all(strategy is not None for strategy in result.values())
+
+    @pytest.mark.asyncio
+    async def test_create_multiple_strategies_partial_failure(self, factory):
+        """Test creation of multiple strategies with partial failures."""
+        strategy_configs = {
+            'success': {'name': 'success', 'parameters': {}},
+            'failure': {'name': 'failure', 'parameters': {}},
+        }
+        
+        def mock_create_strategy(name, config, use_enhanced=True):
+            if name == 'success':
+                return MockStrategy({'name': 'test'})
+            else:
+                return None
+        
+        with patch.object(factory, 'create_strategy', side_effect=mock_create_strategy):
+            result = await factory.create_multiple_strategies(strategy_configs)
+            
+            assert len(result) == 2
+            assert result['success'] is not None
+            assert result['failure'] is None
+
+    @pytest.mark.asyncio
+    async def test_create_multiple_strategies_with_exceptions(self, factory):
+        """Test creation of multiple strategies with exceptions."""
+        strategy_configs = {
+            'exception': {'name': 'exception', 'parameters': {}},
+            'success': {'name': 'success', 'parameters': {}},
+        }
+        
+        def mock_create_strategy(name, config, use_enhanced=True):
+            if name == 'exception':
+                raise Exception("Test exception")
+            else:
+                return MockStrategy({'name': 'test'})
+        
+        with patch.object(factory, 'create_strategy', side_effect=mock_create_strategy):
+            result = await factory.create_multiple_strategies(strategy_configs)
+            
+            assert len(result) == 2
+            assert result['exception'] is None
+            assert result['success'] is not None
+
+    @pytest.mark.asyncio
+    async def test_create_multiple_strategies_empty_input(self, factory):
+        """Test creation of multiple strategies with empty input."""
+        result = await factory.create_multiple_strategies({})
+        
+        assert result == {}
+
+    @pytest.mark.asyncio
+    async def test_create_multiple_strategies_enhanced_preference(self, factory):
+        """Test creation of multiple strategies with enhanced preference."""
+        strategy_configs = {
+            'test': {'name': 'test', 'parameters': {}},
+        }
+        
+        with patch.object(factory, 'create_strategy') as mock_create:
+            await factory.create_multiple_strategies(strategy_configs, use_enhanced=True)
+            
+            mock_create.assert_called_with('test', strategy_configs['test'], True)
+
+    @pytest.mark.asyncio
+    async def test_create_multiple_strategies_legacy_preference(self, factory):
+        """Test creation of multiple strategies with legacy preference."""
+        strategy_configs = {
+            'test': {'name': 'test', 'parameters': {}},
+        }
+        
+        with patch.object(factory, 'create_strategy') as mock_create:
+            await factory.create_multiple_strategies(strategy_configs, use_enhanced=False)
+            
+            mock_create.assert_called_with('test', strategy_configs['test'], False)

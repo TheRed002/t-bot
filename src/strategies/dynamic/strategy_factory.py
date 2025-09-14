@@ -1,98 +1,98 @@
 """
-Enhanced Strategy Factory for Dynamic Strategies - Day 13
+Strategy Factory for Dynamic Strategies
 
 This factory creates strategy instances with proper service layer integration,
-dependency injection, and enhanced architecture support.
+dependency injection, and architecture support.
 
 Features:
 - Automatic service dependency injection
-- Enhanced strategy configuration validation
-- Support for both legacy and refactored strategies
+- Strategy configuration validation
 - Comprehensive initialization and validation
 - Proper error handling and logging
 """
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from src.base import BaseComponent
+from src.core.base.component import BaseComponent
 from src.core.types import StrategyType
 from src.data.features.technical_indicators import TechnicalIndicators
 from src.risk_management.adaptive_risk import AdaptiveRiskManager
 from src.risk_management.regime_detection import MarketRegimeDetector
 from src.strategies.base import BaseStrategy
-from src.strategies.service import StrategyService
+from src.strategies.dependencies import StrategyServiceContainer
+
+if TYPE_CHECKING:
+    from src.strategies.service import StrategyService
 
 # Import strategies
-from .adaptive_momentum import AdaptiveMomentumStrategy
-from .volatility_breakout import VolatilityBreakoutStrategy
+from src.strategies.dynamic.adaptive_momentum import AdaptiveMomentumStrategy
+from src.strategies.dynamic.volatility_breakout import VolatilityBreakoutStrategy
 
 
-class EnhancedDynamicStrategyFactory(BaseComponent):
+class DynamicStrategyFactory(BaseComponent):
     """
-    Enhanced factory for creating dynamic strategies with service layer integration.
+    Factory for creating dynamic strategies with service layer integration.
 
     This factory handles:
     - Strategy creation with proper dependency injection
     - Service layer integration setup
-    - Configuration validation and enhancement
-    - Legacy and refactored strategy support
+    - Configuration validation
+    - Strategy support
     """
 
-    def __init__(self):
-        """Initialize the enhanced strategy factory."""
+    def __init__(
+        self,
+        service_container: "StrategyServiceContainer | None" = None,
+        technical_indicators: TechnicalIndicators | None = None,
+        strategy_service: "StrategyService | None" = None,
+        regime_detector: MarketRegimeDetector | None = None,
+        adaptive_risk_manager: AdaptiveRiskManager | None = None,
+    ):
+        """
+        Initialize the strategy factory with dependency injection.
+
+        Args:
+            technical_indicators: Technical indicators service (injected)
+            strategy_service: Strategy service for lifecycle management (injected)
+            regime_detector: Market regime detector (injected)
+            adaptive_risk_manager: Adaptive risk manager (injected)
+        """
         super().__init__()
 
-        # Service dependencies (will be injected)
-        self._technical_indicators: TechnicalIndicators | None = None
-        self._strategy_service: StrategyService | None = None
-        self._regime_detector: MarketRegimeDetector | None = None
-        self._adaptive_risk_manager: AdaptiveRiskManager | None = None
+        # Use service container for dependency resolution
+        self._service_container = service_container
+        
+        # Fallback to direct dependencies for backward compatibility
+        self._technical_indicators = technical_indicators
+        self._strategy_service = strategy_service
+        self._regime_detector = regime_detector
+        self._adaptive_risk_manager = adaptive_risk_manager
 
         # Strategy type mappings
         self._strategy_mappings = {
-            # Legacy strategies
             "adaptive_momentum": AdaptiveMomentumStrategy,
             "volatility_breakout": VolatilityBreakoutStrategy,
-            # Enhanced strategies (default)
-            "adaptive_momentum_enhanced": AdaptiveMomentumStrategy,
-            "volatility_breakout_enhanced": VolatilityBreakoutStrategy,
         }
 
-        # Default to enhanced versions
+        # Use MOMENTUM for dynamic strategies
         self._default_mappings = {
-            StrategyType.DYNAMIC: {
+            StrategyType.MOMENTUM: {
                 "adaptive_momentum": AdaptiveMomentumStrategy,
                 "volatility_breakout": VolatilityBreakoutStrategy,
             }
         }
 
         self.logger.info(
-            "Enhanced dynamic strategy factory initialized",
+            "Dynamic strategy factory initialized",
             available_strategies=list(self._strategy_mappings.keys()),
+            has_technical_indicators=self._technical_indicators is not None,
+            has_strategy_service=self._strategy_service is not None,
+            has_regime_detector=self._regime_detector is not None,
+            has_adaptive_risk_manager=self._adaptive_risk_manager is not None,
         )
 
-    def set_technical_indicators(self, technical_indicators: TechnicalIndicators) -> None:
-        """Set technical indicators service for strategy dependency injection."""
-        self._technical_indicators = technical_indicators
-        self.logger.info("Technical indicators service set in factory")
-
-    def set_strategy_service(self, strategy_service: StrategyService) -> None:
-        """Set strategy service for lifecycle management."""
-        self._strategy_service = strategy_service
-        self.logger.info("Strategy service set in factory")
-
-    def set_regime_detector(self, regime_detector: MarketRegimeDetector) -> None:
-        """Set regime detector for adaptive strategies."""
-        self._regime_detector = regime_detector
-        self.logger.info("Regime detector set in factory")
-
-    def set_adaptive_risk_manager(self, adaptive_risk_manager: AdaptiveRiskManager) -> None:
-        """Set adaptive risk manager for dynamic risk adjustment."""
-        self._adaptive_risk_manager = adaptive_risk_manager
-        self.logger.info("Adaptive risk manager set in factory")
-
     async def create_strategy(
-        self, strategy_name: str, config: dict[str, Any], use_enhanced: bool = True
+        self, strategy_name: str, config: dict[str, Any]
     ) -> BaseStrategy | None:
         """
         Create a strategy instance with proper service integration.
@@ -100,14 +100,13 @@ class EnhancedDynamicStrategyFactory(BaseComponent):
         Args:
             strategy_name: Name of the strategy to create
             config: Strategy configuration dictionary
-            use_enhanced: Whether to use enhanced versions (default: True)
 
         Returns:
             Configured strategy instance or None if creation fails
         """
         try:
             # Determine strategy class to use
-            strategy_class = self._resolve_strategy_class(strategy_name, use_enhanced)
+            strategy_class = self._resolve_strategy_class(strategy_name)
             if not strategy_class:
                 self.logger.error(
                     "Unknown strategy type",
@@ -117,17 +116,20 @@ class EnhancedDynamicStrategyFactory(BaseComponent):
                 return None
 
             # Enhance configuration with defaults
-            enhanced_config = await self._enhance_configuration(strategy_name, config)
+            config = await self._enhance_configuration(strategy_name, config)
 
             # Create strategy instance
             self.logger.info(
                 "Creating strategy instance",
                 strategy_name=strategy_name,
                 strategy_class=strategy_class.__name__,
-                enhanced_config=use_enhanced,
             )
 
-            strategy = strategy_class(enhanced_config)
+            # Create strategy with service container if available
+            if self._service_container:
+                strategy = strategy_class(config, services=self._service_container)
+            else:
+                strategy = strategy_class(config)
 
             # Inject service dependencies
             await self._inject_dependencies(strategy, strategy_name)
@@ -158,18 +160,16 @@ class EnhancedDynamicStrategyFactory(BaseComponent):
             )
             return None
 
-    def _resolve_strategy_class(self, strategy_name: str, use_enhanced: bool):
-        """Resolve strategy class based on name and enhancement preference."""
+    def _resolve_strategy_class(self, strategy_name: str):
+        """Resolve strategy class based on name."""
         try:
             # Direct mapping lookup
             if strategy_name in self._strategy_mappings:
                 return self._strategy_mappings[strategy_name]
 
-            # Enhanced version preference
-            if use_enhanced:
-                enhanced_name = f"{strategy_name}_enhanced"
-                if enhanced_name in self._strategy_mappings:
-                    return self._strategy_mappings[enhanced_name]
+            # Check if strategy exists
+            if strategy_name in self._strategy_mappings:
+                return self._strategy_mappings[strategy_name]
 
             # Default mapping lookup
             for _strategy_type, mappings in self._default_mappings.items():
@@ -209,7 +209,7 @@ class EnhancedDynamicStrategyFactory(BaseComponent):
             # Add common defaults
             parameters = enhanced_config["parameters"]
 
-            if strategy_name in ["adaptive_momentum", "adaptive_momentum_enhanced"]:
+            if strategy_name == "adaptive_momentum":
                 parameters.setdefault("fast_ma_period", 20)
                 parameters.setdefault("slow_ma_period", 50)
                 parameters.setdefault("rsi_period", 14)
@@ -217,7 +217,7 @@ class EnhancedDynamicStrategyFactory(BaseComponent):
                 parameters.setdefault("volume_threshold", 1.5)
                 parameters.setdefault("min_data_points", 50)
 
-            elif strategy_name in ["volatility_breakout", "volatility_breakout_enhanced"]:
+            elif strategy_name == "volatility_breakout":
                 parameters.setdefault("atr_period", 14)
                 parameters.setdefault("breakout_multiplier", 2.0)
                 parameters.setdefault("consolidation_period", 20)
@@ -249,8 +249,14 @@ class EnhancedDynamicStrategyFactory(BaseComponent):
             return config
 
     async def _inject_dependencies(self, strategy: BaseStrategy, strategy_name: str) -> None:
-        """Inject service dependencies into strategy instance."""
+        """Inject service dependencies into strategy instance using service container."""
         try:
+            # Use service container if available
+            if self._service_container and hasattr(strategy, "set_services"):
+                strategy.set_services(self._service_container)
+                return
+
+            # Fallback to individual service injection
             # Inject technical indicators service
             if self._technical_indicators and hasattr(strategy, "set_technical_indicators"):
                 strategy.set_technical_indicators(self._technical_indicators)
@@ -267,12 +273,14 @@ class EnhancedDynamicStrategyFactory(BaseComponent):
             if self._adaptive_risk_manager and hasattr(strategy, "set_adaptive_risk_manager"):
                 strategy.set_adaptive_risk_manager(self._adaptive_risk_manager)
 
-            # Use BaseStrategy's built-in dependency injection methods
-            if hasattr(strategy, "set_data_service") and self._strategy_service:
+            # Use service container for data service if available
+            data_service = self._service_container.data_service if self._service_container else None
+            if not data_service and hasattr(strategy, "set_data_service") and self._strategy_service:
                 # Get data service from strategy service if available
                 data_service = getattr(self._strategy_service, "_data_service", None)
-                if data_service:
-                    strategy.set_data_service(data_service)
+            
+            if data_service and hasattr(strategy, "set_data_service"):
+                strategy.set_data_service(data_service)
 
             self.logger.debug(
                 "Dependencies injected",
@@ -346,10 +354,8 @@ class EnhancedDynamicStrategyFactory(BaseComponent):
     def get_available_strategies(self) -> dict[str, str]:
         """Get list of available strategies with descriptions."""
         return {
-            "adaptive_momentum": "Legacy adaptive momentum strategy",
-            "adaptive_momentum_enhanced": "Enhanced momentum strategy with service layer",
-            "volatility_breakout": "Legacy volatility breakout strategy",
-            "volatility_breakout_enhanced": "Enhanced breakout strategy with service layer",
+            "adaptive_momentum": "Adaptive momentum strategy with service layer",
+            "volatility_breakout": "Volatility breakout strategy with service layer",
         }
 
     def get_strategy_requirements(self, strategy_name: str) -> dict[str, Any]:
@@ -361,7 +367,7 @@ class EnhancedDynamicStrategyFactory(BaseComponent):
             "optional_parameters": [],
         }
 
-        if strategy_name in ["adaptive_momentum", "adaptive_momentum_enhanced"]:
+        if strategy_name == "adaptive_momentum":
             requirements.update(
                 {
                     "required_services": ["TechnicalIndicators", "DataService"],
@@ -374,7 +380,7 @@ class EnhancedDynamicStrategyFactory(BaseComponent):
                     ],
                 }
             )
-        elif strategy_name in ["volatility_breakout", "volatility_breakout_enhanced"]:
+        elif strategy_name == "volatility_breakout":
             requirements.update(
                 {
                     "required_services": ["TechnicalIndicators", "DataService"],
@@ -391,14 +397,13 @@ class EnhancedDynamicStrategyFactory(BaseComponent):
         return requirements
 
     async def create_multiple_strategies(
-        self, strategy_configs: dict[str, dict[str, Any]], use_enhanced: bool = True
+        self, strategy_configs: dict[str, dict[str, Any]]
     ) -> dict[str, BaseStrategy | None]:
         """
         Create multiple strategy instances.
 
         Args:
             strategy_configs: Dictionary mapping strategy names to their configs
-            use_enhanced: Whether to use enhanced versions
 
         Returns:
             Dictionary mapping strategy names to created instances (or None if failed)
@@ -407,7 +412,7 @@ class EnhancedDynamicStrategyFactory(BaseComponent):
 
         for strategy_name, config in strategy_configs.items():
             try:
-                strategy = await self.create_strategy(strategy_name, config, use_enhanced)
+                strategy = await self.create_strategy(strategy_name, config)
                 strategies[strategy_name] = strategy
 
                 if strategy:

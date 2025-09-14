@@ -32,6 +32,7 @@ from src.risk_management.regime_detection import MarketRegimeDetector
 
 # MANDATORY: Import from P-011
 from src.strategies.base import BaseStrategy
+from src.strategies.dependencies import StrategyServiceContainer
 
 # MANDATORY: Import from P-007A
 from src.utils.decorators import time_execution
@@ -63,7 +64,7 @@ class FailureType(Enum):
 class FailureDetector:
     """Detects various types of strategy failures."""
 
-    def __init__(self, config: dict[str, Any]):
+    def __init__(self, config: dict[str, Any], services: StrategyServiceContainer | None = None):
         """Initialize failure detector."""
         self.config = config
 
@@ -84,10 +85,10 @@ class FailureDetector:
         )  # 50% annualized
 
         # State tracking
-        self.recent_trades = []
-        self.recent_errors = []
-        self.recent_timeouts = []
-        self.last_signals = []
+        self.recent_trades: list[Any] = []
+        self.recent_errors: list[Any] = []
+        self.recent_timeouts: list[Any] = []
+        self.last_signals: list[Any] = []
 
     def add_trade_result(self, return_pct: float, timestamp: datetime) -> None:
         """Add a trade result for analysis."""
@@ -271,7 +272,7 @@ class FailureDetector:
 class SafeModeStrategy:
     """Emergency safe mode strategy with minimal risk."""
 
-    def __init__(self, config: dict[str, Any]):
+    def __init__(self, config: dict[str, Any], services: StrategyServiceContainer | None = None):
         """Initialize safe mode strategy."""
         self.config = config
         self.position_limit = config.get("safe_mode_position_limit", 0.01)  # 1% max position
@@ -300,11 +301,11 @@ class SafeModeStrategy:
                     confidence = min(trend_strength * 10, 1.0)
                     if confidence > self.confidence_threshold:
                         return Signal(
-                            direction=SignalDirection.BUY,
-                            confidence=confidence,
-                            timestamp=data.timestamp,
                             symbol=data.symbol,
-                            strategy_name="SafeMode",
+                            direction=SignalDirection.BUY,
+                            strength=Decimal(str(confidence)),
+                            timestamp=data.timestamp,
+                            source="SafeMode",
                             metadata={
                                 "mode": "safe_mode",
                                 "trend_strength": trend_strength,
@@ -316,11 +317,11 @@ class SafeModeStrategy:
                     confidence = min(trend_strength * 10, 1.0)
                     if confidence > self.confidence_threshold:
                         return Signal(
-                            direction=SignalDirection.SELL,
-                            confidence=confidence,
-                            timestamp=data.timestamp,
                             symbol=data.symbol,
-                            strategy_name="SafeMode",
+                            direction=SignalDirection.SELL,
+                            strength=Decimal(str(confidence)),
+                            timestamp=data.timestamp,
+                            source="SafeMode",
                             metadata={
                                 "mode": "safe_mode",
                                 "trend_strength": trend_strength,
@@ -339,7 +340,7 @@ class SafeModeStrategy:
 class DegradedModeStrategy:
     """Degraded mode strategy with simplified logic."""
 
-    def __init__(self, config: dict[str, Any]):
+    def __init__(self, config: dict[str, Any], services: StrategyServiceContainer | None = None):
         """Initialize degraded mode strategy."""
         self.config = config
         self.position_limit = config.get("degraded_mode_position_limit", 0.02)  # 2% max position
@@ -401,11 +402,11 @@ class DegradedModeStrategy:
 
             if signal_strength >= self.confidence_threshold and direction != SignalDirection.HOLD:
                 return Signal(
-                    direction=direction,
-                    confidence=signal_strength,
-                    timestamp=data.timestamp,
                     symbol=data.symbol,
-                    strategy_name="DegradedMode",
+                    direction=direction,
+                    strength=Decimal(str(signal_strength)),
+                    timestamp=data.timestamp,
+                    source="DegradedMode",
                     metadata={
                         "mode": "degraded_mode",
                         "ma_5": ma_5,
@@ -431,14 +432,14 @@ class FallbackStrategy(BaseStrategy):
     and recovery mechanisms for robust trading operations.
     """
 
-    def __init__(self, config: dict[str, Any]):
+    def __init__(self, config: dict[str, Any], services: StrategyServiceContainer | None = None):
         """Initialize the fallback strategy."""
         # Ensure strategy type is set correctly
         config["strategy_type"] = StrategyType.HYBRID
         if "name" not in config:
             config["name"] = "Fallback"
 
-        super().__init__(config)
+        super().__init__(config, services)
 
         # Primary strategy
         self.primary_strategy: BaseStrategy | None = None
@@ -451,7 +452,7 @@ class FallbackStrategy(BaseStrategy):
 
         # Fallback state
         self.current_mode = FallbackMode.PRIMARY
-        self.mode_history = []
+        self.mode_history: list[Any] = []
         self.last_mode_change = datetime.now(timezone.utc)
         self.failure_count = 0
         self.recovery_attempts = 0
@@ -965,6 +966,20 @@ class FallbackStrategy(BaseStrategy):
             self.logger.error("Error updating trade result", error=str(e))
 
     def get_fallback_statistics(self) -> dict[str, Any]:
+        """Get comprehensive fallback strategy statistics."""
+        return {
+            "primary_strategy": self.primary_strategy.name if self.primary_strategy else None,
+            "fallback_strategies": [s.name for s in self.fallback_strategies],
+            "current_active": self.current_active_strategy.name if self.current_active_strategy else None,
+            "fallback_triggered": self.fallback_triggered,
+            "last_check": self.last_performance_check.isoformat() if self.last_performance_check else None,
+            "performance_threshold": self.performance_threshold,
+            "recovery_threshold": self.recovery_threshold,
+        }
+
+    # Helper methods for accessing data through data service
+    def get_strategy_info(self) -> dict[str, Any]:
+
         """Get comprehensive fallback statistics."""
         try:
             return {

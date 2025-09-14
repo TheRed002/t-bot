@@ -1,0 +1,203 @@
+"""
+Simple tests for evolutionary strategies to boost coverage.
+"""
+
+import random
+from decimal import Decimal
+from unittest.mock import Mock, patch
+import pytest
+
+from src.strategies.evolutionary.fitness import SharpeFitness, ReturnFitness, FitnessFunction
+from src.strategies.evolutionary.mutations import MutationOperator, CrossoverOperator
+from src.strategies.evolutionary.population import Population, Individual
+from src.strategies.evolutionary.genetic import GeneticConfig
+
+
+class TestGeneticConfig:
+    """Test genetic config functionality."""
+    
+    def test_genetic_config_creation(self):
+        """Test basic genetic config creation."""
+        config = GeneticConfig(
+            population_size=50,
+            mutation_rate=0.1,
+            crossover_rate=0.8
+        )
+        assert config.population_size == 50
+        assert config.mutation_rate == 0.1
+        assert config.crossover_rate == 0.8
+    
+    def test_genetic_config_defaults(self):
+        """Test genetic config with default values."""
+        config = GeneticConfig()
+        assert config.population_size == 50
+        assert config.mutation_rate == 0.1
+        assert config.crossover_rate == 0.7
+
+
+class TestFitnessFunction:
+    """Test fitness function functionality."""
+    
+    def test_sharpe_fitness(self):
+        """Test Sharpe ratio fitness calculation."""
+        fitness_func = SharpeFitness()
+        
+        # Mock backtest result
+        mock_result = Mock()
+        mock_result.sharpe_ratio = 1.5
+        
+        fitness = fitness_func.calculate(mock_result)
+        assert fitness == 1.5
+    
+    def test_return_fitness(self):
+        """Test return fitness calculation."""
+        fitness_func = ReturnFitness()
+        
+        # Mock backtest result
+        mock_result = Mock()
+        mock_result.total_return = Decimal("0.25")
+        
+        fitness = fitness_func.calculate(mock_result)
+        assert fitness == 0.25
+
+
+class TestMutationOperator:
+    """Test mutation operators."""
+    
+    def test_mutation_operator_creation(self):
+        """Test basic mutation operator creation."""
+        operator = MutationOperator(
+            mutation_rate=0.15,
+            mutation_strength=0.25
+        )
+        assert operator.mutation_rate == 0.15
+        assert operator.mutation_strength == 0.25
+    
+    def test_mutate_genes(self):
+        """Test gene mutation."""
+        operator = MutationOperator(mutation_rate=1.0)  # Always mutate
+        
+        genes = {"param1": 50, "param2": 0.5}
+        parameter_ranges = {
+            "param1": (10, 100),
+            "param2": (0.1, 1.0)
+        }
+        
+        mutated = operator.mutate(genes, parameter_ranges)
+        
+        # Genes should be mutated but within bounds
+        assert 10 <= mutated["param1"] <= 100
+        assert 0.1 <= mutated["param2"] <= 1.0
+    
+    def test_boolean_mutation(self):
+        """Test boolean parameter mutation."""
+        operator = MutationOperator(mutation_rate=1.0)
+        
+        genes = {"flag": True}
+        parameter_ranges = {"flag": (True, False)}
+        
+        mutated = operator.mutate(genes, parameter_ranges)
+        assert mutated["flag"] in [True, False]
+
+
+class TestCrossoverOperator:
+    """Test crossover operators."""
+    
+    def test_crossover_operator_creation(self):
+        """Test basic crossover operator creation."""
+        operator = CrossoverOperator(
+            crossover_rate=0.8,
+            crossover_type="uniform"
+        )
+        assert operator.crossover_rate == 0.8
+        assert operator.crossover_type == "uniform"
+    
+    def test_uniform_crossover(self):
+        """Test uniform crossover."""
+        operator = CrossoverOperator(crossover_rate=1.0, crossover_type="uniform")
+        
+        parent1_genes = {"param1": 10, "param2": 0.2}
+        parent2_genes = {"param1": 20, "param2": 0.4}
+        
+        child1_genes, child2_genes = operator.crossover(parent1_genes, parent2_genes)
+        
+        # Children should have values from parents
+        assert child1_genes["param1"] in [10, 20]
+        assert child1_genes["param2"] in [0.2, 0.4]
+        assert child2_genes["param1"] in [10, 20]
+        assert child2_genes["param2"] in [0.2, 0.4]
+    
+    def test_single_point_crossover(self):
+        """Test single-point crossover."""
+        operator = CrossoverOperator(crossover_rate=1.0, crossover_type="single_point")
+        
+        parent1_genes = {"param1": 10, "param2": 0.2, "param3": True}
+        parent2_genes = {"param1": 20, "param2": 0.4, "param3": False}
+        
+        child1_genes, child2_genes = operator.crossover(parent1_genes, parent2_genes)
+        
+        # Should have mixed traits
+        assert len(child1_genes) == 3
+        assert len(child2_genes) == 3
+
+
+class TestPopulation:
+    """Test population management."""
+    
+    def test_population_creation(self):
+        """Test population creation."""
+        individuals = [
+            Individual("ind1", {"param": 10}, 1.0),
+            Individual("ind2", {"param": 20}, 2.0),
+        ]
+        population = Population(individuals)
+        assert len(population.individuals) == 2
+    
+    def test_get_best_individual(self):
+        """Test getting best individual."""
+        individuals = [
+            Individual("ind1", {"param": 10}, 1.0),
+            Individual("ind2", {"param": 20}, 3.0),  # Best
+            Individual("ind3", {"param": 15}, 2.0),
+        ]
+        population = Population(individuals)
+        
+        best = population.get_best()
+        assert best.id == "ind2"
+        assert best.fitness == 3.0
+    
+    def test_get_top_n(self):
+        """Test getting top N individuals."""
+        individuals = [
+            Individual("ind1", {"param": 10}, 1.0),
+            Individual("ind2", {"param": 20}, 3.0),
+            Individual("ind3", {"param": 15}, 2.0),
+        ]
+        population = Population(individuals)
+        
+        top_2 = population.get_top_n(2)
+        assert len(top_2) == 2
+        assert top_2[0].fitness >= top_2[1].fitness
+    
+    def test_individual_copy(self):
+        """Test individual copying."""
+        individual = Individual("ind1", {"param": 10}, 1.5)
+        individual.metadata = {"generation": 1}
+        
+        copy_ind = individual.copy()
+        assert copy_ind.id == individual.id
+        assert copy_ind.fitness == individual.fitness
+        assert copy_ind.genes == individual.genes
+        assert copy_ind.metadata == individual.metadata
+        
+        # Should be separate objects
+        copy_ind.genes["param"] = 20
+        assert individual.genes["param"] == 10
+    
+    def test_individual_comparison(self):
+        """Test individual comparison by fitness."""
+        ind1 = Individual("ind1", {}, 1.0)
+        ind2 = Individual("ind2", {}, 2.0)
+        
+        assert ind1 < ind2
+        assert not (ind2 < ind1)

@@ -200,38 +200,44 @@ class MetricsCalculator:
             return {}
 
         # Calculate returns
-        returns = []
+        returns_list: list[float] = []
         for i in range(1, len(equity_curve)):
             prev_equity = equity_curve[i - 1]["equity"]
             curr_equity = equity_curve[i]["equity"]
             if prev_equity > 0:
-                returns.append((curr_equity - prev_equity) / prev_equity)
+                returns_list.append((curr_equity - prev_equity) / prev_equity)
 
-        if not returns:
+        if not returns_list:
             return {}
 
-        returns = np.array(returns)
+        returns = np.array(returns_list)
 
         # Volatility (annualized)
         volatility = float(np.std(returns) * np.sqrt(self.trading_days_per_year))
 
-        # Sharpe ratio
-        mean_return = np.mean(returns)
-        excess_return = mean_return - (self.risk_free_rate / self.trading_days_per_year)
-        sharpe_ratio = (
-            float(excess_return / np.std(returns) * np.sqrt(self.trading_days_per_year))
-            if np.std(returns) > 0
-            else 0.0
-        )
+        # Use FinancialCalculator for Sharpe and Sortino ratios
+        from decimal import Decimal
 
-        # Sortino ratio (downside deviation)
-        downside_returns = returns[returns < 0]
-        downside_std = np.std(downside_returns) if len(downside_returns) > 0 else 0
-        sortino_ratio = (
-            float(excess_return / downside_std * np.sqrt(self.trading_days_per_year))
-            if downside_std > 0
-            else 0.0
+        from src.utils.calculations.financial import FinancialCalculator
+
+        # Convert to Decimal tuple for FinancialCalculator
+        returns_decimal = tuple(Decimal(str(r)) for r in returns)
+
+        # Calculate Sharpe ratio using FinancialCalculator
+        sharpe_decimal = FinancialCalculator.sharpe_ratio(
+            returns_decimal,
+            risk_free_rate=Decimal(str(self.risk_free_rate)),
+            periods_per_year=self.trading_days_per_year
         )
+        sharpe_ratio = float(sharpe_decimal)
+
+        # Calculate Sortino ratio using FinancialCalculator
+        sortino_decimal = FinancialCalculator.sortino_ratio(
+            returns_decimal,
+            risk_free_rate=Decimal(str(self.risk_free_rate)),
+            periods_per_year=self.trading_days_per_year
+        )
+        sortino_ratio = float(sortino_decimal)
 
         # VaR and CVaR (95%)
         var_95 = Decimal(str(np.percentile(returns, 5) * 100))  # 5th percentile for 95% VaR
@@ -339,10 +345,16 @@ class MetricsCalculator:
 
         win_rate = winning_trades / total_trades if total_trades > 0 else 0.0
 
-        # Profit factor
-        gross_profit = sum(trade.get("pnl", 0) for trade in trades if trade.get("pnl", 0) > 0)
-        gross_loss = abs(sum(trade.get("pnl", 0) for trade in trades if trade.get("pnl", 0) < 0))
-        profit_factor = gross_profit / gross_loss if gross_loss > 0 else 0.0
+        # Profit factor using FinancialCalculator
+        from decimal import Decimal
+
+        from src.utils.calculations.financial import FinancialCalculator
+
+        winning_pnls = [Decimal(str(trade.get("pnl", 0))) for trade in trades if trade.get("pnl", 0) > 0]
+        losing_pnls = [Decimal(str(abs(trade.get("pnl", 0)))) for trade in trades if trade.get("pnl", 0) < 0]
+
+        profit_factor_decimal = FinancialCalculator.profit_factor(winning_pnls, losing_pnls)
+        profit_factor = float(profit_factor_decimal)
 
         return {
             "total_trades": total_trades,
@@ -366,21 +378,21 @@ class MetricsCalculator:
                 "signal_quality_score": 0.0,
             }
 
-        # Count valid signals (those with reasonable confidence)
-        valid_signals = sum(1 for signal in signals if signal.confidence >= 0.5)
+        # Count valid signals (those with reasonable strength)
+        valid_signals = sum(1 for signal in signals if signal.strength >= Decimal("0.5"))
 
         # Executed signals (approximate - signals that led to trades)
         executed_signals = len(trades)  # Simplified assumption
 
         # Signal quality score
-        confidence_scores = [signal.confidence for signal in signals]
-        avg_confidence = np.mean(confidence_scores) if confidence_scores else 0.0
+        strength_scores = [float(signal.strength) for signal in signals]
+        avg_strength = np.mean(strength_scores) if strength_scores else 0.0
 
         # Factor in execution rate
         execution_rate = executed_signals / total_signals if total_signals > 0 else 0.0
 
         # Combined quality score
-        signal_quality_score = avg_confidence * 0.7 + execution_rate * 0.3
+        signal_quality_score = avg_strength * 0.7 + execution_rate * 0.3
 
         return {
             "total_signals": total_signals,
@@ -431,7 +443,7 @@ class RealTimeMetricsTracker:
         """
         self.strategy_id = strategy_id
         self.config = config or {}
-        self._logger = logger.getChild(f"MetricsTracker_{strategy_id}")
+        self._logger = get_logger(f"{__name__}.MetricsTracker_{strategy_id}")
 
         # Current metrics
         self._current_metrics = PerformanceMetrics()
@@ -443,13 +455,13 @@ class RealTimeMetricsTracker:
         self._signal_history: list[Signal] = []
 
         # Update frequency
-        self._update_interval = timedelta(seconds=config.get("update_interval_seconds", 60))
+        self._update_interval = timedelta(seconds=self.config.get("update_interval_seconds", 60))
         self._last_update = datetime.now(timezone.utc)
 
         # Limits for data retention
-        self._max_equity_points = config.get("max_equity_points", 10000)
-        self._max_trade_history = config.get("max_trade_history", 1000)
-        self._max_signal_history = config.get("max_signal_history", 1000)
+        self._max_equity_points = self.config.get("max_equity_points", 10000)
+        self._max_trade_history = self.config.get("max_trade_history", 1000)
+        self._max_signal_history = self.config.get("max_signal_history", 1000)
 
     async def update_equity(self, equity: float, timestamp: datetime | None = None) -> None:
         """
@@ -581,7 +593,7 @@ class StrategyComparator:
 
     def __init__(self):
         """Initialize strategy comparator."""
-        self._logger = logger.getChild("StrategyComparator")
+        self._logger = get_logger(f"{__name__}.StrategyComparator")
 
     async def compare_strategies(
         self, strategy_metrics: dict[str, PerformanceMetrics]

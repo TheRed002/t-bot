@@ -14,7 +14,7 @@ Key Features:
 - Performance monitoring configurations
 """
 
-from typing import Any, Optional
+from typing import Any
 
 from src.core.types import StrategyType
 
@@ -34,8 +34,8 @@ class StrategyConfigTemplates:
     @staticmethod
     def get_arbitrage_scanner_config(
         risk_level: str = "medium",
-        exchanges: Optional[list[str]] = None,
-        symbols: Optional[list[str]] = None,
+        exchanges: list[str] | None = None,
+        symbols: list[str] | None = None,
     ) -> dict[str, Any]:
         """
         Get arbitrage scanner configuration.
@@ -108,7 +108,7 @@ class StrategyConfigTemplates:
         }
 
         # Risk level adjustments
-        risk_adjustments = {
+        risk_adjustments: dict[str, dict[str, Any]] = {
             "conservative": {
                 "min_profit_threshold": 0.002,  # 0.2%
                 "max_position_size_pct": 0.05,
@@ -188,18 +188,21 @@ class StrategyConfigTemplates:
             },
         }
 
+        # Get timeframe-specific parameters
+        selected_params: dict[str, Any] = timeframe_params.get(timeframe, timeframe_params["1h"])
+        
         base_config = {
             "name": f"mean_reversion_{timeframe}_v1",
             "strategy_id": f"mean_rev_{timeframe}_001",
             "strategy_type": StrategyType.MEAN_REVERSION.value,
             "exchange_type": "single",
-            "symbols": ["BTCUSDT"],
+            "symbol": "BTCUSDT",
             "requires_risk_manager": True,
             "requires_exchange": True,
             "min_confidence": 0.6,
             "position_size_pct": 0.03,
             "parameters": {
-                **timeframe_params.get(timeframe, timeframe_params["1h"]),
+                **selected_params,
                 "atr_multiplier": 2.0,
                 "volume_filter": True,
                 "confirmation_timeframe": timeframe,
@@ -233,10 +236,10 @@ class StrategyConfigTemplates:
         }
 
         # Risk level adjustments
-        risk_adjustments = {
+        risk_adjustments: dict[str, dict[str, Any]] = {
             "conservative": {
                 "position_size_pct": 0.02,
-                "entry_threshold": base_config["parameters"]["entry_threshold"] * 1.2,
+                "entry_threshold": selected_params["entry_threshold"] * 1.2,
                 "stop_loss_pct": 0.015,
                 "max_holding_time": 24,
             },
@@ -246,7 +249,7 @@ class StrategyConfigTemplates:
             },
             "aggressive": {
                 "position_size_pct": 0.05,
-                "entry_threshold": base_config["parameters"]["entry_threshold"] * 0.8,
+                "entry_threshold": selected_params["entry_threshold"] * 0.8,
                 "stop_loss_pct": 0.025,
                 "max_holding_time": 72,
             },
@@ -549,7 +552,7 @@ class StrategyConfigTemplates:
         base_config = {
             "name": f"volatility_breakout_{volatility_regime}_v1",
             "strategy_id": f"vol_break_{volatility_regime}_001",
-            "strategy_type": StrategyType.VOLATILITY_BREAKOUT.value,
+            "strategy_type": StrategyType.MOMENTUM.value,
             "exchange_type": "single",
             "symbols": ["BTCUSDT"],
             "requires_risk_manager": True,
@@ -600,7 +603,7 @@ class StrategyConfigTemplates:
 
     @staticmethod
     def get_ensemble_config(
-        strategy_types: Optional[list[str]] = None,
+        strategy_types: list[str] | None = None,
         voting_method: str = "weighted",
         correlation_limit: float = 0.7,
     ) -> dict[str, Any]:
@@ -626,7 +629,7 @@ class StrategyConfigTemplates:
         base_config = {
             "name": f"ensemble_{voting_method}_v1",
             "strategy_id": f"ensemble_{voting_method}_001",
-            "strategy_type": StrategyType.ENSEMBLE.value,
+            "strategy_type": StrategyType.CUSTOM.value,
             "exchange_type": "single",
             "symbols": ["BTCUSDT"],
             "requires_risk_manager": True,

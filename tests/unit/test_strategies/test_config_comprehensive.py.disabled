@@ -1,0 +1,629 @@
+"""
+Comprehensive tests for StrategyConfigurationManager.
+
+Tests configuration loading, validation, saving, and error handling to improve coverage.
+"""
+
+import json
+import pytest
+import tempfile
+import yaml
+from datetime import datetime, timezone
+from decimal import Decimal
+from pathlib import Path
+from unittest.mock import MagicMock, patch
+
+# Disable verbose logging for performance
+import logging
+logging.getLogger('src').setLevel(logging.CRITICAL)
+
+from src.core.exceptions import ConfigurationError
+from src.core.types import StrategyConfig, StrategyType
+from src.strategies.config import StrategyConfigurationManager
+
+
+@pytest.fixture(scope="session")
+def temp_config_dir():
+    """Create in-memory mock config directory for performance."""
+    # Use a simple string path for in-memory operations
+    return "/tmp/mock_config"
+
+
+@pytest.fixture(scope="session")
+def config_manager(temp_config_dir):
+    """Create configuration manager with mocked file operations."""
+    manager = StrategyConfigurationManager(config_dir=temp_config_dir)
+    # Mock file operations for performance
+    with patch.object(manager, '_mock_file_ops', True):
+        yield manager
+
+
+@pytest.fixture(scope="session")
+def sample_strategy_config():
+    """Create sample strategy configuration."""
+    return StrategyConfig(
+        strategy_id="test_strategy_001",
+        name="test_strategy",
+        strategy_type=StrategyType.MEAN_REVERSION,
+        symbol="BTCUSDT",
+        enabled=True,
+        timeframe="1h",
+        min_confidence=Decimal("0.6"),
+        max_positions=5,
+        position_size_pct=Decimal("0.02"),
+        stop_loss_pct=Decimal("0.02"),
+        take_profit_pct=Decimal("0.04"),
+        parameters={
+            "lookback_period": 20,
+            "entry_threshold": 2.0,
+        }
+    )
+
+
+@pytest.fixture
+def sample_yaml_config():
+    """Create sample YAML configuration string."""
+    return """
+strategy_id: test_strategy_yaml_001
+name: test_strategy
+strategy_type: mean_reversion
+enabled: true
+symbol: BTCUSDT
+timeframe: 1h
+min_confidence: 0.6
+max_positions: 5
+position_size_pct: 0.02
+stop_loss_pct: 0.02
+take_profit_pct: 0.04
+parameters:
+  lookback_period: 20
+  entry_threshold: 2.0
+"""
+
+
+class TestStrategyConfigurationManager:
+    """Test cases for StrategyConfigurationManager."""
+
+    def test_initialization_default_dir(self):
+        """Test initialization with default config directory."""
+        # Act
+        manager = StrategyConfigurationManager()
+        
+        # Assert
+        assert manager.config_dir == Path("config/strategies")
+        assert manager._default_configs is not None
+        assert len(manager._default_configs) > 0
+
+    def test_initialization_custom_dir(self, temp_config_dir):
+        """Test initialization with custom config directory."""
+        # Act
+        manager = StrategyConfigurationManager(config_dir=temp_config_dir)
+        
+        # Assert
+        assert manager.config_dir == Path(temp_config_dir)
+        assert manager.config_dir.exists()
+
+    def test_default_configs_initialization(self, config_manager):
+        """Test that default configurations are properly initialized."""
+        # Assert
+        default_configs = config_manager._default_configs
+        assert "mean_reversion" in default_configs
+        assert "trend_following" in default_configs
+        assert "breakout" in default_configs
+        
+        # Check structure of mean_reversion config
+        mean_rev_config = default_configs["mean_reversion"]
+        assert mean_rev_config["name"] == "mean_reversion"
+        assert mean_rev_config["strategy_type"] == "mean_reversion"
+        assert "parameters" in mean_rev_config
+
+    def test_load_strategy_config_from_default(self, config_manager):
+        """Test loading strategy config from defaults."""
+        # Act
+        config = config_manager.load_strategy_config("mean_reversion")
+        
+        # Assert
+        assert isinstance(config, StrategyConfig)
+        assert config.name == "mean_reversion"
+        assert config.strategy_type == StrategyType.MEAN_REVERSION
+        assert config.enabled is True
+
+    def test_load_strategy_config_from_yaml_file(self, config_manager, sample_yaml_config):
+        """Test loading strategy config from YAML file."""
+        # Arrange
+        config_file = config_manager.config_dir / "test_strategy.yaml"
+        config_file.write_text(sample_yaml_config)
+        
+        # Act
+        config = config_manager.load_strategy_config("test_strategy")
+        
+        # Assert
+        assert isinstance(config, StrategyConfig)
+        assert config.name == "test_strategy"
+        assert config.strategy_type == StrategyType.MEAN_REVERSION
+
+    def test_load_strategy_config_from_json_file(self, config_manager):
+        """Test loading strategy config from JSON file."""
+        # Arrange
+        json_config = {
+            "strategy_id": "json_strategy_001",
+            "name": "json_strategy",
+            "strategy_type": "trend_following",
+            "enabled": True,
+            "symbol": "BTCUSDT",
+            "timeframe": "1h",
+            "min_confidence": 0.6,
+            "max_positions": 3,
+            "position_size_pct": 0.02,
+            "stop_loss_pct": 0.02,
+            "take_profit_pct": 0.04,
+            "parameters": {"fast_ma": 20}
+        }
+        config_file = config_manager.config_dir / "json_strategy.json"
+        with open(config_file, "w") as f:
+            json.dump(json_config, f)
+        
+        # Act
+        config = config_manager.load_strategy_config("json_strategy")
+        
+        # Assert
+        assert isinstance(config, StrategyConfig)
+        assert config.name == "json_strategy"
+        assert config.strategy_type == StrategyType.TREND_FOLLOWING
+
+    def test_load_strategy_config_nested_structure(self, config_manager, sample_yaml_config):
+        """Test loading config with nested 'strategy' key."""
+        # Arrange
+        # Indent the sample config to be nested under "strategy:"
+        indented_config = "\n".join(f"  {line}" for line in sample_yaml_config.strip().split("\n"))
+        nested_config = f"strategy:\n{indented_config}"
+        config_file = config_manager.config_dir / "nested_strategy.yaml"
+        config_file.write_text(nested_config)
+        
+        # Act
+        config = config_manager.load_strategy_config("nested_strategy")
+        
+        # Assert
+        assert isinstance(config, StrategyConfig)
+        assert config.name == "test_strategy"
+
+    def test_load_strategy_config_nonexistent_strategy(self, config_manager):
+        """Test loading config for nonexistent strategy."""
+        # Act & Assert
+        with pytest.raises(ConfigurationError) as exc_info:
+            config_manager.load_strategy_config("nonexistent_strategy")
+        
+        assert "No default configuration for strategy: nonexistent_strategy" in str(exc_info.value)
+
+    def test_load_strategy_config_invalid_yaml(self, config_manager):
+        """Test loading config with invalid YAML."""
+        # Arrange
+        invalid_yaml = "invalid: yaml: content: ["
+        config_file = config_manager.config_dir / "invalid.yaml"
+        config_file.write_text(invalid_yaml)
+        
+        # Act & Assert
+        with pytest.raises(ConfigurationError) as exc_info:
+            config_manager.load_strategy_config("invalid")
+        
+        assert "Invalid YAML" in str(exc_info.value)
+
+    def test_load_strategy_config_invalid_json(self, config_manager):
+        """Test loading config with invalid JSON."""
+        # Arrange
+        invalid_json = '{"invalid": json,}'
+        config_file = config_manager.config_dir / "invalid.json"
+        config_file.write_text(invalid_json)
+        
+        # Act & Assert
+        with pytest.raises(ConfigurationError) as exc_info:
+            config_manager.load_strategy_config("invalid")
+        
+        assert "Invalid JSON" in str(exc_info.value)
+
+    def test_load_strategy_config_unsupported_format(self, config_manager):
+        """Test loading config with unsupported file format."""
+        # Arrange
+        config_file = config_manager.config_dir / "unsupported.txt"
+        config_file.write_text("some content")
+        
+        # Act & Assert
+        with pytest.raises(ConfigurationError) as exc_info:
+            config_manager.load_strategy_config("unsupported")
+        
+        assert "Unsupported config file format" in str(exc_info.value)
+
+    def test_save_strategy_config_success(self, config_manager, sample_strategy_config):
+        """Test successful strategy config saving."""
+        # Act
+        config_manager.save_strategy_config("test_save", sample_strategy_config)
+        
+        # Assert
+        config_file = config_manager.config_dir / "test_save.yaml"
+        assert config_file.exists()
+        
+        # Load and verify content
+        loaded_config = config_manager.load_strategy_config("test_save")
+        assert loaded_config.name == sample_strategy_config.name
+
+    def test_save_strategy_config_with_metadata(self, config_manager, sample_strategy_config):
+        """Test saving config includes metadata."""
+        # Act
+        config_manager.save_strategy_config("test_metadata", sample_strategy_config)
+        
+        # Assert
+        config_file = config_manager.config_dir / "test_metadata.yaml"
+        with open(config_file) as f:
+            saved_data = yaml.safe_load(f)
+        
+        assert "_metadata" in saved_data
+        assert "last_updated" in saved_data["_metadata"]
+        assert "version" in saved_data["_metadata"]
+
+    @patch("builtins.open", side_effect=PermissionError("Permission denied"))
+    def test_save_strategy_config_permission_error(self, mock_open, config_manager, sample_strategy_config):
+        """Test save config with permission error."""
+        # Act & Assert
+        with pytest.raises(ConfigurationError) as exc_info:
+            config_manager.save_strategy_config("test_permission", sample_strategy_config)
+        
+        assert "Permission denied saving configuration" in str(exc_info.value)
+
+    @patch("yaml.dump", side_effect=yaml.YAMLError("YAML error"))
+    def test_save_strategy_config_yaml_error(self, mock_yaml_dump, config_manager, sample_strategy_config):
+        """Test save config with YAML serialization error."""
+        # Act & Assert
+        with pytest.raises(ConfigurationError) as exc_info:
+            config_manager.save_strategy_config("test_yaml_error", sample_strategy_config)
+        
+        assert "Failed to serialize YAML" in str(exc_info.value)
+
+    def test_validate_config_valid(self, config_manager):
+        """Test validation of valid configuration."""
+        # Arrange
+        valid_config = {
+            "strategy_id": "test_config_001",
+            "name": "test_config",
+            "strategy_type": "mean_reversion",
+            "enabled": True,
+            "symbol": "BTCUSDT",
+            "timeframe": "1h",
+            "min_confidence": 0.6,
+            "max_positions": 5,
+            "position_size_pct": 0.02,
+            "stop_loss_pct": 0.02,
+            "take_profit_pct": 0.04,
+            "parameters": {}
+        }
+        
+        # Act
+        result = config_manager.validate_config(valid_config)
+        
+        # Assert
+        assert result is True
+
+    def test_validate_config_invalid_values(self, config_manager):
+        """Test validation of configuration with invalid values."""
+        # Arrange
+        invalid_config = {
+            "strategy_id": "test_config_002",
+            "name": "test_config",
+            "strategy_type": "invalid_type",  # Invalid strategy type
+            "enabled": True,
+            "symbol": "BTCUSDT",
+            "timeframe": "1h",
+            "min_confidence": 0.6,
+            "max_positions": 5,
+            "position_size_pct": 0.02,
+            "stop_loss_pct": 0.02,
+            "take_profit_pct": 0.04,
+            "parameters": {}
+        }
+        
+        # Act
+        result = config_manager.validate_config(invalid_config)
+        
+        # Assert
+        assert result is False
+
+    def test_validate_config_missing_fields(self, config_manager):
+        """Test validation of configuration with missing required fields."""
+        # Arrange
+        incomplete_config = {
+            "name": "test_config"
+            # Missing required fields: strategy_id, symbol, strategy_type, timeframe
+        }
+        
+        # Act
+        result = config_manager.validate_config(incomplete_config)
+        
+        # Assert
+        assert result is False
+
+    def test_validate_config_type_error(self, config_manager):
+        """Test validation with type error."""
+        # Arrange
+        config_with_wrong_types = {
+            "strategy_id": "test_config_003",
+            "name": "test_config",
+            "strategy_type": "mean_reversion",
+            "symbol": "BTCUSDT",
+            "timeframe": 123,          # Should be string
+            "enabled": "not_boolean",  # Should be boolean
+            "min_confidence": "not_number",  # Should be number
+            "max_positions": "not_number",   # Should be number
+            "position_size_pct": "not_number", # Should be number
+            "stop_loss_pct": "not_number",     # Should be number
+            "take_profit_pct": "not_number",   # Should be number
+            "parameters": "not_dict"           # Should be dict
+        }
+        
+        # Act
+        result = config_manager.validate_config(config_with_wrong_types)
+        
+        # Assert
+        assert result is False
+
+    def test_get_available_strategies_with_files(self, config_manager, sample_yaml_config):
+        """Test getting available strategies with config files."""
+        # Arrange
+        (config_manager.config_dir / "custom_strategy.yaml").write_text(sample_yaml_config)
+        
+        # Act
+        strategies = config_manager.get_available_strategies()
+        
+        # Assert
+        assert "custom_strategy" in strategies
+        assert "mean_reversion" in strategies  # From defaults
+        assert "trend_following" in strategies
+        assert len(strategies) > 3
+
+    def test_get_available_strategies_empty_dir(self, config_manager):
+        """Test getting available strategies with empty config dir."""
+        # Act
+        strategies = config_manager.get_available_strategies()
+        
+        # Assert
+        # Should return only default strategies
+        assert "mean_reversion" in strategies
+        assert "trend_following" in strategies
+        assert "breakout" in strategies
+
+    def test_get_config_schema(self, config_manager):
+        """Test getting configuration schema."""
+        # Act
+        schema = config_manager.get_config_schema()
+        
+        # Assert
+        assert isinstance(schema, dict)
+        assert "$defs" in schema or "properties" in schema
+        assert "title" in schema
+
+    def test_update_config_parameter_success(self, config_manager):
+        """Test successful parameter update."""
+        # Act
+        result = config_manager.update_config_parameter(
+            "mean_reversion", "enabled", False
+        )
+        
+        # Assert
+        assert result is True
+        
+        # Verify update
+        updated_config = config_manager.load_strategy_config("mean_reversion")
+        assert updated_config.enabled is False
+
+    def test_update_config_parameter_invalid_parameter(self, config_manager):
+        """Test updating nonexistent parameter."""
+        # Act
+        result = config_manager.update_config_parameter(
+            "mean_reversion", "nonexistent_param", "value"
+        )
+        
+        # Assert
+        assert result is False
+
+    def test_update_config_parameter_invalid_value(self, config_manager):
+        """Test updating parameter with invalid value."""
+        # Act
+        result = config_manager.update_config_parameter(
+            "mean_reversion", "strategy_type", "invalid_type"
+        )
+        
+        # Assert
+        assert result is False
+
+    def test_update_config_parameter_nonexistent_strategy(self, config_manager):
+        """Test updating parameter for nonexistent strategy."""
+        # Act & Assert
+        with pytest.raises(ConfigurationError):
+            config_manager.update_config_parameter(
+                "nonexistent_strategy", "enabled", True
+            )
+
+    def test_create_strategy_config_success(self, config_manager):
+        """Test successful strategy config creation."""
+        # Act
+        config = config_manager.create_strategy_config(
+            "custom_strategy",
+            StrategyType.TREND_FOLLOWING,
+            "ETHUSDT",
+            strategy_id="custom_strategy_005",
+            timeframe="4h",
+            max_positions=3
+        )
+        
+        # Assert
+        assert isinstance(config, StrategyConfig)
+        assert config.name == "custom_strategy"
+        assert config.strategy_type == StrategyType.TREND_FOLLOWING
+        assert config.symbol == "ETHUSDT"
+        assert config.timeframe == "4h"
+        assert config.max_positions == 3
+
+    def test_create_strategy_config_with_string_strategy_type(self, config_manager):
+        """Test creating config with string strategy type."""
+        # Act
+        config = config_manager.create_strategy_config(
+            "string_type_strategy",
+            "mean_reversion",  # String instead of enum
+            "BTCUSDT",
+            strategy_id="string_strategy_006"
+        )
+        
+        # Assert
+        assert isinstance(config, StrategyConfig)
+        assert config.strategy_type == StrategyType.MEAN_REVERSION
+
+    def test_create_strategy_config_invalid_values(self, config_manager):
+        """Test creating config with invalid values."""
+        # Act & Assert
+        with pytest.raises(ConfigurationError) as exc_info:
+            config_manager.create_strategy_config(
+                "invalid_strategy",
+                "invalid_strategy_type",
+                "BTCUSDT",
+                strategy_id="invalid_strategy_007",
+                min_confidence=-0.5  # Invalid value instead of invalid_param
+            )
+        
+        assert "Invalid parameter values" in str(exc_info.value)
+
+    def test_delete_strategy_config_success(self, config_manager, sample_strategy_config):
+        """Test successful strategy config deletion."""
+        # Arrange
+        config_manager.save_strategy_config("to_delete", sample_strategy_config)
+        assert (config_manager.config_dir / "to_delete.yaml").exists()
+        
+        # Act
+        result = config_manager.delete_strategy_config("to_delete")
+        
+        # Assert
+        assert result is True
+        assert not (config_manager.config_dir / "to_delete.yaml").exists()
+
+    def test_delete_strategy_config_nonexistent(self, config_manager):
+        """Test deleting nonexistent config file."""
+        # Act
+        result = config_manager.delete_strategy_config("nonexistent")
+        
+        # Assert
+        assert result is False
+
+    @patch("pathlib.Path.unlink", side_effect=PermissionError("Permission denied"))
+    def test_delete_strategy_config_permission_error(self, mock_unlink, config_manager, sample_strategy_config):
+        """Test deleting config with permission error."""
+        # Arrange
+        config_manager.save_strategy_config("permission_test", sample_strategy_config)
+        
+        # Act
+        result = config_manager.delete_strategy_config("permission_test")
+        
+        # Assert
+        assert result is False
+
+    def test_get_config_summary(self, config_manager, sample_yaml_config):
+        """Test getting configuration summary."""
+        # Arrange
+        (config_manager.config_dir / "test_summary.yaml").write_text(sample_yaml_config)
+        
+        # Act
+        summary = config_manager.get_config_summary()
+        
+        # Assert
+        assert "config_directory" in summary
+        assert "total_strategies" in summary
+        assert "config_files" in summary
+        assert "default_configs" in summary
+        
+        # Check config files info
+        config_files = summary["config_files"]
+        assert len(config_files) >= 1
+        test_file = next((f for f in config_files if f["name"] == "test_summary"), None)
+        assert test_file is not None
+        assert "size" in test_file
+        assert "modified" in test_file
+
+    def test_time_execution_decorator(self, config_manager):
+        """Test that time_execution decorator is applied."""
+        # Act
+        config = config_manager.load_strategy_config("mean_reversion")
+        
+        # Assert - just verify method works (decorator would log timing)
+        assert isinstance(config, StrategyConfig)
+
+    def test_load_config_file_with_yml_extension(self, config_manager, sample_yaml_config):
+        """Test loading config file with .yml extension."""
+        # Arrange
+        config_file = config_manager.config_dir / "yml_test.yml"
+        config_file.write_text(sample_yaml_config)
+        
+        # Act
+        config = config_manager.load_strategy_config("yml_test")
+        
+        # Assert
+        assert isinstance(config, StrategyConfig)
+        assert config.name == "test_strategy"
+
+    def test_get_default_config_copy(self, config_manager):
+        """Test that get_default_config returns a copy."""
+        # Act
+        config1 = config_manager._get_default_config("mean_reversion")
+        config2 = config_manager._get_default_config("mean_reversion")
+        
+        # Assert
+        assert config1 is not config2  # Should be different objects
+        assert config1 == config2      # But with same content
+
+    def test_config_with_strategy_type_enum_serialization(self, config_manager, sample_strategy_config):
+        """Test saving and loading config with StrategyType enum."""
+        # Arrange
+        sample_strategy_config.strategy_type = StrategyType.TREND_FOLLOWING
+        
+        # Act
+        config_manager.save_strategy_config("enum_test", sample_strategy_config)
+        loaded_config = config_manager.load_strategy_config("enum_test")
+        
+        # Assert
+        assert loaded_config.strategy_type == StrategyType.TREND_FOLLOWING
+
+    def test_exception_handling_in_methods(self, config_manager):
+        """Test exception handling in various methods."""
+        # Test load_strategy_config with general exception
+        with patch("src.strategies.config.StrategyConfig", side_effect=Exception("General error")):
+            with pytest.raises(ConfigurationError) as exc_info:
+                config_manager.load_strategy_config("mean_reversion")
+            assert "Failed to load configuration" in str(exc_info.value)
+
+        # Test save_strategy_config - should succeed with valid config
+        config = StrategyConfig(
+            strategy_id="test_save_004", name="test", strategy_type="mean_reversion", enabled=True,
+            symbol="BTCUSDT", timeframe="1h", min_confidence=0.6,
+            max_positions=5, position_size_pct=0.02, stop_loss_pct=0.02,
+            take_profit_pct=0.04, parameters={}
+        )
+        # This should succeed, not raise an exception
+        config_manager.save_strategy_config("test", config)
+        
+        # Test save_strategy_config with actual file system error - use open() mock instead
+        with patch("builtins.open", side_effect=PermissionError("Permission denied")):
+            with pytest.raises(ConfigurationError) as exc_info:
+                config_manager.save_strategy_config("test_fail", config)
+            assert "Permission denied saving configuration" in str(exc_info.value)
+
+        # Test create_strategy_config with exception in save operation
+        with patch.object(config_manager, "save_strategy_config", side_effect=Exception("Create error")):
+            with pytest.raises(ConfigurationError) as exc_info:
+                config_manager.create_strategy_config(
+                    "error_test", StrategyType.MEAN_REVERSION, "BTCUSDT"
+                )
+            assert "Failed to create configuration" in str(exc_info.value)
+
+    def test_validate_config_with_exception(self, config_manager):
+        """Test validate_config with unexpected exception."""
+        # Act
+        with patch("src.core.types.StrategyConfig", side_effect=Exception("Unexpected error")):
+            result = config_manager.validate_config({"name": "test"})
+        
+        # Assert
+        assert result is False

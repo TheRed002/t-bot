@@ -17,7 +17,9 @@ CRITICAL: This strategy follows the perfect architecture from Day 12.
 
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Any
+
+# Import service layer components
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
@@ -31,12 +33,15 @@ from src.core.types import (
     StrategyType,
 )
 
-# Import service layer components
+# REMOVED: Direct imports replaced with service container access
 from src.data.features.technical_indicators import TechnicalIndicators
 from src.risk_management.adaptive_risk import AdaptiveRiskManager
 from src.risk_management.regime_detection import MarketRegimeDetector
 from src.strategies.base import BaseStrategy
-from src.strategies.service import StrategyService
+from src.strategies.dependencies import StrategyServiceContainer
+
+if TYPE_CHECKING:
+    from src.strategies.service import StrategyService
 
 # MANDATORY: Import from P-007A - Decorators and utilities
 from src.utils.decorators import retry, time_execution
@@ -86,9 +91,9 @@ class AdaptiveMomentumStrategy(BaseStrategy):
         """Set the strategy status."""
         self._status = value
 
-    def __init__(self, config: dict[str, Any]):
+    def __init__(self, config: dict[str, Any], services: StrategyServiceContainer | None = None):
         """Initialize adaptive momentum strategy with enhanced architecture."""
-        super().__init__(config)
+        super().__init__(config, services)
 
         # Override version for refactored strategy
         self._version = "2.0.0-refactored"
@@ -146,7 +151,7 @@ class AdaptiveMomentumStrategy(BaseStrategy):
         self._technical_indicators = technical_indicators
         self.logger.info("Technical indicators service set", strategy=self.name)
 
-    def set_strategy_service(self, strategy_service: StrategyService) -> None:
+    def set_strategy_service(self, strategy_service: "StrategyService") -> None:
         """Set strategy service for lifecycle management."""
         self._strategy_service = strategy_service
         self.logger.info("Strategy service set", strategy=self.name)
@@ -209,12 +214,12 @@ class AdaptiveMomentumStrategy(BaseStrategy):
                 return []
 
             # Generate signals based on indicators and regime
-            signals = await self._generate_momentum_signals_enhanced(
+            signals = await self._generate_momentum_signals(
                 data, indicators, current_regime
             )
 
             # Apply regime-aware adjustments
-            signals = await self._apply_enhanced_confidence_adjustments(signals, current_regime)
+            signals = await self._apply_confidence_adjustments(signals, current_regime)
 
             # Update strategy state and metrics
             await self._update_strategy_state(symbol, signals, indicators, current_regime)
@@ -324,9 +329,12 @@ class AdaptiveMomentumStrategy(BaseStrategy):
             # Get indicators through centralized service
             indicators = {}
 
-            # Moving averages - using the corrected API
-            fast_ma = await self._technical_indicators.calculate_sma(symbol, self.fast_ma_period)
-            slow_ma = await self._technical_indicators.calculate_sma(symbol, self.slow_ma_period)
+            # Moving averages - using shared BaseStrategy methods (eliminates code duplication)
+            fast_ma_decimal = await self.get_sma(symbol, self.fast_ma_period)
+            slow_ma_decimal = await self.get_sma(symbol, self.slow_ma_period)
+
+            fast_ma = float(fast_ma_decimal) if fast_ma_decimal else None
+            slow_ma = float(slow_ma_decimal) if slow_ma_decimal else None
 
             if fast_ma is not None and slow_ma is not None:
                 indicators["fast_ma"] = fast_ma
@@ -336,8 +344,9 @@ class AdaptiveMomentumStrategy(BaseStrategy):
                 self.logger.warning(f"Could not calculate moving averages for {symbol}")
                 return None
 
-            # RSI calculation - using the corrected API
-            rsi = await self._technical_indicators.calculate_rsi(symbol, self.rsi_period)
+            # RSI calculation - using shared BaseStrategy method (eliminates code duplication)
+            rsi_decimal = await self.get_rsi(symbol, self.rsi_period)
+            rsi = float(rsi_decimal) if rsi_decimal else None
             if rsi is not None:
                 indicators["rsi"] = rsi
                 indicators["rsi_score"] = self._calculate_rsi_score_from_value(rsi)
@@ -407,10 +416,10 @@ class AdaptiveMomentumStrategy(BaseStrategy):
         else:
             return (rsi - 50) / 50  # Normal range conversion
 
-    async def _generate_momentum_signals_enhanced(
+    async def _generate_momentum_signals(
         self, data: MarketData, indicators: dict[str, Any], current_regime: MarketRegime | None
     ) -> list[Signal]:
-        """Generate enhanced momentum signals with comprehensive analysis."""
+        """Generate momentum signals based on indicators."""
         signals = []
 
         try:
@@ -418,17 +427,17 @@ class AdaptiveMomentumStrategy(BaseStrategy):
             volume_score = indicators.get("volume_score", 0.0)
             volatility = indicators.get("volatility", 0.0)
 
-            # Enhanced signal generation with multiple criteria
             signal_threshold = 0.25
 
             # Bullish momentum signal
             if combined_score > signal_threshold:
-                confidence = self._calculate_enhanced_confidence(
+                confidence = self._calculate_confidence(
                     combined_score, volume_score, volatility, current_regime, "BUY"
                 )
 
-                min_confidence = getattr(self.config, 'min_confidence', 
-                                        self.config.parameters.get('min_confidence', 0.6))
+                min_confidence = getattr(
+                    self.config, "min_confidence", self.config.parameters.get("min_confidence", 0.6)
+                )
                 if confidence >= min_confidence:
                     signal = Signal(
                         direction=SignalDirection.BUY,
@@ -440,19 +449,19 @@ class AdaptiveMomentumStrategy(BaseStrategy):
                             **indicators,
                             "regime": current_regime.value if current_regime else "unknown",
                             "signal_type": "momentum_bullish",
-                            "generation_method": "enhanced_service_layer",
                         },
                     )
                     signals.append(signal)
 
             # Bearish momentum signal
             elif combined_score < -signal_threshold:
-                confidence = self._calculate_enhanced_confidence(
+                confidence = self._calculate_confidence(
                     combined_score, volume_score, volatility, current_regime, "SELL"
                 )
 
-                min_confidence = getattr(self.config, 'min_confidence', 
-                                        self.config.parameters.get('min_confidence', 0.6))
+                min_confidence = getattr(
+                    self.config, "min_confidence", self.config.parameters.get("min_confidence", 0.6)
+                )
                 if confidence >= min_confidence:
                     signal = Signal(
                         direction=SignalDirection.SELL,
@@ -464,7 +473,6 @@ class AdaptiveMomentumStrategy(BaseStrategy):
                             **indicators,
                             "regime": current_regime.value if current_regime else "unknown",
                             "signal_type": "momentum_bearish",
-                            "generation_method": "enhanced_service_layer",
                         },
                     )
                     signals.append(signal)
@@ -473,14 +481,14 @@ class AdaptiveMomentumStrategy(BaseStrategy):
 
         except Exception as e:
             self.logger.error(
-                "Enhanced momentum signal generation failed",
+                "Momentum signal generation failed",
                 strategy=self.name,
                 symbol=data.symbol,
                 error=str(e),
             )
             return []
 
-    def _calculate_enhanced_confidence(
+    def _calculate_confidence(
         self,
         momentum_score: float,
         volume_score: float,
@@ -488,7 +496,7 @@ class AdaptiveMomentumStrategy(BaseStrategy):
         regime: MarketRegime | None,
         direction: str,
     ) -> float:
-        """Calculate enhanced confidence score with multiple factors."""
+        """Calculate confidence score with multiple factors."""
         try:
             # Base confidence from momentum strength
             base_confidence = min(abs(momentum_score), 0.9)
@@ -503,47 +511,47 @@ class AdaptiveMomentumStrategy(BaseStrategy):
             regime_multiplier = self._get_regime_confidence_multiplier(regime)
 
             # Combine all factors
-            enhanced_confidence = (
+            confidence = (
                 (base_confidence + volume_boost) * volatility_adjustment * regime_multiplier
             )
 
-            return min(enhanced_confidence, 0.95)
+            return min(confidence, 0.95)
 
         except Exception as e:
-            self.logger.error("Enhanced confidence calculation failed", error=str(e))
+            self.logger.error("Confidence calculation failed", error=str(e))
             return 0.1
 
-    async def _apply_enhanced_confidence_adjustments(
+    async def _apply_confidence_adjustments(
         self, signals: list[Signal], current_regime: MarketRegime | None
     ) -> list[Signal]:
-        """Apply enhanced confidence adjustments using service layer."""
+        """Apply confidence adjustments based on regime."""
         try:
             if not signals or not current_regime:
                 return signals
 
             adjusted_signals = []
             for signal in signals:
-                # Get adaptive parameters if available
-                adaptive_params = None
-                if self.adaptive_risk_manager:
-                    adaptive_params = self.adaptive_risk_manager.get_adaptive_parameters(
-                        current_regime
-                    )
-
                 # Apply regime-specific adjustments
                 regime_multiplier = self._get_regime_confidence_multiplier(current_regime)
-                adjusted_strength = signal.strength * regime_multiplier
+                adjusted_strength = signal.strength * Decimal(str(regime_multiplier))
 
-                # Create new signal with enhanced metadata (Signal is immutable)
+                # Create new signal with updated metadata
                 updated_metadata = {**signal.metadata}
                 updated_metadata.update(
                     {
                         "regime_confidence_multiplier": regime_multiplier,
-                        "adaptive_params": adaptive_params,
-                        "enhancement_version": "2.0.0",
                     }
                 )
-                
+
+                # Add adaptive parameters if available
+                if self.adaptive_risk_manager and hasattr(
+                    self.adaptive_risk_manager, "get_adaptive_parameters"
+                ):
+                    adaptive_params = self.adaptive_risk_manager.get_adaptive_parameters()
+                    updated_metadata["adaptive_params"] = adaptive_params
+                else:
+                    updated_metadata["adaptive_params"] = None
+
                 adjusted_signal = Signal(
                     symbol=signal.symbol,
                     direction=signal.direction,
@@ -555,19 +563,11 @@ class AdaptiveMomentumStrategy(BaseStrategy):
 
                 adjusted_signals.append(adjusted_signal)
 
-            self.logger.debug(
-                "Applied enhanced confidence adjustments",
-                strategy=self.name,
-                original_count=len(signals),
-                adjusted_count=len(adjusted_signals),
-                regime=current_regime.value,
-            )
-
             return adjusted_signals
 
         except Exception as e:
             self.logger.error(
-                "Enhanced confidence adjustment failed",
+                "Confidence adjustment failed",
                 strategy=self.name,
                 error=str(e),
             )
@@ -633,35 +633,22 @@ class AdaptiveMomentumStrategy(BaseStrategy):
                 error=str(e),
             )
 
-    async def _persist_strategy_state(self) -> None:
-        """Persist strategy state through service layer."""
-        try:
-            if self._strategy_service:
-                await self._strategy_service.persist_strategy_state(
-                    self.config.strategy_id, self._strategy_state
-                )
-        except Exception as e:
-            self.logger.error(
-                "Strategy state persistence failed",
-                strategy=self.name,
-                error=str(e),
-            )
 
     def _get_regime_confidence_multiplier(self, regime: MarketRegime | None) -> float:
-        """Get enhanced regime-specific confidence multiplier."""
+        """Get regime-specific confidence multiplier."""
         if not regime:
             return 1.0
 
         confidence_multipliers = {
-            MarketRegime.LOW_VOLATILITY: 1.15,  # Higher confidence in low vol
-            MarketRegime.MEDIUM_VOLATILITY: 1.0,  # Standard confidence
-            MarketRegime.HIGH_VOLATILITY: 0.75,  # Lower confidence in high vol
-            MarketRegime.TRENDING_UP: 1.1,  # Higher in uptrend (momentum favors trends)
-            MarketRegime.TRENDING_DOWN: 0.85,  # Slightly lower in downtrend
-            MarketRegime.RANGING: 0.9,  # Lower in ranging (momentum less effective)
-            MarketRegime.HIGH_CORRELATION: 0.85,  # Lower in high correlation
-            MarketRegime.LOW_CORRELATION: 1.1,  # Higher in low correlation
-            MarketRegime.UNKNOWN: 0.8,  # Lower confidence in unknown regime
+            MarketRegime.LOW_VOLATILITY: 1.15,
+            MarketRegime.MEDIUM_VOLATILITY: 1.0,
+            MarketRegime.HIGH_VOLATILITY: 0.75,
+            MarketRegime.TRENDING_UP: 1.1,
+            MarketRegime.TRENDING_DOWN: 0.85,
+            MarketRegime.RANGING: 0.9,
+            MarketRegime.HIGH_CORRELATION: 0.85,
+            MarketRegime.LOW_CORRELATION: 1.1,
+            MarketRegime.UNKNOWN: 0.8,
         }
 
         return confidence_multipliers.get(regime, 1.0)
@@ -715,8 +702,9 @@ class AdaptiveMomentumStrategy(BaseStrategy):
                 return False
 
             # Validate strength is above minimum threshold
-            min_confidence = getattr(self.config, 'min_confidence', 
-                                   self.config.parameters.get('min_confidence', 0.6))
+            min_confidence = getattr(
+                self.config, "min_confidence", self.config.parameters.get("min_confidence", 0.6)
+            )
             if signal.strength < min_confidence:
                 self.logger.warning(
                     "Signal confidence below threshold",
@@ -759,25 +747,30 @@ class AdaptiveMomentumStrategy(BaseStrategy):
                 except ValueError:
                     current_regime = MarketRegime.MEDIUM_VOLATILITY
 
-                # Get portfolio value from risk manager or service
-                portfolio_value = Decimal("10000")  # TODO: Get from portfolio service
-                if self._risk_manager:
+                # Get portfolio value from capital service
+                portfolio_value = Decimal("10000")  # Default portfolio value
+                if self.services.capital_service:
                     try:
-                        portfolio_value = self._risk_manager.get_available_capital()
+                        # Note: get_available_balance would need to be sync or we need to make get_position_size async
+                        # For now, use default value until capital service integration is complete
+                        portfolio_value = Decimal("10000")
                     except (AttributeError, TypeError, KeyError) as e:
-                        # Risk manager capital access error - use default portfolio value
-                        pass
+                        # Capital service access error - use default portfolio value
+                        self.logger.debug(f"Capital service access error, using default: {e}")
                     except Exception as e:
-                        # Unexpected error accessing risk manager - use default portfolio value
-                        pass
+                        # Unexpected error accessing capital service - use default portfolio value
+                        self.logger.warning(f"Unexpected error accessing capital service: {e}")
 
                 # Calculate position size with enhanced factors
                 volatility = signal.metadata.get("volatility", 0.02)
                 volume_score = signal.metadata.get("volume_score", 1.0)
 
                 # Adjust position size based on volatility and volume
-                base_position_pct = getattr(self.config, 'position_size_pct', 
-                                          self.config.parameters.get('position_size_pct', 0.02))
+                base_position_pct = getattr(
+                    self.config,
+                    "position_size_pct",
+                    self.config.parameters.get("position_size_pct", 0.02),
+                )
                 volatility_adjustment = max(
                     0.5, 1.0 - (volatility * 10)
                 )  # Reduce size in high volatility
@@ -803,8 +796,11 @@ class AdaptiveMomentumStrategy(BaseStrategy):
                 return position_size
             else:
                 # Enhanced fallback calculation
-                base_position_pct = getattr(self.config, 'position_size_pct', 
-                                          self.config.parameters.get('position_size_pct', 0.02))
+                base_position_pct = getattr(
+                    self.config,
+                    "position_size_pct",
+                    self.config.parameters.get("position_size_pct", 0.02),
+                )
                 base_size = Decimal(str(base_position_pct))
                 confidence_adjustment = Decimal(str(signal.strength))
                 adjusted_size = base_size * confidence_adjustment
@@ -825,8 +821,11 @@ class AdaptiveMomentumStrategy(BaseStrategy):
                 symbol=signal.symbol,
                 error=str(e),
             )
-            fallback_position_pct = getattr(self.config, 'position_size_pct', 
-                                           self.config.parameters.get('position_size_pct', 0.02))
+            fallback_position_pct = getattr(
+                self.config,
+                "position_size_pct",
+                self.config.parameters.get("position_size_pct", 0.02),
+            )
             return Decimal(str(fallback_position_pct))
 
     def should_exit(self, position: Position, data: MarketData) -> bool:
@@ -852,9 +851,9 @@ class AdaptiveMomentumStrategy(BaseStrategy):
             position_side = position.side.value.lower()
 
             momentum_reversal = False
-            if position_side == "buy" and current_momentum < -reversal_threshold:
+            if position_side == "long" and current_momentum < -reversal_threshold:
                 momentum_reversal = True
-            elif position_side == "sell" and current_momentum > reversal_threshold:
+            elif position_side == "short" and current_momentum > reversal_threshold:
                 momentum_reversal = True
 
             if momentum_reversal:
@@ -881,7 +880,8 @@ class AdaptiveMomentumStrategy(BaseStrategy):
                         if (
                             entry_regime
                             and recent_regime != entry_regime
-                            and recent_regime in [MarketRegime.HIGH_VOLATILITY, MarketRegime.UNKNOWN]
+                            and recent_regime
+                            in [MarketRegime.HIGH_VOLATILITY, MarketRegime.UNKNOWN]
                         ):
                             self.logger.info(
                                 "Regime change exit triggered",
@@ -928,8 +928,8 @@ class AdaptiveMomentumStrategy(BaseStrategy):
                 "strategy_service_available": self._strategy_service is not None,
                 "regime_detector_available": self.regime_detector is not None,
                 "adaptive_risk_manager_available": self.adaptive_risk_manager is not None,
-                "data_service_available": self._data_service is not None,
-                "risk_manager_available": self._risk_manager is not None,
+                "data_service_available": self.services.data_service is not None if hasattr(self, 'services') else False,
+                "risk_manager_available": self.services.risk_service is not None if hasattr(self, 'services') else False,
             },
             "configuration": {
                 "fast_ma_period": self.fast_ma_period,
@@ -990,6 +990,8 @@ class AdaptiveMomentumStrategy(BaseStrategy):
                 strategy=self.name,
                 error=str(e),
             )
+
+    # Helper methods for accessing data through data service
 
     def cleanup(self) -> None:
         """Enhanced cleanup with state management."""

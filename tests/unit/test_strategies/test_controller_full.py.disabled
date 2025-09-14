@@ -1,0 +1,478 @@
+"""
+Comprehensive tests for strategies controller module.
+"""
+
+import json
+from datetime import datetime, timezone
+from decimal import Decimal
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
+
+import pytest
+
+from src.core.exceptions import ValidationError, ServiceError
+from src.core.types import (
+    MarketData, 
+    Signal, 
+    SignalDirection,
+    StrategyConfig,
+    StrategyMetrics,
+    StrategyStatus,
+    StrategyType
+)
+from src.strategies.controller import StrategyController
+
+
+@pytest.fixture
+def mock_service():
+    """Create mock strategy service."""
+    service = AsyncMock()
+    service.register_strategy = AsyncMock(return_value="strategy_123")
+    service.unregister_strategy = AsyncMock(return_value=True)
+    service.get_strategy = AsyncMock(return_value={
+        "id": "strategy_123",
+        "name": "TestStrategy",
+        "type": StrategyType.TREND_FOLLOWING,
+        "status": StrategyStatus.ACTIVE
+    })
+    service.list_strategies = AsyncMock(return_value=[
+        {"id": "strategy_1", "name": "Strategy1"},
+        {"id": "strategy_2", "name": "Strategy2"}
+    ])
+    service.process_market_data = AsyncMock(return_value=[
+        Signal(
+            symbol="BTC/USDT",
+            direction=SignalDirection.BUY,
+            strength=Decimal("0.8"),
+            timestamp=datetime.now(timezone.utc),
+            source="TestStrategy",
+            metadata={"confidence": 0.8}
+        )
+    ])
+    service.get_strategy_metrics = AsyncMock(return_value=StrategyMetrics(
+        strategy_id="test_strategy",
+        total_trades=100,
+        winning_trades=65,
+        losing_trades=35,
+        win_rate=0.65
+    ))
+    service.update_strategy_config = AsyncMock(return_value=True)
+    service.start_strategy = AsyncMock(return_value=True)
+    service.stop_strategy = AsyncMock(return_value=True)
+    service.pause_strategy = AsyncMock(return_value=True)
+    service.resume_strategy = AsyncMock(return_value=True)
+    return service
+
+
+@pytest.fixture
+def controller(mock_service):
+    """Create controller with mock service."""
+    return StrategyController(strategy_service=mock_service)
+
+
+class TestStrategyControllerInitialization:
+    """Test controller initialization."""
+    
+    def test_controller_creation(self, mock_service):
+        """Test basic controller creation."""
+        controller = StrategyController(strategy_service=mock_service)
+        assert controller is not None
+        assert hasattr(controller, '_strategy_service')
+    
+    def test_controller_with_service(self, mock_service):
+        """Test controller with injected service."""
+        controller = StrategyController()
+        controller._service = mock_service
+        assert controller._service == mock_service
+
+
+class TestStrategyRegistration:
+    """Test strategy registration endpoints."""
+    
+    @pytest.mark.asyncio
+    async def test_register_strategy_success(self, controller):
+        """Test successful strategy registration."""
+        request = {
+            "name": "TestStrategy",
+            "type": StrategyType.TREND_FOLLOWING,
+            "config": {"param1": "value1"}
+        }
+        
+        result = await controller.register_strategy(request)
+        
+        assert result == {"strategy_id": "strategy_123"}
+        controller._service.register_strategy.assert_called_once()
+    
+    @pytest.mark.asyncio
+    async def test_register_strategy_validation_error(self, controller):
+        """Test registration with invalid data."""
+        request = {}  # Missing required fields
+        
+        controller._service.register_strategy.side_effect = ValidationError("Invalid config")
+        
+        with pytest.raises(ValidationError):
+            await controller.register_strategy(request)
+    
+    @pytest.mark.asyncio
+    async def test_unregister_strategy_success(self, controller):
+        """Test successful strategy unregistration."""
+        result = await controller.unregister_strategy("strategy_123")
+        
+        assert result == {"success": True}
+        controller._service.unregister_strategy.assert_called_once_with("strategy_123")
+    
+    @pytest.mark.asyncio
+    async def test_unregister_strategy_not_found(self, controller):
+        """Test unregistering non-existent strategy."""
+        controller._service.unregister_strategy.return_value = False
+        
+        result = await controller.unregister_strategy("invalid_id")
+        
+        assert result == {"success": False}
+
+
+class TestStrategyQueries:
+    """Test strategy query endpoints."""
+    
+    @pytest.mark.asyncio
+    async def test_get_strategy_success(self, controller):
+        """Test getting strategy details."""
+        result = await controller.get_strategy("strategy_123")
+        
+        assert result["id"] == "strategy_123"
+        assert result["name"] == "TestStrategy"
+        controller._service.get_strategy.assert_called_once_with("strategy_123")
+    
+    @pytest.mark.asyncio
+    async def test_get_strategy_not_found(self, controller):
+        """Test getting non-existent strategy."""
+        controller._service.get_strategy.return_value = None
+        
+        result = await controller.get_strategy("invalid_id")
+        
+        assert result is None
+    
+    @pytest.mark.asyncio
+    async def test_list_strategies(self, controller):
+        """Test listing all strategies."""
+        result = await controller.list_strategies()
+        
+        assert len(result) == 2
+        assert result[0]["id"] == "strategy_1"
+        controller._service.list_strategies.assert_called_once()
+    
+    @pytest.mark.asyncio
+    async def test_list_strategies_with_filters(self, controller):
+        """Test listing strategies with filters."""
+        filters = {"type": StrategyType.MEAN_REVERSION}
+        
+        await controller.list_strategies(filters)
+        
+        controller._service.list_strategies.assert_called_once_with(filters)
+
+
+class TestSignalGeneration:
+    """Test signal generation endpoints."""
+    
+    @pytest.mark.asyncio
+    async def test_process_market_data_success(self, controller):
+        """Test processing market data for signals."""
+        market_data = MarketData(
+            symbol="BTC/USDT",
+            price=Decimal("50000"),
+            volume=Decimal("100"),
+            timestamp=datetime.now(timezone.utc)
+        )
+        
+        result = await controller.process_market_data("strategy_123", market_data)
+        
+        assert len(result) == 1
+        assert result[0].direction == SignalDirection.BUY
+        controller._service.process_market_data.assert_called_once()
+    
+    @pytest.mark.asyncio
+    async def test_process_market_data_no_signals(self, controller):
+        """Test processing data with no signals generated."""
+        controller._service.process_market_data.return_value = []
+        
+        market_data = MarketData(
+            symbol="BTC/USDT",
+            price=Decimal("50000"),
+            volume=Decimal("100"),
+            timestamp=datetime.now(timezone.utc)
+        )
+        
+        result = await controller.process_market_data("strategy_123", market_data)
+        
+        assert result == []
+    
+    @pytest.mark.asyncio
+    async def test_process_market_data_error(self, controller):
+        """Test error handling in market data processing."""
+        controller._service.process_market_data.side_effect = ServiceError("Processing failed")
+        
+        market_data = MarketData(
+            symbol="BTC/USDT",
+            price=Decimal("50000"),
+            volume=Decimal("100"),
+            timestamp=datetime.now(timezone.utc)
+        )
+        
+        with pytest.raises(ServiceError):
+            await controller.process_market_data("strategy_123", market_data)
+
+
+class TestStrategyMetrics:
+    """Test strategy metrics endpoints."""
+    
+    @pytest.mark.asyncio
+    async def test_get_strategy_metrics_success(self, controller):
+        """Test getting strategy metrics."""
+        result = await controller.get_strategy_metrics("strategy_123")
+        
+        assert result.total_return == Decimal("15.5")
+        assert result.sharpe_ratio == Decimal("1.2")
+        assert result.win_rate == Decimal("0.65")
+        controller._service.get_strategy_metrics.assert_called_once_with("strategy_123")
+    
+    @pytest.mark.asyncio
+    async def test_get_strategy_metrics_with_timeframe(self, controller):
+        """Test getting metrics with timeframe."""
+        start_time = datetime.now(timezone.utc)
+        end_time = datetime.now(timezone.utc)
+        
+        await controller.get_strategy_metrics("strategy_123", start_time, end_time)
+        
+        controller._service.get_strategy_metrics.assert_called_once_with(
+            "strategy_123", start_time, end_time
+        )
+    
+    @pytest.mark.asyncio
+    async def test_get_strategy_metrics_empty(self, controller):
+        """Test getting metrics for new strategy."""
+        controller._service.get_strategy_metrics.return_value = None
+        
+        result = await controller.get_strategy_metrics("new_strategy")
+        
+        assert result is None
+
+
+class TestStrategyConfiguration:
+    """Test strategy configuration endpoints."""
+    
+    @pytest.mark.asyncio
+    async def test_update_strategy_config_success(self, controller):
+        """Test updating strategy configuration."""
+        config = StrategyConfig(
+            name="UpdatedStrategy",
+            type=StrategyType.ARBITRAGE,
+            parameters={"param1": "new_value"}
+        )
+        
+        result = await controller.update_strategy_config("strategy_123", config)
+        
+        assert result == {"success": True}
+        controller._service.update_strategy_config.assert_called_once()
+    
+    @pytest.mark.asyncio
+    async def test_update_strategy_config_validation_error(self, controller):
+        """Test config update with invalid data."""
+        controller._service.update_strategy_config.side_effect = ValidationError("Invalid config")
+        
+        config = StrategyConfig(
+            name="",  # Invalid empty name
+            type=StrategyType.ARBITRAGE,
+            parameters={}
+        )
+        
+        with pytest.raises(ValidationError):
+            await controller.update_strategy_config("strategy_123", config)
+    
+    @pytest.mark.asyncio
+    async def test_update_strategy_config_not_found(self, controller):
+        """Test updating config for non-existent strategy."""
+        controller._service.update_strategy_config.return_value = False
+        
+        config = StrategyConfig(
+            name="UpdatedStrategy",
+            type=StrategyType.ARBITRAGE,
+            parameters={}
+        )
+        
+        result = await controller.update_strategy_config("invalid_id", config)
+        
+        assert result == {"success": False}
+
+
+class TestStrategyLifecycle:
+    """Test strategy lifecycle management endpoints."""
+    
+    @pytest.mark.asyncio
+    async def test_start_strategy_success(self, controller):
+        """Test starting a strategy."""
+        result = await controller.start_strategy("strategy_123")
+        
+        assert result == {"success": True}
+        controller._service.start_strategy.assert_called_once_with("strategy_123")
+    
+    @pytest.mark.asyncio
+    async def test_stop_strategy_success(self, controller):
+        """Test stopping a strategy."""
+        result = await controller.stop_strategy("strategy_123")
+        
+        assert result == {"success": True}
+        controller._service.stop_strategy.assert_called_once_with("strategy_123")
+    
+    @pytest.mark.asyncio
+    async def test_pause_strategy_success(self, controller):
+        """Test pausing a strategy."""
+        result = await controller.pause_strategy("strategy_123")
+        
+        assert result == {"success": True}
+        controller._service.pause_strategy.assert_called_once_with("strategy_123")
+    
+    @pytest.mark.asyncio
+    async def test_resume_strategy_success(self, controller):
+        """Test resuming a strategy."""
+        result = await controller.resume_strategy("strategy_123")
+        
+        assert result == {"success": True}
+        controller._service.resume_strategy.assert_called_once_with("strategy_123")
+    
+    @pytest.mark.asyncio
+    async def test_lifecycle_operation_failed(self, controller):
+        """Test failed lifecycle operation."""
+        controller._service.start_strategy.return_value = False
+        
+        result = await controller.start_strategy("strategy_123")
+        
+        assert result == {"success": False}
+    
+    @pytest.mark.asyncio
+    async def test_lifecycle_operation_error(self, controller):
+        """Test error in lifecycle operation."""
+        controller._service.stop_strategy.side_effect = ServiceError("Cannot stop strategy")
+        
+        with pytest.raises(ServiceError):
+            await controller.stop_strategy("strategy_123")
+
+
+class TestControllerValidation:
+    """Test controller input validation."""
+    
+    @pytest.mark.asyncio
+    async def test_validate_strategy_id(self, controller):
+        """Test strategy ID validation."""
+        # Test with empty ID
+        with pytest.raises(ValidationError):
+            await controller.get_strategy("")
+        
+        # Test with None ID
+        with pytest.raises(ValidationError):
+            await controller.get_strategy(None)
+    
+    @pytest.mark.asyncio
+    async def test_validate_market_data(self, controller):
+        """Test market data validation."""
+        # Test with None data
+        with pytest.raises(ValidationError):
+            await controller.process_market_data("strategy_123", None)
+        
+        # Test with invalid data type
+        with pytest.raises(ValidationError):
+            await controller.process_market_data("strategy_123", {"invalid": "data"})
+    
+    @pytest.mark.asyncio
+    async def test_validate_config(self, controller):
+        """Test configuration validation."""
+        # Test with None config
+        with pytest.raises(ValidationError):
+            await controller.update_strategy_config("strategy_123", None)
+        
+        # Test with invalid config type
+        with pytest.raises(ValidationError):
+            await controller.update_strategy_config("strategy_123", {"invalid": "config"})
+
+
+class TestControllerErrorHandling:
+    """Test controller error handling."""
+    
+    @pytest.mark.asyncio
+    async def test_handle_service_unavailable(self, controller):
+        """Test handling when service is unavailable."""
+        controller._service = None
+        
+        with pytest.raises(ServiceError):
+            await controller.list_strategies()
+    
+    @pytest.mark.asyncio
+    async def test_handle_service_timeout(self, controller):
+        """Test handling service timeout."""
+        controller._service.list_strategies.side_effect = TimeoutError("Service timeout")
+        
+        with pytest.raises(TimeoutError):
+            await controller.list_strategies()
+    
+    @pytest.mark.asyncio
+    async def test_handle_unexpected_error(self, controller):
+        """Test handling unexpected errors."""
+        controller._service.get_strategy.side_effect = Exception("Unexpected error")
+        
+        with pytest.raises(Exception):
+            await controller.get_strategy("strategy_123")
+
+
+class TestControllerSerialization:
+    """Test controller response serialization."""
+    
+    @pytest.mark.asyncio
+    async def test_serialize_strategy_response(self, controller):
+        """Test strategy response serialization."""
+        result = await controller.get_strategy("strategy_123")
+        
+        # Should be JSON serializable
+        json_str = json.dumps(result, default=str)
+        assert json_str is not None
+    
+    @pytest.mark.asyncio
+    async def test_serialize_metrics_response(self, controller):
+        """Test metrics response serialization."""
+        result = await controller.get_strategy_metrics("strategy_123")
+        
+        # Convert to dict for serialization
+        result_dict = {
+            "total_return": str(result.total_return),
+            "sharpe_ratio": str(result.sharpe_ratio),
+            "max_drawdown": str(result.max_drawdown),
+            "win_rate": str(result.win_rate),
+            "total_trades": result.total_trades
+        }
+        
+        json_str = json.dumps(result_dict)
+        assert json_str is not None
+    
+    @pytest.mark.asyncio
+    async def test_serialize_signal_response(self, controller):
+        """Test signal response serialization."""
+        market_data = MarketData(
+            symbol="BTC/USDT",
+            price=Decimal("50000"),
+            volume=Decimal("100"),
+            timestamp=datetime.now(timezone.utc)
+        )
+        
+        result = await controller.process_market_data("strategy_123", market_data)
+        
+        # Convert signals to dict for serialization
+        signals_dict = [
+            {
+                "direction": signal.direction.value,
+                "confidence": str(signal.confidence),
+                "timestamp": signal.timestamp.isoformat(),
+                "symbol": signal.symbol,
+                "strategy_name": signal.strategy_name
+            }
+            for signal in result
+        ]
+        
+        json_str = json.dumps(signals_dict)
+        assert json_str is not None

@@ -23,6 +23,7 @@ from typing import Any
 import numpy as np
 
 from src.core.exceptions import PerformanceError
+from src.core.logging import get_logger
 from src.core.types import (
     MarketRegime,
     Position,
@@ -31,7 +32,6 @@ from src.core.types import (
 from src.strategies.interfaces import (
     BaseStrategyInterface,
     MarketDataProviderInterface,
-    StrategyDataRepositoryInterface,
 )
 
 
@@ -128,7 +128,7 @@ class PerformanceMonitor:
 
     def __init__(
         self,
-        data_repository: StrategyDataRepositoryInterface | None = None,
+        data_service: Any | None = None,
         market_data_provider: MarketDataProviderInterface | None = None,
         update_interval_seconds: int = 60,
         calculation_window_days: int = 252,
@@ -136,11 +136,13 @@ class PerformanceMonitor:
         """Initialize performance monitor.
 
         Args:
-            data_repository: Data repository for persistence
+            data_service: Data service for persistence operations
+            market_data_provider: Market data provider service
             update_interval_seconds: Frequency of metric updates
             calculation_window_days: Rolling window for calculations
         """
-        self.data_repository = data_repository
+        self.logger = get_logger(__name__)
+        self.data_service = data_service
         self.market_data_provider = market_data_provider
         self.update_interval = timedelta(seconds=update_interval_seconds)
         self.calculation_window = timedelta(days=calculation_window_days)
@@ -243,55 +245,99 @@ class PerformanceMonitor:
         self.monitoring_task = asyncio.create_task(self._monitoring_loop())
 
     async def stop_monitoring(self) -> None:
-        """Stop the performance monitoring loop."""
+        """Stop the performance monitoring loop with proper cleanup."""
         self.monitoring_active = False
 
-        if self.monitoring_task:
+        if self.monitoring_task and not self.monitoring_task.done():
             self.monitoring_task.cancel()
             try:
-                await self.monitoring_task
-            except asyncio.CancelledError:
+                await asyncio.wait_for(self.monitoring_task, timeout=10.0)
+            except (asyncio.CancelledError, asyncio.TimeoutError):
                 pass
+            finally:
+                # Ensure task cleanup
+                if not self.monitoring_task.done():
+                    self.logger.warning("Monitoring task did not complete cleanly")
+                self.monitoring_task = None
 
     async def _monitoring_loop(self) -> None:
-        """Main monitoring loop that updates performance metrics."""
-        while self.monitoring_active:
-            try:
-                # Update all strategy metrics
-                await self._update_all_metrics()
+        """Main monitoring loop with proper error handling and backpressure control."""
+        consecutive_errors = 0
+        max_consecutive_errors = 5
 
-                # Check for alerts
-                await self._check_performance_alerts()
+        try:
+            while self.monitoring_active:
+                try:
+                    # Update all strategy metrics with timeout
+                    await asyncio.wait_for(
+                        self._update_all_metrics(),
+                        timeout=30.0,  # 30 second timeout for metric updates
+                    )
 
-                # Update strategy rankings
-                self._update_strategy_rankings()
+                    # Check for alerts with timeout
+                    await asyncio.wait_for(self._check_performance_alerts(), timeout=10.0)
 
-                # Persist metrics to database
-                await self._persist_metrics()
+                    # Update strategy rankings (synchronous operation)
+                    self._update_strategy_rankings()
 
-                # Wait for next update interval
-                await asyncio.sleep(self.update_interval.total_seconds())
+                    # Persist metrics to database with timeout
+                    await asyncio.wait_for(self._persist_metrics(), timeout=15.0)
 
-            except asyncio.CancelledError:
-                # Monitoring was cancelled - exit loop
-                break
-            except (AttributeError, KeyError, TypeError) as e:
-                # Strategy data access errors - log and continue monitoring
-                continue
-            except Exception as e:
-                # Unexpected errors - log and continue monitoring
-                continue
+                    # Reset error counter on successful iteration
+                    consecutive_errors = 0
+
+                    # Wait for next update interval with cancellation check
+                    try:
+                        await asyncio.sleep(self.update_interval.total_seconds())
+                    except asyncio.CancelledError:
+                        break
+
+                except asyncio.TimeoutError as e:
+                    self.logger.warning(f"Monitoring loop timeout: {e}")
+                    consecutive_errors += 1
+                except asyncio.CancelledError:
+                    # Monitoring was cancelled - exit loop cleanly
+                    break
+                except (AttributeError, KeyError, TypeError) as e:
+                    # Strategy data access errors - log and continue monitoring
+                    self.logger.warning(f"Data access error in monitoring loop: {e}")
+                    consecutive_errors += 1
+                except Exception as e:
+                    # Unexpected errors - log and continue monitoring
+                    self.logger.error(f"Unexpected error in monitoring loop: {e}")
+                    consecutive_errors += 1
+
+                # Implement backpressure - if too many consecutive errors, increase wait time
+                if consecutive_errors >= max_consecutive_errors:
+                    self.logger.error(
+                        f"Too many consecutive errors ({consecutive_errors}), backing off"
+                    )
+                    await asyncio.sleep(min(60.0, self.update_interval.total_seconds() * 2))
+                    consecutive_errors = 0
+
+        finally:
+            # Cleanup on exit
+            self.logger.info("Monitoring loop exited")
 
     async def _update_all_metrics(self) -> None:
-        """Update performance metrics for all monitored strategies."""
+        """Update performance metrics for all monitored strategies with proper concurrency control."""
         update_tasks = []
 
-        for strategy_name in self.strategy_metrics.keys():
+        # Create a copy of the keys to avoid race conditions during iteration
+        strategy_names = list(self.strategy_metrics.keys())
+
+        for strategy_name in strategy_names:
             task = self._update_strategy_metrics(strategy_name)
             update_tasks.append(task)
 
-        # Update all strategies concurrently
-        await asyncio.gather(*update_tasks, return_exceptions=True)
+        # Update all strategies concurrently with proper exception handling
+        if update_tasks:
+            results = await asyncio.gather(*update_tasks, return_exceptions=True)
+
+            # Log any exceptions that occurred during updates
+            for strategy_name, result in zip(strategy_names, results, strict=False):
+                if isinstance(result, Exception):
+                    self.logger.warning(f"Error updating metrics for strategy {strategy_name}: {result}")
 
     async def _update_strategy_metrics(self, strategy_name: str) -> None:
         """Update performance metrics for a specific strategy."""
@@ -299,8 +345,6 @@ class PerformanceMonitor:
             if strategy_name not in self.monitored_strategies:
                 return
 
-            # Get strategy reference for potential future use
-            # strategy = self.monitored_strategies[strategy_name]
             metrics = self.strategy_metrics[strategy_name]
 
             # Get current strategy state
@@ -333,10 +377,12 @@ class PerformanceMonitor:
 
         except (AttributeError, KeyError, TypeError) as e:
             # Strategy metrics access errors - log but don't fail the entire update
-            pass
+            self.logger.warning(f"Strategy metrics access error: {e}", extra={"error": str(e)})
         except Exception as e:
             # Unexpected errors - log but don't fail the entire update
-            pass
+            self.logger.error(
+                f"Unexpected error updating strategy metrics: {e}", extra={"error": str(e)}
+            )
 
     def _update_trade_statistics(self, metrics: PerformanceMetrics, trades: list[Trade]) -> None:
         """Update basic trade statistics."""
@@ -362,34 +408,37 @@ class PerformanceMonitor:
         losing_trades = [trade for trade in trades if trade.metadata.get("pnl", Decimal("0")) < 0]
 
         if winning_trades:
-            metrics.average_win = Decimal(
-                str(np.mean([float(t.metadata.get("pnl", Decimal("0"))) for t in winning_trades]))
-            )
+            # Use Decimal calculations for financial precision
+            winning_pnls = [t.metadata.get("pnl", Decimal("0")) for t in winning_trades]
+            average_win_value = sum(winning_pnls) / Decimal(len(winning_pnls))
+            metrics.average_win = average_win_value
             metrics.largest_win = max(
                 trade.metadata.get("pnl", Decimal("0")) for trade in winning_trades
             )
 
         if losing_trades:
-            metrics.average_loss = Decimal(
-                str(
-                    abs(
-                        np.mean([float(t.metadata.get("pnl", Decimal("0"))) for t in losing_trades])
-                    )
-                )
-            )
+            # Use Decimal calculations for financial precision
+            losing_pnls = [t.metadata.get("pnl", Decimal("0")) for t in losing_trades]
+            average_loss_value = abs(sum(losing_pnls) / Decimal(len(losing_pnls)))
+            metrics.average_loss = average_loss_value
             metrics.largest_loss = min(
                 trade.metadata.get("pnl", Decimal("0")) for trade in losing_trades
             )
 
-        # Calculate profit factor
-        gross_profit = sum(trade.metadata.get("pnl", Decimal("0")) for trade in winning_trades)
-        gross_loss = abs(sum(trade.metadata.get("pnl", Decimal("0")) for trade in losing_trades))
+        # Calculate profit factor using FinancialCalculator
+        from src.utils.calculations.financial import FinancialCalculator
+
+        winning_pnls = [trade.metadata.get("pnl", Decimal("0")) for trade in winning_trades]
+        losing_pnls = [abs(trade.metadata.get("pnl", Decimal("0"))) for trade in losing_trades]
+
+        gross_profit = sum(winning_pnls)
+        gross_loss = sum(losing_pnls)
 
         metrics.gross_profit = gross_profit
         metrics.gross_loss = gross_loss
 
-        if gross_loss > 0:
-            metrics.profit_factor = float(gross_profit / gross_loss)
+        profit_factor_decimal = FinancialCalculator.profit_factor(winning_pnls, losing_pnls)
+        metrics.profit_factor = float(profit_factor_decimal)
 
         # Calculate consecutive wins/losses
         self._calculate_consecutive_trades(metrics, trades)
@@ -439,34 +488,67 @@ class PerformanceMonitor:
         positions: list[Position],
         trades: list[Trade],
     ) -> None:
-        """Update P&L and return metrics."""
-        # Calculate realized P&L from closed trades
-        realized_pnl = sum(
-            trade.metadata.get("pnl", Decimal("0"))
-            for trade in trades
-            if trade.metadata.get("is_closed", False)
-        )
-        metrics.realized_pnl = realized_pnl
+        """Update P&L metrics with concurrent price fetching."""
+        try:
+            # Calculate realized P&L from closed trades
+            realized_pnl = sum(
+                trade.metadata.get("pnl", Decimal("0"))
+                for trade in trades
+                if trade.metadata.get("is_closed", False)
+            )
+            metrics.realized_pnl = realized_pnl
 
-        # Calculate unrealized P&L from open positions
-        unrealized_pnl = Decimal("0")
-        for position in positions:
-            if position.is_open():  # Use Position model method instead of status attribute
-                # Get current market price for position
-                current_price = await self._get_current_price(position.symbol)
-                if current_price:
-                    position_pnl = self._calculate_position_pnl(position, current_price)
-                    unrealized_pnl += position_pnl
+            # Calculate unrealized P&L from open positions using concurrent fetching
+            unrealized_pnl = Decimal("0")
+            open_positions = [pos for pos in positions if pos.is_open()]
 
-        metrics.unrealized_pnl = unrealized_pnl
-        metrics.total_pnl = realized_pnl + unrealized_pnl
+            if open_positions:
+                # Fetch all prices concurrently with semaphore for backpressure control
+                semaphore = asyncio.Semaphore(5)  # Limit concurrent price requests
 
-        # Calculate returns based on initial capital
+                async def fetch_price_with_semaphore(position):
+                    async with semaphore:
+                        return await self._get_current_price(position.symbol)
+
+                price_tasks = [
+                    fetch_price_with_semaphore(position) for position in open_positions
+                ]
+
+                # Add timeout to prevent hanging on multiple WebSocket operations
+                try:
+                    prices = await asyncio.wait_for(
+                        asyncio.gather(*price_tasks, return_exceptions=True),
+                        timeout=30.0  # 30 second timeout for all price fetches
+                    )
+
+                    for position, price in zip(open_positions, prices, strict=False):
+                        if isinstance(price, Decimal) and price is not None:
+                            position_pnl = self._calculate_position_pnl(position, price)
+                            unrealized_pnl += position_pnl
+                        elif isinstance(price, Exception):
+                            self.logger.warning(f"Error fetching price for {position.symbol}: {price}")
+
+                except asyncio.TimeoutError:
+                    self.logger.warning("Timeout fetching prices for unrealized P&L calculation")
+                    # Continue with zero unrealized PnL rather than failing
+
+            metrics.unrealized_pnl = unrealized_pnl
+            metrics.total_pnl = realized_pnl + unrealized_pnl
+
+        except Exception as e:
+            self.logger.error(f"Error updating P&L metrics: {e}")
+            # Set safe defaults on error
+            metrics.realized_pnl = Decimal("0")
+            metrics.unrealized_pnl = Decimal("0")
+            metrics.total_pnl = Decimal("0")
+
+        # Calculate returns based on initial capital - use Decimal for precision
         if hasattr(metrics, "initial_capital") and metrics.initial_capital > 0:
-            metrics.total_return = float(metrics.total_pnl / metrics.initial_capital)
+            initial_capital_decimal = Decimal(str(metrics.initial_capital))
+            metrics.total_return = metrics.total_pnl / initial_capital_decimal
 
         # Update equity curve
-        current_equity = float(metrics.total_pnl)
+        current_equity = metrics.total_pnl
         metrics.equity_curve.append(current_equity)
 
         # Keep only recent equity curve data
@@ -604,15 +686,15 @@ class PerformanceMonitor:
 
         returns = np.array(metrics.daily_returns)
 
-        # Calculate VaR at different confidence levels
-        metrics.var_95 = float(np.percentile(returns, 5))  # 95% VaR
-        metrics.var_99 = float(np.percentile(returns, 1))  # 99% VaR
+        # Calculate VaR at different confidence levels - maintain precision
+        metrics.var_95 = float(round(np.percentile(returns, 5), 8))  # 95% VaR
+        metrics.var_99 = float(round(np.percentile(returns, 1), 8))  # 99% VaR
 
         # Calculate Conditional VaR (Expected Shortfall)
         var_95_threshold = metrics.var_95
         tail_losses = returns[returns <= var_95_threshold]
         if len(tail_losses) > 0:
-            metrics.conditional_var_95 = float(np.mean(tail_losses))
+            metrics.conditional_var_95 = float(round(np.mean(tail_losses), 8))
 
         # Calculate Beta (vs benchmark if available)
         if len(metrics.benchmark_returns) == len(metrics.daily_returns):
@@ -697,11 +779,11 @@ class PerformanceMonitor:
 
             return composite_score
 
-        except (ZeroDivisionError, ValueError, TypeError) as e:
+        except (ZeroDivisionError, ValueError, TypeError):
             # Mathematical calculation errors in composite score
             return 0.0
         except Exception as e:
-            # Unexpected errors in composite score calculation
+            self.logger.error(f"Unexpected error in composite score calculation: {e}")
             return 0.0
 
     async def get_strategy_performance(self, strategy_name: str) -> dict[str, Any]:
@@ -856,15 +938,24 @@ class PerformanceMonitor:
             returns = np.array(all_returns)
 
             # Calculate portfolio-level metrics
+            # Portfolio return calculation with proper precision
             portfolio_return = float(total_pnl)
             portfolio_volatility = np.std(returns) * np.sqrt(252)
-            portfolio_sharpe = (
-                np.mean(returns) / np.std(returns) * np.sqrt(252) if np.std(returns) > 0 else 0
-            )
+            # Use FinancialCalculator for portfolio Sharpe ratio
+            from src.utils.calculations.financial import FinancialCalculator
+
+            if len(returns) > 1:
+                returns_decimal = tuple(Decimal(str(r)) for r in returns)
+                portfolio_sharpe_decimal = FinancialCalculator.sharpe_ratio(
+                    returns_decimal, risk_free_rate=Decimal("0.02"), periods_per_year=252
+                )
+                portfolio_sharpe = float(portfolio_sharpe_decimal)
+            else:
+                portfolio_sharpe = 0
 
             # Calculate correlation matrix between strategies
             strategy_names = list(self.strategy_metrics.keys())
-            correlation_matrix = {}
+            correlation_matrix: dict[str, dict[str, float]] = {}
 
             for i, strategy1 in enumerate(strategy_names):
                 correlation_matrix[strategy1] = {}
@@ -894,11 +985,11 @@ class PerformanceMonitor:
                 "correlation_matrix": correlation_matrix,
             }
 
-        except (KeyError, AttributeError, TypeError) as e:
+        except (KeyError, AttributeError, TypeError):
             # Strategy comparison data access errors
             return {}
         except Exception as e:
-            # Unexpected errors in strategy comparison
+            self.logger.error(f"Unexpected error in strategy comparison: {e}")
             return {}
 
     # Helper methods (implementations would depend on your data access patterns)
@@ -909,11 +1000,14 @@ class PerformanceMonitor:
             if not strategy_name or not isinstance(strategy_name, str):
                 raise ValueError("Invalid strategy_name parameter")
 
-            if not self.data_repository:
+            if not self.data_service:
                 return []
 
-            # Get positions from repository
-            position_dicts = await self.data_repository.get_strategy_positions(strategy_name)
+            # Get positions from data service with timeout to prevent WebSocket hangs
+            position_dicts = await asyncio.wait_for(
+                self.data_service.get_strategy_positions(strategy_name),
+                timeout=10.0  # 10 second timeout for database operations
+            )
 
             if not position_dicts:
                 return []
@@ -968,14 +1062,14 @@ class PerformanceMonitor:
                     positions.append(position)
                 except (ValueError, TypeError, KeyError) as e:
                     # Log specific error but continue processing
-                    print(f"Error converting position data: {e}")
+                    self.logger.warning(f"Error converting position data: {e}")
                     continue
 
             return positions
 
         except Exception as e:
             # Log error with more context
-            print(f"Error getting positions for strategy '{strategy_name}': {e}")
+            self.logger.error(f"Error getting positions for strategy '{strategy_name}': {e}")
             return []
 
     async def _get_recent_trades(
@@ -986,10 +1080,10 @@ class PerformanceMonitor:
             # Validate input parameters
             self._validate_trade_query_params(strategy_name, limit, offset)
 
-            if not self.data_repository:
+            if not self.data_service:
                 return []
 
-            # Get trade dictionaries from repository
+            # Get trade dictionaries from data service
             trade_dicts = await self._fetch_trade_data(strategy_name)
             if not trade_dicts:
                 return []
@@ -1000,7 +1094,7 @@ class PerformanceMonitor:
 
         except Exception as e:
             # Log error with more context
-            print(f"Error getting trades for strategy '{strategy_name}': {e}")
+            self.logger.error(f"Error getting trades for strategy '{strategy_name}': {e}")
             return []
 
     def _validate_trade_query_params(self, strategy_name: str, limit: int, offset: int) -> None:
@@ -1015,14 +1109,18 @@ class PerformanceMonitor:
             raise ValueError("Offset must be non-negative")
 
     async def _fetch_trade_data(self, strategy_name: str) -> list[dict[str, Any]]:
-        """Fetch trade data from repository."""
+        """Fetch trade data from data service."""
         from datetime import timedelta
 
         end_time = datetime.now(timezone.utc)
         start_time = end_time - timedelta(days=1)
 
-        return await self.data_repository.get_strategy_trades(
-            strategy_id=strategy_name, start_time=start_time, end_time=end_time
+        # Add timeout to prevent WebSocket operations from hanging
+        return await asyncio.wait_for(
+            self.data_service.get_strategy_trades(
+                strategy_name, start_time=start_time, end_time=end_time
+            ),
+            timeout=10.0  # 10 second timeout for database operations
         )
 
     def _convert_trade_dicts_to_objects(self, trade_dicts: list[dict[str, Any]]) -> list[Trade]:
@@ -1035,7 +1133,7 @@ class PerformanceMonitor:
                     trades.append(trade)
             except (ValueError, TypeError, KeyError) as e:
                 # Log specific error but continue processing
-                print(f"Error converting trade data: {e}")
+                self.logger.warning(f"Error converting trade data: {e}")
                 continue
 
         return trades
@@ -1139,15 +1237,23 @@ class PerformanceMonitor:
         return mapped_dict
 
     async def _get_current_price(self, symbol: str) -> Decimal | None:
-        """Get current market price for a symbol."""
+        """Get current market price for a symbol with timeout and error handling."""
         try:
             if not self.market_data_provider:
                 return None
 
-            return await self.market_data_provider.get_current_price(symbol)
+            # Add timeout to prevent hanging on WebSocket operations
+            price = await asyncio.wait_for(
+                self.market_data_provider.get_current_price(symbol),
+                timeout=5.0,  # 5 second timeout
+            )
+            return price
 
+        except asyncio.TimeoutError:
+            self.logger.warning(f"Timeout getting price for {symbol}")
+            return None
         except Exception as e:
-            print(f"Error getting current price for {symbol}: {e}")
+            self.logger.error(f"Error getting current price for {symbol}: {e}")
             return None
 
     def _calculate_position_pnl(self, position: Position, current_price: Decimal) -> Decimal:
@@ -1162,11 +1268,14 @@ class PerformanceMonitor:
     async def _load_historical_performance(self, strategy_name: str) -> None:
         """Load historical performance data from database."""
         try:
-            if not self.data_repository:
+            if not self.data_service:
                 return
 
-            # Load historical metrics
-            history = await self.data_repository.load_performance_history(strategy_id=strategy_name)
+            # Load historical metrics with timeout
+            history = await asyncio.wait_for(
+                self.data_service.load_performance_history(strategy_id=strategy_name),
+                timeout=15.0  # 15 second timeout for historical data loading
+            )
 
             if history and strategy_name in self.strategy_metrics:
                 metrics = self.strategy_metrics[strategy_name]
@@ -1179,12 +1288,12 @@ class PerformanceMonitor:
 
         except Exception as e:
             # Log error but don't fail initialization
-            print(f"Error loading historical performance for {strategy_name}: {e}")
+            self.logger.error(f"Error loading historical performance for {strategy_name}: {e}")
 
     async def _save_performance_metrics(self, strategy_name: str) -> None:
         """Save performance metrics to database."""
         try:
-            if not self.data_repository or strategy_name not in self.strategy_metrics:
+            if not self.data_service or strategy_name not in self.strategy_metrics:
                 return
 
             metrics = self.strategy_metrics[strategy_name]
@@ -1206,31 +1315,55 @@ class PerformanceMonitor:
                 "equity_curve": metrics.equity_curve[-100:],  # Last 100 points
             }
 
-            await self.data_repository.save_performance_metrics(
-                strategy_id=strategy_name, metrics=metrics_dict, timestamp=metrics.last_updated
+            # Add timeout to prevent database operations from hanging
+            await asyncio.wait_for(
+                self.data_service.save_performance_metrics(
+                    strategy_id=strategy_name, metrics=metrics_dict, timestamp=metrics.last_updated
+                ),
+                timeout=10.0  # 10 second timeout for database save operations
             )
 
         except Exception as e:
             # Log error but continue operation
-            print(f"Error saving performance metrics for {strategy_name}: {e}")
+            self.logger.error(f"Error saving performance metrics for {strategy_name}: {e}")
 
     async def _persist_metrics(self) -> None:
-        """Persist all metrics to database."""
-        if not self.data_repository:
+        """Persist all metrics to database with proper error handling and backpressure."""
+        if not self.data_service:
             return
 
-        # Save metrics for all strategies
-        persist_tasks = []
-        for strategy_name in self.strategy_metrics:
-            task = self._save_performance_metrics(strategy_name)
-            persist_tasks.append(task)
+        # Create a copy to avoid race conditions during iteration
+        strategy_names = list(self.strategy_metrics.keys())
 
-        # Execute all saves concurrently
+        # Limit concurrent database operations to prevent overwhelming the database
+        semaphore = asyncio.Semaphore(3)  # Max 3 concurrent database operations
+
+        async def persist_with_semaphore(strategy_name):
+            async with semaphore:
+                return await self._save_performance_metrics(strategy_name)
+
+        # Save metrics for all strategies
+        persist_tasks = [
+            persist_with_semaphore(strategy_name) for strategy_name in strategy_names
+        ]
+
+        # Execute all saves concurrently with timeout
         try:
-            await asyncio.gather(*persist_tasks, return_exceptions=True)
+            results = await asyncio.wait_for(
+                asyncio.gather(*persist_tasks, return_exceptions=True),
+                timeout=30.0  # 30 second timeout for all database operations
+            )
+
+            # Log any persistence errors
+            for strategy_name, result in zip(strategy_names, results, strict=False):
+                if isinstance(result, Exception):
+                    self.logger.warning(f"Error persisting metrics for strategy {strategy_name}: {result}")
+
+        except asyncio.TimeoutError:
+            self.logger.warning("Timeout persisting metrics to database")
         except Exception as e:
             # Log error but don't fail monitoring loop
-            print(f"Error persisting metrics: {e}")
+            self.logger.error(f"Unexpected error persisting metrics: {e}")
 
     async def _send_performance_alerts(self, strategy_name: str, alerts: list[str]) -> None:
         """Send performance alerts."""

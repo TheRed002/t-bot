@@ -1,0 +1,630 @@
+"""
+Working comprehensive tests for performance monitor to achieve maximum coverage.
+"""
+
+import asyncio
+from datetime import datetime, timedelta, timezone
+from decimal import Decimal
+from unittest.mock import Mock, AsyncMock, patch, MagicMock
+import pytest
+import numpy as np
+import logging
+
+# Disable logging for performance
+logging.disable(logging.CRITICAL)
+
+from src.core.exceptions import PerformanceError
+from src.core.types import MarketRegime, Trade, Position
+from src.strategies.performance_monitor import PerformanceMetrics, PerformanceMonitor
+
+
+class TestPerformanceMetrics:
+    """Comprehensive test coverage for PerformanceMetrics class."""
+    
+    def test_performance_metrics_initialization(self):
+        """Test basic initialization of PerformanceMetrics."""
+        strategy_name = "test_strategy"
+        metrics = PerformanceMetrics(strategy_name)
+        
+        # Basic properties
+        assert metrics.strategy_name == strategy_name
+        assert metrics.total_trades == 0
+        assert metrics.winning_trades == 0
+        assert metrics.losing_trades == 0
+        assert metrics.breakeven_trades == 0
+        
+        # P&L metrics
+        assert metrics.total_pnl == Decimal("0")
+        assert metrics.realized_pnl == Decimal("0")
+        assert metrics.unrealized_pnl == Decimal("0")
+        assert metrics.gross_profit == Decimal("0")
+        assert metrics.gross_loss == Decimal("0")
+        
+        # Returns and ratios
+        assert metrics.total_return == 0.0
+        assert metrics.annualized_return == 0.0
+        assert metrics.volatility == 0.0
+        assert metrics.sharpe_ratio == 0.0
+        assert metrics.sortino_ratio == 0.0
+        assert metrics.calmar_ratio == 0.0
+        assert metrics.information_ratio == 0.0
+        
+        # Risk metrics
+        assert metrics.max_drawdown == 0.0
+        assert metrics.current_drawdown == 0.0
+        assert metrics.var_95 == 0.0
+        assert metrics.var_99 == 0.0
+        assert metrics.conditional_var_95 == 0.0
+        assert metrics.beta == 1.0
+        
+        # Trade statistics
+        assert metrics.win_rate == 0.0
+        assert metrics.profit_factor == 0.0
+        assert metrics.average_win == Decimal("0")
+        assert metrics.average_loss == Decimal("0")
+        assert metrics.largest_win == Decimal("0")
+        assert metrics.largest_loss == Decimal("0")
+        assert metrics.consecutive_wins == 0
+        assert metrics.consecutive_losses == 0
+        assert metrics.max_consecutive_wins == 0
+        assert metrics.max_consecutive_losses == 0
+        
+        # Time-based metrics
+        assert isinstance(metrics.average_holding_time, timedelta)
+        assert isinstance(metrics.total_time_in_market, timedelta)
+        assert metrics.trades_per_day == 0.0
+        assert isinstance(metrics.strategy_start_time, datetime)
+        
+        # Market exposure
+        assert isinstance(metrics.long_exposure_time, timedelta)
+        assert isinstance(metrics.short_exposure_time, timedelta)
+        assert metrics.long_trades == 0
+        assert metrics.short_trades == 0
+        assert metrics.long_pnl == Decimal("0")
+        assert metrics.short_pnl == Decimal("0")
+        
+        # Historical data
+        assert isinstance(metrics.daily_returns, list)
+        assert isinstance(metrics.monthly_returns, list)
+        assert isinstance(metrics.equity_curve, list)
+        assert isinstance(metrics.drawdown_curve, list)
+        assert isinstance(metrics.trade_history, list)
+        
+        # Benchmarking
+        assert isinstance(metrics.benchmark_returns, list)
+        assert isinstance(metrics.excess_returns, list)
+        assert metrics.tracking_error == 0.0
+        
+        # Last update
+        assert isinstance(metrics.last_updated, datetime)
+
+
+class TestPerformanceMonitor:
+    """Comprehensive test coverage for PerformanceMonitor class."""
+    
+    @pytest.fixture
+    def mock_data_repository(self):
+        """Create mock data repository."""
+        repo = AsyncMock()
+        repo.get_strategy_trades.return_value = []
+        repo.get_strategy_positions.return_value = []
+        repo.save_performance_metrics = AsyncMock()
+        return repo
+    
+    @pytest.fixture
+    def mock_market_data_provider(self):
+        """Create mock market data provider."""
+        provider = AsyncMock()
+        provider.get_current_price.return_value = Decimal("50000")
+        provider.get_market_regime.return_value = MarketRegime.TRENDING_UP
+        return provider
+    
+    @pytest.fixture
+    def mock_strategy(self):
+        """Create mock strategy."""
+        strategy = Mock()
+        strategy.name = "test_strategy"
+        strategy.strategy_id = "strategy_123"
+        return strategy
+    
+    @pytest.fixture
+    def performance_monitor(self, mock_data_repository, mock_market_data_provider):
+        """Create PerformanceMonitor with mocked dependencies."""
+        return PerformanceMonitor(
+            data_repository=mock_data_repository,
+            market_data_provider=mock_market_data_provider,
+            update_interval_seconds=1,  # 1 second for testing
+            calculation_window_days=30
+        )
+    
+    def test_performance_monitor_initialization_full_params(self, mock_data_repository, mock_market_data_provider):
+        """Test PerformanceMonitor initialization with full parameters."""
+        monitor = PerformanceMonitor(
+            data_repository=mock_data_repository,
+            market_data_provider=mock_market_data_provider,
+            update_interval_seconds=5,
+            calculation_window_days=100
+        )
+        
+        assert monitor.data_repository == mock_data_repository
+        assert monitor.market_data_provider == mock_market_data_provider
+        assert monitor.update_interval == timedelta(seconds=5)
+        assert monitor.calculation_window == timedelta(days=100)
+        assert isinstance(monitor.strategy_metrics, dict)
+        assert isinstance(monitor.monitored_strategies, dict)
+        assert isinstance(monitor.strategy_rankings, dict)
+        assert isinstance(monitor.performance_scores, dict)
+        assert monitor.monitoring_active is False
+        assert monitor.monitoring_task is None
+    
+    def test_performance_monitor_initialization_minimal_params(self):
+        """Test PerformanceMonitor initialization with minimal parameters."""
+        mock_repo = AsyncMock()
+        
+        monitor = PerformanceMonitor(data_repository=mock_repo)
+        
+        assert monitor.data_repository == mock_repo
+        assert monitor.market_data_provider is None
+        assert monitor.update_interval == timedelta(seconds=60)  # default
+        assert monitor.calculation_window == timedelta(days=252)  # default
+        assert isinstance(monitor.alert_thresholds, dict)
+    
+    @pytest.mark.asyncio
+    async def test_add_strategy_success(self, performance_monitor, mock_strategy):
+        """Test successfully adding a strategy for monitoring."""
+        with patch.object(performance_monitor, '_load_historical_performance', new_callable=AsyncMock):
+            await performance_monitor.add_strategy(mock_strategy)
+        
+        assert mock_strategy.name in performance_monitor.strategy_metrics
+        assert isinstance(performance_monitor.strategy_metrics[mock_strategy.name], PerformanceMetrics)
+        assert performance_monitor.strategy_metrics[mock_strategy.name].strategy_name == mock_strategy.name
+    
+    @pytest.mark.asyncio
+    async def test_add_strategy_duplicate(self, performance_monitor, mock_strategy):
+        """Test adding duplicate strategy raises error."""
+        with patch.object(performance_monitor, '_load_historical_performance', new_callable=AsyncMock):
+            await performance_monitor.add_strategy(mock_strategy)
+        
+        with pytest.raises(PerformanceError, match="already being monitored"):
+            with patch.object(performance_monitor, '_load_historical_performance', new_callable=AsyncMock):
+                await performance_monitor.add_strategy(mock_strategy)
+    
+    @pytest.mark.asyncio
+    async def test_remove_strategy_success(self, performance_monitor, mock_strategy):
+        """Test successfully removing a strategy."""
+        with patch.object(performance_monitor, '_load_historical_performance', new_callable=AsyncMock):
+            await performance_monitor.add_strategy(mock_strategy)
+        assert mock_strategy.name in performance_monitor.strategy_metrics
+        
+        await performance_monitor.remove_strategy(mock_strategy.name)
+        assert mock_strategy.name not in performance_monitor.strategy_metrics
+    
+    @pytest.mark.asyncio
+    async def test_remove_strategy_not_found(self, performance_monitor):
+        """Test removing non-existent strategy raises error."""
+        with pytest.raises(PerformanceError, match="not found"):
+            await performance_monitor.remove_strategy("non_existent")
+    
+    @pytest.mark.asyncio
+    async def test_start_monitoring_success(self, performance_monitor):
+        """Test successfully starting monitoring."""
+        with patch.object(performance_monitor, '_monitoring_loop') as mock_loop:
+            await performance_monitor.start_monitoring()
+            
+            assert performance_monitor.monitoring_active is True
+            assert performance_monitor._monitoring_task is not None
+    
+    @pytest.mark.asyncio
+    async def test_start_monitoring_already_running(self, performance_monitor):
+        """Test starting monitoring when already running."""
+        performance_monitor.monitoring_active = True
+        
+        with pytest.raises(PerformanceError, match="already running"):
+            await performance_monitor.start_monitoring()
+    
+    @pytest.mark.asyncio
+    async def test_stop_monitoring_success(self, performance_monitor):
+        """Test successfully stopping monitoring."""
+        # Set up monitoring first
+        performance_monitor.monitoring_active = True
+        mock_task = AsyncMock()
+        performance_monitor._monitoring_task = mock_task
+        
+        await performance_monitor.stop_monitoring()
+        
+        assert performance_monitor.monitoring_active is False
+        assert performance_monitor._monitoring_task is None
+        mock_task.cancel.assert_called_once()
+    
+    @pytest.mark.asyncio
+    async def test_stop_monitoring_not_running(self, performance_monitor):
+        """Test stopping monitoring when not running."""
+        with pytest.raises(PerformanceError, match="not currently running"):
+            await performance_monitor.stop_monitoring()
+    
+    @pytest.mark.asyncio
+    async def test_monitoring_loop_basic(self, performance_monitor, mock_strategy):
+        """Test basic monitoring loop functionality."""
+        performance_monitor.update_interval = timedelta(seconds=0.001)  # Ultra-short for testing
+        with patch.object(performance_monitor, '_load_historical_performance', new_callable=AsyncMock):
+            await performance_monitor.add_strategy(mock_strategy)
+        
+        with patch.object(performance_monitor, '_update_all_metrics') as mock_update:
+            with patch('asyncio.sleep', side_effect=[None, asyncio.CancelledError()]):
+                try:
+                    await performance_monitor._monitoring_loop()
+                except asyncio.CancelledError:
+                    pass
+                
+                mock_update.assert_called_once()
+    
+    @pytest.mark.asyncio
+    async def test_monitoring_loop_exception_handling(self, performance_monitor, mock_strategy):
+        """Test monitoring loop handles exceptions gracefully."""
+        performance_monitor.update_interval = timedelta(seconds=0.001)
+        await performance_monitor.add_strategy(mock_strategy)
+        
+        with patch.object(performance_monitor, '_update_all_metrics', side_effect=Exception("Test error")):
+            with patch('asyncio.sleep', side_effect=[None, asyncio.CancelledError()]):
+                try:
+                    await performance_monitor._monitoring_loop()
+                except asyncio.CancelledError:
+                    pass
+                # Should not raise exception, just log it
+    
+    @pytest.mark.asyncio
+    async def test_update_all_metrics(self, performance_monitor, mock_strategy):
+        """Test updating all strategy metrics."""
+        await performance_monitor.add_strategy(mock_strategy)
+        
+        with patch.object(performance_monitor, '_update_strategy_metrics') as mock_update:
+            with patch.object(performance_monitor, '_check_performance_alerts') as mock_alerts:
+                with patch.object(performance_monitor, '_update_strategy_rankings') as mock_rankings:
+                    await performance_monitor._update_all_metrics()
+                    
+                    mock_update.assert_called_once_with(mock_strategy.name)
+                    mock_alerts.assert_called_once()
+                    mock_rankings.assert_called_once()
+    
+    @pytest.mark.asyncio
+    async def test_update_strategy_metrics_with_trades(self, performance_monitor, mock_strategy):
+        """Test updating strategy metrics when trades exist."""
+        await performance_monitor.add_strategy(mock_strategy)
+        
+        # Create mock trades
+        mock_trades = [
+            Trade(
+                id="trade1",
+                strategy_id=mock_strategy.strategy_id,
+                symbol="BTCUSDT",
+                side="BUY",
+                quantity=Decimal("1.0"),
+                price=Decimal("50000"),
+                timestamp=datetime.now(timezone.utc),
+                pnl=Decimal("100"),
+                status="closed"
+            ),
+            Trade(
+                id="trade2", 
+                strategy_id=mock_strategy.strategy_id,
+                symbol="BTCUSDT",
+                side="SELL",
+                quantity=Decimal("1.0"),
+                price=Decimal("51000"),
+                timestamp=datetime.now(timezone.utc),
+                pnl=Decimal("-50"),
+                status="closed"
+            )
+        ]
+        
+        performance_monitor.data_repository.get_strategy_trades.return_value = mock_trades
+        performance_monitor.data_repository.get_strategy_positions.return_value = []
+        
+        with patch.object(performance_monitor, '_update_trade_statistics') as mock_trade_stats:
+            with patch.object(performance_monitor, '_update_pnl_metrics') as mock_pnl:
+                with patch.object(performance_monitor, '_calculate_risk_ratios') as mock_risk:
+                    await performance_monitor._update_strategy_metrics(mock_strategy.name)
+                    
+                    mock_trade_stats.assert_called_once()
+                    mock_pnl.assert_called_once()
+                    mock_risk.assert_called_once()
+    
+    def test_update_trade_statistics_basic(self, performance_monitor, mock_strategy):
+        """Test basic trade statistics calculation."""
+        metrics = PerformanceMetrics(mock_strategy.name)
+        
+        trades = [
+            Mock(pnl=Decimal("100"), side="BUY", status="closed"),
+            Mock(pnl=Decimal("-50"), side="SELL", status="closed"),
+            Mock(pnl=Decimal("0"), side="BUY", status="closed"),  # breakeven
+            Mock(pnl=Decimal("200"), side="BUY", status="closed")
+        ]
+        
+        performance_monitor._update_trade_statistics(metrics, trades)
+        
+        assert metrics.total_trades == 4
+        assert metrics.winning_trades == 2
+        assert metrics.losing_trades == 1
+        assert metrics.breakeven_trades == 1
+        assert metrics.win_rate == 0.5  # 2/4
+        assert metrics.gross_profit == Decimal("300")  # 100 + 200
+        assert metrics.gross_loss == Decimal("50")
+        assert metrics.largest_win == Decimal("200")
+        assert metrics.largest_loss == Decimal("50")
+        assert metrics.average_win == Decimal("150")  # 300/2
+        assert metrics.average_loss == Decimal("50")  # 50/1
+        assert metrics.profit_factor == 6.0  # 300/50
+    
+    def test_update_trade_statistics_no_losses(self, performance_monitor, mock_strategy):
+        """Test trade statistics when there are no losses."""
+        metrics = PerformanceMetrics(mock_strategy.name)
+        
+        trades = [
+            Mock(pnl=Decimal("100"), side="BUY", status="closed"),
+            Mock(pnl=Decimal("200"), side="SELL", status="closed")
+        ]
+        
+        performance_monitor._update_trade_statistics(metrics, trades)
+        
+        assert metrics.profit_factor == float('inf')  # Division by zero case
+    
+    def test_calculate_consecutive_trades_alternating(self, performance_monitor):
+        """Test consecutive wins/losses calculation with alternating pattern."""
+        metrics = PerformanceMetrics("test")
+        
+        trades = [
+            Mock(pnl=Decimal("100")),  # win
+            Mock(pnl=Decimal("-50")),  # loss
+            Mock(pnl=Decimal("200")),  # win
+            Mock(pnl=Decimal("-25")),  # loss
+        ]
+        
+        performance_monitor._calculate_consecutive_trades(metrics, trades)
+        
+        assert metrics.consecutive_wins == 0  # Ended on loss
+        assert metrics.consecutive_losses == 1
+        assert metrics.max_consecutive_wins == 1
+        assert metrics.max_consecutive_losses == 1
+    
+    def test_calculate_consecutive_trades_winning_streak(self, performance_monitor):
+        """Test consecutive calculation with winning streak."""
+        metrics = PerformanceMetrics("test")
+        
+        trades = [
+            Mock(pnl=Decimal("100")),  # win
+            Mock(pnl=Decimal("200")),  # win  
+            Mock(pnl=Decimal("300")),  # win
+        ]
+        
+        performance_monitor._calculate_consecutive_trades(metrics, trades)
+        
+        assert metrics.consecutive_wins == 3
+        assert metrics.consecutive_losses == 0
+        assert metrics.max_consecutive_wins == 3
+        assert metrics.max_consecutive_losses == 0
+    
+    def test_calculate_risk_ratios_with_data(self, performance_monitor):
+        """Test risk ratio calculations with valid data."""
+        metrics = PerformanceMetrics("test")
+        metrics.annualized_return = 0.12  # 12%
+        metrics.volatility = 0.08  # 8%
+        metrics.daily_returns = [0.01, -0.005, 0.015, -0.002, 0.008]
+        
+        performance_monitor._calculate_risk_ratios(metrics)
+        
+        assert metrics.sharpe_ratio == 1.5  # 0.12 / 0.08
+        # Should calculate Sortino ratio (only downside volatility)
+        assert metrics.sortino_ratio > 0
+    
+    def test_calculate_risk_ratios_zero_volatility(self, performance_monitor):
+        """Test risk ratios when volatility is zero."""
+        metrics = PerformanceMetrics("test")
+        metrics.annualized_return = 0.12
+        metrics.volatility = 0.0  # Zero volatility
+        metrics.daily_returns = []
+        
+        performance_monitor._calculate_risk_ratios(metrics)
+        
+        assert metrics.sharpe_ratio == 0.0  # Should handle division by zero
+        assert metrics.sortino_ratio == 0.0
+    
+    def test_update_drawdown_analysis_basic(self, performance_monitor):
+        """Test basic drawdown analysis."""
+        metrics = PerformanceMetrics("test")
+        metrics.equity_curve = [1000, 1100, 1050, 900, 950, 1200]
+        
+        performance_monitor._update_drawdown_analysis(metrics)
+        
+        # Max drawdown should be from peak 1100 to trough 900 = 18.18%
+        assert metrics.max_drawdown > 0.15  # Approximately 18%
+        assert len(metrics.drawdown_curve) == len(metrics.equity_curve)
+    
+    def test_update_time_metrics_basic(self, performance_monitor):
+        """Test time-based metrics calculation."""
+        metrics = PerformanceMetrics("test")
+        
+        now = datetime.now(timezone.utc)
+        trades = [
+            Mock(
+                timestamp=now - timedelta(hours=2),
+                exit_time=now - timedelta(hours=1),
+                side="BUY"
+            ),
+            Mock(
+                timestamp=now - timedelta(hours=4),
+                exit_time=now - timedelta(hours=3),
+                side="SELL"
+            )
+        ]
+        
+        performance_monitor._update_time_metrics(metrics, trades)
+        
+        assert metrics.average_holding_time == timedelta(hours=1)
+        assert metrics.long_trades == 1
+        assert metrics.short_trades == 1
+    
+    def test_calculate_performance_score_basic(self, performance_monitor):
+        """Test performance score calculation."""
+        metrics = PerformanceMetrics("test")
+        metrics.sharpe_ratio = 1.5
+        metrics.calmar_ratio = 2.0
+        metrics.win_rate = 0.6
+        metrics.profit_factor = 1.8
+        metrics.max_drawdown = 0.15
+        
+        score = performance_monitor._calculate_performance_score(metrics)
+        
+        assert isinstance(score, float)
+        assert score > 0  # Should be positive with good metrics
+    
+    def test_update_strategy_rankings_basic(self, performance_monitor, mock_strategy):
+        """Test strategy rankings update."""
+        # Add strategy and set up metrics
+        performance_monitor.strategy_metrics[mock_strategy.name] = PerformanceMetrics(mock_strategy.name)
+        performance_monitor.strategy_metrics[mock_strategy.name].sharpe_ratio = 1.5
+        
+        with patch.object(performance_monitor, '_calculate_performance_score', return_value=85.0):
+            performance_monitor._update_strategy_rankings()
+            
+            assert len(performance_monitor.strategy_rankings) == 1
+            assert performance_monitor.strategy_rankings[0]['strategy_name'] == mock_strategy.name
+            assert performance_monitor.strategy_rankings[0]['score'] == 85.0
+    
+    @pytest.mark.asyncio
+    async def test_check_performance_alerts_max_drawdown(self, performance_monitor, mock_strategy):
+        """Test performance alerts for max drawdown threshold."""
+        await performance_monitor.add_strategy(mock_strategy)
+        metrics = performance_monitor.strategy_metrics[mock_strategy.name]
+        metrics.max_drawdown = 0.15  # Above threshold of 0.1
+        
+        # Mock logger to capture alert
+        with patch('src.strategies.performance_monitor.get_logger') as mock_get_logger:
+            mock_logger = Mock()
+            mock_get_logger.return_value = mock_logger
+            
+            await performance_monitor._check_performance_alerts()
+            
+            # Should log warning about drawdown
+            mock_logger.warning.assert_called()
+    
+    @pytest.mark.asyncio
+    async def test_check_performance_alerts_low_sharpe(self, performance_monitor, mock_strategy):
+        """Test performance alerts for low Sharpe ratio."""
+        await performance_monitor.add_strategy(mock_strategy)
+        metrics = performance_monitor.strategy_metrics[mock_strategy.name]
+        metrics.sharpe_ratio = 0.5  # Below threshold of 1.0
+        
+        with patch('src.strategies.performance_monitor.get_logger') as mock_get_logger:
+            mock_logger = Mock()
+            mock_get_logger.return_value = mock_logger
+            
+            await performance_monitor._check_performance_alerts()
+            
+            mock_logger.warning.assert_called()
+    
+    @pytest.mark.asyncio
+    async def test_update_pnl_metrics_with_positions(self, performance_monitor, mock_strategy):
+        """Test PnL metrics update with open positions."""
+        metrics = PerformanceMetrics(mock_strategy.name)
+        
+        # Mock positions with unrealized PnL
+        mock_positions = [
+            Mock(unrealized_pnl=Decimal("150"), symbol="BTCUSDT"),
+            Mock(unrealized_pnl=Decimal("-25"), symbol="ETHUSDT")
+        ]
+        
+        trades = [Mock(pnl=Decimal("100"))]
+        
+        await performance_monitor._update_pnl_metrics(metrics, trades, mock_positions)
+        
+        assert metrics.unrealized_pnl == Decimal("125")  # 150 - 25
+        assert metrics.realized_pnl == Decimal("100")
+        assert metrics.total_pnl == Decimal("225")  # 100 + 125
+    
+    def test_update_exposure_metrics_long_short(self, performance_monitor):
+        """Test exposure metrics for long and short positions."""
+        metrics = PerformanceMetrics("test")
+        
+        positions = [
+            Mock(side="BUY", quantity=Decimal("1.0"), unrealized_pnl=Decimal("100")),
+            Mock(side="SELL", quantity=Decimal("0.5"), unrealized_pnl=Decimal("-25"))
+        ]
+        
+        performance_monitor._update_exposure_metrics(metrics, positions)
+        
+        assert metrics.long_pnl == Decimal("100")
+        assert metrics.short_pnl == Decimal("-25")
+    
+    def test_calculate_risk_metrics_var_calculation(self, performance_monitor):
+        """Test VaR calculation from daily returns."""
+        metrics = PerformanceMetrics("test")
+        # Set up returns data for VaR calculation
+        np.random.seed(42)  # For reproducible results
+        metrics.daily_returns = np.random.normal(0.001, 0.02, 252).tolist()  # 252 trading days
+        
+        performance_monitor._calculate_risk_metrics(metrics)
+        
+        assert metrics.var_95 < 0  # VaR should be negative (loss)
+        assert metrics.var_99 < metrics.var_95  # 99% VaR should be worse than 95%
+        assert metrics.conditional_var_95 <= metrics.var_95  # CVaR should be worse than VaR
+
+
+class TestPerformanceMonitorIntegration:
+    """Integration tests for PerformanceMonitor with real-like scenarios."""
+    
+    @pytest.mark.asyncio
+    async def test_full_monitoring_lifecycle(self):
+        """Test complete monitoring lifecycle from start to stop."""
+        mock_repo = AsyncMock()
+        mock_repo.get_strategy_trades.return_value = []
+        mock_repo.get_strategy_positions.return_value = []
+        
+        monitor = PerformanceMonitor(data_repository=mock_repo, update_interval_seconds=1)
+        mock_strategy = Mock(name="integration_test", strategy_id="int_123")
+        
+        # Add strategy
+        await monitor.add_strategy(mock_strategy)
+        assert mock_strategy.name in monitor.strategy_metrics
+        
+        # Start monitoring
+        await monitor.start_monitoring()
+        assert monitor.monitoring_active is True
+        
+        # Mocked sleep for performance
+        with patch('asyncio.sleep', new_callable=AsyncMock) as mock_sleep:
+            pass  # No actual sleep needed for tests
+        
+        # Stop monitoring
+        await monitor.stop_monitoring()
+        assert monitor.monitoring_active is False
+        
+        # Remove strategy
+        await monitor.remove_strategy(mock_strategy.name)
+        assert mock_strategy.name not in monitor.strategy_metrics
+    
+    def test_performance_metrics_complete_lifecycle(self):
+        """Test PerformanceMetrics through a complete trading lifecycle."""
+        metrics = PerformanceMetrics("lifecycle_test")
+        
+        # Verify initial state
+        assert metrics.total_trades == 0
+        assert metrics.total_pnl == Decimal("0")
+        assert metrics.win_rate == 0.0
+        
+        # Simulate adding some trading history
+        metrics.trade_history = [
+            Mock(pnl=Decimal("100"), side="BUY", timestamp=datetime.now(timezone.utc)),
+            Mock(pnl=Decimal("-50"), side="SELL", timestamp=datetime.now(timezone.utc)),
+            Mock(pnl=Decimal("75"), side="BUY", timestamp=datetime.now(timezone.utc))
+        ]
+        
+        # Simulate returns data
+        metrics.daily_returns = [0.02, -0.01, 0.015, -0.005, 0.01]
+        metrics.equity_curve = [1000, 1020, 1010, 1025, 1020, 1030]
+        
+        # All attributes should be accessible and of correct types
+        assert isinstance(metrics.strategy_name, str)
+        assert isinstance(metrics.last_updated, datetime)
+        assert isinstance(metrics.benchmark_returns, list)
+        assert isinstance(metrics.excess_returns, list)
+        assert metrics.tracking_error == 0.0

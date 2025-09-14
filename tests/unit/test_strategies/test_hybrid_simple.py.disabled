@@ -1,0 +1,506 @@
+"""
+Simple tests for hybrid strategies to boost coverage.
+"""
+
+from decimal import Decimal
+from datetime import datetime, timezone
+from unittest.mock import Mock, AsyncMock, patch
+import pytest
+
+from src.core.types import MarketData, Signal, SignalDirection
+from src.strategies.hybrid.ensemble import EnsembleStrategy
+from src.strategies.hybrid.fallback import FallbackStrategy
+from src.strategies.hybrid.rule_based_ai import RuleBasedAIStrategy
+
+
+class TestEnsembleStrategy:
+    """Test ensemble strategy functionality."""
+    
+    def test_ensemble_strategy_creation(self):
+        """Test basic ensemble strategy creation."""
+        sub_strategies = [Mock(), Mock(), Mock()]
+        
+        strategy = EnsembleStrategy(
+            name="EnsembleTest",
+            config={"voting_method": "majority"},
+            sub_strategies=sub_strategies
+        )
+        
+        assert strategy.name == "EnsembleTest"
+        assert len(strategy.sub_strategies) == 3
+        assert strategy.config["voting_method"] == "majority"
+    
+    @pytest.mark.asyncio
+    async def test_majority_voting(self):
+        """Test majority voting mechanism."""
+        # Create mock sub-strategies
+        strategy1 = Mock()
+        strategy2 = Mock()
+        strategy3 = Mock()
+        
+        strategy1.generate_signals = AsyncMock(return_value=[
+            Signal(SignalDirection.BUY, Decimal("0.8"), datetime.now(timezone.utc), "BTC/USDT", "Strategy1")
+        ])
+        strategy2.generate_signals = AsyncMock(return_value=[
+            Signal(SignalDirection.BUY, Decimal("0.7"), datetime.now(timezone.utc), "BTC/USDT", "Strategy2")
+        ])
+        strategy3.generate_signals = AsyncMock(return_value=[
+            Signal(SignalDirection.SELL, Decimal("0.6"), datetime.now(timezone.utc), "BTC/USDT", "Strategy3")
+        ])
+        
+        ensemble = EnsembleStrategy(
+            name="EnsembleTest",
+            config={"voting_method": "majority"},
+            sub_strategies=[strategy1, strategy2, strategy3]
+        )
+        
+        market_data = MarketData(
+            symbol="BTC/USDT",
+            price=Decimal("50000"),
+            volume=Decimal("100"),
+            timestamp=datetime.now(timezone.utc)
+        )
+        
+        # Initialize and generate signals
+        await ensemble.initialize({})
+        signals = await ensemble.generate_signals(market_data)
+        
+        # Should return BUY signal (2 out of 3 strategies voted BUY)
+        assert len(signals) > 0
+        assert signals[0].direction == SignalDirection.BUY
+    
+    @pytest.mark.asyncio
+    async def test_weighted_voting(self):
+        """Test weighted voting mechanism."""
+        strategy1 = Mock()
+        strategy2 = Mock()
+        
+        strategy1.generate_signals = AsyncMock(return_value=[
+            Signal(SignalDirection.BUY, Decimal("0.8"), datetime.now(timezone.utc), "BTC/USDT", "Strategy1")
+        ])
+        strategy2.generate_signals = AsyncMock(return_value=[
+            Signal(SignalDirection.SELL, Decimal("0.9"), datetime.now(timezone.utc), "BTC/USDT", "Strategy2")
+        ])
+        
+        ensemble = EnsembleStrategy(
+            name="EnsembleTest",
+            config={"voting_method": "weighted"},
+            sub_strategies=[strategy1, strategy2],
+            weights=[Decimal("0.3"), Decimal("0.7")]  # Strategy2 has more weight
+        )
+        
+        market_data = MarketData(
+            symbol="BTC/USDT",
+            price=Decimal("50000"),
+            volume=Decimal("100"),
+            timestamp=datetime.now(timezone.utc)
+        )
+        
+        await ensemble.initialize({})
+        signals = await ensemble.generate_signals(market_data)
+        
+        # Should favor Strategy2's SELL signal due to higher weight
+        assert len(signals) > 0
+        assert signals[0].direction == SignalDirection.SELL
+    
+    def test_confidence_weighted_voting(self):
+        """Test confidence-weighted voting."""
+        ensemble = EnsembleStrategy(
+            name="EnsembleTest",
+            config={"voting_method": "confidence_weighted"}
+        )
+        
+        signals = [
+            Signal(SignalDirection.BUY, Decimal("0.9"), datetime.now(timezone.utc), "BTC/USDT", "Strategy1"),
+            Signal(SignalDirection.BUY, Decimal("0.6"), datetime.now(timezone.utc), "BTC/USDT", "Strategy2"),
+            Signal(SignalDirection.SELL, Decimal("0.7"), datetime.now(timezone.utc), "BTC/USDT", "Strategy3"),
+        ]
+        
+        final_signal = ensemble.aggregate_signals_by_confidence(signals)
+        
+        # BUY should win: (0.9 + 0.6) = 1.5 vs SELL: 0.7
+        assert final_signal.direction == SignalDirection.BUY
+        assert final_signal.confidence > Decimal("0.7")
+    
+    def test_correlation_adjustment(self):
+        """Test correlation-based signal adjustment."""
+        ensemble = EnsembleStrategy(
+            name="EnsembleTest",
+            config={"adjust_for_correlation": True}
+        )
+        
+        # Mock correlation matrix (high correlation between strategy1 and strategy2)
+        correlation_matrix = {
+            ("strategy1", "strategy2"): Decimal("0.8"),
+            ("strategy1", "strategy3"): Decimal("0.2"),
+            ("strategy2", "strategy3"): Decimal("0.1"),
+        }
+        
+        signals = [
+            Signal(SignalDirection.BUY, Decimal("0.8"), datetime.now(timezone.utc), "BTC/USDT", "strategy1"),
+            Signal(SignalDirection.BUY, Decimal("0.7"), datetime.now(timezone.utc), "BTC/USDT", "strategy2"),
+            Signal(SignalDirection.SELL, Decimal("0.6"), datetime.now(timezone.utc), "BTC/USDT", "strategy3"),
+        ]
+        
+        adjusted_signals = ensemble.adjust_for_correlation(signals, correlation_matrix)
+        
+        # High correlation between strategy1 and strategy2 should reduce their combined weight
+        assert len(adjusted_signals) == 3
+        for signal in adjusted_signals:
+            if signal.strategy_name in ["strategy1", "strategy2"]:
+                assert signal.confidence < Decimal("0.8")  # Should be reduced
+
+
+class TestFallbackStrategy:
+    """Test fallback strategy functionality."""
+    
+    def test_fallback_strategy_creation(self):
+        """Test basic fallback strategy creation."""
+        primary = Mock()
+        fallback = Mock()
+        
+        strategy = FallbackStrategy(
+            name="FallbackTest",
+            config={"fallback_threshold": Decimal("0.5")},
+            primary_strategy=primary,
+            fallback_strategy=fallback
+        )
+        
+        assert strategy.name == "FallbackTest"
+        assert strategy.primary_strategy == primary
+        assert strategy.fallback_strategy == fallback
+    
+    @pytest.mark.asyncio
+    async def test_primary_strategy_success(self):
+        """Test normal operation with primary strategy."""
+        primary = Mock()
+        fallback = Mock()
+        
+        primary.generate_signals = AsyncMock(return_value=[
+            Signal(SignalDirection.BUY, Decimal("0.8"), datetime.now(timezone.utc), "BTC/USDT", "Primary")
+        ])
+        
+        strategy = FallbackStrategy(
+            name="FallbackTest",
+            config={},
+            primary_strategy=primary,
+            fallback_strategy=fallback
+        )
+        
+        market_data = MarketData(
+            symbol="BTC/USDT",
+            price=Decimal("50000"),
+            volume=Decimal("100"),
+            timestamp=datetime.now(timezone.utc)
+        )
+        
+        await strategy.initialize({})
+        signals = await strategy.generate_signals(market_data)
+        
+        # Should use primary strategy
+        assert len(signals) > 0
+        assert signals[0].strategy_name == "Primary"
+        primary.generate_signals.assert_called_once()
+    
+    @pytest.mark.asyncio
+    async def test_fallback_on_exception(self):
+        """Test fallback when primary strategy fails."""
+        primary = Mock()
+        fallback = Mock()
+        
+        # Primary strategy throws exception
+        primary.generate_signals = AsyncMock(side_effect=Exception("Primary failed"))
+        
+        # Fallback strategy works
+        fallback.generate_signals = AsyncMock(return_value=[
+            Signal(SignalDirection.SELL, Decimal("0.6"), datetime.now(timezone.utc), "BTC/USDT", "Fallback")
+        ])
+        
+        strategy = FallbackStrategy(
+            name="FallbackTest",
+            config={},
+            primary_strategy=primary,
+            fallback_strategy=fallback
+        )
+        
+        market_data = MarketData(
+            symbol="BTC/USDT",
+            price=Decimal("50000"),
+            volume=Decimal("100"),
+            timestamp=datetime.now(timezone.utc)
+        )
+        
+        await strategy.initialize({})
+        signals = await strategy.generate_signals(market_data)
+        
+        # Should use fallback strategy
+        assert len(signals) > 0
+        assert signals[0].strategy_name == "Fallback"
+        fallback.generate_signals.assert_called_once()
+    
+    @pytest.mark.asyncio
+    async def test_fallback_on_low_confidence(self):
+        """Test fallback when primary strategy has low confidence."""
+        primary = Mock()
+        fallback = Mock()
+        
+        # Primary strategy returns low confidence signal
+        primary.generate_signals = AsyncMock(return_value=[
+            Signal(SignalDirection.BUY, Decimal("0.3"), datetime.now(timezone.utc), "BTC/USDT", "Primary")
+        ])
+        
+        # Fallback strategy returns higher confidence
+        fallback.generate_signals = AsyncMock(return_value=[
+            Signal(SignalDirection.SELL, Decimal("0.7"), datetime.now(timezone.utc), "BTC/USDT", "Fallback")
+        ])
+        
+        strategy = FallbackStrategy(
+            name="FallbackTest",
+            config={"fallback_threshold": Decimal("0.5")},
+            primary_strategy=primary,
+            fallback_strategy=fallback
+        )
+        
+        market_data = MarketData(
+            symbol="BTC/USDT",
+            price=Decimal("50000"),
+            volume=Decimal("100"),
+            timestamp=datetime.now(timezone.utc)
+        )
+        
+        await strategy.initialize({})
+        signals = await strategy.generate_signals(market_data)
+        
+        # Should use fallback due to low confidence
+        assert len(signals) > 0
+        assert signals[0].strategy_name == "Fallback"
+    
+    def test_health_monitoring(self):
+        """Test strategy health monitoring."""
+        primary = Mock()
+        fallback = Mock()
+        
+        strategy = FallbackStrategy(
+            name="FallbackTest",
+            config={},
+            primary_strategy=primary,
+            fallback_strategy=fallback
+        )
+        
+        # Initially both strategies should be healthy
+        assert strategy.is_strategy_healthy(primary) == True
+        assert strategy.is_strategy_healthy(fallback) == True
+        
+        # Simulate primary strategy failure
+        strategy.record_strategy_failure(primary)
+        strategy.record_strategy_failure(primary)
+        strategy.record_strategy_failure(primary)
+        
+        # After multiple failures, strategy should be considered unhealthy
+        assert strategy.is_strategy_healthy(primary) == False
+
+
+class TestRuleBasedAIStrategy:
+    """Test rule-based AI strategy functionality."""
+    
+    def test_rule_based_ai_creation(self):
+        """Test basic rule-based AI strategy creation."""
+        strategy = RuleBasedAIStrategy(
+            name="RuleAITest",
+            config={
+                "ml_model": "random_forest",
+                "rule_weight": Decimal("0.6"),
+                "ai_weight": Decimal("0.4")
+            }
+        )
+        
+        assert strategy.name == "RuleAITest"
+        assert strategy.config["ml_model"] == "random_forest"
+        assert strategy.config["rule_weight"] == Decimal("0.6")
+    
+    @pytest.mark.asyncio
+    async def test_rule_evaluation(self):
+        """Test rule-based signal generation."""
+        strategy = RuleBasedAIStrategy(
+            name="RuleAITest",
+            config={"rule_weight": Decimal("1.0")}  # Only rules, no AI
+        )
+        
+        market_data = MarketData(
+            symbol="BTC/USDT",
+            price=Decimal("50000"),
+            volume=Decimal("100"),
+            timestamp=datetime.now(timezone.utc)
+        )
+        
+        await strategy.initialize({})
+        
+        # Mock rule evaluation
+        with patch.object(strategy, 'evaluate_technical_rules') as mock_rules:
+            mock_rules.return_value = [
+                Signal(SignalDirection.BUY, Decimal("0.8"), datetime.now(timezone.utc), "BTC/USDT", "TechnicalRule")
+            ]
+            
+            signals = await strategy.generate_signals(market_data)
+            
+            assert len(signals) > 0
+            assert signals[0].direction == SignalDirection.BUY
+            mock_rules.assert_called_once()
+    
+    @pytest.mark.asyncio
+    async def test_ai_prediction(self):
+        """Test AI-based signal generation."""
+        strategy = RuleBasedAIStrategy(
+            name="RuleAITest",
+            config={"ai_weight": Decimal("1.0")}  # Only AI, no rules
+        )
+        
+        market_data = MarketData(
+            symbol="BTC/USDT",
+            price=Decimal("50000"),
+            volume=Decimal("100"),
+            timestamp=datetime.now(timezone.utc)
+        )
+        
+        await strategy.initialize({})
+        
+        # Mock AI prediction
+        with patch.object(strategy, 'get_ai_prediction') as mock_ai:
+            mock_ai.return_value = [
+                Signal(SignalDirection.SELL, Decimal("0.7"), datetime.now(timezone.utc), "BTC/USDT", "AI")
+            ]
+            
+            signals = await strategy.generate_signals(market_data)
+            
+            assert len(signals) > 0
+            assert signals[0].direction == SignalDirection.SELL
+            mock_ai.assert_called_once()
+    
+    @pytest.mark.asyncio
+    async def test_combined_signals(self):
+        """Test combining rule-based and AI signals."""
+        strategy = RuleBasedAIStrategy(
+            name="RuleAITest",
+            config={
+                "rule_weight": Decimal("0.6"),
+                "ai_weight": Decimal("0.4")
+            }
+        )
+        
+        market_data = MarketData(
+            symbol="BTC/USDT",
+            price=Decimal("50000"),
+            volume=Decimal("100"),
+            timestamp=datetime.now(timezone.utc)
+        )
+        
+        await strategy.initialize({})
+        
+        # Mock both rule and AI signals
+        rule_signal = Signal(SignalDirection.BUY, Decimal("0.8"), datetime.now(timezone.utc), "BTC/USDT", "Rule")
+        ai_signal = Signal(SignalDirection.BUY, Decimal("0.6"), datetime.now(timezone.utc), "BTC/USDT", "AI")
+        
+        with patch.object(strategy, 'evaluate_technical_rules') as mock_rules, \
+             patch.object(strategy, 'get_ai_prediction') as mock_ai:
+            
+            mock_rules.return_value = [rule_signal]
+            mock_ai.return_value = [ai_signal]
+            
+            signals = await strategy.generate_signals(market_data)
+            
+            # Should combine both signals
+            assert len(signals) > 0
+            combined_signal = signals[0]
+            
+            # Combined confidence should be weighted average
+            expected_confidence = (rule_signal.confidence * Decimal("0.6")) + (ai_signal.confidence * Decimal("0.4"))
+            assert abs(combined_signal.confidence - expected_confidence) < Decimal("0.01")
+    
+    def test_technical_rule_evaluation(self):
+        """Test technical rule evaluation."""
+        strategy = RuleBasedAIStrategy(
+            name="RuleAITest",
+            config={}
+        )
+        
+        market_data = MarketData(
+            symbol="BTC/USDT",
+            price=Decimal("50000"),
+            volume=Decimal("100"),
+            timestamp=datetime.now(timezone.utc)
+        )
+        
+        # Add historical data for technical analysis
+        strategy.price_history = [
+            Decimal("49000"), Decimal("49500"), Decimal("50000"),
+            Decimal("49800"), Decimal("50200")
+        ]
+        
+        # Evaluate moving average rule
+        ma_signal = strategy.evaluate_moving_average_rule(market_data)
+        assert ma_signal is not None
+        assert isinstance(ma_signal.confidence, Decimal)
+        
+        # Evaluate RSI rule
+        rsi_signal = strategy.evaluate_rsi_rule(market_data)
+        assert rsi_signal is not None
+        
+        # Evaluate MACD rule
+        macd_signal = strategy.evaluate_macd_rule(market_data)
+        assert macd_signal is not None
+    
+    def test_feature_engineering(self):
+        """Test feature engineering for ML model."""
+        strategy = RuleBasedAIStrategy(
+            name="RuleAITest",
+            config={}
+        )
+        
+        market_data = MarketData(
+            symbol="BTC/USDT",
+            price=Decimal("50000"),
+            volume=Decimal("100"),
+            timestamp=datetime.now(timezone.utc)
+        )
+        
+        # Add historical data
+        strategy.price_history = [Decimal(str(49000 + i * 100)) for i in range(20)]
+        strategy.volume_history = [Decimal(str(90 + i * 2)) for i in range(20)]
+        
+        features = strategy.extract_features(market_data)
+        
+        assert "sma_10" in features
+        assert "sma_20" in features
+        assert "rsi" in features
+        assert "volume_ratio" in features
+        assert "price_change" in features
+        
+        # Features should be numeric
+        for key, value in features.items():
+            assert isinstance(value, (int, float, Decimal))
+    
+    def test_model_prediction(self):
+        """Test ML model prediction."""
+        strategy = RuleBasedAIStrategy(
+            name="RuleAITest",
+            config={"ml_model": "random_forest"}
+        )
+        
+        # Mock model
+        mock_model = Mock()
+        mock_model.predict.return_value = [1]  # Buy prediction
+        mock_model.predict_proba.return_value = [[0.2, 0.8]]  # 80% confidence for buy
+        
+        strategy.model = mock_model
+        
+        features = {
+            "sma_10": 50000,
+            "sma_20": 49500,
+            "rsi": 65,
+            "volume_ratio": 1.2
+        }
+        
+        prediction = strategy.predict_with_model(features)
+        
+        assert prediction["direction"] == SignalDirection.BUY
+        assert prediction["confidence"] == Decimal("0.8")

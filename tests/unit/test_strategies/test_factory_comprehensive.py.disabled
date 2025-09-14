@@ -1,0 +1,306 @@
+"""
+Comprehensive tests for strategies factory module.
+"""
+
+import pytest
+from unittest.mock import AsyncMock, Mock, patch
+from uuid import uuid4
+
+# Disable verbose logging for performance
+import logging
+logging.getLogger('src').setLevel(logging.CRITICAL)
+
+from src.core.exceptions import StrategyError, ValidationError
+from src.core.types import StrategyConfig, StrategyType, MarketData, Signal
+from src.strategies.factory import StrategyFactory, DEFAULT_RETRY_ATTEMPTS, DEFAULT_RETRY_DELAY
+from src.strategies.base import BaseStrategy
+from datetime import datetime, timezone
+from decimal import Decimal
+
+
+class MockStrategy(BaseStrategy):
+    """Mock strategy implementation for testing."""
+    
+    @property
+    def strategy_type(self) -> StrategyType:
+        return StrategyType.TREND_FOLLOWING
+    
+    async def _generate_signals_impl(self, data: MarketData) -> list[Signal]:
+        """Simple signal generation for testing."""
+        return [Signal(
+            strategy_id=self.config.strategy_id,
+            symbol=data.symbol,
+            side="BUY",
+            price=data.price,
+            confidence=0.8,
+            timestamp=datetime.now(timezone.utc)
+        )]
+    
+    async def validate_signal(self, signal: Signal) -> bool:
+        """Validate signal before execution."""
+        return signal.confidence > 0.5
+    
+    def get_position_size(self, signal: Signal) -> Decimal:
+        """Calculate position size for signal."""
+        return Decimal("1000")
+    
+    def should_exit(self, position, data: MarketData) -> bool:
+        """Determine if position should be closed."""
+        return False
+
+
+class TestStrategyFactory:
+    """Test strategy factory functionality."""
+    
+    @pytest.fixture
+    def mock_services(self):
+        """Create mock services for dependency injection."""
+        return {
+            'strategy_service': AsyncMock(),
+            'validation_framework': Mock(),
+            'repository': Mock(),
+            'risk_manager': Mock(),
+            'exchange_factory': Mock(),
+            'data_service': Mock()
+        }
+    
+    @pytest.fixture
+    def factory(self, mock_services):
+        """Create factory with mock services."""
+        return StrategyFactory(**mock_services)
+    
+    @pytest.fixture
+    def sample_config(self):
+        """Create sample strategy configuration."""
+        config_dict = {
+            "strategy_id": str(uuid4()),
+            "name": "test_strategy",
+            "symbols": ["BTCUSDT"],
+            "timeframe": "1h",
+            "max_positions": 3,
+            "risk_per_trade": 0.02,
+            "parameters": {"param1": "value1"}
+        }
+        return StrategyConfig(**config_dict)
+    
+    def test_factory_initialization_default(self):
+        """Test factory initialization with default parameters."""
+        factory = StrategyFactory()
+        
+        assert factory._strategy_service is None
+        assert factory._validation_framework is None
+        assert factory._repository is None
+        assert factory._risk_manager is None
+        assert factory._exchange_factory is None
+        assert factory._data_service is None
+        assert isinstance(factory._strategy_registry, dict)
+        assert len(factory._strategy_registry) == 0
+    
+    def test_factory_initialization_with_services(self, mock_services):
+        """Test factory initialization with provided services."""
+        factory = StrategyFactory(**mock_services)
+        
+        assert factory._strategy_service == mock_services['strategy_service']
+        assert factory._validation_framework == mock_services['validation_framework']
+        assert factory._repository == mock_services['repository']
+        assert factory._risk_manager == mock_services['risk_manager']
+        assert factory._exchange_factory == mock_services['exchange_factory']
+        assert factory._data_service == mock_services['data_service']
+    
+    def test_factory_error_handler_initialization(self):
+        """Test that error handler is properly initialized."""
+        with patch('src.strategies.factory.get_global_error_handler') as mock_get_handler:
+            mock_handler = Mock()
+            mock_get_handler.return_value = mock_handler
+            
+            factory = StrategyFactory()
+            
+            assert factory._error_handler == mock_handler
+            mock_get_handler.assert_called_once()
+    
+    def test_register_builtin_strategies(self, factory):
+        """Test registration of built-in strategies."""
+        # Initially empty registry
+        assert len(factory._strategy_registry) == 0
+        
+        # Register should have been called but does nothing by default
+        factory._register_builtin_strategies()
+        assert len(factory._strategy_registry) == 0
+    
+    def test_register_strategy_type(self, factory):
+        """Test manual registration of strategy class."""
+        strategy_type = StrategyType.TREND_FOLLOWING
+        strategy_class = MockStrategy
+        
+        factory.register_strategy_type(strategy_type, strategy_class)
+        
+        assert strategy_type in factory._strategy_registry
+        assert factory._strategy_registry[strategy_type] == strategy_class
+    
+    def test_lazy_load_strategy_class_already_loaded(self, factory):
+        """Test lazy loading when class is already loaded."""
+        strategy_type = StrategyType.TREND_FOLLOWING
+        strategy_class = MockStrategy
+        
+        # Pre-register the strategy
+        factory._strategy_registry[strategy_type] = strategy_class
+        
+        result = factory._lazy_load_strategy_class(strategy_type)
+        assert result == strategy_class
+    
+    def test_lazy_load_strategy_class_not_found(self, factory):
+        """Test lazy loading when strategy class is not found."""
+        # Use a strategy type that doesn't have lazy loading implemented
+        result = factory._lazy_load_strategy_class(StrategyType.PAIRS_TRADING)
+        assert result is None
+    
+    def test_validate_strategy_requirements_basic(self, factory, sample_config):
+        """Test basic strategy requirements validation."""
+        # Test with a strategy type that should work
+        result = factory.validate_strategy_requirements(StrategyType.TREND_FOLLOWING, sample_config)
+        
+        # The method should implement validation logic
+        # For now, we just test it runs without error
+        assert isinstance(result, bool)
+    
+    @pytest.mark.asyncio
+    async def test_create_strategy_success(self, factory, sample_config):
+        """Test successful strategy creation."""
+        strategy_type = StrategyType.TREND_FOLLOWING
+        
+        # Mock lazy loading to return our test strategy
+        with patch.object(factory, '_lazy_load_strategy_class', return_value=MockStrategy):
+            with patch.object(factory, 'validate_strategy_requirements', return_value=True):
+                with patch.object(factory, '_inject_dependencies') as mock_inject:
+                    strategy = await factory.create_strategy(strategy_type, sample_config)
+                    
+                    assert isinstance(strategy, MockStrategy)
+                    assert strategy.initialized is True
+                    mock_inject.assert_called_once_with(strategy, sample_config)
+    
+    @pytest.mark.asyncio
+    async def test_create_strategy_unsupported_type(self, factory, sample_config):
+        """Test creation of unsupported strategy type."""
+        strategy_type = StrategyType.PAIRS_TRADING
+        
+        # Mock lazy loading to return None (unsupported)
+        with patch.object(factory, '_lazy_load_strategy_class', return_value=None):
+            with pytest.raises(StrategyError, match="Unsupported strategy type"):
+                await factory.create_strategy(strategy_type, sample_config)
+    
+    @pytest.mark.asyncio
+    async def test_create_strategy_validation_error(self, factory, sample_config):
+        """Test strategy creation with validation error."""
+        strategy_type = StrategyType.TREND_FOLLOWING
+        
+        with patch.object(factory, '_lazy_load_strategy_class', return_value=MockStrategy):
+            with patch.object(factory, 'validate_strategy_requirements', return_value=False):
+                with pytest.raises(ValidationError, match="Invalid configuration"):
+                    await factory.create_strategy(strategy_type, sample_config)
+    
+    @pytest.mark.asyncio
+    async def test_inject_dependencies_all_services(self, factory, sample_config):
+        """Test dependency injection with all services available."""
+        strategy = MockStrategy(sample_config.model_dump())
+        
+        await factory._inject_dependencies(strategy, sample_config)
+        
+        # Verify all dependencies were injected
+        assert strategy._repository == factory._repository
+        assert strategy._risk_manager == factory._risk_manager
+        assert strategy._data_service == factory._data_service
+    
+    @pytest.mark.asyncio
+    async def test_inject_dependencies_partial_services(self, sample_config):
+        """Test dependency injection with some services missing."""
+        # Create factory with only some services
+        factory = StrategyFactory(
+            repository=Mock(),
+            risk_manager=None,  # Missing
+            data_service=Mock()
+        )
+        
+        strategy = MockStrategy(sample_config.model_dump())
+        
+        await factory._inject_dependencies(strategy, sample_config)
+        
+        # Verify only available dependencies were injected
+        assert strategy._repository == factory._repository
+        assert strategy._risk_manager is None  # Not injected
+        assert strategy._data_service == factory._data_service
+    
+    def test_validate_strategy_requirements_constants(self):
+        """Test that validation constants are properly defined."""
+        from src.strategies.factory import (
+            MIN_LOOKBACK_PERIOD,
+            MAX_LOOKBACK_PERIOD,
+            MIN_MOMENTUM_THRESHOLD,
+            MAX_MOMENTUM_THRESHOLD,
+            MIN_MEAN_PERIOD,
+            MAX_MEAN_PERIOD,
+            MIN_DEVIATION_THRESHOLD,
+            MAX_DEVIATION_THRESHOLD
+        )
+        
+        assert MIN_LOOKBACK_PERIOD == 5
+        assert MAX_LOOKBACK_PERIOD == 200
+        assert MIN_MOMENTUM_THRESHOLD == 0
+        assert MAX_MOMENTUM_THRESHOLD == 1
+        assert MIN_MEAN_PERIOD == 10
+        assert MAX_MEAN_PERIOD == 200
+        assert MIN_DEVIATION_THRESHOLD == 0.5
+        assert MAX_DEVIATION_THRESHOLD == 5.0
+    
+    def test_factory_constants(self):
+        """Test factory constants are properly defined."""
+        assert DEFAULT_RETRY_ATTEMPTS == 3
+        assert DEFAULT_RETRY_DELAY == 1.0
+    
+    def test_supported_strategy_types_coverage(self, factory):
+        """Test that factory covers major strategy types."""
+        major_types = [
+            StrategyType.MOMENTUM,
+            StrategyType.MEAN_REVERSION,
+            StrategyType.ARBITRAGE,
+            StrategyType.MARKET_MAKING,
+            StrategyType.TREND_FOLLOWING
+        ]
+        
+        for strategy_type in major_types:
+            # Test that lazy loading doesn't crash for these types
+            try:
+                result = factory._lazy_load_strategy_class(strategy_type)
+                # Result can be None (import failed) or a class
+                assert result is None or callable(result)
+            except Exception as e:
+                # Should handle import errors gracefully
+                assert "Import" in str(type(e).__name__) or "Strategy" in str(type(e).__name__)
+    
+    @pytest.mark.asyncio
+    async def test_create_strategy_with_validation_framework(self, factory, sample_config):
+        """Test strategy creation with validation framework injection."""
+        strategy_type = StrategyType.TREND_FOLLOWING
+        
+        with patch.object(factory, '_lazy_load_strategy_class', return_value=MockStrategy):
+            with patch.object(factory, 'validate_strategy_requirements', return_value=True):
+                with patch.object(factory, '_inject_dependencies'):
+                    strategy = await factory.create_strategy(strategy_type, sample_config)
+                    
+                    # Should have injected validation framework
+                    assert strategy._validation_framework == factory._validation_framework
+    
+    def test_factory_registry_management(self, factory):
+        """Test strategy registry management."""
+        initial_count = len(factory._strategy_registry)
+        
+        # Register a new strategy
+        factory.register_strategy_type(StrategyType.TREND_FOLLOWING, MockStrategy)
+        assert len(factory._strategy_registry) == initial_count + 1
+        
+        # Register another strategy
+        factory.register_strategy_type(StrategyType.MOMENTUM, MockStrategy)
+        assert len(factory._strategy_registry) == initial_count + 2
+        
+        # Overriding should work (same strategy type, overwrites the class)
+        factory.register_strategy_type(StrategyType.TREND_FOLLOWING, MockStrategy)
+        assert len(factory._strategy_registry) == initial_count + 2

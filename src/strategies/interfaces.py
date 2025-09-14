@@ -771,4 +771,103 @@ class StrategyDataRepositoryInterface(Protocol):
         ...
 
 
+class StrategyServiceInterface(Protocol):
+    """Interface for strategy service business logic operations."""
+
+    async def register_strategy(
+        self, strategy_id: str, strategy_instance: Any, config: StrategyConfig
+    ) -> None:
+        """Register a strategy with the service."""
+        ...
+
+    async def start_strategy(self, strategy_id: str) -> None:
+        """Start a registered strategy."""
+        ...
+
+    async def stop_strategy(self, strategy_id: str) -> None:
+        """Stop a running strategy."""
+        ...
+
+    async def process_market_data(self, market_data: MarketData) -> dict[str, list[Signal]]:
+        """Process market data through all active strategies."""
+        ...
+
+    async def validate_signal(self, strategy_id: str, signal: Signal) -> bool:
+        """Validate a trading signal."""
+        ...
+
+    async def get_strategy_performance(self, strategy_id: str) -> dict[str, Any]:
+        """Get comprehensive strategy performance data."""
+        ...
+
+    async def get_all_strategies(self) -> dict[str, dict[str, Any]]:
+        """Get information about all registered strategies."""
+        ...
+
+    async def cleanup_strategy(self, strategy_id: str) -> None:
+        """Clean up and remove a strategy."""
+        ...
+
+
+# Optimization and Genetic Algorithm Interfaces
+
+class OptimizationResult:
+    """Generic optimization result that doesn't depend on backtesting module."""
+
+    def __init__(
+        self,
+        total_return: float,
+        sharpe_ratio: float,
+        max_drawdown: float,
+        win_rate: float,
+        num_trades: int = 0,
+        **kwargs
+    ):
+        self.total_return = total_return
+        self.sharpe_ratio = sharpe_ratio
+        self.max_drawdown = max_drawdown
+        self.win_rate = win_rate
+        self.num_trades = num_trades
+        self.additional_metrics = kwargs
+
+
+class OptimizationConfig:
+    """Generic optimization configuration that doesn't depend on backtesting module."""
+
+    def __init__(
+        self,
+        symbols: list[str],
+        start_date: datetime,
+        end_date: datetime,
+        initial_capital: float = 10000.0,
+        timeframe: str = "1h",
+        **kwargs
+    ):
+        self.symbols = symbols
+        self.start_date = start_date
+        self.end_date = end_date
+        self.initial_capital = initial_capital
+        self.timeframe = timeframe
+        self.additional_config = kwargs
+
+
+class OptimizationEngineInterface(Protocol):
+    """Interface for optimization engines that genetic algorithms can use."""
+
+    async def run_optimization(
+        self, strategy: Any, config: OptimizationConfig
+    ) -> OptimizationResult:
+        """
+        Run optimization for a strategy.
+        
+        Args:
+            strategy: Strategy instance to optimize
+            config: Optimization configuration
+            
+        Returns:
+            Optimization results
+        """
+        ...
+
+
 # Import typing for better type hints

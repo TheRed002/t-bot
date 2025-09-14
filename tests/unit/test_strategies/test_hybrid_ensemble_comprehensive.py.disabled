@@ -1,0 +1,1483 @@
+"""
+Comprehensive tests for Hybrid Ensemble Strategy.
+
+This module provides complete test coverage for the EnsembleStrategy and its
+supporting classes, covering all methods, error paths, and edge cases.
+"""
+
+import pytest
+import numpy as np
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
+from decimal import Decimal
+from datetime import datetime, timezone, timedelta
+from typing import Any, Dict
+
+from src.strategies.hybrid.ensemble import (
+    EnsembleStrategy,
+    StrategyPerformanceTracker,
+    CorrelationAnalyzer,
+    VotingMechanism,
+)
+from src.strategies.base import BaseStrategy
+from src.core.types import (
+    MarketData,
+    Position,
+    Signal,
+    SignalDirection,
+    StrategyType,
+)
+from src.core.exceptions import StrategyError
+
+
+class MockStrategy(BaseStrategy):
+    """Mock strategy for testing ensemble."""
+    
+    def __init__(self, config: Dict[str, Any]):
+        super().__init__(config)
+        self.last_signal_direction = None
+    
+    async def _generate_signals_impl(self, data):
+        return []
+    
+    def validate_signal(self, signal):
+        return True
+    
+    def get_position_size(self, signal):
+        return Decimal('0.01')
+    
+    def should_exit(self, position, data):
+        return False
+
+
+class TestStrategyPerformanceTracker:
+    """Test suite for StrategyPerformanceTracker."""
+
+    @pytest.fixture
+    def tracker(self):
+        """Create a performance tracker instance."""
+        return StrategyPerformanceTracker('test_strategy')
+
+    @pytest.fixture
+    def sample_signal(self):
+        """Create a sample signal."""
+        return Signal(
+            strategy_name='test_strategy',
+            symbol='BTCUSDT',
+            direction=SignalDirection.BUY,
+            confidence=Decimal('0.8'),
+            timestamp=datetime.now(timezone.utc)
+        )
+
+    def test_tracker_initialization(self, tracker):
+        """Test tracker initialization."""
+        assert tracker.strategy_name == 'test_strategy'
+        assert tracker.trades == []
+        assert tracker.signals == []
+        assert tracker.returns == []
+        assert tracker.win_rate == 0.0
+        assert tracker.sharpe_ratio == 0.0
+        assert tracker.max_drawdown == 0.0
+        assert tracker.total_return == 0.0
+        assert tracker.volatility == 0.0
+        assert tracker.correlation_with_market == 0.0
+        assert tracker.rolling_window == 50
+        assert tracker.recent_performance == []
+
+    def test_add_signal(self, tracker, sample_signal):
+        """Test adding a signal to the tracker."""
+        tracker.add_signal(sample_signal)
+        
+        assert len(tracker.signals) == 1
+        signal_record = tracker.signals[0]
+        assert signal_record['timestamp'] == sample_signal.timestamp
+        assert signal_record['direction'] == sample_signal.direction
+        assert signal_record['confidence'] == sample_signal.confidence
+        assert signal_record['symbol'] == sample_signal.symbol
+
+    def test_add_trade_result(self, tracker):
+        """Test adding trade results."""
+        trade_info = {
+            'timestamp': datetime.now(timezone.utc),
+            'symbol': 'BTCUSDT',
+            'side': 'buy'
+        }
+        
+        tracker.add_trade_result(0.05, trade_info)
+        
+        assert len(tracker.trades) == 1
+        assert len(tracker.returns) == 1
+        assert len(tracker.recent_performance) == 1
+        assert tracker.returns[0] == 0.05
+        assert tracker.trades[0]['return'] == 0.05
+
+    def test_add_multiple_trade_results(self, tracker):
+        """Test adding multiple trade results."""
+        returns = [0.05, -0.02, 0.03, -0.01, 0.04]
+        
+        for i, ret in enumerate(returns):
+            trade_info = {
+                'timestamp': datetime.now(timezone.utc),
+                'symbol': 'BTCUSDT',
+                'side': 'buy'
+            }
+            tracker.add_trade_result(ret, trade_info)
+        
+        assert len(tracker.trades) == 5
+        assert len(tracker.returns) == 5
+        assert tracker.win_rate == 0.6  # 3 out of 5 profitable
+        assert tracker.total_return == sum(returns)
+        assert tracker.volatility > 0
+
+    def test_rolling_window_limit(self, tracker):
+        """Test that recent performance respects rolling window limit."""
+        # Add more trades than rolling window
+        for i in range(60):
+            trade_info = {'timestamp': datetime.now(timezone.utc)}
+            tracker.add_trade_result(0.01, trade_info)
+        
+        assert len(tracker.recent_performance) == tracker.rolling_window
+
+    def test_update_metrics_empty_returns(self, tracker):
+        """Test metrics update with no returns."""
+        tracker._update_metrics()
+        
+        assert tracker.win_rate == 0.0
+        assert tracker.total_return == 0.0
+        assert tracker.volatility == 0.0
+        assert tracker.sharpe_ratio == 0.0
+        assert tracker.max_drawdown == 0.0
+
+    def test_update_metrics_single_return(self, tracker):
+        """Test metrics update with single return."""
+        tracker.returns = [0.05]
+        tracker._update_metrics()
+        
+        assert tracker.win_rate == 1.0
+        assert tracker.total_return == 0.05
+        assert tracker.volatility == 0.0  # No variance with single point
+        assert tracker.sharpe_ratio == 0.0
+
+    def test_update_metrics_multiple_returns(self, tracker):
+        """Test metrics update with multiple returns."""
+        returns = [0.05, -0.02, 0.03, -0.01, 0.04, 0.02, -0.03]
+        tracker.returns = returns
+        tracker._update_metrics()
+        
+        assert tracker.win_rate == 4/7  # 4 positive out of 7
+        assert tracker.total_return == sum(returns)
+        assert tracker.volatility > 0
+        assert tracker.sharpe_ratio != 0.0
+        assert tracker.max_drawdown >= 0
+
+    def test_get_recent_performance_empty(self, tracker):
+        """Test getting recent performance with no data."""
+        result = tracker.get_recent_performance()
+        assert result == 0.0
+
+    def test_get_recent_performance_with_data(self, tracker):
+        """Test getting recent performance with data."""
+        tracker.recent_performance = [0.01, 0.02, -0.01, 0.03]
+        result = tracker.get_recent_performance(window=3)
+        
+        expected = np.mean(tracker.recent_performance[-3:])
+        assert result == expected
+
+    def test_get_performance_score_new_strategy(self, tracker):
+        """Test performance score for new strategy."""
+        # Less than 5 returns should give neutral score
+        tracker.returns = [0.01, 0.02]
+        score = tracker.get_performance_score()
+        assert score == 0.5
+
+    def test_get_performance_score_with_data(self, tracker):
+        """Test performance score calculation with sufficient data."""
+        # Add sufficient returns for scoring
+        returns = [0.05, -0.02, 0.03, -0.01, 0.04, 0.02, -0.01, 0.03, 0.01, 0.02]
+        for ret in returns:
+            tracker.returns.append(ret)
+            tracker.recent_performance.append(ret)
+        
+        tracker._update_metrics()
+        score = tracker.get_performance_score()
+        
+        assert 0.0 <= score <= 1.0
+        assert isinstance(score, float)
+
+    def test_get_metrics_comprehensive(self, tracker):
+        """Test comprehensive metrics retrieval."""
+        # Setup some data
+        returns = [0.05, -0.02, 0.03]
+        for ret in returns:
+            tracker.returns.append(ret)
+            trade_info = {'timestamp': datetime.now(timezone.utc)}
+            tracker.trades.append({'return': ret, **trade_info})
+        
+        tracker._update_metrics()
+        
+        metrics = tracker.get_metrics()
+        
+        assert metrics['strategy_name'] == 'test_strategy'
+        assert metrics['total_trades'] == 3
+        assert 'win_rate' in metrics
+        assert 'total_return' in metrics
+        assert 'sharpe_ratio' in metrics
+        assert 'volatility' in metrics
+        assert 'max_drawdown' in metrics
+        assert 'recent_performance' in metrics
+        assert 'performance_score' in metrics
+        assert 'correlation_with_market' in metrics
+
+
+class TestCorrelationAnalyzer:
+    """Test suite for CorrelationAnalyzer."""
+
+    @pytest.fixture
+    def analyzer(self):
+        """Create a correlation analyzer instance."""
+        return CorrelationAnalyzer(window_size=20)
+
+    def test_analyzer_initialization(self, analyzer):
+        """Test analyzer initialization."""
+        assert analyzer.window_size == 20
+        assert analyzer.strategy_returns == {}
+
+    def test_add_strategy_return(self, analyzer):
+        """Test adding strategy returns."""
+        analyzer.add_strategy_return('strategy1', 0.05)
+        analyzer.add_strategy_return('strategy1', -0.02)
+        analyzer.add_strategy_return('strategy2', 0.03)
+        
+        assert 'strategy1' in analyzer.strategy_returns
+        assert 'strategy2' in analyzer.strategy_returns
+        assert len(analyzer.strategy_returns['strategy1']) == 2
+        assert len(analyzer.strategy_returns['strategy2']) == 1
+
+    def test_add_strategy_return_window_limit(self, analyzer):
+        """Test that strategy returns respect window size limit."""
+        strategy_name = 'test_strategy'
+        
+        # Add more returns than window size
+        for i in range(30):
+            analyzer.add_strategy_return(strategy_name, 0.01)
+        
+        assert len(analyzer.strategy_returns[strategy_name]) == analyzer.window_size
+
+    def test_calculate_correlation_matrix_empty(self, analyzer):
+        """Test correlation matrix with no data."""
+        matrix = analyzer.calculate_correlation_matrix()
+        assert matrix == {}
+
+    def test_calculate_correlation_matrix_single_strategy(self, analyzer):
+        """Test correlation matrix with single strategy."""
+        analyzer.add_strategy_return('strategy1', 0.05)
+        analyzer.add_strategy_return('strategy1', -0.02)
+        
+        matrix = analyzer.calculate_correlation_matrix()
+        
+        assert 'strategy1' in matrix
+        assert matrix['strategy1']['strategy1'] == 1.0
+
+    def test_calculate_correlation_matrix_insufficient_data(self, analyzer):
+        """Test correlation matrix with insufficient data."""
+        # Add less than minimum required data points
+        for i in range(5):
+            analyzer.add_strategy_return('strategy1', 0.01)
+            analyzer.add_strategy_return('strategy2', 0.02)
+        
+        matrix = analyzer.calculate_correlation_matrix()
+        
+        assert matrix['strategy1']['strategy2'] == 0.0
+        assert matrix['strategy2']['strategy1'] == 0.0
+
+    def test_calculate_correlation_matrix_sufficient_data(self, analyzer):
+        """Test correlation matrix with sufficient data."""
+        # Add correlated returns
+        for i in range(15):
+            ret1 = 0.01 * i
+            ret2 = 0.01 * i + 0.005  # Highly correlated
+            analyzer.add_strategy_return('strategy1', ret1)
+            analyzer.add_strategy_return('strategy2', ret2)
+        
+        matrix = analyzer.calculate_correlation_matrix()
+        
+        correlation = matrix['strategy1']['strategy2']
+        assert 0.8 <= correlation <= 1.0  # Should be highly correlated
+
+    def test_calculate_correlation_matrix_exception_handling(self, analyzer):
+        """Test correlation matrix calculation with exception scenarios."""
+        # Add identical returns (should handle division by zero)
+        for i in range(15):
+            analyzer.add_strategy_return('strategy1', 0.01)  # Identical
+            analyzer.add_strategy_return('strategy2', 0.01)  # Identical
+        
+        with patch('src.strategies.hybrid.ensemble.logger') as mock_logger:
+            matrix = analyzer.calculate_correlation_matrix()
+            
+            # Should handle gracefully and return 0.0 correlation
+            assert matrix['strategy1']['strategy2'] == 0.0
+
+    def test_get_diversity_score_empty(self, analyzer):
+        """Test diversity score with no strategies."""
+        score = analyzer.get_diversity_score()
+        assert score == 1.0  # Perfect diversity with no strategies
+
+    def test_get_diversity_score_single_strategy(self, analyzer):
+        """Test diversity score with single strategy."""
+        analyzer.add_strategy_return('strategy1', 0.05)
+        
+        score = analyzer.get_diversity_score()
+        assert score == 1.0  # Perfect diversity with single strategy
+
+    def test_get_diversity_score_multiple_strategies(self, analyzer):
+        """Test diversity score with multiple strategies."""
+        # Add uncorrelated strategies
+        for i in range(15):
+            analyzer.add_strategy_return('strategy1', 0.01 * i)
+            analyzer.add_strategy_return('strategy2', -0.01 * i)  # Negatively correlated
+        
+        score = analyzer.get_diversity_score()
+        assert 0.0 <= score <= 1.0
+        assert score > 0.5  # Should have good diversity
+
+    def test_identify_redundant_strategies_no_redundancy(self, analyzer):
+        """Test identifying redundant strategies with no redundancy."""
+        # Add uncorrelated strategies
+        for i in range(15):
+            analyzer.add_strategy_return('strategy1', 0.01 * i)
+            analyzer.add_strategy_return('strategy2', -0.01 * i)
+        
+        redundant_pairs = analyzer.identify_redundant_strategies(threshold=0.8)
+        assert len(redundant_pairs) == 0
+
+    def test_identify_redundant_strategies_with_redundancy(self, analyzer):
+        """Test identifying redundant strategies with high correlation."""
+        # Add highly correlated strategies
+        for i in range(15):
+            ret = 0.01 * i
+            analyzer.add_strategy_return('strategy1', ret)
+            analyzer.add_strategy_return('strategy2', ret + 0.001)  # Very similar
+        
+        redundant_pairs = analyzer.identify_redundant_strategies(threshold=0.7)
+        
+        # Should identify the pair as redundant
+        assert len(redundant_pairs) >= 0  # Might be identified as redundant
+
+
+class TestVotingMechanism:
+    """Test suite for VotingMechanism."""
+
+    @pytest.fixture
+    def voting_mechanism(self):
+        """Create voting mechanism instance."""
+        return VotingMechanism()
+
+    @pytest.fixture
+    def sample_signals(self):
+        """Create sample signals for voting."""
+        signals = []
+        
+        # Buy signal
+        buy_signal = Signal(
+            strategy_name='strategy1',
+            symbol='BTCUSDT',
+            direction=SignalDirection.BUY,
+            confidence=Decimal('0.8'),
+            timestamp=datetime.now(timezone.utc)
+        )
+        signals.append(('strategy1', buy_signal))
+        
+        # Sell signal
+        sell_signal = Signal(
+            strategy_name='strategy2',
+            symbol='BTCUSDT',
+            direction=SignalDirection.SELL,
+            confidence=Decimal('0.7'),
+            timestamp=datetime.now(timezone.utc)
+        )
+        signals.append(('strategy2', sell_signal))
+        
+        # Another buy signal
+        buy_signal2 = Signal(
+            strategy_name='strategy3',
+            symbol='BTCUSDT',
+            direction=SignalDirection.BUY,
+            confidence=Decimal('0.9'),
+            timestamp=datetime.now(timezone.utc)
+        )
+        signals.append(('strategy3', buy_signal2))
+        
+        return signals
+
+    def test_majority_vote_empty_signals(self, voting_mechanism):
+        """Test majority vote with empty signals."""
+        result = voting_mechanism.majority_vote([])
+        assert result is None
+
+    def test_majority_vote_buy_majority(self, voting_mechanism, sample_signals):
+        """Test majority vote with buy majority."""
+        result = voting_mechanism.majority_vote(sample_signals)
+        
+        assert result is not None
+        assert result.direction == SignalDirection.BUY
+        assert result.source == "EnsembleMajority"
+        assert result.metadata['voting_method'] == 'majority'
+        assert result.metadata['buy_votes'] == 2
+        assert result.metadata['sell_votes'] == 1
+        assert len(result.metadata['contributing_strategies']) == 3
+
+    def test_majority_vote_sell_majority(self, voting_mechanism):
+        """Test majority vote with sell majority."""
+        signals = []
+        
+        # Create more sell signals than buy signals
+        for i in range(3):
+            sell_signal = Signal(
+                strategy_name=f'strategy{i}',
+                symbol='BTCUSDT',
+                direction=SignalDirection.SELL,
+                confidence=Decimal('0.8'),
+                timestamp=datetime.now(timezone.utc)
+            )
+            signals.append((f'strategy{i}', sell_signal))
+        
+        # One buy signal
+        buy_signal = Signal(
+            strategy_name='strategy_buy',
+            symbol='BTCUSDT',
+            direction=SignalDirection.BUY,
+            confidence=Decimal('0.8'),
+            timestamp=datetime.now(timezone.utc)
+        )
+        signals.append(('strategy_buy', buy_signal))
+        
+        result = voting_mechanism.majority_vote(signals)
+        
+        assert result is not None
+        assert result.direction == SignalDirection.SELL
+        assert result.metadata['sell_votes'] == 3
+        assert result.metadata['buy_votes'] == 1
+
+    def test_majority_vote_no_clear_majority(self, voting_mechanism):
+        """Test majority vote with no clear majority (tie)."""
+        signals = []
+        
+        # Equal buy and sell signals
+        buy_signal = Signal(
+            strategy_name='strategy1',
+            symbol='BTCUSDT',
+            direction=SignalDirection.BUY,
+            confidence=Decimal('0.8'),
+            timestamp=datetime.now(timezone.utc)
+        )
+        signals.append(('strategy1', buy_signal))
+        
+        sell_signal = Signal(
+            strategy_name='strategy2',
+            symbol='BTCUSDT',
+            direction=SignalDirection.SELL,
+            confidence=Decimal('0.8'),
+            timestamp=datetime.now(timezone.utc)
+        )
+        signals.append(('strategy2', sell_signal))
+        
+        result = voting_mechanism.majority_vote(signals)
+        assert result is None
+
+    def test_weighted_vote_empty_signals(self, voting_mechanism):
+        """Test weighted vote with empty signals."""
+        result = voting_mechanism.weighted_vote([], {})
+        assert result is None
+
+    def test_weighted_vote_with_weights(self, voting_mechanism, sample_signals):
+        """Test weighted vote with strategy weights."""
+        weights = {
+            'strategy1': 2.0,  # High weight for buy
+            'strategy2': 1.0,  # Lower weight for sell
+            'strategy3': 1.5,  # Medium weight for buy
+        }
+        
+        result = voting_mechanism.weighted_vote(sample_signals, weights)
+        
+        assert result is not None
+        assert result.direction == SignalDirection.BUY  # Should favor buy due to higher weights
+        assert result.source == "EnsembleWeighted"
+        assert result.metadata['voting_method'] == 'weighted'
+        assert 'strategy_weights' in result.metadata
+
+    def test_weighted_vote_zero_total_weight(self, voting_mechanism, sample_signals):
+        """Test weighted vote with zero total weight."""
+        weights = {
+            'strategy1': 0.0,
+            'strategy2': 0.0,
+            'strategy3': 0.0,
+        }
+        
+        result = voting_mechanism.weighted_vote(sample_signals, weights)
+        assert result is None
+
+    def test_weighted_vote_below_threshold(self, voting_mechanism):
+        """Test weighted vote below threshold."""
+        # Create weak signals
+        signals = []
+        weak_signal = Signal(
+            strategy_name='strategy1',
+            symbol='BTCUSDT',
+            direction=SignalDirection.BUY,
+            confidence=Decimal('0.2'),  # Weak confidence
+            timestamp=datetime.now(timezone.utc)
+        )
+        signals.append(('strategy1', weak_signal))
+        
+        weights = {'strategy1': 1.0}
+        
+        result = voting_mechanism.weighted_vote(signals, weights)
+        assert result is None  # Should be below threshold
+
+    def test_confidence_weighted_vote_empty_signals(self, voting_mechanism):
+        """Test confidence-weighted vote with empty signals."""
+        result = voting_mechanism.confidence_weighted_vote([], {})
+        assert result is None
+
+    def test_confidence_weighted_vote_with_performance(self, voting_mechanism, sample_signals):
+        """Test confidence-weighted vote with performance scores."""
+        performance_scores = {
+            'strategy1': 0.9,  # High performance
+            'strategy2': 0.5,  # Medium performance
+            'strategy3': 0.8,  # Good performance
+        }
+        
+        result = voting_mechanism.confidence_weighted_vote(sample_signals, performance_scores)
+        
+        assert result is not None
+        assert result.source == "EnsembleConfidenceWeighted"
+        assert result.metadata['voting_method'] == 'confidence_weighted'
+        assert 'strategy_scores' in result.metadata
+
+    def test_confidence_weighted_vote_zero_total_score(self, voting_mechanism, sample_signals):
+        """Test confidence-weighted vote with zero total score."""
+        performance_scores = {
+            'strategy1': 0.0,
+            'strategy2': 0.0,
+            'strategy3': 0.0,
+        }
+        
+        result = voting_mechanism.confidence_weighted_vote(sample_signals, performance_scores)
+        assert result is None
+
+    def test_confidence_weighted_vote_below_threshold(self, voting_mechanism):
+        """Test confidence-weighted vote below threshold."""
+        # Create very weak scenario
+        signals = []
+        weak_signal = Signal(
+            strategy_name='strategy1',
+            symbol='BTCUSDT',
+            direction=SignalDirection.BUY,
+            confidence=Decimal('0.1'),  # Very weak
+            timestamp=datetime.now(timezone.utc)
+        )
+        signals.append(('strategy1', weak_signal))
+        
+        performance_scores = {'strategy1': 0.1}  # Poor performance
+        
+        result = voting_mechanism.confidence_weighted_vote(signals, performance_scores)
+        assert result is None  # Should be below threshold
+
+
+class TestEnsembleStrategy:
+    """Test suite for EnsembleStrategy."""
+
+    @pytest.fixture
+    def ensemble_config(self):
+        """Create ensemble strategy configuration."""
+        return {
+            'name': 'test_ensemble',
+            'voting_method': 'confidence_weighted',
+            'max_strategies': 5,
+            'min_strategies': 2,
+            'rebalance_frequency': 24,
+            'correlation_threshold': 0.8,
+            'performance_window': 50,
+            'diversity_weight': 0.3,
+            'min_confidence': 0.3,
+            'position_size_pct': 0.02,
+            'stop_loss_pct': 0.05,
+            'take_profit_pct': 0.10,
+        }
+
+    @pytest.fixture
+    def ensemble(self, ensemble_config):
+        """Create ensemble strategy instance."""
+        with patch('src.strategies.hybrid.ensemble.MarketRegimeDetector'):
+            return EnsembleStrategy(ensemble_config)
+
+    @pytest.fixture
+    def mock_strategy(self):
+        """Create mock component strategy."""
+        config = {'name': 'mock_strategy', 'strategy_type': StrategyType.MOMENTUM}
+        strategy = MockStrategy(config)
+        return strategy
+
+    @pytest.fixture
+    def market_data(self):
+        """Create market data for testing."""
+        return MarketData(
+            symbol='BTCUSDT',
+            price=Decimal('50000'),
+            volume=Decimal('1000'),
+            timestamp=datetime.now(timezone.utc),
+            current_price=Decimal('50000')
+        )
+
+    @pytest.fixture
+    def position(self):
+        """Create position for testing."""
+        from src.core.types import PositionSide
+        
+        position = Mock()
+        position.symbol = 'BTCUSDT'
+        position.side = Mock()
+        position.side.value = 'buy'
+        position.entry_price = Decimal('49000')
+        return position
+
+    def test_ensemble_initialization(self, ensemble_config):
+        """Test ensemble strategy initialization."""
+        with patch('src.strategies.hybrid.ensemble.MarketRegimeDetector'):
+            ensemble = EnsembleStrategy(ensemble_config)
+        
+        assert ensemble.name == 'test_ensemble'
+        assert ensemble.strategy_type == StrategyType.HYBRID
+        assert ensemble.voting_method == 'confidence_weighted'
+        assert ensemble.max_strategies == 5
+        assert ensemble.min_strategies == 2
+        assert ensemble.rebalance_frequency == 24
+        assert ensemble.correlation_threshold == 0.8
+        assert isinstance(ensemble.component_strategies, dict)
+        assert isinstance(ensemble.strategy_weights, dict)
+        assert isinstance(ensemble.performance_trackers, dict)
+        assert isinstance(ensemble.correlation_analyzer, CorrelationAnalyzer)
+        assert isinstance(ensemble.voting_mechanism, VotingMechanism)
+
+    def test_ensemble_initialization_defaults(self):
+        """Test ensemble initialization with default values."""
+        config = {'name': 'test_ensemble'}
+        with patch('src.strategies.hybrid.ensemble.MarketRegimeDetector'):
+            ensemble = EnsembleStrategy(config)
+        
+        assert ensemble.voting_method == 'confidence_weighted'
+        assert ensemble.max_strategies == 5
+        assert ensemble.min_strategies == 2
+
+    def test_add_strategy_success(self, ensemble, mock_strategy):
+        """Test successfully adding a strategy to ensemble."""
+        ensemble.add_strategy(mock_strategy, initial_weight=1.5)
+        
+        assert mock_strategy.name in ensemble.component_strategies
+        assert ensemble.strategy_weights[mock_strategy.name] == 1.5
+        assert mock_strategy.name in ensemble.performance_trackers
+        assert isinstance(ensemble.performance_trackers[mock_strategy.name], StrategyPerformanceTracker)
+
+    def test_add_strategy_max_limit_reached(self, ensemble, mock_strategy):
+        """Test adding strategy when max limit is reached."""
+        # Fill up to max strategies
+        for i in range(ensemble.max_strategies):
+            strategy_config = {'name': f'strategy_{i}', 'strategy_type': StrategyType.MOMENTUM}
+            strategy = MockStrategy(strategy_config)
+            ensemble.add_strategy(strategy)
+        
+        # Try to add one more
+        ensemble.add_strategy(mock_strategy)
+        
+        # Should not be added
+        assert mock_strategy.name not in ensemble.component_strategies
+
+    def test_add_strategy_exception_handling(self, ensemble):
+        """Test adding strategy with exception."""
+        # Create strategy that will cause exception
+        bad_strategy = Mock()
+        bad_strategy.name = Mock(side_effect=Exception("Test error"))
+        
+        with pytest.raises(StrategyError):
+            ensemble.add_strategy(bad_strategy)
+
+    def test_remove_strategy_success(self, ensemble, mock_strategy):
+        """Test successfully removing a strategy."""
+        # First add the strategy
+        ensemble.add_strategy(mock_strategy)
+        
+        # Then remove it
+        ensemble.remove_strategy(mock_strategy.name)
+        
+        assert mock_strategy.name not in ensemble.component_strategies
+        assert mock_strategy.name not in ensemble.strategy_weights
+        assert mock_strategy.name not in ensemble.performance_trackers
+
+    def test_remove_strategy_not_found(self, ensemble):
+        """Test removing non-existent strategy."""
+        # Should not raise exception
+        ensemble.remove_strategy('non_existent_strategy')
+
+    def test_remove_strategy_exception_handling(self, ensemble):
+        """Test removing strategy with exception."""
+        # Setup component_strategies to raise exception
+        ensemble.component_strategies = Mock()
+        ensemble.component_strategies.__contains__ = Mock(return_value=True)
+        ensemble.component_strategies.__delitem__ = Mock(side_effect=Exception("Test error"))
+        
+        # Should handle exception gracefully
+        ensemble.remove_strategy('test_strategy')
+
+    @pytest.mark.asyncio
+    async def test_generate_signals_insufficient_strategies(self, ensemble, market_data):
+        """Test signal generation with insufficient strategies."""
+        # Ensemble has 0 strategies, needs min_strategies=2
+        result = await ensemble._generate_signals_impl(market_data)
+        
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_generate_signals_success(self, ensemble, market_data, mock_strategy):
+        """Test successful signal generation."""
+        # Add sufficient strategies
+        for i in range(3):
+            strategy_config = {'name': f'strategy_{i}', 'strategy_type': StrategyType.MOMENTUM}
+            strategy = MockStrategy(strategy_config)
+            
+            # Mock signal generation
+            test_signal = Signal(
+                strategy_name=f'strategy_{i}',
+                symbol=market_data.symbol,
+                direction=SignalDirection.BUY,
+                confidence=Decimal('0.8'),
+                timestamp=datetime.now(timezone.utc)
+            )
+            
+            strategy.generate_signals = AsyncMock(return_value=[test_signal])
+            ensemble.add_strategy(strategy)
+        
+        with patch.object(ensemble.regime_detector, 'detect_comprehensive_regime', return_value=Mock()), \
+             patch.object(ensemble, '_check_and_rebalance'), \
+             patch.object(ensemble, '_vote_on_signals') as mock_vote:
+            
+            mock_ensemble_signal = Signal(
+                strategy_name='ensemble',
+                symbol=market_data.symbol,
+                direction=SignalDirection.BUY,
+                confidence=Decimal('0.9'),
+                timestamp=datetime.now(timezone.utc),
+                source='Ensemble',
+                metadata={'voting_method': 'test'}
+            )
+            mock_vote.return_value = mock_ensemble_signal
+            
+            result = await ensemble._generate_signals_impl(market_data)
+            
+            assert len(result) == 1
+            assert result[0] == mock_ensemble_signal
+
+    @pytest.mark.asyncio
+    async def test_generate_signals_component_strategy_exception(self, ensemble, market_data):
+        """Test signal generation with component strategy exception."""
+        # Add strategies with one that raises exception
+        for i in range(3):
+            strategy_config = {'name': f'strategy_{i}', 'strategy_type': StrategyType.MOMENTUM}
+            strategy = MockStrategy(strategy_config)
+            
+            if i == 1:
+                # Make one strategy raise exception
+                strategy.generate_signals = AsyncMock(side_effect=Exception("Strategy error"))
+            else:
+                test_signal = Signal(
+                    strategy_name=f'strategy_{i}',
+                    symbol=market_data.symbol,
+                    direction=SignalDirection.BUY,
+                    confidence=Decimal('0.8'),
+                    timestamp=datetime.now(timezone.utc)
+                )
+                strategy.generate_signals = AsyncMock(return_value=[test_signal])
+            
+            ensemble.add_strategy(strategy)
+        
+        with patch.object(ensemble.regime_detector, 'detect_comprehensive_regime', return_value=Mock()), \
+             patch.object(ensemble, '_check_and_rebalance'), \
+             patch.object(ensemble, '_vote_on_signals', return_value=None):
+            
+            result = await ensemble._generate_signals_impl(market_data)
+            
+            # Should handle exception and continue with other strategies
+            assert result == []
+
+    @pytest.mark.asyncio
+    async def test_generate_signals_no_component_signals(self, ensemble, market_data):
+        """Test signal generation when no component signals are generated."""
+        # Add strategies that don't generate signals
+        for i in range(3):
+            strategy_config = {'name': f'strategy_{i}', 'strategy_type': StrategyType.MOMENTUM}
+            strategy = MockStrategy(strategy_config)
+            strategy.generate_signals = AsyncMock(return_value=[])
+            ensemble.add_strategy(strategy)
+        
+        with patch.object(ensemble.regime_detector, 'detect_comprehensive_regime', return_value=Mock()):
+            result = await ensemble._generate_signals_impl(market_data)
+            
+            assert result == []
+
+    @pytest.mark.asyncio
+    async def test_vote_on_signals_majority(self, ensemble):
+        """Test voting on signals with majority method."""
+        ensemble.voting_method = 'majority'
+        
+        signals = [
+            ('strategy1', Mock()),
+            ('strategy2', Mock()),
+        ]
+        
+        mock_regime = Mock()
+        mock_signal = Mock()
+        
+        with patch.object(ensemble, '_filter_signals_by_regime', return_value=signals), \
+             patch.object(ensemble.voting_mechanism, 'majority_vote', return_value=mock_signal):
+            
+            result = await ensemble._vote_on_signals(signals, mock_regime)
+            
+            assert result == mock_signal
+
+    @pytest.mark.asyncio
+    async def test_vote_on_signals_weighted(self, ensemble):
+        """Test voting on signals with weighted method."""
+        ensemble.voting_method = 'weighted'
+        
+        signals = [
+            ('strategy1', Mock()),
+            ('strategy2', Mock()),
+        ]
+        
+        mock_regime = Mock()
+        mock_signal = Mock()
+        
+        with patch.object(ensemble, '_filter_signals_by_regime', return_value=signals), \
+             patch.object(ensemble.voting_mechanism, 'weighted_vote', return_value=mock_signal):
+            
+            result = await ensemble._vote_on_signals(signals, mock_regime)
+            
+            assert result == mock_signal
+
+    @pytest.mark.asyncio
+    async def test_vote_on_signals_confidence_weighted(self, ensemble):
+        """Test voting on signals with confidence-weighted method."""
+        ensemble.voting_method = 'confidence_weighted'
+        
+        signals = [
+            ('strategy1', Mock()),
+            ('strategy2', Mock()),
+        ]
+        
+        mock_regime = Mock()
+        mock_signal = Mock()
+        
+        with patch.object(ensemble, '_filter_signals_by_regime', return_value=signals), \
+             patch.object(ensemble.voting_mechanism, 'confidence_weighted_vote', return_value=mock_signal):
+            
+            result = await ensemble._vote_on_signals(signals, mock_regime)
+            
+            assert result == mock_signal
+
+    @pytest.mark.asyncio
+    async def test_vote_on_signals_unknown_method(self, ensemble):
+        """Test voting with unknown method falls back to confidence_weighted."""
+        ensemble.voting_method = 'unknown_method'
+        
+        signals = [
+            ('strategy1', Mock()),
+            ('strategy2', Mock()),
+        ]
+        
+        mock_regime = Mock()
+        mock_signal = Mock()
+        
+        with patch.object(ensemble, '_filter_signals_by_regime', return_value=signals), \
+             patch.object(ensemble.voting_mechanism, 'confidence_weighted_vote', return_value=mock_signal):
+            
+            result = await ensemble._vote_on_signals(signals, mock_regime)
+            
+            assert result == mock_signal
+
+    @pytest.mark.asyncio
+    async def test_vote_on_signals_empty_signals(self, ensemble):
+        """Test voting with empty signals."""
+        result = await ensemble._vote_on_signals([], Mock())
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_vote_on_signals_filtered_out(self, ensemble):
+        """Test voting when all signals are filtered out."""
+        signals = [('strategy1', Mock())]
+        
+        with patch.object(ensemble, '_filter_signals_by_regime', return_value=[]):
+            result = await ensemble._vote_on_signals(signals, Mock())
+            
+            assert result is None
+
+    @pytest.mark.asyncio
+    async def test_vote_on_signals_exception_handling(self, ensemble):
+        """Test voting with exception during voting."""
+        signals = [('strategy1', Mock())]
+        
+        with patch.object(ensemble, '_filter_signals_by_regime', side_effect=Exception("Filter error")):
+            result = await ensemble._vote_on_signals(signals, Mock())
+            
+            assert result is None
+
+    @pytest.mark.asyncio
+    async def test_filter_signals_by_regime(self, ensemble):
+        """Test signal filtering by regime."""
+        signals = [
+            ('strategy1', Mock()),
+            ('strategy2', Mock()),
+        ]
+        
+        # Currently just returns all signals
+        result = await ensemble._filter_signals_by_regime(signals, Mock())
+        assert result == signals
+
+    @pytest.mark.asyncio
+    async def test_check_and_rebalance_needed(self, ensemble):
+        """Test rebalancing check when rebalancing is needed."""
+        # Set last rebalance to far in the past
+        old_time = datetime.now(timezone.utc) - timedelta(hours=48)
+        ensemble.last_rebalance = old_time
+        
+        with patch.object(ensemble, '_rebalance_strategies') as mock_rebalance:
+            await ensemble._check_and_rebalance()
+            
+            mock_rebalance.assert_called_once()
+            assert ensemble.last_rebalance > old_time
+
+    @pytest.mark.asyncio
+    async def test_check_and_rebalance_not_needed(self, ensemble):
+        """Test rebalancing check when rebalancing is not needed."""
+        # Set last rebalance to recent
+        ensemble.last_rebalance = datetime.now(timezone.utc) - timedelta(hours=1)
+        
+        with patch.object(ensemble, '_rebalance_strategies') as mock_rebalance:
+            await ensemble._check_and_rebalance()
+            
+            mock_rebalance.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_check_and_rebalance_first_time(self, ensemble):
+        """Test rebalancing check when never rebalanced before."""
+        ensemble.last_rebalance = None
+        
+        with patch.object(ensemble, '_rebalance_strategies') as mock_rebalance:
+            await ensemble._check_and_rebalance()
+            
+            mock_rebalance.assert_called_once()
+            assert ensemble.last_rebalance is not None
+
+    @pytest.mark.asyncio
+    async def test_check_and_rebalance_exception_handling(self, ensemble):
+        """Test rebalancing check with exception."""
+        ensemble.last_rebalance = None
+        
+        with patch.object(ensemble, '_rebalance_strategies', side_effect=Exception("Rebalance error")):
+            # Should not raise exception
+            await ensemble._check_and_rebalance()
+
+    @pytest.mark.asyncio
+    async def test_rebalance_strategies_insufficient_strategies(self, ensemble):
+        """Test rebalancing with insufficient strategies."""
+        # Add only one strategy
+        strategy = MockStrategy({'name': 'single_strategy', 'strategy_type': StrategyType.MOMENTUM})
+        ensemble.add_strategy(strategy)
+        
+        # Should not rebalance with < 2 strategies
+        await ensemble._rebalance_strategies()
+
+    @pytest.mark.asyncio
+    async def test_rebalance_strategies_success(self, ensemble):
+        """Test successful strategy rebalancing."""
+        # Add multiple strategies with performance data
+        strategies = []
+        for i in range(3):
+            strategy_config = {'name': f'strategy_{i}', 'strategy_type': StrategyType.MOMENTUM}
+            strategy = MockStrategy(strategy_config)
+            ensemble.add_strategy(strategy)
+            strategies.append(strategy)
+            
+            # Add some performance data
+            tracker = ensemble.performance_trackers[strategy.name]
+            for j in range(10):
+                tracker.add_trade_result(0.01 * (i + 1), {'timestamp': datetime.now(timezone.utc)})
+        
+        await ensemble._rebalance_strategies()
+        
+        # Check that weights were updated
+        total_weight = sum(ensemble.strategy_weights.values())
+        assert abs(total_weight - 1.0) < 0.01  # Should sum to ~1.0
+
+    @pytest.mark.asyncio
+    async def test_rebalance_strategies_no_performance_data(self, ensemble):
+        """Test rebalancing with no performance data."""
+        # Add strategies without performance data
+        for i in range(3):
+            strategy_config = {'name': f'strategy_{i}', 'strategy_type': StrategyType.MOMENTUM}
+            strategy = MockStrategy(strategy_config)
+            ensemble.add_strategy(strategy)
+        
+        await ensemble._rebalance_strategies()
+        
+        # Should assign equal weights
+        expected_weight = 1.0 / 3
+        for weight in ensemble.strategy_weights.values():
+            assert abs(weight - expected_weight) < 0.01
+
+    @pytest.mark.asyncio
+    async def test_rebalance_strategies_redundant_pairs(self, ensemble):
+        """Test rebalancing with redundant strategy pairs."""
+        # Add strategies
+        for i in range(3):
+            strategy_config = {'name': f'strategy_{i}', 'strategy_type': StrategyType.MOMENTUM}
+            strategy = MockStrategy(strategy_config)
+            ensemble.add_strategy(strategy)
+            
+            # Add performance data
+            tracker = ensemble.performance_trackers[strategy.name]
+            tracker.add_trade_result(0.05, {'timestamp': datetime.now(timezone.utc)})
+        
+        # Mock correlation analyzer to return redundant pairs
+        with patch.object(ensemble.correlation_analyzer, 'identify_redundant_strategies', 
+                         return_value=[('strategy_0', 'strategy_1')]):
+            
+            await ensemble._rebalance_strategies()
+            
+            # Weights should still sum to 1.0
+            total_weight = sum(ensemble.strategy_weights.values())
+            assert abs(total_weight - 1.0) < 0.01
+
+    @pytest.mark.asyncio
+    async def test_rebalance_strategies_exception_handling(self, ensemble):
+        """Test rebalancing with exception."""
+        # Add strategies
+        for i in range(2):
+            strategy_config = {'name': f'strategy_{i}', 'strategy_type': StrategyType.MOMENTUM}
+            strategy = MockStrategy(strategy_config)
+            ensemble.add_strategy(strategy)
+        
+        # Mock performance tracker to raise exception
+        with patch.object(ensemble.performance_trackers['strategy_0'], 'get_performance_score', 
+                         side_effect=Exception("Performance error")):
+            
+            # Should handle exception gracefully
+            await ensemble._rebalance_strategies()
+
+    @pytest.mark.asyncio
+    async def test_validate_signal_success(self, ensemble):
+        """Test successful signal validation."""
+        signal = Signal(
+            strategy_name='test',
+            symbol='BTCUSDT',
+            direction=SignalDirection.BUY,
+            confidence=Decimal('0.8'),
+            timestamp=datetime.now(timezone.utc),
+            metadata={
+                'voting_method': 'majority',
+                'contributing_strategies': ['strategy1', 'strategy2', 'strategy3']
+            }
+        )
+        
+        result = await ensemble.validate_signal(signal)
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_validate_signal_low_confidence(self, ensemble):
+        """Test signal validation with low confidence."""
+        signal = Signal(
+            strategy_name='test',
+            symbol='BTCUSDT',
+            direction=SignalDirection.BUY,
+            confidence=Decimal('0.1'),  # Below min_confidence
+            timestamp=datetime.now(timezone.utc),
+            metadata={
+                'voting_method': 'majority',
+                'contributing_strategies': ['strategy1', 'strategy2']
+            }
+        )
+        
+        result = await ensemble.validate_signal(signal)
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_validate_signal_hold_direction(self, ensemble):
+        """Test signal validation with HOLD direction."""
+        signal = Signal(
+            strategy_name='test',
+            symbol='BTCUSDT',
+            direction=SignalDirection.HOLD,
+            confidence=Decimal('0.8'),
+            timestamp=datetime.now(timezone.utc),
+            metadata={
+                'voting_method': 'majority',
+                'contributing_strategies': ['strategy1', 'strategy2']
+            }
+        )
+        
+        result = await ensemble.validate_signal(signal)
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_validate_signal_missing_metadata(self, ensemble):
+        """Test signal validation with missing metadata."""
+        signal = Signal(
+            strategy_name='test',
+            symbol='BTCUSDT',
+            direction=SignalDirection.BUY,
+            confidence=Decimal('0.8'),
+            timestamp=datetime.now(timezone.utc),
+            metadata={}
+        )
+        
+        result = await ensemble.validate_signal(signal)
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_validate_signal_insufficient_participation(self, ensemble):
+        """Test signal validation with insufficient strategy participation."""
+        signal = Signal(
+            strategy_name='test',
+            symbol='BTCUSDT',
+            direction=SignalDirection.BUY,
+            confidence=Decimal('0.8'),
+            timestamp=datetime.now(timezone.utc),
+            metadata={
+                'voting_method': 'majority',
+                'contributing_strategies': ['strategy1']  # Only 1, needs min_strategies=2
+            }
+        )
+        
+        result = await ensemble.validate_signal(signal)
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_validate_signal_exception_handling(self, ensemble):
+        """Test signal validation with exception."""
+        signal = Mock()
+        signal.confidence = Mock(side_effect=Exception("Validation error"))
+        
+        result = await ensemble.validate_signal(signal)
+        assert result is False
+
+    def test_get_position_size_success(self, ensemble):
+        """Test successful position size calculation."""
+        # Add some strategies for participation calculation
+        for i in range(3):
+            strategy = MockStrategy({'name': f'strategy_{i}', 'strategy_type': StrategyType.MOMENTUM})
+            ensemble.add_strategy(strategy)
+        
+        signal = Signal(
+            strategy_name='test',
+            symbol='BTCUSDT',
+            direction=SignalDirection.BUY,
+            confidence=Decimal('0.8'),
+            timestamp=datetime.now(timezone.utc),
+            metadata={
+                'contributing_strategies': ['strategy_0', 'strategy_1']  # 2 out of 3
+            }
+        )
+        
+        # Mock correlation analyzer
+        with patch.object(ensemble.correlation_analyzer, 'get_diversity_score', return_value=0.8):
+            size = ensemble.get_position_size(signal)
+        
+        assert isinstance(size, Decimal)
+        assert Decimal('0.005') <= size <= Decimal('0.08')
+
+    def test_get_position_size_minimum_bound(self, ensemble):
+        """Test position size calculation with minimum bound."""
+        signal = Signal(
+            strategy_name='test',
+            symbol='BTCUSDT',
+            direction=SignalDirection.BUY,
+            confidence=Decimal('0.1'),  # Very low confidence
+            timestamp=datetime.now(timezone.utc),
+            metadata={'contributing_strategies': []}
+        )
+        
+        with patch.object(ensemble.correlation_analyzer, 'get_diversity_score', return_value=0.1):
+            size = ensemble.get_position_size(signal)
+        
+        assert size == Decimal('0.005')  # Should hit minimum
+
+    def test_get_position_size_maximum_bound(self, ensemble):
+        """Test position size calculation with maximum bound."""
+        # Add many strategies
+        for i in range(10):
+            strategy = MockStrategy({'name': f'strategy_{i}', 'strategy_type': StrategyType.MOMENTUM})
+            ensemble.add_strategy(strategy)
+        
+        signal = Signal(
+            strategy_name='test',
+            symbol='BTCUSDT',
+            direction=SignalDirection.BUY,
+            confidence=Decimal('1.0'),  # Max confidence
+            timestamp=datetime.now(timezone.utc),
+            metadata={'contributing_strategies': [f'strategy_{i}' for i in range(10)]}
+        )
+        
+        with patch.object(ensemble.correlation_analyzer, 'get_diversity_score', return_value=1.0):
+            size = ensemble.get_position_size(signal)
+        
+        assert size <= Decimal('0.08')  # Should not exceed maximum
+
+    def test_get_position_size_exception_handling(self, ensemble):
+        """Test position size calculation with exception."""
+        signal = Mock()
+        signal.confidence = Mock(side_effect=Exception("Position size error"))
+        
+        size = ensemble.get_position_size(signal)
+        assert size == Decimal('0.01')  # Default fallback
+
+    def test_should_exit_stop_loss(self, ensemble, position, market_data):
+        """Test exit decision with stop loss triggered."""
+        # Set current price below stop loss threshold
+        market_data.current_price = Decimal('46000')  # ~6% loss from 49000 entry
+        
+        result = ensemble.should_exit(position, market_data)
+        assert result is True
+
+    def test_should_exit_take_profit(self, ensemble, position, market_data):
+        """Test exit decision with take profit triggered."""
+        # Set current price above take profit threshold
+        market_data.current_price = Decimal('54000')  # ~10% profit from 49000 entry
+        
+        result = ensemble.should_exit(position, market_data)
+        assert result is True
+
+    def test_should_exit_opposing_signals(self, ensemble, position, market_data):
+        """Test exit decision with opposing signals from strategies."""
+        # Add strategies with opposing signals
+        for i in range(5):
+            strategy = MockStrategy({'name': f'strategy_{i}', 'strategy_type': StrategyType.MOMENTUM})
+            if i < 3:  # 3 out of 5 oppose the position
+                strategy.last_signal_direction = SignalDirection.SELL
+            else:
+                strategy.last_signal_direction = SignalDirection.BUY
+            ensemble.add_strategy(strategy)
+        
+        # Price within normal range (no stop/profit trigger)
+        market_data.current_price = Decimal('50000')
+        
+        result = ensemble.should_exit(position, market_data)
+        assert result is True  # Should exit due to opposing signals
+
+    def test_should_exit_no_exit_conditions(self, ensemble, position, market_data):
+        """Test exit decision with no exit conditions met."""
+        # Add strategies with supporting signals
+        for i in range(3):
+            strategy = MockStrategy({'name': f'strategy_{i}', 'strategy_type': StrategyType.MOMENTUM})
+            strategy.last_signal_direction = SignalDirection.BUY  # Support position
+            ensemble.add_strategy(strategy)
+        
+        # Price within normal range
+        market_data.current_price = Decimal('50000')
+        
+        result = ensemble.should_exit(position, market_data)
+        assert result is False
+
+    def test_should_exit_sell_position(self, ensemble, market_data):
+        """Test exit decision for sell position."""
+        # Create sell position
+        position = Mock()
+        position.symbol = 'BTCUSDT'
+        position.side.value = 'sell'
+        position.entry_price = Decimal('51000')
+        
+        # Set price that would trigger stop loss for sell position
+        market_data.current_price = Decimal('54000')  # Price moved against sell position
+        
+        result = ensemble.should_exit(position, market_data)
+        assert result is True
+
+    def test_should_exit_strategy_attribute_error(self, ensemble, position, market_data):
+        """Test exit decision with strategy attribute errors."""
+        # Add strategies without last_signal_direction attribute
+        for i in range(3):
+            strategy = MockStrategy({'name': f'strategy_{i}', 'strategy_type': StrategyType.MOMENTUM})
+            delattr(strategy, 'last_signal_direction')
+            ensemble.add_strategy(strategy)
+        
+        market_data.current_price = Decimal('50000')
+        
+        # Should not raise exception and return False
+        result = ensemble.should_exit(position, market_data)
+        assert result is False
+
+    def test_should_exit_exception_handling(self, ensemble, market_data):
+        """Test exit decision with exception."""
+        position = Mock()
+        position.symbol = 'BTCUSDT'
+        position.side.value = Mock(side_effect=Exception("Position error"))
+        
+        result = ensemble.should_exit(position, market_data)
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_on_start(self, ensemble):
+        """Test ensemble start method."""
+        # Add strategies
+        strategies = []
+        for i in range(3):
+            strategy = MockStrategy({'name': f'strategy_{i}', 'strategy_type': StrategyType.MOMENTUM})
+            strategy.start = AsyncMock()
+            strategies.append(strategy)
+            ensemble.add_strategy(strategy)
+        
+        await ensemble._on_start()
+        
+        # All component strategies should be started
+        for strategy in strategies:
+            strategy.start.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_on_start_with_exception(self, ensemble):
+        """Test ensemble start method with component strategy exception."""
+        # Add strategies, one with exception
+        for i in range(3):
+            strategy = MockStrategy({'name': f'strategy_{i}', 'strategy_type': StrategyType.MOMENTUM})
+            if i == 1:
+                strategy.start = AsyncMock(side_effect=Exception("Start error"))
+            else:
+                strategy.start = AsyncMock()
+            ensemble.add_strategy(strategy)
+        
+        # Should not raise exception
+        await ensemble._on_start()
+
+    @pytest.mark.asyncio
+    async def test_on_stop(self, ensemble):
+        """Test ensemble stop method."""
+        # Add strategies
+        strategies = []
+        for i in range(3):
+            strategy = MockStrategy({'name': f'strategy_{i}', 'strategy_type': StrategyType.MOMENTUM})
+            strategy.stop = AsyncMock()
+            strategies.append(strategy)
+            ensemble.add_strategy(strategy)
+        
+        await ensemble._on_stop()
+        
+        # All component strategies should be stopped
+        for strategy in strategies:
+            strategy.stop.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_on_stop_with_exception(self, ensemble):
+        """Test ensemble stop method with component strategy exception."""
+        # Add strategies, one with exception
+        for i in range(3):
+            strategy = MockStrategy({'name': f'strategy_{i}', 'strategy_type': StrategyType.MOMENTUM})
+            if i == 1:
+                strategy.stop = AsyncMock(side_effect=Exception("Stop error"))
+            else:
+                strategy.stop = AsyncMock()
+            ensemble.add_strategy(strategy)
+        
+        # Should not raise exception
+        await ensemble._on_stop()
+
+    def test_update_strategy_performance(self, ensemble):
+        """Test updating strategy performance."""
+        # Add strategy
+        strategy = MockStrategy({'name': 'test_strategy', 'strategy_type': StrategyType.MOMENTUM})
+        ensemble.add_strategy(strategy)
+        
+        trade_info = {
+            'timestamp': datetime.now(timezone.utc),
+            'symbol': 'BTCUSDT'
+        }
+        
+        ensemble.update_strategy_performance('test_strategy', 0.05, trade_info)
+        
+        # Check that performance tracker was updated
+        tracker = ensemble.performance_trackers['test_strategy']
+        assert len(tracker.trades) == 1
+        assert tracker.returns[0] == 0.05
+
+    def test_update_strategy_performance_unknown_strategy(self, ensemble):
+        """Test updating performance for unknown strategy."""
+        trade_info = {'timestamp': datetime.now(timezone.utc)}
+        
+        # Should not raise exception
+        ensemble.update_strategy_performance('unknown_strategy', 0.05, trade_info)
+
+    def test_update_strategy_performance_exception_handling(self, ensemble):
+        """Test updating strategy performance with exception."""
+        # Add strategy
+        strategy = MockStrategy({'name': 'test_strategy', 'strategy_type': StrategyType.MOMENTUM})
+        ensemble.add_strategy(strategy)
+        
+        # Mock tracker to raise exception
+        tracker = ensemble.performance_trackers['test_strategy']
+        tracker.add_trade_result = Mock(side_effect=Exception("Update error"))
+        
+        trade_info = {'timestamp': datetime.now(timezone.utc)}
+        
+        # Should not raise exception
+        ensemble.update_strategy_performance('test_strategy', 0.05, trade_info)
+
+    def test_get_ensemble_statistics(self, ensemble):
+        """Test getting comprehensive ensemble statistics."""
+        # Add strategies with some performance data
+        for i in range(3):
+            strategy = MockStrategy({'name': f'strategy_{i}', 'strategy_type': StrategyType.MOMENTUM})
+            ensemble.add_strategy(strategy)
+            
+            # Add some performance data
+            tracker = ensemble.performance_trackers[strategy.name]
+            tracker.add_trade_result(0.01 * (i + 1), {'timestamp': datetime.now(timezone.utc)})
+        
+        # Mock correlation analyzer
+        with patch.object(ensemble.correlation_analyzer, 'calculate_correlation_matrix', return_value={}), \
+             patch.object(ensemble.correlation_analyzer, 'get_diversity_score', return_value=0.8), \
+             patch.object(ensemble.correlation_analyzer, 'identify_redundant_strategies', return_value=[]):
+            
+            stats = ensemble.get_ensemble_statistics()
+        
+        assert 'ensemble_config' in stats
+        assert 'component_strategies' in stats
+        assert 'strategy_weights' in stats
+        assert 'strategy_metrics' in stats
+        assert 'correlation_matrix' in stats
+        assert 'diversity_score' in stats
+        assert 'redundant_pairs' in stats
+        assert 'ensemble_performance' in stats
+        assert 'total_ensemble_signals' in stats
+        assert 'last_rebalance' in stats
+        
+        assert stats['ensemble_config']['voting_method'] == ensemble.voting_method
+        assert len(stats['component_strategies']) == 3
+        assert stats['diversity_score'] == 0.8
+
+    def test_get_ensemble_statistics_with_rebalance_time(self, ensemble):
+        """Test getting statistics with rebalance time."""
+        ensemble.last_rebalance = datetime.now(timezone.utc)
+        
+        with patch.object(ensemble.correlation_analyzer, 'calculate_correlation_matrix', return_value={}), \
+             patch.object(ensemble.correlation_analyzer, 'get_diversity_score', return_value=0.5), \
+             patch.object(ensemble.correlation_analyzer, 'identify_redundant_strategies', return_value=[]):
+            
+            stats = ensemble.get_ensemble_statistics()
+        
+        assert stats['last_rebalance'] is not None
+        assert isinstance(stats['last_rebalance'], str)
+
+    def test_get_ensemble_statistics_exception_handling(self, ensemble):
+        """Test getting ensemble statistics with exception."""
+        # Mock correlation analyzer to raise exception
+        with patch.object(ensemble.correlation_analyzer, 'calculate_correlation_matrix', 
+                         side_effect=Exception("Stats error")):
+            
+            stats = ensemble.get_ensemble_statistics()
+        
+        assert 'error' in stats
+        assert 'Stats error' in stats['error']

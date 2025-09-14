@@ -1,0 +1,1629 @@
+"""
+Comprehensive StrategyService Integration Tests
+
+This module provides extensive test coverage for the StrategyService class,
+focusing on financial precision, error handling, service integration,
+and edge cases critical for trading systems.
+
+Coverage targets:
+- Analytics service integration
+- Cache layer functionality
+- Service container management
+- Financial calculations precision
+- Error scenarios and circuit breakers
+- Performance monitoring
+"""
+
+import asyncio
+from datetime import datetime, timezone
+from decimal import Decimal
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
+from uuid import uuid4
+
+import pytest
+
+from src.core.exceptions import ServiceError, StrategyError
+from src.core.types import (
+    MarketData,
+    Signal,
+    StrategyConfig,
+    StrategyMetrics,
+    StrategyStatus,
+    StrategyType,
+)
+from src.strategies.service import StrategyService
+
+
+class TestStrategyServiceInitialization:
+    """Test strategy service initialization and dependency injection."""
+    
+    def test_service_initialization_with_full_dependencies(self):
+        """Test service initialization with all dependencies provided."""
+        mock_repository = Mock()
+        mock_risk_manager = Mock()
+        mock_exchange_factory = Mock()
+        mock_data_service = Mock()
+        mock_service_manager = Mock()
+        
+        service = StrategyService(
+            name="TestStrategyService",
+            config={"test_key": "test_value"},
+            repository=mock_repository,
+            risk_manager=mock_risk_manager,
+            exchange_factory=mock_exchange_factory,
+            data_service=mock_data_service,
+            service_manager=mock_service_manager,
+        )
+        
+        assert service.name == "TestStrategyService"
+        assert service._repository == mock_repository
+        assert service._risk_manager == mock_risk_manager
+        assert service._exchange_factory == mock_exchange_factory
+        assert service._data_service == mock_data_service
+        assert service._service_manager == mock_service_manager
+        assert len(service._active_strategies) == 0
+        assert len(service._strategy_configs) == 0
+        assert len(service._strategy_metrics) == 0
+        assert len(service._signal_history) == 0
+    
+    def test_service_initialization_with_minimal_dependencies(self):
+        """Test service initialization with minimal dependencies."""
+        service = StrategyService()
+        
+        assert service.name == "StrategyService"
+        assert service._repository is None
+        assert service._risk_manager is None
+        assert service._exchange_factory is None
+        assert service._data_service is None
+        assert service._service_manager is None
+        assert service.cache_manager is not None
+    
+    def test_service_initialization_with_cache_config(self):
+        """Test service initialization with cache configuration."""
+        cache_config = {
+            "cache": {
+                "ttl": 600,
+                "max_size": 1000
+            }
+        }
+        
+        service = StrategyService(config=cache_config)
+        
+        assert service.cache_manager is not None
+    
+    @pytest.mark.asyncio
+    async def test_service_start_with_dependencies(self):
+        """Test service start with all dependencies."""
+        mock_service_manager = Mock()
+        service = StrategyService(service_manager=mock_service_manager)
+        
+        with patch.object(service, '_build_strategy_service_container') as mock_build:
+            mock_container = Mock()
+            mock_build.return_value = mock_container
+            
+            await service._do_start()
+            
+            mock_build.assert_called_once()
+            assert service._strategy_services == mock_container
+    
+    @pytest.mark.asyncio
+    async def test_service_start_without_dependencies(self):
+        """Test service start handles missing dependencies gracefully."""
+        service = StrategyService()
+        
+        with patch.object(service, '_build_strategy_service_container') as mock_build:
+            mock_container = Mock()
+            mock_build.return_value = mock_container
+            
+            await service._do_start()
+            
+            mock_build.assert_called_once()
+            assert service._strategy_services == mock_container
+    
+    @pytest.mark.asyncio
+    async def test_service_start_build_container_failure(self):
+        """Test service start handles container build failure."""
+        service = StrategyService()
+        
+        with patch.object(service, '_build_strategy_service_container') as mock_build:
+            mock_build.side_effect = Exception("Container build failed")
+            
+            with pytest.raises(ServiceError, match="Failed to start strategy service"):
+                await service._do_start()
+
+
+class TestServiceContainerBuilding:
+    """Test strategy service container building and dependency resolution."""
+    
+    @pytest.mark.asyncio
+    async def test_build_container_with_all_services(self):
+        """Test building container with all available services."""
+        mock_service_manager = Mock()
+        
+        # Mock all services
+        mock_risk_service = Mock()
+        mock_execution_service = Mock()
+        mock_monitoring_service = Mock()
+        mock_state_service = Mock()
+        mock_capital_service = Mock()
+        mock_analytics_service = Mock()
+        mock_ml_service = Mock()
+        mock_optimization_service = Mock()
+        
+        async def get_service_side_effect(service_name):
+            service_map = {
+                "risk_management": mock_risk_service,
+                "execution": mock_execution_service,
+                "monitoring": mock_monitoring_service,
+                "state": mock_state_service,
+                "capital_management": mock_capital_service,
+                "analytics": mock_analytics_service,
+                "ml": mock_ml_service,
+                "optimization": mock_optimization_service,
+            }
+            return service_map.get(service_name)
+        
+        mock_service_manager.get_service = AsyncMock(side_effect=get_service_side_effect)
+        
+        mock_data_service = Mock()
+        service = StrategyService(
+            service_manager=mock_service_manager,
+            data_service=mock_data_service
+        )
+        
+        with patch('src.strategies.service.create_strategy_service_container') as mock_create:
+            mock_container = Mock()
+            mock_container.get_service_status.return_value = {"all": "available"}
+            mock_create.return_value = mock_container
+            
+            container = await service._build_strategy_service_container()
+            
+            mock_create.assert_called_once_with(
+                risk_service=mock_risk_service,
+                data_service=mock_data_service,
+                execution_service=mock_execution_service,
+                monitoring_service=mock_monitoring_service,
+                state_service=mock_state_service,
+                capital_service=mock_capital_service,
+                analytics_service=mock_analytics_service,
+                ml_service=mock_ml_service,
+                optimization_service=mock_optimization_service,
+            )
+            assert container == mock_container
+    
+    @pytest.mark.asyncio
+    async def test_build_container_with_service_failures(self):
+        """Test building container when some services fail to load."""
+        mock_service_manager = Mock()
+        
+        async def get_service_side_effect(service_name):
+            if service_name == "risk_management":
+                return Mock()  # Only risk service available
+            raise Exception(f"Service {service_name} not available")
+        
+        mock_service_manager.get_service = AsyncMock(side_effect=get_service_side_effect)
+        
+        service = StrategyService(service_manager=mock_service_manager)
+        
+        with patch('src.strategies.service.create_strategy_service_container') as mock_create:
+            mock_container = Mock()
+            mock_container.get_service_status.return_value = {"risk": "available"}
+            mock_create.return_value = mock_container
+            
+            container = await service._build_strategy_service_container()
+            
+            # Should still create container with available services
+            assert container == mock_container
+            mock_create.assert_called_once()
+    
+    @pytest.mark.asyncio
+    async def test_build_container_fallback_on_failure(self):
+        """Test fallback to empty container when building fails."""
+        service = StrategyService()
+        
+        with patch('src.strategies.service.create_strategy_service_container') as mock_create:
+            mock_create.side_effect = Exception("Container creation failed")
+            
+            with patch('src.strategies.service.StrategyServiceContainer') as mock_container_class:
+                mock_empty_container = Mock()
+                mock_container_class.return_value = mock_empty_container
+                
+                container = await service._build_strategy_service_container()
+                
+                assert container == mock_empty_container
+                mock_container_class.assert_called_once_with()
+
+
+class TestStrategyRegistration:
+    """Test strategy registration and lifecycle management."""
+    
+    @pytest.fixture
+    def mock_strategy(self):
+        """Create a mock strategy instance."""
+        strategy = Mock()
+        strategy.services = Mock()
+        strategy.services.is_ready.return_value = True
+        strategy.status = StrategyStatus.INACTIVE
+        return strategy
+    
+    @pytest.fixture
+    def strategy_config(self):
+        """Create a test strategy configuration."""
+        return StrategyConfig(
+            name="TestStrategy",
+            strategy_type=StrategyType.TREND_FOLLOWING,
+            exchange_type="binance",
+            parameters={"param1": "value1"},
+            max_position_size=Decimal("1000.0"),
+            risk_per_trade=Decimal("0.02"),
+        )
+    
+    @pytest.mark.asyncio
+    async def test_register_strategy_success(self, mock_strategy, strategy_config):
+        """Test successful strategy registration."""
+        service = StrategyService()
+        strategy_id = "test_strategy_1"
+        
+        with patch.object(service, 'validate_strategy_config', return_value=True):
+            with patch.object(service, 'execute_with_monitoring') as mock_execute:
+                mock_execute.return_value = None
+                
+                await service.register_strategy(strategy_id, mock_strategy, strategy_config)
+                
+                mock_execute.assert_called_once_with(
+                    "register_strategy",
+                    service._register_strategy_impl,
+                    strategy_id,
+                    mock_strategy,
+                    strategy_config,
+                )
+    
+    @pytest.mark.asyncio
+    async def test_register_strategy_implementation_new_pattern(self, mock_strategy, strategy_config):
+        """Test strategy registration with new service container pattern."""
+        mock_repository = Mock()
+        mock_repository.create_strategy = AsyncMock()
+        
+        service = StrategyService(repository=mock_repository)
+        service._strategy_services = Mock()
+        
+        strategy_id = "test_strategy_1"
+        
+        with patch.object(service, 'validate_strategy_config', return_value=True):
+            await service._register_strategy_impl(strategy_id, mock_strategy, strategy_config)
+            
+            # Verify strategy is registered
+            assert strategy_id in service._active_strategies
+            assert service._active_strategies[strategy_id] == mock_strategy
+            assert strategy_id in service._strategy_configs
+            assert strategy_id in service._strategy_metrics
+            assert strategy_id in service._signal_history
+            
+            # Verify strategy services updated
+            assert mock_strategy.services == service._strategy_services
+            
+            # Verify database save attempted
+            mock_repository.create_strategy.assert_called_once()
+    
+    @pytest.mark.asyncio
+    async def test_register_strategy_legacy_pattern(self, strategy_config):
+        """Test strategy registration with legacy pattern."""
+        mock_strategy = Mock()
+        # Remove services attribute to simulate legacy strategy
+        del mock_strategy.services
+        
+        mock_risk_manager = Mock()
+        mock_exchange_factory = Mock()
+        mock_data_service = Mock()
+        
+        service = StrategyService(
+            risk_manager=mock_risk_manager,
+            exchange_factory=mock_exchange_factory,
+            data_service=mock_data_service,
+        )
+        
+        strategy_id = "test_legacy_strategy"
+        
+        # Mock exchange creation
+        mock_exchange = Mock()
+        mock_exchange_factory.get_exchange = AsyncMock(return_value=mock_exchange)
+        
+        with patch.object(service, 'validate_strategy_config', return_value=True):
+            await service._register_strategy_impl(strategy_id, mock_strategy, strategy_config)
+            
+            # Verify legacy setters called
+            mock_strategy.set_risk_manager.assert_called_once_with(mock_risk_manager)
+            mock_strategy.set_exchange.assert_called_once_with(mock_exchange)
+            mock_strategy.set_data_service.assert_called_once_with(mock_data_service)
+    
+    @pytest.mark.asyncio
+    async def test_register_strategy_already_exists(self, mock_strategy, strategy_config):
+        """Test registering strategy that already exists."""
+        service = StrategyService()
+        strategy_id = "existing_strategy"
+        
+        # Register strategy first time
+        service._active_strategies[strategy_id] = Mock()
+        
+        with pytest.raises(StrategyError, match="already registered"):
+            await service._register_strategy_impl(strategy_id, mock_strategy, strategy_config)
+    
+    @pytest.mark.asyncio
+    async def test_register_strategy_invalid_config(self, mock_strategy, strategy_config):
+        """Test registering strategy with invalid configuration."""
+        service = StrategyService()
+        strategy_id = "test_strategy"
+        
+        with patch.object(service, 'validate_strategy_config', return_value=False):
+            with pytest.raises(StrategyError, match="Invalid configuration"):
+                await service._register_strategy_impl(strategy_id, mock_strategy, strategy_config)
+    
+    @pytest.mark.asyncio
+    async def test_register_strategy_database_save_failure(self, mock_strategy, strategy_config):
+        """Test strategy registration continues when database save fails."""
+        mock_repository = Mock()
+        mock_repository.create_strategy = AsyncMock(side_effect=Exception("DB error"))
+        
+        service = StrategyService(repository=mock_repository)
+        service._strategy_services = Mock()
+        
+        strategy_id = "test_strategy"
+        
+        with patch.object(service, 'validate_strategy_config', return_value=True):
+            # Should not raise exception, just log warning
+            await service._register_strategy_impl(strategy_id, mock_strategy, strategy_config)
+            
+            # Strategy should still be registered
+            assert strategy_id in service._active_strategies
+    
+    @pytest.mark.asyncio
+    async def test_register_strategy_exchange_creation_failure(self, strategy_config):
+        """Test strategy registration when exchange creation fails."""
+        mock_strategy = Mock()
+        del mock_strategy.services  # Legacy pattern
+        
+        mock_exchange_factory = Mock()
+        mock_exchange_factory.get_exchange = AsyncMock(side_effect=Exception("Exchange error"))
+        
+        service = StrategyService(exchange_factory=mock_exchange_factory)
+        strategy_id = "test_strategy"
+        
+        with patch.object(service, 'validate_strategy_config', return_value=True):
+            # Should not raise exception, just log warning
+            await service._register_strategy_impl(strategy_id, mock_strategy, strategy_config)
+            
+            # Strategy should still be registered
+            assert strategy_id in service._active_strategies
+    
+    @pytest.mark.asyncio
+    async def test_start_strategy_success(self, mock_strategy):
+        """Test successful strategy start."""
+        service = StrategyService()
+        strategy_id = "test_strategy"
+        service._active_strategies[strategy_id] = mock_strategy
+        
+        mock_strategy.start = AsyncMock()
+        
+        with patch.object(service, '_validate_start_conditions', return_value=True):
+            with patch.object(service, 'execute_with_monitoring') as mock_execute:
+                mock_execute.return_value = None
+                
+                await service.start_strategy(strategy_id)
+                
+                mock_execute.assert_called_once_with(
+                    "start_strategy", 
+                    service._start_strategy_impl, 
+                    strategy_id
+                )
+    
+    @pytest.mark.asyncio
+    async def test_start_strategy_not_registered(self):
+        """Test starting unregistered strategy."""
+        service = StrategyService()
+        strategy_id = "nonexistent_strategy"
+        
+        with pytest.raises(StrategyError, match="not registered"):
+            await service._start_strategy_impl(strategy_id)
+    
+    @pytest.mark.asyncio
+    async def test_start_strategy_conditions_not_met(self, mock_strategy):
+        """Test starting strategy when conditions not met."""
+        service = StrategyService()
+        strategy_id = "test_strategy"
+        service._active_strategies[strategy_id] = mock_strategy
+        
+        with patch.object(service, '_validate_start_conditions', return_value=False):
+            with pytest.raises(StrategyError, match="Start conditions not met"):
+                await service._start_strategy_impl(strategy_id)
+    
+    @pytest.mark.asyncio
+    async def test_stop_strategy_success(self, mock_strategy):
+        """Test successful strategy stop."""
+        service = StrategyService()
+        strategy_id = "test_strategy"
+        service._active_strategies[strategy_id] = mock_strategy
+        
+        mock_strategy.stop = AsyncMock()
+        
+        with patch.object(service, 'execute_with_monitoring') as mock_execute:
+            mock_execute.return_value = None
+            
+            await service.stop_strategy(strategy_id)
+            
+            mock_execute.assert_called_once_with(
+                "stop_strategy", 
+                service._stop_strategy_impl, 
+                strategy_id
+            )
+
+
+class TestMarketDataProcessing:
+    """Test market data processing and signal generation."""
+    
+    @pytest.fixture
+    def market_data(self):
+        """Create test market data."""
+        return MarketData(
+            symbol="BTC/USDT",
+            timestamp=datetime.now(timezone.utc),
+            price=Decimal("50000.00"),
+            volume=Decimal("100.0"),
+            bid=Decimal("49999.00"),
+            ask=Decimal("50001.00"),
+        )
+    
+    @pytest.fixture
+    def mock_signals(self):
+        """Create mock trading signals."""
+        return [
+            Signal(
+                symbol="BTC/USDT",
+                direction=1,
+                strength=0.8,
+                timestamp=datetime.now(timezone.utc),
+                price=Decimal("50000.00"),
+            ),
+            Signal(
+                symbol="BTC/USDT",
+                direction=-1,
+                strength=0.6,
+                timestamp=datetime.now(timezone.utc),
+                price=Decimal("50000.00"),
+            ),
+        ]
+    
+    @pytest.mark.asyncio
+    async def test_process_market_data_success(self, market_data, mock_signals):
+        """Test successful market data processing."""
+        service = StrategyService()
+        
+        # Create mock strategy
+        mock_strategy = Mock()
+        mock_strategy.status = StrategyStatus.ACTIVE
+        mock_strategy.generate_signals = AsyncMock(return_value=mock_signals)
+        
+        strategy_id = "test_strategy"
+        service._active_strategies[strategy_id] = mock_strategy
+        service._strategy_metrics[strategy_id] = StrategyMetrics(strategy_id=strategy_id)
+        service._signal_history[strategy_id] = []
+        
+        with patch.object(service, 'validate_signal', return_value=True):
+            with patch.object(service, '_update_strategy_metrics') as mock_update:
+                mock_update.return_value = None
+                
+                with patch.object(service, 'execute_with_monitoring') as mock_execute:
+                    mock_execute.return_value = {strategy_id: mock_signals}
+                    
+                    result = await service.process_market_data(market_data)
+                    
+                    assert result == {strategy_id: mock_signals}
+                    mock_execute.assert_called_once()
+    
+    @pytest.mark.asyncio
+    async def test_process_market_data_inactive_strategy(self, market_data):
+        """Test processing with inactive strategy."""
+        service = StrategyService()
+        
+        mock_strategy = Mock()
+        mock_strategy.status = StrategyStatus.INACTIVE
+        
+        strategy_id = "inactive_strategy"
+        service._active_strategies[strategy_id] = mock_strategy
+        
+        result = await service._process_market_data_impl(market_data)
+        
+        # Inactive strategy should not be processed
+        assert result == {}
+    
+    @pytest.mark.asyncio
+    async def test_process_market_data_with_invalid_signals(self, market_data, mock_signals):
+        """Test processing with mix of valid and invalid signals."""
+        service = StrategyService()
+        
+        mock_strategy = Mock()
+        mock_strategy.status = StrategyStatus.ACTIVE
+        mock_strategy.generate_signals = AsyncMock(return_value=mock_signals)
+        
+        strategy_id = "test_strategy"
+        service._active_strategies[strategy_id] = mock_strategy
+        service._strategy_metrics[strategy_id] = StrategyMetrics(strategy_id=strategy_id)
+        service._signal_history[strategy_id] = []
+        
+        # Mock signal validation - first signal valid, second invalid
+        def validate_side_effect(strategy_id, signal):
+            return signal == mock_signals[0]
+        
+        with patch.object(service, 'validate_signal', side_effect=validate_side_effect):
+            with patch.object(service, '_update_strategy_metrics') as mock_update:
+                result = await service._process_market_data_impl(market_data)
+                
+                # Should only include valid signal
+                assert len(result[strategy_id]) == 1
+                assert result[strategy_id][0] == mock_signals[0]
+                
+                # Should update metrics with valid signals only
+                mock_update.assert_called_once_with(strategy_id, [mock_signals[0]])
+    
+    @pytest.mark.asyncio
+    async def test_process_market_data_strategy_error(self, market_data):
+        """Test processing when strategy raises error."""
+        service = StrategyService()
+        service._error_handler = Mock()
+        service._error_handler.handle_error = AsyncMock()
+        
+        mock_strategy = Mock()
+        mock_strategy.status = StrategyStatus.ACTIVE
+        mock_strategy.generate_signals = AsyncMock(side_effect=Exception("Strategy error"))
+        
+        strategy_id = "error_strategy"
+        service._active_strategies[strategy_id] = mock_strategy
+        
+        result = await service._process_market_data_impl(market_data)
+        
+        # Should handle error gracefully and return empty signals
+        assert result[strategy_id] == []
+        service._error_handler.handle_error.assert_called_once()
+    
+    @pytest.mark.asyncio
+    async def test_process_market_data_no_error_handler(self, market_data):
+        """Test processing error when no error handler available."""
+        service = StrategyService()
+        service._error_handler = None
+        
+        mock_strategy = Mock()
+        mock_strategy.status = StrategyStatus.ACTIVE
+        mock_strategy.generate_signals = AsyncMock(side_effect=Exception("Strategy error"))
+        
+        strategy_id = "error_strategy"
+        service._active_strategies[strategy_id] = mock_strategy
+        
+        # Should not raise exception, just log error
+        result = await service._process_market_data_impl(market_data)
+        
+        assert result[strategy_id] == []
+
+
+class TestSignalValidation:
+    """Test trading signal validation."""
+    
+    @pytest.fixture
+    def valid_signal(self):
+        """Create a valid trading signal."""
+        return Signal(
+            symbol="BTC/USDT",
+            direction=1,
+            strength=0.8,
+            timestamp=datetime.now(timezone.utc),
+            price=Decimal("50000.00"),
+        )
+    
+    @pytest.mark.asyncio
+    async def test_validate_signal_success(self, valid_signal):
+        """Test successful signal validation."""
+        service = StrategyService()
+        strategy_id = "test_strategy"
+        
+        # Mock strategy validation
+        mock_strategy = Mock()
+        mock_strategy.validate_signal = AsyncMock(return_value=True)
+        service._active_strategies[strategy_id] = mock_strategy
+        
+        # Mock risk manager validation
+        mock_risk_manager = Mock()
+        mock_risk_manager.validate_signal = AsyncMock(return_value=True)
+        service._risk_manager = mock_risk_manager
+        
+        result = await service.validate_signal(strategy_id, valid_signal)
+        
+        assert result is True
+        mock_strategy.validate_signal.assert_called_once_with(valid_signal)
+        mock_risk_manager.validate_signal.assert_called_once_with(valid_signal)
+    
+    @pytest.mark.asyncio
+    async def test_validate_signal_missing_symbol(self):
+        """Test validation fails for signal without symbol."""
+        service = StrategyService()
+        
+        invalid_signal = Signal(
+            symbol="",  # Empty symbol
+            direction=1,
+            strength=0.8,
+            timestamp=datetime.now(timezone.utc),
+            price=Decimal("50000.00"),
+        )
+        
+        result = await service.validate_signal("strategy_id", invalid_signal)
+        assert result is False
+    
+    @pytest.mark.asyncio
+    async def test_validate_signal_missing_direction(self):
+        """Test validation fails for signal without direction."""
+        service = StrategyService()
+        
+        invalid_signal = Signal(
+            symbol="BTC/USDT",
+            direction=0,  # No direction
+            strength=0.8,
+            timestamp=datetime.now(timezone.utc),
+            price=Decimal("50000.00"),
+        )
+        
+        result = await service.validate_signal("strategy_id", invalid_signal)
+        assert result is False
+    
+    @pytest.mark.asyncio
+    async def test_validate_signal_low_confidence(self):
+        """Test validation fails for low confidence signal."""
+        service = StrategyService()
+        
+        weak_signal = Signal(
+            symbol="BTC/USDT",
+            direction=1,
+            strength=0.05,  # Below MIN_SIGNAL_CONFIDENCE
+            timestamp=datetime.now(timezone.utc),
+            price=Decimal("50000.00"),
+        )
+        
+        result = await service.validate_signal("strategy_id", weak_signal)
+        assert result is False
+    
+    @pytest.mark.asyncio
+    async def test_validate_signal_strategy_rejection(self, valid_signal):
+        """Test validation fails when strategy rejects signal."""
+        service = StrategyService()
+        strategy_id = "test_strategy"
+        
+        mock_strategy = Mock()
+        mock_strategy.validate_signal = AsyncMock(return_value=False)
+        service._active_strategies[strategy_id] = mock_strategy
+        
+        result = await service.validate_signal(strategy_id, valid_signal)
+        
+        assert result is False
+        mock_strategy.validate_signal.assert_called_once_with(valid_signal)
+    
+    @pytest.mark.asyncio
+    async def test_validate_signal_risk_manager_rejection(self, valid_signal):
+        """Test validation fails when risk manager rejects signal."""
+        service = StrategyService()
+        strategy_id = "test_strategy"
+        
+        mock_risk_manager = Mock()
+        mock_risk_manager.validate_signal = AsyncMock(return_value=False)
+        service._risk_manager = mock_risk_manager
+        
+        result = await service.validate_signal(strategy_id, valid_signal)
+        
+        assert result is False
+        mock_risk_manager.validate_signal.assert_called_once_with(valid_signal)
+    
+    @pytest.mark.asyncio
+    async def test_validate_signal_validation_error(self, valid_signal):
+        """Test validation handles errors gracefully."""
+        service = StrategyService()
+        strategy_id = "test_strategy"
+        
+        mock_strategy = Mock()
+        mock_strategy.validate_signal = AsyncMock(side_effect=Exception("Validation error"))
+        service._active_strategies[strategy_id] = mock_strategy
+        
+        result = await service.validate_signal(strategy_id, valid_signal)
+        
+        # Should return False on validation error
+        assert result is False
+
+
+class TestAnalyticsIntegration:
+    """Test analytics service integration and performance tracking."""
+    
+    @pytest.fixture
+    def mock_analytics_service(self):
+        """Create mock analytics service."""
+        mock_service = Mock()
+        mock_service.record_strategy_performance = AsyncMock()
+        return mock_service
+    
+    @pytest.fixture
+    def strategy_with_analytics(self, mock_analytics_service):
+        """Create service with analytics integration."""
+        service = StrategyService()
+        
+        # Mock strategy services container
+        mock_container = Mock()
+        mock_container.analytics_service = mock_analytics_service
+        service._strategy_services = mock_container
+        
+        # Set up test data
+        strategy_id = "test_strategy"
+        service._strategy_configs[strategy_id] = StrategyConfig(
+            name="TestStrategy",
+            strategy_type=StrategyType.TREND_FOLLOWING,
+            parameters={"test": "value"},
+        )
+        service._strategy_metrics[strategy_id] = StrategyMetrics(strategy_id=strategy_id)
+        service._signal_history[strategy_id] = []
+        
+        return service, strategy_id
+    
+    @pytest.mark.asyncio
+    async def test_update_strategy_metrics_with_analytics(self, mock_analytics_service):
+        """Test strategy metrics update with analytics integration."""
+        service, strategy_id = self.strategy_with_analytics(mock_analytics_service)
+        
+        # Create test signals
+        signals = [
+            Signal(
+                symbol="BTC/USDT",
+                direction=1,
+                strength=0.8,
+                timestamp=datetime.now(timezone.utc),
+                price=Decimal("50000.00"),
+            )
+        ]
+        
+        with patch.object(service, '_record_strategy_analytics') as mock_record:
+            await service._update_strategy_metrics(strategy_id, signals)
+            
+            # Verify metrics updated
+            metrics = service._strategy_metrics[strategy_id]
+            assert metrics.signals_generated == 1
+            assert metrics.last_signal_time is not None
+            assert metrics.last_updated is not None
+            
+            # Verify analytics recording called
+            mock_record.assert_called_once_with(strategy_id, signals)
+    
+    @pytest.mark.asyncio
+    async def test_update_strategy_metrics_without_analytics(self):
+        """Test metrics update when analytics service not available."""
+        service = StrategyService()
+        strategy_id = "test_strategy"
+        service._strategy_metrics[strategy_id] = StrategyMetrics(strategy_id=strategy_id)
+        
+        signals = [
+            Signal(
+                symbol="BTC/USDT",
+                direction=1,
+                strength=0.7,
+                timestamp=datetime.now(timezone.utc),
+                price=Decimal("50000.00"),
+            )
+        ]
+        
+        # Should not raise error when analytics not available
+        await service._update_strategy_metrics(strategy_id, signals)
+        
+        metrics = service._strategy_metrics[strategy_id]
+        assert metrics.signals_generated == 1
+    
+    @pytest.mark.asyncio
+    async def test_record_strategy_analytics_success(self, mock_analytics_service):
+        """Test successful strategy analytics recording."""
+        service, strategy_id = self.strategy_with_analytics(mock_analytics_service)
+        
+        # Add signal history
+        signal_history = [
+            Signal(
+                symbol="BTC/USDT",
+                direction=1,
+                strength=0.8,
+                timestamp=datetime.now(timezone.utc),
+                price=Decimal("50000.00"),
+            )
+        ] * 10  # 10 signals
+        service._signal_history[strategy_id] = signal_history
+        
+        signals = [signal_history[0]]  # New signal
+        
+        with patch.object(service, '_calculate_win_rate', return_value=75.0):
+            with patch.object(service, '_calculate_sharpe_ratio', return_value=1.5):
+                with patch.object(service, '_calculate_max_drawdown', return_value=5.0):
+                    await service._record_strategy_analytics(strategy_id, signals)
+                    
+                    # Verify analytics service called with correct data
+                    mock_analytics_service.record_strategy_performance.assert_called_once()
+                    call_args = mock_analytics_service.record_strategy_performance.call_args
+                    
+                    assert call_args.kwargs['strategy_id'] == strategy_id
+                    performance_data = call_args.kwargs['performance_data']
+                    
+                    assert performance_data['strategy_id'] == strategy_id
+                    assert performance_data['strategy_type'] == StrategyType.TREND_FOLLOWING
+                    assert performance_data['signals_generated'] == 1
+                    assert performance_data['total_signals'] == 10
+                    assert performance_data['win_rate'] == 75.0
+                    assert performance_data['sharpe_ratio'] == 1.5
+                    assert performance_data['max_drawdown'] == 5.0
+    
+    @pytest.mark.asyncio
+    async def test_record_strategy_analytics_failure(self, mock_analytics_service):
+        """Test analytics recording handles failures gracefully."""
+        service, strategy_id = self.strategy_with_analytics(mock_analytics_service)
+        
+        # Mock analytics service failure
+        mock_analytics_service.record_strategy_performance.side_effect = Exception("Analytics error")
+        
+        signals = [
+            Signal(
+                symbol="BTC/USDT",
+                direction=1,
+                strength=0.8,
+                timestamp=datetime.now(timezone.utc),
+                price=Decimal("50000.00"),
+            )
+        ]
+        
+        # Should not raise error, just log warning
+        await service._record_strategy_analytics(strategy_id, signals)
+    
+    @pytest.mark.asyncio
+    async def test_calculate_win_rate_precision(self):
+        """Test win rate calculation with financial precision."""
+        service = StrategyService()
+        strategy_id = "test_strategy"
+        
+        # Create signal history with known pattern
+        signal_history = []
+        for i in range(100):
+            strength = 0.8 if i < 70 else 0.5  # 70% strong signals
+            signal_history.append(
+                Signal(
+                    symbol="BTC/USDT",
+                    direction=1,
+                    strength=strength,
+                    timestamp=datetime.now(timezone.utc),
+                    price=Decimal("50000.00"),
+                )
+            )
+        
+        win_rate = await service._calculate_win_rate(strategy_id, signal_history)
+        
+        # Should return 70% (70 strong signals out of 100, but limited to last 50)
+        # Last 50 signals: 20 strong (indices 50-69) + 30 weak (indices 70-99)
+        expected_win_rate = (20 / 50) * 100.0
+        assert win_rate == expected_win_rate
+    
+    @pytest.mark.asyncio
+    async def test_calculate_win_rate_insufficient_data(self):
+        """Test win rate calculation with insufficient data."""
+        service = StrategyService()
+        strategy_id = "test_strategy"
+        
+        # Empty signal history
+        win_rate = await service._calculate_win_rate(strategy_id, [])
+        assert win_rate == 0.0
+        
+        # Single signal
+        single_signal = [
+            Signal(
+                symbol="BTC/USDT",
+                direction=1,
+                strength=0.8,
+                timestamp=datetime.now(timezone.utc),
+                price=Decimal("50000.00"),
+            )
+        ]
+        win_rate = await service._calculate_win_rate(strategy_id, single_signal)
+        assert win_rate == 0.0
+    
+    @pytest.mark.asyncio
+    async def test_calculate_sharpe_ratio_precision(self):
+        """Test Sharpe ratio calculation with financial precision."""
+        service = StrategyService()
+        strategy_id = "test_strategy"
+        
+        # Create signal history with known distribution
+        signal_history = []
+        strengths = [0.6, 0.8, 0.4, 0.9, 0.5, 0.7, 0.6, 0.8, 0.5, 0.7]  # Mean = 0.66
+        for strength in strengths:
+            signal_history.append(
+                Signal(
+                    symbol="BTC/USDT",
+                    direction=1,
+                    strength=strength,
+                    timestamp=datetime.now(timezone.utc),
+                    price=Decimal("50000.00"),
+                )
+            )
+        service._signal_history[strategy_id] = signal_history
+        
+        sharpe_ratio = await service._calculate_sharpe_ratio(strategy_id)
+        
+        # Manual calculation for verification
+        mean_return = sum(strengths) / len(strengths)
+        variance = sum((s - mean_return) ** 2 for s in strengths) / len(strengths)
+        std_dev = variance ** 0.5
+        expected_sharpe = mean_return / std_dev
+        
+        assert abs(sharpe_ratio - expected_sharpe) < 0.001  # Allow small floating point errors
+    
+    @pytest.mark.asyncio
+    async def test_calculate_max_drawdown_precision(self):
+        """Test maximum drawdown calculation with financial precision."""
+        service = StrategyService()
+        strategy_id = "test_strategy"
+        
+        # Create signal history simulating drawdown scenario
+        strengths = [1.0, 0.9, 0.8, 0.3, 0.2, 0.4, 0.6, 0.8]  # Max drawdown from 1.0 to 0.2
+        signal_history = []
+        for strength in strengths:
+            signal_history.append(
+                Signal(
+                    symbol="BTC/USDT",
+                    direction=1,
+                    strength=strength,
+                    timestamp=datetime.now(timezone.utc),
+                    price=Decimal("50000.00"),
+                )
+            )
+        service._signal_history[strategy_id] = signal_history
+        
+        max_drawdown = await service._calculate_max_drawdown(strategy_id)
+        
+        # Expected max drawdown: (1.0 - 0.2) / 1.0 * 100 = 80%
+        expected_drawdown = 80.0
+        assert abs(max_drawdown - expected_drawdown) < 0.001
+
+
+class TestCachingBehavior:
+    """Test caching layer functionality."""
+    
+    @pytest.fixture
+    def service_with_cache(self):
+        """Create service with cache manager."""
+        cache_config = {"cache": {"enabled": True}}
+        return StrategyService(config=cache_config)
+    
+    @pytest.mark.asyncio
+    async def test_get_cached_strategy_metrics_hit(self, service_with_cache):
+        """Test cache hit for strategy metrics."""
+        strategy_id = "test_strategy"
+        
+        # Set up metrics
+        metrics = StrategyMetrics(
+            strategy_id=strategy_id,
+            signals_generated=100,
+            last_signal_time=datetime.now(timezone.utc),
+            last_updated=datetime.now(timezone.utc),
+        )
+        service_with_cache._strategy_metrics[strategy_id] = metrics
+        
+        cached_metrics = await service_with_cache.get_cached_strategy_metrics(strategy_id)
+        
+        assert cached_metrics is not None
+        assert cached_metrics["strategy_id"] == strategy_id
+        assert cached_metrics["signals_generated"] == 100
+        assert "cached_at" in cached_metrics
+    
+    @pytest.mark.asyncio
+    async def test_get_cached_strategy_metrics_miss(self, service_with_cache):
+        """Test cache miss for strategy metrics."""
+        strategy_id = "nonexistent_strategy"
+        
+        cached_metrics = await service_with_cache.get_cached_strategy_metrics(strategy_id)
+        
+        assert cached_metrics is None
+    
+    @pytest.mark.asyncio
+    async def test_get_strategy_performance_with_cache_fresh(self, service_with_cache):
+        """Test performance retrieval with fresh cached data."""
+        strategy_id = "test_strategy"
+        
+        # Mock strategy and config
+        mock_strategy = Mock()
+        mock_strategy.status = StrategyStatus.ACTIVE
+        service_with_cache._active_strategies[strategy_id] = mock_strategy
+        
+        config = StrategyConfig(
+            name="TestStrategy",
+            strategy_type=StrategyType.TREND_FOLLOWING,
+            parameters={"test": "value"},
+        )
+        service_with_cache._strategy_configs[strategy_id] = config
+        
+        # Set up fresh cached metrics
+        fresh_time = datetime.now(timezone.utc)
+        metrics = StrategyMetrics(
+            strategy_id=strategy_id,
+            signals_generated=50,
+            last_updated=fresh_time,
+        )
+        service_with_cache._strategy_metrics[strategy_id] = metrics
+        
+        with patch.object(service_with_cache, 'get_strategy_performance') as mock_full_perf:
+            result = await service_with_cache.get_strategy_performance_with_cache(strategy_id)
+            
+            # Should use cached data, not call full performance method
+            assert result is not None
+            assert result["strategy_id"] == strategy_id
+            mock_full_perf.assert_not_called()
+    
+    @pytest.mark.asyncio
+    async def test_get_strategy_performance_with_cache_stale(self, service_with_cache):
+        """Test performance retrieval with stale cached data."""
+        strategy_id = "test_strategy"
+        
+        # Mock strategy and config
+        mock_strategy = Mock()
+        mock_strategy.status = StrategyStatus.ACTIVE
+        service_with_cache._active_strategies[strategy_id] = mock_strategy
+        
+        config = StrategyConfig(
+            name="TestStrategy",
+            strategy_type=StrategyType.TREND_FOLLOWING,
+            parameters={"test": "value"},
+        )
+        service_with_cache._strategy_configs[strategy_id] = config
+        
+        # Set up stale cached metrics (1 hour ago)
+        stale_time = datetime.now(timezone.utc).replace(hour=datetime.now().hour - 1)
+        metrics = StrategyMetrics(
+            strategy_id=strategy_id,
+            signals_generated=50,
+            last_updated=stale_time,
+        )
+        service_with_cache._strategy_metrics[strategy_id] = metrics
+        
+        with patch.object(service_with_cache, 'get_strategy_performance') as mock_full_perf:
+            mock_full_perf.return_value = {"strategy_id": strategy_id, "full_data": True}
+            
+            result = await service_with_cache.get_strategy_performance_with_cache(strategy_id)
+            
+            # Should fall back to full performance method
+            mock_full_perf.assert_called_once_with(strategy_id)
+            assert result["full_data"] is True
+    
+    @pytest.mark.asyncio
+    async def test_get_strategy_performance_with_cache_error_fallback(self, service_with_cache):
+        """Test cache error fallback to full calculation."""
+        strategy_id = "test_strategy"
+        
+        with patch.object(service_with_cache, 'get_cached_strategy_metrics') as mock_cached:
+            mock_cached.side_effect = Exception("Cache error")
+            
+            with patch.object(service_with_cache, 'get_strategy_performance') as mock_full_perf:
+                mock_full_perf.return_value = {"strategy_id": strategy_id, "fallback": True}
+                
+                result = await service_with_cache.get_strategy_performance_with_cache(strategy_id)
+                
+                # Should fall back to full performance method
+                mock_full_perf.assert_called_once_with(strategy_id)
+                assert result["fallback"] is True
+    
+    @pytest.mark.asyncio
+    async def test_cache_strategy_signals_decorator(self, service_with_cache):
+        """Test cache decorator for strategy signals."""
+        # This tests the cache_strategy_signals decorator
+        from src.strategies.service import cache_strategy_signals
+        
+        @cache_strategy_signals(strategy_id_arg_name="strategy_id", ttl=300)
+        async def mock_get_signals(strategy_id: str):
+            return {"signals": f"data_for_{strategy_id}"}
+        
+        strategy_id = "test_strategy"
+        
+        # First call should execute function
+        result1 = await mock_get_signals(strategy_id)
+        assert result1["signals"] == f"data_for_{strategy_id}"
+        
+        # Second call should use cache (if caching implemented)
+        result2 = await mock_get_signals(strategy_id)
+        assert result2["signals"] == f"data_for_{strategy_id}"
+
+
+class TestErrorHandlingAndCircuitBreakers:
+    """Test error handling and circuit breaker functionality."""
+    
+    @pytest.fixture
+    def service_with_error_handler(self):
+        """Create service with error handler."""
+        service = StrategyService()
+        service._error_handler = Mock()
+        service._error_handler.handle_error = AsyncMock()
+        return service
+    
+    @pytest.mark.asyncio
+    async def test_validation_error_handling(self, service_with_error_handler):
+        """Test validation error handling in signal processing."""
+        strategy_id = "error_strategy"
+        
+        # Create strategy that raises validation error
+        mock_strategy = Mock()
+        mock_strategy.status = StrategyStatus.ACTIVE
+        mock_strategy.generate_signals = AsyncMock(side_effect=ValueError("Validation failed"))
+        
+        service_with_error_handler._active_strategies[strategy_id] = mock_strategy
+        
+        market_data = MarketData(
+            symbol="BTC/USDT",
+            timestamp=datetime.now(timezone.utc),
+            price=Decimal("50000.00"),
+            volume=Decimal("100.0"),
+            bid=Decimal("49999.00"),
+            ask=Decimal("50001.00"),
+        )
+        
+        result = await service_with_error_handler._process_market_data_impl(market_data)
+        
+        # Should handle error gracefully
+        assert result[strategy_id] == []
+        service_with_error_handler._error_handler.handle_error.assert_called_once()
+    
+    @pytest.mark.asyncio
+    async def test_service_error_propagation(self):
+        """Test service error propagation in critical operations."""
+        service = StrategyService()
+        
+        with patch.object(service, '_build_strategy_service_container') as mock_build:
+            mock_build.side_effect = Exception("Critical service failure")
+            
+            with pytest.raises(ServiceError, match="Failed to start strategy service"):
+                await service._do_start()
+    
+    @pytest.mark.asyncio
+    async def test_signal_validation_exception_handling(self):
+        """Test signal validation handles exceptions gracefully."""
+        service = StrategyService()
+        strategy_id = "test_strategy"
+        
+        signal = Signal(
+            symbol="BTC/USDT",
+            direction=1,
+            strength=0.8,
+            timestamp=datetime.now(timezone.utc),
+            price=Decimal("50000.00"),
+        )
+        
+        # Mock strategy that raises exception during validation
+        mock_strategy = Mock()
+        mock_strategy.validate_signal = AsyncMock(side_effect=Exception("Validation error"))
+        service._active_strategies[strategy_id] = mock_strategy
+        
+        result = await service.validate_signal(strategy_id, signal)
+        
+        # Should return False on exception
+        assert result is False
+    
+    @pytest.mark.asyncio
+    async def test_risk_manager_exception_handling(self):
+        """Test risk manager exception handling in signal validation."""
+        service = StrategyService()
+        strategy_id = "test_strategy"
+        
+        signal = Signal(
+            symbol="BTC/USDT",
+            direction=1,
+            strength=0.8,
+            timestamp=datetime.now(timezone.utc),
+            price=Decimal("50000.00"),
+        )
+        
+        # Mock risk manager that raises exception
+        mock_risk_manager = Mock()
+        mock_risk_manager.validate_signal = AsyncMock(side_effect=Exception("Risk validation error"))
+        service._risk_manager = mock_risk_manager
+        
+        result = await service.validate_signal(strategy_id, signal)
+        
+        # Should return False on exception
+        assert result is False
+
+
+class TestPerformanceMonitoring:
+    """Test performance monitoring and metrics collection."""
+    
+    @pytest.mark.asyncio
+    async def test_strategy_metrics_initialization(self):
+        """Test strategy metrics are properly initialized."""
+        service = StrategyService()
+        strategy_id = "test_strategy"
+        
+        # Simulate strategy registration
+        service._strategy_metrics[strategy_id] = StrategyMetrics(strategy_id=strategy_id)
+        
+        metrics = service._strategy_metrics[strategy_id]
+        assert metrics.strategy_id == strategy_id
+        assert metrics.signals_generated == 0
+        assert metrics.last_signal_time is None
+        assert metrics.last_updated is not None
+    
+    @pytest.mark.asyncio
+    async def test_signal_history_management(self):
+        """Test signal history is properly maintained."""
+        service = StrategyService()
+        strategy_id = "test_strategy"
+        service._signal_history[strategy_id] = []
+        
+        # Add signals to history
+        signals = [
+            Signal(
+                symbol="BTC/USDT",
+                direction=1,
+                strength=0.8,
+                timestamp=datetime.now(timezone.utc),
+                price=Decimal("50000.00"),
+            )
+        ] * 5
+        
+        service._signal_history[strategy_id].extend(signals)
+        
+        assert len(service._signal_history[strategy_id]) == 5
+        for signal in service._signal_history[strategy_id]:
+            assert signal.symbol == "BTC/USDT"
+            assert signal.strength == 0.8
+    
+    @pytest.mark.asyncio
+    async def test_get_all_strategies_performance(self):
+        """Test getting performance data for all strategies."""
+        service = StrategyService()
+        
+        # Set up multiple strategies
+        strategy_ids = ["strategy_1", "strategy_2", "strategy_3"]
+        for strategy_id in strategy_ids:
+            mock_strategy = Mock()
+            mock_strategy.status = StrategyStatus.ACTIVE
+            service._active_strategies[strategy_id] = mock_strategy
+            
+            config = StrategyConfig(
+                name=f"Strategy_{strategy_id}",
+                strategy_type=StrategyType.TREND_FOLLOWING,
+                parameters={"param": "value"},
+            )
+            service._strategy_configs[strategy_id] = config
+            service._strategy_metrics[strategy_id] = StrategyMetrics(strategy_id=strategy_id)
+        
+        # Mock performance data
+        def mock_performance_impl(strategy_id):
+            return {
+                "strategy_id": strategy_id,
+                "status": "active",
+                "performance": f"data_for_{strategy_id}"
+            }
+        
+        with patch.object(service, '_get_strategy_performance_impl', side_effect=mock_performance_impl):
+            all_strategies = await service.get_all_strategies()
+            
+            assert len(all_strategies) == 3
+            for strategy_id in strategy_ids:
+                assert strategy_id in all_strategies
+                assert all_strategies[strategy_id]["strategy_id"] == strategy_id
+                assert all_strategies[strategy_id]["performance"] == f"data_for_{strategy_id}"
+    
+    @pytest.mark.asyncio
+    async def test_get_all_strategies_with_errors(self):
+        """Test getting all strategies when some have errors."""
+        service = StrategyService()
+        
+        # Set up strategies
+        service._active_strategies["working_strategy"] = Mock()
+        service._active_strategies["error_strategy"] = Mock()
+        
+        def mock_performance_impl(strategy_id):
+            if strategy_id == "error_strategy":
+                raise Exception(f"Error getting performance for {strategy_id}")
+            return {"strategy_id": strategy_id, "status": "working"}
+        
+        with patch.object(service, '_get_strategy_performance_impl', side_effect=mock_performance_impl):
+            all_strategies = await service.get_all_strategies()
+            
+            # Should include working strategy, skip error strategy
+            assert "working_strategy" in all_strategies
+            assert "error_strategy" not in all_strategies
+    
+    @pytest.mark.asyncio
+    async def test_service_health_check(self):
+        """Test service health check functionality."""
+        service = StrategyService()
+        
+        # Set up healthy strategies
+        for i in range(3):
+            strategy_id = f"strategy_{i}"
+            mock_strategy = Mock()
+            mock_strategy.status = StrategyStatus.ACTIVE
+            service._active_strategies[strategy_id] = mock_strategy
+            
+            metrics = StrategyMetrics(
+                strategy_id=strategy_id,
+                last_updated=datetime.now(timezone.utc)
+            )
+            service._strategy_metrics[strategy_id] = metrics
+        
+        health = await service._service_health_check()
+        
+        from src.core.base.interfaces import HealthStatus
+        assert health == HealthStatus.HEALTHY
+    
+    @pytest.mark.asyncio
+    async def test_service_health_check_stuck_strategies(self):
+        """Test health check detects stuck strategies."""
+        service = StrategyService()
+        
+        # Set up stuck strategy (old last_updated time)
+        strategy_id = "stuck_strategy"
+        mock_strategy = Mock()
+        mock_strategy.status = StrategyStatus.ACTIVE
+        service._active_strategies[strategy_id] = mock_strategy
+        
+        # Set last_updated to more than STRATEGY_METRICS_UPDATE_TIMEOUT ago
+        old_time = datetime.now(timezone.utc).replace(minute=datetime.now().minute - 10)
+        metrics = StrategyMetrics(
+            strategy_id=strategy_id,
+            last_updated=old_time
+        )
+        service._strategy_metrics[strategy_id] = metrics
+        
+        health = await service._service_health_check()
+        
+        from src.core.base.interfaces import HealthStatus
+        assert health == HealthStatus.DEGRADED
+    
+    @pytest.mark.asyncio
+    async def test_service_health_check_no_strategies(self):
+        """Test health check with no active strategies."""
+        service = StrategyService()
+        
+        health = await service._service_health_check()
+        
+        from src.core.base.interfaces import HealthStatus
+        assert health == HealthStatus.DEGRADED
+    
+    def test_get_service_metrics(self):
+        """Test service metrics collection."""
+        service = StrategyService()
+        
+        # Set up test data
+        strategy_ids = ["strategy_1", "strategy_2"]
+        for i, strategy_id in enumerate(strategy_ids):
+            mock_strategy = Mock()
+            mock_strategy.status = StrategyStatus.ACTIVE if i == 0 else StrategyStatus.INACTIVE
+            service._active_strategies[strategy_id] = mock_strategy
+            
+            # Add signal history
+            service._signal_history[strategy_id] = [Mock()] * (i + 1) * 5  # 5 and 10 signals
+        
+        with patch.object(service, 'get_metrics') as mock_parent_metrics:
+            mock_parent_metrics.return_value = {"base_metric": "value"}
+            
+            metrics = service.get_metrics()
+            
+            assert metrics["base_metric"] == "value"
+            assert metrics["total_strategies"] == 2
+            assert metrics["running_strategies"] == 1
+            assert metrics["total_signals_generated"] == 15  # 5 + 10
+            assert "strategies_by_status" in metrics
+            assert metrics["strategies_by_status"]["active"] == 1
+            assert metrics["strategies_by_status"]["inactive"] == 1
+
+
+class TestDependencyResolution:
+    """Test dependency resolution functionality."""
+    
+    def test_resolve_dependency_success(self):
+        """Test successful dependency resolution."""
+        mock_repository = Mock()
+        mock_risk_manager = Mock()
+        mock_exchange_factory = Mock()
+        mock_data_service = Mock()
+        
+        service = StrategyService(
+            repository=mock_repository,
+            risk_manager=mock_risk_manager,
+            exchange_factory=mock_exchange_factory,
+            data_service=mock_data_service,
+        )
+        
+        # Test all dependencies can be resolved
+        assert service.resolve_dependency("StrategyRepository") == mock_repository
+        assert service.resolve_dependency("RiskManager") == mock_risk_manager
+        assert service.resolve_dependency("ExchangeFactory") == mock_exchange_factory
+        assert service.resolve_dependency("DataService") == mock_data_service
+    
+    def test_resolve_dependency_not_found(self):
+        """Test dependency resolution for unknown dependency."""
+        service = StrategyService()
+        
+        with pytest.raises(KeyError, match="Unknown dependency"):
+            service.resolve_dependency("UnknownDependency")
+    
+    def test_resolve_dependency_not_available(self):
+        """Test dependency resolution when dependency is None."""
+        service = StrategyService()
+        
+        with pytest.raises(KeyError, match="Dependency StrategyRepository not available"):
+            service.resolve_dependency("StrategyRepository")
+
+
+class TestEdgeCasesAndBoundaryConditions:
+    """Test edge cases and boundary conditions."""
+    
+    @pytest.mark.asyncio
+    async def test_cleanup_nonexistent_strategy(self):
+        """Test cleanup of nonexistent strategy."""
+        service = StrategyService()
+        
+        # Should not raise error for nonexistent strategy
+        await service._cleanup_strategy_impl("nonexistent_strategy")
+    
+    @pytest.mark.asyncio
+    async def test_cleanup_strategy_with_all_features(self):
+        """Test cleanup of strategy with all optional features."""
+        service = StrategyService()
+        strategy_id = "full_featured_strategy"
+        
+        # Mock strategy with all features
+        mock_strategy = Mock()
+        mock_strategy.status = StrategyStatus.ACTIVE
+        mock_strategy.stop = AsyncMock()
+        mock_strategy.cleanup = Mock()
+        
+        service._active_strategies[strategy_id] = mock_strategy
+        service._strategy_configs[strategy_id] = Mock()
+        service._strategy_metrics[strategy_id] = Mock()
+        service._signal_history[strategy_id] = []
+        service._performance_cache[strategy_id] = {}
+        
+        await service._cleanup_strategy_impl(strategy_id)
+        
+        # Verify cleanup sequence
+        mock_strategy.stop.assert_called_once()
+        mock_strategy.cleanup.assert_called_once()
+        
+        # Verify removal from all registries
+        assert strategy_id not in service._active_strategies
+        assert strategy_id not in service._strategy_configs
+        assert strategy_id not in service._strategy_metrics
+        assert strategy_id not in service._signal_history
+        assert strategy_id not in service._performance_cache
+    
+    @pytest.mark.asyncio
+    async def test_large_signal_batch_processing(self):
+        """Test processing large batches of signals."""
+        service = StrategyService()
+        strategy_id = "batch_strategy"
+        
+        # Create strategy that generates many signals
+        large_signal_batch = []
+        for i in range(1000):  # 1000 signals
+            large_signal_batch.append(
+                Signal(
+                    symbol="BTC/USDT",
+                    direction=1 if i % 2 == 0 else -1,
+                    strength=0.5 + (i % 100) / 200,  # Varying strength
+                    timestamp=datetime.now(timezone.utc),
+                    price=Decimal(f"{50000 + i}"),
+                )
+            )
+        
+        mock_strategy = Mock()
+        mock_strategy.status = StrategyStatus.ACTIVE
+        mock_strategy.generate_signals = AsyncMock(return_value=large_signal_batch)
+        
+        service._active_strategies[strategy_id] = mock_strategy
+        service._strategy_metrics[strategy_id] = StrategyMetrics(strategy_id=strategy_id)
+        service._signal_history[strategy_id] = []
+        
+        market_data = MarketData(
+            symbol="BTC/USDT",
+            timestamp=datetime.now(timezone.utc),
+            price=Decimal("50000.00"),
+            volume=Decimal("100.0"),
+            bid=Decimal("49999.00"),
+            ask=Decimal("50001.00"),
+        )
+        
+        with patch.object(service, 'validate_signal', return_value=True):
+            with patch.object(service, '_update_strategy_metrics') as mock_update:
+                result = await service._process_market_data_impl(market_data)
+                
+                # Should handle large batch without issues
+                assert len(result[strategy_id]) == 1000
+                mock_update.assert_called_once_with(strategy_id, large_signal_batch)
+    
+    @pytest.mark.asyncio
+    async def test_concurrent_market_data_processing(self):
+        """Test concurrent processing of market data."""
+        service = StrategyService()
+        
+        # Set up multiple strategies
+        strategy_ids = [f"concurrent_strategy_{i}" for i in range(5)]
+        for strategy_id in strategy_ids:
+            mock_strategy = Mock()
+            mock_strategy.status = StrategyStatus.ACTIVE
+            mock_strategy.generate_signals = AsyncMock(return_value=[
+                Signal(
+                    symbol="BTC/USDT",
+                    direction=1,
+                    strength=0.7,
+                    timestamp=datetime.now(timezone.utc),
+                    price=Decimal("50000.00"),
+                )
+            ])
+            
+            service._active_strategies[strategy_id] = mock_strategy
+            service._strategy_metrics[strategy_id] = StrategyMetrics(strategy_id=strategy_id)
+            service._signal_history[strategy_id] = []
+        
+        market_data = MarketData(
+            symbol="BTC/USDT",
+            timestamp=datetime.now(timezone.utc),
+            price=Decimal("50000.00"),
+            volume=Decimal("100.0"),
+            bid=Decimal("49999.00"),
+            ask=Decimal("50001.00"),
+        )
+        
+        with patch.object(service, 'validate_signal', return_value=True):
+            with patch.object(service, '_update_strategy_metrics'):
+                # Process multiple market data concurrently
+                tasks = [
+                    service._process_market_data_impl(market_data)
+                    for _ in range(3)
+                ]
+                
+                results = await asyncio.gather(*tasks)
+                
+                # All tasks should complete successfully
+                for result in results:
+                    assert len(result) == 5  # 5 strategies
+                    for strategy_id in strategy_ids:
+                        assert strategy_id in result
+                        assert len(result[strategy_id]) == 1  # 1 signal per strategy
+    
+    @pytest.mark.asyncio 
+    async def test_memory_usage_with_large_signal_history(self):
+        """Test memory management with large signal histories."""
+        service = StrategyService()
+        strategy_id = "memory_test_strategy"
+        
+        # Create very large signal history
+        large_history = []
+        for i in range(10000):  # 10,000 signals
+            large_history.append(
+                Signal(
+                    symbol="BTC/USDT",
+                    direction=1,
+                    strength=0.5,
+                    timestamp=datetime.now(timezone.utc),
+                    price=Decimal("50000.00"),
+                )
+            )
+        
+        service._signal_history[strategy_id] = large_history
+        service._strategy_configs[strategy_id] = StrategyConfig(
+            name="MemoryTestStrategy",
+            strategy_type=StrategyType.TREND_FOLLOWING,
+            parameters={"test": "value"},
+        )
+        service._strategy_metrics[strategy_id] = StrategyMetrics(strategy_id=strategy_id)
+        
+        # Test analytics calculations with large dataset
+        with patch.object(service, '_strategy_services') as mock_services:
+            mock_analytics = Mock()
+            mock_analytics.record_strategy_performance = AsyncMock()
+            mock_services.analytics_service = mock_analytics
+            
+            # Should handle large dataset without memory issues
+            await service._record_strategy_analytics(strategy_id, [large_history[0]])
+            
+            # Verify analytics called
+            mock_analytics.record_strategy_performance.assert_called_once()

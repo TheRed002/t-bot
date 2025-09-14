@@ -1,0 +1,443 @@
+"""
+Comprehensive tests for dependency injection registration in strategies module.
+
+Tests DI container registration, factory functions, and error handling.
+"""
+
+import pytest
+from unittest.mock import MagicMock, patch
+from typing import Any
+
+# Disable verbose logging for performance
+import logging
+logging.getLogger('src').setLevel(logging.CRITICAL)
+
+from src.core.dependency_injection import DependencyContainer
+from src.strategies.di_registration import register_strategies_dependencies
+from src.strategies.interfaces import StrategyServiceInterface, StrategyDataRepositoryInterface
+from src.strategies.repository import StrategyRepository
+from src.strategies.service import StrategyService
+
+
+@pytest.fixture(scope="session")
+def mock_container():
+    """Create mock dependency container."""
+    container = MagicMock(spec=DependencyContainer)
+    return container
+
+
+@pytest.fixture(scope="session")
+def mock_session():
+    """Create mock database session."""
+    session = MagicMock()
+    return session
+
+
+class TestDependencyRegistration:
+    """Test cases for dependency injection registration."""
+
+    def test_register_strategies_dependencies_success(self, mock_container):
+        """Test successful registration of all dependencies."""
+        # Act
+        register_strategies_dependencies(mock_container)
+        
+        # Assert
+        assert mock_container.register.call_count == 4
+        
+        # Verify all expected registrations
+        call_args = [call[1] for call in mock_container.register.call_args_list]
+        registered_names = [args['name'] for args in call_args]
+        
+        assert "StrategyService" in registered_names
+        assert "StrategyRepository" in registered_names
+        assert "StrategyServiceInterface" in registered_names
+        assert "StrategyRepositoryInterface" in registered_names
+
+    def test_register_strategy_service_factory(self, mock_container):
+        """Test StrategyService factory registration."""
+        # Act
+        register_strategies_dependencies(mock_container)
+        
+        # Assert - Find the StrategyService registration
+        strategy_service_call = None
+        for call in mock_container.register.call_args_list:
+            if call[1]['name'] == 'StrategyService':
+                strategy_service_call = call
+                break
+        
+        assert strategy_service_call is not None
+        assert strategy_service_call[1]['singleton'] is True
+        
+        # Test the factory function
+        factory = strategy_service_call[1]['service']
+        assert callable(factory)
+
+    def test_strategy_service_factory_function(self, mock_container):
+        """Test StrategyService factory function creates correct instance."""
+        # Arrange
+        register_strategies_dependencies(mock_container)
+        
+        # Get the factory function
+        strategy_service_call = None
+        for call in mock_container.register.call_args_list:
+            if call[1]['name'] == 'StrategyService':
+                strategy_service_call = call
+                break
+        
+        factory = strategy_service_call[1]['service']
+        
+        # Mock dependencies
+        mock_repository = MagicMock()
+        mock_risk_manager = MagicMock()
+        mock_exchange_factory = MagicMock()
+        mock_data_service = MagicMock()
+        mock_backtest_service = MagicMock()
+        mock_service_manager = MagicMock()
+        mock_config = {"test": "config"}
+        
+        # Act
+        service = factory(
+            repository=mock_repository,
+            risk_manager=mock_risk_manager,
+            exchange_factory=mock_exchange_factory,
+            data_service=mock_data_service,
+            backtest_service=mock_backtest_service,
+            service_manager=mock_service_manager,
+            config=mock_config
+        )
+        
+        # Assert
+        assert isinstance(service, StrategyService)
+        assert service.name == "StrategyService"
+
+    def test_strategy_service_factory_with_defaults(self, mock_container):
+        """Test StrategyService factory function with default parameters."""
+        # Arrange
+        register_strategies_dependencies(mock_container)
+        
+        # Get the factory function
+        strategy_service_call = None
+        for call in mock_container.register.call_args_list:
+            if call[1]['name'] == 'StrategyService':
+                strategy_service_call = call
+                break
+        
+        factory = strategy_service_call[1]['service']
+        
+        # Act
+        service = factory()
+        
+        # Assert
+        assert isinstance(service, StrategyService)
+        assert service.name == "StrategyService"
+
+    def test_strategy_service_factory_with_none_config(self, mock_container):
+        """Test StrategyService factory function with None config."""
+        # Arrange
+        register_strategies_dependencies(mock_container)
+        
+        # Get the factory function
+        strategy_service_call = None
+        for call in mock_container.register.call_args_list:
+            if call[1]['name'] == 'StrategyService':
+                strategy_service_call = call
+                break
+        
+        factory = strategy_service_call[1]['service']
+        
+        # Act
+        service = factory(config=None)
+        
+        # Assert
+        assert isinstance(service, StrategyService)
+        # Should use empty dict as default
+        assert service.config == {}
+
+    def test_register_strategy_repository_factory(self, mock_container):
+        """Test StrategyRepository factory registration."""
+        # Act
+        register_strategies_dependencies(mock_container)
+        
+        # Assert - Find the StrategyRepository registration
+        repository_call = None
+        for call in mock_container.register.call_args_list:
+            if call[1]['name'] == 'StrategyRepository':
+                repository_call = call
+                break
+        
+        assert repository_call is not None
+        assert repository_call[1]['singleton'] is False  # Repository should not be singleton
+        
+        # Test the factory function
+        factory = repository_call[1]['service']
+        assert callable(factory)
+
+    def test_strategy_repository_factory_function(self, mock_container, mock_session):
+        """Test StrategyRepository factory function creates correct instance."""
+        # Arrange
+        register_strategies_dependencies(mock_container)
+        
+        # Get the factory function
+        repository_call = None
+        for call in mock_container.register.call_args_list:
+            if call[1]['name'] == 'StrategyRepository':
+                repository_call = call
+                break
+        
+        factory = repository_call[1]['service']
+        
+        # Act
+        repository = factory(mock_session)
+        
+        # Assert
+        assert isinstance(repository, StrategyRepository)
+
+    def test_register_interface_types(self, mock_container):
+        """Test registration of interface types."""
+        # Act
+        register_strategies_dependencies(mock_container)
+        
+        # Assert - Check interface registrations
+        interface_calls = [
+            call for call in mock_container.register.call_args_list
+            if 'Interface' in call[1]['name']
+        ]
+        
+        assert len(interface_calls) == 2
+        
+        # Check StrategyServiceInterface registration
+        service_interface_call = next(
+            call for call in interface_calls 
+            if call[1]['name'] == 'StrategyServiceInterface'
+        )
+        assert service_interface_call[1]['service'] == StrategyService
+        assert service_interface_call[1]['singleton'] is True
+        
+        # Check StrategyRepositoryInterface registration
+        repo_interface_call = next(
+            call for call in interface_calls 
+            if call[1]['name'] == 'StrategyRepositoryInterface'
+        )
+        assert repo_interface_call[1]['service'] == StrategyRepository
+        assert repo_interface_call[1]['singleton'] is False
+
+    def test_singleton_configuration(self, mock_container):
+        """Test singleton configuration for registered services."""
+        # Act
+        register_strategies_dependencies(mock_container)
+        
+        # Assert - Check singleton settings
+        for call in mock_container.register.call_args_list:
+            name = call[1]['name']
+            singleton = call[1]['singleton']
+            
+            if name in ['StrategyService', 'StrategyServiceInterface']:
+                assert singleton is True, f"{name} should be singleton"
+            elif name in ['StrategyRepository', 'StrategyRepositoryInterface']:
+                assert singleton is False, f"{name} should not be singleton"
+
+    @patch('src.strategies.di_registration.get_logger')
+    def test_logging_success(self, mock_get_logger, mock_container):
+        """Test successful logging during registration."""
+        # Arrange
+        mock_logger = MagicMock()
+        mock_get_logger.return_value = mock_logger
+        
+        # Act
+        register_strategies_dependencies(mock_container)
+        
+        # Assert
+        mock_logger.info.assert_any_call("Registering strategies module dependencies")
+        mock_logger.info.assert_any_call("Strategies module dependencies registered successfully")
+
+    @patch('src.strategies.di_registration.get_logger')
+    def test_logging_on_error(self, mock_get_logger, mock_container):
+        """Test error logging during registration failure."""
+        # Arrange
+        mock_logger = MagicMock()
+        mock_get_logger.return_value = mock_logger
+        mock_container.register.side_effect = Exception("Registration failed")
+        
+        # Act & Assert
+        with pytest.raises(Exception):
+            register_strategies_dependencies(mock_container)
+        
+        # Assert error logging
+        mock_logger.error.assert_called_once()
+        error_call = mock_logger.error.call_args[0][0]
+        assert "Failed to register strategies dependencies" in error_call
+
+    def test_exception_propagation(self, mock_container):
+        """Test that exceptions are properly propagated."""
+        # Arrange
+        mock_container.register.side_effect = ValueError("Container error")
+        
+        # Act & Assert
+        with pytest.raises(ValueError) as exc_info:
+            register_strategies_dependencies(mock_container)
+        
+        assert "Container error" in str(exc_info.value)
+
+    def test_factory_function_parameters_handling(self, mock_container):
+        """Test that factory functions handle various parameter combinations."""
+        # Arrange
+        register_strategies_dependencies(mock_container)
+        
+        # Get StrategyService factory
+        strategy_service_call = next(
+            call for call in mock_container.register.call_args_list
+            if call[1]['name'] == 'StrategyService'
+        )
+        factory = strategy_service_call[1]['service']
+        
+        # Test with partial parameters
+        service1 = factory(repository=MagicMock())
+        assert isinstance(service1, StrategyService)
+        
+        # Test with keyword arguments
+        service2 = factory(
+            repository=MagicMock(),
+            risk_manager=MagicMock(),
+            config={"key": "value"}
+        )
+        assert isinstance(service2, StrategyService)
+        
+        # Test with all None parameters
+        service3 = factory(
+            repository=None,
+            risk_manager=None,
+            exchange_factory=None,
+            data_service=None,
+            backtest_service=None,
+            service_manager=None,
+            config=None
+        )
+        assert isinstance(service3, StrategyService)
+
+    def test_factory_function_signature_correctness(self, mock_container):
+        """Test that factory functions have correct signatures."""
+        # Arrange
+        register_strategies_dependencies(mock_container)
+        
+        # Get StrategyService factory
+        strategy_service_call = next(
+            call for call in mock_container.register.call_args_list
+            if call[1]['name'] == 'StrategyService'
+        )
+        factory = strategy_service_call[1]['service']
+        
+        # Get StrategyRepository factory
+        repository_call = next(
+            call for call in mock_container.register.call_args_list
+            if call[1]['name'] == 'StrategyRepository'
+        )
+        repo_factory = repository_call[1]['service']
+        
+        # Test factory function attributes exist
+        assert hasattr(factory, '__call__')
+        assert hasattr(repo_factory, '__call__')
+
+    def test_registration_order_independence(self, mock_container):
+        """Test that registration order doesn't matter."""
+        # Act
+        register_strategies_dependencies(mock_container)
+        
+        # Assert - All registrations should complete successfully
+        assert mock_container.register.call_count == 4
+        
+        # Verify no registration depends on previous ones completing
+        for call in mock_container.register.call_args_list:
+            args, kwargs = call
+            assert 'name' in kwargs
+            assert 'service' in kwargs
+            assert 'singleton' in kwargs
+
+    def test_container_register_call_format(self, mock_container):
+        """Test that container.register is called with correct format."""
+        # Act
+        register_strategies_dependencies(mock_container)
+        
+        # Assert - Check call format for all registrations
+        for call in mock_container.register.call_args_list:
+            args, kwargs = call
+            
+            # Should be called with keyword arguments
+            assert len(args) == 0
+            assert 'name' in kwargs
+            assert 'service' in kwargs
+            assert 'singleton' in kwargs
+            
+            # Name should be a string
+            assert isinstance(kwargs['name'], str)
+            
+            # Service should be callable or class
+            assert callable(kwargs['service']) or isinstance(kwargs['service'], type)
+            
+            # Singleton should be boolean
+            assert isinstance(kwargs['singleton'], bool)
+
+    def test_multiple_registration_calls(self, mock_container):
+        """Test calling registration multiple times."""
+        # Act
+        register_strategies_dependencies(mock_container)
+        register_strategies_dependencies(mock_container)
+        
+        # Assert - Should be called twice for each service
+        assert mock_container.register.call_count == 8  # 4 services × 2 calls
+
+    @patch('src.strategies.di_registration.StrategyService')
+    def test_strategy_service_import_error(self, mock_strategy_service, mock_container):
+        """Test handling of import errors."""
+        # Arrange
+        mock_strategy_service.side_effect = ImportError("Cannot import StrategyService")
+        
+        # Act & Assert
+        with pytest.raises(ImportError):
+            register_strategies_dependencies(mock_container)
+
+    @patch('src.strategies.di_registration.StrategyRepository')
+    def test_strategy_repository_import_error(self, mock_strategy_repository, mock_container):
+        """Test handling of repository import errors."""
+        # Arrange
+        mock_strategy_repository.side_effect = ImportError("Cannot import StrategyRepository")
+        
+        # Act & Assert
+        with pytest.raises(ImportError):
+            register_strategies_dependencies(mock_container)
+
+    def test_factory_return_types(self, mock_container, mock_session):
+        """Test that factories return correct types."""
+        # Arrange
+        register_strategies_dependencies(mock_container)
+        
+        # Get factory functions
+        service_factory = None
+        repo_factory = None
+        
+        for call in mock_container.register.call_args_list:
+            if call[1]['name'] == 'StrategyService':
+                service_factory = call[1]['service']
+            elif call[1]['name'] == 'StrategyRepository':
+                repo_factory = call[1]['service']
+        
+        # Act
+        service_instance = service_factory()
+        repo_instance = repo_factory(mock_session)
+        
+        # Assert
+        assert isinstance(service_instance, StrategyService)
+        assert isinstance(repo_instance, StrategyRepository)
+        
+        # Verify they implement correct interfaces
+        assert hasattr(service_instance, 'register_strategy')
+        assert hasattr(service_instance, 'start_strategy')
+        assert hasattr(repo_instance, 'session')
+
+    def test_dependency_injection_module_structure(self):
+        """Test the module structure and exports."""
+        # Import and verify function exists
+        from src.strategies.di_registration import register_strategies_dependencies
+        
+        # Assert
+        assert callable(register_strategies_dependencies)
+        assert register_strategies_dependencies.__doc__ is not None

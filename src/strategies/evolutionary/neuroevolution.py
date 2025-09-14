@@ -27,6 +27,7 @@ Dependencies:
 - Base strategy from src/strategies/base.py
 """
 
+import asyncio
 import logging
 import random
 import uuid
@@ -34,16 +35,33 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal
 from enum import Enum
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
+
+# Optional PyTorch imports - only import if available
+try:
+    import torch
+    import torch.nn as nn
+    import torch.nn.functional as F
+
+    HAS_TORCH = True
+except ImportError:
+    HAS_TORCH = False
+    torch = None
+    nn = None
+    F = None
+
+# For type checking only
+if TYPE_CHECKING and HAS_TORCH:
+    from torch import Tensor
+else:
+    Tensor = Any
 
 from src.core.exceptions import OptimizationError
 from src.core.types import MarketData, Position, Signal, SignalDirection
 from src.strategies.base import BaseStrategy
+from src.strategies.dependencies import StrategyServiceContainer
 from src.strategies.evolutionary.fitness import FitnessEvaluator
 from src.utils.decorators import memory_usage, time_execution
 
@@ -621,7 +639,7 @@ class NEATGenome:
         return new_genome
 
 
-class NeuroNetwork(nn.Module):
+class NeuroNetwork:
     """PyTorch implementation of evolvable neural network from NEAT genome.
 
     Converts NEAT genome representation into executable PyTorch network with
@@ -635,7 +653,11 @@ class NeuroNetwork(nn.Module):
             genome: NEAT genome to convert to network
             device: Device to run network on ("cpu" or "cuda")
         """
-        super().__init__()
+        if not HAS_TORCH:
+            raise ImportError(
+                "PyTorch is required for NeuroNetwork but not installed. Install with: pip install torch"
+            )
+
         self.genome = genome
         self.device = device
         self.input_size = genome.input_size
@@ -643,9 +665,6 @@ class NeuroNetwork(nn.Module):
 
         # Build network structure
         self._build_network()
-
-        # Move to device
-        self.to(device)
 
     def _build_network(self) -> None:
         """Build PyTorch network from genome structure."""
@@ -681,7 +700,7 @@ class NeuroNetwork(nn.Module):
         ]
 
         # Initialize hidden states for recurrent connections
-        self.hidden_states: dict[int, torch.Tensor] = {}
+        self.hidden_states: dict[int, Tensor] = {}
         self._reset_hidden_states()
 
     def _reset_hidden_states(self) -> None:
@@ -690,7 +709,7 @@ class NeuroNetwork(nn.Module):
             if self.genome.nodes[node_id].node_type == NodeType.HIDDEN:
                 self.hidden_states[node_id] = torch.zeros(1, device=self.device)
 
-    def forward(self, x: torch.Tensor, reset_hidden: bool = False) -> torch.Tensor:
+    def forward(self, x: "Tensor", reset_hidden: bool = False) -> "Tensor":
         """Forward pass through the neural network.
 
         Args:
@@ -706,7 +725,7 @@ class NeuroNetwork(nn.Module):
         batch_size = x.size(0)
 
         # Initialize node activations
-        node_activations: dict[int, torch.Tensor] = {}
+        node_activations: dict[int, Tensor] = {}
 
         # Set input activations
         for i in range(self.input_size):
@@ -809,11 +828,11 @@ class NeuroNetwork(nn.Module):
             confidence = 0.0
 
         return Signal(
-            direction=direction,
-            confidence=confidence,
-            timestamp=market_data.timestamp,
             symbol=market_data.symbol,
-            strategy_name="neuroevolution",
+            direction=direction,
+            strength=Decimal(str(confidence)),
+            timestamp=market_data.timestamp,
+            source="neuroevolution",
             metadata={
                 "raw_output": signal_strength,
                 "network_genome_id": self.genome.genome_id,
@@ -833,31 +852,34 @@ class NeuroNetwork(nn.Module):
         features = []
 
         # Price-based features
-        price = float(market_data.price)
-        features.append(price / 10000.0)  # Normalize price
+        price = market_data.price if isinstance(market_data.price, Decimal) else Decimal(str(market_data.price))
+        features.append(float(price / Decimal("10000")))  # Normalize price
 
         # Volume feature
-        volume = float(market_data.volume)
-        features.append(min(volume / 1000000.0, 1.0))  # Normalize and cap volume
+        volume = market_data.volume if isinstance(market_data.volume, Decimal) else Decimal(str(market_data.volume))
+        features.append(min(float(volume / Decimal("1000000")), 1.0))  # Normalize and cap volume
 
         # Spread feature (if available)
         if market_data.bid and market_data.ask:
-            spread = float(market_data.ask - market_data.bid)
+            spread = market_data.ask - market_data.bid
             features.append(min(spread / price, 0.1))  # Relative spread, capped
         else:
             features.append(0.0)
 
         # OHLC features (if available)
         if market_data.open_price:
-            price_change = (price - float(market_data.open_price)) / float(market_data.open_price)
+            open_price = market_data.open_price if isinstance(market_data.open_price, Decimal) else Decimal(str(market_data.open_price))
+            price_change = float((price - open_price) / open_price)
             features.append(max(-1.0, min(1.0, price_change)))  # Price change ratio
         else:
             features.append(0.0)
 
         if market_data.high_price and market_data.low_price:
-            price_range = float(market_data.high_price - market_data.low_price)
+            high_price = market_data.high_price if isinstance(market_data.high_price, Decimal) else Decimal(str(market_data.high_price))
+            low_price = market_data.low_price if isinstance(market_data.low_price, Decimal) else Decimal(str(market_data.low_price))
+            price_range = high_price - low_price
             relative_position = (
-                (price - float(market_data.low_price)) / price_range if price_range > 0 else 0.5
+                float((price - low_price) / price_range) if price_range > 0 else 0.5
             )
             features.append(relative_position)  # Position within daily range
         else:
@@ -1140,13 +1162,13 @@ class NeuroEvolutionStrategy(BaseStrategy):
     - Integration with existing strategy framework
     """
 
-    def __init__(self, config: dict[str, Any]):
+    def __init__(self, config: dict[str, Any], services: StrategyServiceContainer | None = None):
         """Initialize neuroevolution strategy.
 
         Args:
             config: Strategy configuration including neuroevolution parameters
         """
-        super().__init__(config)
+        super().__init__(config, services)
 
         # Parse neuroevolution-specific config
         self.neuro_config = NeuroEvolutionConfig(**config.get("neuroevolution", {}))
@@ -1204,11 +1226,12 @@ class NeuroEvolutionStrategy(BaseStrategy):
 
         # Select initial best genome
         self.best_genome = self.population[0]
-        self._update_best_network()
+        if HAS_TORCH:
+            self._update_best_network()
 
     def _update_best_network(self) -> None:
         """Update the best network from current best genome."""
-        if self.best_genome:
+        if self.best_genome and HAS_TORCH:
             self.best_network = NeuroNetwork(
                 genome=self.best_genome, device=self.neuro_config.device
             )
@@ -1223,8 +1246,17 @@ class NeuroEvolutionStrategy(BaseStrategy):
         Returns:
             List of trading signals
         """
-        if not self.best_network:
-            return []
+        if not HAS_TORCH or not self.best_network:
+            # Return neutral signal if torch not available
+            return [
+                Signal(
+                    symbol=data.symbol,
+                    direction=SignalDirection.HOLD,
+                    strength=Decimal("0.0"),
+                    timestamp=data.timestamp,
+                    source="neuroevolution_no_torch",
+                )
+            ]
 
         try:
             # Generate signal from best network
@@ -1510,7 +1542,7 @@ class NeuroEvolutionStrategy(BaseStrategy):
 
         # Check for reasonable output values
         raw_output = signal.metadata["raw_output"]
-        if not isinstance(raw_output, int | float) or abs(raw_output) > 10:
+        if not isinstance(raw_output, (int, float)) or abs(raw_output) > 10:
             return False
 
         return True
@@ -1670,13 +1702,12 @@ class NeuroEvolutionStrategy(BaseStrategy):
                 "config": self.neuro_config,
             }
 
-            f = None
-            try:
-                f = open(filepath, "wb")
-                pickle.dump(save_data, f)
-            finally:
-                if f:
-                    f.close()
+            def _save_to_file():
+                with open(filepath, "wb") as f:
+                    pickle.dump(save_data, f)
+
+            # Run file I/O in executor to avoid blocking the event loop
+            await asyncio.to_thread(_save_to_file)
 
             self.logger.info(f"Population saved to {filepath}")
 
@@ -1693,13 +1724,12 @@ class NeuroEvolutionStrategy(BaseStrategy):
         try:
             import pickle
 
-            f = None
-            try:
-                f = open(filepath, "rb")
-                save_data = pickle.load(f)
-            finally:
-                if f:
-                    f.close()
+            def _load_from_file():
+                with open(filepath, "rb") as f:
+                    return pickle.load(f)
+
+            # Run file I/O in executor to avoid blocking the event loop
+            save_data = await asyncio.to_thread(_load_from_file)
 
             self.population = save_data["population"]
             self.best_genome = save_data["best_genome"]
@@ -1721,3 +1751,7 @@ class NeuroEvolutionStrategy(BaseStrategy):
 
 
 # Update completion status
+
+
+    # Helper methods for accessing data through data service
+

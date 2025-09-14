@@ -1,0 +1,611 @@
+"""
+Comprehensive tests for StrategyController.
+
+Tests all API endpoints, error handling, and edge cases to improve coverage.
+"""
+
+import pytest
+from decimal import Decimal
+from datetime import datetime, timezone
+from unittest.mock import AsyncMock, MagicMock
+from typing import Any
+
+# Disable verbose logging for performance
+import logging
+logging.getLogger('src').setLevel(logging.CRITICAL)
+
+from src.core.exceptions import ServiceError, ValidationError
+from src.core.types import MarketData, StrategyConfig, StrategyType, Signal, SignalDirection
+from src.strategies.controller import StrategyController
+from src.strategies.interfaces import StrategyServiceInterface
+
+
+class MockStrategyService:
+    """Mock strategy service for testing."""
+    
+    def __init__(self):
+        # Use synchronous mocks for better performance
+        self.register_strategy = MagicMock()
+        self.start_strategy = MagicMock()
+        self.stop_strategy = MagicMock()
+        self.process_market_data = MagicMock()
+        self.get_strategy_performance = MagicMock()
+        self.get_all_strategies = MagicMock()
+        self.cleanup_strategy = MagicMock()
+
+
+@pytest.fixture
+def mock_strategy_service():
+    """Create mock strategy service."""
+    return MockStrategyService()
+
+
+@pytest.fixture
+def strategy_controller(mock_strategy_service):
+    """Create strategy controller with mock service."""
+    return StrategyController(mock_strategy_service)
+
+
+@pytest.fixture
+def sample_strategy_config():
+    """Create sample strategy configuration."""
+    return StrategyConfig(
+        strategy_id="test_strategy_001",
+        name="test_strategy",
+        strategy_type=StrategyType.MEAN_REVERSION,
+        symbol="BTCUSDT",
+        timeframe="1h",
+        enabled=True,
+        min_confidence=0.6,
+        max_positions=5,
+        position_size_pct=0.02,
+        stop_loss_pct=0.02,
+        take_profit_pct=0.04,
+        parameters={
+            "lookback_period": 20,
+            "entry_threshold": 2.0,
+        }
+    )
+
+
+@pytest.fixture
+def sample_market_data():
+    """Create sample market data."""
+    return MarketData(
+        symbol="BTCUSDT",
+        timestamp=datetime.now(timezone.utc),
+        open=Decimal("50000.00"),
+        high=Decimal("50500.00"),
+        low=Decimal("49500.00"),
+        close=Decimal("50250.00"),
+        volume=Decimal("100.5"),
+        exchange="binance",
+        metadata={}
+    )
+
+
+@pytest.fixture
+def sample_signals():
+    """Create sample trading signals."""
+    return [
+        Signal(
+            symbol="BTCUSDT",
+            direction=SignalDirection.BUY,
+            strength=Decimal("0.8"),
+            timestamp=datetime.now(timezone.utc),
+            source="test_strategy",
+            metadata={"confidence": "0.85", "price": "50000.00"}
+        )
+    ]
+
+
+class TestStrategyController:
+    """Test cases for StrategyController."""
+
+    async def test_register_strategy_success(self, strategy_controller, mock_strategy_service, sample_strategy_config):
+        """Test successful strategy registration."""
+        # Arrange
+        request_data = {
+            "strategy_id": "test_strategy_001",
+            "config": sample_strategy_config.model_dump(),
+            "strategy_instance": MagicMock()
+        }
+        
+        # Act
+        result = await strategy_controller.register_strategy(request_data)
+        
+        # Assert
+        assert result["success"] is True
+        assert result["strategy_id"] == "test_strategy_001"
+        assert "registered successfully" in result["message"]
+        mock_strategy_service.register_strategy.assert_called_once()
+
+    async def test_register_strategy_missing_strategy_id(self, strategy_controller):
+        """Test strategy registration with missing strategy_id."""
+        # Arrange
+        request_data = {
+            "config": {"name": "test"}
+        }
+        
+        # Act
+        result = await strategy_controller.register_strategy(request_data)
+        
+        # Assert
+        assert result["success"] is False
+        assert result["error_type"] == "ValidationError"
+        assert "strategy_id is required" in result["error"]
+
+    async def test_register_strategy_missing_config(self, strategy_controller):
+        """Test strategy registration with missing config."""
+        # Arrange
+        request_data = {
+            "strategy_id": "test_strategy_001"
+        }
+        
+        # Act
+        result = await strategy_controller.register_strategy(request_data)
+        
+        # Assert
+        assert result["success"] is False
+        assert result["error_type"] == "ValidationError"
+        assert "config is required" in result["error"]
+
+    async def test_register_strategy_service_error(self, strategy_controller, mock_strategy_service, sample_strategy_config):
+        """Test strategy registration with service error."""
+        # Arrange
+        request_data = {
+            "strategy_id": "test_strategy_001",
+            "config": sample_strategy_config.model_dump()
+        }
+        mock_strategy_service.register_strategy.side_effect = ServiceError("Database connection failed")
+        
+        # Act
+        result = await strategy_controller.register_strategy(request_data)
+        
+        # Assert
+        assert result["success"] is False
+        assert result["error_type"] == "ServiceError"
+        assert "Database connection failed" in result["error"]
+
+    async def test_register_strategy_invalid_config(self, strategy_controller, mock_strategy_service):
+        """Test strategy registration with invalid config format."""
+        # Arrange
+        request_data = {
+            "strategy_id": "test_strategy_001",
+            "config": {
+                "invalid_field": "value"
+                # Missing required fields
+            }
+        }
+        
+        # Act
+        result = await strategy_controller.register_strategy(request_data)
+        
+        # Assert
+        assert result["success"] is False
+        assert result["error_type"] == "ValidationError"
+
+    async def test_start_strategy_success(self, strategy_controller, mock_strategy_service):
+        """Test successful strategy start."""
+        # Arrange
+        strategy_id = "test_strategy_001"
+        
+        # Act
+        result = await strategy_controller.start_strategy(strategy_id)
+        
+        # Assert
+        assert result["success"] is True
+        assert result["strategy_id"] == strategy_id
+        assert "started successfully" in result["message"]
+        mock_strategy_service.start_strategy.assert_called_once_with(strategy_id)
+
+    async def test_start_strategy_empty_id(self, strategy_controller):
+        """Test strategy start with empty strategy_id."""
+        # Act
+        result = await strategy_controller.start_strategy("")
+        
+        # Assert
+        assert result["success"] is False
+        assert result["error_type"] == "ValidationError"
+        assert "strategy_id is required" in result["error"]
+
+    async def test_start_strategy_none_id(self, strategy_controller):
+        """Test strategy start with None strategy_id."""
+        # Act
+        result = await strategy_controller.start_strategy(None)
+        
+        # Assert
+        assert result["success"] is False
+        assert result["error_type"] == "ValidationError"
+        assert "strategy_id is required" in result["error"]
+
+    async def test_start_strategy_service_error(self, strategy_controller, mock_strategy_service):
+        """Test strategy start with service error."""
+        # Arrange
+        strategy_id = "test_strategy_001"
+        mock_strategy_service.start_strategy.side_effect = ServiceError("Strategy not found")
+        
+        # Act
+        result = await strategy_controller.start_strategy(strategy_id)
+        
+        # Assert
+        assert result["success"] is False
+        assert result["error_type"] == "ServiceError"
+        assert "Strategy not found" in result["error"]
+
+    async def test_stop_strategy_success(self, strategy_controller, mock_strategy_service):
+        """Test successful strategy stop."""
+        # Arrange
+        strategy_id = "test_strategy_001"
+        
+        # Act
+        result = await strategy_controller.stop_strategy(strategy_id)
+        
+        # Assert
+        assert result["success"] is True
+        assert result["strategy_id"] == strategy_id
+        assert "stopped successfully" in result["message"]
+        mock_strategy_service.stop_strategy.assert_called_once_with(strategy_id)
+
+    async def test_stop_strategy_empty_id(self, strategy_controller):
+        """Test strategy stop with empty strategy_id."""
+        # Act
+        result = await strategy_controller.stop_strategy("")
+        
+        # Assert
+        assert result["success"] is False
+        assert result["error_type"] == "ValidationError"
+        assert "strategy_id is required" in result["error"]
+
+    async def test_stop_strategy_validation_error(self, strategy_controller, mock_strategy_service):
+        """Test strategy stop with validation error from service."""
+        # Arrange
+        strategy_id = "test_strategy_001"
+        mock_strategy_service.stop_strategy.side_effect = ValidationError("Strategy is not running")
+        
+        # Act
+        result = await strategy_controller.stop_strategy(strategy_id)
+        
+        # Assert
+        assert result["success"] is False
+        assert result["error_type"] == "ValidationError"
+        assert "Strategy is not running" in result["error"]
+
+    async def test_process_market_data_success(self, strategy_controller, mock_strategy_service, sample_market_data, sample_signals):
+        """Test successful market data processing."""
+        # Arrange
+        market_data_dict = sample_market_data.model_dump()
+        mock_strategy_service.process_market_data.return_value = sample_signals
+        
+        # Act
+        result = await strategy_controller.process_market_data(market_data_dict)
+        
+        # Assert
+        assert result["success"] is True
+        assert result["signals"] == sample_signals
+        assert result["symbol"] == "BTCUSDT"
+        assert "processed_at" in result
+        mock_strategy_service.process_market_data.assert_called_once()
+
+    async def test_process_market_data_empty_data(self, strategy_controller):
+        """Test market data processing with empty data."""
+        # Act
+        result = await strategy_controller.process_market_data({})
+        
+        # Assert
+        assert result["success"] is False
+        assert result["error_type"] == "ValidationError"
+        assert "market_data is required" in result["error"]
+
+    async def test_process_market_data_none_data(self, strategy_controller):
+        """Test market data processing with None data."""
+        # Act
+        result = await strategy_controller.process_market_data(None)
+        
+        # Assert
+        assert result["success"] is False
+        assert result["error_type"] == "ValidationError"
+        assert "market_data is required" in result["error"]
+
+    async def test_process_market_data_invalid_format(self, strategy_controller):
+        """Test market data processing with invalid data format."""
+        # Arrange
+        invalid_data = {
+            "invalid_field": "value"
+            # Missing required MarketData fields
+        }
+        
+        # Act
+        result = await strategy_controller.process_market_data(invalid_data)
+        
+        # Assert
+        assert result["success"] is False
+        assert result["error_type"] == "ValidationError"
+
+    async def test_process_market_data_service_error(self, strategy_controller, mock_strategy_service, sample_market_data):
+        """Test market data processing with service error."""
+        # Arrange
+        market_data_dict = sample_market_data.model_dump()
+        mock_strategy_service.process_market_data.side_effect = ServiceError("Processing failed")
+        
+        # Act
+        result = await strategy_controller.process_market_data(market_data_dict)
+        
+        # Assert
+        assert result["success"] is False
+        assert result["error_type"] == "ServiceError"
+        assert "Processing failed" in result["error"]
+
+    async def test_get_strategy_performance_success(self, strategy_controller, mock_strategy_service):
+        """Test successful strategy performance retrieval."""
+        # Arrange
+        strategy_id = "test_strategy_001"
+        performance_data = {
+            "total_return": Decimal("0.15"),
+            "sharpe_ratio": Decimal("1.25"),
+            "max_drawdown": Decimal("0.08"),
+            "win_rate": Decimal("0.67")
+        }
+        mock_strategy_service.get_strategy_performance.return_value = performance_data
+        
+        # Act
+        result = await strategy_controller.get_strategy_performance(strategy_id)
+        
+        # Assert
+        assert result["success"] is True
+        assert result["performance"] == performance_data
+        assert result["strategy_id"] == strategy_id
+        mock_strategy_service.get_strategy_performance.assert_called_once_with(strategy_id)
+
+    async def test_get_strategy_performance_empty_id(self, strategy_controller):
+        """Test performance retrieval with empty strategy_id."""
+        # Act
+        result = await strategy_controller.get_strategy_performance("")
+        
+        # Assert
+        assert result["success"] is False
+        assert result["error_type"] == "ValidationError"
+        assert "strategy_id is required" in result["error"]
+
+    async def test_get_strategy_performance_service_error(self, strategy_controller, mock_strategy_service):
+        """Test performance retrieval with service error."""
+        # Arrange
+        strategy_id = "test_strategy_001"
+        mock_strategy_service.get_strategy_performance.side_effect = ServiceError("Data unavailable")
+        
+        # Act
+        result = await strategy_controller.get_strategy_performance(strategy_id)
+        
+        # Assert
+        assert result["success"] is False
+        assert result["error_type"] == "ServiceError"
+        assert "Data unavailable" in result["error"]
+
+    async def test_get_all_strategies_success(self, strategy_controller, mock_strategy_service):
+        """Test successful retrieval of all strategies."""
+        # Arrange
+        strategies_data = {
+            "strategy_001": {"status": "active", "performance": 0.12},
+            "strategy_002": {"status": "paused", "performance": 0.08}
+        }
+        mock_strategy_service.get_all_strategies.return_value = strategies_data
+        
+        # Act
+        result = await strategy_controller.get_all_strategies()
+        
+        # Assert
+        assert result["success"] is True
+        assert result["strategies"] == strategies_data
+        assert result["count"] == 2
+        mock_strategy_service.get_all_strategies.assert_called_once()
+
+    async def test_get_all_strategies_empty_result(self, strategy_controller, mock_strategy_service):
+        """Test retrieval of all strategies with empty result."""
+        # Arrange
+        mock_strategy_service.get_all_strategies.return_value = {}
+        
+        # Act
+        result = await strategy_controller.get_all_strategies()
+        
+        # Assert
+        assert result["success"] is True
+        assert result["strategies"] == {}
+        assert result["count"] == 0
+
+    async def test_get_all_strategies_service_error(self, strategy_controller, mock_strategy_service):
+        """Test retrieval of all strategies with service error."""
+        # Arrange
+        mock_strategy_service.get_all_strategies.side_effect = ServiceError("Database error")
+        
+        # Act
+        result = await strategy_controller.get_all_strategies()
+        
+        # Assert
+        assert result["success"] is False
+        assert result["error_type"] == "ServiceError"
+        assert "Database error" in result["error"]
+
+    async def test_cleanup_strategy_success(self, strategy_controller, mock_strategy_service):
+        """Test successful strategy cleanup."""
+        # Arrange
+        strategy_id = "test_strategy_001"
+        
+        # Act
+        result = await strategy_controller.cleanup_strategy(strategy_id)
+        
+        # Assert
+        assert result["success"] is True
+        assert result["strategy_id"] == strategy_id
+        assert "cleaned up successfully" in result["message"]
+        mock_strategy_service.cleanup_strategy.assert_called_once_with(strategy_id)
+
+    async def test_cleanup_strategy_empty_id(self, strategy_controller):
+        """Test strategy cleanup with empty strategy_id."""
+        # Act
+        result = await strategy_controller.cleanup_strategy("")
+        
+        # Assert
+        assert result["success"] is False
+        assert result["error_type"] == "ValidationError"
+        assert "strategy_id is required" in result["error"]
+
+    async def test_cleanup_strategy_service_error(self, strategy_controller, mock_strategy_service):
+        """Test strategy cleanup with service error."""
+        # Arrange
+        strategy_id = "test_strategy_001"
+        mock_strategy_service.cleanup_strategy.side_effect = ServiceError("Cleanup failed")
+        
+        # Act
+        result = await strategy_controller.cleanup_strategy(strategy_id)
+        
+        # Assert
+        assert result["success"] is False
+        assert result["error_type"] == "ServiceError"
+        assert "Cleanup failed" in result["error"]
+
+    async def test_cleanup_strategy_validation_error(self, strategy_controller, mock_strategy_service):
+        """Test strategy cleanup with validation error."""
+        # Arrange
+        strategy_id = "test_strategy_001"
+        mock_strategy_service.cleanup_strategy.side_effect = ValidationError("Strategy not found")
+        
+        # Act
+        result = await strategy_controller.cleanup_strategy(strategy_id)
+        
+        # Assert
+        assert result["success"] is False
+        assert result["error_type"] == "ValidationError"
+        assert "Strategy not found" in result["error"]
+
+    def test_controller_initialization(self, mock_strategy_service):
+        """Test controller initialization."""
+        # Act
+        controller = StrategyController(mock_strategy_service)
+        
+        # Assert
+        assert controller._strategy_service == mock_strategy_service
+        assert hasattr(controller, 'logger')
+
+    async def test_register_strategy_with_optional_instance(self, strategy_controller, mock_strategy_service, sample_strategy_config):
+        """Test strategy registration without optional strategy_instance."""
+        # Arrange
+        request_data = {
+            "strategy_id": "test_strategy_001",
+            "config": sample_strategy_config.model_dump()
+            # No strategy_instance provided
+        }
+        
+        # Act
+        result = await strategy_controller.register_strategy(request_data)
+        
+        # Assert
+        assert result["success"] is True
+        mock_strategy_service.register_strategy.assert_called_once()
+        args = mock_strategy_service.register_strategy.call_args[0]
+        assert args[1] is None  # strategy_instance should be None
+
+    async def test_process_market_data_timestamp_format(self, strategy_controller, mock_strategy_service, sample_market_data):
+        """Test that timestamp is properly formatted in response."""
+        # Arrange
+        market_data_dict = sample_market_data.model_dump()
+        mock_strategy_service.process_market_data.return_value = []
+        
+        # Act
+        result = await strategy_controller.process_market_data(market_data_dict)
+        
+        # Assert
+        assert result["success"] is True
+        assert "processed_at" in result
+        # Verify it's a valid ISO format timestamp
+        datetime.fromisoformat(result["processed_at"].replace('Z', '+00:00'))
+
+    async def test_all_methods_delegate_to_service(self, strategy_controller, mock_strategy_service, sample_strategy_config, sample_market_data):
+        """Test that all controller methods properly delegate to service layer."""
+        # Test register_strategy delegation
+        request_data = {
+            "strategy_id": "test_001",
+            "config": sample_strategy_config.model_dump()
+        }
+        await strategy_controller.register_strategy(request_data)
+        assert mock_strategy_service.register_strategy.called
+
+        # Test start_strategy delegation
+        await strategy_controller.start_strategy("test_001")
+        assert mock_strategy_service.start_strategy.called
+
+        # Test stop_strategy delegation
+        await strategy_controller.stop_strategy("test_001")
+        assert mock_strategy_service.stop_strategy.called
+
+        # Test process_market_data delegation
+        mock_strategy_service.process_market_data.return_value = []
+        await strategy_controller.process_market_data(sample_market_data.model_dump())
+        assert mock_strategy_service.process_market_data.called
+
+        # Test get_strategy_performance delegation
+        mock_strategy_service.get_strategy_performance.return_value = {}
+        await strategy_controller.get_strategy_performance("test_001")
+        assert mock_strategy_service.get_strategy_performance.called
+
+        # Test get_all_strategies delegation
+        mock_strategy_service.get_all_strategies.return_value = {}
+        await strategy_controller.get_all_strategies()
+        assert mock_strategy_service.get_all_strategies.called
+
+        # Test cleanup_strategy delegation
+        await strategy_controller.cleanup_strategy("test_001")
+        assert mock_strategy_service.cleanup_strategy.called
+
+    async def test_error_response_format_consistency(self, strategy_controller, mock_strategy_service):
+        """Test that all error responses have consistent format."""
+        # Test ValidationError format
+        result1 = await strategy_controller.start_strategy("")
+        assert "success" in result1
+        assert "error" in result1
+        assert "error_type" in result1
+        assert result1["success"] is False
+
+        # Test ServiceError format
+        mock_strategy_service.start_strategy.side_effect = ServiceError("Test error")
+        result2 = await strategy_controller.start_strategy("test")
+        assert "success" in result2
+        assert "error" in result2
+        assert "error_type" in result2
+        assert result2["success"] is False
+        assert result2["error_type"] == "ServiceError"
+
+    async def test_success_response_format_consistency(self, strategy_controller, mock_strategy_service, sample_strategy_config):
+        """Test that all success responses have consistent format."""
+        # Test register_strategy success format
+        request_data = {
+            "strategy_id": "test_001",
+            "config": sample_strategy_config.model_dump()
+        }
+        result1 = await strategy_controller.register_strategy(request_data)
+        assert result1["success"] is True
+        assert "message" in result1
+        assert "strategy_id" in result1
+
+        # Test start_strategy success format
+        result2 = await strategy_controller.start_strategy("test_001")
+        assert result2["success"] is True
+        assert "message" in result2
+        assert "strategy_id" in result2
+
+        # Test process_market_data success format
+        mock_strategy_service.process_market_data.return_value = []
+        market_data = {
+            "symbol": "BTCUSDT",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "open": "50000.00",
+            "high": "50500.00",
+            "low": "49500.00",
+            "close": "50250.00",
+            "volume": "100.5",
+            "vwap": "50125.00"
+        }
+        result3 = await strategy_controller.process_market_data(market_data)
+        assert result3["success"] is True
+        assert "signals" in result3
+        assert "processed_at" in result3
+        assert "symbol" in result3

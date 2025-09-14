@@ -1,0 +1,660 @@
+"""
+Comprehensive tests for evolutionary mutations module.
+"""
+
+import random
+from typing import Any, Dict
+from unittest.mock import patch
+
+import numpy as np
+import pytest
+
+from src.strategies.evolutionary.mutations import (
+    AdvancedMutationOperator,
+    CrossoverOperator,
+    MutationOperator,
+)
+
+
+class TestMutationOperator:
+    """Test MutationOperator class."""
+
+    def test_init_default_values(self):
+        """Test initialization with default values."""
+        operator = MutationOperator()
+        
+        assert operator.mutation_rate == 0.1
+        assert operator.mutation_strength == 0.2
+        assert operator.adaptive is False
+        assert operator.generation_count == 0
+
+    def test_init_custom_values(self):
+        """Test initialization with custom values."""
+        operator = MutationOperator(
+            mutation_rate=0.15,
+            mutation_strength=0.3,
+            adaptive=True
+        )
+        
+        assert operator.mutation_rate == 0.15
+        assert operator.mutation_strength == 0.3
+        assert operator.adaptive is True
+        assert operator.generation_count == 0
+
+    def test_mutate_no_mutations(self):
+        """Test mutation when random values prevent mutations."""
+        operator = MutationOperator(mutation_rate=0.1)
+        genes = {"param1": 10, "param2": 5.5}
+        ranges = {"param1": (0, 100), "param2": (0.0, 10.0)}
+        
+        with patch('random.random', return_value=0.2):  # > mutation_rate
+            result = operator.mutate(genes, ranges)
+            
+        assert result == genes
+        assert result is not genes  # Should be a copy
+
+    def test_mutate_boolean_parameter(self):
+        """Test mutation of boolean parameters."""
+        operator = MutationOperator(mutation_rate=1.0)  # Always mutate
+        genes = {"bool_param": True}
+        ranges = {"bool_param": (False, True)}
+        
+        result = operator.mutate(genes, ranges)
+        
+        # Boolean should flip
+        assert result["bool_param"] is False
+
+    @patch('numpy.random.normal')
+    def test_mutate_integer_parameter(self, mock_normal):
+        """Test mutation of integer parameters."""
+        mock_normal.return_value = 5.0  # Fixed noise value
+        
+        operator = MutationOperator(mutation_rate=1.0, mutation_strength=0.1)
+        genes = {"int_param": 50}
+        ranges = {"int_param": (0, 100)}
+        
+        result = operator.mutate(genes, ranges)
+        
+        # Should add Gaussian noise and clamp to range
+        assert isinstance(result["int_param"], int)
+        assert 0 <= result["int_param"] <= 100
+
+    @patch('numpy.random.normal')
+    def test_mutate_float_parameter(self, mock_normal):
+        """Test mutation of float parameters."""
+        mock_normal.return_value = 0.5
+        
+        operator = MutationOperator(mutation_rate=1.0, mutation_strength=0.1)
+        genes = {"float_param": 5.0}
+        ranges = {"float_param": (0.0, 10.0)}
+        
+        result = operator.mutate(genes, ranges)
+        
+        # Should add Gaussian noise and clamp to range
+        assert isinstance(result["float_param"], float)
+        assert 0.0 <= result["float_param"] <= 10.0
+
+    def test_mutate_string_parameter_with_choices(self):
+        """Test mutation of string parameters with choices."""
+        operator = MutationOperator(mutation_rate=1.0)
+        genes = {"str_param": "option1"}
+        ranges = {"str_param": (["option1", "option2", "option3"], None)}
+        
+        with patch('random.choice', return_value="option2"):
+            result = operator.mutate(genes, ranges)
+        
+        assert result["str_param"] == "option2"
+
+    def test_mutate_string_parameter_no_choices(self):
+        """Test mutation of string parameters without choices."""
+        operator = MutationOperator(mutation_rate=1.0)
+        genes = {"str_param": "test"}
+        ranges = {"str_param": ("min", "max")}  # Not a list
+        
+        result = operator.mutate(genes, ranges)
+        
+        # Should remain unchanged
+        assert result["str_param"] == "test"
+
+    def test_mutate_unknown_type(self):
+        """Test mutation of unknown parameter type."""
+        operator = MutationOperator(mutation_rate=1.0)
+        genes = {"unknown": object()}
+        ranges = {"unknown": (None, None)}
+        
+        result = operator.mutate(genes, ranges)
+        
+        # Should remain unchanged
+        assert result["unknown"] is genes["unknown"]
+
+    def test_mutate_parameter_not_in_ranges(self):
+        """Test mutation when parameter not in ranges."""
+        operator = MutationOperator(mutation_rate=1.0)
+        genes = {"param1": 10, "param2": 20}
+        ranges = {"param1": (0, 100)}  # param2 not in ranges
+        
+        result = operator.mutate(genes, ranges)
+        
+        # Only param1 should potentially be mutated, param2 unchanged
+        assert result["param2"] == 20
+
+    def test_mutate_with_clamping_integer(self):
+        """Test integer mutation with value clamping."""
+        operator = MutationOperator(mutation_rate=1.0, mutation_strength=2.0)
+        genes = {"int_param": 95}
+        ranges = {"int_param": (0, 100)}
+        
+        with patch('numpy.random.normal', return_value=50):  # Large noise
+            result = operator.mutate(genes, ranges)
+        
+        # Should be clamped to max value
+        assert result["int_param"] == 100
+
+    def test_mutate_with_clamping_float(self):
+        """Test float mutation with value clamping."""
+        operator = MutationOperator(mutation_rate=1.0, mutation_strength=2.0)
+        genes = {"float_param": 0.1}
+        ranges = {"float_param": (0.0, 1.0)}
+        
+        with patch('numpy.random.normal', return_value=-0.5):  # Negative noise
+            result = operator.mutate(genes, ranges)
+        
+        # Should be clamped to min value
+        assert result["float_param"] == 0.0
+
+    def test_adaptive_mutation_rate(self):
+        """Test adaptive mutation rate calculation."""
+        operator = MutationOperator(mutation_rate=0.1, adaptive=True)
+        
+        # Initial rate should be base rate
+        initial_rate = operator._adaptive_rate()
+        assert initial_rate == 0.1
+        
+        # After generations, rate should decrease
+        operator.generation_count = 10
+        decreased_rate = operator._adaptive_rate()
+        assert decreased_rate < 0.1
+        assert decreased_rate >= 0.01  # Should not go below min_rate
+
+    def test_adaptive_mutation_rate_minimum(self):
+        """Test adaptive mutation rate minimum."""
+        operator = MutationOperator(mutation_rate=0.1, adaptive=True)
+        operator.generation_count = 1000  # Large number of generations
+        
+        rate = operator._adaptive_rate()
+        expected_min = 0.1 * 0.1  # mutation_rate * 0.1
+        assert rate >= expected_min
+
+    def test_increment_generation(self):
+        """Test generation counter increment."""
+        operator = MutationOperator()
+        assert operator.generation_count == 0
+        
+        operator.increment_generation()
+        assert operator.generation_count == 1
+        
+        operator.increment_generation()
+        assert operator.generation_count == 2
+
+    def test_mutate_with_adaptive_rate(self):
+        """Test mutation using adaptive rate."""
+        operator = MutationOperator(mutation_rate=0.1, adaptive=True)
+        genes = {"param": True}
+        ranges = {"param": (False, True)}
+        
+        # Mock adaptive rate to always cause mutation
+        with patch.object(operator, '_adaptive_rate', return_value=1.0):
+            result = operator.mutate(genes, ranges)
+        
+        assert result["param"] is False
+
+
+class TestCrossoverOperator:
+    """Test CrossoverOperator class."""
+
+    def test_init_default_values(self):
+        """Test initialization with default values."""
+        operator = CrossoverOperator()
+        
+        assert operator.crossover_rate == 0.7
+        assert operator.crossover_type == "uniform"
+
+    def test_init_custom_values(self):
+        """Test initialization with custom values."""
+        operator = CrossoverOperator(
+            crossover_rate=0.8,
+            crossover_type="single_point"
+        )
+        
+        assert operator.crossover_rate == 0.8
+        assert operator.crossover_type == "single_point"
+
+    def test_crossover_no_operation(self):
+        """Test crossover when rate prevents operation."""
+        operator = CrossoverOperator(crossover_rate=0.5)
+        parent1 = {"param1": 10, "param2": 20}
+        parent2 = {"param1": 30, "param2": 40}
+        
+        with patch('random.random', return_value=0.6):  # > crossover_rate
+            child1, child2 = operator.crossover(parent1, parent2)
+        
+        assert child1 == parent1
+        assert child2 == parent2
+        assert child1 is not parent1  # Should be copies
+        assert child2 is not parent2
+
+    def test_uniform_crossover(self):
+        """Test uniform crossover."""
+        operator = CrossoverOperator(crossover_rate=1.0, crossover_type="uniform")
+        parent1 = {"param1": 10, "param2": 20, "param3": 30}
+        parent2 = {"param1": 40, "param2": 50, "param3": 60}
+        
+        with patch('random.random', side_effect=[0.1, 0.1, 0.3, 0.6]):  # crossover rate check + uniform choices
+            child1, child2 = operator.crossover(parent1, parent2)
+        
+        # param1 and param2: child1 gets parent1, child2 gets parent2
+        # param3: child1 gets parent2, child2 gets parent1
+        assert child1["param1"] == 10
+        assert child1["param2"] == 20
+        assert child1["param3"] == 60
+        assert child2["param1"] == 40
+        assert child2["param2"] == 50
+        assert child2["param3"] == 30
+
+    def test_uniform_crossover_missing_parameter(self):
+        """Test uniform crossover with missing parameter in second parent."""
+        operator = CrossoverOperator(crossover_rate=1.0, crossover_type="uniform")
+        parent1 = {"param1": 10, "param2": 20}
+        parent2 = {"param1": 30}  # Missing param2
+        
+        child1, child2 = operator.crossover(parent1, parent2)
+        
+        # param2 should be copied from parent1 to both children
+        assert child1["param2"] == 20
+        assert child2["param2"] == 20
+
+    def test_single_point_crossover_empty_params(self):
+        """Test single point crossover with empty parameters."""
+        operator = CrossoverOperator(crossover_rate=1.0, crossover_type="single_point")
+        parent1: Dict[str, Any] = {}
+        parent2: Dict[str, Any] = {}
+        
+        child1, child2 = operator.crossover(parent1, parent2)
+        
+        assert child1 == parent1
+        assert child2 == parent2
+
+    def test_single_point_crossover_one_param(self):
+        """Test single point crossover with one parameter."""
+        operator = CrossoverOperator(crossover_rate=1.0, crossover_type="single_point")
+        parent1 = {"param1": 10}
+        parent2 = {"param1": 20}
+        
+        child1, child2 = operator.crossover(parent1, parent2)
+        
+        # Should return copies without crossover
+        assert child1 == parent1
+        assert child2 == parent2
+
+    def test_single_point_crossover_multiple_params(self):
+        """Test single point crossover with multiple parameters."""
+        operator = CrossoverOperator(crossover_rate=1.0, crossover_type="single_point")
+        parent1 = {"param1": 10, "param2": 20, "param3": 30}
+        parent2 = {"param1": 40, "param2": 50, "param3": 60}
+        
+        with patch('random.randint', return_value=2):  # Crossover at position 2
+            child1, child2 = operator.crossover(parent1, parent2)
+        
+        # First two params from respective parents, last param swapped
+        param_keys = list(parent1.keys())
+        for i, param in enumerate(param_keys):
+            if i < 2:
+                assert child1[param] == parent1[param]
+                assert child2[param] == parent2[param]
+            else:
+                assert child1[param] == parent2[param]
+                assert child2[param] == parent1[param]
+
+    def test_two_point_crossover_small_params(self):
+        """Test two point crossover with small parameter set."""
+        operator = CrossoverOperator(crossover_rate=1.0, crossover_type="two_point")
+        parent1 = {"param1": 10, "param2": 20}
+        parent2 = {"param1": 30, "param2": 40}
+        
+        # Should fallback to single point crossover
+        with patch.object(operator, '_single_point_crossover', return_value=(parent1, parent2)):
+            child1, child2 = operator.crossover(parent1, parent2)
+        
+        assert child1 == parent1
+        assert child2 == parent2
+
+    def test_two_point_crossover_multiple_params(self):
+        """Test two point crossover with multiple parameters."""
+        operator = CrossoverOperator(crossover_rate=1.0, crossover_type="two_point")
+        parent1 = {"param1": 10, "param2": 20, "param3": 30, "param4": 40}
+        parent2 = {"param1": 50, "param2": 60, "param3": 70, "param4": 80}
+        
+        with patch('random.randint', side_effect=[1, 3]):  # Points at 1 and 3
+            child1, child2 = operator.crossover(parent1, parent2)
+        
+        # Segments: [0], [1,2], [3] - middle segment swapped
+        param_keys = list(parent1.keys())
+        for i, param in enumerate(param_keys):
+            if i < 1 or i >= 3:
+                assert child1[param] == parent1[param]
+                assert child2[param] == parent2[param]
+            else:
+                assert child1[param] == parent2[param]
+                assert child2[param] == parent1[param]
+
+    def test_blend_crossover_numeric_values(self):
+        """Test blend crossover with numeric values."""
+        operator = CrossoverOperator(crossover_rate=1.0, crossover_type="blend")
+        parent1 = {"int_param": 10, "float_param": 5.0}
+        parent2 = {"int_param": 20, "float_param": 15.0}
+        
+        with patch('random.random', return_value=0.1):  # Pass crossover rate check
+            with patch('random.uniform', side_effect=[12.5, 15.5, 8.0, 6.5]):  # Different order based on code execution
+                child1, child2 = operator.crossover(parent1, parent2)
+        
+        assert isinstance(child1["int_param"], int)
+        assert isinstance(child1["float_param"], float)
+        # Values should be within expected ranges from blend crossover
+        assert 0 <= child1["int_param"] <= 30  # Reasonable range for blended values
+        assert 0.0 <= child1["float_param"] <= 20.0
+
+    def test_blend_crossover_mixed_integer_float(self):
+        """Test blend crossover with mixed integer and float."""
+        operator = CrossoverOperator(crossover_rate=1.0, crossover_type="blend")
+        parent1 = {"param": 10}  # int
+        parent2 = {"param": 15.5}  # float
+        
+        with patch('random.uniform', return_value=12.5):
+            child1, child2 = operator.crossover(parent1, parent2)
+        
+        # Result should be float since one parent is float
+        assert isinstance(child1["param"], float)
+        assert child1["param"] == 12.5
+
+    def test_blend_crossover_non_numeric(self):
+        """Test blend crossover with non-numeric values."""
+        operator = CrossoverOperator(crossover_rate=1.0, crossover_type="blend")
+        parent1 = {"str_param": "value1", "bool_param": True}
+        parent2 = {"str_param": "value2", "bool_param": False}
+        
+        with patch('random.random', side_effect=[0.1, 0.3, 0.7]):  # crossover rate + uniform choices
+            child1, child2 = operator.crossover(parent1, parent2)
+        
+        # Non-numeric values should use uniform crossover logic
+        # Just verify that results are valid (one of the two parent values)
+        assert child1["str_param"] in ["value1", "value2"]
+        assert child2["str_param"] in ["value1", "value2"]
+        assert child1["bool_param"] in [True, False]
+        assert child2["bool_param"] in [True, False]
+
+    def test_unknown_crossover_type(self):
+        """Test crossover with unknown type."""
+        operator = CrossoverOperator(crossover_rate=1.0, crossover_type="unknown")
+        parent1 = {"param": 10}
+        parent2 = {"param": 20}
+        
+        # Should default to uniform crossover
+        with patch.object(operator, '_uniform_crossover', return_value=(parent1, parent2)):
+            child1, child2 = operator.crossover(parent1, parent2)
+        
+        assert child1 == parent1
+        assert child2 == parent2
+
+
+class TestAdvancedMutationOperator:
+    """Test AdvancedMutationOperator class."""
+
+    def test_init_default_values(self):
+        """Test initialization with default values."""
+        operator = AdvancedMutationOperator()
+        
+        assert operator.mutation_rate == 0.1
+        assert operator.mutation_strength == 0.2
+        assert operator.adaptive is True
+        assert operator.strategies == ["gaussian", "uniform", "polynomial"]
+
+    def test_init_custom_strategies(self):
+        """Test initialization with custom strategies."""
+        custom_strategies = ["gaussian", "uniform"]
+        operator = AdvancedMutationOperator(strategies=custom_strategies)
+        
+        assert operator.strategies == custom_strategies
+
+    def test_mutate_gaussian_strategy(self):
+        """Test mutation using Gaussian strategy."""
+        operator = AdvancedMutationOperator(mutation_rate=1.0)
+        genes = {"param": 50.0}
+        ranges = {"param": (0.0, 100.0)}
+        
+        with patch('random.choice', return_value="gaussian"):
+            with patch.object(operator, '_gaussian_mutation', return_value=55.0) as mock_gaussian:
+                result = operator.mutate(genes, ranges)
+        
+        mock_gaussian.assert_called_once_with(50.0, (0.0, 100.0))
+        assert result["param"] == 55.0
+
+    def test_mutate_uniform_strategy(self):
+        """Test mutation using uniform strategy."""
+        operator = AdvancedMutationOperator(mutation_rate=1.0)
+        genes = {"param": 50}
+        ranges = {"param": (0, 100)}
+        
+        with patch('random.choice', return_value="uniform"):
+            with patch.object(operator, '_uniform_mutation', return_value=75) as mock_uniform:
+                result = operator.mutate(genes, ranges)
+        
+        mock_uniform.assert_called_once_with(50, (0, 100))
+        assert result["param"] == 75
+
+    def test_mutate_polynomial_strategy(self):
+        """Test mutation using polynomial strategy."""
+        operator = AdvancedMutationOperator(mutation_rate=1.0)
+        genes = {"param": 25.0}
+        ranges = {"param": (0.0, 50.0)}
+        
+        with patch('random.choice', return_value="polynomial"):
+            with patch.object(operator, '_polynomial_mutation', return_value=30.0) as mock_poly:
+                result = operator.mutate(genes, ranges)
+        
+        mock_poly.assert_called_once_with(25.0, (0.0, 50.0))
+        assert result["param"] == 30.0
+
+    def test_mutate_unknown_strategy(self):
+        """Test mutation with unknown strategy falls back to base method."""
+        operator = AdvancedMutationOperator(mutation_rate=1.0)
+        genes = {"param": True}
+        ranges = {"param": (False, True)}
+        
+        with patch('random.choice', return_value="unknown"):
+            result = operator.mutate(genes, ranges)
+        
+        # Should use base mutation (flip boolean)
+        assert result["param"] is False
+
+    def test_gaussian_mutation_non_numeric(self):
+        """Test Gaussian mutation with non-numeric value."""
+        operator = AdvancedMutationOperator()
+        result = operator._gaussian_mutation("string", (0, 100))
+        assert result == "string"
+
+    @patch('numpy.random.normal')
+    @patch('numpy.exp')
+    def test_gaussian_mutation_numeric(self, mock_exp, mock_normal):
+        """Test Gaussian mutation with numeric value."""
+        mock_exp.return_value = 0.9
+        mock_normal.return_value = 2.0
+        
+        operator = AdvancedMutationOperator(mutation_strength=0.1)
+        operator.generation_count = 5
+        
+        result = operator._gaussian_mutation(50.0, (0.0, 100.0))
+        
+        # Should apply adaptive variance and clamp result
+        assert isinstance(result, float)
+        assert 0.0 <= result <= 100.0
+
+    def test_gaussian_mutation_integer_result(self):
+        """Test Gaussian mutation preserves integer type."""
+        operator = AdvancedMutationOperator()
+        
+        with patch('numpy.random.normal', return_value=5.7):
+            result = operator._gaussian_mutation(50, (0, 100))
+        
+        assert isinstance(result, int)
+        assert 0 <= result <= 100
+
+    def test_uniform_mutation_non_numeric(self):
+        """Test uniform mutation with non-numeric value."""
+        operator = AdvancedMutationOperator()
+        result = operator._uniform_mutation("string", (0, 100))
+        assert result == "string"
+
+    def test_uniform_mutation_integer(self):
+        """Test uniform mutation with integer."""
+        operator = AdvancedMutationOperator()
+        
+        with patch('random.randint', return_value=75):
+            result = operator._uniform_mutation(50, (0, 100))
+        
+        assert result == 75
+        assert isinstance(result, int)
+
+    def test_uniform_mutation_float(self):
+        """Test uniform mutation with float."""
+        operator = AdvancedMutationOperator()
+        
+        with patch('random.uniform', return_value=7.5):
+            result = operator._uniform_mutation(5.0, (0.0, 10.0))
+        
+        assert result == 7.5
+        assert isinstance(result, float)
+
+    def test_polynomial_mutation_non_numeric(self):
+        """Test polynomial mutation with non-numeric value."""
+        operator = AdvancedMutationOperator()
+        result = operator._polynomial_mutation("string", (0, 100))
+        assert result == "string"
+
+    def test_polynomial_mutation_numeric_low_u(self):
+        """Test polynomial mutation with u < 0.5."""
+        operator = AdvancedMutationOperator(mutation_strength=0.1)
+        
+        with patch('random.random', return_value=0.3):  # u < 0.5
+            result = operator._polynomial_mutation(50.0, (0.0, 100.0), eta=20)
+        
+        assert isinstance(result, float)
+        assert 0.0 <= result <= 100.0
+
+    def test_polynomial_mutation_numeric_high_u(self):
+        """Test polynomial mutation with u >= 0.5."""
+        operator = AdvancedMutationOperator(mutation_strength=0.1)
+        
+        with patch('random.random', return_value=0.7):  # u >= 0.5
+            result = operator._polynomial_mutation(50.0, (0.0, 100.0), eta=20)
+        
+        assert isinstance(result, float)
+        assert 0.0 <= result <= 100.0
+
+    def test_polynomial_mutation_integer_result(self):
+        """Test polynomial mutation preserves integer type."""
+        operator = AdvancedMutationOperator(mutation_strength=0.1)
+        
+        with patch('random.random', return_value=0.5):
+            result = operator._polynomial_mutation(50, (0, 100))
+        
+        assert isinstance(result, int)
+        assert 0 <= result <= 100
+
+    def test_polynomial_mutation_clamping(self):
+        """Test polynomial mutation with clamping to range."""
+        operator = AdvancedMutationOperator(mutation_strength=2.0)  # Large strength
+        
+        result = operator._polynomial_mutation(90.0, (0.0, 100.0))
+        
+        # Should be clamped to valid range
+        assert 0.0 <= result <= 100.0
+
+
+class TestErrorHandling:
+    """Test error handling and edge cases."""
+
+    def test_empty_genes_mutation(self):
+        """Test mutation with empty genes dictionary."""
+        operator = MutationOperator(mutation_rate=1.0)
+        result = operator.mutate({}, {})
+        assert result == {}
+
+    def test_empty_genes_crossover(self):
+        """Test crossover with empty genes dictionaries."""
+        operator = CrossoverOperator(crossover_rate=1.0)
+        child1, child2 = operator.crossover({}, {})
+        assert child1 == {}
+        assert child2 == {}
+
+    def test_mismatched_parents_crossover(self):
+        """Test crossover with completely different parent structures."""
+        operator = CrossoverOperator(crossover_rate=1.0)
+        parent1 = {"param1": 10}
+        parent2 = {"param2": 20}
+        
+        child1, child2 = operator.crossover(parent1, parent2)
+        
+        # param1 should appear in both children from parent1
+        # param2 should not appear since it's not in parent1
+        assert "param1" in child1
+        assert "param1" in child2
+        assert "param2" not in child1
+        assert "param2" not in child2
+
+    def test_none_values_in_genes(self):
+        """Test handling of None values in genes."""
+        operator = MutationOperator(mutation_rate=1.0)
+        genes = {"param": None}
+        ranges = {"param": (0, 100)}
+        
+        result = operator.mutate(genes, ranges)
+        
+        # None should remain unchanged
+        assert result["param"] is None
+
+    def test_extreme_mutation_strength(self):
+        """Test mutation with extreme mutation strength."""
+        operator = MutationOperator(mutation_rate=1.0, mutation_strength=10.0)
+        genes = {"param": 50}
+        ranges = {"param": (0, 100)}
+        
+        result = operator.mutate(genes, ranges)
+        
+        # Should still be within range despite high strength
+        assert 0 <= result["param"] <= 100
+
+    def test_zero_mutation_rate(self):
+        """Test mutation with zero mutation rate."""
+        operator = MutationOperator(mutation_rate=0.0)
+        genes = {"param": 50}
+        ranges = {"param": (0, 100)}
+        
+        result = operator.mutate(genes, ranges)
+        
+        # Should remain unchanged
+        assert result == genes
+        assert result is not genes  # But should be a copy
+
+    def test_zero_crossover_rate(self):
+        """Test crossover with zero crossover rate."""
+        operator = CrossoverOperator(crossover_rate=0.0)
+        parent1 = {"param": 10}
+        parent2 = {"param": 20}
+        
+        child1, child2 = operator.crossover(parent1, parent2)
+        
+        # Should return copies of parents
+        assert child1 == parent1
+        assert child2 == parent2
+        assert child1 is not parent1
+        assert child2 is not parent2

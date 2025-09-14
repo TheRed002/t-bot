@@ -14,13 +14,12 @@ from typing import Any
 import numpy as np
 from pydantic import BaseModel, ConfigDict, Field
 
-from src.backtesting.engine import BacktestConfig, BacktestEngine
 from src.core.exceptions import OptimizationError
+from src.strategies.evolutionary.fitness import FitnessEvaluator
+from src.strategies.evolutionary.mutations import CrossoverOperator, MutationOperator
+from src.strategies.evolutionary.population import Individual, Population
+from src.strategies.interfaces import OptimizationConfig, OptimizationEngineInterface
 from src.utils.decorators import time_execution
-
-from .fitness import FitnessEvaluator
-from .mutations import CrossoverOperator, MutationOperator
-from .population import Individual, Population
 
 
 class GeneticConfig(BaseModel):
@@ -68,7 +67,8 @@ class GeneticAlgorithm:
         strategy_class: type,
         parameter_ranges: dict[str, tuple[Any, Any]],
         fitness_evaluator: FitnessEvaluator,
-        backtest_config: BacktestConfig,
+        optimization_config: OptimizationConfig,
+        optimization_engine: OptimizationEngineInterface,
     ):
         """
         Initialize genetic algorithm.
@@ -78,13 +78,15 @@ class GeneticAlgorithm:
             strategy_class: Strategy class to evolve
             parameter_ranges: Parameter ranges for evolution
             fitness_evaluator: Fitness evaluation function
-            backtest_config: Backtesting configuration
+            optimization_config: Optimization configuration
+            optimization_engine: Optimization engine interface
         """
         self.config = config
         self.strategy_class = strategy_class
         self.parameter_ranges = parameter_ranges
         self.fitness_evaluator = fitness_evaluator
-        self.backtest_config = backtest_config
+        self.optimization_config = optimization_config
+        self.optimization_engine = optimization_engine
 
         # Initialize operators
         self.mutation_operator = MutationOperator(mutation_rate=config.mutation_rate)
@@ -189,7 +191,7 @@ class GeneticAlgorithm:
             # Generate random parameters
             genes = {}
             for param, (min_val, max_val) in self.parameter_ranges.items():
-                if isinstance(min_val, int | float):
+                if isinstance(min_val, (int, float)):
                     # Numeric parameter
                     if isinstance(min_val, int):
                         value = random.randint(min_val, max_val)
@@ -246,13 +248,11 @@ class GeneticAlgorithm:
             # Create strategy with individual's parameters
             strategy = self.strategy_class(**individual.genes)
 
-            # Run backtest
-            engine = BacktestEngine(
-                config=self.backtest_config,
+            # Run optimization using the generic engine
+            result = await self.optimization_engine.run_optimization(
                 strategy=strategy,
+                config=self.optimization_config,
             )
-
-            result = await engine.run()
 
             # Calculate fitness
             fitness = self.fitness_evaluator.evaluate(result)
@@ -262,9 +262,11 @@ class GeneticAlgorithm:
             individual.metadata.update(
                 {
                     "sharpe_ratio": result.sharpe_ratio,
-                    "total_return": float(result.total_return),
-                    "max_drawdown": float(result.max_drawdown),
+                    "total_return": result.total_return,
+                    "max_drawdown": result.max_drawdown,
                     "win_rate": result.win_rate,
+                    "num_trades": result.num_trades,
+                    **result.additional_metrics,
                 }
             )
 
@@ -385,7 +387,7 @@ class GeneticAlgorithm:
 
                 if (
                     not is_categorical
-                    and isinstance(val1, int | float)
+                    and isinstance(val1, (int, float))
                     and not isinstance(val1, bool)
                 ):
                     # Numeric distance (normalized)
@@ -412,7 +414,7 @@ class GeneticAlgorithm:
             # Generate random individual
             genes = {}
             for param, (min_val, max_val) in self.parameter_ranges.items():
-                if isinstance(min_val, int | float):
+                if isinstance(min_val, (int, float)):
                     if isinstance(min_val, int):
                         value = random.randint(min_val, max_val)
                     else:

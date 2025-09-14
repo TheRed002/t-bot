@@ -12,6 +12,7 @@ This module provides robust validation for:
 import asyncio
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
+from decimal import Decimal
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -70,7 +71,7 @@ class BaseValidator(ABC):
         """
         self.name = name
         self.config = config or {}
-        self._logger = logger.getChild(name)
+        self._logger = get_logger(f"{__name__}.{name}")
 
     @abstractmethod
     async def validate(
@@ -97,9 +98,9 @@ class SignalValidator(BaseValidator):
         super().__init__("SignalValidator", config)
 
         # Validation thresholds
-        self.min_confidence = config.get("min_confidence", 0.1) if config else 0.1
+        self.min_strength = config.get("min_strength", 0.1) if config else 0.1
         self.max_signal_age_seconds = config.get("max_signal_age_seconds", 60) if config else 60
-        self.required_fields = ["symbol", "direction", "confidence", "timestamp", "strategy_name"]
+        self.required_fields = ["symbol", "direction", "strength", "timestamp", "source"]
 
     async def validate(
         self, signal: Signal, context: dict[str, Any] | None = None
@@ -121,7 +122,7 @@ class SignalValidator(BaseValidator):
             await self._validate_required_fields(signal, result)
 
             # Confidence validation
-            await self._validate_confidence(signal, result)
+            await self._validate_strength(signal, result)
 
             # Timestamp validation
             await self._validate_timestamp(signal, result)
@@ -148,18 +149,16 @@ class SignalValidator(BaseValidator):
             if not hasattr(signal, field) or getattr(signal, field) is None:
                 result.add_error(f"Missing required field: {field}")
 
-    async def _validate_confidence(self, signal: Signal, result: ValidationResult) -> None:
-        """Validate signal confidence."""
-        if signal.confidence < self.min_confidence:
-            result.add_error(
-                f"Signal confidence {signal.confidence} below minimum {self.min_confidence}"
-            )
+    async def _validate_strength(self, signal: Signal, result: ValidationResult) -> None:
+        """Validate signal strength."""
+        if signal.strength < Decimal(str(self.min_strength)):
+            result.add_error(f"Signal strength {signal.strength} below minimum {self.min_strength}")
 
-        if signal.confidence > 1.0:
-            result.add_error(f"Signal confidence {signal.confidence} above maximum 1.0")
+        if signal.strength > Decimal("1.0"):
+            result.add_error(f"Signal strength {signal.strength} above maximum 1.0")
 
-        if signal.confidence < 0.5:
-            result.add_warning(f"Low signal confidence: {signal.confidence}")
+        if signal.strength < Decimal("0.5"):
+            result.add_warning(f"Low signal strength: {signal.strength}")
 
     async def _validate_timestamp(self, signal: Signal, result: ValidationResult) -> None:
         """Validate signal timestamp."""
@@ -199,10 +198,10 @@ class SignalValidator(BaseValidator):
 
             # Check if signal price is reasonable relative to market
             if hasattr(signal, "target_price") and signal.target_price:
-                price_diff = abs(float(signal.target_price - market_data.price)) / float(
-                    market_data.price
-                )
-                if price_diff > 0.1:  # 10% difference
+                # Calculate price difference using Decimal arithmetic for precision
+                price_difference = abs(signal.target_price - market_data.price)
+                price_diff = price_difference / market_data.price
+                if price_diff > Decimal("0.1"):  # 10% difference
                     result.add_warning(
                         f"Signal target price deviates significantly from market: {price_diff:.2%}"
                     )
@@ -395,9 +394,10 @@ class MarketConditionValidator(BaseValidator):
     async def _validate_spread(self, market_data: MarketData, result: ValidationResult) -> None:
         """Validate bid-ask spread."""
         if market_data.bid and market_data.ask:
-            spread_pct = float((market_data.ask - market_data.bid) / market_data.price)
-            if spread_pct > self.max_spread_pct:
-                result.add_warning(f"Wide spread: {spread_pct:.4f} > {self.max_spread_pct:.4f}")
+            # Calculate spread using Decimal arithmetic
+            spread_decimal = (market_data.ask - market_data.bid) / market_data.price
+            if spread_decimal > Decimal(str(self.max_spread_pct)):
+                result.add_warning(f"Wide spread: {spread_decimal:.4f} > {self.max_spread_pct:.4f}")
 
     async def _validate_price_data(self, market_data: MarketData, result: ValidationResult) -> None:
         """Validate price data integrity."""

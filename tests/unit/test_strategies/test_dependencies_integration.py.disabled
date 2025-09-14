@@ -1,0 +1,1013 @@
+"""
+Comprehensive Strategy Dependencies Integration Tests
+
+This module provides extensive test coverage for the StrategyServiceContainer
+and dependency injection system, focusing on:
+
+- Service container initialization and validation
+- Dependency injection patterns
+- Service availability checking
+- Builder pattern implementation
+- Container factory functions
+- Error handling for missing dependencies
+- Integration with actual service instances
+
+Coverage targets:
+- StrategyServiceContainer class: 100%
+- StrategyServiceContainerBuilder class: 100%  
+- create_strategy_service_container function: 100%
+- Service status and readiness checks: 100%
+"""
+
+from unittest.mock import Mock, patch
+
+import pytest
+
+from src.strategies.dependencies import (
+    StrategyServiceContainer,
+    StrategyServiceContainerBuilder,
+    create_strategy_service_container,
+)
+
+
+class TestStrategyServiceContainer:
+    """Test StrategyServiceContainer initialization and validation."""
+    
+    def test_container_initialization_empty(self):
+        """Test container initialization with no services."""
+        container = StrategyServiceContainer()
+        
+        # All services should be None by default
+        assert container.risk_service is None
+        assert container.data_service is None
+        assert container.execution_service is None
+        assert container.monitoring_service is None
+        assert container.state_service is None
+        assert container.capital_service is None
+        assert container.ml_service is None
+        assert container.analytics_service is None
+        assert container.optimization_service is None
+        
+        # Container should not be ready
+        assert not container.is_ready()
+    
+    def test_container_initialization_with_all_services(self):
+        """Test container initialization with all services provided."""
+        # Create mock services
+        mock_risk = Mock()
+        mock_data = Mock()
+        mock_execution = Mock()
+        mock_monitoring = Mock()
+        mock_state = Mock()
+        mock_capital = Mock()
+        mock_ml = Mock()
+        mock_analytics = Mock()
+        mock_optimization = Mock()
+        
+        container = StrategyServiceContainer(
+            risk_service=mock_risk,
+            data_service=mock_data,
+            execution_service=mock_execution,
+            monitoring_service=mock_monitoring,
+            state_service=mock_state,
+            capital_service=mock_capital,
+            ml_service=mock_ml,
+            analytics_service=mock_analytics,
+            optimization_service=mock_optimization,
+        )
+        
+        # All services should be assigned
+        assert container.risk_service == mock_risk
+        assert container.data_service == mock_data
+        assert container.execution_service == mock_execution
+        assert container.monitoring_service == mock_monitoring
+        assert container.state_service == mock_state
+        assert container.capital_service == mock_capital
+        assert container.ml_service == mock_ml
+        assert container.analytics_service == mock_analytics
+        assert container.optimization_service == mock_optimization
+        
+        # Container should be ready (has all critical services)
+        assert container.is_ready()
+    
+    def test_container_initialization_critical_services_only(self):
+        """Test container with only critical services is ready."""
+        mock_risk = Mock()
+        mock_data = Mock()
+        mock_execution = Mock()
+        
+        container = StrategyServiceContainer(
+            risk_service=mock_risk,
+            data_service=mock_data,
+            execution_service=mock_execution,
+        )
+        
+        # Should be ready with critical services
+        assert container.is_ready()
+        
+        # Optional services should still be None
+        assert container.monitoring_service is None
+        assert container.state_service is None
+        assert container.capital_service is None
+        assert container.ml_service is None
+        assert container.analytics_service is None
+        assert container.optimization_service is None
+    
+    def test_container_post_init_validation_missing_critical(self):
+        """Test post-init validation logs warnings for missing critical services."""
+        with patch('src.strategies.dependencies.get_logger') as mock_get_logger:
+            mock_logger = Mock()
+            mock_get_logger.return_value = mock_logger
+            
+            # Create container missing critical services
+            container = StrategyServiceContainer(
+                monitoring_service=Mock(),  # Only optional service
+            )
+            
+            # Should log warning about missing critical services
+            mock_logger.warning.assert_called_once()
+            call_args = mock_logger.warning.call_args
+            assert "Critical services missing" in call_args[0][0]
+            assert "missing_services" in call_args[1]
+    
+    def test_container_post_init_validation_all_critical_present(self):
+        """Test post-init validation with all critical services present."""
+        with patch('src.strategies.dependencies.get_logger') as mock_get_logger:
+            mock_logger = Mock()
+            mock_get_logger.return_value = mock_logger
+            
+            # Create container with all critical services
+            container = StrategyServiceContainer(
+                risk_service=Mock(),
+                data_service=Mock(),
+                execution_service=Mock(),
+            )
+            
+            # Should not log any warnings
+            mock_logger.warning.assert_not_called()
+    
+    def test_is_ready_with_all_critical_services(self):
+        """Test is_ready returns True when all critical services present."""
+        container = StrategyServiceContainer(
+            risk_service=Mock(),
+            data_service=Mock(),
+            execution_service=Mock(),
+        )
+        
+        assert container.is_ready() is True
+    
+    def test_is_ready_missing_risk_service(self):
+        """Test is_ready returns False when risk service missing."""
+        container = StrategyServiceContainer(
+            data_service=Mock(),
+            execution_service=Mock(),
+            # risk_service missing
+        )
+        
+        assert container.is_ready() is False
+    
+    def test_is_ready_missing_data_service(self):
+        """Test is_ready returns False when data service missing."""
+        container = StrategyServiceContainer(
+            risk_service=Mock(),
+            execution_service=Mock(),
+            # data_service missing
+        )
+        
+        assert container.is_ready() is False
+    
+    def test_is_ready_missing_execution_service(self):
+        """Test is_ready returns False when execution service missing."""
+        container = StrategyServiceContainer(
+            risk_service=Mock(),
+            data_service=Mock(),
+            # execution_service missing
+        )
+        
+        assert container.is_ready() is False
+    
+    def test_is_ready_missing_multiple_critical_services(self):
+        """Test is_ready returns False when multiple critical services missing."""
+        container = StrategyServiceContainer(
+            risk_service=Mock(),
+            # data_service and execution_service missing
+        )
+        
+        assert container.is_ready() is False
+    
+    def test_get_service_status_all_services(self):
+        """Test get_service_status returns correct status for all services."""
+        container = StrategyServiceContainer(
+            risk_service=Mock(),
+            data_service=Mock(),
+            execution_service=Mock(),
+            monitoring_service=Mock(),
+            state_service=Mock(),
+            capital_service=Mock(),
+            ml_service=Mock(),
+            analytics_service=Mock(),
+            optimization_service=Mock(),
+        )
+        
+        status = container.get_service_status()
+        
+        expected_status = {
+            "risk_service": True,
+            "data_service": True,
+            "execution_service": True,
+            "monitoring_service": True,
+            "state_service": True,
+            "capital_service": True,
+            "ml_service": True,
+            "analytics_service": True,
+            "optimization_service": True,
+        }
+        
+        assert status == expected_status
+    
+    def test_get_service_status_partial_services(self):
+        """Test get_service_status with only some services available."""
+        container = StrategyServiceContainer(
+            risk_service=Mock(),
+            data_service=Mock(),
+            # execution_service and others missing
+        )
+        
+        status = container.get_service_status()
+        
+        expected_status = {
+            "risk_service": True,
+            "data_service": True,
+            "execution_service": False,
+            "monitoring_service": False,
+            "state_service": False,
+            "capital_service": False,
+            "ml_service": False,
+            "analytics_service": False,
+            "optimization_service": False,
+        }
+        
+        assert status == expected_status
+    
+    def test_get_service_status_no_services(self):
+        """Test get_service_status with no services."""
+        container = StrategyServiceContainer()
+        
+        status = container.get_service_status()
+        
+        expected_status = {
+            "risk_service": False,
+            "data_service": False,
+            "execution_service": False,
+            "monitoring_service": False,
+            "state_service": False,
+            "capital_service": False,
+            "ml_service": False,
+            "analytics_service": False,
+            "optimization_service": False,
+        }
+        
+        assert status == expected_status
+
+
+class TestStrategyServiceContainerBuilder:
+    """Test StrategyServiceContainerBuilder pattern implementation."""
+    
+    def test_builder_initialization(self):
+        """Test builder initializes with empty container."""
+        builder = StrategyServiceContainerBuilder()
+        
+        # Should create empty container
+        assert builder._container is not None
+        assert not builder._container.is_ready()
+    
+    def test_builder_with_risk_service(self):
+        """Test builder with_risk_service method."""
+        builder = StrategyServiceContainerBuilder()
+        mock_risk_service = Mock()
+        
+        result = builder.with_risk_service(mock_risk_service)
+        
+        # Should return self for chaining
+        assert result == builder
+        
+        # Should set risk service in container
+        assert builder._container.risk_service == mock_risk_service
+    
+    def test_builder_with_data_service(self):
+        """Test builder with_data_service method."""
+        builder = StrategyServiceContainerBuilder()
+        mock_data_service = Mock()
+        
+        result = builder.with_data_service(mock_data_service)
+        
+        # Should return self for chaining
+        assert result == builder
+        
+        # Should set data service in container
+        assert builder._container.data_service == mock_data_service
+    
+    def test_builder_with_execution_service(self):
+        """Test builder with_execution_service method."""
+        builder = StrategyServiceContainerBuilder()
+        mock_execution_service = Mock()
+        
+        result = builder.with_execution_service(mock_execution_service)
+        
+        # Should return self for chaining
+        assert result == builder
+        
+        # Should set execution service in container
+        assert builder._container.execution_service == mock_execution_service
+    
+    def test_builder_with_monitoring_service(self):
+        """Test builder with_monitoring_service method."""
+        builder = StrategyServiceContainerBuilder()
+        mock_monitoring_service = Mock()
+        
+        result = builder.with_monitoring_service(mock_monitoring_service)
+        
+        # Should return self for chaining
+        assert result == builder
+        
+        # Should set monitoring service in container
+        assert builder._container.monitoring_service == mock_monitoring_service
+    
+    def test_builder_with_state_service(self):
+        """Test builder with_state_service method."""
+        builder = StrategyServiceContainerBuilder()
+        mock_state_service = Mock()
+        
+        result = builder.with_state_service(mock_state_service)
+        
+        # Should return self for chaining
+        assert result == builder
+        
+        # Should set state service in container
+        assert builder._container.state_service == mock_state_service
+    
+    def test_builder_with_capital_service(self):
+        """Test builder with_capital_service method."""
+        builder = StrategyServiceContainerBuilder()
+        mock_capital_service = Mock()
+        
+        result = builder.with_capital_service(mock_capital_service)
+        
+        # Should return self for chaining
+        assert result == builder
+        
+        # Should set capital service in container
+        assert builder._container.capital_service == mock_capital_service
+    
+    def test_builder_with_ml_service(self):
+        """Test builder with_ml_service method."""
+        builder = StrategyServiceContainerBuilder()
+        mock_ml_service = Mock()
+        
+        result = builder.with_ml_service(mock_ml_service)
+        
+        # Should return self for chaining
+        assert result == builder
+        
+        # Should set ML service in container
+        assert builder._container.ml_service == mock_ml_service
+    
+    def test_builder_with_analytics_service(self):
+        """Test builder with_analytics_service method."""
+        builder = StrategyServiceContainerBuilder()
+        mock_analytics_service = Mock()
+        
+        result = builder.with_analytics_service(mock_analytics_service)
+        
+        # Should return self for chaining
+        assert result == builder
+        
+        # Should set analytics service in container
+        assert builder._container.analytics_service == mock_analytics_service
+    
+    def test_builder_with_optimization_service(self):
+        """Test builder with_optimization_service method."""
+        builder = StrategyServiceContainerBuilder()
+        mock_optimization_service = Mock()
+        
+        result = builder.with_optimization_service(mock_optimization_service)
+        
+        # Should return self for chaining
+        assert result == builder
+        
+        # Should set optimization service in container
+        assert builder._container.optimization_service == mock_optimization_service
+    
+    def test_builder_method_chaining(self):
+        """Test builder methods can be chained together."""
+        builder = StrategyServiceContainerBuilder()
+        
+        mock_risk = Mock()
+        mock_data = Mock()
+        mock_execution = Mock()
+        mock_monitoring = Mock()
+        mock_state = Mock()
+        mock_capital = Mock()
+        mock_ml = Mock()
+        mock_analytics = Mock()
+        mock_optimization = Mock()
+        
+        # Chain all methods together
+        result = (builder
+                  .with_risk_service(mock_risk)
+                  .with_data_service(mock_data)
+                  .with_execution_service(mock_execution)
+                  .with_monitoring_service(mock_monitoring)
+                  .with_state_service(mock_state)
+                  .with_capital_service(mock_capital)
+                  .with_ml_service(mock_ml)
+                  .with_analytics_service(mock_analytics)
+                  .with_optimization_service(mock_optimization))
+        
+        # Should return the same builder instance
+        assert result == builder
+        
+        # All services should be set
+        container = builder._container
+        assert container.risk_service == mock_risk
+        assert container.data_service == mock_data
+        assert container.execution_service == mock_execution
+        assert container.monitoring_service == mock_monitoring
+        assert container.state_service == mock_state
+        assert container.capital_service == mock_capital
+        assert container.ml_service == mock_ml
+        assert container.analytics_service == mock_analytics
+        assert container.optimization_service == mock_optimization
+    
+    def test_builder_build_with_complete_container(self):
+        """Test building complete container with all services."""
+        builder = StrategyServiceContainerBuilder()
+        
+        # Add all critical services
+        builder.with_risk_service(Mock())
+        builder.with_data_service(Mock())
+        builder.with_execution_service(Mock())
+        
+        container = builder.build()
+        
+        # Should return the built container
+        assert isinstance(container, StrategyServiceContainer)
+        assert container.is_ready()
+        assert container == builder._container
+    
+    def test_builder_build_with_missing_critical_services(self):
+        """Test building container with missing critical services logs warning."""
+        with patch('src.strategies.dependencies.get_logger') as mock_get_logger:
+            mock_logger = Mock()
+            mock_get_logger.return_value = mock_logger
+            
+            builder = StrategyServiceContainerBuilder()
+            
+            # Only add optional services
+            builder.with_monitoring_service(Mock())
+            builder.with_analytics_service(Mock())
+            
+            container = builder.build()
+            
+            # Should log warning about missing critical services
+            mock_logger.warning.assert_called_once()
+            call_args = mock_logger.warning.call_args
+            assert "Building container with missing critical services" in call_args[0][0]
+            assert "missing_services" in call_args[1]
+            
+            # Should still return container
+            assert isinstance(container, StrategyServiceContainer)
+            assert not container.is_ready()
+    
+    def test_builder_build_logs_success(self):
+        """Test building container logs success message."""
+        with patch('src.strategies.dependencies.get_logger') as mock_get_logger:
+            mock_logger = Mock()
+            mock_get_logger.return_value = mock_logger
+            
+            builder = StrategyServiceContainerBuilder()
+            
+            # Add all critical services
+            builder.with_risk_service(Mock())
+            builder.with_data_service(Mock())
+            builder.with_execution_service(Mock())
+            
+            # Mock get_service_status for logging
+            with patch.object(builder._container, 'get_service_status') as mock_status:
+                mock_status.return_value = {"all": "services"}
+                
+                container = builder.build()
+                
+                # Should log info about successful build
+                mock_logger.info.assert_called_once()
+                call_args = mock_logger.info.call_args
+                assert "Strategy service container built" in call_args[0][0]
+                assert call_args[1]["status"] == {"all": "services"}
+
+
+class TestCreateStrategyServiceContainerFactory:
+    """Test create_strategy_service_container factory function."""
+    
+    def test_factory_with_no_services(self):
+        """Test factory function with no services provided."""
+        container = create_strategy_service_container()
+        
+        # Should create empty container
+        assert isinstance(container, StrategyServiceContainer)
+        assert not container.is_ready()
+        assert container.get_service_status() == {
+            "risk_service": False,
+            "data_service": False,
+            "execution_service": False,
+            "monitoring_service": False,
+            "state_service": False,
+            "capital_service": False,
+            "ml_service": False,
+            "analytics_service": False,
+            "optimization_service": False,
+        }
+    
+    def test_factory_with_all_services(self):
+        """Test factory function with all services provided."""
+        # Create mock services
+        mock_risk = Mock()
+        mock_data = Mock()
+        mock_execution = Mock()
+        mock_monitoring = Mock()
+        mock_state = Mock()
+        mock_capital = Mock()
+        mock_ml = Mock()
+        mock_analytics = Mock()
+        mock_optimization = Mock()
+        
+        container = create_strategy_service_container(
+            risk_service=mock_risk,
+            data_service=mock_data,
+            execution_service=mock_execution,
+            monitoring_service=mock_monitoring,
+            state_service=mock_state,
+            capital_service=mock_capital,
+            ml_service=mock_ml,
+            analytics_service=mock_analytics,
+            optimization_service=mock_optimization,
+        )
+        
+        # Should create container with all services
+        assert isinstance(container, StrategyServiceContainer)
+        assert container.is_ready()
+        assert container.risk_service == mock_risk
+        assert container.data_service == mock_data
+        assert container.execution_service == mock_execution
+        assert container.monitoring_service == mock_monitoring
+        assert container.state_service == mock_state
+        assert container.capital_service == mock_capital
+        assert container.ml_service == mock_ml
+        assert container.analytics_service == mock_analytics
+        assert container.optimization_service == mock_optimization
+    
+    def test_factory_with_critical_services_only(self):
+        """Test factory function with only critical services."""
+        mock_risk = Mock()
+        mock_data = Mock()
+        mock_execution = Mock()
+        
+        container = create_strategy_service_container(
+            risk_service=mock_risk,
+            data_service=mock_data,
+            execution_service=mock_execution,
+        )
+        
+        # Should create ready container with critical services
+        assert isinstance(container, StrategyServiceContainer)
+        assert container.is_ready()
+        assert container.risk_service == mock_risk
+        assert container.data_service == mock_data
+        assert container.execution_service == mock_execution
+        
+        # Optional services should be None
+        assert container.monitoring_service is None
+        assert container.state_service is None
+        assert container.capital_service is None
+        assert container.ml_service is None
+        assert container.analytics_service is None
+        assert container.optimization_service is None
+    
+    def test_factory_with_partial_services(self):
+        """Test factory function with partial service set."""
+        mock_risk = Mock()
+        mock_analytics = Mock()
+        mock_ml = Mock()
+        
+        container = create_strategy_service_container(
+            risk_service=mock_risk,
+            analytics_service=mock_analytics,
+            ml_service=mock_ml,
+            # Missing data_service and execution_service (critical)
+        )
+        
+        # Should create container but not ready
+        assert isinstance(container, StrategyServiceContainer)
+        assert not container.is_ready()  # Missing critical services
+        assert container.risk_service == mock_risk
+        assert container.analytics_service == mock_analytics
+        assert container.ml_service == mock_ml
+        
+        # Missing services should be None
+        assert container.data_service is None
+        assert container.execution_service is None
+    
+    def test_factory_with_none_services(self):
+        """Test factory function explicitly passing None services."""
+        container = create_strategy_service_container(
+            risk_service=None,
+            data_service=None,
+            execution_service=None,
+            monitoring_service=None,
+            state_service=None,
+            capital_service=None,
+            ml_service=None,
+            analytics_service=None,
+            optimization_service=None,
+        )
+        
+        # Should create empty container
+        assert isinstance(container, StrategyServiceContainer)
+        assert not container.is_ready()
+        
+        # All services should be None
+        status = container.get_service_status()
+        assert all(not available for available in status.values())
+    
+    def test_factory_uses_builder_pattern(self):
+        """Test factory function uses builder pattern internally."""
+        with patch('src.strategies.dependencies.StrategyServiceContainerBuilder') as mock_builder_class:
+            mock_builder = Mock()
+            mock_container = Mock()
+            mock_builder.build.return_value = mock_container
+            
+            # Set up method chaining
+            mock_builder.with_risk_service.return_value = mock_builder
+            mock_builder.with_data_service.return_value = mock_builder
+            mock_builder.with_execution_service.return_value = mock_builder
+            mock_builder.with_monitoring_service.return_value = mock_builder
+            mock_builder.with_state_service.return_value = mock_builder
+            mock_builder.with_capital_service.return_value = mock_builder
+            mock_builder.with_ml_service.return_value = mock_builder
+            mock_builder.with_analytics_service.return_value = mock_builder
+            mock_builder.with_optimization_service.return_value = mock_builder
+            
+            mock_builder_class.return_value = mock_builder
+            
+            mock_services = [Mock() for _ in range(9)]  # 9 services
+            
+            result = create_strategy_service_container(
+                risk_service=mock_services[0],
+                data_service=mock_services[1],
+                execution_service=mock_services[2],
+                monitoring_service=mock_services[3],
+                state_service=mock_services[4],
+                capital_service=mock_services[5],
+                ml_service=mock_services[6],
+                analytics_service=mock_services[7],
+                optimization_service=mock_services[8],
+            )
+            
+            # Should create builder
+            mock_builder_class.assert_called_once()
+            
+            # Should call all with_ methods
+            mock_builder.with_risk_service.assert_called_once_with(mock_services[0])
+            mock_builder.with_data_service.assert_called_once_with(mock_services[1])
+            mock_builder.with_execution_service.assert_called_once_with(mock_services[2])
+            mock_builder.with_monitoring_service.assert_called_once_with(mock_services[3])
+            mock_builder.with_state_service.assert_called_once_with(mock_services[4])
+            mock_builder.with_capital_service.assert_called_once_with(mock_services[5])
+            mock_builder.with_ml_service.assert_called_once_with(mock_services[6])
+            mock_builder.with_analytics_service.assert_called_once_with(mock_services[7])
+            mock_builder.with_optimization_service.assert_called_once_with(mock_services[8])
+            
+            # Should build and return container
+            mock_builder.build.assert_called_once()
+            assert result == mock_container
+    
+    def test_factory_skips_none_services(self):
+        """Test factory function skips None services in builder calls."""
+        with patch('src.strategies.dependencies.StrategyServiceContainerBuilder') as mock_builder_class:
+            mock_builder = Mock()
+            mock_container = Mock()
+            mock_builder.build.return_value = mock_container
+            
+            # Set up method chaining
+            mock_builder.with_risk_service.return_value = mock_builder
+            mock_builder.with_analytics_service.return_value = mock_builder
+            
+            mock_builder_class.return_value = mock_builder
+            
+            mock_risk = Mock()
+            mock_analytics = Mock()
+            
+            result = create_strategy_service_container(
+                risk_service=mock_risk,
+                data_service=None,  # Should be skipped
+                execution_service=None,  # Should be skipped
+                monitoring_service=None,  # Should be skipped
+                state_service=None,  # Should be skipped
+                capital_service=None,  # Should be skipped
+                ml_service=None,  # Should be skipped
+                analytics_service=mock_analytics,
+                optimization_service=None,  # Should be skipped
+            )
+            
+            # Should only call with_ methods for non-None services
+            mock_builder.with_risk_service.assert_called_once_with(mock_risk)
+            mock_builder.with_analytics_service.assert_called_once_with(mock_analytics)
+            
+            # Should not call with_ methods for None services
+            mock_builder.with_data_service.assert_not_called()
+            mock_builder.with_execution_service.assert_not_called()
+            mock_builder.with_monitoring_service.assert_not_called()
+            mock_builder.with_state_service.assert_not_called()
+            mock_builder.with_capital_service.assert_not_called()
+            mock_builder.with_ml_service.assert_not_called()
+            mock_builder.with_optimization_service.assert_not_called()
+            
+            # Should still build and return container
+            mock_builder.build.assert_called_once()
+            assert result == mock_container
+
+
+class TestServiceIntegrationPatterns:
+    """Test service integration patterns and real-world usage scenarios."""
+    
+    def test_container_with_real_service_types(self):
+        """Test container with realistic service type checking."""
+        # Simulate real service instances with expected attributes
+        class MockRiskService:
+            def validate_signal(self, signal):
+                return True
+                
+        class MockDataService:
+            async def get_market_data(self, symbol):
+                return {"symbol": symbol, "price": 100}
+                
+        class MockExecutionService:
+            async def execute_order(self, order):
+                return {"order_id": "12345", "status": "filled"}
+        
+        risk_service = MockRiskService()
+        data_service = MockDataService()
+        execution_service = MockExecutionService()
+        
+        container = StrategyServiceContainer(
+            risk_service=risk_service,
+            data_service=data_service,
+            execution_service=execution_service,
+        )
+        
+        # Should be ready and contain real service instances
+        assert container.is_ready()
+        assert hasattr(container.risk_service, 'validate_signal')
+        assert hasattr(container.data_service, 'get_market_data')
+        assert hasattr(container.execution_service, 'execute_order')
+    
+    def test_container_dependency_injection_simulation(self):
+        """Test container simulates real dependency injection scenario."""
+        # Simulate a strategy using the container
+        container = StrategyServiceContainer(
+            risk_service=Mock(),
+            data_service=Mock(),
+            execution_service=Mock(),
+            analytics_service=Mock(),
+        )
+        
+        class MockStrategy:
+            def __init__(self, services: StrategyServiceContainer):
+                self.services = services
+                
+            async def generate_signals(self, market_data):
+                # Use data service
+                if self.services.data_service:
+                    processed_data = await self.services.data_service.process_data(market_data)
+                
+                # Generate mock signal
+                signal = {"symbol": "BTC/USDT", "direction": 1}
+                
+                # Validate with risk service
+                if self.services.risk_service:
+                    if not self.services.risk_service.validate_signal(signal):
+                        return []
+                
+                # Record analytics
+                if self.services.analytics_service:
+                    await self.services.analytics_service.record_signal(signal)
+                
+                return [signal]
+        
+        # Strategy should be able to use all services from container
+        strategy = MockStrategy(container)
+        assert strategy.services == container
+        assert strategy.services.is_ready()
+    
+    def test_container_service_availability_patterns(self):
+        """Test patterns for checking service availability before use."""
+        # Container with partial services
+        container = StrategyServiceContainer(
+            risk_service=Mock(),
+            data_service=Mock(),
+            # execution_service missing
+            analytics_service=Mock(),
+            # ml_service missing
+        )
+        
+        # Pattern 1: Direct None checking
+        assert container.risk_service is not None
+        assert container.data_service is not None
+        assert container.execution_service is None
+        assert container.analytics_service is not None
+        assert container.ml_service is None
+        
+        # Pattern 2: Using service status
+        status = container.get_service_status()
+        assert status["risk_service"] is True
+        assert status["data_service"] is True
+        assert status["execution_service"] is False
+        assert status["analytics_service"] is True
+        assert status["ml_service"] is False
+        
+        # Pattern 3: Critical vs optional service checking
+        critical_available = all([
+            container.risk_service,
+            container.data_service,
+            container.execution_service,  # This will make it False
+        ])
+        assert critical_available is False
+        
+        # Pattern 4: Specific service feature checking
+        has_analytics = container.analytics_service is not None
+        has_ml = container.ml_service is not None
+        assert has_analytics is True
+        assert has_ml is False
+    
+    def test_container_error_handling_patterns(self):
+        """Test error handling patterns with container services."""
+        container = StrategyServiceContainer(
+            risk_service=Mock(),
+            data_service=Mock(),
+            execution_service=Mock(),
+        )
+        
+        # Pattern 1: Try-except with service availability check
+        def safe_risk_validation(signal):
+            try:
+                if container.risk_service:
+                    return container.risk_service.validate_signal(signal)
+                return True  # Default to allow if no risk service
+            except Exception:
+                return False  # Default to deny on error
+        
+        # Test with mock signal
+        test_signal = {"symbol": "BTC/USDT", "direction": 1}
+        
+        # Should work with available service
+        container.risk_service.validate_signal.return_value = True
+        result = safe_risk_validation(test_signal)
+        assert result is True
+        
+        # Should handle service error
+        container.risk_service.validate_signal.side_effect = Exception("Service error")
+        result = safe_risk_validation(test_signal)
+        assert result is False
+        
+        # Should handle missing service
+        container.risk_service = None
+        result = safe_risk_validation(test_signal)
+        assert result is True  # Default to allow
+    
+    def test_container_lifecycle_management(self):
+        """Test container lifecycle management patterns."""
+        # Pattern 1: Container initialization with validation
+        def create_validated_container(*services):
+            container = StrategyServiceContainer(*services)
+            
+            if not container.is_ready():
+                missing = [
+                    name for name, available in container.get_service_status().items()
+                    if not available and name in ["risk_service", "data_service", "execution_service"]
+                ]
+                raise ValueError(f"Missing critical services: {missing}")
+                
+            return container
+        
+        # Should succeed with all critical services
+        complete_container = create_validated_container(
+            Mock(),  # risk_service
+            Mock(),  # data_service  
+            Mock(),  # execution_service
+        )
+        assert complete_container.is_ready()
+        
+        # Should fail with missing critical services
+        with pytest.raises(ValueError, match="Missing critical services"):
+            create_validated_container(
+                Mock(),  # risk_service
+                None,    # data_service missing
+                Mock(),  # execution_service
+            )
+    
+    def test_builder_advanced_usage_patterns(self):
+        """Test advanced builder usage patterns."""
+        # Pattern 1: Conditional service addition
+        def build_container_for_environment(environment: str):
+            builder = StrategyServiceContainerBuilder()
+            
+            # Always add critical services
+            builder.with_risk_service(Mock())
+            builder.with_data_service(Mock())
+            builder.with_execution_service(Mock())
+            
+            # Conditionally add services based on environment
+            if environment == "production":
+                builder.with_monitoring_service(Mock())
+                builder.with_analytics_service(Mock())
+                
+            if environment in ["production", "staging"]:
+                builder.with_ml_service(Mock())
+                builder.with_optimization_service(Mock())
+                
+            return builder.build()
+        
+        # Test different environments
+        dev_container = build_container_for_environment("development")
+        staging_container = build_container_for_environment("staging")
+        prod_container = build_container_for_environment("production")
+        
+        # All should have critical services
+        assert dev_container.is_ready()
+        assert staging_container.is_ready()
+        assert prod_container.is_ready()
+        
+        # Check optional services based on environment
+        assert dev_container.monitoring_service is None
+        assert dev_container.analytics_service is None
+        assert dev_container.ml_service is None
+        
+        assert staging_container.monitoring_service is None
+        assert staging_container.analytics_service is None
+        assert staging_container.ml_service is not None  # Added for staging
+        
+        assert prod_container.monitoring_service is not None  # Added for production
+        assert prod_container.analytics_service is not None   # Added for production
+        assert prod_container.ml_service is not None         # Added for production
+    
+    def test_container_service_proxy_pattern(self):
+        """Test service proxy pattern for enhanced container functionality."""
+        # Advanced pattern: Container with service proxies for additional functionality
+        class ServiceProxy:
+            def __init__(self, service, container):
+                self._service = service
+                self._container = container
+                
+            def __getattr__(self, name):
+                return getattr(self._service, name)
+                
+            async def safe_call(self, method_name, *args, **kwargs):
+                """Safely call service method with error handling."""
+                try:
+                    method = getattr(self._service, method_name)
+                    if callable(method):
+                        return await method(*args, **kwargs) if asyncio.iscoroutinefunction(method) else method(*args, **kwargs)
+                except Exception as e:
+                    # Could log error, trigger alerts, etc.
+                    return None
+        
+        class EnhancedContainer(StrategyServiceContainer):
+            def get_risk_service_proxy(self):
+                if self.risk_service:
+                    return ServiceProxy(self.risk_service, self)
+                return None
+                
+            def get_data_service_proxy(self):
+                if self.data_service:
+                    return ServiceProxy(self.data_service, self)
+                return None
+        
+        # Test enhanced container
+        mock_risk = Mock()
+        mock_data = Mock()
+        
+        container = EnhancedContainer(
+            risk_service=mock_risk,
+            data_service=mock_data,
+            execution_service=Mock(),
+        )
+        
+        # Get service proxies
+        risk_proxy = container.get_risk_service_proxy()
+        data_proxy = container.get_data_service_proxy()
+        
+        assert risk_proxy is not None
+        assert data_proxy is not None
+        
+        # Proxies should delegate to actual services
+        assert risk_proxy._service == mock_risk
+        assert data_proxy._service == mock_data

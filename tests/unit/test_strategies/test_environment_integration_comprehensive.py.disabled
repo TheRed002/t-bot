@@ -1,0 +1,1038 @@
+"""
+Comprehensive tests for Environment-aware Strategy Integration.
+
+This module provides complete test coverage for the environment-aware strategy
+management functionality, covering all methods, error paths, and edge cases.
+"""
+
+import pytest
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
+from decimal import Decimal
+from datetime import datetime, timedelta, timezone
+from typing import Any, Dict
+
+from src.strategies.environment_integration import (
+    EnvironmentAwareStrategyConfiguration,
+    EnvironmentAwareStrategyManager,
+    StrategyMode,
+)
+from src.core.config.environment import ExchangeEnvironment
+from src.core.integration.environment_aware_service import EnvironmentContext
+from src.core.types import StrategyConfig, MarketData, Signal, SignalDirection
+from src.core.exceptions import StrategyError, ValidationError
+
+
+class MockStrategyConfig:
+    """Mock strategy configuration for testing."""
+    
+    def __init__(self, **kwargs):
+        self.name = kwargs.get('name', 'test_strategy')
+        self.max_position_size = kwargs.get('max_position_size', Decimal('0.05'))
+        self.min_signal_confidence = kwargs.get('min_signal_confidence', Decimal('0.6'))
+        self.max_drawdown = kwargs.get('max_drawdown', Decimal('0.10'))
+        self.rebalancing_frequency = kwargs.get('rebalancing_frequency', 60)
+        self.is_experimental = kwargs.get('is_experimental', False)
+        self.uses_ml = kwargs.get('uses_ml', False)
+        self.is_high_frequency = kwargs.get('is_high_frequency', False)
+        self.enable_experimental_features = kwargs.get('enable_experimental_features', False)
+    
+    def model_copy(self):
+        """Mock model_copy method."""
+        return MockStrategyConfig(
+            name=self.name,
+            max_position_size=self.max_position_size,
+            min_signal_confidence=self.min_signal_confidence,
+            max_drawdown=self.max_drawdown,
+            rebalancing_frequency=self.rebalancing_frequency,
+            is_experimental=self.is_experimental,
+            uses_ml=self.uses_ml,
+            is_high_frequency=self.is_high_frequency,
+            enable_experimental_features=self.enable_experimental_features,
+        )
+
+
+class TestEnvironmentAwareStrategyConfiguration:
+    """Test suite for EnvironmentAwareStrategyConfiguration."""
+
+    def test_get_sandbox_strategy_config(self):
+        """Test getting sandbox strategy configuration."""
+        config = EnvironmentAwareStrategyConfiguration.get_sandbox_strategy_config()
+        
+        assert config['strategy_mode'] == StrategyMode.EXPERIMENTAL
+        assert config['max_position_size_pct'] == Decimal('0.15')
+        assert config['enable_experimental_strategies'] is True
+        assert config['enable_high_frequency_strategies'] is True
+        assert config['enable_arbitrage_strategies'] is True
+        assert config['enable_ml_strategies'] is True
+        assert config['min_signal_confidence'] == Decimal('0.4')
+        assert config['max_drawdown_pct'] == Decimal('0.20')
+        assert config['rebalancing_frequency_minutes'] == 15
+        assert config['enable_dynamic_parameters'] is True
+        assert config['enable_genetic_optimization'] is True
+        assert config['backtest_required'] is False
+        assert config['paper_trading_mode'] is False
+        assert config['strategy_timeout_minutes'] == 30
+        assert config['max_concurrent_strategies'] == 10
+        assert config['enable_cross_strategy_coordination'] is True
+        assert config['risk_override_allowed'] is True
+        assert config['enable_strategy_hot_reload'] is True
+
+    def test_get_live_strategy_config(self):
+        """Test getting live/production strategy configuration."""
+        config = EnvironmentAwareStrategyConfiguration.get_live_strategy_config()
+        
+        assert config['strategy_mode'] == StrategyMode.CONSERVATIVE
+        assert config['max_position_size_pct'] == Decimal('0.05')
+        assert config['enable_experimental_strategies'] is False
+        assert config['enable_high_frequency_strategies'] is False
+        assert config['enable_arbitrage_strategies'] is True
+        assert config['enable_ml_strategies'] is False
+        assert config['min_signal_confidence'] == Decimal('0.7')
+        assert config['max_drawdown_pct'] == Decimal('0.08')
+        assert config['rebalancing_frequency_minutes'] == 60
+        assert config['enable_dynamic_parameters'] is False
+        assert config['enable_genetic_optimization'] is False
+        assert config['backtest_required'] is True
+        assert config['paper_trading_mode'] is False
+        assert config['strategy_timeout_minutes'] == 60
+        assert config['max_concurrent_strategies'] == 5
+        assert config['enable_cross_strategy_coordination'] is False
+        assert config['risk_override_allowed'] is False
+        assert config['enable_strategy_hot_reload'] is False
+
+
+class TestStrategyMode:
+    """Test suite for StrategyMode enum."""
+
+    def test_strategy_mode_values(self):
+        """Test all strategy mode enum values."""
+        assert StrategyMode.EXPERIMENTAL.value == "experimental"
+        assert StrategyMode.CONSERVATIVE.value == "conservative"
+        assert StrategyMode.BALANCED.value == "balanced"
+        assert StrategyMode.PAPER_ONLY.value == "paper_only"
+        assert StrategyMode.VALIDATION.value == "validation"
+
+    def test_strategy_mode_membership(self):
+        """Test strategy mode enum membership."""
+        modes = [mode.value for mode in StrategyMode]
+        assert "experimental" in modes
+        assert "conservative" in modes
+        assert "balanced" in modes
+        assert "paper_only" in modes
+        assert "validation" in modes
+
+
+class TestEnvironmentAwareStrategyManager:
+    """Test suite for EnvironmentAwareStrategyManager."""
+
+    @pytest.fixture
+    def mock_context_sandbox(self):
+        """Mock sandbox environment context."""
+        context = Mock(spec=EnvironmentContext)
+        context.exchange_name = 'binance_sandbox'
+        context.environment = ExchangeEnvironment.SANDBOX
+        context.is_production = False
+        return context
+
+    @pytest.fixture
+    def mock_context_production(self):
+        """Mock production environment context."""
+        context = Mock(spec=EnvironmentContext)
+        context.exchange_name = 'binance_live'
+        context.environment = ExchangeEnvironment.PRODUCTION
+        context.is_production = True
+        return context
+
+    @pytest.fixture
+    def manager(self):
+        """Create strategy manager instance."""
+        return EnvironmentAwareStrategyManager()
+
+    @pytest.fixture
+    def strategy_config(self):
+        """Create mock strategy configuration."""
+        return MockStrategyConfig(
+            name='test_strategy',
+            max_position_size=Decimal('0.03'),
+            min_signal_confidence=Decimal('0.5')
+        )
+
+    @pytest.fixture
+    def market_data(self):
+        """Create mock market data."""
+        return MarketData(
+            symbol='BTCUSDT',
+            price=Decimal('50000'),
+            volume=Decimal('1000'),
+            timestamp=datetime.now(timezone.utc)
+        )
+
+    def test_manager_initialization(self, manager):
+        """Test manager initialization."""
+        assert hasattr(manager, '_environment_strategy_configs')
+        assert hasattr(manager, '_strategy_performance_tracking')
+        assert hasattr(manager, '_active_strategies_by_env')
+        assert hasattr(manager, '_strategy_backtests')
+        assert isinstance(manager._environment_strategy_configs, dict)
+        assert isinstance(manager._strategy_performance_tracking, dict)
+        assert isinstance(manager._active_strategies_by_env, dict)
+        assert isinstance(manager._strategy_backtests, dict)
+
+    @pytest.mark.asyncio
+    async def test_update_service_environment_sandbox(self, manager, mock_context_sandbox):
+        """Test updating service environment for sandbox."""
+        with patch.object(manager, '_disable_experimental_strategies') as mock_disable:
+            await manager._update_service_environment(mock_context_sandbox)
+        
+        # Check that sandbox configuration was applied
+        assert 'binance_sandbox' in manager._environment_strategy_configs
+        config = manager._environment_strategy_configs['binance_sandbox']
+        assert config['strategy_mode'] == StrategyMode.EXPERIMENTAL
+        assert config['enable_experimental_strategies'] is True
+        
+        # Check performance tracking initialization
+        assert 'binance_sandbox' in manager._strategy_performance_tracking
+        tracking = manager._strategy_performance_tracking['binance_sandbox']
+        assert tracking['total_signals'] == 0
+        assert tracking['total_pnl'] == Decimal('0')
+        
+        # Should not disable experimental strategies for sandbox
+        mock_disable.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_update_service_environment_production(self, manager, mock_context_production):
+        """Test updating service environment for production."""
+        with patch.object(manager, '_disable_experimental_strategies') as mock_disable:
+            await manager._update_service_environment(mock_context_production)
+        
+        # Check that production configuration was applied
+        assert 'binance_live' in manager._environment_strategy_configs
+        config = manager._environment_strategy_configs['binance_live']
+        assert config['strategy_mode'] == StrategyMode.CONSERVATIVE
+        assert config['enable_experimental_strategies'] is False
+        
+        # Should disable experimental strategies for production
+        mock_disable.assert_called_once_with('binance_live')
+
+    def test_get_environment_strategy_config_existing(self, manager):
+        """Test getting existing environment strategy config."""
+        # Pre-populate config
+        manager._environment_strategy_configs['test_exchange'] = {'test_key': 'test_value'}
+        
+        config = manager.get_environment_strategy_config('test_exchange')
+        assert config['test_key'] == 'test_value'
+
+    def test_get_environment_strategy_config_new_production(self, manager):
+        """Test getting strategy config for new production environment."""
+        with patch.object(manager, 'get_environment_context') as mock_context:
+            mock_context.return_value.is_production = True
+            
+            config = manager.get_environment_strategy_config('new_exchange')
+            
+            assert config['strategy_mode'] == StrategyMode.CONSERVATIVE
+            assert 'new_exchange' in manager._environment_strategy_configs
+
+    def test_get_environment_strategy_config_new_sandbox(self, manager):
+        """Test getting strategy config for new sandbox environment."""
+        with patch.object(manager, 'get_environment_context') as mock_context:
+            mock_context.return_value.is_production = False
+            
+            config = manager.get_environment_strategy_config('new_exchange')
+            
+            assert config['strategy_mode'] == StrategyMode.EXPERIMENTAL
+            assert 'new_exchange' in manager._environment_strategy_configs
+
+    @pytest.mark.asyncio
+    async def test_deploy_environment_aware_strategy_success(self, manager, strategy_config, mock_context_sandbox):
+        """Test successful environment-aware strategy deployment."""
+        exchange = 'test_exchange'
+        
+        with patch.object(manager, 'get_environment_context', return_value=mock_context_sandbox), \
+             patch.object(manager, 'validate_strategy_for_environment', return_value=True), \
+             patch.object(manager, '_verify_strategy_backtest', return_value=True), \
+             patch.object(manager, '_apply_environment_strategy_adjustments', return_value=strategy_config), \
+             patch.object(manager, '_deploy_strategy_with_config', return_value=True), \
+             patch.object(manager, '_initialize_strategy_tracking'):
+            
+            # Setup environment config
+            manager._environment_strategy_configs[exchange] = {'max_concurrent_strategies': 5}
+            manager._active_strategies_by_env[exchange] = []
+            
+            result = await manager.deploy_environment_aware_strategy(strategy_config, exchange)
+            
+            assert result is True
+            assert strategy_config.name in manager._active_strategies_by_env[exchange]
+
+    @pytest.mark.asyncio
+    async def test_deploy_environment_aware_strategy_validation_failure(self, manager, strategy_config, mock_context_sandbox):
+        """Test strategy deployment with validation failure."""
+        exchange = 'test_exchange'
+        
+        with patch.object(manager, 'get_environment_context', return_value=mock_context_sandbox), \
+             patch.object(manager, 'validate_strategy_for_environment', return_value=False):
+            
+            with pytest.raises(StrategyError):
+                await manager.deploy_environment_aware_strategy(strategy_config, exchange)
+
+    @pytest.mark.asyncio
+    async def test_deploy_environment_aware_strategy_backtest_required(self, manager, strategy_config, mock_context_production):
+        """Test strategy deployment with required backtest in production."""
+        exchange = 'test_exchange'
+        
+        with patch.object(manager, 'get_environment_context', return_value=mock_context_production), \
+             patch.object(manager, 'validate_strategy_for_environment', return_value=True), \
+             patch.object(manager, '_verify_strategy_backtest', return_value=False):
+            
+            # Setup environment config
+            manager._environment_strategy_configs[exchange] = {
+                'max_concurrent_strategies': 5,
+                'backtest_required': True
+            }
+            
+            with pytest.raises(StrategyError, match="requires valid backtest"):
+                await manager.deploy_environment_aware_strategy(strategy_config, exchange)
+
+    @pytest.mark.asyncio
+    async def test_deploy_environment_aware_strategy_force_deploy(self, manager, strategy_config, mock_context_production):
+        """Test force deployment without backtest."""
+        exchange = 'test_exchange'
+        
+        with patch.object(manager, 'get_environment_context', return_value=mock_context_production), \
+             patch.object(manager, 'validate_strategy_for_environment', return_value=True), \
+             patch.object(manager, '_verify_strategy_backtest', return_value=False), \
+             patch.object(manager, '_apply_environment_strategy_adjustments', return_value=strategy_config), \
+             patch.object(manager, '_deploy_strategy_with_config', return_value=True), \
+             patch.object(manager, '_initialize_strategy_tracking'):
+            
+            # Setup environment config
+            manager._environment_strategy_configs[exchange] = {
+                'max_concurrent_strategies': 5,
+                'backtest_required': True
+            }
+            manager._active_strategies_by_env[exchange] = []
+            
+            result = await manager.deploy_environment_aware_strategy(
+                strategy_config, exchange, force_deploy=True
+            )
+            
+            assert result is True
+
+    @pytest.mark.asyncio
+    async def test_deploy_environment_aware_strategy_max_concurrent_reached(self, manager, strategy_config, mock_context_sandbox):
+        """Test strategy deployment when max concurrent limit reached."""
+        exchange = 'test_exchange'
+        
+        with patch.object(manager, 'get_environment_context', return_value=mock_context_sandbox), \
+             patch.object(manager, 'validate_strategy_for_environment', return_value=True):
+            
+            # Setup environment config with max strategies reached
+            manager._environment_strategy_configs[exchange] = {'max_concurrent_strategies': 2}
+            manager._active_strategies_by_env[exchange] = ['strategy1', 'strategy2']
+            
+            with pytest.raises(StrategyError, match="Maximum concurrent strategies"):
+                await manager.deploy_environment_aware_strategy(strategy_config, exchange)
+
+    @pytest.mark.asyncio
+    async def test_deploy_environment_aware_strategy_deployment_failure(self, manager, strategy_config, mock_context_sandbox):
+        """Test strategy deployment failure during deployment."""
+        exchange = 'test_exchange'
+        
+        with patch.object(manager, 'get_environment_context', return_value=mock_context_sandbox), \
+             patch.object(manager, 'validate_strategy_for_environment', return_value=True), \
+             patch.object(manager, '_apply_environment_strategy_adjustments', return_value=strategy_config), \
+             patch.object(manager, '_deploy_strategy_with_config', side_effect=Exception("Deployment failed")):
+            
+            # Setup environment config
+            manager._environment_strategy_configs[exchange] = {'max_concurrent_strategies': 5}
+            manager._active_strategies_by_env[exchange] = []
+            
+            with pytest.raises(StrategyError, match="Failed to deploy strategy"):
+                await manager.deploy_environment_aware_strategy(strategy_config, exchange)
+
+    @pytest.mark.asyncio
+    async def test_validate_strategy_for_environment_production(self, manager, strategy_config, mock_context_production):
+        """Test strategy validation for production environment."""
+        exchange = 'test_exchange'
+        
+        with patch.object(manager, 'get_environment_context', return_value=mock_context_production), \
+             patch.object(manager, '_validate_production_strategy', return_value=True), \
+             patch.object(manager, '_validate_common_strategy_rules', return_value=True):
+            
+            manager._environment_strategy_configs[exchange] = {}
+            
+            result = await manager.validate_strategy_for_environment(strategy_config, exchange)
+            assert result is True
+
+    @pytest.mark.asyncio
+    async def test_validate_strategy_for_environment_sandbox(self, manager, strategy_config, mock_context_sandbox):
+        """Test strategy validation for sandbox environment."""
+        exchange = 'test_exchange'
+        
+        with patch.object(manager, 'get_environment_context', return_value=mock_context_sandbox), \
+             patch.object(manager, '_validate_sandbox_strategy', return_value=True), \
+             patch.object(manager, '_validate_common_strategy_rules', return_value=True):
+            
+            manager._environment_strategy_configs[exchange] = {}
+            
+            result = await manager.validate_strategy_for_environment(strategy_config, exchange)
+            assert result is True
+
+    @pytest.mark.asyncio
+    async def test_validate_production_strategy_experimental_blocked(self, manager, strategy_config):
+        """Test production validation blocks experimental strategies."""
+        strategy_config.is_experimental = True
+        env_config = {'enable_experimental_strategies': False}
+        
+        result = await manager._validate_production_strategy(strategy_config, env_config)
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_validate_production_strategy_ml_blocked(self, manager, strategy_config):
+        """Test production validation blocks ML strategies."""
+        strategy_config.uses_ml = True
+        env_config = {'enable_ml_strategies': False}
+        
+        result = await manager._validate_production_strategy(strategy_config, env_config)
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_validate_production_strategy_high_frequency_blocked(self, manager, strategy_config):
+        """Test production validation blocks high-frequency strategies."""
+        strategy_config.is_high_frequency = True
+        env_config = {'enable_high_frequency_strategies': False}
+        
+        result = await manager._validate_production_strategy(strategy_config, env_config)
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_validate_production_strategy_position_size_exceeded(self, manager, strategy_config):
+        """Test production validation blocks excessive position sizes."""
+        strategy_config.max_position_size = Decimal('0.10')
+        env_config = {'max_position_size_pct': Decimal('0.05')}
+        
+        result = await manager._validate_production_strategy(strategy_config, env_config)
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_validate_production_strategy_success(self, manager, strategy_config):
+        """Test successful production strategy validation."""
+        env_config = {
+            'enable_experimental_strategies': True,
+            'enable_ml_strategies': True,
+            'enable_high_frequency_strategies': True,
+            'max_position_size_pct': Decimal('0.05')
+        }
+        
+        result = await manager._validate_production_strategy(strategy_config, env_config)
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_validate_sandbox_strategy_no_name(self, manager):
+        """Test sandbox validation with missing strategy name."""
+        strategy_config = MockStrategyConfig(name='')
+        env_config = {}
+        
+        result = await manager._validate_sandbox_strategy(strategy_config, env_config)
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_validate_sandbox_strategy_position_size_warning(self, manager, strategy_config):
+        """Test sandbox validation with position size warning."""
+        strategy_config.max_position_size = Decimal('0.20')
+        env_config = {'max_position_size_pct': Decimal('0.15')}
+        
+        # Should pass but log warning
+        result = await manager._validate_sandbox_strategy(strategy_config, env_config)
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_validate_sandbox_strategy_success(self, manager, strategy_config):
+        """Test successful sandbox strategy validation."""
+        env_config = {'max_position_size_pct': Decimal('0.15')}
+        
+        result = await manager._validate_sandbox_strategy(strategy_config, env_config)
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_validate_common_strategy_rules_confidence_too_low(self, manager, strategy_config):
+        """Test common validation with insufficient confidence."""
+        strategy_config.min_signal_confidence = Decimal('0.3')
+        env_config = {'min_signal_confidence': Decimal('0.5')}
+        
+        result = await manager._validate_common_strategy_rules(strategy_config, 'exchange', env_config)
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_validate_common_strategy_rules_drawdown_too_high(self, manager, strategy_config):
+        """Test common validation with excessive drawdown."""
+        strategy_config.max_drawdown = Decimal('0.20')
+        env_config = {'max_drawdown_pct': Decimal('0.15')}
+        
+        result = await manager._validate_common_strategy_rules(strategy_config, 'exchange', env_config)
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_validate_common_strategy_rules_success(self, manager, strategy_config):
+        """Test successful common strategy validation."""
+        env_config = {
+            'min_signal_confidence': Decimal('0.4'),
+            'max_drawdown_pct': Decimal('0.15')
+        }
+        
+        result = await manager._validate_common_strategy_rules(strategy_config, 'exchange', env_config)
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_apply_environment_strategy_adjustments_production(self, manager, strategy_config, mock_context_production):
+        """Test strategy adjustments for production environment."""
+        exchange = 'test_exchange'
+        env_config = {
+            'max_position_size_pct': Decimal('0.02'),
+            'rebalancing_frequency_minutes': 120
+        }
+        
+        with patch.object(manager, 'get_environment_context', return_value=mock_context_production):
+            manager._environment_strategy_configs[exchange] = env_config
+            
+            adjusted = await manager._apply_environment_strategy_adjustments(strategy_config, exchange)
+            
+            assert adjusted.max_position_size == Decimal('0.02')  # Reduced to production limit
+            assert adjusted.rebalancing_frequency == 120  # Increased to production frequency
+
+    @pytest.mark.asyncio
+    async def test_apply_environment_strategy_adjustments_sandbox(self, manager, strategy_config, mock_context_sandbox):
+        """Test strategy adjustments for sandbox environment."""
+        exchange = 'test_exchange'
+        env_config = {'enable_experimental_strategies': True}
+        
+        with patch.object(manager, 'get_environment_context', return_value=mock_context_sandbox):
+            manager._environment_strategy_configs[exchange] = env_config
+            
+            adjusted = await manager._apply_environment_strategy_adjustments(strategy_config, exchange)
+            
+            # Should enable experimental features in sandbox
+            assert adjusted.enable_experimental_features is True
+
+    @pytest.mark.asyncio
+    async def test_generate_environment_aware_signal_success(self, manager, market_data):
+        """Test successful environment-aware signal generation."""
+        strategy_name = 'test_strategy'
+        exchange = 'test_exchange'
+        
+        mock_signal = Signal(
+            strategy_name=strategy_name,
+            symbol=market_data.symbol,
+            direction=SignalDirection.BUY,
+            confidence=Decimal('0.8'),
+            timestamp=datetime.now(timezone.utc)
+        )
+        
+        with patch.object(manager, 'get_environment_context') as mock_context, \
+             patch.object(manager, 'get_environment_strategy_config', return_value={}), \
+             patch.object(manager, '_generate_base_signal', return_value=mock_signal), \
+             patch.object(manager, '_apply_environment_signal_filters', return_value=mock_signal), \
+             patch.object(manager, '_validate_signal_for_environment', return_value=True), \
+             patch.object(manager, '_update_signal_tracking'):
+            
+            result = await manager.generate_environment_aware_signal(strategy_name, market_data, exchange)
+            
+            assert result == mock_signal
+
+    @pytest.mark.asyncio
+    async def test_generate_environment_aware_signal_no_base_signal(self, manager, market_data):
+        """Test signal generation with no base signal."""
+        strategy_name = 'test_strategy'
+        exchange = 'test_exchange'
+        
+        with patch.object(manager, 'get_environment_context'), \
+             patch.object(manager, 'get_environment_strategy_config', return_value={}), \
+             patch.object(manager, '_generate_base_signal', return_value=None):
+            
+            result = await manager.generate_environment_aware_signal(strategy_name, market_data, exchange)
+            
+            assert result is None
+
+    @pytest.mark.asyncio
+    async def test_generate_environment_aware_signal_filtered_out(self, manager, market_data):
+        """Test signal generation with signal filtered out."""
+        strategy_name = 'test_strategy'
+        exchange = 'test_exchange'
+        
+        mock_signal = Signal(
+            strategy_name=strategy_name,
+            symbol=market_data.symbol,
+            direction=SignalDirection.BUY,
+            confidence=Decimal('0.2'),  # Low confidence
+            timestamp=datetime.now(timezone.utc)
+        )
+        
+        with patch.object(manager, 'get_environment_context'), \
+             patch.object(manager, 'get_environment_strategy_config', return_value={}), \
+             patch.object(manager, '_generate_base_signal', return_value=mock_signal), \
+             patch.object(manager, '_apply_environment_signal_filters', return_value=None):
+            
+            result = await manager.generate_environment_aware_signal(strategy_name, market_data, exchange)
+            
+            assert result is None
+
+    @pytest.mark.asyncio
+    async def test_apply_environment_signal_filters_low_confidence(self, manager):
+        """Test signal filtering with low confidence."""
+        signal = Signal(
+            strategy_name='test',
+            symbol='BTCUSDT',
+            direction=SignalDirection.BUY,
+            confidence=Decimal('0.3'),
+            timestamp=datetime.now(timezone.utc)
+        )
+        
+        exchange = 'test_exchange'
+        env_config = {'min_signal_confidence': Decimal('0.5')}
+        
+        with patch.object(manager, 'get_environment_context'):
+            result = await manager._apply_environment_signal_filters(signal, exchange, env_config)
+            
+            assert result is None
+
+    @pytest.mark.asyncio
+    async def test_apply_environment_signal_filters_position_size_adjustment(self, manager):
+        """Test signal filtering with position size adjustment."""
+        signal = Signal(
+            strategy_name='test',
+            symbol='BTCUSDT',
+            direction=SignalDirection.BUY,
+            confidence=Decimal('0.8'),
+            position_size_pct=Decimal('0.10'),
+            timestamp=datetime.now(timezone.utc)
+        )
+        
+        exchange = 'test_exchange'
+        env_config = {
+            'min_signal_confidence': Decimal('0.5'),
+            'max_position_size_pct': Decimal('0.05')
+        }
+        
+        with patch.object(manager, 'get_environment_context'):
+            result = await manager._apply_environment_signal_filters(signal, exchange, env_config)
+            
+            assert result is not None
+            assert result.position_size_pct == Decimal('0.05')
+
+    @pytest.mark.asyncio
+    async def test_apply_environment_signal_filters_high_risk_production(self, manager, mock_context_production):
+        """Test signal filtering for high-risk signal in production."""
+        signal = Signal(
+            strategy_name='test',
+            symbol='BTCUSDT',
+            direction=SignalDirection.BUY,
+            confidence=Decimal('0.8'),
+            risk_score=Decimal('0.8'),
+            timestamp=datetime.now(timezone.utc)
+        )
+        
+        exchange = 'test_exchange'
+        env_config = {'min_signal_confidence': Decimal('0.5')}
+        
+        with patch.object(manager, 'get_environment_context', return_value=mock_context_production):
+            result = await manager._apply_environment_signal_filters(signal, exchange, env_config)
+            
+            assert result is None
+
+    @pytest.mark.asyncio
+    async def test_validate_signal_for_environment_drawdown_exceeded(self, manager):
+        """Test signal validation with drawdown limit exceeded."""
+        signal = Signal(
+            strategy_name='test',
+            symbol='BTCUSDT',
+            direction=SignalDirection.BUY,
+            confidence=Decimal('0.8'),
+            timestamp=datetime.now(timezone.utc)
+        )
+        
+        exchange = 'test_exchange'
+        
+        # Setup tracking with high drawdown
+        manager._strategy_performance_tracking[exchange] = {
+            'current_drawdown': Decimal('0.20')
+        }
+        manager._environment_strategy_configs[exchange] = {
+            'max_drawdown_pct': Decimal('0.15')
+        }
+        
+        with patch.object(manager, 'get_environment_context'):
+            result = await manager._validate_signal_for_environment(signal, exchange)
+            
+            assert result is False
+
+    @pytest.mark.asyncio
+    async def test_validate_signal_for_environment_high_volatility_production(self, manager, mock_context_production):
+        """Test signal validation during high volatility in production."""
+        signal = Signal(
+            strategy_name='test',
+            symbol='BTCUSDT',
+            direction=SignalDirection.BUY,
+            confidence=Decimal('0.8'),
+            timestamp=datetime.now(timezone.utc)
+        )
+        
+        exchange = 'test_exchange'
+        
+        manager._strategy_performance_tracking[exchange] = {
+            'current_drawdown': Decimal('0.05')
+        }
+        manager._environment_strategy_configs[exchange] = {
+            'max_drawdown_pct': Decimal('0.15')
+        }
+        
+        with patch.object(manager, 'get_environment_context', return_value=mock_context_production), \
+             patch.object(manager, '_is_high_volatility_period', return_value=True):
+            
+            result = await manager._validate_signal_for_environment(signal, exchange)
+            
+            assert result is False
+
+    @pytest.mark.asyncio
+    async def test_validate_signal_for_environment_success(self, manager, mock_context_sandbox):
+        """Test successful signal validation."""
+        signal = Signal(
+            strategy_name='test',
+            symbol='BTCUSDT',
+            direction=SignalDirection.BUY,
+            confidence=Decimal('0.8'),
+            timestamp=datetime.now(timezone.utc)
+        )
+        
+        exchange = 'test_exchange'
+        
+        manager._strategy_performance_tracking[exchange] = {
+            'current_drawdown': Decimal('0.05')
+        }
+        manager._environment_strategy_configs[exchange] = {
+            'max_drawdown_pct': Decimal('0.15')
+        }
+        
+        with patch.object(manager, 'get_environment_context', return_value=mock_context_sandbox), \
+             patch.object(manager, '_is_high_volatility_period', return_value=False):
+            
+            result = await manager._validate_signal_for_environment(signal, exchange)
+            
+            assert result is True
+
+    @pytest.mark.asyncio
+    async def test_deploy_strategy_with_config_mock(self, manager, strategy_config):
+        """Test mock strategy deployment."""
+        exchange = 'test_exchange'
+        
+        result = await manager._deploy_strategy_with_config(strategy_config, exchange)
+        
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_generate_base_signal_mock(self, manager, market_data):
+        """Test mock base signal generation."""
+        strategy_name = 'test_strategy'
+        exchange = 'test_exchange'
+        
+        result = await manager._generate_base_signal(strategy_name, market_data, exchange)
+        
+        assert result is not None
+        assert result.strategy_name == strategy_name
+        assert result.symbol == market_data.symbol
+        assert result.action == 'BUY'
+        assert result.confidence == Decimal('0.75')
+        assert result.position_size_pct == Decimal('0.05')
+        assert result.price == market_data.price
+
+    @pytest.mark.asyncio
+    async def test_verify_strategy_backtest_no_results(self, manager, strategy_config):
+        """Test backtest verification with no results."""
+        exchange = 'test_exchange'
+        
+        result = await manager._verify_strategy_backtest(strategy_config, exchange)
+        
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_verify_strategy_backtest_low_sharpe(self, manager, strategy_config):
+        """Test backtest verification with low Sharpe ratio."""
+        exchange = 'test_exchange'
+        backtest_key = f"{strategy_config.name}_{exchange}"
+        
+        manager._strategy_backtests[backtest_key] = {
+            'sharpe_ratio': Decimal('0.5'),
+            'max_drawdown': Decimal('0.10')
+        }
+        
+        result = await manager._verify_strategy_backtest(strategy_config, exchange)
+        
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_verify_strategy_backtest_high_drawdown(self, manager, strategy_config):
+        """Test backtest verification with high drawdown."""
+        exchange = 'test_exchange'
+        backtest_key = f"{strategy_config.name}_{exchange}"
+        
+        manager._strategy_backtests[backtest_key] = {
+            'sharpe_ratio': Decimal('1.5'),
+            'max_drawdown': Decimal('0.20')
+        }
+        
+        result = await manager._verify_strategy_backtest(strategy_config, exchange)
+        
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_verify_strategy_backtest_success(self, manager, strategy_config):
+        """Test successful backtest verification."""
+        exchange = 'test_exchange'
+        backtest_key = f"{strategy_config.name}_{exchange}"
+        
+        manager._strategy_backtests[backtest_key] = {
+            'sharpe_ratio': Decimal('1.5'),
+            'max_drawdown': Decimal('0.10')
+        }
+        
+        result = await manager._verify_strategy_backtest(strategy_config, exchange)
+        
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_initialize_strategy_tracking(self, manager):
+        """Test strategy tracking initialization."""
+        strategy_name = 'test_strategy'
+        exchange = 'test_exchange'
+        
+        manager._strategy_performance_tracking[exchange] = {
+            'active_strategies': []
+        }
+        
+        await manager._initialize_strategy_tracking(strategy_name, exchange)
+        
+        assert strategy_name in manager._strategy_performance_tracking[exchange]['active_strategies']
+
+    @pytest.mark.asyncio
+    async def test_initialize_strategy_tracking_no_exchange(self, manager):
+        """Test strategy tracking initialization with non-existent exchange."""
+        strategy_name = 'test_strategy'
+        exchange = 'non_existent'
+        
+        # Should not raise exception
+        await manager._initialize_strategy_tracking(strategy_name, exchange)
+
+    @pytest.mark.asyncio
+    async def test_update_signal_tracking(self, manager):
+        """Test signal tracking update."""
+        strategy_name = 'test_strategy'
+        exchange = 'test_exchange'
+        signal = Signal(
+            strategy_name=strategy_name,
+            symbol='BTCUSDT',
+            direction=SignalDirection.BUY,
+            confidence=Decimal('0.8'),
+            timestamp=datetime.now(timezone.utc)
+        )
+        
+        manager._strategy_performance_tracking[exchange] = {
+            'total_signals': 5
+        }
+        
+        await manager._update_signal_tracking(strategy_name, exchange, signal)
+        
+        assert manager._strategy_performance_tracking[exchange]['total_signals'] == 6
+        assert 'last_signal' in manager._strategy_performance_tracking[exchange]
+
+    @pytest.mark.asyncio
+    async def test_update_signal_tracking_no_exchange(self, manager):
+        """Test signal tracking update with non-existent exchange."""
+        strategy_name = 'test_strategy'
+        exchange = 'non_existent'
+        signal = Signal(
+            strategy_name=strategy_name,
+            symbol='BTCUSDT',
+            direction=SignalDirection.BUY,
+            confidence=Decimal('0.8'),
+            timestamp=datetime.now(timezone.utc)
+        )
+        
+        # Should not raise exception
+        await manager._update_signal_tracking(strategy_name, exchange, signal)
+
+    @pytest.mark.asyncio
+    async def test_disable_experimental_strategies(self, manager):
+        """Test disabling experimental strategies."""
+        exchange = 'test_exchange'
+        manager._active_strategies_by_env[exchange] = ['strategy1', 'strategy2']
+        
+        # Should log strategy compatibility check
+        await manager._disable_experimental_strategies(exchange)
+
+    @pytest.mark.asyncio
+    async def test_is_high_volatility_period_mock(self, manager):
+        """Test mock high volatility check."""
+        result = await manager._is_high_volatility_period('BTCUSDT', 'test_exchange')
+        
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_update_strategy_performance(self, manager):
+        """Test strategy performance update."""
+        strategy_name = 'test_strategy'
+        exchange = 'test_exchange'
+        
+        manager._strategy_performance_tracking[exchange] = {
+            'total_pnl': Decimal('100'),
+            'profitable_signals': 5,
+            'current_drawdown': Decimal('0'),
+            'max_drawdown': Decimal('0')
+        }
+        
+        # Test profitable trade
+        await manager.update_strategy_performance(strategy_name, exchange, Decimal('50'), True)
+        
+        tracking = manager._strategy_performance_tracking[exchange]
+        assert tracking['total_pnl'] == Decimal('150')
+        assert tracking['profitable_signals'] == 6
+        
+        # Test losing trade
+        await manager.update_strategy_performance(strategy_name, exchange, Decimal('-30'), False)
+        
+        assert tracking['total_pnl'] == Decimal('120')
+        assert tracking['current_drawdown'] == Decimal('30')
+        assert tracking['max_drawdown'] == Decimal('30')
+
+    @pytest.mark.asyncio
+    async def test_update_strategy_performance_no_exchange(self, manager):
+        """Test strategy performance update with non-existent exchange."""
+        # Should not raise exception
+        await manager.update_strategy_performance('test', 'non_existent', Decimal('10'), True)
+
+    def test_get_environment_strategy_metrics(self, manager):
+        """Test getting environment strategy metrics."""
+        exchange = 'test_exchange'
+        
+        # Setup mock context
+        mock_context = Mock()
+        mock_context.environment.value = 'sandbox'
+        mock_context.is_production = False
+        
+        manager._environment_strategy_configs[exchange] = {
+            'strategy_mode': StrategyMode.EXPERIMENTAL,
+            'max_concurrent_strategies': 10,
+            'max_position_size_pct': Decimal('0.15'),
+            'min_signal_confidence': Decimal('0.4'),
+            'enable_experimental_strategies': True,
+            'backtest_required': False
+        }
+        
+        manager._strategy_performance_tracking[exchange] = {
+            'total_signals': 100,
+            'profitable_signals': 60,
+            'win_rate': Decimal('0.6'),
+            'total_pnl': Decimal('1500'),
+            'current_drawdown': Decimal('50'),
+            'max_drawdown': Decimal('100'),
+            'strategy_violations': 2,
+            'last_rebalance': '2023-01-01T12:00:00'
+        }
+        
+        manager._active_strategies_by_env[exchange] = ['strategy1', 'strategy2', 'strategy3']
+        
+        with patch.object(manager, 'get_environment_context', return_value=mock_context):
+            metrics = manager.get_environment_strategy_metrics(exchange)
+        
+        assert metrics['exchange'] == exchange
+        assert metrics['environment'] == 'sandbox'
+        assert metrics['is_production'] is False
+        assert metrics['strategy_mode'] == 'experimental'
+        assert metrics['active_strategies'] == 3
+        assert metrics['max_concurrent_strategies'] == 10
+        assert metrics['total_signals'] == 100
+        assert metrics['profitable_signals'] == 60
+        assert metrics['win_rate'] == 0.6
+        assert metrics['total_pnl'] == 1500.0
+        assert metrics['current_drawdown'] == 50.0
+        assert metrics['max_drawdown'] == 100.0
+        assert metrics['max_position_size_pct'] == 0.15
+        assert metrics['min_signal_confidence'] == 0.4
+        assert metrics['enable_experimental_strategies'] is True
+        assert metrics['backtest_required'] is False
+        assert metrics['strategy_violations'] == 2
+        assert metrics['last_rebalance'] == '2023-01-01T12:00:00'
+        assert 'last_updated' in metrics
+
+    @pytest.mark.asyncio
+    async def test_rebalance_strategies_for_environment_too_soon(self, manager):
+        """Test strategy rebalancing when called too soon."""
+        exchange = 'test_exchange'
+        
+        manager._environment_strategy_configs[exchange] = {
+            'rebalancing_frequency_minutes': 60
+        }
+        
+        manager._strategy_performance_tracking[exchange] = {
+            'last_rebalance': datetime.now().isoformat()  # Just now
+        }
+        
+        mock_context = Mock()
+        mock_context.environment.value = 'sandbox'
+        
+        with patch.object(manager, 'get_environment_context', return_value=mock_context):
+            result = await manager.rebalance_strategies_for_environment(exchange)
+        
+        assert result['status'] == 'skipped'
+        assert result['reason'] == 'too_soon'
+        assert result['next_rebalance_minutes'] == 60
+
+    @pytest.mark.asyncio
+    async def test_rebalance_strategies_for_environment_success(self, manager):
+        """Test successful strategy rebalancing."""
+        exchange = 'test_exchange'
+        
+        manager._environment_strategy_configs[exchange] = {
+            'rebalancing_frequency_minutes': 60
+        }
+        
+        # Set last rebalance to over an hour ago
+        old_time = datetime.now() - timedelta(hours=2)
+        manager._strategy_performance_tracking[exchange] = {
+            'last_rebalance': old_time.isoformat()
+        }
+        
+        manager._active_strategies_by_env[exchange] = ['strategy1', 'strategy2']
+        
+        mock_context = Mock()
+        mock_context.environment.value = 'sandbox'
+        
+        with patch.object(manager, 'get_environment_context', return_value=mock_context):
+            result = await manager.rebalance_strategies_for_environment(exchange)
+        
+        assert result['status'] == 'completed'
+        assert result['exchange'] == exchange
+        assert result['environment'] == 'sandbox'
+        assert result['active_strategies'] == 2
+        assert 'rebalance_time' in result
+
+    @pytest.mark.asyncio
+    async def test_rebalance_strategies_for_environment_no_last_rebalance(self, manager):
+        """Test strategy rebalancing with no previous rebalance."""
+        exchange = 'test_exchange'
+        
+        manager._environment_strategy_configs[exchange] = {
+            'rebalancing_frequency_minutes': 60
+        }
+        
+        manager._strategy_performance_tracking[exchange] = {
+            'last_rebalance': None
+        }
+        
+        manager._active_strategies_by_env[exchange] = []
+        
+        mock_context = Mock()
+        mock_context.environment.value = 'production'
+        
+        with patch.object(manager, 'get_environment_context', return_value=mock_context):
+            result = await manager.rebalance_strategies_for_environment(exchange)
+        
+        assert result['status'] == 'completed'
+        assert result['environment'] == 'production'

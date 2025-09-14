@@ -1,0 +1,1006 @@
+"""
+Comprehensive Strategy Analytics Service Integration Tests
+
+This module provides extensive test coverage for analytics service integration
+within the strategies module, focusing on:
+
+- Real-time performance tracking
+- Attribution analysis
+- Benchmarking capabilities
+- Error handling and graceful degradation
+- Financial precision in analytics calculations
+- Edge cases and boundary conditions
+- Service availability patterns
+
+Coverage targets:
+- Analytics service integration: 100%
+- Performance tracking methods: 100%
+- Error handling scenarios: 100%
+- Financial calculation precision: 100%
+"""
+
+import asyncio
+from datetime import datetime, timezone
+from decimal import Decimal
+from unittest.mock import AsyncMock, Mock, call, patch
+
+import pytest
+
+from src.core.types import (
+    MarketData,
+    Signal,
+    SignalDirection,
+    StrategyConfig,
+    StrategyMetrics,
+    StrategyType,
+)
+from src.strategies.dependencies import StrategyServiceContainer
+from src.strategies.service import StrategyService
+
+
+class TestAnalyticsServiceIntegration:
+    """Test analytics service integration in strategies."""
+    
+    @pytest.fixture
+    def mock_analytics_service(self):
+        """Create comprehensive mock analytics service."""
+        mock_service = Mock()
+        mock_service.record_strategy_performance = AsyncMock()
+        mock_service.get_strategy_attribution = AsyncMock()
+        mock_service.calculate_benchmarking_metrics = AsyncMock()
+        mock_service.record_signal_performance = AsyncMock()
+        mock_service.get_performance_analytics = AsyncMock()
+        return mock_service
+    
+    @pytest.fixture
+    def strategy_service_with_analytics(self, mock_analytics_service):
+        """Create strategy service with analytics integration."""
+        service = StrategyService()
+        
+        # Create service container with analytics service
+        container = StrategyServiceContainer(
+            risk_service=Mock(),
+            data_service=Mock(),
+            execution_service=Mock(),
+            analytics_service=mock_analytics_service,
+        )
+        service._strategy_services = container
+        
+        # Set up test strategy
+        strategy_id = "analytics_test_strategy"
+        service._strategy_configs[strategy_id] = StrategyConfig(
+            strategy_id=strategy_id,
+            name="AnalyticsTestStrategy",
+            symbol="BTC/USD",
+            timeframe="1h",
+            strategy_type=StrategyType.TREND_FOLLOWING,
+            parameters={"test_param": "value"},
+        )
+        service._strategy_metrics[strategy_id] = StrategyMetrics(strategy_id=strategy_id)
+        service._signal_history[strategy_id] = []
+        
+        return service, strategy_id, mock_analytics_service
+    
+    @pytest.mark.asyncio
+    async def test_record_strategy_analytics_success(self, strategy_service_with_analytics):
+        """Test successful strategy analytics recording."""
+        service, strategy_id, mock_analytics = strategy_service_with_analytics
+        
+        # Create test signals
+        signals = [
+            Signal(
+                symbol="BTC/USDT",
+                direction="buy",
+                strength=Decimal("0.8"),
+                timestamp=datetime.now(timezone.utc),
+                source="test_strategy",
+                metadata={"price": Decimal("50000.00")},
+            ),
+            Signal(
+                symbol="ETH/USDT",
+                direction=SignalDirection.SELL,
+                strength=Decimal("0.7"),
+                timestamp=datetime.now(timezone.utc),
+                source="test_strategy",
+                metadata={"price": Decimal("3000.00")},
+            ),
+        ]
+        
+        # Add signal history for calculations
+        service._signal_history[strategy_id] = [
+            Signal(
+                symbol="BTC/USDT",
+                direction=SignalDirection.BUY,
+                strength=Decimal("0.75"),
+                timestamp=datetime.now(timezone.utc),
+                source="test_strategy",
+                metadata={"price": Decimal("49000.00")},
+            )
+        ] * 20  # 20 historical signals
+        
+        with patch.object(service, '_calculate_win_rate', return_value=75.0):
+            with patch.object(service, '_calculate_sharpe_ratio', return_value=1.8):
+                with patch.object(service, '_calculate_max_drawdown', return_value=8.5):
+                    
+                    await service._record_strategy_analytics(strategy_id, signals)
+                    
+                    # Verify analytics service called with correct data
+                    mock_analytics.record_strategy_performance.assert_called_once()
+                    call_args = mock_analytics.record_strategy_performance.call_args
+                    
+                    assert call_args.kwargs['strategy_id'] == strategy_id
+                    
+                    performance_data = call_args.kwargs['performance_data']
+                    assert performance_data['strategy_id'] == strategy_id
+                    assert performance_data['strategy_type'] == StrategyType.TREND_FOLLOWING
+                    assert performance_data['signals_generated'] == 2
+                    assert performance_data['total_signals'] == 20
+                    assert performance_data['win_rate'] == 75.0
+                    assert performance_data['sharpe_ratio'] == 1.8
+                    assert performance_data['max_drawdown'] == 8.5
+                    assert performance_data['signal_strength_avg'] == 0.75  # (0.8 + 0.7) / 2
+                    assert performance_data['performance_period'] == "real_time"
+    
+    @pytest.mark.asyncio
+    async def test_record_strategy_analytics_no_service(self):
+        """Test analytics recording when service not available."""
+        service = StrategyService()
+        # No analytics service in container
+        service._strategy_services = StrategyServiceContainer()
+        
+        strategy_id = "no_analytics_strategy"
+        signals = [
+            Signal(
+                symbol="BTC/USDT",
+                direction="buy",
+                strength=Decimal("0.8"),
+                timestamp=datetime.now(timezone.utc),
+                source="test_strategy",
+                metadata={"price": Decimal("50000.00")},
+            )
+        ]
+        
+        # Should not raise error when analytics service not available
+        await service._record_strategy_analytics(strategy_id, signals)
+    
+    @pytest.mark.asyncio
+    async def test_record_strategy_analytics_service_failure(self, strategy_service_with_analytics):
+        """Test analytics recording handles service failures gracefully."""
+        service, strategy_id, mock_analytics = strategy_service_with_analytics
+        
+        # Mock analytics service to raise exception
+        mock_analytics.record_strategy_performance.side_effect = Exception("Analytics service error")
+        
+        signals = [
+            Signal(
+                symbol="BTC/USDT",
+                direction="buy",
+                strength=Decimal("0.8"),
+                timestamp=datetime.now(timezone.utc),
+                source="test_strategy",
+                metadata={"price": Decimal("50000.00")},
+            )
+        ]
+        
+        # Should not raise exception, just log error
+        await service._record_strategy_analytics(strategy_id, signals)
+        
+        # Analytics service should have been called
+        mock_analytics.record_strategy_performance.assert_called_once()
+    
+    @pytest.mark.asyncio
+    async def test_record_strategy_analytics_missing_config(self, strategy_service_with_analytics):
+        """Test analytics recording with missing strategy config."""
+        service, strategy_id, mock_analytics = strategy_service_with_analytics
+        
+        # Remove strategy config
+        del service._strategy_configs[strategy_id]
+        
+        signals = [
+            Signal(
+                symbol="BTC/USDT",
+                direction="buy",
+                strength=Decimal("0.8"),
+                timestamp=datetime.now(timezone.utc),
+                source="test_strategy",
+                metadata={"price": Decimal("50000.00")},
+            )
+        ]
+        
+        # Should return early when config missing
+        await service._record_strategy_analytics(strategy_id, signals)
+        
+        # Analytics service should not be called
+        mock_analytics.record_strategy_performance.assert_not_called()
+    
+    @pytest.mark.asyncio
+    async def test_record_strategy_analytics_missing_metrics(self, strategy_service_with_analytics):
+        """Test analytics recording with missing strategy metrics."""
+        service, strategy_id, mock_analytics = strategy_service_with_analytics
+        
+        # Remove strategy metrics
+        del service._strategy_metrics[strategy_id]
+        
+        signals = [
+            Signal(
+                symbol="BTC/USDT",
+                direction="buy",
+                strength=Decimal("0.8"),
+                timestamp=datetime.now(timezone.utc),
+                source="test_strategy",
+                metadata={"price": Decimal("50000.00")},
+            )
+        ]
+        
+        # Should return early when metrics missing
+        await service._record_strategy_analytics(strategy_id, signals)
+        
+        # Analytics service should not be called
+        mock_analytics.record_strategy_performance.assert_not_called()
+    
+    @pytest.mark.asyncio
+    async def test_update_strategy_metrics_with_analytics(self, strategy_service_with_analytics):
+        """Test strategy metrics update triggers analytics recording."""
+        service, strategy_id, mock_analytics = strategy_service_with_analytics
+        
+        # Mock cache manager
+        mock_cache_manager = Mock()
+        mock_cache_manager.set = AsyncMock()
+        service.cache_manager = mock_cache_manager
+        
+        signals = [
+            Signal(
+                symbol="BTC/USDT",
+                direction=SignalDirection.BUY,
+                strength=Decimal("0.9"),
+                timestamp=datetime.now(timezone.utc),
+                source="test_strategy",
+                metadata={"price": Decimal("51000.00")},
+            ),
+            Signal(
+                symbol="ETH/USDT",
+                direction=SignalDirection.BUY,
+                strength=Decimal("0.6"),
+                timestamp=datetime.now(timezone.utc),
+                source="test_strategy",
+                metadata={"price": Decimal("3100.00")},
+            ),
+        ]
+        
+        with patch.object(service, '_record_strategy_analytics') as mock_record:
+            await service._update_strategy_metrics(strategy_id, signals)
+            
+            # Verify metrics updated
+            metrics = service._strategy_metrics[strategy_id]
+            assert metrics.signals_generated == 2
+            assert metrics.last_signal_time is not None
+            assert metrics.last_updated is not None
+            
+            # Verify cache updated
+            mock_cache_manager.set.assert_called_once()
+            
+            # Verify analytics recording called
+            mock_record.assert_called_once_with(strategy_id, signals)
+    
+    @pytest.mark.asyncio
+    async def test_update_strategy_metrics_analytics_failure(self, strategy_service_with_analytics):
+        """Test metrics update continues when analytics recording fails."""
+        service, strategy_id, mock_analytics = strategy_service_with_analytics
+        
+        signals = [
+            Signal(
+                symbol="BTC/USDT",
+                direction="buy",
+                strength=Decimal("0.8"),
+                timestamp=datetime.now(timezone.utc),
+                source="test_strategy",
+                metadata={"price": Decimal("50000.00")},
+            )
+        ]
+        
+        with patch.object(service, '_record_strategy_analytics') as mock_record:
+            mock_record.side_effect = Exception("Analytics recording failed")
+            
+            # Should not raise exception
+            await service._update_strategy_metrics(strategy_id, signals)
+            
+            # Metrics should still be updated
+            metrics = service._strategy_metrics[strategy_id]
+            assert metrics.signals_generated == 1
+
+
+class TestFinancialCalculationPrecision:
+    """Test financial calculations for analytics with high precision."""
+    
+    @pytest.fixture
+    def strategy_service(self):
+        """Create strategy service for calculation testing."""
+        return StrategyService()
+    
+    @pytest.mark.asyncio
+    async def test_calculate_win_rate_precision(self, strategy_service):
+        """Test win rate calculation with financial precision."""
+        strategy_id = "win_rate_test"
+        
+        # Create signal history with known pattern
+        strong_signals = [
+            Signal(
+                symbol="BTC/USDT",
+                direction=SignalDirection.BUY,
+                strength=Decimal("0.8"),  # Strong signal (>= 0.7)
+                timestamp=datetime.now(timezone.utc),
+                source="test_strategy",
+                metadata={"price": Decimal("50000.00")},
+            )
+        ] * 35  # 35 strong signals
+        
+        weak_signals = [
+            Signal(
+                symbol="BTC/USDT",
+                direction=SignalDirection.BUY,
+                strength=Decimal("0.5"),  # Weak signal (< 0.7)
+                timestamp=datetime.now(timezone.utc),
+                source="test_strategy",
+                metadata={"price": Decimal("50000.00")},
+            )
+        ] * 15  # 15 weak signals
+        
+        signal_history = strong_signals + weak_signals  # 50 total signals
+        
+        win_rate = await strategy_service._calculate_win_rate(strategy_id, signal_history)
+        
+        # Win rate should be based on last 50 signals: 35 strong / 50 total = 70%
+        expected_win_rate = 70.0
+        assert abs(win_rate - expected_win_rate) < 0.001
+    
+    @pytest.mark.asyncio
+    async def test_calculate_win_rate_edge_cases(self, strategy_service):
+        """Test win rate calculation edge cases."""
+        strategy_id = "edge_case_test"
+        
+        # Test with empty signal history
+        win_rate = await strategy_service._calculate_win_rate(strategy_id, [])
+        assert win_rate == 0.0
+        
+        # Test with single signal
+        single_signal = [
+            Signal(
+                symbol="BTC/USDT",
+                direction="buy",
+                strength=Decimal("0.8"),
+                timestamp=datetime.now(timezone.utc),
+                source="test_strategy",
+                metadata={"price": Decimal("50000.00")},
+            )
+        ]
+        win_rate = await strategy_service._calculate_win_rate(strategy_id, single_signal)
+        assert win_rate == 0.0  # Need at least 2 signals
+        
+        # Test with exactly 2 signals
+        two_signals = single_signal * 2
+        win_rate = await strategy_service._calculate_win_rate(strategy_id, two_signals)
+        assert win_rate == 100.0  # Both signals are strong (>= 0.7)
+    
+    @pytest.mark.asyncio
+    async def test_calculate_win_rate_boundary_strength(self, strategy_service):
+        """Test win rate calculation with boundary strength values."""
+        strategy_id = "boundary_test"
+        
+        # Test signals exactly at boundary (0.7)
+        boundary_signals = [
+            Signal(
+                symbol="BTC/USDT",
+                direction=SignalDirection.BUY,
+                strength=Decimal("0.7"),  # Exactly at boundary
+                timestamp=datetime.now(timezone.utc),
+                source="test_strategy",
+                metadata={"price": Decimal("50000.00")},
+            )
+        ] * 10
+        
+        below_boundary_signals = [
+            Signal(
+                symbol="BTC/USDT",
+                direction=SignalDirection.BUY,
+                strength=Decimal("0.6999"),  # Just below boundary
+                timestamp=datetime.now(timezone.utc),
+                source="test_strategy",
+                metadata={"price": Decimal("50000.00")},
+            )
+        ] * 10
+        
+        signal_history = boundary_signals + below_boundary_signals
+        
+        win_rate = await strategy_service._calculate_win_rate(strategy_id, signal_history)
+        
+        # Only boundary signals (0.7) should count as strong: 10/20 = 50%
+        expected_win_rate = 50.0
+        assert abs(win_rate - expected_win_rate) < 0.001
+    
+    @pytest.mark.asyncio
+    async def test_calculate_win_rate_calculation_error(self, strategy_service):
+        """Test win rate calculation handles errors gracefully."""
+        strategy_id = "error_test"
+        
+        # Create invalid signal that might cause calculation error
+        invalid_signal = Signal(
+            symbol="BTC/USDT",
+            direction=SignalDirection.BUY,
+            strength=Decimal("1.0"),  # Max valid strength
+            timestamp=datetime.now(timezone.utc),
+            source="test_strategy",
+            metadata={"price": Decimal("50000.00"), "invalid": float('inf')},
+        )
+        
+        signal_history = [invalid_signal] * 10
+        
+        # Should handle error gracefully and return 0.0
+        win_rate = await strategy_service._calculate_win_rate(strategy_id, signal_history)
+        assert win_rate == 0.0
+    
+    @pytest.mark.asyncio
+    async def test_calculate_sharpe_ratio_precision(self, strategy_service):
+        """Test Sharpe ratio calculation with financial precision."""
+        strategy_id = "sharpe_test"
+        
+        # Create signal history with known statistical properties
+        strengths = [0.6, 0.8, 0.4, 0.9, 0.5, 0.7, 0.6, 0.8, 0.5, 0.7]  # Mean = 0.66
+        signal_history = []
+        for strength in strengths:
+            signal_history.append(
+                Signal(
+                    symbol="BTC/USDT",
+                    direction=SignalDirection.BUY,
+                    strength=Decimal(str(strength)),
+                    timestamp=datetime.now(timezone.utc),
+                    source="test_strategy",
+                    metadata={"price": Decimal("50000.00")},
+                )
+            )
+        
+        # Set up signal history in service
+        strategy_service._signal_history[strategy_id] = signal_history
+        
+        sharpe_ratio = await strategy_service._calculate_sharpe_ratio(strategy_id)
+        
+        # Manual calculation for verification
+        mean_return = sum(strengths) / len(strengths)
+        variance = sum((s - mean_return) ** 2 for s in strengths) / len(strengths)
+        std_dev = variance ** 0.5
+        expected_sharpe = mean_return / std_dev if std_dev > 0 else 0.0
+        
+        assert abs(sharpe_ratio - expected_sharpe) < 0.001
+    
+    @pytest.mark.asyncio
+    async def test_calculate_sharpe_ratio_edge_cases(self, strategy_service):
+        """Test Sharpe ratio calculation edge cases."""
+        strategy_id = "sharpe_edge_test"
+        
+        # Test with insufficient data
+        few_signals = [
+            Signal(
+                symbol="BTC/USDT",
+                direction="buy",
+                strength=Decimal("0.8"),
+                timestamp=datetime.now(timezone.utc),
+                source="test_strategy",
+                metadata={"price": Decimal("50000.00")},
+            )
+        ] * 5  # Less than 10 signals
+        
+        strategy_service._signal_history[strategy_id] = few_signals
+        sharpe_ratio = await strategy_service._calculate_sharpe_ratio(strategy_id)
+        assert sharpe_ratio == 0.0
+        
+        # Test with zero variance (all same strength)
+        identical_signals = [
+            Signal(
+                symbol="BTC/USDT",
+                direction=SignalDirection.BUY,
+                strength=Decimal("0.7"),  # All identical
+                timestamp=datetime.now(timezone.utc),
+                source="test_strategy",
+                metadata={"price": Decimal("50000.00")},
+            )
+        ] * 20
+        
+        strategy_service._signal_history[strategy_id] = identical_signals
+        sharpe_ratio = await strategy_service._calculate_sharpe_ratio(strategy_id)
+        assert sharpe_ratio == 0.0  # Zero standard deviation
+    
+    @pytest.mark.asyncio
+    async def test_calculate_max_drawdown_precision(self, strategy_service):
+        """Test maximum drawdown calculation with financial precision."""
+        strategy_id = "drawdown_test"
+        
+        # Create signal history simulating drawdown scenario
+        # Simulate portfolio value decline from peak to trough
+        strengths = [1.0, 0.9, 0.8, 0.3, 0.2, 0.4, 0.6, 0.8, 0.9]  # Peak 1.0, trough 0.2
+        signal_history = []
+        for strength in strengths:
+            signal_history.append(
+                Signal(
+                    symbol="BTC/USDT",
+                    direction=SignalDirection.BUY,
+                    strength=Decimal(str(strength)),
+                    timestamp=datetime.now(timezone.utc),
+                    source="test_strategy",
+                    metadata={"price": Decimal("50000.00")},
+                )
+            )
+        
+        strategy_service._signal_history[strategy_id] = signal_history
+        
+        max_drawdown = await strategy_service._calculate_max_drawdown(strategy_id)
+        
+        # Expected max drawdown: (1.0 - 0.2) / 1.0 * 100 = 80.0%
+        expected_drawdown = 80.0
+        assert abs(max_drawdown - expected_drawdown) < 0.001
+    
+    @pytest.mark.asyncio
+    async def test_calculate_max_drawdown_no_drawdown(self, strategy_service):
+        """Test max drawdown calculation with no drawdown."""
+        strategy_id = "no_drawdown_test"
+        
+        # Create signal history with only increasing strengths
+        strengths = [0.5, 0.6, 0.7, 0.8, 0.9, 1.0]  # Only increases
+        signal_history = []
+        for strength in strengths:
+            signal_history.append(
+                Signal(
+                    symbol="BTC/USDT",
+                    direction=SignalDirection.BUY,
+                    strength=Decimal(str(strength)),
+                    timestamp=datetime.now(timezone.utc),
+                    source="test_strategy",
+                    metadata={"price": Decimal("50000.00")},
+                )
+            )
+        
+        strategy_service._signal_history[strategy_id] = signal_history
+        
+        max_drawdown = await strategy_service._calculate_max_drawdown(strategy_id)
+        
+        # Should be 0.0 as there's no drawdown
+        assert max_drawdown == 0.0
+    
+    @pytest.mark.asyncio
+    async def test_calculate_max_drawdown_edge_cases(self, strategy_service):
+        """Test max drawdown calculation edge cases."""
+        strategy_id = "drawdown_edge_test"
+        
+        # Test with insufficient data
+        few_signals = [
+            Signal(
+                symbol="BTC/USDT",
+                direction="buy",
+                strength=Decimal("0.8"),
+                timestamp=datetime.now(timezone.utc),
+                source="test_strategy",
+                metadata={"price": Decimal("50000.00")},
+            )
+        ] * 3  # Less than 5 signals
+        
+        strategy_service._signal_history[strategy_id] = few_signals
+        max_drawdown = await strategy_service._calculate_max_drawdown(strategy_id)
+        assert max_drawdown == 0.0
+        
+        # Test with empty signal history
+        strategy_service._signal_history[strategy_id] = []
+        max_drawdown = await strategy_service._calculate_max_drawdown(strategy_id)
+        assert max_drawdown == 0.0
+    
+    @pytest.mark.asyncio
+    async def test_financial_calculations_error_handling(self, strategy_service):
+        """Test all financial calculations handle errors gracefully."""
+        strategy_id = "error_handling_test"
+        
+        # Test with problematic data that might cause calculation errors
+        problematic_signals = [
+            Signal(
+                symbol="BTC/USDT",
+                direction=SignalDirection.BUY,
+                strength=Decimal("0.0"),  # Use 0 instead of NaN
+                timestamp=datetime.now(timezone.utc),
+                source="test_strategy",
+                metadata={"price": Decimal("50000.00"), "invalid": float('nan')},
+            )
+        ] * 10
+        
+        strategy_service._signal_history[strategy_id] = problematic_signals
+        
+        # All calculations should handle errors and return safe defaults
+        win_rate = await strategy_service._calculate_win_rate(strategy_id, problematic_signals)
+        assert win_rate == 0.0
+        
+        sharpe_ratio = await strategy_service._calculate_sharpe_ratio(strategy_id)
+        assert sharpe_ratio == 0.0
+        
+        max_drawdown = await strategy_service._calculate_max_drawdown(strategy_id)
+        assert max_drawdown == 0.0
+
+
+class TestAnalyticsIntegrationPatterns:
+    """Test analytics integration patterns and real-world scenarios."""
+    
+    @pytest.fixture
+    def comprehensive_strategy_service(self):
+        """Create strategy service with comprehensive analytics setup."""
+        service = StrategyService()
+        
+        # Create comprehensive analytics service mock
+        analytics_service = Mock()
+        analytics_service.record_strategy_performance = AsyncMock()
+        analytics_service.record_real_time_metrics = AsyncMock()
+        analytics_service.calculate_attribution = AsyncMock()
+        analytics_service.generate_performance_report = AsyncMock()
+        analytics_service.track_signal_effectiveness = AsyncMock()
+        
+        # Set up service container
+        container = StrategyServiceContainer(
+            risk_service=Mock(),
+            data_service=Mock(),
+            execution_service=Mock(),
+            analytics_service=analytics_service,
+            monitoring_service=Mock(),
+        )
+        service._strategy_services = container
+        
+        return service, analytics_service
+    
+    @pytest.mark.asyncio
+    async def test_end_to_end_analytics_workflow(self, comprehensive_strategy_service):
+        """Test complete analytics workflow from signal to reporting."""
+        service, analytics_service = comprehensive_strategy_service
+        
+        # Set up strategy
+        strategy_id = "e2e_analytics_strategy"
+        service._strategy_configs[strategy_id] = StrategyConfig(
+            name="E2EAnalyticsStrategy",
+            strategy_type=StrategyType.MEAN_REVERSION,
+            parameters={
+                "lookback_period": 20,
+                "threshold": 0.02,
+            },
+        )
+        service._strategy_metrics[strategy_id] = StrategyMetrics(strategy_id=strategy_id)
+        service._signal_history[strategy_id] = []
+        
+        # Process market data and generate signals
+        market_data = MarketData(
+            symbol="BTC/USDT",
+            timestamp=datetime.now(timezone.utc),
+            price=Decimal("52000.00"),
+            volume=Decimal("150.0"),
+            bid=Decimal("51999.50"),
+            ask=Decimal("52000.50"),
+        )
+        
+        # Mock strategy that generates signals
+        mock_strategy = Mock()
+        mock_strategy.status = "ACTIVE"  # String instead of enum for simplicity
+        mock_strategy.generate_signals = AsyncMock(return_value=[
+            Signal(
+                symbol="BTC/USDT",
+                direction=SignalDirection.BUY,
+                strength=Decimal("0.85"),
+                timestamp=market_data.timestamp,
+                source="test_strategy",
+                metadata={"price": market_data.price},
+            )
+        ])
+        service._active_strategies[strategy_id] = mock_strategy
+        
+        with patch.object(service, 'validate_signal', return_value=True):
+            with patch.object(service, '_calculate_win_rate', return_value=68.5):
+                with patch.object(service, '_calculate_sharpe_ratio', return_value=1.4):
+                    with patch.object(service, '_calculate_max_drawdown', return_value=12.3):
+                        
+                        # Process market data (triggers analytics recording)
+                        await service._process_market_data_impl(market_data)
+                        
+                        # Verify analytics service called with comprehensive data
+                        analytics_service.record_strategy_performance.assert_called_once()
+                        
+                        call_args = analytics_service.record_strategy_performance.call_args
+                        performance_data = call_args.kwargs['performance_data']
+                        
+                        # Verify comprehensive performance data
+                        assert performance_data['strategy_id'] == strategy_id
+                        assert performance_data['strategy_type'] == StrategyType.MEAN_REVERSION
+                        assert performance_data['signals_generated'] == 1
+                        assert performance_data['win_rate'] == 68.5
+                        assert performance_data['sharpe_ratio'] == 1.4
+                        assert performance_data['max_drawdown'] == 12.3
+                        assert performance_data['signal_strength_avg'] == 0.85
+                        assert performance_data['performance_period'] == "real_time"
+    
+    @pytest.mark.asyncio
+    async def test_analytics_batch_processing(self, comprehensive_strategy_service):
+        """Test analytics processing for multiple strategies in batch."""
+        service, analytics_service = comprehensive_strategy_service
+        
+        # Set up multiple strategies
+        strategy_configs = [
+            ("trend_strategy", StrategyType.TREND_FOLLOWING),
+            ("mean_revert_strategy", StrategyType.MEAN_REVERSION),
+            ("arbitrage_strategy", StrategyType.ARBITRAGE),
+        ]
+        
+        for strategy_id, strategy_type in strategy_configs:
+            service._strategy_configs[strategy_id] = StrategyConfig(
+                name=f"Strategy_{strategy_id}",
+                strategy_type=strategy_type,
+                parameters={"param": "value"},
+            )
+            service._strategy_metrics[strategy_id] = StrategyMetrics(strategy_id=strategy_id)
+            service._signal_history[strategy_id] = []
+            
+            # Mock strategy
+            mock_strategy = Mock()
+            mock_strategy.status = "ACTIVE"
+            mock_strategy.generate_signals = AsyncMock(return_value=[
+                Signal(
+                    symbol="BTC/USDT",
+                    direction=SignalDirection.BUY,
+                    strength=Decimal("0.8"),
+                    timestamp=datetime.now(timezone.utc),
+                    source="test_strategy",
+                    metadata={"price": Decimal("50000.00")},
+                )
+            ])
+            service._active_strategies[strategy_id] = mock_strategy
+        
+        # Process market data for all strategies
+        market_data = MarketData(
+            symbol="BTC/USDT",
+            timestamp=datetime.now(timezone.utc),
+            price=Decimal("50000.00"),
+            volume=Decimal("100.0"),
+            bid=Decimal("49999.00"),
+            ask=Decimal("50001.00"),
+        )
+        
+        with patch.object(service, 'validate_signal', return_value=True):
+            with patch.object(service, '_calculate_win_rate', return_value=70.0):
+                with patch.object(service, '_calculate_sharpe_ratio', return_value=1.2):
+                    with patch.object(service, '_calculate_max_drawdown', return_value=10.0):
+                        
+                        await service._process_market_data_impl(market_data)
+                        
+                        # Verify analytics called for each strategy
+                        assert analytics_service.record_strategy_performance.call_count == 3
+                        
+                        # Verify each strategy recorded with correct type
+                        calls = analytics_service.record_strategy_performance.call_args_list
+                        recorded_types = {call.kwargs['performance_data']['strategy_type'] for call in calls}
+                        expected_types = {StrategyType.TREND_FOLLOWING, StrategyType.MEAN_REVERSION, StrategyType.ARBITRAGE}
+                        assert recorded_types == expected_types
+    
+    @pytest.mark.asyncio
+    async def test_analytics_performance_under_load(self, comprehensive_strategy_service):
+        """Test analytics service performance under high load."""
+        service, analytics_service = comprehensive_strategy_service
+        
+        # Set up strategy with high signal volume
+        strategy_id = "high_volume_strategy"
+        service._strategy_configs[strategy_id] = StrategyConfig(
+            name="HighVolumeStrategy",
+            strategy_type=StrategyType.MARKET_MAKING,
+            parameters={"update_frequency": "1s"},
+        )
+        service._strategy_metrics[strategy_id] = StrategyMetrics(strategy_id=strategy_id)
+        service._signal_history[strategy_id] = []
+        
+        # Create large batch of signals
+        large_signal_batch = []
+        for i in range(1000):  # 1000 signals
+            large_signal_batch.append(
+                Signal(
+                    symbol="BTC/USDT",
+                    direction=SignalDirection.BUY if i % 2 == 0 else SignalDirection.SELL,
+                    strength=Decimal(str(0.5 + (i % 100) / 200)),  # Varying strength
+                    timestamp=datetime.now(timezone.utc),
+                    source="test_strategy",
+                    metadata={"price": Decimal(f"{50000 + i % 1000}")},
+                )
+            )
+        
+        # Mock analytics service to track performance
+        call_times = []
+        
+        async def mock_record_performance(*args, **kwargs):
+            start_time = datetime.now()
+            # Simulate processing time
+            await asyncio.sleep(0.001)  # 1ms processing time
+            call_times.append((datetime.now() - start_time).total_seconds())
+        
+        analytics_service.record_strategy_performance.side_effect = mock_record_performance
+        
+        with patch.object(service, '_calculate_win_rate', return_value=75.0):
+            with patch.object(service, '_calculate_sharpe_ratio', return_value=1.5):
+                with patch.object(service, '_calculate_max_drawdown', return_value=8.0):
+                    
+                    # Process large signal batch
+                    await service._record_strategy_analytics(strategy_id, large_signal_batch)
+                    
+                    # Verify analytics service called
+                    analytics_service.record_strategy_performance.assert_called_once()
+                    
+                    # Verify performance data includes large signal count
+                    call_args = analytics_service.record_strategy_performance.call_args
+                    performance_data = call_args.kwargs['performance_data']
+                    assert performance_data['signals_generated'] == 1000
+                    
+                    # Verify processing completed within reasonable time
+                    assert len(call_times) == 1
+                    assert call_times[0] < 1.0  # Should complete within 1 second
+    
+    @pytest.mark.asyncio
+    async def test_analytics_concurrent_access(self, comprehensive_strategy_service):
+        """Test analytics service handles concurrent access correctly."""
+        service, analytics_service = comprehensive_strategy_service
+        
+        # Set up multiple strategies for concurrent processing
+        strategy_ids = [f"concurrent_strategy_{i}" for i in range(10)]
+        
+        for strategy_id in strategy_ids:
+            service._strategy_configs[strategy_id] = StrategyConfig(
+                name=f"ConcurrentStrategy_{strategy_id}",
+                strategy_type=StrategyType.TREND_FOLLOWING,
+                parameters={"concurrent_test": True},
+            )
+            service._strategy_metrics[strategy_id] = StrategyMetrics(strategy_id=strategy_id)
+            service._signal_history[strategy_id] = []
+        
+        # Mock analytics service with concurrent tracking
+        concurrent_calls = []
+        
+        async def mock_concurrent_record(*args, **kwargs):
+            concurrent_calls.append(kwargs.get('strategy_id', 'unknown'))
+            await asyncio.sleep(0.01)  # Simulate processing time
+        
+        analytics_service.record_strategy_performance.side_effect = mock_concurrent_record
+        
+        # Create concurrent analytics recording tasks
+        signals = [
+            Signal(
+                symbol="BTC/USDT",
+                direction="buy",
+                strength=Decimal("0.8"),
+                timestamp=datetime.now(timezone.utc),
+                source="test_strategy",
+                metadata={"price": Decimal("50000.00")},
+            )
+        ]
+        
+        tasks = []
+        for strategy_id in strategy_ids:
+            task = service._record_strategy_analytics(strategy_id, signals)
+            tasks.append(task)
+        
+        with patch.object(service, '_calculate_win_rate', return_value=70.0):
+            with patch.object(service, '_calculate_sharpe_ratio', return_value=1.2):
+                with patch.object(service, '_calculate_max_drawdown', return_value=5.0):
+                    
+                    # Execute all tasks concurrently
+                    await asyncio.gather(*tasks)
+                    
+                    # Verify all strategies were processed
+                    assert len(concurrent_calls) == 10
+                    assert set(concurrent_calls) == set(strategy_ids)
+                    
+                    # Verify analytics service called for each strategy
+                    assert analytics_service.record_strategy_performance.call_count == 10
+    
+    @pytest.mark.asyncio
+    async def test_analytics_error_resilience(self, comprehensive_strategy_service):
+        """Test analytics service error resilience and recovery."""
+        service, analytics_service = comprehensive_strategy_service
+        
+        # Set up strategy
+        strategy_id = "error_resilient_strategy"
+        service._strategy_configs[strategy_id] = StrategyConfig(
+            name="ErrorResilientStrategy",
+            strategy_type=StrategyType.TREND_FOLLOWING,
+            parameters={"error_test": True},
+        )
+        service._strategy_metrics[strategy_id] = StrategyMetrics(strategy_id=strategy_id)
+        service._signal_history[strategy_id] = []
+        
+        # Mock analytics service with intermittent failures
+        call_count = 0
+        
+        async def mock_failing_record(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            
+            if call_count <= 3:  # First 3 calls fail
+                raise Exception(f"Analytics service error {call_count}")
+            # Subsequent calls succeed
+            return {"status": "success"}
+        
+        analytics_service.record_strategy_performance.side_effect = mock_failing_record
+        
+        signals = [
+            Signal(
+                symbol="BTC/USDT",
+                direction="buy",
+                strength=Decimal("0.8"),
+                timestamp=datetime.now(timezone.utc),
+                source="test_strategy",
+                metadata={"price": Decimal("50000.00")},
+            )
+        ]
+        
+        # Test error resilience over multiple calls
+        for i in range(5):
+            with patch.object(service, '_calculate_win_rate', return_value=70.0):
+                with patch.object(service, '_calculate_sharpe_ratio', return_value=1.2):
+                    with patch.object(service, '_calculate_max_drawdown', return_value=5.0):
+                        
+                        # Should not raise exception even when analytics fails
+                        await service._record_strategy_analytics(strategy_id, signals)
+        
+        # Verify all calls were attempted (both failing and successful)
+        assert analytics_service.record_strategy_performance.call_count == 5
+        
+        # Verify final calls succeeded (no exception raised)
+        assert call_count == 5
+    
+    @pytest.mark.asyncio
+    async def test_analytics_data_validation(self, comprehensive_strategy_service):
+        """Test analytics service validates data integrity."""
+        service, analytics_service = comprehensive_strategy_service
+        
+        # Set up strategy with edge case data
+        strategy_id = "data_validation_strategy"
+        service._strategy_configs[strategy_id] = StrategyConfig(
+            name="DataValidationStrategy",
+            strategy_type=StrategyType.TREND_FOLLOWING,
+            parameters={"validation_test": True},
+        )
+        service._strategy_metrics[strategy_id] = StrategyMetrics(strategy_id=strategy_id)
+        service._signal_history[strategy_id] = []
+        
+        # Create signals with edge case values
+        edge_case_signals = [
+            Signal(
+                symbol="EDGE/CASE",  # Edge case symbol
+                direction=SignalDirection.HOLD,  # Hold direction
+                strength=Decimal("0.0"),  # Zero strength
+                timestamp=datetime.now(timezone.utc),
+                source="test_strategy",
+                metadata={"price": Decimal("0.00")},  # Zero price
+            ),
+            Signal(
+                symbol="BTC/USDT",
+                direction=SignalDirection.BUY,
+                strength=Decimal("1.0"),  # Maximum strength
+                timestamp=datetime.now(timezone.utc),
+                source="test_strategy",
+                metadata={"price": Decimal("999999.99")},  # Very high price
+            ),
+        ]
+        
+        # Mock calculation methods to return edge case values
+        with patch.object(service, '_calculate_win_rate', return_value=float('inf')):
+            with patch.object(service, '_calculate_sharpe_ratio', return_value=float('-inf')):
+                with patch.object(service, '_calculate_max_drawdown', return_value=float('nan')):
+                    
+                    # Should handle edge case data gracefully
+                    await service._record_strategy_analytics(strategy_id, edge_case_signals)
+                    
+                    # Verify analytics service was called despite edge case data
+                    analytics_service.record_strategy_performance.assert_called_once()
+                    
+                    # Verify performance data structure
+                    call_args = analytics_service.record_strategy_performance.call_args
+                    performance_data = call_args.kwargs['performance_data']
+                    
+                    # Data should be present even if values are edge cases
+                    assert 'strategy_id' in performance_data
+                    assert 'signals_generated' in performance_data
+                    assert 'win_rate' in performance_data
+                    assert 'sharpe_ratio' in performance_data
+                    assert 'max_drawdown' in performance_data

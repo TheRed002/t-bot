@@ -50,10 +50,11 @@ class StrategyConfigurationManager:
         """
         return {
             "mean_reversion": {
+                "strategy_id": "mean_rev_default_001",
                 "name": "mean_reversion",
-                "strategy_type": "static",
+                "strategy_type": "mean_reversion",
                 "enabled": True,
-                "symbols": ["BTCUSDT", "ETHUSDT"],
+                "symbol": "BTCUSDT",
                 "timeframe": "5m",
                 "min_confidence": 0.6,
                 "max_positions": 5,
@@ -68,10 +69,11 @@ class StrategyConfigurationManager:
                 },
             },
             "trend_following": {
+                "strategy_id": "trend_follow_default_001",
                 "name": "trend_following",
-                "strategy_type": "static",
+                "strategy_type": "trend_following",
                 "enabled": True,
-                "symbols": ["BTCUSDT", "ETHUSDT"],
+                "symbol": "BTCUSDT",
                 "timeframe": "1h",
                 "min_confidence": 0.6,
                 "max_positions": 5,
@@ -87,10 +89,11 @@ class StrategyConfigurationManager:
                 },
             },
             "breakout": {
+                "strategy_id": "breakout_default_001",
                 "name": "breakout",
-                "strategy_type": "static",
+                "strategy_type": "momentum",
                 "enabled": True,
-                "symbols": ["BTCUSDT", "ETHUSDT"],
+                "symbol": "BTCUSDT",
                 "timeframe": "1h",
                 "min_confidence": 0.6,
                 "max_positions": 5,
@@ -120,9 +123,28 @@ class StrategyConfigurationManager:
             ConfigurationError: If configuration loading fails
         """
         try:
-            # Try to load from file first
-            config_file = self.config_dir / f"{strategy_name}.yaml"
-            if config_file.exists():
+            # Try to load from file first - check both YAML and JSON
+            yaml_config_file = self.config_dir / f"{strategy_name}.yaml"
+            yml_config_file = self.config_dir / f"{strategy_name}.yml"
+            json_config_file = self.config_dir / f"{strategy_name}.json"
+
+            config_file = None
+            if yaml_config_file.exists():
+                config_file = yaml_config_file
+            elif yml_config_file.exists():
+                config_file = yml_config_file
+            elif json_config_file.exists():
+                config_file = json_config_file
+            else:
+                # Check if there's any file with this strategy name but unsupported extension
+                for file_path in self.config_dir.glob(f"{strategy_name}.*"):
+                    if file_path.suffix not in [".yaml", ".yml", ".json"]:
+                        # Found an unsupported format file
+                        raise ConfigurationError(
+                            f"Unsupported config file format: {file_path.suffix}"
+                        )
+
+            if config_file:
                 config_data = self._load_config_file(config_file)
                 self.logger.info(
                     "Loaded strategy config from file",
@@ -143,22 +165,30 @@ class StrategyConfigurationManager:
             self.logger.error(
                 "Strategy config file not found", strategy_name=strategy_name, error=str(e)
             )
-            raise ConfigurationError(f"Configuration file not found for {strategy_name}: {e!s}")
+            raise ConfigurationError(
+                f"Configuration file not found for {strategy_name}: {e!s}"
+            ) from e
         except yaml.YAMLError as e:
             self.logger.error(
                 "Invalid YAML in strategy config", strategy_name=strategy_name, error=str(e)
             )
-            raise ConfigurationError(f"Invalid YAML configuration for {strategy_name}: {e!s}")
+            raise ConfigurationError(
+                f"Invalid YAML configuration for {strategy_name}: {e!s}"
+            ) from e
         except json.JSONDecodeError as e:
             self.logger.error(
                 "Invalid JSON in strategy config", strategy_name=strategy_name, error=str(e)
             )
-            raise ConfigurationError(f"Invalid JSON configuration for {strategy_name}: {e!s}")
+            raise ConfigurationError(
+                f"Invalid JSON configuration for {strategy_name}: {e!s}"
+            ) from e
         except Exception as e:
             self.logger.error(
                 "Failed to load strategy config", strategy_name=strategy_name, error=str(e)
             )
-            raise ConfigurationError(f"Failed to load configuration for {strategy_name}: {e!s}")
+            raise ConfigurationError(
+                f"Failed to load configuration for {strategy_name}: {e!s}"
+            ) from e
 
     def _load_config_file(self, config_file: Path) -> dict[str, Any]:
         """Load configuration from file.
@@ -183,7 +213,9 @@ class StrategyConfigurationManager:
                         return data["strategy"]
                     return data
                 else:
-                    raise ConfigurationError(f"Unsupported config file format: {config_file.suffix}")
+                    raise ConfigurationError(
+                        f"Unsupported config file format: {config_file.suffix}"
+                    )
         except FileNotFoundError as e:
             self.logger.error("Config file not found", config_file=str(config_file))
             raise ConfigurationError(f"Configuration file not found: {config_file}") from e
@@ -242,18 +274,20 @@ class StrategyConfigurationManager:
 
         except PermissionError as e:
             self.logger.error(
-                "Permission denied saving strategy config", strategy_name=strategy_name, error=str(e)
+                "Permission denied saving strategy config",
+                strategy_name=strategy_name,
+                error=str(e),
             )
-            raise ConfigurationError(f"Permission denied saving configuration for {strategy_name}: {e!s}")
+            raise ConfigurationError(
+                f"Permission denied saving configuration for {strategy_name}: {e!s}"
+            )
         except OSError as e:
             self.logger.error(
                 "OS error saving strategy config", strategy_name=strategy_name, error=str(e)
             )
             raise ConfigurationError(f"OS error saving configuration for {strategy_name}: {e!s}")
         except yaml.YAMLError as e:
-            self.logger.error(
-                "YAML serialization error", strategy_name=strategy_name, error=str(e)
-            )
+            self.logger.error("YAML serialization error", strategy_name=strategy_name, error=str(e))
             raise ConfigurationError(f"Failed to serialize YAML for {strategy_name}: {e!s}")
         except Exception as e:
             self.logger.error(
@@ -379,32 +413,44 @@ class StrategyConfigurationManager:
             return False
 
     def create_strategy_config(
-        self, strategy_name: str, strategy_type: StrategyType, symbols: list[str], **kwargs
+        self, strategy_name: str, strategy_type: StrategyType, symbol: str, **kwargs
     ) -> StrategyConfig:
         """Create a new strategy configuration.
 
         Args:
             strategy_name: Name of the strategy
             strategy_type: Type of strategy
-            symbols: Trading symbols
+            symbol: Trading symbol
             **kwargs: Additional configuration parameters
 
         Returns:
             New strategy configuration
         """
         try:
+            # Map strategy type to default config key
+            strategy_type_str = strategy_type.value if hasattr(strategy_type, "value") else strategy_type
+
+            # Find matching default config or use mean_reversion as fallback
+            config_key = strategy_type_str
+            if config_key not in self._default_configs:
+                # Try to find a matching config type
+                if strategy_type_str == "momentum":
+                    config_key = "breakout"  # momentum maps to breakout in defaults
+                else:
+                    config_key = "mean_reversion"  # fallback
+
             # Start with default config for strategy type
-            config_data = self._get_default_config(strategy_name)
+            config_key_str = config_key if isinstance(config_key, str) else config_key.value
+            config_data = self._get_default_config(config_key_str)
 
             # Update with provided parameters
             config_data.update(
                 {
+                    "strategy_id": kwargs.get("strategy_id", f"{strategy_name}_{hash(strategy_name) % 1000:03d}"),
                     "name": strategy_name,
-                    "strategy_type": (
-                        strategy_type.value if hasattr(strategy_type, "value") else strategy_type
-                    ),
-                    "symbols": symbols,
-                    **kwargs,
+                    "strategy_type": strategy_type_str,
+                    "symbol": symbol,
+                    **{k: v for k, v in kwargs.items() if k not in ["strategy_id"]},
                 }
             )
 
@@ -427,7 +473,9 @@ class StrategyConfigurationManager:
             raise
         except ValueError as e:
             self.logger.error(
-                "Invalid parameter values for strategy config", strategy_name=strategy_name, error=str(e)
+                "Invalid parameter values for strategy config",
+                strategy_name=strategy_name,
+                error=str(e),
             )
             raise ConfigurationError(f"Invalid parameter values for {strategy_name}: {e!s}")
         except Exception as e:
@@ -463,7 +511,9 @@ class StrategyConfigurationManager:
 
         except PermissionError as e:
             self.logger.error(
-                "Permission denied deleting strategy config", strategy_name=strategy_name, error=str(e)
+                "Permission denied deleting strategy config",
+                strategy_name=strategy_name,
+                error=str(e),
             )
             return False
         except OSError as e:
@@ -483,7 +533,7 @@ class StrategyConfigurationManager:
         Returns:
             Configuration summary
         """
-        summary = {
+        summary: dict[str, Any] = {
             "config_directory": str(self.config_dir),
             "total_strategies": len(self.get_available_strategies()),
             "config_files": [],

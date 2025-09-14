@@ -1,0 +1,515 @@
+"""
+Comprehensive tests for Evolutionary Strategy Fitness Functions.
+
+This module provides complete test coverage for fitness evaluation functions
+used in evolutionary trading strategies.
+"""
+
+import pytest
+from unittest.mock import Mock, MagicMock
+from decimal import Decimal
+
+# Disable verbose logging for performance
+import logging
+logging.getLogger('src').setLevel(logging.CRITICAL)
+
+from src.strategies.evolutionary.fitness import (
+    FitnessFunction,
+    SharpeFitness,
+    ReturnFitness,
+    CompositeFitness,
+)
+
+
+class TestFitnessFunctionBase:
+    """Test suite for FitnessFunction abstract base class."""
+
+    def test_fitness_function_is_abstract(self):
+        """Test that FitnessFunction cannot be instantiated directly."""
+        with pytest.raises(TypeError):
+            FitnessFunction()
+
+    def test_concrete_implementation_required(self):
+        """Test that concrete implementations must implement calculate method."""
+        
+        class IncompleteFitness(FitnessFunction):
+            pass  # Missing calculate method
+        
+        with pytest.raises(TypeError):
+            IncompleteFitness()
+
+
+class TestSharpeFitness:
+    """Test suite for SharpeFitness."""
+
+    @pytest.fixture(scope="session")
+    def sharpe_fitness(self):
+        """Create SharpeFitness instance."""
+        return SharpeFitness()
+
+    @pytest.fixture(scope="session")
+    def mock_backtest_result(self):
+        """Create mock backtest result."""
+        result = Mock()
+        result.sharpe_ratio = 1.5
+        result.total_return = Decimal('0.25')
+        result.max_drawdown = Decimal('0.08')
+        result.win_rate = 0.65
+        result.total_trades = 100
+        return result
+
+    def test_sharpe_fitness_initialization(self, sharpe_fitness):
+        """Test SharpeFitness initialization."""
+        assert isinstance(sharpe_fitness, FitnessFunction)
+        assert isinstance(sharpe_fitness, SharpeFitness)
+
+    def test_sharpe_fitness_calculate_positive(self, sharpe_fitness, mock_backtest_result):
+        """Test Sharpe fitness calculation with positive ratio."""
+        mock_backtest_result.sharpe_ratio = 2.3
+        
+        fitness = sharpe_fitness.calculate(mock_backtest_result)
+        
+        assert fitness == 2.3
+        assert isinstance(fitness, (int, float))
+
+    def test_sharpe_fitness_calculate_negative(self, sharpe_fitness, mock_backtest_result):
+        """Test Sharpe fitness calculation with negative ratio."""
+        mock_backtest_result.sharpe_ratio = -0.5
+        
+        fitness = sharpe_fitness.calculate(mock_backtest_result)
+        
+        assert fitness == -0.5
+
+    def test_sharpe_fitness_calculate_zero(self, sharpe_fitness, mock_backtest_result):
+        """Test Sharpe fitness calculation with zero ratio."""
+        mock_backtest_result.sharpe_ratio = 0.0
+        
+        fitness = sharpe_fitness.calculate(mock_backtest_result)
+        
+        assert fitness == 0.0
+
+    def test_sharpe_fitness_calculate_missing_attribute(self, sharpe_fitness):
+        """Test Sharpe fitness calculation with missing sharpe_ratio attribute."""
+        result = Mock()
+        delattr(result, 'sharpe_ratio') if hasattr(result, 'sharpe_ratio') else None
+        
+        with pytest.raises(AttributeError):
+            sharpe_fitness.calculate(result)
+
+    def test_sharpe_fitness_calculate_none_result(self, sharpe_fitness):
+        """Test Sharpe fitness calculation with None result."""
+        with pytest.raises(AttributeError):
+            sharpe_fitness.calculate(None)
+
+
+class TestReturnFitness:
+    """Test suite for ReturnFitness."""
+
+    @pytest.fixture
+    def return_fitness(self):
+        """Create ReturnFitness instance."""
+        return ReturnFitness()
+
+    @pytest.fixture
+    def mock_backtest_result(self):
+        """Create mock backtest result."""
+        result = Mock()
+        result.total_return = Decimal('0.35')
+        result.sharpe_ratio = 1.8
+        result.max_drawdown = Decimal('0.12')
+        return result
+
+    def test_return_fitness_initialization(self, return_fitness):
+        """Test ReturnFitness initialization."""
+        assert isinstance(return_fitness, FitnessFunction)
+        assert isinstance(return_fitness, ReturnFitness)
+
+    def test_return_fitness_calculate_positive(self, return_fitness, mock_backtest_result):
+        """Test return fitness calculation with positive return."""
+        mock_backtest_result.total_return = Decimal('0.45')
+        
+        fitness = return_fitness.calculate(mock_backtest_result)
+        
+        assert fitness == 0.45
+        assert isinstance(fitness, float)
+
+    def test_return_fitness_calculate_negative(self, return_fitness, mock_backtest_result):
+        """Test return fitness calculation with negative return."""
+        mock_backtest_result.total_return = Decimal('-0.15')
+        
+        fitness = return_fitness.calculate(mock_backtest_result)
+        
+        assert fitness == -0.15
+
+    def test_return_fitness_calculate_zero(self, return_fitness, mock_backtest_result):
+        """Test return fitness calculation with zero return."""
+        mock_backtest_result.total_return = Decimal('0.0')
+        
+        fitness = return_fitness.calculate(mock_backtest_result)
+        
+        assert fitness == 0.0
+
+    def test_return_fitness_calculate_large_return(self, return_fitness, mock_backtest_result):
+        """Test return fitness calculation with large return."""
+        mock_backtest_result.total_return = Decimal('2.5')
+        
+        fitness = return_fitness.calculate(mock_backtest_result)
+        
+        assert fitness == 2.5
+
+    def test_return_fitness_calculate_small_return(self, return_fitness, mock_backtest_result):
+        """Test return fitness calculation with very small return."""
+        mock_backtest_result.total_return = Decimal('0.001')
+        
+        fitness = return_fitness.calculate(mock_backtest_result)
+        
+        assert fitness == 0.001
+
+    def test_return_fitness_decimal_conversion(self, return_fitness):
+        """Test that Decimal is properly converted to float."""
+        result = Mock()
+        result.total_return = Decimal('0.123456789')
+        
+        fitness = return_fitness.calculate(result)
+        
+        assert isinstance(fitness, float)
+        assert abs(fitness - 0.123456789) < 1e-9
+
+    def test_return_fitness_calculate_missing_attribute(self, return_fitness):
+        """Test return fitness calculation with missing total_return attribute."""
+        result = Mock()
+        delattr(result, 'total_return') if hasattr(result, 'total_return') else None
+        
+        with pytest.raises(AttributeError):
+            return_fitness.calculate(result)
+
+    def test_return_fitness_calculate_none_result(self, return_fitness):
+        """Test return fitness calculation with None result."""
+        with pytest.raises(AttributeError):
+            return_fitness.calculate(None)
+
+
+class TestCompositeFitness:
+    """Test suite for CompositeFitness."""
+
+    @pytest.fixture
+    def default_composite_fitness(self):
+        """Create CompositeFitness with default weights."""
+        return CompositeFitness()
+
+    @pytest.fixture
+    def custom_composite_fitness(self):
+        """Create CompositeFitness with custom weights."""
+        return CompositeFitness(
+            sharpe_weight=0.4,
+            return_weight=0.3,
+            drawdown_weight=0.2,
+            win_rate_weight=0.1
+        )
+
+    @pytest.fixture
+    def mock_backtest_result(self):
+        """Create comprehensive mock backtest result."""
+        result = Mock()
+        result.sharpe_ratio = 1.5
+        result.total_return = Decimal('0.30')
+        result.max_drawdown = Decimal('0.10')
+        result.win_rate = 0.65
+        result.total_trades = 100
+        result.profit_factor = 1.8
+        result.calmar_ratio = 3.0
+        return result
+
+    def test_composite_fitness_default_initialization(self, default_composite_fitness):
+        """Test CompositeFitness initialization with default weights."""
+        cf = default_composite_fitness
+        
+        assert isinstance(cf, FitnessFunction)
+        assert isinstance(cf, CompositeFitness)
+        assert cf.sharpe_weight == 0.4
+        assert cf.return_weight == 0.3
+        assert cf.drawdown_weight == 0.2
+        assert cf.win_rate_weight == 0.1
+
+    def test_composite_fitness_custom_initialization(self, custom_composite_fitness):
+        """Test CompositeFitness initialization with custom weights."""
+        cf = custom_composite_fitness
+        
+        assert cf.sharpe_weight == 0.4
+        assert cf.return_weight == 0.3
+        assert cf.drawdown_weight == 0.2
+        assert cf.win_rate_weight == 0.1
+
+    def test_composite_fitness_weights_sum_to_one(self):
+        """Test that default weights sum to 1.0."""
+        cf = CompositeFitness()
+        total_weight = cf.sharpe_weight + cf.return_weight + cf.drawdown_weight + cf.win_rate_weight
+        
+        assert abs(total_weight - 1.0) < 1e-10
+
+    def test_composite_fitness_calculate_default_weights(self, default_composite_fitness, mock_backtest_result):
+        """Test composite fitness calculation with default weights."""
+        result = mock_backtest_result
+        result.sharpe_ratio = 2.0
+        result.total_return = Decimal('0.40')
+        result.max_drawdown = Decimal('0.08')
+        result.win_rate = 0.70
+        
+        fitness = default_composite_fitness.calculate(result)
+        
+        # Expected calculation:
+        # sharpe_component = 0.4 * 2.0 = 0.8
+        # return_component = 0.3 * 0.40 = 0.12
+        # drawdown_component = 0.2 * (1.0 - 0.08) = 0.184
+        # win_rate_component = 0.1 * 0.70 = 0.07
+        # total = 0.8 + 0.12 + 0.184 + 0.07 = 1.174
+        expected = 0.4 * 2.0 + 0.3 * 0.40 + 0.2 * (1.0 - 0.08) + 0.1 * 0.70
+        
+        assert abs(fitness - expected) < 1e-10
+
+    def test_composite_fitness_calculate_custom_weights(self, custom_composite_fitness, mock_backtest_result):
+        """Test composite fitness calculation with custom weights."""
+        result = mock_backtest_result
+        result.sharpe_ratio = 1.5
+        result.total_return = Decimal('0.25')
+        result.max_drawdown = Decimal('0.12')
+        result.win_rate = 0.60
+        
+        fitness = custom_composite_fitness.calculate(result)
+        
+        expected = 0.4 * 1.5 + 0.3 * 0.25 + 0.2 * (1.0 - 0.12) + 0.1 * 0.60
+        
+        assert abs(fitness - expected) < 1e-10
+
+    def test_composite_fitness_negative_sharpe(self, default_composite_fitness, mock_backtest_result):
+        """Test composite fitness with negative Sharpe ratio."""
+        result = mock_backtest_result
+        result.sharpe_ratio = -0.5
+        result.total_return = Decimal('0.10')
+        result.max_drawdown = Decimal('0.15')
+        result.win_rate = 0.45
+        
+        fitness = default_composite_fitness.calculate(result)
+        
+        # Should handle negative Sharpe ratio
+        expected = 0.4 * (-0.5) + 0.3 * 0.10 + 0.2 * (1.0 - 0.15) + 0.1 * 0.45
+        
+        assert abs(fitness - expected) < 1e-10
+        assert fitness < 1.0  # Should be lower due to negative Sharpe
+
+    def test_composite_fitness_negative_return(self, default_composite_fitness, mock_backtest_result):
+        """Test composite fitness with negative return."""
+        result = mock_backtest_result
+        result.sharpe_ratio = 1.0
+        result.total_return = Decimal('-0.20')
+        result.max_drawdown = Decimal('0.25')
+        result.win_rate = 0.40
+        
+        fitness = default_composite_fitness.calculate(result)
+        
+        expected = 0.4 * 1.0 + 0.3 * (-0.20) + 0.2 * (1.0 - 0.25) + 0.1 * 0.40
+        
+        assert abs(fitness - expected) < 1e-10
+
+    def test_composite_fitness_high_drawdown_penalty(self, default_composite_fitness, mock_backtest_result):
+        """Test composite fitness penalizes high drawdown."""
+        result = mock_backtest_result
+        result.sharpe_ratio = 2.0
+        result.total_return = Decimal('0.50')
+        result.max_drawdown = Decimal('0.30')  # High drawdown
+        result.win_rate = 0.75
+        
+        fitness = default_composite_fitness.calculate(result)
+        
+        expected = 0.4 * 2.0 + 0.3 * 0.50 + 0.2 * (1.0 - 0.30) + 0.1 * 0.75
+        
+        assert abs(fitness - expected) < 1e-10
+        
+        # Compare with low drawdown scenario
+        result.max_drawdown = Decimal('0.05')  # Low drawdown
+        fitness_low_dd = default_composite_fitness.calculate(result)
+        
+        assert fitness_low_dd > fitness  # Lower drawdown should result in higher fitness
+
+    def test_composite_fitness_zero_values(self, default_composite_fitness):
+        """Test composite fitness with all zero values."""
+        result = Mock()
+        result.sharpe_ratio = 0.0
+        result.total_return = Decimal('0.0')
+        result.max_drawdown = Decimal('0.0')
+        result.win_rate = 0.0
+        
+        fitness = default_composite_fitness.calculate(result)
+        
+        expected = 0.4 * 0.0 + 0.3 * 0.0 + 0.2 * (1.0 - 0.0) + 0.1 * 0.0
+        
+        assert abs(fitness - expected) < 1e-10
+        assert fitness == 0.2  # Only drawdown component contributes
+
+    def test_composite_fitness_extreme_values(self, default_composite_fitness):
+        """Test composite fitness with extreme values."""
+        result = Mock()
+        result.sharpe_ratio = 10.0  # Very high
+        result.total_return = Decimal('5.0')  # Very high
+        result.max_drawdown = Decimal('0.01')  # Very low
+        result.win_rate = 0.95  # Very high
+        
+        fitness = default_composite_fitness.calculate(result)
+        
+        expected = 0.4 * 10.0 + 0.3 * 5.0 + 0.2 * (1.0 - 0.01) + 0.1 * 0.95
+        
+        assert abs(fitness - expected) < 1e-10
+        assert fitness > 5.0  # Should be very high
+
+    def test_composite_fitness_missing_attributes(self, default_composite_fitness):
+        """Test composite fitness with missing attributes."""
+        result = Mock()
+        # Missing sharpe_ratio
+        result.total_return = Decimal('0.20')
+        result.max_drawdown = Decimal('0.10')
+        result.win_rate = 0.60
+        
+        with pytest.raises(AttributeError):
+            default_composite_fitness.calculate(result)
+
+    def test_composite_fitness_none_result(self, default_composite_fitness):
+        """Test composite fitness with None result."""
+        with pytest.raises(AttributeError):
+            default_composite_fitness.calculate(None)
+
+    def test_composite_fitness_decimal_conversion(self, default_composite_fitness):
+        """Test that Decimal values are properly handled."""
+        result = Mock()
+        result.sharpe_ratio = 1.5
+        result.total_return = Decimal('0.123456789')  # High precision Decimal
+        result.max_drawdown = Decimal('0.087654321')  # High precision Decimal
+        result.win_rate = 0.654321
+        
+        fitness = default_composite_fitness.calculate(result)
+        
+        # Should handle high precision calculations
+        assert isinstance(fitness, float)
+        assert fitness > 0
+
+    def test_composite_fitness_weight_sensitivity(self):
+        """Test sensitivity to different weight configurations."""
+        result = Mock()
+        result.sharpe_ratio = 2.0
+        result.total_return = Decimal('0.30')
+        result.max_drawdown = Decimal('0.10')
+        result.win_rate = 0.70
+        
+        # Sharpe-heavy weighting
+        sharpe_heavy = CompositeFitness(sharpe_weight=0.8, return_weight=0.1, 
+                                       drawdown_weight=0.05, win_rate_weight=0.05)
+        fitness_sharpe = sharpe_heavy.calculate(result)
+        
+        # Return-heavy weighting
+        return_heavy = CompositeFitness(sharpe_weight=0.1, return_weight=0.8,
+                                       drawdown_weight=0.05, win_rate_weight=0.05)
+        fitness_return = return_heavy.calculate(result)
+        
+        # Results should differ based on weighting
+        assert fitness_sharpe != fitness_return
+
+    def test_composite_fitness_non_normalized_weights(self):
+        """Test composite fitness with weights that don't sum to 1."""
+        # Weights sum to 2.0
+        cf = CompositeFitness(sharpe_weight=0.8, return_weight=0.6, 
+                             drawdown_weight=0.4, win_rate_weight=0.2)
+        
+        result = Mock()
+        result.sharpe_ratio = 1.0
+        result.total_return = Decimal('0.20')
+        result.max_drawdown = Decimal('0.10')
+        result.win_rate = 0.60
+        
+        fitness = cf.calculate(result)
+        
+        # Should still calculate, but result will be scaled
+        expected = 0.8 * 1.0 + 0.6 * 0.20 + 0.4 * (1.0 - 0.10) + 0.2 * 0.60
+        
+        assert abs(fitness - expected) < 1e-10
+        assert fitness > 1.0  # Higher than normalized version due to weight sum > 1
+
+    def test_composite_fitness_boundary_conditions(self, default_composite_fitness):
+        """Test composite fitness at boundary conditions."""
+        # Maximum drawdown (100%)
+        result = Mock()
+        result.sharpe_ratio = 1.0
+        result.total_return = Decimal('0.10')
+        result.max_drawdown = Decimal('1.0')  # 100% drawdown
+        result.win_rate = 0.50
+        
+        fitness = default_composite_fitness.calculate(result)
+        
+        expected = 0.4 * 1.0 + 0.3 * 0.10 + 0.2 * (1.0 - 1.0) + 0.1 * 0.50
+        
+        assert abs(fitness - expected) < 1e-10
+        # Drawdown component should be 0
+
+    def test_composite_fitness_reproducibility(self, default_composite_fitness, mock_backtest_result):
+        """Test that fitness calculation is reproducible."""
+        fitness1 = default_composite_fitness.calculate(mock_backtest_result)
+        fitness2 = default_composite_fitness.calculate(mock_backtest_result)
+        
+        assert fitness1 == fitness2
+
+    def test_composite_fitness_comparison_scenarios(self):
+        """Test composite fitness in comparison scenarios."""
+        cf = CompositeFitness()
+        
+        # Scenario 1: High Sharpe, low return
+        result1 = Mock()
+        result1.sharpe_ratio = 3.0
+        result1.total_return = Decimal('0.15')
+        result1.max_drawdown = Decimal('0.05')
+        result1.win_rate = 0.65
+        
+        # Scenario 2: Low Sharpe, high return
+        result2 = Mock()
+        result2.sharpe_ratio = 1.0
+        result2.total_return = Decimal('0.45')
+        result2.max_drawdown = Decimal('0.05')
+        result2.win_rate = 0.65
+        
+        fitness1 = cf.calculate(result1)
+        fitness2 = cf.calculate(result2)
+        
+        # Both should be reasonable, but different
+        assert fitness1 > 0
+        assert fitness2 > 0
+        assert fitness1 != fitness2
+
+    def test_composite_fitness_mathematical_properties(self, default_composite_fitness):
+        """Test mathematical properties of composite fitness."""
+        result = Mock()
+        result.sharpe_ratio = 1.5
+        result.total_return = Decimal('0.25')
+        result.max_drawdown = Decimal('0.10')
+        result.win_rate = 0.60
+        
+        baseline_fitness = default_composite_fitness.calculate(result)
+        
+        # Improve Sharpe ratio
+        result.sharpe_ratio = 2.5
+        improved_sharpe_fitness = default_composite_fitness.calculate(result)
+        
+        # Should improve fitness
+        assert improved_sharpe_fitness > baseline_fitness
+        
+        # Reset and improve return
+        result.sharpe_ratio = 1.5
+        result.total_return = Decimal('0.35')
+        improved_return_fitness = default_composite_fitness.calculate(result)
+        
+        # Should improve fitness
+        assert improved_return_fitness > baseline_fitness
+        
+        # Reset and reduce drawdown
+        result.total_return = Decimal('0.25')
+        result.max_drawdown = Decimal('0.05')
+        improved_drawdown_fitness = default_composite_fitness.calculate(result)
+        
+        # Should improve fitness
+        assert improved_drawdown_fitness > baseline_fitness

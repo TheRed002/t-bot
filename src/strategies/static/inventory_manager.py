@@ -13,10 +13,11 @@ from decimal import Decimal
 from typing import Any
 
 from src.core.exceptions import RiskManagementError
+from src.core.logging import get_logger
 
-# Logger is provided by BaseStrategy (via BaseComponent)
 # MANDATORY: Import from P-001
 from src.core.types import OrderRequest, OrderSide, OrderType, Position
+from src.strategies.dependencies import StrategyServiceContainer
 
 # MANDATORY: Import from P-007A
 from src.utils.decorators import time_execution
@@ -37,7 +38,7 @@ class InventoryManager:
     - Emergency inventory liquidation procedures
     """
 
-    def __init__(self, config: dict[str, Any]):
+    def __init__(self, config: dict[str, Any], services: StrategyServiceContainer | None = None):
         """
         Initialize Inventory Manager.
 
@@ -45,6 +46,7 @@ class InventoryManager:
             config: Configuration dictionary with inventory parameters
         """
         self.config = config
+        self.logger = get_logger(f"{__name__}.InventoryManager")
 
         # Inventory parameters
         self.target_inventory = Decimal(str(config.get("target_inventory", 0.5)))
@@ -61,6 +63,9 @@ class InventoryManager:
         self.emergency_threshold = config.get("emergency_threshold", 0.8)  # 80% of max
         self.emergency_liquidation_enabled = config.get("emergency_liquidation_enabled", True)
 
+        # Trading symbol
+        self.symbol = config.get("symbol", "BTCUSDT")
+        
         # State tracking
         self.current_inventory = Decimal("0")
         self.inventory_skew = 0.0  # -1 to 1
@@ -166,7 +171,7 @@ class InventoryManager:
             List of rebalancing orders
         """
         try:
-            orders = []
+            orders: list[Any] = []
 
             # Calculate required inventory change
             required_change = self.target_inventory - self.current_inventory
@@ -188,7 +193,7 @@ class InventoryManager:
             if required_change > 0:
                 # Need to buy to increase inventory
                 order = OrderRequest(
-                    symbol="BTCUSDT",  # TODO: Get from config
+                    symbol=self.symbol,
                     side=OrderSide.BUY,
                     order_type=OrderType.MARKET,
                     quantity=abs(required_change),
@@ -207,7 +212,7 @@ class InventoryManager:
             elif required_change < 0:
                 # Need to sell to decrease inventory
                 order = OrderRequest(
-                    symbol="BTCUSDT",  # TODO: Get from config
+                    symbol=self.symbol,
                     side=OrderSide.SELL,
                     order_type=OrderType.MARKET,
                     quantity=abs(required_change),
@@ -253,7 +258,7 @@ class InventoryManager:
                 return True
 
             # Check for rapid inventory accumulation
-            # TODO: Implement time-based emergency detection
+            # TBD: Implement time-based emergency detection for rapid inventory changes
 
             return False
 
@@ -273,12 +278,12 @@ class InventoryManager:
             List of emergency liquidation orders
         """
         try:
-            orders = []
+            orders: list[Any] = []
 
             if self.current_inventory > 0:
                 # Need to sell entire inventory
                 order = OrderRequest(
-                    symbol="BTCUSDT",  # TODO: Get from config
+                    symbol=self.symbol,
                     side=OrderSide.SELL,
                     order_type=OrderType.MARKET,
                     quantity=self.current_inventory,
@@ -296,7 +301,7 @@ class InventoryManager:
             elif self.current_inventory < 0:
                 # Need to buy to cover short position
                 order = OrderRequest(
-                    symbol="BTCUSDT",  # TODO: Get from config
+                    symbol=self.symbol,
                     side=OrderSide.BUY,
                     order_type=OrderType.MARKET,
                     quantity=abs(self.current_inventory),

@@ -20,9 +20,11 @@ from decimal import Decimal
 from typing import Any
 
 import numpy as np
+from numpy import ndarray
 from scipy.optimize import minimize
 
 from src.core.exceptions import AllocationError
+from src.core.logging import get_logger
 from src.core.types import (
     MarketRegime,
     Signal,
@@ -112,6 +114,7 @@ class PortfolioAllocator:
             min_strategy_allocation: Minimum allocation per strategy
             max_strategy_allocation: Maximum allocation per strategy
         """
+        self.logger = get_logger(self.__class__.__name__)
         self.total_capital = total_capital
         self.risk_manager = risk_manager
         self.max_strategies = max_strategies
@@ -149,11 +152,11 @@ class PortfolioAllocator:
         self.max_drawdown_limit = 0.20  # Stop if drawdown exceeds 20%
 
         # Market regime tracking
-        self.current_regime = MarketRegime.NORMAL
+        self.current_regime = MarketRegime.UNKNOWN
         self.regime_allocations = {
-            MarketRegime.BULL: {"risk_multiplier": 1.2, "diversification_weight": 0.8},
-            MarketRegime.BEAR: {"risk_multiplier": 0.7, "diversification_weight": 1.3},
-            MarketRegime.SIDEWAYS: {"risk_multiplier": 1.0, "diversification_weight": 1.0},
+            MarketRegime.TRENDING_UP: {"risk_multiplier": 1.2, "diversification_weight": 0.8},
+            MarketRegime.TRENDING_DOWN: {"risk_multiplier": 0.7, "diversification_weight": 1.3},
+            MarketRegime.RANGING: {"risk_multiplier": 1.0, "diversification_weight": 1.0},
             MarketRegime.HIGH_VOLATILITY: {"risk_multiplier": 0.6, "diversification_weight": 1.5},
             MarketRegime.LOW_VOLATILITY: {"risk_multiplier": 1.1, "diversification_weight": 0.9},
         }
@@ -175,6 +178,12 @@ class PortfolioAllocator:
         try:
             # Validate strategy
             if not await self._validate_strategy(strategy):
+                self.logger.warning(f"Strategy validation failed for {strategy.name}")
+                return False
+            
+            # Validate initial weight
+            if initial_weight < self.min_strategy_allocation or initial_weight > self.max_strategy_allocation:
+                self.logger.warning(f"Initial weight {initial_weight} outside allowed range [{self.min_strategy_allocation}, {self.max_strategy_allocation}]")
                 return False
 
             # Check if we have capacity
@@ -225,17 +234,20 @@ class PortfolioAllocator:
         """
         try:
             # Check strategy status
-            if strategy.status not in [StrategyStatus.STOPPED, StrategyStatus.RUNNING]:
+            if strategy.status not in [StrategyStatus.STOPPED, StrategyStatus.ACTIVE]:
+                self.logger.warning(f"Strategy {strategy.name} has invalid status: {strategy.status}")
                 return False
 
             # Check for duplicate names
             if strategy.name in self.allocations:
+                self.logger.warning(f"Strategy {strategy.name} is already allocated")
                 return False
 
             # Check correlation with existing strategies
             if len(self.allocations) > 0:
                 correlation = await self._calculate_strategy_correlation(strategy)
                 if correlation > self.max_correlation_threshold:
+                    self.logger.warning(f"Strategy {strategy.name} correlation {correlation} exceeds threshold {self.max_correlation_threshold}")
                     return False
 
             # Check strategy requirements
@@ -245,20 +257,22 @@ class PortfolioAllocator:
                     direction=SignalDirection.BUY,
                     strength=0.8,
                     timestamp=datetime.now(timezone.utc),
-                    symbol="BTCUSDT",
+                    symbol="BTC/USDT",
                     source=strategy.name,
                     metadata={},
                 )
                 if not await strategy.validate_signal(test_signal):
+                    self.logger.warning(f"Strategy {strategy.name} failed signal validation")
                     return False
 
             return True
 
         except (AttributeError, TypeError) as e:
             # Strategy validation errors - log and return False
+            self.logger.warning(f"Strategy {strategy.name} validation error (AttributeError/TypeError): {e}")
             return False
         except Exception as e:
-            # Unexpected errors - log and return False for safety
+            self.logger.error(f"Unexpected error in strategy {strategy.name} validation: {e}")
             return False
 
     async def _calculate_strategy_correlation(self, new_strategy: BaseStrategyInterface) -> float:
@@ -300,9 +314,10 @@ class PortfolioAllocator:
 
         except (KeyError, AttributeError, TypeError) as e:
             # Strategy type comparison errors
+            self.logger.warning(f"Strategy correlation calculation error: {e}")
             return 1.0  # Conservative estimate
         except Exception as e:
-            # Unexpected errors - return conservative estimate
+            self.logger.error(f"Unexpected error calculating strategy correlation: {e}")
             return 1.0
 
     @time_execution
@@ -368,18 +383,22 @@ class PortfolioAllocator:
 
                     # Calculate Sortino ratio if available
                     if len(allocation.daily_returns) > 20:
-                        negative_returns = [r for r in allocation.daily_returns if r < 0]
-                        if negative_returns:
-                            downside_deviation = np.std(negative_returns)
-                            if downside_deviation > 0:
-                                mean_return = np.mean(allocation.daily_returns)
-                                allocation.sortino_ratio = mean_return / downside_deviation
+                        from decimal import Decimal
 
-            except (AttributeError, KeyError, TypeError) as e:
+                        from src.utils.calculations.financial import FinancialCalculator
+
+                        # Use FinancialCalculator for Sortino ratio
+                        returns_decimal = tuple(Decimal(str(r)) for r in allocation.daily_returns)
+                        sortino_decimal = FinancialCalculator.sortino_ratio(
+                            returns_decimal, risk_free_rate=Decimal("0.02"), periods_per_year=252
+                        )
+                        allocation.sortino_ratio = float(sortino_decimal)
+
+            except (AttributeError, KeyError, TypeError):
                 # Strategy metrics access errors - continue with other strategies
                 continue
             except Exception as e:
-                # Unexpected errors - log and continue
+                logger.error(f"Unexpected error processing strategy {strategy.name}: {e}")
                 continue
 
     async def _calculate_optimal_weights(self) -> dict[str, float]:
@@ -425,14 +444,14 @@ class PortfolioAllocator:
 
             return optimal_weights
 
-        except (ValueError, np.linalg.LinAlgError, ZeroDivisionError) as e:
+        except (ValueError, np.linalg.LinAlgError, ZeroDivisionError):
             # Mathematical optimization errors - fallback to performance-based weights
             return self._calculate_performance_based_weights()
         except Exception as e:
-            # Unexpected errors - fallback to performance-based weights
+            logger.error(f"Unexpected error calculating optimal weights: {e}")
             return self._calculate_performance_based_weights()
 
-    def _build_returns_matrix(self, strategies: list[str]) -> np.ndarray | None:
+    def _build_returns_matrix(self, strategies: list[str]) -> ndarray | None:
         """Build returns matrix for portfolio optimization."""
         try:
             # Collect daily returns for each strategy
@@ -457,11 +476,11 @@ class PortfolioAllocator:
 
             return returns_matrix
 
-        except (IndexError, ValueError, TypeError) as e:
+        except (IndexError, ValueError, TypeError):
             # Data processing errors
             return None
         except Exception as e:
-            # Unexpected errors
+            logger.error(f"Unexpected error building returns matrix: {e}")
             return None
 
     def _optimize_sharpe_ratio(
@@ -510,11 +529,11 @@ class PortfolioAllocator:
                 # Fallback to equal weights
                 return initial_weights
 
-        except (ValueError, np.linalg.LinAlgError, ZeroDivisionError) as e:
+        except (ValueError, np.linalg.LinAlgError, ZeroDivisionError):
             # Mathematical optimization errors - fallback to equal weights
             return np.array([1.0 / n_strategies] * n_strategies)
         except Exception as e:
-            # Unexpected errors - fallback to equal weights
+            logger.error(f"Unexpected error optimizing Sharpe ratio: {e}")
             return np.array([1.0 / n_strategies] * n_strategies)
 
     def _apply_weight_constraints(self, weights: np.ndarray) -> np.ndarray:
@@ -561,12 +580,12 @@ class PortfolioAllocator:
 
             return {name: score / total_score for name, score in scores.items()}
 
-        except (ZeroDivisionError, KeyError, AttributeError) as e:
+        except (ZeroDivisionError, KeyError, AttributeError):
             # Performance calculation errors - equal weights fallback
             strategies = list(self.allocations.keys())
             return {name: 1.0 / len(strategies) for name in strategies}
         except Exception as e:
-            # Unexpected errors - equal weights fallback
+            logger.error(f"Unexpected error calculating performance-based weights: {e}")
             strategies = list(self.allocations.keys())
             return {name: 1.0 / len(strategies) for name in strategies}
 
@@ -600,11 +619,11 @@ class PortfolioAllocator:
 
             return adjusted_weights
 
-        except (KeyError, AttributeError, ZeroDivisionError) as e:
+        except (KeyError, AttributeError, ZeroDivisionError):
             # Regime adjustment errors - return original weights
             return weights
         except Exception as e:
-            # Unexpected errors - return original weights
+            logger.error(f"Unexpected error applying regime adjustments: {e}")
             return weights
 
     async def _execute_rebalancing(self, target_weights: dict[str, float]) -> list[dict[str, Any]]:
@@ -675,33 +694,40 @@ class PortfolioAllocator:
             annualized_return = (1 + mean_return) ** 252 - 1
             annualized_volatility = volatility * np.sqrt(252)
 
-            # Sharpe ratio (assuming 2% risk-free rate)
-            risk_free_rate = 0.02 / 252  # Daily risk-free rate
-            if annualized_volatility > 0:
-                sharpe_ratio = (annualized_return - 0.02) / annualized_volatility
-            else:
-                sharpe_ratio = 0.0
+            # Use FinancialCalculator for risk ratios and drawdown
+            from decimal import Decimal
 
-            # Sortino ratio
-            negative_returns = returns[returns < 0]
-            if len(negative_returns) > 0:
-                downside_deviation = np.std(negative_returns) * np.sqrt(252)
-                sortino_ratio = (
-                    (annualized_return - 0.02) / downside_deviation
-                    if downside_deviation > 0
-                    else 0.0
-                )
-            else:
-                sortino_ratio = sharpe_ratio
+            from src.utils.calculations.financial import FinancialCalculator
 
-            # Maximum drawdown
-            cumulative_returns = np.cumprod(1 + returns)
-            running_max = np.maximum.accumulate(cumulative_returns)
-            drawdowns = (cumulative_returns - running_max) / running_max
-            max_drawdown = np.min(drawdowns) if len(drawdowns) > 0 else 0.0
+            # Convert returns to Decimal tuple for FinancialCalculator
+            returns_decimal = tuple(Decimal(str(r)) for r in returns)
 
-            # Calmar ratio
-            calmar_ratio = annualized_return / abs(max_drawdown) if max_drawdown != 0 else 0.0
+            # Calculate Sharpe ratio using FinancialCalculator (2% risk-free rate, 252 trading days)
+            sharpe_decimal = FinancialCalculator.sharpe_ratio(
+                returns_decimal, risk_free_rate=Decimal("0.02"), periods_per_year=252
+            )
+            sharpe_ratio = float(sharpe_decimal)
+
+            # Calculate Sortino ratio using FinancialCalculator
+            sortino_decimal = FinancialCalculator.sortino_ratio(
+                returns_decimal, risk_free_rate=Decimal("0.02"), periods_per_year=252
+            )
+            sortino_ratio = float(sortino_decimal)
+
+            # Calculate maximum drawdown using FinancialCalculator
+            # First convert returns to cumulative equity curve
+            equity_curve = []
+            cumulative = Decimal("1.0")
+            for ret in returns:
+                cumulative *= (Decimal("1.0") + Decimal(str(ret)))
+                equity_curve.append(cumulative)
+
+            max_dd_decimal, _, _ = FinancialCalculator.max_drawdown(equity_curve)
+            max_drawdown = float(max_dd_decimal)
+
+            # Calculate Calmar ratio using FinancialCalculator
+            calmar_decimal = FinancialCalculator.calmar_ratio(returns_decimal, periods_per_year=252)
+            calmar_ratio = float(calmar_decimal)
 
             # Update portfolio metrics
             self.portfolio_metrics = {
@@ -716,11 +742,11 @@ class PortfolioAllocator:
 
             return self.portfolio_metrics
 
-        except (ValueError, IndexError, ZeroDivisionError) as e:
+        except (ValueError, IndexError, ZeroDivisionError):
             # Metrics calculation errors - return existing metrics
             return self.portfolio_metrics
         except Exception as e:
-            # Unexpected errors - return existing metrics
+            logger.error(f"Unexpected error calculating portfolio metrics: {e}")
             return self.portfolio_metrics
 
     async def update_market_regime(self, new_regime: MarketRegime) -> None:
@@ -736,10 +762,10 @@ class PortfolioAllocator:
 
             # Trigger rebalancing for significant regime changes
             regime_change_threshold = {
-                (MarketRegime.BULL, MarketRegime.BEAR): True,
-                (MarketRegime.BEAR, MarketRegime.BULL): True,
-                (MarketRegime.NORMAL, MarketRegime.HIGH_VOLATILITY): True,
-                (MarketRegime.HIGH_VOLATILITY, MarketRegime.NORMAL): True,
+                (MarketRegime.TRENDING_UP, MarketRegime.TRENDING_DOWN): True,
+                (MarketRegime.TRENDING_DOWN, MarketRegime.TRENDING_UP): True,
+                (MarketRegime.RANGING, MarketRegime.HIGH_VOLATILITY): True,
+                (MarketRegime.HIGH_VOLATILITY, MarketRegime.RANGING): True,
             }
 
             if regime_change_threshold.get((old_regime, new_regime), False):
@@ -788,6 +814,62 @@ class PortfolioAllocator:
             raise
         except Exception as e:
             raise AllocationError(f"Failed to remove strategy {strategy_name}: {e}") from e
+
+    def get_strategy_allocation(self, strategy: BaseStrategyInterface) -> StrategyAllocation | None:
+        """
+        Get allocation information for a specific strategy.
+        
+        Args:
+            strategy: Strategy to get allocation for
+            
+        Returns:
+            StrategyAllocation object or None if not found
+        """
+        if strategy is None:
+            return None
+        return self.allocations.get(strategy.name)
+
+    async def calculate_optimal_weights(self) -> dict[str, float]:
+        """
+        Calculate optimal portfolio weights using modern portfolio theory.
+        
+        Returns:
+            Dictionary mapping strategy names to optimal weights
+        """
+        return await self._calculate_optimal_weights()
+
+    def update_strategy_performance(self, strategy: BaseStrategyInterface, performance_data: dict[str, float]) -> bool:
+        """
+        Update performance metrics for a specific strategy.
+        
+        Args:
+            strategy: Strategy to update
+            performance_data: Dictionary containing performance metrics
+            
+        Returns:
+            True if update was successful
+        """
+        allocation = self.allocations.get(strategy.name)
+        if not allocation:
+            return False
+            
+        # Update performance metrics
+        if "sharpe_ratio" in performance_data:
+            allocation.sharpe_ratio = performance_data["sharpe_ratio"]
+        if "sortino_ratio" in performance_data:
+            allocation.sortino_ratio = performance_data["sortino_ratio"]
+        if "win_rate" in performance_data:
+            allocation.win_rate = performance_data["win_rate"]
+        if "volatility" in performance_data:
+            allocation.volatility = performance_data["volatility"]
+        if "max_drawdown" in performance_data:
+            allocation.max_drawdown = performance_data["max_drawdown"]
+        if "cumulative_pnl" in performance_data:
+            allocation.cumulative_pnl = Decimal(str(performance_data["cumulative_pnl"]))
+        if "daily_returns" in performance_data:
+            allocation.daily_returns = performance_data["daily_returns"]
+            
+        return True
 
     def get_allocation_status(self) -> dict[str, Any]:
         """
@@ -838,7 +920,9 @@ class PortfolioAllocator:
             }
 
         except (KeyError, AttributeError) as e:
-            raise AllocationError(f"Failed to get allocation status - data access error: {e}") from e
+            raise AllocationError(
+                f"Failed to get allocation status - data access error: {e}"
+            ) from e
         except Exception as e:
             raise AllocationError(f"Failed to get allocation status: {e}") from e
 
@@ -871,9 +955,9 @@ class PortfolioAllocator:
 
             return False
 
-        except (KeyError, AttributeError, TypeError) as e:
+        except (KeyError, AttributeError, TypeError):
             # Rebalancing check errors - conservative approach
             return True  # Conservative approach - rebalance on error
         except Exception as e:
-            # Unexpected errors - conservative approach
+            logger.error(f"Unexpected error determining rebalancing need: {e}")
             return True  # Conservative approach - rebalance on error

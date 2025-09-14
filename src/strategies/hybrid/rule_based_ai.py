@@ -15,7 +15,7 @@ Key Features:
 """
 
 from decimal import Decimal
-from typing import Any
+from typing import Any, Optional
 
 import numpy as np
 from sklearn.ensemble import RandomForestClassifier
@@ -26,24 +26,34 @@ from src.core.exceptions import StrategyError
 from src.core.logging import get_logger
 
 # MANDATORY: Import from P-001
-from src.core.types import MarketData, Position, Signal, SignalDirection, StrategyType
+from src.core.types import MarketData, Position, PositionSide, Signal, SignalDirection, StrategyType
 
 # MANDATORY: Import from P-010
 from src.risk_management.regime_detection import MarketRegimeDetector
 
 # MANDATORY: Import from P-011
 from src.strategies.base import BaseStrategy
+from src.strategies.dependencies import StrategyServiceContainer
 
 # MANDATORY: Import from P-007A
 from src.utils.decorators import time_execution
 
 
 class TechnicalRuleEngine:
-    """Traditional technical analysis rule engine."""
+    """Traditional technical analysis rule engine.
+    
+    Uses shared BaseStrategy technical indicator methods to eliminate code duplication.
+    """
 
-    def __init__(self, config: dict[str, Any]):
-        """Initialize the technical rule engine."""
+    def __init__(self, config: dict[str, Any], strategy_instance: Optional["BaseStrategy"] = None):
+        """Initialize the technical rule engine.
+        
+        Args:
+            config: Configuration parameters
+            strategy_instance: Reference to BaseStrategy instance for shared indicator methods
+        """
         self.config = config
+        self.strategy_instance = strategy_instance  # Reference for shared methods
         self.rsi_period = config.get("rsi_period", 14)
         self.ma_short_period = config.get("ma_short_period", 10)
         self.ma_long_period = config.get("ma_long_period", 20)
@@ -63,46 +73,59 @@ class TechnicalRuleEngine:
             rule: {"wins": 0, "losses": 0, "total": 0} for rule in self.rule_weights.keys()
         }
 
-    def calculate_rsi(self, prices: list[float]) -> float:
-        """Calculate RSI indicator."""
-        if len(prices) < self.rsi_period + 1:
-            return 50.0  # Neutral RSI
+    async def calculate_rsi(self, symbol: str) -> float:
+        """Calculate RSI indicator using shared BaseStrategy method.
+        
+        This eliminates code duplication by using the BaseStrategy's shared RSI calculation.
+        """
+        if not self.strategy_instance:
+            return 50.0  # Neutral RSI if no strategy instance
 
-        deltas = np.diff(prices)
-        gains = np.where(deltas > 0, deltas, 0)
-        losses = np.where(deltas < 0, -deltas, 0)
+        try:
+            # Use shared BaseStrategy method for RSI calculation
+            rsi_decimal = await self.strategy_instance.get_rsi(symbol, self.rsi_period)
 
-        avg_gain = np.mean(gains[-self.rsi_period :])
-        avg_loss = np.mean(losses[-self.rsi_period :])
+            if rsi_decimal is not None:
+                return rsi_decimal
+            else:
+                return 50.0  # Neutral RSI on calculation failure
+        except Exception as e:
+            logger.error(f"Failed to calculate RSI: {e}")
+            return 50.0
 
-        if avg_loss == 0:
-            return 100.0
+    async def calculate_moving_averages(self, symbol: str, current_price: Decimal) -> tuple[Decimal, Decimal]:
+        """Calculate short and long moving averages using shared BaseStrategy methods.
+        
+        This eliminates code duplication by using the BaseStrategy's shared SMA calculations.
+        """
+        if not self.strategy_instance:
+            return current_price, current_price  # Fallback if no strategy instance
 
-        rs = avg_gain / avg_loss
-        rsi = 100 - (100 / (1 + rs))
-        return rsi
+        try:
+            # Use shared BaseStrategy methods for SMA calculations
+            ma_short_decimal = await self.strategy_instance.get_sma(symbol, self.ma_short_period)
+            ma_long_decimal = await self.strategy_instance.get_sma(symbol, self.ma_long_period)
 
-    def calculate_moving_averages(self, prices: list[float]) -> tuple[float, float]:
-        """Calculate short and long moving averages."""
-        if len(prices) < self.ma_long_period:
-            return prices[-1], prices[-1]
+            ma_short = ma_short_decimal if ma_short_decimal is not None else current_price
+            ma_long = ma_long_decimal if ma_long_decimal is not None else current_price
 
-        ma_short = np.mean(prices[-self.ma_short_period :])
-        ma_long = np.mean(prices[-self.ma_long_period :])
-        return ma_short, ma_long
+            return ma_short, ma_long
+        except Exception as e:
+            logger.error(f"Failed to calculate moving averages: {e}")
+            return current_price, current_price
 
-    def evaluate_rules(
+    async def evaluate_rules(
         self, market_data: MarketData, price_history: list[float], volume_history: list[float]
     ) -> dict[str, Any]:
-        """Evaluate all technical rules and return signals."""
-        if len(price_history) < max(self.rsi_period, self.ma_long_period):
-            return {"signals": [], "confidence": 0.0, "rules_triggered": []}
-
+        """Evaluate all technical rules and return signals.
+        
+        Updated to use shared BaseStrategy methods for technical indicators.
+        """
         signals = []
         rules_triggered = []
 
-        # RSI Rules
-        rsi = self.calculate_rsi(price_history)
+        # RSI Rules - using shared BaseStrategy method
+        rsi = await self.calculate_rsi(market_data.symbol)
         if rsi < 30:  # Oversold
             signals.append(
                 {
@@ -124,9 +147,10 @@ class TechnicalRuleEngine:
             )
             rules_triggered.append("rsi_overbought")
 
-        # Moving Average Crossover
-        ma_short, ma_long = self.calculate_moving_averages(price_history)
-        if ma_short > ma_long * 1.005:  # 0.5% threshold for noise filtering
+        # Moving Average Crossover - using shared BaseStrategy methods
+        current_price = market_data.price if isinstance(market_data.price, Decimal) else Decimal(str(market_data.price))
+        ma_short, ma_long = await self.calculate_moving_averages(market_data.symbol, current_price)
+        if ma_short > ma_long * Decimal("1.005"):  # 0.5% threshold for noise filtering
             crossover_strength = (ma_short - ma_long) / ma_long
             signals.append(
                 {
@@ -152,7 +176,7 @@ class TechnicalRuleEngine:
         # Volume confirmation
         if len(volume_history) >= 5:
             avg_volume = np.mean(volume_history[-5:])
-            current_volume = float(market_data.volume)
+            current_volume = market_data.volume if isinstance(market_data.volume, Decimal) else Decimal(str(market_data.volume))
             if current_volume > avg_volume * self.volume_threshold:
                 signals.append(
                     {
@@ -198,7 +222,7 @@ class TechnicalRuleEngine:
 class AIPredictor:
     """AI prediction component using machine learning."""
 
-    def __init__(self, config: dict[str, Any]):
+    def __init__(self, config: dict[str, Any], services: StrategyServiceContainer | None = None):
         """Initialize AI predictor."""
         self.config = config
         self.model = RandomForestClassifier(
@@ -214,8 +238,8 @@ class AIPredictor:
         self.logger = get_logger(__name__)
 
         # Performance tracking
-        self.predictions_made = []
-        self.actual_outcomes = []
+        self.predictions_made: list[Any] = []
+        self.actual_outcomes: list[Any] = []
 
     def prepare_features(
         self, price_history: list[float], volume_history: list[float]
@@ -421,19 +445,25 @@ class RuleBasedAIStrategy(BaseStrategy):
     AI-driven decisions, with dynamic weight adjustment based on performance attribution.
     """
 
-    def __init__(self, config: dict[str, Any]):
+    def __init__(self, config: dict[str, Any], services: StrategyServiceContainer | None = None):
         """Initialize the Rule-Based AI hybrid strategy."""
         # Ensure strategy type is set correctly
-        config["strategy_type"] = StrategyType.HYBRID
+        config["strategy_type"] = StrategyType.CUSTOM
         if "name" not in config:
             config["name"] = "RuleBasedAI"
 
-        super().__init__(config)
+        super().__init__(config, services)
 
-        # Initialize components
-        self.rule_engine = TechnicalRuleEngine(config.get("rules", {}))
+        # Initialize components with strategy instance reference for shared indicator methods
+        self.rule_engine = TechnicalRuleEngine(config.get("rules", {}), strategy_instance=self)
         self.ai_predictor = AIPredictor(config.get("ai", {}))
         self.regime_detector = MarketRegimeDetector(config.get("regime_detection", {}))
+
+        # Initialize ML service integration
+        self._ml_service = None
+        if services and services.ml_service:
+            self._ml_service = services.ml_service
+            self.logger.info("ML service integrated for enhanced AI predictions", strategy=self.name)
 
         # Hybrid strategy parameters
         self.rule_weight = config.get("rule_weight", 0.6)
@@ -460,6 +490,11 @@ class RuleBasedAIStrategy(BaseStrategy):
             conflict_resolution=self.conflict_resolution_method,
         )
 
+    @property
+    def strategy_type(self) -> StrategyType:
+        """Get the strategy type."""
+        return StrategyType.CUSTOM
+
     @time_execution
     async def _generate_signals_impl(self, data: MarketData) -> list[Signal]:
         """Generate hybrid signals combining rules and AI predictions."""
@@ -471,8 +506,8 @@ class RuleBasedAIStrategy(BaseStrategy):
                 self.price_history[symbol] = []
                 self.volume_history[symbol] = []
 
-            self.price_history[symbol].append(float(data.price))
-            self.volume_history[symbol].append(float(data.volume))
+            self.price_history[symbol].append(float(data.price if isinstance(data.price, Decimal) else Decimal(str(data.price))))
+            self.volume_history[symbol].append(float(data.volume if isinstance(data.volume, Decimal) else Decimal(str(data.volume))))
 
             # Keep only recent history (last 200 points)
             self.price_history[symbol] = self.price_history[symbol][-200:]
@@ -487,14 +522,24 @@ class RuleBasedAIStrategy(BaseStrategy):
             current_regime = await self.regime_detector.detect_comprehensive_regime([data])
 
             # Generate rule-based signals
-            rule_analysis = self.rule_engine.evaluate_rules(
+            rule_analysis = await self.rule_engine.evaluate_rules(
                 data, self.price_history[symbol], self.volume_history[symbol]
             )
 
-            # Generate AI prediction
+            # Generate AI prediction using both local predictor and ML service
             ai_prediction = await self.ai_predictor.predict(
                 self.price_history[symbol], self.volume_history[symbol]
             )
+
+            # Enhanced prediction using ML service if available
+            if self._ml_service:
+                try:
+                    enhanced_prediction = await self._get_ml_service_prediction(symbol, data)
+                    if enhanced_prediction:
+                        # Combine predictions with confidence weighting
+                        ai_prediction = self._combine_predictions(ai_prediction, enhanced_prediction)
+                except Exception as e:
+                    self.logger.warning(f"ML service prediction failed: {e}", symbol=symbol)
 
             # Combine signals using conflict resolution
             hybrid_signal = await self._resolve_conflicts(
@@ -588,11 +633,11 @@ class RuleBasedAIStrategy(BaseStrategy):
             # Check minimum confidence threshold
             if final_signal and final_signal["confidence"] >= self.min_confidence_threshold:
                 return Signal(
-                    direction=final_signal["direction"],
-                    confidence=final_signal["confidence"],
-                    timestamp=data.timestamp,
                     symbol=data.symbol,
-                    strategy_name=self.name,
+                    direction=final_signal["direction"],
+                    strength=Decimal(str(final_signal["confidence"])),
+                    timestamp=data.timestamp,
+                    source=self.name,
                     metadata={
                         "rule_direction": rule_direction.value,
                         "rule_confidence": rule_confidence,
@@ -678,10 +723,8 @@ class RuleBasedAIStrategy(BaseStrategy):
         """Validate hybrid signal before execution."""
         try:
             # Basic signal validation
-            if signal.confidence < self.min_confidence_threshold:
-                self.logger.warning(
-                    "Signal confidence below threshold", confidence=signal.confidence
-                )
+            if signal.strength < Decimal(str(self.min_confidence_threshold)):
+                self.logger.warning("Signal strength below threshold", strength=signal.strength)
                 return False
 
             if signal.direction == SignalDirection.HOLD:
@@ -711,7 +754,7 @@ class RuleBasedAIStrategy(BaseStrategy):
             base_size = Decimal(str(self.config.position_size_pct))
 
             # Adjust size based on confidence
-            confidence_multiplier = Decimal(str(signal.confidence))
+            confidence_multiplier = signal.strength
 
             # Adjust based on component agreement
             rule_direction = signal.metadata.get("rule_direction", "hold")
@@ -737,17 +780,17 @@ class RuleBasedAIStrategy(BaseStrategy):
             self.logger.error("Error calculating position size", error=str(e))
             return Decimal("0.01")  # Default 1%
 
-    def should_exit(self, position: Position, data: MarketData) -> bool:
+    async def should_exit(self, position: Position, data: MarketData) -> bool:
         """Determine if position should be closed using hybrid analysis."""
         try:
             # Basic stop-loss and take-profit checks
             current_price = data.price
             entry_price = position.entry_price
 
-            if position.side.value == "buy":
-                pnl_pct = float((current_price - entry_price) / entry_price)
+            if position.side == PositionSide.LONG:
+                pnl_pct = (current_price - entry_price) / entry_price
             else:
-                pnl_pct = float((entry_price - current_price) / entry_price)
+                pnl_pct = (entry_price - current_price) / entry_price
 
             # Stop loss
             if pnl_pct <= -self.config.stop_loss_pct:
@@ -763,7 +806,7 @@ class RuleBasedAIStrategy(BaseStrategy):
             symbol = position.symbol
             if symbol in self.price_history and len(self.price_history[symbol]) >= 20:
                 # Get current rule and AI signals for exit decision
-                rule_analysis = self.rule_engine.evaluate_rules(
+                rule_analysis = await self.rule_engine.evaluate_rules(
                     data, self.price_history[symbol], self.volume_history.get(symbol, [])
                 )
 
@@ -886,6 +929,21 @@ class RuleBasedAIStrategy(BaseStrategy):
             self.logger.error("Error adjusting component weights", error=str(e))
 
     def get_strategy_statistics(self) -> dict[str, Any]:
+        """Get strategy performance statistics."""
+        return {
+            "total_trades": len(self.trade_history),
+            "win_rate": self.overall_win_rate,
+            "rule_performance": self.rule_performance.copy(),
+            "component_weights": {
+                "technical": self.technical_weight,
+                "ai": self.ai_weight,
+            },
+        }
+
+
+    # Helper methods for accessing data through data service
+
+    def get_strategy_stats(self) -> dict[str, Any]:
         """Get comprehensive strategy statistics."""
         stats = {
             "component_weights": {"rule_weight": self.rule_weight, "ai_weight": self.ai_weight},
@@ -899,3 +957,125 @@ class RuleBasedAIStrategy(BaseStrategy):
         }
 
         return stats
+
+    async def _get_ml_service_prediction(self, symbol: str, data: MarketData) -> dict[str, Any] | None:
+        """Get prediction from ML service for enhanced AI analysis.
+        
+        Args:
+            symbol: Trading symbol
+            data: Current market data
+            
+        Returns:
+            ML prediction with confidence score or None if unavailable
+        """
+        try:
+            if not self._ml_service:
+                return None
+
+            # Prepare feature data for ML service
+            features = {
+                "symbol": symbol,
+                "price": float(data.price if isinstance(data.price, Decimal) else Decimal(str(data.price))),
+                "volume": float(data.volume if isinstance(data.volume, Decimal) else Decimal(str(data.volume))),
+                "timestamp": data.timestamp.isoformat(),
+                "price_history": self.price_history.get(symbol, [])[-20:],  # Last 20 prices
+                "volume_history": self.volume_history.get(symbol, [])[-20:],  # Last 20 volumes
+            }
+
+            # Get prediction from ML service
+            if hasattr(self._ml_service, "predict_price_direction"):
+                prediction = await self._ml_service.predict_price_direction(features)
+                if prediction:
+                    return {
+                        "direction": prediction.get("direction", "HOLD"),
+                        "confidence": prediction.get("confidence", 0.5),
+                        "probability": prediction.get("probability", 0.5),
+                        "source": "ml_service"
+                    }
+
+            # Fallback to general prediction
+            if hasattr(self._ml_service, "predict"):
+                prediction = await self._ml_service.predict(symbol, features)
+                if prediction:
+                    return {
+                        "direction": prediction.get("direction", "HOLD"),
+                        "confidence": prediction.get("confidence", 0.5),
+                        "probability": prediction.get("probability", 0.5),
+                        "source": "ml_service"
+                    }
+
+            return None
+
+        except Exception as e:
+            self.logger.warning(f"Failed to get ML service prediction: {e}", symbol=symbol)
+            return None
+
+    def _combine_predictions(self, local_prediction: dict[str, Any], ml_prediction: dict[str, Any]) -> dict[str, Any]:
+        """Combine local AI prediction with ML service prediction.
+        
+        Args:
+            local_prediction: Prediction from local AI predictor
+            ml_prediction: Prediction from ML service
+            
+        Returns:
+            Combined prediction with enhanced confidence
+        """
+        try:
+            local_confidence = local_prediction.get("confidence", 0.5)
+            ml_confidence = ml_prediction.get("confidence", 0.5)
+
+            # Weighted average based on confidence levels
+            total_weight = local_confidence + ml_confidence
+            if total_weight == 0:
+                return local_prediction
+
+            local_weight = local_confidence / total_weight
+            ml_weight = ml_confidence / total_weight
+
+            # Combine directions with confidence weighting
+            local_direction = local_prediction.get("direction", "HOLD")
+            ml_direction = ml_prediction.get("direction", "HOLD")
+
+            # If predictions agree, increase confidence
+            if local_direction == ml_direction:
+                combined_confidence = min(0.95, local_confidence * 0.6 + ml_confidence * 0.4 + 0.1)
+                combined_direction = local_direction
+            else:
+                # If predictions disagree, use confidence-weighted approach
+                if local_confidence > ml_confidence:
+                    combined_direction = local_direction
+                    combined_confidence = local_confidence * 0.8  # Reduce confidence due to disagreement
+                else:
+                    combined_direction = ml_direction
+                    combined_confidence = ml_confidence * 0.8
+
+            # Combine probability scores
+            local_probability = local_prediction.get("probability", 0.5)
+            ml_probability = ml_prediction.get("probability", 0.5)
+            combined_probability = local_probability * local_weight + ml_probability * ml_weight
+
+            enhanced_prediction = {
+                "direction": combined_direction,
+                "confidence": combined_confidence,
+                "probability": combined_probability,
+                "source": "hybrid_ml",
+                "components": {
+                    "local": local_prediction,
+                    "ml_service": ml_prediction
+                }
+            }
+
+            self.logger.debug(
+                "Combined ML predictions",
+                strategy=self.name,
+                local_direction=local_direction,
+                ml_direction=ml_direction,
+                combined_direction=combined_direction,
+                combined_confidence=combined_confidence
+            )
+
+            return enhanced_prediction
+
+        except Exception as e:
+            self.logger.warning(f"Failed to combine predictions: {e}")
+            return local_prediction  # Fallback to local prediction

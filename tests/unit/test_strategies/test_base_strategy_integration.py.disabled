@@ -1,0 +1,1311 @@
+"""
+Comprehensive BaseStrategy Integration Tests
+
+This module provides extensive test coverage for the BaseStrategy class,
+focusing on:
+
+- Enhanced service integration methods
+- Financial precision calculations
+- Error handling and circuit breakers
+- Performance monitoring
+- State management
+- Signal processing with validation
+- Service-based data access patterns
+- Advanced monitoring and alerting
+
+Coverage targets:
+- BaseStrategy initialization and lifecycle: 100%
+- Service integration methods: 100%
+- Financial calculations with precision: 100%
+- Error handling patterns: 100%
+- Circuit breaker functionality: 100%
+"""
+
+import asyncio
+from datetime import datetime, timezone
+from decimal import Decimal
+from unittest.mock import AsyncMock, Mock, patch
+from uuid import uuid4
+
+import pytest
+
+from src.core.types import (
+    MarketData,
+    Signal,
+    StrategyConfig,
+    StrategyMetrics,
+    StrategyStatus,
+    StrategyType,
+)
+from src.strategies.base import BaseStrategy
+from src.strategies.dependencies import StrategyServiceContainer
+
+
+class MockStrategy(BaseStrategy):
+    """Mock strategy implementation for testing."""
+    
+    @property
+    def strategy_type(self) -> StrategyType:
+        return StrategyType.TREND_FOLLOWING
+    
+    async def _generate_signals_impl(self, data: MarketData) -> list[Signal]:
+        """Mock signal generation."""
+        return [
+            Signal(
+                symbol=data.symbol,
+                direction=1,
+                strength=0.8,
+                timestamp=data.timestamp,
+                price=data.price,
+            )
+        ]
+    
+    async def initialize(self, config: StrategyConfig) -> None:
+        """Mock initialization."""
+        pass
+    
+    async def validate_signal(self, signal: Signal) -> bool:
+        """Mock signal validation."""
+        return signal.strength >= 0.5
+    
+    def get_position_size(self, signal: Signal) -> Decimal:
+        """Mock position sizing."""
+        return Decimal("100.0")
+    
+    def should_exit(self, position, data: MarketData) -> bool:
+        """Mock exit decision."""
+        return False
+    
+    async def start(self) -> None:
+        """Mock start."""
+        self._status = StrategyStatus.ACTIVE
+    
+    async def stop(self) -> None:
+        """Mock stop."""
+        self._status = StrategyStatus.STOPPED
+    
+    async def pause(self) -> None:
+        """Mock pause."""
+        self._status = StrategyStatus.PAUSED
+    
+    async def resume(self) -> None:
+        """Mock resume."""
+        self._status = StrategyStatus.ACTIVE
+    
+    async def prepare_for_backtest(self, config: dict) -> None:
+        """Mock backtest preparation."""
+        self._is_backtesting = True
+        self._backtest_config = config
+    
+    async def process_historical_data(self, data: MarketData) -> list[Signal]:
+        """Mock historical data processing."""
+        return await self._generate_signals_impl(data)
+    
+    async def get_backtest_metrics(self) -> dict:
+        """Mock backtest metrics."""
+        return {"total_trades": 10, "win_rate": 0.6}
+    
+    def get_real_time_metrics(self) -> dict:
+        """Mock real-time metrics."""
+        return {"live_pnl": 100.0, "open_positions": 2}
+
+
+class TestBaseStrategyInitialization:
+    """Test BaseStrategy initialization and configuration."""
+    
+    def test_strategy_initialization_minimal_config(self):
+        """Test strategy initialization with minimal configuration."""
+        config = {
+            "name": "TestStrategy",
+            "strategy_type": StrategyType.TREND_FOLLOWING.value,
+            "parameters": {"param1": "value1"},
+        }
+        
+        strategy = MockStrategy(config)
+        
+        assert strategy.name == "TestStrategy"
+        assert strategy.version == "1.0.0"
+        assert strategy.status == StrategyStatus.STOPPED
+        assert strategy.strategy_type == StrategyType.TREND_FOLLOWING
+        assert isinstance(strategy.services, StrategyServiceContainer)
+        assert isinstance(strategy.metrics, StrategyMetrics)
+        
+        # Performance metrics should be initialized
+        assert strategy._performance_metrics["total_signals"] == 0
+        assert strategy._performance_metrics["valid_signals"] == 0
+        assert strategy._performance_metrics["execution_count"] == 0
+        
+        # Signal history should be empty
+        assert len(strategy._signal_history) == 0
+        assert strategy._max_signal_history == 1000  # DEFAULT_SIGNAL_HISTORY_LIMIT
+    
+    def test_strategy_initialization_with_services(self):
+        """Test strategy initialization with service container."""
+        config = {
+            "name": "ServiceStrategy",
+            "strategy_type": StrategyType.MEAN_REVERSION.value,
+            "parameters": {"param1": "value1"},
+        }
+        
+        # Create service container with services
+        services = StrategyServiceContainer(
+            risk_service=Mock(),
+            data_service=Mock(),
+            execution_service=Mock(),
+            monitoring_service=Mock(),
+        )
+        
+        strategy = MockStrategy(config, services)
+        
+        assert strategy.services == services
+        assert strategy.services.is_ready()
+        
+        # Circuit breaker should be None when monitoring service available
+        assert strategy._circuit_breaker is None
+    
+    def test_strategy_initialization_without_monitoring_service(self):
+        """Test strategy initialization creates local circuit breaker without monitoring."""
+        config = {
+            "name": "LocalCBStrategy",
+            "strategy_type": StrategyType.ARBITRAGE.value,
+            "parameters": {"param1": "value1"},
+        }
+        
+        # Create service container without monitoring service
+        services = StrategyServiceContainer(
+            risk_service=Mock(),
+            data_service=Mock(),
+            execution_service=Mock(),
+        )
+        
+        with patch('src.strategies.base.CircuitBreaker') as mock_cb:
+            mock_circuit_breaker = Mock()
+            mock_cb.return_value = mock_circuit_breaker
+            
+            strategy = MockStrategy(config, services)
+            
+            # Should create local circuit breaker
+            mock_cb.assert_called_once_with(
+                failure_threshold=5,
+                recovery_timeout=30,
+            )
+            assert strategy._circuit_breaker == mock_circuit_breaker
+    
+    def test_strategy_initialization_backtesting_mode(self):
+        """Test strategy initialization in backtesting mode."""
+        config = {
+            "name": "BacktestStrategy",
+            "strategy_type": StrategyType.MARKET_MAKING.value,
+            "parameters": {"backtest_mode": True},
+        }
+        
+        strategy = MockStrategy(config)
+        
+        # Should initialize backtesting attributes
+        assert strategy._is_backtesting is False  # Not set until prepare_for_backtest
+        assert strategy._backtest_config is None
+        assert strategy._backtest_metrics == {}
+    
+    def test_strategy_properties(self):
+        """Test strategy property accessors."""
+        config = {
+            "name": "PropertyTestStrategy",
+            "strategy_type": StrategyType.TREND_FOLLOWING.value,
+            "parameters": {"test": "value"},
+        }
+        
+        strategy = MockStrategy(config)
+        
+        # Test property access
+        assert strategy.name == "PropertyTestStrategy"
+        assert strategy.version == "1.0.0"
+        assert strategy.status == StrategyStatus.STOPPED
+        assert strategy.strategy_type == StrategyType.TREND_FOLLOWING
+
+
+class TestSignalGenerationAndProcessing:
+    """Test signal generation and processing functionality."""
+    
+    @pytest.fixture
+    def market_data(self):
+        """Create test market data."""
+        return MarketData(
+            symbol="BTC/USDT",
+            timestamp=datetime.now(timezone.utc),
+            price=Decimal("50000.00"),
+            volume=Decimal("100.0"),
+            bid=Decimal("49999.00"),
+            ask=Decimal("50001.00"),
+        )
+    
+    @pytest.fixture
+    def strategy(self):
+        """Create test strategy instance."""
+        config = {
+            "name": "SignalTestStrategy",
+            "strategy_type": StrategyType.TREND_FOLLOWING.value,
+            "parameters": {"test": "value"},
+        }
+        return MockStrategy(config)
+    
+    @pytest.mark.asyncio
+    async def test_generate_signals_success(self, strategy, market_data):
+        """Test successful signal generation."""
+        with patch('src.strategies.base.get_tracer') as mock_tracer:
+            mock_span = Mock()
+            mock_span.__enter__ = Mock()
+            mock_span.__exit__ = Mock()
+            mock_tracer.return_value.start_as_current_span.return_value = mock_span
+            
+            signals = await strategy.generate_signals(market_data)
+            
+            assert len(signals) == 1
+            assert signals[0].symbol == "BTC/USDT"
+            assert signals[0].direction == 1
+            assert signals[0].strength == 0.8
+            
+            # Verify metrics updated
+            assert strategy._performance_metrics["total_signals"] == 1
+            assert strategy._performance_metrics["valid_signals"] == 1
+            
+            # Verify signal history
+            assert len(strategy._signal_history) == 1
+    
+    @pytest.mark.asyncio
+    async def test_generate_signals_circuit_breaker_open(self, strategy, market_data):
+        """Test signal generation when circuit breaker is open."""
+        # Create mock circuit breaker in open state
+        mock_circuit_breaker = Mock()
+        mock_circuit_breaker.is_open.return_value = True
+        strategy._circuit_breaker = mock_circuit_breaker
+        
+        signals = await strategy.generate_signals(market_data)
+        
+        # Should return empty list when circuit breaker is open
+        assert signals == []
+        
+        # Metrics should not be updated
+        assert strategy._performance_metrics["total_signals"] == 0
+        assert strategy._performance_metrics["valid_signals"] == 0
+    
+    @pytest.mark.asyncio
+    async def test_generate_signals_validation_failure(self, strategy, market_data):
+        """Test signal generation with validation failure."""
+        # Create validation framework that fails validation
+        mock_validation_framework = Mock()
+        validation_result = Mock()
+        validation_result.is_valid = False
+        validation_result.errors = ["Market conditions not suitable"]
+        mock_validation_framework.validate_market_conditions = AsyncMock(return_value=validation_result)
+        
+        strategy._validation_framework = mock_validation_framework
+        
+        signals = await strategy.generate_signals(market_data)
+        
+        # Should return empty list due to validation failure
+        assert signals == []
+        
+        # Validation should have been called
+        mock_validation_framework.validate_market_conditions.assert_called_once_with(market_data)
+    
+    @pytest.mark.asyncio
+    async def test_generate_signals_with_invalid_signals(self, strategy, market_data):
+        """Test signal generation with mix of valid and invalid signals."""
+        
+        # Override the mock strategy to return multiple signals with different strengths
+        async def mock_generate_signals_impl(data):
+            return [
+                Signal(
+                    symbol=data.symbol,
+                    direction=1,
+                    strength=0.8,  # Valid (>= 0.5)
+                    timestamp=data.timestamp,
+                    price=data.price,
+                ),
+                Signal(
+                    symbol=data.symbol,
+                    direction=-1,
+                    strength=0.3,  # Invalid (< 0.5)
+                    timestamp=data.timestamp,
+                    price=data.price,
+                ),
+                Signal(
+                    symbol=data.symbol,
+                    direction=1,
+                    strength=0.7,  # Valid (>= 0.5)
+                    timestamp=data.timestamp,
+                    price=data.price,
+                ),
+            ]
+        
+        strategy._generate_signals_impl = mock_generate_signals_impl
+        
+        signals = await strategy.generate_signals(market_data)
+        
+        # Should only return valid signals (strength >= 0.5)
+        assert len(signals) == 2
+        assert all(signal.strength >= 0.5 for signal in signals)
+        
+        # Metrics should reflect all generated vs valid signals
+        assert strategy._performance_metrics["total_signals"] == 3
+        assert strategy._performance_metrics["valid_signals"] == 2
+    
+    @pytest.mark.asyncio
+    async def test_generate_signals_with_metrics_collector(self, strategy, market_data):
+        """Test signal generation with metrics collector."""
+        # Create mock metrics collector
+        mock_metrics_collector = Mock()
+        mock_trading_metrics = Mock()
+        mock_signals_generated = Mock()
+        mock_signals_validated = Mock()
+        
+        mock_trading_metrics.signals_generated = mock_signals_generated
+        mock_trading_metrics.signals_validated = mock_signals_validated
+        mock_metrics_collector.trading_metrics = mock_trading_metrics
+        
+        strategy._metrics_collector = mock_metrics_collector
+        
+        signals = await strategy.generate_signals(market_data)
+        
+        # Verify metrics collector was called
+        mock_signals_generated.labels.assert_called_once_with(
+            strategy="SignalTestStrategy",
+            strategy_type="trend_following"
+        )
+        mock_signals_validated.labels.assert_called_once_with(
+            strategy="SignalTestStrategy",
+            strategy_type="trend_following"
+        )
+        
+        # Verify inc() was called on the labeled metrics
+        mock_signals_generated.labels.return_value.inc.assert_called_once_with(1)
+        mock_signals_validated.labels.return_value.inc.assert_called_once_with(1)
+    
+    @pytest.mark.asyncio
+    async def test_generate_signals_exception_handling(self, strategy, market_data):
+        """Test signal generation exception handling."""
+        # Make signal implementation raise exception
+        async def failing_generate_signals_impl(data):
+            raise ValueError("Signal generation failed")
+        
+        strategy._generate_signals_impl = failing_generate_signals_impl
+        
+        # Mock error handler
+        mock_error_handler = Mock()
+        mock_error_handler.handle_error = AsyncMock()
+        strategy._error_handler = mock_error_handler
+        
+        # Mock circuit breaker
+        mock_circuit_breaker = Mock()
+        mock_circuit_breaker.failure_count = 0
+        mock_circuit_breaker.failure_threshold = 5
+        mock_circuit_breaker.is_open.return_value = False
+        strategy._circuit_breaker = mock_circuit_breaker
+        
+        signals = await strategy.generate_signals(market_data)
+        
+        # Should return empty list on exception
+        assert signals == []
+        
+        # Error handler should be called
+        mock_error_handler.handle_error.assert_called_once()
+        
+        # Circuit breaker failure count should be incremented
+        assert mock_circuit_breaker.failure_count == 1
+        assert mock_circuit_breaker.last_failure_time is not None
+    
+    @pytest.mark.asyncio
+    async def test_validate_and_process_signal_success(self, strategy):
+        """Test successful signal validation and processing."""
+        signal = Signal(
+            symbol="BTC/USDT",
+            direction=1,
+            strength=0.8,
+            timestamp=datetime.now(timezone.utc),
+            price=Decimal("50000.00"),
+        )
+        
+        market_data = MarketData(
+            symbol="BTC/USDT",
+            timestamp=datetime.now(timezone.utc),
+            price=Decimal("50000.00"),
+            volume=Decimal("100.0"),
+            bid=Decimal("49999.00"),
+            ask=Decimal("50001.00"),
+        )
+        
+        # Test signal validation (should call strategy's validate_signal method)
+        result = await strategy._validate_and_process_signal(signal, market_data)
+        
+        assert result is True
+    
+    @pytest.mark.asyncio
+    async def test_add_to_signal_history_limit_management(self, strategy):
+        """Test signal history limit management."""
+        # Set a small history limit for testing
+        strategy._max_signal_history = 3
+        
+        # Add signals beyond the limit
+        signals = []
+        for i in range(5):
+            signal = Signal(
+                symbol="BTC/USDT",
+                direction=1,
+                strength=0.8,
+                timestamp=datetime.now(timezone.utc),
+                price=Decimal(f"{50000 + i}.00"),
+            )
+            signals.append(signal)
+            strategy._add_to_signal_history([signal])
+        
+        # Should only keep the last 3 signals
+        assert len(strategy._signal_history) == 3
+        
+        # Verify it's the latest signals
+        for i, signal in enumerate(strategy._signal_history):
+            expected_price = Decimal(f"{50002 + i}.00")  # Last 3: 50002, 50003, 50004
+            assert signal.price == expected_price
+
+
+class TestServiceIntegrationMethods:
+    """Test service-based data access and integration methods."""
+    
+    @pytest.fixture
+    def strategy_with_services(self):
+        """Create strategy with full service container."""
+        config = {
+            "name": "ServiceIntegrationStrategy",
+            "strategy_type": StrategyType.TREND_FOLLOWING.value,
+            "strategy_id": "test_strategy_123",
+            "parameters": {"test": "value"},
+        }
+        
+        services = StrategyServiceContainer(
+            risk_service=Mock(),
+            data_service=Mock(),
+            execution_service=Mock(),
+            monitoring_service=Mock(),
+            state_service=Mock(),
+            capital_service=Mock(),
+            analytics_service=Mock(),
+        )
+        
+        return MockStrategy(config, services)
+    
+    @pytest.mark.asyncio
+    async def test_get_market_data_success(self, strategy_with_services):
+        """Test successful market data retrieval through data service."""
+        # Mock data service response
+        expected_market_data = MarketData(
+            symbol="BTC/USDT",
+            timestamp=datetime.now(timezone.utc),
+            price=Decimal("50000.00"),
+            volume=Decimal("100.0"),
+            bid=Decimal("49999.00"),
+            ask=Decimal("50001.00"),
+        )
+        
+        strategy_with_services.services.data_service.get_market_data = AsyncMock(
+            return_value=expected_market_data
+        )
+        
+        result = await strategy_with_services.get_market_data("BTC/USDT")
+        
+        assert result == expected_market_data
+        strategy_with_services.services.data_service.get_market_data.assert_called_once_with("BTC/USDT")
+    
+    @pytest.mark.asyncio
+    async def test_get_market_data_service_error(self, strategy_with_services):
+        """Test market data retrieval with service error."""
+        # Mock data service to raise exception
+        strategy_with_services.services.data_service.get_market_data = AsyncMock(
+            side_effect=Exception("Data service error")
+        )
+        
+        result = await strategy_with_services.get_market_data("BTC/USDT")
+        
+        assert result is None
+    
+    @pytest.mark.asyncio
+    async def test_get_market_data_no_service(self):
+        """Test market data retrieval when data service not available."""
+        config = {
+            "name": "NoServiceStrategy",
+            "strategy_type": StrategyType.TREND_FOLLOWING.value,
+            "parameters": {"test": "value"},
+        }
+        
+        # Create strategy without data service
+        strategy = MockStrategy(config)
+        
+        result = await strategy.get_market_data("BTC/USDT")
+        
+        assert result is None
+    
+    @pytest.mark.asyncio
+    async def test_get_historical_data_success(self, strategy_with_services):
+        """Test successful historical data retrieval."""
+        # Mock historical data
+        historical_data = [
+            MarketData(
+                symbol="BTC/USDT",
+                timestamp=datetime.now(timezone.utc),
+                price=Decimal(f"{50000 + i}.00"),
+                volume=Decimal("100.0"),
+                bid=Decimal(f"{49999 + i}.00"),
+                ask=Decimal(f"{50001 + i}.00"),
+            )
+            for i in range(10)
+        ]
+        
+        strategy_with_services.services.data_service.get_historical_data = AsyncMock(
+            return_value=historical_data
+        )
+        
+        result = await strategy_with_services.get_historical_data("BTC/USDT", "1h", 10)
+        
+        assert len(result) == 10
+        assert result == historical_data
+        
+        strategy_with_services.services.data_service.get_historical_data.assert_called_once_with(
+            symbol="BTC/USDT",
+            timeframe="1h",
+            limit=10
+        )
+    
+    @pytest.mark.asyncio
+    async def test_get_historical_data_empty_result(self, strategy_with_services):
+        """Test historical data retrieval with empty result."""
+        # Mock data service to return None
+        strategy_with_services.services.data_service.get_historical_data = AsyncMock(
+            return_value=None
+        )
+        
+        result = await strategy_with_services.get_historical_data("BTC/USDT", "1h", 10)
+        
+        assert result == []
+    
+    @pytest.mark.asyncio
+    async def test_execute_order_success(self, strategy_with_services):
+        """Test successful order execution through services."""
+        signal = Signal(
+            symbol="BTC/USDT",
+            direction=1,
+            strength=0.8,
+            timestamp=datetime.now(timezone.utc),
+            price=Decimal("50000.00"),
+        )
+        
+        # Mock risk service validation
+        strategy_with_services.services.risk_service.validate_signal = AsyncMock(return_value=True)
+        
+        # Mock execution result
+        order_result = {
+            "order_id": "12345",
+            "status": "filled",
+            "executed_price": Decimal("50000.00"),
+            "executed_quantity": Decimal("100.0"),
+        }
+        strategy_with_services.services.execution_service.execute_order = AsyncMock(
+            return_value=order_result
+        )
+        
+        # Mock post trade processing
+        strategy_with_services.post_trade_processing = AsyncMock()
+        
+        result = await strategy_with_services.execute_order(signal)
+        
+        assert result == order_result
+        
+        # Verify risk validation called
+        strategy_with_services.services.risk_service.validate_signal.assert_called_once_with(signal)
+        
+        # Verify execution service called
+        strategy_with_services.services.execution_service.execute_order.assert_called_once_with(
+            signal=signal,
+            position_size=Decimal("100.0"),  # From MockStrategy.get_position_size
+            strategy_id="test_strategy_123"
+        )
+        
+        # Verify post trade processing called
+        strategy_with_services.post_trade_processing.assert_called_once_with(order_result)
+    
+    @pytest.mark.asyncio
+    async def test_execute_order_risk_rejection(self, strategy_with_services):
+        """Test order execution rejected by risk service."""
+        signal = Signal(
+            symbol="BTC/USDT",
+            direction=1,
+            strength=0.8,
+            timestamp=datetime.now(timezone.utc),
+            price=Decimal("50000.00"),
+        )
+        
+        # Mock risk service to reject signal
+        strategy_with_services.services.risk_service.validate_signal = AsyncMock(return_value=False)
+        
+        result = await strategy_with_services.execute_order(signal)
+        
+        assert result is None
+        
+        # Execution service should not be called
+        strategy_with_services.services.execution_service.execute_order.assert_not_called()
+    
+    @pytest.mark.asyncio
+    async def test_execute_order_execution_failure(self, strategy_with_services):
+        """Test order execution with execution service failure."""
+        signal = Signal(
+            symbol="BTC/USDT",
+            direction=1,
+            strength=0.8,
+            timestamp=datetime.now(timezone.utc),
+            price=Decimal("50000.00"),
+        )
+        
+        # Mock risk service validation success
+        strategy_with_services.services.risk_service.validate_signal = AsyncMock(return_value=True)
+        
+        # Mock execution service failure
+        strategy_with_services.services.execution_service.execute_order = AsyncMock(
+            side_effect=Exception("Execution failed")
+        )
+        
+        result = await strategy_with_services.execute_order(signal)
+        
+        assert result is None
+    
+    @pytest.mark.asyncio
+    async def test_save_state_success(self, strategy_with_services):
+        """Test successful state saving through state service."""
+        state_data = {
+            "position_size": 100.0,
+            "last_signal_time": datetime.now(timezone.utc).isoformat(),
+            "performance_metrics": {"win_rate": 0.65},
+        }
+        
+        # Mock state service
+        strategy_with_services.services.state_service.save_strategy_state = AsyncMock()
+        
+        result = await strategy_with_services.save_state(state_data)
+        
+        assert result is True
+        
+        strategy_with_services.services.state_service.save_strategy_state.assert_called_once_with(
+            strategy_id="test_strategy_123",
+            state_data=state_data
+        )
+    
+    @pytest.mark.asyncio
+    async def test_save_state_failure(self, strategy_with_services):
+        """Test state saving with service failure."""
+        state_data = {"test": "data"}
+        
+        # Mock state service failure
+        strategy_with_services.services.state_service.save_strategy_state = AsyncMock(
+            side_effect=Exception("State save failed")
+        )
+        
+        result = await strategy_with_services.save_state(state_data)
+        
+        assert result is False
+    
+    @pytest.mark.asyncio
+    async def test_load_state_success(self, strategy_with_services):
+        """Test successful state loading through state service."""
+        expected_state = {
+            "position_size": 150.0,
+            "last_signal_time": datetime.now(timezone.utc).isoformat(),
+            "performance_metrics": {"win_rate": 0.70},
+        }
+        
+        # Mock state service
+        strategy_with_services.services.state_service.load_strategy_state = AsyncMock(
+            return_value=expected_state
+        )
+        
+        result = await strategy_with_services.load_state()
+        
+        assert result == expected_state
+        
+        strategy_with_services.services.state_service.load_strategy_state.assert_called_once_with(
+            strategy_id="test_strategy_123"
+        )
+    
+    @pytest.mark.asyncio
+    async def test_load_state_failure(self, strategy_with_services):
+        """Test state loading with service failure."""
+        # Mock state service failure
+        strategy_with_services.services.state_service.load_strategy_state = AsyncMock(
+            side_effect=Exception("State load failed")
+        )
+        
+        result = await strategy_with_services.load_state()
+        
+        assert result is None
+
+
+class TestFinancialPrecisionCalculations:
+    """Test financial calculations with high precision."""
+    
+    @pytest.fixture
+    def strategy_with_trades(self):
+        """Create strategy with trade history for calculations."""
+        config = {
+            "name": "FinancialTestStrategy",
+            "strategy_type": StrategyType.TREND_FOLLOWING.value,
+            "parameters": {"test": "value"},
+        }
+        
+        strategy = MockStrategy(config)
+        
+        # Add sample trade returns for calculations
+        strategy._returns = [0.05, -0.02, 0.03, 0.01, -0.01, 0.04, -0.03, 0.02]
+        strategy._trades_count = len(strategy._returns)
+        
+        return strategy
+    
+    def test_calculate_win_rate_precision(self, strategy_with_trades):
+        """Test win rate calculation with financial precision."""
+        # Mock win/loss data
+        winning_trades = [0.05, 0.03, 0.01, 0.04, 0.02]  # 5 winning trades
+        losing_trades = [-0.02, -0.01, -0.03]  # 3 losing trades
+        strategy_with_trades._returns = winning_trades + losing_trades
+        
+        win_rate = strategy_with_trades._calculate_win_rate()
+        
+        # Win rate should be 5/8 = 0.625 = 62.5%
+        expected_win_rate = 5 / 8
+        assert abs(win_rate - expected_win_rate) < 0.0001
+    
+    def test_calculate_win_rate_no_trades(self):
+        """Test win rate calculation with no trades."""
+        config = {
+            "name": "NoTradesStrategy",
+            "strategy_type": StrategyType.TREND_FOLLOWING.value,
+            "parameters": {"test": "value"},
+        }
+        
+        strategy = MockStrategy(config)
+        strategy._returns = []
+        
+        win_rate = strategy._calculate_win_rate()
+        
+        assert win_rate == 0.0
+    
+    def test_calculate_sharpe_ratio_precision(self, strategy_with_trades):
+        """Test Sharpe ratio calculation with financial precision."""
+        # Use known returns for precise calculation
+        returns = [0.02, -0.01, 0.03, 0.01, -0.005, 0.025, -0.02, 0.015]
+        strategy_with_trades._returns = returns
+        
+        sharpe_ratio = strategy_with_trades._calculate_sharpe_ratio()
+        
+        # Manual calculation for verification
+        mean_return = sum(returns) / len(returns)
+        variance = sum((r - mean_return) ** 2 for r in returns) / (len(returns) - 1)
+        std_dev = variance ** 0.5
+        
+        # Assuming risk-free rate of 0 for simplicity
+        expected_sharpe = mean_return / std_dev if std_dev > 0 else 0.0
+        
+        assert abs(sharpe_ratio - expected_sharpe) < 0.0001
+    
+    def test_calculate_sharpe_ratio_insufficient_data(self):
+        """Test Sharpe ratio calculation with insufficient data."""
+        config = {
+            "name": "InsufficientDataStrategy",
+            "strategy_type": StrategyType.TREND_FOLLOWING.value,
+            "parameters": {"test": "value"},
+        }
+        
+        strategy = MockStrategy(config)
+        strategy._returns = [0.02]  # Only one return
+        
+        sharpe_ratio = strategy._calculate_sharpe_ratio()
+        
+        assert sharpe_ratio == 0.0
+    
+    def test_calculate_max_drawdown_precision(self, strategy_with_trades):
+        """Test maximum drawdown calculation with financial precision."""
+        # Simulate cumulative returns with known drawdown
+        cumulative_returns = [1.0, 1.05, 1.03, 1.06, 1.07, 1.06, 1.10, 1.07, 1.09]
+        
+        # Calculate returns from cumulative returns
+        returns = []
+        for i in range(1, len(cumulative_returns)):
+            returns.append((cumulative_returns[i] - cumulative_returns[i-1]) / cumulative_returns[i-1])
+        
+        strategy_with_trades._returns = returns
+        
+        max_drawdown = strategy_with_trades._calculate_max_drawdown()
+        
+        # Manual calculation: max drawdown is from peak 1.10 to trough 1.07
+        # Drawdown = (1.10 - 1.07) / 1.10 = 0.0273 = 2.73%
+        expected_max_drawdown = (1.10 - 1.07) / 1.10
+        
+        assert abs(max_drawdown - expected_max_drawdown) < 0.0001
+    
+    def test_calculate_max_drawdown_no_drawdown(self):
+        """Test maximum drawdown calculation with no drawdown (only gains)."""
+        config = {
+            "name": "NoDrawdownStrategy",
+            "strategy_type": StrategyType.TREND_FOLLOWING.value,
+            "parameters": {"test": "value"},
+        }
+        
+        strategy = MockStrategy(config)
+        strategy._returns = [0.01, 0.02, 0.015, 0.03, 0.005]  # All positive returns
+        
+        max_drawdown = strategy._calculate_max_drawdown()
+        
+        assert max_drawdown == 0.0
+    
+    def test_get_position_size_with_decimal_precision(self):
+        """Test position size calculation returns Decimal for financial precision."""
+        config = {
+            "name": "PrecisionStrategy",
+            "strategy_type": StrategyType.TREND_FOLLOWING.value,
+            "parameters": {"test": "value"},
+        }
+        
+        strategy = MockStrategy(config)
+        
+        signal = Signal(
+            symbol="BTC/USDT",
+            direction=1,
+            strength=0.8,
+            timestamp=datetime.now(timezone.utc),
+            price=Decimal("50000.00"),
+        )
+        
+        position_size = strategy.get_position_size(signal)
+        
+        # Should return Decimal for financial precision
+        assert isinstance(position_size, Decimal)
+        assert position_size == Decimal("100.0")
+    
+    def test_performance_summary_financial_precision(self, strategy_with_trades):
+        """Test performance summary maintains financial precision."""
+        # Set up metrics with Decimal values
+        strategy_with_trades.metrics.total_pnl = Decimal("1234.56789")
+        strategy_with_trades.metrics.total_trades = 10
+        strategy_with_trades.metrics.winning_trades = 6
+        strategy_with_trades.metrics.losing_trades = 4
+        
+        performance = strategy_with_trades.get_performance_summary()
+        
+        # Verify financial data maintains precision
+        assert performance["total_pnl"] == float(Decimal("1234.56789"))
+        assert performance["total_trades"] == 10
+        assert performance["winning_trades"] == 6
+        assert performance["losing_trades"] == 4
+        
+        # Verify calculated metrics
+        assert "win_rate" in performance
+        assert "sharpe_ratio" in performance
+        assert "max_drawdown" in performance
+
+
+class TestErrorHandlingAndCircuitBreakers:
+    """Test error handling and circuit breaker functionality."""
+    
+    @pytest.fixture
+    def strategy_with_error_handler(self):
+        """Create strategy with error handler."""
+        config = {
+            "name": "ErrorHandlingStrategy",
+            "strategy_type": StrategyType.TREND_FOLLOWING.value,
+            "parameters": {"test": "value"},
+        }
+        
+        strategy = MockStrategy(config)
+        
+        # Mock error handler
+        mock_error_handler = Mock()
+        mock_error_handler.handle_error = AsyncMock()
+        strategy._error_handler = mock_error_handler
+        
+        return strategy
+    
+    @pytest.mark.asyncio
+    async def test_handle_error_with_alerting(self, strategy_with_error_handler):
+        """Test error handling with alerting system."""
+        from src.error_handling import ErrorSeverity
+        
+        error = ValueError("Test error")
+        context = {"operation": "test_operation", "symbol": "BTC/USDT"}
+        
+        with patch('src.strategies.base.ALERTING_AVAILABLE', True):
+            with patch('src.strategies.base.get_alert_manager') as mock_get_alert_manager:
+                with patch('src.strategies.base.Alert') as mock_alert:
+                    with patch('src.strategies.base.AlertSeverity') as mock_alert_severity:
+                        
+                        mock_alert_manager = Mock()
+                        mock_alert_manager.send_alert = AsyncMock()
+                        mock_get_alert_manager.return_value = mock_alert_manager
+                        
+                        mock_alert_severity.HIGH = "HIGH"
+                        mock_alert_severity.MEDIUM = "MEDIUM"
+                        
+                        await strategy_with_error_handler._handle_error(error, ErrorSeverity.HIGH, context)
+                        
+                        # Verify error handler called
+                        strategy_with_error_handler._error_handler.handle_error.assert_called_once_with(
+                            error, context, ErrorSeverity.HIGH
+                        )
+                        
+                        # Verify alert creation and sending
+                        mock_alert.assert_called_once()
+                        mock_alert_manager.send_alert.assert_called_once()
+    
+    @pytest.mark.asyncio
+    async def test_handle_error_alerting_failure(self, strategy_with_error_handler):
+        """Test error handling when alerting fails."""
+        from src.error_handling import ErrorSeverity
+        
+        error = ValueError("Test error")
+        context = {"operation": "test_operation"}
+        
+        with patch('src.strategies.base.ALERTING_AVAILABLE', True):
+            with patch('src.strategies.base.get_alert_manager') as mock_get_alert_manager:
+                
+                mock_alert_manager = Mock()
+                mock_alert_manager.send_alert = AsyncMock(side_effect=Exception("Alert failed"))
+                mock_get_alert_manager.return_value = mock_alert_manager
+                
+                # Should not raise exception even if alerting fails
+                await strategy_with_error_handler._handle_error(error, ErrorSeverity.MEDIUM, context)
+                
+                # Error handler should still be called
+                strategy_with_error_handler._error_handler.handle_error.assert_called_once()
+    
+    def test_circuit_breaker_state_management(self):
+        """Test circuit breaker state management."""
+        config = {
+            "name": "CircuitBreakerStrategy",
+            "strategy_type": StrategyType.TREND_FOLLOWING.value,
+            "parameters": {"test": "value"},
+        }
+        
+        strategy = MockStrategy(config)
+        
+        # Create mock circuit breaker
+        mock_circuit_breaker = Mock()
+        mock_circuit_breaker.failure_count = 0
+        mock_circuit_breaker.failure_threshold = 3
+        mock_circuit_breaker.is_open.return_value = False
+        strategy._circuit_breaker = mock_circuit_breaker
+        
+        # Test circuit breaker opening after threshold
+        for i in range(3):
+            mock_circuit_breaker.failure_count = i + 1
+            
+        # After 3 failures, circuit should open
+        mock_circuit_breaker.failure_count = 3
+        mock_circuit_breaker.state = "OPEN"
+        mock_circuit_breaker.is_open.return_value = True
+        
+        # Test health check with open circuit breaker
+        assert not strategy.is_healthy()
+    
+    def test_is_healthy_checks(self):
+        """Test comprehensive health checks."""
+        config = {
+            "name": "HealthCheckStrategy",
+            "strategy_type": StrategyType.TREND_FOLLOWING.value,
+            "parameters": {"test": "value"},
+        }
+        
+        strategy = MockStrategy(config)
+        
+        # Test unhealthy: circuit breaker open
+        mock_circuit_breaker = Mock()
+        mock_circuit_breaker.is_open.return_value = True
+        strategy._circuit_breaker = mock_circuit_breaker
+        
+        assert not strategy.is_healthy()
+        
+        # Test unhealthy: strategy not active
+        mock_circuit_breaker.is_open.return_value = False
+        strategy._status = StrategyStatus.STOPPED
+        
+        assert not strategy.is_healthy()
+        
+        # Test unhealthy: excessive errors
+        strategy._status = StrategyStatus.ACTIVE
+        mock_error_handler = Mock()
+        mock_error_handler.total_errors = 100  # Above threshold of 50
+        strategy._error_handler = mock_error_handler
+        
+        assert not strategy.is_healthy()
+        
+        # Test healthy: all conditions met
+        mock_error_handler.total_errors = 10  # Below threshold
+        
+        assert strategy.is_healthy()
+
+
+class TestLifecycleManagement:
+    """Test strategy lifecycle management."""
+    
+    @pytest.fixture
+    def strategy(self):
+        """Create strategy for lifecycle testing."""
+        config = {
+            "name": "LifecycleStrategy",
+            "strategy_type": StrategyType.TREND_FOLLOWING.value,
+            "parameters": {"test": "value"},
+        }
+        return MockStrategy(config)
+    
+    @pytest.mark.asyncio
+    async def test_start_strategy(self, strategy):
+        """Test strategy start."""
+        assert strategy.status == StrategyStatus.STOPPED
+        
+        await strategy.start()
+        
+        assert strategy.status == StrategyStatus.ACTIVE
+    
+    @pytest.mark.asyncio
+    async def test_stop_strategy(self, strategy):
+        """Test strategy stop."""
+        strategy._status = StrategyStatus.ACTIVE
+        
+        await strategy.stop()
+        
+        assert strategy.status == StrategyStatus.STOPPED
+    
+    @pytest.mark.asyncio
+    async def test_pause_resume_strategy(self, strategy):
+        """Test strategy pause and resume."""
+        strategy._status = StrategyStatus.ACTIVE
+        
+        await strategy.pause()
+        assert strategy.status == StrategyStatus.PAUSED
+        
+        await strategy.resume()
+        assert strategy.status == StrategyStatus.ACTIVE
+    
+    def test_cleanup_strategy(self, strategy):
+        """Test strategy cleanup."""
+        # Set up strategy with some data
+        strategy._status = StrategyStatus.ACTIVE
+        strategy._signal_history = [Mock() for _ in range(5)]
+        strategy._performance_metrics = {
+            "total_signals": 10,
+            "valid_signals": 8,
+            "execution_count": 5,
+        }
+        
+        strategy.cleanup()
+        
+        # Verify cleanup
+        assert strategy.status == StrategyStatus.STOPPED
+        assert len(strategy._signal_history) == 0
+        assert strategy._performance_metrics["total_signals"] == 0
+        assert strategy._performance_metrics["valid_signals"] == 0
+        assert strategy._performance_metrics["execution_count"] == 0
+    
+    def test_cleanup_with_error(self, strategy):
+        """Test cleanup handles errors gracefully."""
+        # Mock error during cleanup
+        strategy._status = StrategyStatus.ACTIVE
+        
+        # Mock error handler
+        mock_error_handler = Mock()
+        mock_error_handler.logger = Mock()
+        strategy._error_handler = mock_error_handler
+        
+        # Force an error by making signal history clear fail
+        strategy._signal_history = Mock()
+        strategy._signal_history.clear = Mock(side_effect=Exception("Clear failed"))
+        
+        # Should not raise exception
+        strategy.cleanup()
+        
+        # Should log error
+        mock_error_handler.logger.error.assert_called()
+    
+    @pytest.mark.asyncio
+    async def test_backtest_lifecycle(self, strategy):
+        """Test backtesting lifecycle."""
+        backtest_config = {
+            "start_date": "2023-01-01",
+            "end_date": "2023-12-31",
+            "initial_capital": 10000.0,
+        }
+        
+        # Prepare for backtest
+        await strategy.prepare_for_backtest(backtest_config)
+        
+        assert strategy._is_backtesting is True
+        assert strategy._backtest_config == backtest_config
+        
+        # Process historical data
+        historical_data = MarketData(
+            symbol="BTC/USDT",
+            timestamp=datetime.now(timezone.utc),
+            price=Decimal("45000.00"),
+            volume=Decimal("200.0"),
+            bid=Decimal("44999.00"),
+            ask=Decimal("45001.00"),
+        )
+        
+        signals = await strategy.process_historical_data(historical_data)
+        
+        assert len(signals) == 1
+        assert signals[0].symbol == "BTC/USDT"
+        
+        # Get backtest metrics
+        metrics = await strategy.get_backtest_metrics()
+        
+        assert "total_trades" in metrics
+        assert "win_rate" in metrics
+
+
+class TestPerformanceMonitoring:
+    """Test performance monitoring and metrics collection."""
+    
+    @pytest.fixture
+    def strategy_with_metrics(self):
+        """Create strategy with metrics setup."""
+        config = {
+            "name": "MetricsStrategy",
+            "strategy_type": StrategyType.TREND_FOLLOWING.value,
+            "parameters": {"test": "value"},
+        }
+        
+        strategy = MockStrategy(config)
+        
+        # Set up some performance data
+        strategy._performance_metrics.update({
+            "total_signals": 100,
+            "valid_signals": 85,
+            "execution_count": 75,
+        })
+        
+        strategy._returns = [0.02, -0.01, 0.03, 0.01, -0.005, 0.025]
+        strategy._trades_count = len(strategy._returns)
+        
+        return strategy
+    
+    def test_get_metrics_comprehensive(self, strategy_with_metrics):
+        """Test comprehensive metrics collection."""
+        metrics = strategy_with_metrics.get_metrics()
+        
+        assert metrics["strategy_name"] == "MetricsStrategy"
+        assert metrics["status"] == "stopped"
+        assert metrics["total_signals"] == len(strategy_with_metrics._signal_history)
+        assert "win_rate" in metrics
+        assert "sharpe_ratio" in metrics
+        assert "max_drawdown" in metrics
+        
+        # Performance metrics should be included
+        assert metrics["total_signals"] == 100
+        assert metrics["valid_signals"] == 85
+        assert metrics["execution_count"] == 75
+    
+    def test_get_metrics_error_handling(self):
+        """Test metrics collection error handling."""
+        config = {
+            "name": "ErrorMetricsStrategy",
+            "strategy_type": StrategyType.TREND_FOLLOWING.value,
+            "parameters": {"test": "value"},
+        }
+        
+        strategy = MockStrategy(config)
+        
+        # Force error in win rate calculation
+        strategy._calculate_win_rate = Mock(side_effect=Exception("Calculation failed"))
+        
+        metrics = strategy.get_metrics()
+        
+        # Should return basic metrics with error info
+        assert metrics["strategy_name"] == "ErrorMetricsStrategy"
+        assert metrics["status"] == "stopped"
+        assert "error" in metrics
+    
+    def test_update_metrics_with_collector(self):
+        """Test metrics update with metrics collector."""
+        config = {
+            "name": "CollectorMetricsStrategy",
+            "strategy_type": StrategyType.TREND_FOLLOWING.value,
+            "parameters": {"test": "value"},
+        }
+        
+        strategy = MockStrategy(config)
+        
+        # Mock metrics collector
+        mock_metrics_collector = Mock()
+        mock_metrics_collector.record_strategy_metric = Mock()
+        strategy._metrics_collector = mock_metrics_collector
+        
+        # Update metrics
+        new_metrics = {
+            "win_rate": 0.65,
+            "sharpe_ratio": 1.2,
+            "total_pnl": 1500.0,
+        }
+        
+        strategy._update_metrics(new_metrics)
+        
+        # Verify metrics collector called for each metric
+        assert mock_metrics_collector.record_strategy_metric.call_count == 3
+        
+        # Verify performance metrics updated
+        for key, value in new_metrics.items():
+            assert strategy._performance_metrics[key] == value
+    
+    def test_log_signal_history_management(self):
+        """Test signal logging and history management."""
+        config = {
+            "name": "SignalLogStrategy",
+            "strategy_type": StrategyType.TREND_FOLLOWING.value,
+            "parameters": {"test": "value"},
+        }
+        
+        strategy = MockStrategy(config)
+        strategy._max_signal_history = 5  # Small limit for testing
+        
+        # Add signals
+        signals = []
+        for i in range(10):
+            signal = Signal(
+                symbol="BTC/USDT",
+                direction=1,
+                strength=0.8,
+                timestamp=datetime.now(timezone.utc),
+                price=Decimal(f"{50000 + i}.00"),
+            )
+            signals.append(signal)
+            strategy._log_signal(signal)
+        
+        # Should only keep last 5 signals
+        assert len(strategy._signal_history) == 5
+        
+        # Verify it's the latest signals
+        for i, signal in enumerate(strategy._signal_history):
+            expected_price = Decimal(f"{50005 + i}.00")  # Last 5: 50005-50009
+            assert signal.price == expected_price
+    
+    def test_get_real_time_metrics(self, strategy_with_metrics):
+        """Test real-time metrics collection."""
+        real_time_metrics = strategy_with_metrics.get_real_time_metrics()
+        
+        assert "live_pnl" in real_time_metrics
+        assert "open_positions" in real_time_metrics
+        assert real_time_metrics["live_pnl"] == 100.0
+        assert real_time_metrics["open_positions"] == 2
+    
+    def test_get_state_comprehensive(self, strategy_with_metrics):
+        """Test comprehensive state information."""
+        state = strategy_with_metrics.get_state()
+        
+        assert state["name"] == "MetricsStrategy"
+        assert state["status"] == "stopped"
+        assert state["type"] == "trend_following"
+        assert state["version"] == "1.0.0"
+        assert "parameters" in state
+        assert "metrics" in state
+        assert "timestamp" in state

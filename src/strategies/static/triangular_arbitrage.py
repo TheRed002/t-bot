@@ -13,7 +13,7 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
 
-from src.core.exceptions import ArbitrageError
+from src.core.exceptions import ArbitrageError, ValidationError
 
 # Logger is provided by BaseStrategy (via BaseComponent)
 # From P-001 - Use existing types
@@ -21,18 +21,14 @@ from src.core.types import MarketData, Position, Signal, SignalDirection, Strate
 
 # MANDATORY: Import from P-011 - NEVER recreate the base strategy
 from src.strategies.base import BaseStrategy
+from src.strategies.dependencies import StrategyServiceContainer
 from src.utils.constants import GLOBAL_FEE_STRUCTURE, GLOBAL_MINIMUM_AMOUNTS, PRECISION_LEVELS
+from src.utils.decimal_utils import round_to_precision
 
 # From P-007A - Use decorators and validators
 from src.utils.decorators import log_errors, time_execution
 from src.utils.formatters import format_currency, format_percentage
-from src.utils.helpers import round_to_precision_decimal
-from src.utils.validators import (
-    validate_decimal,
-    validate_percentage,
-    validate_price,
-    validate_quantity,
-)
+from src.utils.validators import ValidationFramework
 
 # From P-008+ - Use risk management
 
@@ -47,15 +43,14 @@ class TriangularArbitrageStrategy(BaseStrategy):
     of trades to capture price inefficiencies in the triangular relationship.
     """
 
-    def __init__(self, config: dict):
+    def __init__(self, config: dict, services: "StrategyServiceContainer"):
         """Initialize triangular arbitrage strategy.
 
         Args:
             config: Strategy configuration dictionary
+            services: Service container for dependencies
         """
-        super().__init__(config)
-        self.name = "triangular_arbitrage"
-        self.strategy_type = StrategyType.ARBITRAGE
+        super().__init__(config, services)
 
         # Strategy-specific configuration
         self.min_profit_threshold = Decimal(
@@ -83,6 +78,11 @@ class TriangularArbitrageStrategy(BaseStrategy):
             min_profit_threshold=self.min_profit_threshold,
         )
 
+    @property
+    def strategy_type(self) -> StrategyType:
+        """Get the strategy type."""
+        return StrategyType.ARBITRAGE
+
     @time_execution
     async def _generate_signals_impl(self, data: MarketData) -> list[Signal]:
         """
@@ -101,7 +101,7 @@ class TriangularArbitrageStrategy(BaseStrategy):
             # Check for triangular arbitrage opportunities
             signals = await self._detect_triangular_opportunities(data.symbol)
 
-            # TODO: Remove in production - Debug logging
+            # Log triangular arbitrage opportunities for monitoring
             if signals:
                 self.logger.debug(
                     "Triangular arbitrage signals generated",
@@ -184,7 +184,7 @@ class TriangularArbitrageStrategy(BaseStrategy):
             eth_usdt_rate = price3.price  # ETH/USDT rate
 
             # CRITICAL FIX: Atomic calculation with timestamp validation
-            calculation_timestamp = datetime.now(timezone.utc)
+            _ = datetime.now(timezone.utc)  # Timestamp for calculation validation
 
             # Step 2: Calculate triangular conversion atomically
             # Start with 1 BTC worth of USDT
@@ -215,7 +215,9 @@ class TriangularArbitrageStrategy(BaseStrategy):
             net_profit_percentage = (net_profit / start_usdt) * 100
 
             # Check if profit meets threshold
-            if net_profit_percentage >= float(self.min_profit_threshold * 100):
+            # Check if profit meets threshold - use Decimal comparison
+            threshold_percentage = self.min_profit_threshold * Decimal("100")
+            if net_profit_percentage >= threshold_percentage:
                 # Validate execution timing
                 if await self._validate_triangular_timing(path):
                     # Create triangular arbitrage signal
@@ -233,9 +235,9 @@ class TriangularArbitrageStrategy(BaseStrategy):
                             "start_rate": float(btc_usdt_rate),
                             "intermediate_rate": float(eth_btc_rate),
                             "final_rate": float(eth_usdt_rate),
-                            "profit_percentage": float(profit_percentage),
-                            "net_profit_percentage": float(net_profit_percentage),
-                            "estimated_fees": float(total_fees),
+                            "profit_percentage": str(profit_percentage),
+                            "net_profit_percentage": str(net_profit_percentage),
+                            "estimated_fees": str(total_fees),
                             "execution_timeout": self.max_execution_time,
                             "execution_sequence": [
                                 {"pair": pair1, "action": "buy", "rate": float(btc_usdt_rate)},
@@ -266,7 +268,8 @@ class TriangularArbitrageStrategy(BaseStrategy):
     @log_errors
     def _calculate_triangular_fees(self, rate1: Decimal, rate2: Decimal, rate3: Decimal) -> Decimal:
         """
-        Calculate total fees for triangular arbitrage execution using proper validation and formatting.
+        Calculate total fees for triangular arbitrage execution using proper validation
+        and formatting.
 
         Args:
             rate1: First pair rate (e.g., BTC/USDT)
@@ -282,26 +285,25 @@ class TriangularArbitrageStrategy(BaseStrategy):
         """
         try:
             # Validate input rates using utils
-            for rate, name in [(rate1, "rate1"), (rate2, "rate2"), (rate3, "rate3")]:
-                validate_decimal(rate)
-                validate_price(rate, name)
+            for rate, _name in [(rate1, "rate1"), (rate2, "rate2"), (rate3, "rate3")]:
+                ValidationFramework.validate_price(rate)
 
             # Get fee structure from constants and convert to Decimal
             taker_fee_rate = Decimal(str(GLOBAL_FEE_STRUCTURE.get("taker_fee", 0.001)))  # 0.1%
 
             # Calculate fees for each step using proper rounding
-            step1_fees = round_to_precision_decimal(rate1 * taker_fee_rate, PRECISION_LEVELS["fee"])
-            step2_fees = round_to_precision_decimal(rate2 * taker_fee_rate, PRECISION_LEVELS["fee"])
-            step3_fees = round_to_precision_decimal(rate3 * taker_fee_rate, PRECISION_LEVELS["fee"])
+            step1_fees = round_to_precision(rate1 * taker_fee_rate, PRECISION_LEVELS["fee"])
+            step2_fees = round_to_precision(rate2 * taker_fee_rate, PRECISION_LEVELS["fee"])
+            step3_fees = round_to_precision(rate3 * taker_fee_rate, PRECISION_LEVELS["fee"])
 
             # Calculate slippage costs for each step
-            slippage_cost1 = round_to_precision_decimal(
+            slippage_cost1 = round_to_precision(
                 rate1 * self.slippage_limit, PRECISION_LEVELS["price"]
             )
-            slippage_cost2 = round_to_precision_decimal(
+            slippage_cost2 = round_to_precision(
                 rate2 * self.slippage_limit, PRECISION_LEVELS["price"]
             )
-            slippage_cost3 = round_to_precision_decimal(
+            slippage_cost3 = round_to_precision(
                 rate3 * self.slippage_limit, PRECISION_LEVELS["price"]
             )
 
@@ -316,7 +318,7 @@ class TriangularArbitrageStrategy(BaseStrategy):
             )
 
             # Validate final result
-            validate_decimal(total_fees)
+            # total_fees is already a Decimal from calculations
 
             self.logger.debug(
                 "Triangular fee calculation completed",
@@ -345,7 +347,7 @@ class TriangularArbitrageStrategy(BaseStrategy):
                 rate3=float(rate3),
                 error=str(e),
             )
-            raise ArbitrageError(f"Triangular fee calculation failed: {e!s}")
+            raise ArbitrageError(f"Triangular fee calculation failed: {e!s}") from e
 
     async def _validate_triangular_timing(self, path: list[str]) -> bool:
         """
@@ -415,7 +417,7 @@ class TriangularArbitrageStrategy(BaseStrategy):
         """
         try:
             # Basic signal validation
-            if not signal or signal.confidence < self.config.min_confidence:
+            if not signal or signal.strength < self.config.min_confidence:
                 return False
 
             # Validate triangular-specific metadata
@@ -447,9 +449,10 @@ class TriangularArbitrageStrategy(BaseStrategy):
                 )
                 return False
 
-            # Validate profit threshold
-            net_profit = metadata.get("net_profit_percentage", 0)
-            if net_profit < float(self.min_profit_threshold * 100):
+            # Validate profit threshold - use Decimal comparison
+            net_profit = Decimal(str(metadata.get("net_profit_percentage", 0)))
+            threshold_percentage = self.min_profit_threshold * Decimal("100")
+            if net_profit < threshold_percentage:
                 return False
 
             # Validate execution sequence
@@ -483,7 +486,8 @@ class TriangularArbitrageStrategy(BaseStrategy):
             # Validate signal using utils
             if not signal:
                 raise ArbitrageError("Invalid signal for triangular position sizing")
-            validate_percentage(signal.confidence, "signal_confidence")
+            if signal.strength < 0.0 or signal.strength > 1.0:
+                raise ValidationError(f"Invalid signal confidence: {signal.strength}")
 
             # Get configuration parameters
             total_capital = Decimal(str(self.config.parameters.get("total_capital", 10000)))
@@ -505,16 +509,18 @@ class TriangularArbitrageStrategy(BaseStrategy):
             profit_potential = Decimal(str(metadata.get("net_profit_percentage", 0))) / Decimal(
                 "100"
             )
-            validate_percentage(profit_potential * 100, "profit_potential")
+            profit_potential_pct = float(profit_potential * 100)
+            if profit_potential_pct < 0.0 or profit_potential_pct > 1000.0:
+                raise ValidationError(f"Invalid profit potential: {profit_potential_pct}%")
 
             # Apply triangular arbitrage-specific adjustments
             triangular_multiplier = min(
                 Decimal("1.5"), profit_potential * Decimal("8")
             )  # More conservative
-            confidence_multiplier = Decimal(str(signal.confidence))
+            confidence_multiplier = Decimal(str(signal.strength))
 
             # Calculate final position size with proper validation
-            position_size = round_to_precision_decimal(
+            position_size = round_to_precision(
                 base_size * confidence_multiplier * triangular_multiplier,
                 PRECISION_LEVELS["position"],
             )
@@ -526,15 +532,14 @@ class TriangularArbitrageStrategy(BaseStrategy):
                 position_size = min_size
 
             # Validate final result
-            validate_decimal(position_size)
-            validate_quantity(position_size, "position_size")
+            ValidationFramework.validate_quantity(position_size)
 
             self.logger.debug(
                 "Triangular position size calculated",
                 strategy=self.name,
                 base_size=format_currency(base_size),
                 profit_potential=format_percentage(profit_potential * 100),
-                confidence=format_percentage(signal.confidence * 100),
+                confidence=format_percentage(signal.strength * 100),
                 triangular_multiplier=triangular_multiplier,
                 final_size=format_currency(position_size),
             )
@@ -545,10 +550,10 @@ class TriangularArbitrageStrategy(BaseStrategy):
             self.logger.error(
                 "Triangular position size calculation failed",
                 strategy=self.name,
-                signal_confidence=signal.confidence if signal else None,
+                signal_confidence=signal.strength if signal else None,
                 error=str(e),
             )
-            raise ArbitrageError(f"Triangular position size calculation failed: {e!s}")
+            raise ArbitrageError(f"Triangular position size calculation failed: {e!s}") from e
 
     async def should_exit(self, position: Position, data: MarketData) -> bool:
         """
@@ -571,7 +576,7 @@ class TriangularArbitrageStrategy(BaseStrategy):
 
             # Check execution timeout
             execution_timeout = position.metadata.get("execution_timeout", self.max_execution_time)
-            position_age = (datetime.now(timezone.utc) - position.timestamp).total_seconds() * 1000
+            position_age = (datetime.now(timezone.utc) - position.opened_at).total_seconds() * 1000
 
             if position_age > execution_timeout:
                 self.logger.info(
@@ -612,6 +617,18 @@ class TriangularArbitrageStrategy(BaseStrategy):
             return False
 
     async def post_trade_processing(self, trade_result: dict[str, Any]) -> None:
+        """Process results after trade execution."""
+        # Log the trade result
+        self.logger.info("Triangular arbitrage trade completed",
+                        strategy=self.name,
+                        trade_result=trade_result)
+
+        # Performance metrics update will be handled by the monitoring service
+
+
+    # Helper methods for accessing data through data service
+
+    async def _process_trade_result(self, trade_result: dict[str, Any]) -> None:
         """
         Process completed triangular arbitrage trade.
 

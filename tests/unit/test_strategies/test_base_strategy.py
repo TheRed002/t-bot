@@ -4,23 +4,69 @@ Unit tests for BaseStrategy interface.
 Tests the abstract base strategy interface and its core functionality.
 """
 
+import asyncio
+import logging
 from datetime import datetime, timezone
 from decimal import Decimal
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, Mock, patch
+from functools import lru_cache
 
 import pytest
+
+# Disable logging during tests for performance
+logging.disable(logging.CRITICAL)
+
+# Fast mock time for deterministic tests
+FIXED_TIME = datetime(2023, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
 
 # Import from P-001
 from src.core.types import (
     MarketData,
-    OrderSide,
     Position,
+    PositionSide,
+    PositionStatus,
     Signal,
     SignalDirection,
     StrategyMetrics,
     StrategyStatus,
     StrategyType,
 )
+
+# Pre-computed signal objects for performance
+VALID_SIGNAL = Signal(
+    direction=SignalDirection.BUY,
+    strength=Decimal("0.8"),
+    timestamp=FIXED_TIME,
+    symbol="BTC/USDT",
+    source="test",
+    metadata={},
+)
+
+INVALID_SIGNAL = Signal(
+    direction=SignalDirection.BUY,
+    strength=Decimal("0.5"),
+    timestamp=FIXED_TIME,
+    symbol="BTC/USDT",
+    source="test",
+    metadata={},
+)
+
+# Pre-computed mock objects for performance
+MOCK_TRADE_RESULT_POSITIVE = Mock(pnl=Decimal("10.50"))
+MOCK_TRADE_RESULT_NEGATIVE = Mock(pnl=Decimal("-5.25"))
+
+
+# Cached mock factory functions for performance
+@lru_cache(maxsize=2)
+def create_passing_risk_manager():
+    return Mock(validate_signal=AsyncMock(return_value=True))
+
+@lru_cache(maxsize=2)
+def create_failing_risk_manager():
+    return Mock(validate_signal=AsyncMock(return_value=False))
+
+
+MOCK_EXCHANGE = Mock()
 
 # Import from P-011
 from src.strategies.base import BaseStrategy
@@ -37,21 +83,21 @@ class MockStrategy(BaseStrategy):
     def strategy_type(self) -> StrategyType:
         """Return the strategy type."""
         return StrategyType.CUSTOM
-    
+
     @property
     def name(self) -> str:
         """Return the strategy name."""
-        return self.config.name if hasattr(self, 'config') else "mock_strategy"
-    
+        return self._name
+
     @property
     def version(self) -> str:
         """Return the strategy version."""
         return "1.0.0"
-    
+
     @property
     def status(self) -> StrategyStatus:
         """Return the strategy status."""
-        return self._status if hasattr(self, '_status') else StrategyStatus.STOPPED
+        return self._status if hasattr(self, "_status") else StrategyStatus.STOPPED
 
     async def _generate_signals_impl(self, data: MarketData) -> list[Signal]:
         """Generate mock signals."""
@@ -63,8 +109,8 @@ class MockStrategy(BaseStrategy):
             signal = Signal(
                 symbol=data.symbol,
                 direction=SignalDirection.BUY,
-                strength=0.8,
-                timestamp=datetime.now(timezone.utc),
+                strength=Decimal("0.8"),
+                timestamp=FIXED_TIME,
                 source=self.name,
                 metadata={"test": True},
             )
@@ -76,11 +122,15 @@ class MockStrategy(BaseStrategy):
 
     async def validate_signal(self, signal: Signal) -> bool:
         """Validate mock signal."""
-        return signal.strength >= self.config.min_confidence
+        min_confidence = self.config.parameters.get("min_confidence", 0.6)
+        return signal.strength >= min_confidence
 
     def get_position_size(self, signal: Signal) -> Decimal:
         """Get mock position size."""
-        return Decimal(str(self.config.position_size_pct))
+        # StrategyConfig doesn't have position_size_pct attribute
+        # Get from parameters or use default
+        position_size = self.config.parameters.get("position_size_pct", 0.02)
+        return Decimal(str(position_size))
 
     def should_exit(self, position: Position, data: MarketData) -> bool:
         """Mock exit condition."""
@@ -90,14 +140,29 @@ class MockStrategy(BaseStrategy):
 class TestBaseStrategy:
     """Test cases for BaseStrategy interface."""
 
-    @pytest.fixture
+    @pytest.fixture(scope="session", autouse=True)
+    def setup_performance_optimizations(self):
+        """Setup performance optimizations for all tests."""
+        # Pre-create common objects for reuse
+        self._cached_market_data = MarketData(
+            symbol="BTC/USDT",
+            timestamp=FIXED_TIME,
+            open=Decimal("49000.0"),
+            high=Decimal("51000.0"),
+            low=Decimal("48000.0"),
+            close=Decimal("50000.0"),
+            volume=Decimal("1000.0"),
+            exchange="binance"
+        )
+        
+    @pytest.fixture(scope="session")
     def mock_config(self):
-        """Create mock strategy configuration."""
+        """Create mock strategy configuration - cached for session scope."""
         return {
             "name": "test_strategy",
             "strategy_id": "test_strategy_001",
-            "strategy_type": "mean_reversion",
-            "symbol": "BTCUSDT",
+            "strategy_type": StrategyType.MEAN_REVERSION,  # Use actual enum
+            "symbol": "BTC/USDT",
             "enabled": True,
             "timeframe": "1h",
             "min_confidence": 0.6,
@@ -105,41 +170,50 @@ class TestBaseStrategy:
             "position_size_pct": 0.02,
             "stop_loss_pct": 0.02,
             "take_profit_pct": 0.04,
-            "parameters": {"test_param": "test_value"},
+            "parameters": {
+                "test_param": "test_value",
+            },
         }
 
-    @pytest.fixture
+    @pytest.fixture(scope="session")
     def mock_strategy(self, mock_config):
-        """Create mock strategy instance."""
+        """Create mock strategy instance - cached for session scope."""
         return MockStrategy(mock_config)
 
-    @pytest.fixture
+    @pytest.fixture(scope="function")
+    def fresh_strategy(self, mock_config):
+        """Create fresh strategy instance for each test."""
+        return MockStrategy(mock_config)
+
+    @pytest.fixture(scope="session")
     def mock_market_data(self):
-        """Create mock market data."""
+        """Create mock market data - cached for session scope with fixed time."""
         return MarketData(
-            symbol="BTCUSDT",
+            symbol="BTC/USDT",  # Use proper symbol format
             open=Decimal("49900"),
             high=Decimal("50100"),
             low=Decimal("49800"),
             close=Decimal("50000"),
             volume=Decimal("100"),
-            timestamp=datetime.now(timezone.utc),
+            timestamp=FIXED_TIME,  # Use fixed time for performance
             exchange="binance",
             bid_price=Decimal("49999"),
             ask_price=Decimal("50001"),
         )
 
-    @pytest.fixture
+    @pytest.fixture(scope="session")
     def mock_position(self):
-        """Create mock position."""
+        """Create mock position - cached for session scope with fixed time."""
         return Position(
-            symbol="BTCUSDT",
+            symbol="BTC/USDT",  # Use proper symbol format
+            side=PositionSide.LONG,  # Use PositionSide, not OrderSide
             quantity=Decimal("0.1"),
             entry_price=Decimal("50000"),
             current_price=Decimal("50100"),
             unrealized_pnl=Decimal("10"),
-            side=OrderSide.BUY,
-            timestamp=datetime.now(timezone.utc),
+            status=PositionStatus.OPEN,  # Required field
+            opened_at=FIXED_TIME,  # Use fixed time for performance
+            exchange="binance",  # Required field
         )
 
     def test_strategy_initialization(self, mock_strategy, mock_config):
@@ -149,7 +223,7 @@ class TestBaseStrategy:
         assert mock_strategy.status == StrategyStatus.STOPPED
         assert isinstance(mock_strategy.metrics, StrategyMetrics)
         assert mock_strategy.config.name == mock_config["name"]
-        assert mock_strategy.config.strategy_type.value == mock_config["strategy_type"]
+        assert mock_strategy.config.strategy_type == mock_config["strategy_type"]
 
     def test_strategy_info(self, mock_strategy):
         """Test getting strategy information."""
@@ -165,74 +239,43 @@ class TestBaseStrategy:
         assert info["status"] == StrategyStatus.STOPPED.value
 
     @pytest.mark.asyncio
-    async def test_generate_signals(self, mock_strategy, mock_market_data):
+    async def test_generate_signals(self, fresh_strategy, mock_market_data):
         """Test signal generation."""
-        # Test the internal implementation directly to avoid BaseStrategy complexity
-        signals = await mock_strategy._generate_signals_impl(mock_market_data)
+        signals = await fresh_strategy._generate_signals_impl(mock_market_data)
 
-        assert isinstance(signals, list)
-        assert len(signals) == 1
-        assert isinstance(signals[0], Signal)
-        assert signals[0].direction == SignalDirection.BUY
-        assert signals[0].strength == 0.8
-        assert signals[0].symbol == "BTCUSDT"
+        # Batch assertions for better performance
+        assert isinstance(signals, list) and len(signals) == 1
+        signal = signals[0]
+        assert isinstance(signal, Signal) and signal.direction == SignalDirection.BUY
+        assert signal.strength == Decimal("0.8") and signal.symbol == "BTC/USDT"
 
     @pytest.mark.asyncio
-    async def test_generate_signals_empty_data(self, mock_strategy):
+    async def test_generate_signals_empty_data(self, fresh_strategy):
         """Test signal generation with empty data."""
-        signals = await mock_strategy.generate_signals(None)
-        assert signals == []
-
-        empty_data = MarketData(
-            symbol="BTCUSDT",
-            open=Decimal("0"),
-            high=Decimal("0"),
-            low=Decimal("0"),
-            close=Decimal("0"),
-            volume=Decimal("0"),
-            timestamp=datetime.now(timezone.utc),
-            exchange="binance",
+        # Test both None and zero data cases
+        none_signals, zero_signals = await asyncio.gather(
+            fresh_strategy.generate_signals(None),
+            fresh_strategy.generate_signals(MarketData(
+                symbol="BTC/USDT", open=Decimal("0"), high=Decimal("0"),
+                low=Decimal("0"), close=Decimal("0"), volume=Decimal("0"),
+                timestamp=FIXED_TIME, exchange="binance",
+                bid_price=Decimal("0"), ask_price=Decimal("0")
+            ))
         )
-        signals = await mock_strategy.generate_signals(empty_data)
-        assert signals == []
+        assert none_signals == [] and zero_signals == []
 
     @pytest.mark.asyncio
-    async def test_validate_signal(self, mock_strategy):
+    async def test_validate_signal(self, fresh_strategy):
         """Test signal validation."""
-        # Valid signal
-        valid_signal = Signal(
-            direction=SignalDirection.BUY,
-            strength=0.8,
-            timestamp=datetime.now(timezone.utc),
-            symbol="BTCUSDT",
-            source="test",
-            metadata={},
-        )
-        assert await mock_strategy.validate_signal(valid_signal) is True
 
-        # Invalid signal (low confidence)
-        invalid_signal = Signal(
-            direction=SignalDirection.BUY,
-            strength=0.5,
-            timestamp=datetime.now(timezone.utc),
-            symbol="BTCUSDT",
-            source="test",
-            metadata={},
-        )
-        assert await mock_strategy.validate_signal(invalid_signal) is False
+        # Use pre-computed signals for performance
+        assert await fresh_strategy.validate_signal(VALID_SIGNAL) is True
+        assert await fresh_strategy.validate_signal(INVALID_SIGNAL) is False
 
     def test_get_position_size(self, mock_strategy):
         """Test position size calculation."""
-        signal = Signal(
-            direction=SignalDirection.BUY,
-            strength=0.8,
-            timestamp=datetime.now(timezone.utc),
-            symbol="BTCUSDT",
-            source="test",
-            metadata={},
-        )
-
-        position_size = mock_strategy.get_position_size(signal)
+        # Use pre-computed signal for performance
+        position_size = mock_strategy.get_position_size(VALID_SIGNAL)
         assert isinstance(position_size, Decimal)
         assert position_size == Decimal("0.02")
 
@@ -243,178 +286,152 @@ class TestBaseStrategy:
 
         # Position with negative P&L
         negative_position = Position(
-            symbol="BTCUSDT",
+            symbol="BTC/USDT",
+            side=PositionSide.LONG,
             quantity=Decimal("0.1"),
             entry_price=Decimal("50000"),
             current_price=Decimal("49900"),
             unrealized_pnl=Decimal("-10"),
-            side=OrderSide.BUY,
-            timestamp=datetime.now(timezone.utc),
+            status=PositionStatus.OPEN,
+            opened_at=FIXED_TIME,
+            exchange="binance",
         )
         assert mock_strategy.should_exit(negative_position, mock_market_data) is True
 
     @pytest.mark.asyncio
-    async def test_pre_trade_validation(self, mock_strategy):
+    async def test_pre_trade_validation(self, fresh_strategy):
         """Test pre-trade validation."""
-        # Valid signal
-        valid_signal = Signal(
-            direction=SignalDirection.BUY,
-            strength=0.8,
-            timestamp=datetime.now(timezone.utc),
-            symbol="BTCUSDT",
-            source="test",
-            metadata={},
-        )
-        assert await mock_strategy.pre_trade_validation(valid_signal) is True
 
-        # Invalid signal
-        invalid_signal = Signal(
-            direction=SignalDirection.BUY,
-            strength=0.5,
-            timestamp=datetime.now(timezone.utc),
-            symbol="BTCUSDT",
-            source="test",
-            metadata={},
-        )
-        assert await mock_strategy.pre_trade_validation(invalid_signal) is False
+        # Use pre-computed signals for performance
+        assert await fresh_strategy.pre_trade_validation(VALID_SIGNAL) is True
+        assert await fresh_strategy.pre_trade_validation(INVALID_SIGNAL) is False
 
     @pytest.mark.asyncio
-    async def test_pre_trade_validation_with_risk_manager(self, mock_strategy):
+    async def test_pre_trade_validation_with_risk_manager(self, fresh_strategy):
         """Test pre-trade validation with risk manager."""
-        # Mock risk manager
-        mock_risk_manager = Mock()
-        mock_risk_manager.validate_signal = AsyncMock(return_value=True)
-        mock_strategy.set_risk_manager(mock_risk_manager)
 
-        signal = Signal(
-            direction=SignalDirection.BUY,
-            strength=0.8,
-            timestamp=datetime.now(timezone.utc),
-            symbol="BTCUSDT",
-            source="test",
-            metadata={},
-        )
+        # Use fresh mock for performance
+        mock_risk_manager = create_passing_risk_manager()
+        fresh_strategy.set_risk_manager(mock_risk_manager)
 
-        assert await mock_strategy.pre_trade_validation(signal) is True
-        mock_risk_manager.validate_signal.assert_called_once_with(signal)
+        assert await fresh_strategy.pre_trade_validation(VALID_SIGNAL) is True
+        mock_risk_manager.validate_signal.assert_called_once_with(VALID_SIGNAL)
 
     @pytest.mark.asyncio
-    async def test_pre_trade_validation_with_risk_manager_failure(self, mock_strategy):
+    async def test_pre_trade_validation_with_risk_manager_failure(self, fresh_strategy):
         """Test pre-trade validation with risk manager failure."""
-        # Mock risk manager
-        mock_risk_manager = Mock()
-        mock_risk_manager.validate_signal = AsyncMock(return_value=False)
-        mock_strategy.set_risk_manager(mock_risk_manager)
 
-        signal = Signal(
-            direction=SignalDirection.BUY,
-            strength=0.8,
-            timestamp=datetime.now(timezone.utc),
-            symbol="BTCUSDT",
-            source="test",
-            metadata={},
-        )
+        # Use fresh mock for performance
+        mock_risk_manager = create_failing_risk_manager()
+        fresh_strategy.set_risk_manager(mock_risk_manager)
 
-        assert await mock_strategy.pre_trade_validation(signal) is False
-        mock_risk_manager.validate_signal.assert_called_once_with(signal)
+        assert await fresh_strategy.pre_trade_validation(VALID_SIGNAL) is False
+        mock_risk_manager.validate_signal.assert_called_once_with(VALID_SIGNAL)
 
-    def test_set_risk_manager(self, mock_strategy):
+    def test_set_risk_manager(self, fresh_strategy):
         """Test setting risk manager."""
-        mock_risk_manager = Mock()
-        mock_strategy.set_risk_manager(mock_risk_manager)
-        assert mock_strategy._risk_manager == mock_risk_manager
+        mock_risk_manager = create_passing_risk_manager()
+        fresh_strategy.set_risk_manager(mock_risk_manager)
+        # Risk manager is now stored in services container
+        assert fresh_strategy.services.risk_service == mock_risk_manager
 
-    def test_set_exchange(self, mock_strategy):
+    def test_set_exchange(self, fresh_strategy):
         """Test setting exchange."""
-        mock_exchange = Mock()
-        mock_strategy.set_exchange(mock_exchange)
-        assert mock_strategy._exchange == mock_exchange
+        fresh_strategy.set_exchange(MOCK_EXCHANGE)
+        # Exchange is stored for backward compatibility
+        assert fresh_strategy._exchange == MOCK_EXCHANGE
 
     @pytest.mark.asyncio
-    async def test_strategy_lifecycle(self, mock_strategy):
+    async def test_strategy_lifecycle(self, fresh_strategy):
         """Test strategy lifecycle methods."""
+
         # Test start
-        await mock_strategy.start()
-        assert mock_strategy.status == StrategyStatus.RUNNING
+        await fresh_strategy.start()
+        assert fresh_strategy.status == StrategyStatus.ACTIVE
 
         # Test pause
-        await mock_strategy.pause()
-        assert mock_strategy.status == StrategyStatus.PAUSED
+        await fresh_strategy.pause()
+        assert fresh_strategy.status == StrategyStatus.PAUSED
 
         # Test resume
-        await mock_strategy.resume()
-        assert mock_strategy.status == StrategyStatus.RUNNING
+        await fresh_strategy.resume()
+        assert fresh_strategy.status == StrategyStatus.ACTIVE
 
         # Test stop
-        await mock_strategy.stop()
-        assert mock_strategy.status == StrategyStatus.STOPPED
+        await fresh_strategy.stop()
+        assert fresh_strategy.status == StrategyStatus.STOPPED
 
     @pytest.mark.asyncio
-    async def test_strategy_start_error(self, mock_strategy):
+    async def test_strategy_start_error(self, fresh_strategy):
         """Test strategy start with error."""
 
         # Mock _on_start to raise exception
         async def mock_on_start():
             raise Exception("Start error")
 
-        mock_strategy._on_start = mock_on_start
+        fresh_strategy._on_start = mock_on_start
 
-        with pytest.raises(Exception, match="Start error"):
-            await mock_strategy.start()
-
-        assert mock_strategy.status == StrategyStatus.ERROR
+        result = await fresh_strategy.start()
+        
+        assert result is False  # Should return False on error
+        assert fresh_strategy.status == StrategyStatus.ERROR
 
     @pytest.mark.asyncio
-    async def test_strategy_stop_error(self, mock_strategy):
+    async def test_strategy_stop_error(self, fresh_strategy):
         """Test strategy stop with error."""
 
         # Mock _on_stop to raise exception
         async def mock_on_stop():
             raise Exception("Stop error")
 
-        mock_strategy._on_stop = mock_on_stop
+        fresh_strategy._on_stop = mock_on_stop
 
-        with pytest.raises(Exception, match="Stop error"):
-            await mock_strategy.stop()
-
+        result = await fresh_strategy.stop()
+        
+        assert result is False  # Should return False on error
         # Status should remain STOPPED even with error
-        assert mock_strategy.status == StrategyStatus.STOPPED
+        assert fresh_strategy.status == StrategyStatus.STOPPED
 
-    def test_update_config(self, mock_strategy):
+    def test_update_config(self, fresh_strategy):
         """Test configuration update."""
-        old_config = mock_strategy.config.model_dump()
+
+        # Pre-built config for performance
         new_config = {
             "name": "updated_strategy",
-            "strategy_type": "static",
+            "strategy_id": "updated_strategy_001",
+            "strategy_type": StrategyType.CUSTOM,  # Use valid enum
+            "symbol": "BTC/USDT",  # Required field
             "enabled": True,
-            "symbols": ["BTCUSDT"],
             "timeframe": "5m",
             "min_confidence": 0.7,
             "max_positions": 3,
             "position_size_pct": 0.03,
             "stop_loss_pct": 0.03,
             "take_profit_pct": 0.06,
-            "parameters": {"updated_param": "updated_value"},
+            "parameters": {
+                "updated_param": "updated_value",
+            },
         }
 
-        mock_strategy.update_config(new_config)
+        fresh_strategy.update_config(new_config)
 
-        assert mock_strategy.config.name == "updated_strategy"
-        assert mock_strategy.config.min_confidence == 0.7
-        assert mock_strategy.config.max_positions == 3
+        assert fresh_strategy.config.name == "updated_strategy"
+        assert fresh_strategy.config.min_confidence == 0.7
+        assert fresh_strategy.config.max_positions == 3
 
-    def test_get_performance_summary(self, mock_strategy):
+    def test_get_performance_summary(self, fresh_strategy):
         """Test performance summary generation."""
-        # Update metrics
-        mock_strategy.metrics.total_trades = 10
-        mock_strategy.metrics.winning_trades = 7
-        mock_strategy.metrics.losing_trades = 3
-        mock_strategy.metrics.total_pnl = Decimal("100.50")
-        mock_strategy.metrics.win_rate = 0.7
-        mock_strategy.metrics.sharpe_ratio = 1.2
-        mock_strategy.metrics.max_drawdown = 0.05
 
-        summary = mock_strategy.get_performance_summary()
+        # Update metrics directly for performance
+        fresh_strategy.metrics.total_trades = 10
+        fresh_strategy.metrics.winning_trades = 7
+        fresh_strategy.metrics.losing_trades = 3
+        fresh_strategy.metrics.total_pnl = Decimal("100.50")
+        fresh_strategy.metrics.win_rate = 0.7
+        fresh_strategy.metrics.sharpe_ratio = 1.2
+        fresh_strategy.metrics.max_drawdown = 0.05
+
+        summary = fresh_strategy.get_performance_summary()
 
         # Now uses config name
         assert summary["strategy_name"] == "test_strategy"
@@ -428,35 +445,30 @@ class TestBaseStrategy:
         assert summary["max_drawdown"] == 0.05
 
     @pytest.mark.asyncio
-    async def test_post_trade_processing(self, mock_strategy):
+    async def test_post_trade_processing(self, fresh_strategy):
         """Test post-trade processing."""
-        initial_trades = mock_strategy.metrics.total_trades
+        initial_trades = fresh_strategy.metrics.total_trades
 
-        # Mock trade result with P&L
-        mock_trade_result = Mock()
-        mock_trade_result.pnl = Decimal("10.50")
+        # Use pre-computed mock for performance
+        await fresh_strategy.post_trade_processing(MOCK_TRADE_RESULT_POSITIVE)
 
-        await mock_strategy.post_trade_processing(mock_trade_result)
-
-        assert mock_strategy.metrics.total_trades == initial_trades + 1
-        assert mock_strategy.metrics.winning_trades == 1
-        assert mock_strategy.metrics.total_pnl == Decimal("10.50")
-        assert mock_strategy.metrics.win_rate == 1.0
+        assert fresh_strategy.metrics.total_trades == initial_trades + 1
+        assert fresh_strategy.metrics.winning_trades == 1
+        assert fresh_strategy.metrics.total_pnl == Decimal("10.50")
+        assert fresh_strategy.metrics.win_rate == 1.0
 
     @pytest.mark.asyncio
-    async def test_post_trade_processing_negative_pnl(self, mock_strategy):
+    async def test_post_trade_processing_negative_pnl(self, fresh_strategy):
         """Test post-trade processing with negative PnL."""
-        initial_trades = mock_strategy.metrics.total_trades
+        initial_trades = fresh_strategy.metrics.total_trades
 
-        mock_trade_result = Mock()
-        mock_trade_result.pnl = Decimal("-5.25")
+        # Use pre-computed mock for performance
+        await fresh_strategy.post_trade_processing(MOCK_TRADE_RESULT_NEGATIVE)
 
-        await mock_strategy.post_trade_processing(mock_trade_result)
-
-        assert mock_strategy.metrics.total_trades == initial_trades + 1
-        assert mock_strategy.metrics.losing_trades == 1
-        assert mock_strategy.metrics.total_pnl == Decimal("-5.25")
-        assert mock_strategy.metrics.win_rate == 0.0
+        assert fresh_strategy.metrics.total_trades == initial_trades + 1
+        assert fresh_strategy.metrics.losing_trades == 1
+        assert fresh_strategy.metrics.total_pnl == Decimal("-5.25")
+        assert fresh_strategy.metrics.win_rate == 0.0
 
     def test_abstract_methods_required(self):
         """Test that concrete strategies must implement abstract methods."""

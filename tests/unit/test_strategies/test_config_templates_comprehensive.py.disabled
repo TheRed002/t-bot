@@ -1,0 +1,648 @@
+"""
+Comprehensive tests for StrategyConfigTemplates.
+
+Tests template generation, validation, and configuration management.
+"""
+
+import pytest
+from typing import Any
+
+from src.core.types import StrategyType
+from src.strategies.config_templates import StrategyConfigTemplates
+
+
+class TestStrategyConfigTemplates:
+    """Test cases for StrategyConfigTemplates."""
+
+    def test_get_arbitrage_scanner_config_default(self):
+        """Test arbitrage scanner config with default parameters."""
+        # Act
+        config = StrategyConfigTemplates.get_arbitrage_scanner_config()
+        
+        # Assert
+        assert config["name"] == "arbitrage_scanner_v1"
+        assert config["strategy_id"] == "arb_scanner_001"
+        assert config["strategy_type"] == StrategyType.ARBITRAGE.value
+        assert config["exchange_type"] == "multi_exchange"
+        assert "BTCUSDT" in config["symbols"]
+        assert "ETHUSDT" in config["symbols"]
+        assert config["min_confidence"] == 0.7
+        assert "parameters" in config
+        assert "backtesting" in config
+        assert "monitoring" in config
+
+    def test_get_arbitrage_scanner_config_custom_exchanges(self):
+        """Test arbitrage scanner config with custom exchanges."""
+        # Arrange
+        custom_exchanges = ["binance", "kraken"]
+        
+        # Act
+        config = StrategyConfigTemplates.get_arbitrage_scanner_config(
+            exchanges=custom_exchanges
+        )
+        
+        # Assert
+        assert config["parameters"]["exchanges"] == custom_exchanges
+
+    def test_get_arbitrage_scanner_config_custom_symbols(self):
+        """Test arbitrage scanner config with custom symbols."""
+        # Arrange
+        custom_symbols = ["BTCUSD", "ETHUSD"]
+        
+        # Act
+        config = StrategyConfigTemplates.get_arbitrage_scanner_config(
+            symbols=custom_symbols
+        )
+        
+        # Assert
+        assert config["symbols"] == custom_symbols
+        assert config["parameters"]["symbols"] == custom_symbols
+
+    def test_get_arbitrage_scanner_config_risk_levels(self):
+        """Test arbitrage scanner config with different risk levels."""
+        # Test conservative
+        conservative_config = StrategyConfigTemplates.get_arbitrage_scanner_config("conservative")
+        assert conservative_config["parameters"]["min_profit_threshold"] == 0.002
+        assert conservative_config["parameters"]["max_concurrent_trades"] == 2
+        
+        # Test medium
+        medium_config = StrategyConfigTemplates.get_arbitrage_scanner_config("medium")
+        assert medium_config["parameters"]["min_profit_threshold"] == 0.0015
+        assert medium_config["parameters"]["max_concurrent_trades"] == 3
+        
+        # Test aggressive
+        aggressive_config = StrategyConfigTemplates.get_arbitrage_scanner_config("aggressive")
+        assert aggressive_config["parameters"]["min_profit_threshold"] == 0.001
+        assert aggressive_config["parameters"]["max_concurrent_trades"] == 5
+
+    def test_get_arbitrage_scanner_config_structure(self):
+        """Test arbitrage scanner config structure completeness."""
+        # Act
+        config = StrategyConfigTemplates.get_arbitrage_scanner_config()
+        
+        # Assert core parameters exist
+        params = config["parameters"]
+        assert "scan_interval" in params
+        assert "max_execution_time" in params
+        assert "triangular_paths" in params
+        assert "total_capital" in params
+        assert "risk_per_trade" in params
+        
+        # Assert backtesting config
+        backtesting = config["backtesting"]
+        assert backtesting["enabled"] is True
+        assert "start_date" in backtesting
+        assert "initial_capital" in backtesting
+        
+        # Assert monitoring config
+        monitoring = config["monitoring"]
+        assert monitoring["enabled"] is True
+        assert "alert_thresholds" in monitoring
+
+    def test_get_mean_reversion_config_default(self):
+        """Test mean reversion config with default parameters."""
+        # Act
+        config = StrategyConfigTemplates.get_mean_reversion_config()
+        
+        # Assert
+        assert "mean_reversion_1h_v1" in config["name"]
+        assert config["strategy_type"] == StrategyType.MEAN_REVERSION.value
+        assert config["symbols"] == ["BTCUSDT"]
+        assert "parameters" in config
+
+    def test_get_mean_reversion_config_timeframes(self):
+        """Test mean reversion config with different timeframes."""
+        timeframes = ["5m", "15m", "1h", "4h", "1d"]
+        
+        for timeframe in timeframes:
+            # Act
+            config = StrategyConfigTemplates.get_mean_reversion_config(timeframe)
+            
+            # Assert
+            assert timeframe in config["name"]
+            assert timeframe in config["strategy_id"]
+            assert "lookback_period" in config["parameters"]
+            assert "entry_threshold" in config["parameters"]
+
+    def test_get_mean_reversion_config_risk_levels(self):
+        """Test mean reversion config with different risk levels."""
+        # Test conservative
+        conservative_config = StrategyConfigTemplates.get_mean_reversion_config(risk_level="conservative")
+        assert conservative_config["position_size_pct"] == 0.02
+        assert conservative_config["parameters"]["max_holding_time"] == 24
+        
+        # Test medium
+        medium_config = StrategyConfigTemplates.get_mean_reversion_config(risk_level="medium")
+        assert medium_config["position_size_pct"] == 0.03
+        
+        # Test aggressive
+        aggressive_config = StrategyConfigTemplates.get_mean_reversion_config(risk_level="aggressive")
+        assert aggressive_config["position_size_pct"] == 0.05
+        assert aggressive_config["parameters"]["max_holding_time"] == 72
+
+    def test_get_trend_following_config_default(self):
+        """Test trend following config with default parameters."""
+        # Act
+        config = StrategyConfigTemplates.get_trend_following_config()
+        
+        # Assert
+        assert "trend_following_1h_v1" in config["name"]
+        assert config["strategy_type"] == StrategyType.TREND_FOLLOWING.value
+        assert config["min_confidence"] == 0.65
+        assert "fast_ma" in config["parameters"]
+        assert "slow_ma" in config["parameters"]
+
+    def test_get_trend_following_config_timeframes(self):
+        """Test trend following config with different timeframes."""
+        timeframes = ["5m", "15m", "1h", "4h", "1d"]
+        
+        for timeframe in timeframes:
+            # Act
+            config = StrategyConfigTemplates.get_trend_following_config(timeframe)
+            
+            # Assert
+            assert timeframe in config["name"]
+            assert "fast_ma" in config["parameters"]
+            assert "slow_ma" in config["parameters"]
+
+    def test_get_trend_following_config_trend_strength(self):
+        """Test trend following config with different trend strengths."""
+        # Test weak
+        weak_config = StrategyConfigTemplates.get_trend_following_config(trend_strength="weak")
+        assert weak_config["parameters"]["rsi_overbought"] == 75
+        assert weak_config["parameters"]["confirmation_candles"] == 1
+        
+        # Test medium
+        medium_config = StrategyConfigTemplates.get_trend_following_config(trend_strength="medium")
+        assert medium_config["parameters"]["rsi_overbought"] == 70
+        assert medium_config["parameters"]["confirmation_candles"] == 2
+        
+        # Test strong
+        strong_config = StrategyConfigTemplates.get_trend_following_config(trend_strength="strong")
+        assert strong_config["parameters"]["rsi_overbought"] == 65
+        assert strong_config["parameters"]["confirmation_candles"] == 3
+
+    def test_get_market_making_config_default(self):
+        """Test market making config with default parameters."""
+        # Act
+        config = StrategyConfigTemplates.get_market_making_config()
+        
+        # Assert
+        assert "market_making_btcusdt_v1" in config["name"]
+        assert config["strategy_type"] == StrategyType.MARKET_MAKING.value
+        assert config["symbols"] == ["BTCUSDT"]
+        assert "base_spread" in config["parameters"]
+
+    def test_get_market_making_config_custom_symbol(self):
+        """Test market making config with custom symbol."""
+        # Act
+        config = StrategyConfigTemplates.get_market_making_config("ETHUSDT")
+        
+        # Assert
+        assert config["symbols"] == ["ETHUSDT"]
+        assert "ethusdt" in config["name"]
+
+    def test_get_market_making_config_spread_types(self):
+        """Test market making config with different spread types."""
+        # Test fixed
+        fixed_config = StrategyConfigTemplates.get_market_making_config(spread_type="fixed")
+        assert fixed_config["parameters"]["base_spread"] == 0.001
+        assert fixed_config["parameters"]["adaptive_spreads"] is False
+        
+        # Test dynamic
+        dynamic_config = StrategyConfigTemplates.get_market_making_config(spread_type="dynamic")
+        assert dynamic_config["parameters"]["adaptive_spreads"] is True
+        assert dynamic_config["parameters"]["competition_monitoring"] is True
+        
+        # Test adaptive
+        adaptive_config = StrategyConfigTemplates.get_market_making_config(spread_type="adaptive")
+        assert adaptive_config["parameters"]["spread_optimization"] is True
+
+    def test_get_market_making_config_inventory_management(self):
+        """Test market making config with different inventory management."""
+        # Test conservative
+        conservative_config = StrategyConfigTemplates.get_market_making_config(
+            inventory_management="conservative"
+        )
+        assert conservative_config["parameters"]["target_inventory"] == 0.3
+        assert conservative_config["parameters"]["max_inventory"] == 0.8
+        
+        # Test balanced
+        balanced_config = StrategyConfigTemplates.get_market_making_config(
+            inventory_management="balanced"
+        )
+        assert balanced_config["parameters"]["target_inventory"] == 0.5
+        
+        # Test aggressive
+        aggressive_config = StrategyConfigTemplates.get_market_making_config(
+            inventory_management="aggressive"
+        )
+        assert aggressive_config["parameters"]["target_inventory"] == 0.7
+        assert aggressive_config["parameters"]["max_inventory"] == 1.5
+
+    def test_get_volatility_breakout_config_default(self):
+        """Test volatility breakout config with default parameters."""
+        # Act
+        config = StrategyConfigTemplates.get_volatility_breakout_config()
+        
+        # Assert
+        assert "volatility_breakout_medium_v1" in config["name"]
+        assert config["strategy_type"] == StrategyType.MOMENTUM.value
+        assert "breakout_threshold" in config["parameters"]
+
+    def test_get_volatility_breakout_config_volatility_regimes(self):
+        """Test volatility breakout config with different volatility regimes."""
+        # Test low
+        low_config = StrategyConfigTemplates.get_volatility_breakout_config("low")
+        assert low_config["parameters"]["breakout_threshold"] == 1.5
+        assert low_config["parameters"]["volume_multiplier"] == 2.0
+        
+        # Test medium
+        medium_config = StrategyConfigTemplates.get_volatility_breakout_config("medium")
+        assert medium_config["parameters"]["breakout_threshold"] == 2.0
+        
+        # Test high
+        high_config = StrategyConfigTemplates.get_volatility_breakout_config("high")
+        assert high_config["parameters"]["breakout_threshold"] == 2.5
+        assert high_config["parameters"]["volume_multiplier"] == 1.5
+
+    def test_get_volatility_breakout_config_breakout_types(self):
+        """Test volatility breakout config with different breakout types."""
+        # Test range
+        range_config = StrategyConfigTemplates.get_volatility_breakout_config(
+            breakout_type="range"
+        )
+        assert "consolidation_period" in range_config["parameters"]
+        assert range_config["parameters"]["false_breakout_filter"] is True
+        
+        # Test bollinger
+        bollinger_config = StrategyConfigTemplates.get_volatility_breakout_config(
+            breakout_type="bollinger"
+        )
+        assert "bb_period" in bollinger_config["parameters"]
+        assert bollinger_config["parameters"]["squeeze_detection"] is True
+        
+        # Test atr
+        atr_config = StrategyConfigTemplates.get_volatility_breakout_config(
+            breakout_type="atr"
+        )
+        assert "atr_period" in atr_config["parameters"]
+        assert atr_config["parameters"]["trailing_atr"] is True
+
+    def test_get_ensemble_config_default(self):
+        """Test ensemble config with default parameters."""
+        # Act
+        config = StrategyConfigTemplates.get_ensemble_config()
+        
+        # Assert
+        assert "ensemble_weighted_v1" in config["name"]
+        assert config["strategy_type"] == StrategyType.CUSTOM.value
+        assert "voting_method" in config["parameters"]
+        assert "strategy_types" in config["parameters"]
+
+    def test_get_ensemble_config_custom_strategies(self):
+        """Test ensemble config with custom strategy types."""
+        # Arrange
+        custom_strategies = ["mean_reversion", "trend_following"]
+        
+        # Act
+        config = StrategyConfigTemplates.get_ensemble_config(strategy_types=custom_strategies)
+        
+        # Assert
+        assert config["parameters"]["strategy_types"] == custom_strategies
+        assert config["parameters"]["max_strategies"] == len(custom_strategies)
+
+    def test_get_ensemble_config_voting_methods(self):
+        """Test ensemble config with different voting methods."""
+        voting_methods = ["majority", "weighted", "confidence"]
+        
+        for method in voting_methods:
+            # Act
+            config = StrategyConfigTemplates.get_ensemble_config(voting_method=method)
+            
+            # Assert
+            assert method in config["name"]
+            assert config["parameters"]["voting_method"] == method
+
+    def test_get_ensemble_config_correlation_limits(self):
+        """Test ensemble config with different correlation limits."""
+        # Act
+        config = StrategyConfigTemplates.get_ensemble_config(correlation_limit=0.5)
+        
+        # Assert
+        assert config["parameters"]["correlation_limit"] == 0.5
+        assert config["monitoring"]["alert_thresholds"]["max_strategy_correlation"] == 0.5
+
+    def test_get_all_templates(self):
+        """Test getting all available templates."""
+        # Act
+        all_templates = StrategyConfigTemplates.get_all_templates()
+        
+        # Assert
+        assert isinstance(all_templates, dict)
+        assert len(all_templates) > 15  # Should have many templates
+        
+        # Check specific templates exist
+        assert "arbitrage_conservative" in all_templates
+        assert "mean_reversion_1h" in all_templates
+        assert "trend_following_1h" in all_templates
+        assert "market_making_btc" in all_templates
+        assert "volatility_breakout_medium" in all_templates
+        assert "ensemble_balanced" in all_templates
+
+    def test_get_all_templates_structure(self):
+        """Test that all templates have proper structure."""
+        # Act
+        all_templates = StrategyConfigTemplates.get_all_templates()
+        
+        # Assert
+        for template_name, template_config in all_templates.items():
+            assert "name" in template_config
+            assert "strategy_id" in template_config
+            assert "strategy_type" in template_config
+            assert "parameters" in template_config
+            assert "backtesting" in template_config
+            assert "monitoring" in template_config
+
+    def test_get_template_by_name_success(self):
+        """Test getting template by name successfully."""
+        # Act
+        template = StrategyConfigTemplates.get_template_by_name("arbitrage_conservative")
+        
+        # Assert
+        assert template is not None
+        assert template["name"] == "arbitrage_scanner_v1"
+        assert "conservative" in str(template["parameters"]["min_profit_threshold"])
+
+    def test_get_template_by_name_not_found(self):
+        """Test getting template by name when not found."""
+        # Act & Assert
+        with pytest.raises(KeyError) as exc_info:
+            StrategyConfigTemplates.get_template_by_name("nonexistent_template")
+        
+        assert "Template 'nonexistent_template' not found" in str(exc_info.value)
+        assert "Available:" in str(exc_info.value)
+
+    def test_list_available_templates(self):
+        """Test listing available template names."""
+        # Act
+        templates = StrategyConfigTemplates.list_available_templates()
+        
+        # Assert
+        assert isinstance(templates, list)
+        assert len(templates) > 15
+        assert "arbitrage_conservative" in templates
+        assert "ensemble_balanced" in templates
+
+    def test_get_templates_by_strategy_type(self):
+        """Test getting templates by strategy type."""
+        # Test arbitrage templates
+        arbitrage_templates = StrategyConfigTemplates.get_templates_by_strategy_type("arbitrage")
+        assert len(arbitrage_templates) >= 3
+        for name in arbitrage_templates.keys():
+            assert "arbitrage" in name.lower()
+        
+        # Test mean reversion templates
+        mean_rev_templates = StrategyConfigTemplates.get_templates_by_strategy_type("mean_reversion")
+        assert len(mean_rev_templates) >= 4
+        for name in mean_rev_templates.keys():
+            assert "mean_reversion" in name.lower()
+        
+        # Test trend following templates
+        trend_templates = StrategyConfigTemplates.get_templates_by_strategy_type("trend")
+        assert len(trend_templates) >= 4
+        for name in trend_templates.keys():
+            assert "trend" in name.lower()
+
+    def test_get_templates_by_strategy_type_case_insensitive(self):
+        """Test getting templates by strategy type is case insensitive."""
+        # Act
+        upper_templates = StrategyConfigTemplates.get_templates_by_strategy_type("ARBITRAGE")
+        lower_templates = StrategyConfigTemplates.get_templates_by_strategy_type("arbitrage")
+        
+        # Assert
+        assert upper_templates == lower_templates
+        assert len(upper_templates) >= 3
+
+    def test_get_templates_by_strategy_type_empty_result(self):
+        """Test getting templates by nonexistent strategy type."""
+        # Act
+        templates = StrategyConfigTemplates.get_templates_by_strategy_type("nonexistent")
+        
+        # Assert
+        assert templates == {}
+
+    def test_validate_template_valid(self):
+        """Test validating a valid template."""
+        # Arrange
+        valid_template = StrategyConfigTemplates.get_arbitrage_scanner_config()
+        
+        # Act
+        is_valid, errors = StrategyConfigTemplates.validate_template(valid_template)
+        
+        # Assert
+        assert is_valid is True
+        assert errors == []
+
+    def test_validate_template_missing_required_fields(self):
+        """Test validating template with missing required fields."""
+        # Arrange
+        invalid_template = {
+            "name": "test",
+            # Missing other required fields
+        }
+        
+        # Act
+        is_valid, errors = StrategyConfigTemplates.validate_template(invalid_template)
+        
+        # Assert
+        assert is_valid is False
+        assert len(errors) > 0
+        assert any("Missing required field" in error for error in errors)
+
+    def test_validate_template_invalid_numeric_values(self):
+        """Test validating template with invalid numeric values."""
+        # Arrange
+        template = StrategyConfigTemplates.get_mean_reversion_config()
+        template["position_size_pct"] = 2.0  # Too high (200%)
+        template["min_confidence"] = 1.5    # Too high (> 1.0)
+        template["parameters"]["stop_loss_pct"] = 0.5  # Too high (50%)
+        
+        # Act
+        is_valid, errors = StrategyConfigTemplates.validate_template(template)
+        
+        # Assert
+        assert is_valid is False
+        assert len(errors) >= 3
+        assert any("Position size must be" in error for error in errors)
+        assert any("Min confidence must be" in error for error in errors)
+        assert any("Stop loss must be" in error for error in errors)
+
+    def test_validate_template_invalid_backtesting_config(self):
+        """Test validating template with invalid backtesting config."""
+        # Arrange
+        template = StrategyConfigTemplates.get_mean_reversion_config()
+        template["backtesting"] = {
+            "enabled": True
+            # Missing required fields
+        }
+        
+        # Act
+        is_valid, errors = StrategyConfigTemplates.validate_template(template)
+        
+        # Assert
+        assert is_valid is False
+        assert any("Backtesting missing required field" in error for error in errors)
+
+    def test_validate_template_disabled_backtesting(self):
+        """Test validating template with disabled backtesting."""
+        # Arrange
+        template = StrategyConfigTemplates.get_mean_reversion_config()
+        template["backtesting"]["enabled"] = False
+        # Remove required fields since backtesting is disabled
+        del template["backtesting"]["start_date"]
+        del template["backtesting"]["end_date"]
+        del template["backtesting"]["initial_capital"]
+        
+        # Act
+        is_valid, errors = StrategyConfigTemplates.validate_template(template)
+        
+        # Assert
+        assert is_valid is True  # Should be valid since backtesting is disabled
+
+    def test_validate_template_non_numeric_parameters(self):
+        """Test validating template with non-numeric parameters in range checks."""
+        # Arrange
+        template = StrategyConfigTemplates.get_mean_reversion_config()
+        template["position_size_pct"] = "not_a_number"
+        template["min_confidence"] = None
+        
+        # Act
+        is_valid, errors = StrategyConfigTemplates.validate_template(template)
+        
+        # Assert
+        assert is_valid is False
+        assert any("Position size must be" in error for error in errors)
+        assert any("Min confidence must be" in error for error in errors)
+
+    def test_template_immutability(self):
+        """Test that templates returned are not affected by modifications."""
+        # Act
+        template1 = StrategyConfigTemplates.get_mean_reversion_config()
+        template2 = StrategyConfigTemplates.get_mean_reversion_config()
+        
+        # Modify template1
+        template1["name"] = "modified_name"
+        template1["parameters"]["new_param"] = "new_value"
+        
+        # Assert template2 is unaffected
+        assert template2["name"] != "modified_name"
+        assert "new_param" not in template2["parameters"]
+
+    def test_template_parameter_defaults(self):
+        """Test that template methods handle default parameter values correctly."""
+        # Test arbitrage with None parameters
+        config1 = StrategyConfigTemplates.get_arbitrage_scanner_config(
+            exchanges=None, symbols=None
+        )
+        config2 = StrategyConfigTemplates.get_arbitrage_scanner_config()
+        
+        # Should use same defaults
+        assert config1["parameters"]["exchanges"] == config2["parameters"]["exchanges"]
+        assert config1["symbols"] == config2["symbols"]
+
+    def test_strategy_type_enum_values(self):
+        """Test that all templates use correct StrategyType enum values."""
+        # Act
+        all_templates = StrategyConfigTemplates.get_all_templates()
+        
+        # Assert
+        valid_strategy_types = {st.value for st in StrategyType}
+        
+        for template_name, template in all_templates.items():
+            strategy_type = template["strategy_type"]
+            assert strategy_type in valid_strategy_types, (
+                f"Template {template_name} has invalid strategy_type: {strategy_type}"
+            )
+
+    def test_template_backtesting_consistency(self):
+        """Test that all templates have consistent backtesting configuration."""
+        # Act
+        all_templates = StrategyConfigTemplates.get_all_templates()
+        
+        # Assert
+        for template_name, template in all_templates.items():
+            backtesting = template["backtesting"]
+            assert backtesting["enabled"] is True
+            assert "start_date" in backtesting
+            assert "end_date" in backtesting
+            assert "initial_capital" in backtesting
+            assert "commission" in backtesting
+            assert "slippage" in backtesting
+
+    def test_template_monitoring_consistency(self):
+        """Test that all templates have consistent monitoring configuration."""
+        # Act
+        all_templates = StrategyConfigTemplates.get_all_templates()
+        
+        # Assert
+        for template_name, template in all_templates.items():
+            monitoring = template["monitoring"]
+            assert monitoring["enabled"] is True
+            assert "metrics_interval" in monitoring
+            assert "alert_thresholds" in monitoring
+            assert isinstance(monitoring["alert_thresholds"], dict)
+
+    def test_template_parameter_ranges(self):
+        """Test that template parameters are within reasonable ranges."""
+        # Act
+        all_templates = StrategyConfigTemplates.get_all_templates()
+        
+        # Assert
+        for template_name, template in all_templates.items():
+            # Position size should be reasonable (0.1% to 15%)
+            position_size = template.get("position_size_pct", 0)
+            assert 0.001 <= position_size <= 0.15, (
+                f"Template {template_name} has unreasonable position_size_pct: {position_size}"
+            )
+            
+            # Min confidence should be reasonable (0.1 to 1.0)
+            min_confidence = template.get("min_confidence", 0)
+            assert 0.1 <= min_confidence <= 1.0, (
+                f"Template {template_name} has unreasonable min_confidence: {min_confidence}"
+            )
+
+    def test_template_required_fields_completeness(self):
+        """Test that all templates have all required fields for strategy execution."""
+        # Act
+        all_templates = StrategyConfigTemplates.get_all_templates()
+        
+        # Define required fields
+        required_fields = [
+            "name", "strategy_id", "strategy_type", "exchange_type",
+            "symbols", "requires_risk_manager", "requires_exchange",
+            "min_confidence", "position_size_pct", "parameters"
+        ]
+        
+        # Assert
+        for template_name, template in all_templates.items():
+            for field in required_fields:
+                assert field in template, (
+                    f"Template {template_name} missing required field: {field}"
+                )
+
+    def test_class_methods_are_static(self):
+        """Test that template methods can be called without instantiation."""
+        # These should all work without creating an instance
+        
+        # Act & Assert - should not raise exceptions
+        config1 = StrategyConfigTemplates.get_arbitrage_scanner_config()
+        config2 = StrategyConfigTemplates.get_mean_reversion_config()
+        templates = StrategyConfigTemplates.get_all_templates()
+        template_names = StrategyConfigTemplates.list_available_templates()
+        
+        # Basic assertions
+        assert config1 is not None
+        assert config2 is not None
+        assert len(templates) > 0
+        assert len(template_names) > 0

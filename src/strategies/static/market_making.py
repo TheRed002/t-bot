@@ -13,7 +13,7 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
 
-import numpy as np
+from src.core.exceptions import ValidationError
 
 # From P-001 - Use structured logging
 # Logger is provided by BaseStrategy (via BaseComponent)
@@ -26,13 +26,18 @@ from src.core.types import (
     StrategyType,
 )
 
+# Error handling decorators
+from src.error_handling.decorators import with_circuit_breaker, with_error_context, with_retry
+
 # From P-008+ - Use risk management
 # MANDATORY: Import from P-011 - NEVER recreate the base strategy
 from src.strategies.base import BaseStrategy
+from src.strategies.dependencies import StrategyServiceContainer
 
 # From P-007A - Use decorators and validators
 from src.utils.decorators import time_execution
-from src.utils.validators import validate_price, validate_quantity
+from src.utils.strategy_commons import StrategyCommons
+from src.utils.validators import ValidationFramework
 
 
 @dataclass
@@ -77,14 +82,14 @@ class MarketMakingStrategy(BaseStrategy):
     - Cross-exchange rate limit synchronization
     """
 
-    def __init__(self, config: dict[str, Any]):
+    def __init__(self, config: dict[str, Any], services: StrategyServiceContainer | None = None):
         """Initialize Market Making Strategy.
 
         Args:
             config: Strategy configuration dictionary
+            services: Service container with all required dependencies
         """
-        super().__init__(config)
-        self.strategy_type = StrategyType.MARKET_MAKING
+        super().__init__(config, services)
 
         # Strategy-specific parameters with defaults
         self.base_spread = Decimal(str(self.config.parameters.get("base_spread", 0.001)))  # 0.1%
@@ -133,10 +138,11 @@ class MarketMakingStrategy(BaseStrategy):
             last_rebalance=datetime.now(timezone.utc),
         )
 
-        # Market data tracking
-        self.price_history: list[float] = []
-        self.volatility_history: list[float] = []
-        self.spread_history: list[float] = []
+        # Initialize strategy commons for shared functionality
+        self.commons = StrategyCommons(self.name, {"max_history_length": 200})
+
+        # Store current symbol for indicator calculations
+        self._current_symbol: str | None = None
 
         # Performance tracking
         self.total_trades = 0
@@ -153,6 +159,14 @@ class MarketMakingStrategy(BaseStrategy):
             target_inventory=float(self.target_inventory),
         )
 
+    @property
+    def strategy_type(self) -> StrategyType:
+        """Get the strategy type."""
+        return StrategyType.MARKET_MAKING
+
+    @with_circuit_breaker(failure_threshold=5, recovery_timeout=30)
+    @with_error_context(operation="market_making_signal_generation")
+    @with_retry(max_attempts=3, base_delay=Decimal("1.0"))
     @time_execution
     async def _generate_signals_impl(self, data: MarketData) -> list[Signal]:
         """Generate market making signals from market data.
@@ -174,12 +188,30 @@ class MarketMakingStrategy(BaseStrategy):
                 )
                 return []
 
-            # Update price history
-            self._update_price_history(data)
+            # Store current symbol for indicator calculations
+            self._current_symbol = data.symbol
 
-            # Calculate current spread and volatility
+            # Calculate current spread and volatility using data service
             current_spread = (data.ask - data.bid) / data.bid
-            current_volatility = self._calculate_volatility()
+
+            # Use data service for volatility calculation
+            if self.services.data_service:
+                try:
+                    volatility_result = await self.services.data_service.get_volatility(
+                        symbol=data.symbol,
+                        period=20
+                    )
+                    current_volatility = float(volatility_result) if volatility_result else 0.02
+                except Exception as e:
+                    self.logger.warning(
+                        "Failed to get volatility from data service",
+                        symbol=data.symbol,
+                        error=str(e)
+                    )
+                    current_volatility = 0.02  # Fallback volatility
+            else:
+                self.logger.warning("Data service not available, using default volatility")
+                current_volatility = 0.02  # Default volatility
 
             # Generate signals for each order level
             signals = []
@@ -195,16 +227,16 @@ class MarketMakingStrategy(BaseStrategy):
                 bid_price = data.bid * (Decimal("1") - level_spread / Decimal("2"))
                 bid_signal = Signal(
                     direction=SignalDirection.BUY,
-                    confidence=0.8,  # High confidence for market making
+                    strength=Decimal("0.8"),  # High confidence for market making
                     timestamp=data.timestamp,
                     symbol=data.symbol,
-                    strategy_name=self.name,
+                    source=self.name,
                     metadata={
                         "order_type": "limit",
                         "level": level,
-                        "price": float(bid_price),
-                        "size": float(level_size),
-                        "spread": float(level_spread),
+                        "price": str(bid_price),  # Keep as string for precision
+                        "size": str(level_size),  # Keep as string for precision
+                        "spread": str(level_spread),
                         "side": "bid",
                     },
                 )
@@ -214,16 +246,16 @@ class MarketMakingStrategy(BaseStrategy):
                 ask_price = data.ask * (Decimal("1") + level_spread / Decimal("2"))
                 ask_signal = Signal(
                     direction=SignalDirection.SELL,
-                    confidence=0.8,  # High confidence for market making
+                    strength=Decimal("0.8"),  # High confidence for market making
                     timestamp=data.timestamp,
                     symbol=data.symbol,
-                    strategy_name=self.name,
+                    source=self.name,
                     metadata={
                         "order_type": "limit",
                         "level": level,
-                        "price": float(ask_price),
-                        "size": float(level_size),
-                        "spread": float(level_spread),
+                        "price": str(ask_price),  # Keep as string for precision
+                        "size": str(level_size),  # Keep as string for precision
+                        "spread": str(level_spread),
                         "side": "ask",
                     },
                 )
@@ -264,15 +296,21 @@ class MarketMakingStrategy(BaseStrategy):
 
         # Adjust for volatility
         if self.adaptive_spreads and volatility > 0:
-            volatility_adjustment = min(volatility * self.volatility_multiplier, 0.01)
-            level_spread += Decimal(str(volatility_adjustment))
+            volatility_adjustment = min(
+                Decimal(str(volatility)) * Decimal(str(self.volatility_multiplier)), Decimal("0.01")
+            )
+            level_spread += volatility_adjustment
 
         # Adjust for inventory skew with correlation consideration
         if self.inventory_skew_enabled:
             # CRITICAL FIX: Consider correlation in inventory risk
             correlation_factor = self._calculate_correlation_risk_factor()
-            inventory_adjustment = self.inventory_state.inventory_skew * 0.001 * correlation_factor
-            level_spread += Decimal(str(inventory_adjustment))
+            inventory_adjustment = (
+                Decimal(str(self.inventory_state.inventory_skew))
+                * Decimal("0.001")
+                * correlation_factor
+            )
+            level_spread += inventory_adjustment
 
         # Ensure minimum spread
         min_spread = Decimal("0.0001")  # 0.01%
@@ -284,8 +322,8 @@ class MarketMakingStrategy(BaseStrategy):
         Returns:
             Risk factor between 1.0 (no correlation) and 2.0 (high correlation)
         """
-        # TODO: Implement actual correlation calculation with portfolio
-        # For now, return conservative estimate
+        # TBD: Implement portfolio correlation calculation for advanced risk modeling
+        # Currently using conservative estimate
         base_factor = Decimal("1.0")
 
         # Increase risk factor if we have high inventory
@@ -321,42 +359,6 @@ class MarketMakingStrategy(BaseStrategy):
 
         return size
 
-    def _calculate_volatility(self) -> float:
-        """Calculate current volatility from price history.
-
-        Returns:
-            Current volatility as a percentage
-        """
-        if len(self.price_history) < 20:
-            return 0.02  # Default 2% volatility
-
-        # Calculate rolling volatility
-        prices = np.array(self.price_history[-20:])
-        returns = np.diff(prices) / prices[:-1]
-        volatility = np.std(returns) * np.sqrt(252)  # Annualized
-
-        return float(volatility)
-
-    def _update_price_history(self, data: MarketData) -> None:
-        """Update price history for calculations.
-
-        Args:
-            data: Market data
-        """
-        self.price_history.append(float(data.price))
-
-        # Keep only last 100 prices
-        if len(self.price_history) > 100:
-            self.price_history = self.price_history[-100:]
-
-        # Update spread history
-        if data.bid and data.ask:
-            spread = (data.ask - data.bid) / data.bid
-            self.spread_history.append(float(spread))
-
-            if len(self.spread_history) > 100:
-                self.spread_history = self.spread_history[-100:]
-
     async def validate_signal(self, signal: Signal) -> bool:
         """Validate market making signal before execution.
 
@@ -370,9 +372,9 @@ class MarketMakingStrategy(BaseStrategy):
         """
         try:
             # Basic validation
-            if not signal or signal.confidence < self.config.min_confidence:
+            if not signal or signal.strength < self.config.min_confidence:
                 self.logger.warning(
-                    "Signal confidence too low", strategy=self.name, confidence=signal.confidence
+                    "Signal confidence too low", strategy=self.name, confidence=signal.strength
                 )
                 return False
 
@@ -383,17 +385,25 @@ class MarketMakingStrategy(BaseStrategy):
                 )
                 return False
 
-            # Validate price and size
-            price = Decimal(str(signal.metadata["price"]))
-            size = Decimal(str(signal.metadata["size"]))
+            # Validate price and size - handle both string and numeric metadata
+            price_value = signal.metadata["price"]
+            price = (
+                Decimal(str(price_value)) if not isinstance(price_value, Decimal) else price_value
+            )
+            size_value = signal.metadata["size"]
+            size = Decimal(str(size_value)) if not isinstance(size_value, Decimal) else size_value
 
-            if not validate_price(float(price), signal.symbol):
+            try:
+                ValidationFramework.validate_price(price)
+            except ValidationError:
                 self.logger.warning(
                     "Invalid price in signal", strategy=self.name, price=float(price)
                 )
                 return False
 
-            if not validate_quantity(float(size), signal.symbol):
+            try:
+                ValidationFramework.validate_quantity(size)
+            except ValidationError:
                 self.logger.warning("Invalid size in signal", strategy=self.name, size=float(size))
                 return False
 
@@ -412,8 +422,8 @@ class MarketMakingStrategy(BaseStrategy):
                 return False
 
             # Check with risk manager if available
-            if self._risk_manager:
-                if not await self._risk_manager.validate_signal(signal):
+            if self.services.risk_service:
+                if not await self.services.risk_service.validate_signal(signal):
                     self.logger.warning(
                         "Signal rejected by risk manager",
                         strategy=self.name,
@@ -452,6 +462,9 @@ class MarketMakingStrategy(BaseStrategy):
 
     def get_position_size(self, signal: Signal) -> Decimal:
         """Calculate position size for market making signal.
+        
+        This method is overridden to add strategy-specific logic on top of the
+        base risk management position sizing.
 
         Args:
             signal: Trading signal
@@ -460,16 +473,21 @@ class MarketMakingStrategy(BaseStrategy):
             Position size in base currency
         """
         try:
-            # Get size from signal metadata
-            size = Decimal(str(signal.metadata.get("size", self.base_order_size)))
+            # First get the risk-managed position size from the base class
+            base_position_size = super().get_position_size(signal)
 
-            # Apply risk management if available
-            if self._risk_manager:
-                # TODO: Integrate with risk manager for position sizing
-                pass
+            # Get strategy-specific size from signal metadata
+            requested_size = Decimal(str(signal.metadata.get("size", self.base_order_size)))
 
-            # Ensure size is within limits
-            max_size = self.max_position_value / Decimal(str(signal.metadata.get("price", 1)))
+            # Use the smaller of the two for safety
+            size = min(base_position_size, requested_size)
+
+            # Apply strategy-specific limits - use Decimal arithmetic
+            price_value = signal.metadata.get("price", 1)
+            price_decimal = (
+                Decimal(str(price_value)) if not isinstance(price_value, Decimal) else price_value
+            )
+            max_size = self.max_position_value / price_decimal
             size = min(size, max_size)
 
             return size
@@ -478,6 +496,7 @@ class MarketMakingStrategy(BaseStrategy):
             self.logger.error("Position size calculation failed", strategy=self.name, error=str(e))
             return self.base_order_size
 
+    @with_error_context(operation="market_making_position_exit")
     async def should_exit(self, position: Position, data: MarketData) -> bool:
         """Determine if market making position should be closed.
 
@@ -501,14 +520,27 @@ class MarketMakingStrategy(BaseStrategy):
             # Check for profit taking (if position is profitable)
             if position.unrealized_pnl > self.min_profit_per_trade:
                 # Consider closing if spread has narrowed significantly
-                current_spread = (data.ask - data.bid) / data.bid if data.bid and data.ask else 0
-                if current_spread < self.base_spread * Decimal("0.5"):
-                    self.logger.info(
-                        "Closing position due to narrow spread",
-                        strategy=self.name,
-                        spread=float(current_spread),
-                    )
-                    return True
+                if data.bid and data.ask and data.bid > 0:
+                    current_spread = (data.ask - data.bid) / data.bid
+                    if current_spread < self.base_spread * Decimal("0.5"):
+                        self.logger.info(
+                            "Closing position due to narrow spread",
+                            strategy=self.name,
+                            spread=str(current_spread),
+                        )
+                        return True
+                # Handle case where bid/ask data is not available
+                elif not data.bid or not data.ask:
+                    return False
+                else:
+                    current_spread = Decimal("0")
+                    if current_spread < self.base_spread * Decimal("0.5"):
+                        self.logger.info(
+                            "Closing position due to narrow spread",
+                            strategy=self.name,
+                            spread=str(current_spread),
+                        )
+                        return True
 
             # Check for inventory rebalancing
             if await self._should_rebalance_inventory(position):
@@ -567,6 +599,7 @@ class MarketMakingStrategy(BaseStrategy):
 
         return False
 
+    @with_error_context(operation="inventory_state_update")
     async def update_inventory_state(self, new_position: Position) -> None:
         """Update inventory state after position change.
 
@@ -595,6 +628,7 @@ class MarketMakingStrategy(BaseStrategy):
         except Exception as e:
             self.logger.error("Inventory state update failed", strategy=self.name, error=str(e))
 
+    @with_error_context(operation="performance_metrics_update")
     async def update_performance_metrics(self, trade_result: dict[str, Any]) -> None:
         """Update performance metrics after trade execution.
 
@@ -636,6 +670,9 @@ class MarketMakingStrategy(BaseStrategy):
 
         except Exception as e:
             self.logger.error("Performance metrics update failed", strategy=self.name, error=str(e))
+
+
+    # Helper methods for accessing data through data service
 
     def get_strategy_info(self) -> dict[str, Any]:
         """Get comprehensive strategy information.

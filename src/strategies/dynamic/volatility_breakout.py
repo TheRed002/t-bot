@@ -18,7 +18,7 @@ CRITICAL: This strategy follows the perfect architecture from Day 12.
 
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
@@ -37,7 +37,10 @@ from src.data.features.technical_indicators import TechnicalIndicators
 from src.risk_management.adaptive_risk import AdaptiveRiskManager
 from src.risk_management.regime_detection import MarketRegimeDetector
 from src.strategies.base import BaseStrategy
-from src.strategies.service import StrategyService
+from src.strategies.dependencies import StrategyServiceContainer
+
+if TYPE_CHECKING:
+    from src.strategies.service import StrategyService
 
 # MANDATORY: Import from P-007A - Decorators and utilities
 from src.utils.decorators import retry, time_execution
@@ -87,9 +90,9 @@ class VolatilityBreakoutStrategy(BaseStrategy):
         """Set the strategy status."""
         self._status = value
 
-    def __init__(self, config: dict[str, Any]):
+    def __init__(self, config: dict[str, Any], services: StrategyServiceContainer | None = None):
         """Initialize volatility breakout strategy with enhanced architecture."""
-        super().__init__(config)
+        super().__init__(config, services)
 
         # Override version for refactored strategy
         self._version = "2.0.0-refactored"
@@ -110,7 +113,7 @@ class VolatilityBreakoutStrategy(BaseStrategy):
 
         # Service layer integrations (injected via BaseStrategy)
         self._technical_indicators: TechnicalIndicators | None = None
-        self._strategy_service: StrategyService | None = None
+        self._strategy_service: "StrategyService | None" = None
         self.regime_detector: MarketRegimeDetector | None = None
         self.adaptive_risk_manager: AdaptiveRiskManager | None = None
 
@@ -152,7 +155,7 @@ class VolatilityBreakoutStrategy(BaseStrategy):
         self._technical_indicators = technical_indicators
         self.logger.info("Technical indicators service set", strategy=self.name)
 
-    def set_strategy_service(self, strategy_service: StrategyService) -> None:
+    def set_strategy_service(self, strategy_service: "StrategyService") -> None:
         """Set strategy service for lifecycle management."""
         self._strategy_service = strategy_service
         self.logger.info("Strategy service set", strategy=self.name)
@@ -224,20 +227,20 @@ class VolatilityBreakoutStrategy(BaseStrategy):
                 return []
 
             # Calculate breakout levels with regime adjustments
-            breakout_levels = await self._calculate_breakout_levels_enhanced(
+            breakout_levels = await self._calculate_breakout_levels(
                 symbol, indicators, current_regime
             )
 
             # Generate breakout signals
-            signals = await self._generate_breakout_signals_enhanced(
+            signals = await self._generate_breakout_signals(
                 data, indicators, breakout_levels, current_regime
             )
 
             # Apply regime-specific filtering
-            signals = await self._apply_enhanced_regime_filtering(signals, current_regime)
+            signals = await self._apply_regime_filtering(signals, current_regime)
 
             # Apply time-decay adjustments
-            signals = await self._apply_enhanced_time_decay(signals, symbol)
+            signals = await self._apply_time_decay(signals, symbol)
 
             # Update strategy state and metrics
             await self._update_strategy_state(symbol, signals, indicators, current_regime)
@@ -394,7 +397,7 @@ class VolatilityBreakoutStrategy(BaseStrategy):
                 return None
 
             # Calculate consolidation score using service data
-            consolidation_score = await self._calculate_consolidation_score_enhanced(
+            consolidation_score = await self._calculate_consolidation_score(
                 symbol, price_data
             )
             indicators["consolidation_score"] = consolidation_score
@@ -439,10 +442,10 @@ class VolatilityBreakoutStrategy(BaseStrategy):
             )
             return None
 
-    async def _calculate_consolidation_score_enhanced(
+    async def _calculate_consolidation_score(
         self, symbol: str, price_data: list[MarketData]
     ) -> float:
-        """Calculate enhanced consolidation score using service data."""
+        """Calculate consolidation score using service data."""
         try:
             if len(price_data) < self.consolidation_period:
                 return 0.0
@@ -516,11 +519,11 @@ class VolatilityBreakoutStrategy(BaseStrategy):
             # Consider it a squeeze if band width is less than 4% of middle price
             return band_width / middle_price < 0.04 if middle_price > 0 else False
 
-        except (KeyError, ValueError, TypeError, IndexError) as e:
+        except (KeyError, ValueError, TypeError, IndexError):
             # Bollinger band calculation errors
             return False
         except Exception as e:
-            # Unexpected errors in squeeze detection
+            logger.error(f"Unexpected error in squeeze detection: {e}")
             return False
 
     def _get_bb_position(self, bb_data: dict, current_price: Decimal) -> str:
@@ -540,17 +543,17 @@ class VolatilityBreakoutStrategy(BaseStrategy):
             else:
                 return "inside_bands"
 
-        except (KeyError, ValueError, TypeError) as e:
+        except (KeyError, ValueError, TypeError):
             # Bollinger band position calculation errors
             return "unknown"
         except Exception as e:
-            # Unexpected errors in position calculation
+            logger.error(f"Unexpected error in position calculation: {e}")
             return "unknown"
 
-    async def _calculate_breakout_levels_enhanced(
+    async def _calculate_breakout_levels(
         self, symbol: str, indicators: dict[str, Any], current_regime: MarketRegime | None
     ) -> dict[str, float]:
-        """Calculate enhanced breakout levels using ATR and regime adjustments."""
+        """Calculate breakout levels using ATR and regime adjustments."""
         try:
             if not self._data_service:
                 return {}
@@ -627,15 +630,15 @@ class VolatilityBreakoutStrategy(BaseStrategy):
 
         return regime_adjustments.get(regime, 1.0)
 
-    async def _generate_breakout_signals_enhanced(
+    async def _generate_breakout_signals(
         self,
         data: MarketData,
         indicators: dict[str, Any],
         breakout_levels: dict[str, float],
         current_regime: MarketRegime | None,
     ) -> list[Signal]:
-        """Generate enhanced breakout signals with comprehensive validation."""
-        signals = []
+        """Generate breakout signals with validation."""
+        signals: list[Any] = []
 
         try:
             if not breakout_levels:
@@ -656,7 +659,7 @@ class VolatilityBreakoutStrategy(BaseStrategy):
                 and consolidation_score > min_consolidation
                 and (not volume_required or volume_confirmation)
             ):
-                confidence = self._calculate_enhanced_breakout_confidence(
+                confidence = self._calculate_breakout_confidence(
                     "upper", current_price, breakout_levels, indicators, current_regime
                 )
 
@@ -685,7 +688,7 @@ class VolatilityBreakoutStrategy(BaseStrategy):
                 and consolidation_score > min_consolidation
                 and (not volume_required or volume_confirmation)
             ):
-                confidence = self._calculate_enhanced_breakout_confidence(
+                confidence = self._calculate_breakout_confidence(
                     "lower", current_price, breakout_levels, indicators, current_regime
                 )
 
@@ -723,7 +726,7 @@ class VolatilityBreakoutStrategy(BaseStrategy):
             )
             return []
 
-    def _calculate_enhanced_breakout_confidence(
+    def _calculate_breakout_confidence(
         self,
         breakout_type: str,
         current_price: float,
@@ -731,7 +734,7 @@ class VolatilityBreakoutStrategy(BaseStrategy):
         indicators: dict[str, Any],
         regime: MarketRegime | None,
     ) -> float:
-        """Calculate enhanced confidence for breakout signals."""
+        """Calculate confidence for breakout signals."""
         try:
             # Base confidence from breakout strength
             if breakout_type == "upper":
@@ -765,14 +768,14 @@ class VolatilityBreakoutStrategy(BaseStrategy):
             regime_multiplier = self._get_regime_confidence_multiplier(regime)
 
             # Combine all factors
-            enhanced_confidence = (
+            confidence = (
                 base_confidence + consolidation_boost + volume_boost + bb_squeeze_boost + atr_boost
             ) * regime_multiplier
 
-            return min(enhanced_confidence, 0.95)
+            return min(confidence, 0.95)
 
         except Exception as e:
-            self.logger.error("Enhanced breakout confidence calculation failed", error=str(e))
+            self.logger.error("Breakout confidence calculation failed", error=str(e))
             return 0.1
 
     def _get_regime_confidence_multiplier(self, regime: MarketRegime | None) -> float:
@@ -794,10 +797,10 @@ class VolatilityBreakoutStrategy(BaseStrategy):
 
         return confidence_multipliers.get(regime, 1.0)
 
-    async def _apply_enhanced_regime_filtering(
+    async def _apply_regime_filtering(
         self, signals: list[Signal], current_regime: MarketRegime | None
     ) -> list[Signal]:
-        """Apply enhanced regime-specific filtering for breakout signals."""
+        """Apply regime-specific filtering for breakout signals."""
         try:
             if not signals or not current_regime:
                 return signals
@@ -805,7 +808,7 @@ class VolatilityBreakoutStrategy(BaseStrategy):
             filtered_signals = []
 
             for signal in signals:
-                if self._is_signal_valid_for_regime_enhanced(signal, current_regime):
+                if self._is_signal_valid_for_regime(signal, current_regime):
                     # Get adaptive parameters if available
                     adaptive_params = None
                     if self.adaptive_risk_manager:
@@ -829,7 +832,7 @@ class VolatilityBreakoutStrategy(BaseStrategy):
                     filtered_signals.append(signal)
                 else:
                     self.logger.debug(
-                        "Signal filtered out by enhanced regime conditions",
+                        "Signal filtered out by regime conditions",
                         strategy=self.name,
                         symbol=signal.symbol,
                         regime=current_regime.value,
@@ -837,7 +840,7 @@ class VolatilityBreakoutStrategy(BaseStrategy):
                     )
 
             self.logger.debug(
-                "Applied enhanced regime filtering",
+                "Applied regime filtering",
                 strategy=self.name,
                 original_count=len(signals),
                 filtered_count=len(filtered_signals),
@@ -848,14 +851,14 @@ class VolatilityBreakoutStrategy(BaseStrategy):
 
         except Exception as e:
             self.logger.error(
-                "Enhanced regime filtering failed",
+                "Regime filtering failed",
                 strategy=self.name,
                 error=str(e),
             )
             return signals
 
-    def _is_signal_valid_for_regime_enhanced(self, signal: Signal, regime: MarketRegime) -> bool:
-        """Enhanced regime-specific validation for breakout signals."""
+    def _is_signal_valid_for_regime(self, signal: Signal, regime: MarketRegime) -> bool:
+        """Regime-specific validation for breakout signals."""
         try:
             # Get signal metadata
             consolidation_score = signal.metadata.get("consolidation_score", 0.0)
@@ -863,7 +866,7 @@ class VolatilityBreakoutStrategy(BaseStrategy):
             volume_confirmation = signal.metadata.get("volume_confirmation", False)
             bb_squeeze = signal.metadata.get("bb_squeeze", False)
 
-            # Enhanced regime-specific validation rules
+            # Regime-specific validation rules
             if regime == MarketRegime.LOW_VOLATILITY:
                 # Require higher consolidation scores and ATR values in low volatility
                 return consolidation_score > 0.6 and atr_value > 0.005
@@ -902,8 +905,8 @@ class VolatilityBreakoutStrategy(BaseStrategy):
             )
             return False
 
-    async def _apply_enhanced_time_decay(self, signals: list[Signal], symbol: str) -> list[Signal]:
-        """Apply enhanced time-decay adjustments to breakout signals."""
+    async def _apply_time_decay(self, signals: list[Signal], symbol: str) -> list[Signal]:
+        """Apply time-decay adjustments to breakout signals."""
         try:
             last_breakout_times = self._strategy_state["last_breakout_times"]
 
@@ -1033,19 +1036,6 @@ class VolatilityBreakoutStrategy(BaseStrategy):
                 error=str(e),
             )
 
-    async def _persist_strategy_state(self) -> None:
-        """Persist strategy state through service layer."""
-        try:
-            if self._strategy_service:
-                await self._strategy_service.persist_strategy_state(
-                    self.config.strategy_id, self._strategy_state
-                )
-        except Exception as e:
-            self.logger.error(
-                "Strategy state persistence failed",
-                strategy=self.name,
-                error=str(e),
-            )
 
     @retry(max_attempts=2, base_delay=1)
     async def validate_signal(self, signal: Signal) -> bool:
@@ -1176,16 +1166,16 @@ class VolatilityBreakoutStrategy(BaseStrategy):
                     current_regime = MarketRegime.MEDIUM_VOLATILITY
 
                 # Get portfolio value
-                portfolio_value = Decimal("10000")  # TODO: Get from portfolio service
-                if self._risk_manager:
+                portfolio_value = Decimal("10000")  # Default fallback value
+                if self.services.risk_service:
                     try:
                         portfolio_value = self._risk_manager.get_available_capital()
                     except (AttributeError, TypeError, KeyError) as e:
                         # Risk manager capital access error - use default portfolio value
-                        pass
+                        self.logger.debug(f"Risk manager capital access error, using default: {e}")
                     except Exception as e:
                         # Unexpected error accessing risk manager - use default portfolio value
-                        pass
+                        self.logger.warning(f"Unexpected error accessing risk manager capital: {e}")
 
                 # Calculate position size with breakout-specific factors
                 atr_value = signal.metadata.get("atr", 0.02)
@@ -1441,7 +1431,10 @@ class VolatilityBreakoutStrategy(BaseStrategy):
                 error=str(e),
             )
 
+    # Helper methods for accessing data through data service
+    
     def cleanup(self) -> None:
+
         """Enhanced cleanup with state management."""
         try:
             # Clear strategy state

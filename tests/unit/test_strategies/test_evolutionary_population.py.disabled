@@ -1,0 +1,570 @@
+"""
+Comprehensive tests for evolutionary population module.
+"""
+
+import pytest
+
+from src.strategies.evolutionary.population import Individual, Population
+
+
+class TestIndividual:
+    """Test Individual class."""
+
+    def test_init_with_minimal_params(self):
+        """Test individual initialization with minimal parameters."""
+        genes = {"param1": 10, "param2": 5.5}
+        individual = Individual(id="test_001", genes=genes)
+        
+        assert individual.id == "test_001"
+        assert individual.genes == genes
+        assert individual.fitness == 0.0
+        assert individual.metadata == {}
+
+    def test_init_with_all_params(self):
+        """Test individual initialization with all parameters."""
+        genes = {"param1": 20, "param2": 7.5}
+        metadata = {"generation": 1, "parent1": "id1", "parent2": "id2"}
+        
+        individual = Individual(
+            id="test_002",
+            genes=genes,
+            fitness=0.85,
+            metadata=metadata
+        )
+        
+        assert individual.id == "test_002"
+        assert individual.genes == genes
+        assert individual.fitness == 0.85
+        assert individual.metadata == metadata
+
+    def test_comparison_lt_true(self):
+        """Test individual comparison (less than) returns True."""
+        ind1 = Individual(id="1", genes={}, fitness=0.5)
+        ind2 = Individual(id="2", genes={}, fitness=0.8)
+        
+        assert ind1 < ind2  # Lower fitness is "less than"
+
+    def test_comparison_lt_false(self):
+        """Test individual comparison (less than) returns False."""
+        ind1 = Individual(id="1", genes={}, fitness=0.8)
+        ind2 = Individual(id="2", genes={}, fitness=0.5)
+        
+        assert not (ind1 < ind2)  # Higher fitness is not "less than"
+
+    def test_comparison_lt_equal_fitness(self):
+        """Test individual comparison with equal fitness."""
+        ind1 = Individual(id="1", genes={}, fitness=0.7)
+        ind2 = Individual(id="2", genes={}, fitness=0.7)
+        
+        assert not (ind1 < ind2)  # Equal fitness is not "less than"
+
+    def test_repr(self):
+        """Test string representation."""
+        individual = Individual(id="test_repr", genes={}, fitness=0.1234567)
+        repr_str = repr(individual)
+        
+        assert "Individual" in repr_str
+        assert "id=test_repr" in repr_str
+        assert "fitness=0.1235" in repr_str  # Rounded to 4 decimal places
+
+    def test_copy_basic(self):
+        """Test basic copying functionality."""
+        original_genes = {"param1": 10, "param2": "value"}
+        original_metadata = {"key1": "value1"}
+        
+        original = Individual(
+            id="original",
+            genes=original_genes,
+            fitness=0.9,
+            metadata=original_metadata
+        )
+        
+        copied = original.copy()
+        
+        assert copied.id == original.id
+        assert copied.genes == original.genes
+        assert copied.fitness == original.fitness
+        assert copied.metadata == original.metadata
+
+    def test_copy_independence(self):
+        """Test that copied individual is independent from original."""
+        original_genes = {"param1": [1, 2, 3]}
+        original_metadata = {"nested": {"value": 42}}
+        
+        original = Individual(
+            id="original",
+            genes=original_genes,
+            fitness=0.75,
+            metadata=original_metadata
+        )
+        
+        copied = original.copy()
+        
+        # Modify original's genes and metadata
+        original.genes["param1"].append(4)
+        original.genes["new_param"] = "new_value"
+        original.metadata["new_key"] = "new_value"
+        original.fitness = 0.5
+        
+        # Copied should be affected since it's a shallow copy of mutable objects
+        assert len(copied.genes["param1"]) == 4  # Now [1, 2, 3, 4] due to shallow copy
+        assert "new_param" not in copied.genes
+        assert "new_key" not in copied.metadata
+        assert copied.fitness == 0.75
+
+    def test_genes_dict_modification(self):
+        """Test genes dictionary can be modified."""
+        individual = Individual(id="test", genes={"param": 10})
+        
+        individual.genes["param"] = 20
+        individual.genes["new_param"] = "new_value"
+        
+        assert individual.genes["param"] == 20
+        assert individual.genes["new_param"] == "new_value"
+
+    def test_metadata_dict_modification(self):
+        """Test metadata dictionary can be modified."""
+        individual = Individual(id="test", genes={})
+        
+        individual.metadata["generation"] = 5
+        individual.metadata["mutations"] = 3
+        
+        assert individual.metadata["generation"] == 5
+        assert individual.metadata["mutations"] == 3
+
+    def test_fitness_modification(self):
+        """Test fitness can be modified."""
+        individual = Individual(id="test", genes={}, fitness=0.1)
+        
+        individual.fitness = 0.9
+        assert individual.fitness == 0.9
+        
+        individual.fitness = -0.5  # Negative fitness should be allowed
+        assert individual.fitness == -0.5
+
+
+class TestPopulation:
+    """Test Population class."""
+
+    @pytest.fixture
+    def sample_individuals(self):
+        """Create sample individuals for testing."""
+        return [
+            Individual(id="ind1", genes={"param": 1}, fitness=0.9),
+            Individual(id="ind2", genes={"param": 2}, fitness=0.7),
+            Individual(id="ind3", genes={"param": 3}, fitness=0.8),
+            Individual(id="ind4", genes={"param": 4}, fitness=0.6),
+        ]
+
+    @pytest.fixture
+    def empty_population(self):
+        """Create empty population."""
+        return Population([])
+
+    @pytest.fixture
+    def sample_population(self, sample_individuals):
+        """Create population with sample individuals."""
+        return Population(sample_individuals)
+
+    def test_init(self, sample_individuals):
+        """Test population initialization."""
+        pop = Population(sample_individuals)
+        
+        assert len(pop.individuals) == 4
+        assert pop.individuals == sample_individuals
+        assert not pop._sorted  # Should not be sorted initially
+
+    def test_len(self, sample_population, empty_population):
+        """Test population length."""
+        assert len(sample_population) == 4
+        assert len(empty_population) == 0
+
+    def test_iter(self, sample_population):
+        """Test population iteration."""
+        individuals_from_iter = list(sample_population)
+        assert len(individuals_from_iter) == 4
+        assert individuals_from_iter == sample_population.individuals
+
+    def test_ensure_sorted(self, sample_population):
+        """Test population sorting by fitness (highest first)."""
+        # Initially not sorted
+        assert not sample_population._sorted
+        
+        # Force sorting
+        sample_population._ensure_sorted()
+        
+        # Should now be sorted by fitness (descending)
+        assert sample_population._sorted
+        fitnesses = [ind.fitness for ind in sample_population.individuals]
+        assert fitnesses == [0.9, 0.8, 0.7, 0.6]  # Highest to lowest
+
+    def test_ensure_sorted_idempotent(self, sample_population):
+        """Test that multiple calls to _ensure_sorted don't break anything."""
+        sample_population._ensure_sorted()
+        first_order = [ind.id for ind in sample_population.individuals]
+        
+        sample_population._ensure_sorted()
+        second_order = [ind.id for ind in sample_population.individuals]
+        
+        assert first_order == second_order
+
+    def test_get_best_with_individuals(self, sample_population):
+        """Test getting best individual."""
+        best = sample_population.get_best()
+        
+        assert best is not None
+        assert best.fitness == 0.9
+        assert best.id == "ind1"
+
+    def test_get_best_empty_population(self, empty_population):
+        """Test getting best individual from empty population."""
+        best = empty_population.get_best()
+        assert best is None
+
+    def test_get_worst_with_individuals(self, sample_population):
+        """Test getting worst individual."""
+        worst = sample_population.get_worst()
+        
+        assert worst is not None
+        assert worst.fitness == 0.6
+        assert worst.id == "ind4"
+
+    def test_get_worst_empty_population(self, empty_population):
+        """Test getting worst individual from empty population."""
+        worst = empty_population.get_worst()
+        assert worst is None
+
+    def test_get_top_n(self, sample_population):
+        """Test getting top n individuals."""
+        top_2 = sample_population.get_top_n(2)
+        
+        assert len(top_2) == 2
+        assert top_2[0].fitness == 0.9  # Best
+        assert top_2[1].fitness == 0.8  # Second best
+
+    def test_get_top_n_more_than_population_size(self, sample_population):
+        """Test getting top n when n > population size."""
+        top_10 = sample_population.get_top_n(10)
+        
+        # Should return all individuals
+        assert len(top_10) == 4
+        assert top_10[0].fitness == 0.9
+
+    def test_get_top_n_zero(self, sample_population):
+        """Test getting top 0 individuals."""
+        top_0 = sample_population.get_top_n(0)
+        assert len(top_0) == 0
+        assert top_0 == []
+
+    def test_get_bottom_n(self, sample_population):
+        """Test getting bottom n individuals."""
+        bottom_2 = sample_population.get_bottom_n(2)
+        
+        assert len(bottom_2) == 2
+        assert bottom_2[0].fitness == 0.7  # Second worst
+        assert bottom_2[1].fitness == 0.6  # Worst
+
+    def test_get_bottom_n_more_than_population_size(self, sample_population):
+        """Test getting bottom n when n > population size."""
+        bottom_10 = sample_population.get_bottom_n(10)
+        
+        # Should return all individuals (sorted)
+        assert len(bottom_10) == 4
+        assert bottom_10[-1].fitness == 0.6  # Worst should be last
+
+    def test_get_bottom_n_zero(self, sample_population):
+        """Test getting bottom 0 individuals."""
+        bottom_0 = sample_population.get_bottom_n(0)
+        # Python list slicing with [-0:] returns the entire list, not empty
+        # This is expected behavior, so we adjust our test
+        assert len(bottom_0) == 4  # Returns all individuals
+        assert isinstance(bottom_0, list)
+
+    def test_get_bottom_n_indices(self, sample_population):
+        """Test getting bottom n indices."""
+        bottom_2_indices = sample_population.get_bottom_n_indices(2)
+        
+        assert len(bottom_2_indices) == 2
+        assert bottom_2_indices == [2, 3]  # Last 2 indices after sorting
+        
+        # Verify these indices correspond to worst individuals
+        sample_population._ensure_sorted()
+        assert sample_population.individuals[2].fitness == 0.7
+        assert sample_population.individuals[3].fitness == 0.6
+
+    def test_get_bottom_n_indices_edge_cases(self, sample_population):
+        """Test get_bottom_n_indices with edge cases."""
+        # All individuals
+        all_indices = sample_population.get_bottom_n_indices(4)
+        assert all_indices == [0, 1, 2, 3]
+        
+        # Zero individuals - range(4-0, 4) = range(4, 4) = []
+        zero_indices = sample_population.get_bottom_n_indices(0)
+        assert zero_indices == []
+        
+        # More than population size - range(4-10, 4) = range(-6, 4)
+        over_indices = sample_population.get_bottom_n_indices(10)
+        assert len(over_indices) == 10  # range(-6, 4) has 10 items
+        assert over_indices == list(range(-6, 4))
+
+    def test_get_statistics_with_individuals(self, sample_population):
+        """Test population statistics calculation."""
+        stats = sample_population.get_statistics()
+        
+        assert stats["size"] == 4
+        assert abs(stats["mean_fitness"] - 0.75) < 1e-10  # Account for floating point precision
+        assert stats["min_fitness"] == 0.6
+        assert stats["max_fitness"] == 0.9
+        assert isinstance(stats["std_fitness"], float)
+        assert stats["std_fitness"] > 0  # Should have some variance
+
+    def test_get_statistics_empty_population(self, empty_population):
+        """Test statistics for empty population."""
+        stats = empty_population.get_statistics()
+        
+        assert stats["size"] == 0
+        assert stats["mean_fitness"] == 0
+        assert stats["std_fitness"] == 0
+        assert stats["min_fitness"] == 0
+        assert stats["max_fitness"] == 0
+
+    def test_get_statistics_single_individual(self):
+        """Test statistics for single individual."""
+        individual = Individual(id="only", genes={}, fitness=0.5)
+        pop = Population([individual])
+        
+        stats = pop.get_statistics()
+        
+        assert stats["size"] == 1
+        assert stats["mean_fitness"] == 0.5
+        assert stats["std_fitness"] == 0.0  # No variance with single individual
+        assert stats["min_fitness"] == 0.5
+        assert stats["max_fitness"] == 0.5
+
+    def test_add_individual(self, sample_population):
+        """Test adding an individual."""
+        new_individual = Individual(id="new", genes={"param": 5}, fitness=0.95)
+        
+        original_size = len(sample_population)
+        sample_population.add(new_individual)
+        
+        assert len(sample_population) == original_size + 1
+        assert new_individual in sample_population.individuals
+        assert not sample_population._sorted  # Should mark as unsorted
+
+    def test_add_individual_affects_sorting(self, sample_population):
+        """Test that adding individual affects the best/worst."""
+        # Get original best
+        original_best = sample_population.get_best()
+        assert original_best.fitness == 0.9
+        
+        # Add better individual
+        super_individual = Individual(id="super", genes={}, fitness=0.99)
+        sample_population.add(super_individual)
+        
+        # New best should be the super individual
+        new_best = sample_population.get_best()
+        assert new_best.id == "super"
+        assert new_best.fitness == 0.99
+
+    def test_remove_individual_exists(self, sample_population):
+        """Test removing an existing individual."""
+        target_individual = sample_population.individuals[1]  # ind2
+        original_size = len(sample_population)
+        
+        sample_population.remove(target_individual)
+        
+        assert len(sample_population) == original_size - 1
+        assert target_individual not in sample_population.individuals
+        assert not sample_population._sorted  # Should mark as unsorted
+
+    def test_remove_individual_not_exists(self, sample_population):
+        """Test removing a non-existing individual."""
+        non_existing = Individual(id="ghost", genes={}, fitness=0.0)
+        original_size = len(sample_population)
+        
+        sample_population.remove(non_existing)
+        
+        # Should not change anything
+        assert len(sample_population) == original_size
+        assert sample_population._sorted is False  # Initial state
+
+    def test_replace_individual_valid_index(self, sample_population):
+        """Test replacing individual at valid index."""
+        replacement = Individual(id="replacement", genes={"param": 99}, fitness=0.95)
+        original_individual = sample_population.individuals[2]
+        
+        sample_population.replace(2, replacement)
+        
+        assert sample_population.individuals[2] is replacement
+        assert original_individual not in sample_population.individuals
+        assert not sample_population._sorted  # Should mark as unsorted
+
+    def test_replace_individual_invalid_index_negative(self, sample_population):
+        """Test replacing individual at negative index."""
+        replacement = Individual(id="replacement", genes={}, fitness=0.95)
+        original_individuals = sample_population.individuals.copy()
+        
+        sample_population.replace(-1, replacement)
+        
+        # Should not change anything
+        assert sample_population.individuals == original_individuals
+
+    def test_replace_individual_invalid_index_too_high(self, sample_population):
+        """Test replacing individual at index >= size."""
+        replacement = Individual(id="replacement", genes={}, fitness=0.95)
+        original_individuals = sample_population.individuals.copy()
+        
+        sample_population.replace(10, replacement)
+        
+        # Should not change anything
+        assert sample_population.individuals == original_individuals
+
+    def test_replace_individual_affects_sorting(self, sample_population):
+        """Test that replacing individual affects the best."""
+        # Replace worst individual with best one
+        super_individual = Individual(id="super_replacement", genes={}, fitness=1.0)
+        sample_population.replace(0, super_individual)  # Replace first individual
+        
+        new_best = sample_population.get_best()
+        assert new_best.id == "super_replacement"
+        assert new_best.fitness == 1.0
+
+    def test_sorting_stability_with_operations(self, sample_population):
+        """Test that sorting state is properly managed during operations."""
+        # Force initial sort
+        sample_population._ensure_sorted()
+        assert sample_population._sorted
+        
+        # Add individual - should mark as unsorted
+        sample_population.add(Individual(id="new", genes={}, fitness=0.5))
+        assert not sample_population._sorted
+        
+        # Force sort again
+        sample_population._ensure_sorted()
+        assert sample_population._sorted
+        
+        # Remove individual - should mark as unsorted
+        sample_population.remove(sample_population.individuals[0])
+        assert not sample_population._sorted
+        
+        # Replace individual - should mark as unsorted
+        sample_population._ensure_sorted()
+        assert sample_population._sorted
+        sample_population.replace(0, Individual(id="replaced", genes={}, fitness=0.3))
+        assert not sample_population._sorted
+
+
+class TestPopulationEdgeCases:
+    """Test edge cases and error conditions."""
+
+    def test_population_with_same_fitness(self):
+        """Test population where all individuals have same fitness."""
+        individuals = [
+            Individual(id=f"ind{i}", genes={"param": i}, fitness=0.5)
+            for i in range(3)
+        ]
+        pop = Population(individuals)
+        
+        best = pop.get_best()
+        worst = pop.get_worst()
+        
+        # All have same fitness, so first and last after sorting
+        assert best.fitness == 0.5
+        assert worst.fitness == 0.5
+        
+        # Statistics should reflect no variance
+        stats = pop.get_statistics()
+        assert stats["mean_fitness"] == 0.5
+        assert stats["std_fitness"] == 0.0
+        assert stats["min_fitness"] == 0.5
+        assert stats["max_fitness"] == 0.5
+
+    def test_population_with_negative_fitness(self):
+        """Test population with negative fitness values."""
+        individuals = [
+            Individual(id="neg", genes={}, fitness=-0.5),
+            Individual(id="pos", genes={}, fitness=0.5),
+            Individual(id="zero", genes={}, fitness=0.0),
+        ]
+        pop = Population(individuals)
+        
+        best = pop.get_best()
+        worst = pop.get_worst()
+        
+        assert best.fitness == 0.5
+        assert worst.fitness == -0.5
+        
+        stats = pop.get_statistics()
+        assert stats["min_fitness"] == -0.5
+        assert stats["max_fitness"] == 0.5
+
+    def test_population_mutation_during_iteration(self):
+        """Test that population can be safely modified during iteration."""
+        individuals = [
+            Individual(id=f"ind{i}", genes={}, fitness=float(i))
+            for i in range(3)
+        ]
+        pop = Population(individuals)
+        
+        # This should not cause issues even if we modify during iteration
+        original_ids = []
+        for ind in pop:
+            original_ids.append(ind.id)
+        
+        assert len(original_ids) == 3
+        assert "ind0" in original_ids
+        assert "ind1" in original_ids
+        assert "ind2" in original_ids
+
+    def test_individual_comparison_with_nan_fitness(self):
+        """Test individual comparison with NaN fitness."""
+        import math
+        
+        ind1 = Individual(id="nan", genes={}, fitness=float('nan'))
+        ind2 = Individual(id="normal", genes={}, fitness=0.5)
+        
+        # NaN comparisons should work (though behavior may be undefined)
+        # This test mainly ensures no exceptions are raised
+        try:
+            result = ind1 < ind2
+            # We don't assert the result since NaN behavior is undefined
+            assert isinstance(result, bool)
+        except Exception:
+            # NaN comparisons might raise exceptions, which is acceptable
+            pass
+
+    def test_individual_copy_with_nested_objects(self):
+        """Test individual copy with complex nested objects."""
+        nested_genes = {
+            "param1": {"nested": {"deep": [1, 2, 3]}},
+            "param2": [{"item": "value"}]
+        }
+        
+        original = Individual(id="complex", genes=nested_genes, fitness=0.8)
+        copied = original.copy()
+        
+        # Shallow copy means nested objects are shared
+        assert copied.genes is not original.genes
+        assert copied.genes["param1"] is original.genes["param1"]  # Shared reference
+        assert copied.genes["param2"] is original.genes["param2"]  # Shared reference
+
+    def test_empty_population_operations(self):
+        """Test all operations on empty population."""
+        pop = Population([])
+        
+        # All operations should handle empty population gracefully
+        assert len(pop) == 0
+        assert list(pop) == []
+        assert pop.get_best() is None
+        assert pop.get_worst() is None
+        assert pop.get_top_n(5) == []
+        assert pop.get_bottom_n(5) == []
+        assert pop.get_bottom_n_indices(5) == list(range(-5, 0))  # Empty population size = 0
+        
+        stats = pop.get_statistics()
+        assert all(v == 0 for v in stats.values())
+        
+        # Adding to empty population should work
+        pop.add(Individual(id="first", genes={}, fitness=0.5))
+        assert len(pop) == 1

@@ -13,8 +13,9 @@ import pytest
 from src.core.exceptions import ArbitrageError
 from src.core.types import (
     MarketData,
-    OrderSide,
     Position,
+    PositionSide,
+    PositionStatus,
     Signal,
     SignalDirection,
     StrategyType,
@@ -32,16 +33,16 @@ class TestArbitrageOpportunity:
             "name": "arbitrage_scanner",
             "strategy_id": "arbitrage_scanner_001",
             "strategy_type": StrategyType.ARBITRAGE,
-            "symbol": "BTCUSDT",  # Required field for base strategy
+            "symbol": "BTC/USD",  # Required field for base strategy
             "timeframe": "1m",  # Required field for base strategy
             "scan_interval": 100,
             "min_profit_threshold": "0.0001",  # Much smaller threshold for test
             "max_opportunities": 5,
             "exchanges": ["binance", "okx", "coinbase"],
-            "symbols": ["BTCUSDT", "ETHUSDT", "BNBUSDT"],
+            "symbols": ["BTC/USD", "ETH/USD", "BNBUSDT"],
             "triangular_paths": [
-                ["BTCUSDT", "ETHBTC", "ETHUSDT"],
-                ["BTCUSDT", "BNBBTC", "BNBUSDT"],
+                ["BTC/USD", "ETHBTC", "ETH/USD"],
+                ["BTC/USD", "BNBBTC", "BNBUSDT"],
             ],
             "total_capital": 10000,
             "risk_per_trade": 0.02,
@@ -53,13 +54,13 @@ class TestArbitrageOpportunity:
     @pytest.fixture
     def strategy(self, config):
         """Create test strategy instance."""
-        return ArbitrageOpportunity(config)
+        return ArbitrageOpportunity(config, None)
 
     @pytest.fixture
     def market_data(self):
         """Create test market data."""
         return MarketData(
-            symbol="BTCUSDT",
+            symbol="BTC/USD",
             open=Decimal("49800"),
             high=Decimal("50200"),
             low=Decimal("49700"),
@@ -80,7 +81,7 @@ class TestArbitrageOpportunity:
         assert strategy.min_profit_threshold == Decimal("0.0001")
         assert strategy.max_opportunities == 5
         assert strategy.exchanges == ["binance", "okx", "coinbase"]
-        assert strategy.symbols == ["BTCUSDT", "ETHUSDT", "BNBUSDT"]
+        assert strategy.symbols == ["BTC/USD", "ETH/USD", "BNBUSDT"]
         assert len(strategy.triangular_paths) == 2
         assert strategy.active_opportunities == {}
         assert strategy.exchange_prices == {}
@@ -103,8 +104,8 @@ class TestArbitrageOpportunity:
         # Setup price data for cross-exchange arbitrage with larger spread
         strategy.exchange_prices = {
             "binance": {
-                "BTCUSDT": MarketData(
-                    symbol="BTCUSDT",
+                "BTC/USD": MarketData(
+                    symbol="BTC/USD",
                     open=Decimal("49900"),
                     high=Decimal("50100"),
                     low=Decimal("49800"),
@@ -117,8 +118,8 @@ class TestArbitrageOpportunity:
                 )
             },
             "okx": {
-                "BTCUSDT": MarketData(
-                    symbol="BTCUSDT",
+                "BTC/USD": MarketData(
+                    symbol="BTC/USD",
                     open=Decimal("51400"),
                     high=Decimal("51600"),
                     low=Decimal("51300"),
@@ -144,8 +145,8 @@ class TestArbitrageOpportunity:
         # Setup price data
         strategy.exchange_prices = {
             "binance": {
-                "BTCUSDT": MarketData(
-                    symbol="BTCUSDT",
+                "BTC/USD": MarketData(
+                    symbol="BTC/USD",
                     open=Decimal("49900"),
                     high=Decimal("50100"),
                     low=Decimal("49800"),
@@ -158,8 +159,8 @@ class TestArbitrageOpportunity:
                 )
             },
             "okx": {
-                "BTCUSDT": MarketData(
-                    symbol="BTCUSDT",
+                "BTC/USD": MarketData(
+                    symbol="BTC/USD",
                     open=Decimal("50000"),
                     high=Decimal("50200"),
                     low=Decimal("49900"),
@@ -185,8 +186,8 @@ class TestArbitrageOpportunity:
         # Setup price data for cross-exchange arbitrage
         strategy.exchange_prices = {
             "binance": {
-                "BTCUSDT": MarketData(
-                    symbol="BTCUSDT",
+                "BTC/USD": MarketData(
+                    symbol="BTC/USD",
                     open=Decimal("49900"),
                     high=Decimal("50100"),
                     low=Decimal("49800"),
@@ -199,8 +200,8 @@ class TestArbitrageOpportunity:
                 )
             },
             "okx": {
-                "BTCUSDT": MarketData(
-                    symbol="BTCUSDT",
+                "BTC/USD": MarketData(
+                    symbol="BTC/USD",
                     open=Decimal("50000"),
                     high=Decimal("50200"),
                     low=Decimal("49900"),
@@ -229,8 +230,8 @@ class TestArbitrageOpportunity:
         """Test triangular opportunity scanning."""
         # Setup price data for triangular arbitrage
         strategy.pair_prices = {
-            "BTCUSDT": MarketData(
-                symbol="BTCUSDT",
+            "BTC/USD": MarketData(
+                symbol="BTC/USD",
                 open=Decimal("49900"),
                 high=Decimal("50100"),
                 low=Decimal("49800"),
@@ -253,8 +254,8 @@ class TestArbitrageOpportunity:
                 bid_price=Decimal("0.0499"),
                 ask_price=Decimal("0.0501"),
             ),
-            "ETHUSDT": MarketData(
-                symbol="ETHUSDT",
+            "ETH/USD": MarketData(
+                symbol="ETH/USD",
                 open=Decimal("2480"),
                 high=Decimal("2520"),
                 low=Decimal("2470"),
@@ -333,17 +334,17 @@ class TestArbitrageOpportunity:
         """Test opportunity prioritization."""
         signals = [
             Signal(
-                symbol="BTCUSDT",
+                symbol="BTC/USD",
                 direction=SignalDirection.BUY,
-                strength=0.8,
+                strength=Decimal("0.8"),
                 timestamp=datetime.now(timezone.utc),
                 source="test",
                 metadata={"opportunity_priority": 0.3},
             ),
             Signal(
-                symbol="ETHUSDT",
+                symbol="ETH/USD",
                 direction=SignalDirection.BUY,
-                strength=0.9,
+                strength=Decimal("0.9"),
                 timestamp=datetime.now(timezone.utc),
                 source="test",
                 metadata={"opportunity_priority": 0.8},
@@ -365,9 +366,9 @@ class TestArbitrageOpportunity:
     async def test_validate_signal_valid(self, strategy):
         """Test signal validation with valid signal."""
         signal = Signal(
-            symbol="BTCUSDT",
+            symbol="BTC/USD",
             direction=SignalDirection.BUY,
-            strength=0.8,
+            strength=Decimal("0.8"),
             timestamp=datetime.now(timezone.utc),
             source="test",
             metadata={
@@ -388,9 +389,9 @@ class TestArbitrageOpportunity:
     async def test_validate_signal_invalid(self, strategy):
         """Test signal validation with invalid signal."""
         signal = Signal(
-            symbol="BTCUSDT",
+            symbol="BTC/USD",
             direction=SignalDirection.BUY,
-            strength=0.3,  # Below minimum confidence
+            strength=Decimal("0.3"),  # Below minimum confidence
             timestamp=datetime.now(timezone.utc),
             source="test",
             metadata={
@@ -406,9 +407,9 @@ class TestArbitrageOpportunity:
     def test_get_position_size(self, strategy):
         """Test position size calculation."""
         signal = Signal(
-            symbol="BTCUSDT",
+            symbol="BTC/USD",
             direction=SignalDirection.BUY,
-            strength=0.8,
+            strength=Decimal("0.8"),
             timestamp=datetime.now(timezone.utc),
             source="test",
             metadata={"arbitrage_type": "cross_exchange", "net_profit_percentage": 0.5},
@@ -428,12 +429,13 @@ class TestArbitrageOpportunity:
     async def test_should_exit_not_arbitrage_position(self, strategy, market_data):
         """Test exit condition for non-arbitrage position."""
         position = Position(
-            symbol="BTCUSDT",
+            symbol="BTC/USD",
             quantity=Decimal("0.1"),
             entry_price=Decimal("50000"),
             current_price=Decimal("50100"),
             unrealized_pnl=Decimal("0"),
-            side=OrderSide.BUY,
+            side=PositionSide.LONG,
+            status=PositionStatus.OPEN,
             opened_at=datetime.now(timezone.utc),
             exchange="binance",
             metadata={},  # No arbitrage_type
@@ -447,12 +449,13 @@ class TestArbitrageOpportunity:
     async def test_should_exit_timeout(self, strategy, market_data):
         """Test exit condition for timeout."""
         position = Position(
-            symbol="BTCUSDT",
+            symbol="BTC/USD",
             quantity=Decimal("0.1"),
             entry_price=Decimal("50000"),
             current_price=Decimal("50100"),
             unrealized_pnl=Decimal("0"),
-            side=OrderSide.BUY,
+            side=PositionSide.LONG,
+            status=PositionStatus.OPEN,
             opened_at=datetime.now(timezone.utc) - timedelta(seconds=1),  # Old position
             exchange="binance",
             metadata={
@@ -470,8 +473,8 @@ class TestArbitrageOpportunity:
         """Test current cross-exchange spread calculation."""
         strategy.exchange_prices = {
             "binance": {
-                "BTCUSDT": MarketData(
-                    symbol="BTCUSDT",
+                "BTC/USD": MarketData(
+                    symbol="BTC/USD",
                     open=Decimal("49900"),
                     high=Decimal("50100"),
                     low=Decimal("49800"),
@@ -484,8 +487,8 @@ class TestArbitrageOpportunity:
                 )
             },
             "okx": {
-                "BTCUSDT": MarketData(
-                    symbol="BTCUSDT",
+                "BTC/USD": MarketData(
+                    symbol="BTC/USD",
                     open=Decimal("50000"),
                     high=Decimal("50200"),
                     low=Decimal("49900"),
@@ -499,7 +502,7 @@ class TestArbitrageOpportunity:
             },
         }
 
-        spread = await strategy._get_current_cross_exchange_spread("BTCUSDT", "binance", "okx")
+        spread = await strategy._get_current_cross_exchange_spread("BTC/USD", "binance", "okx")
 
         assert isinstance(spread, Decimal)
         # Expected spread: sell_price (okx bid: 50099) - buy_price (binance ask: 50001) = 98
@@ -509,8 +512,8 @@ class TestArbitrageOpportunity:
     async def test_check_triangular_path(self, strategy):
         """Test triangular path checking."""
         strategy.pair_prices = {
-            "BTCUSDT": MarketData(
-                symbol="BTCUSDT",
+            "BTC/USD": MarketData(
+                symbol="BTC/USD",
                 open=Decimal("49900"),
                 high=Decimal("50100"),
                 low=Decimal("49800"),
@@ -533,8 +536,8 @@ class TestArbitrageOpportunity:
                 bid_price=Decimal("0.0499"),
                 ask_price=Decimal("0.0501"),
             ),
-            "ETHUSDT": MarketData(
-                symbol="ETHUSDT",
+            "ETH/USD": MarketData(
+                symbol="ETH/USD",
                 open=Decimal("2480"),
                 high=Decimal("2520"),
                 low=Decimal("2470"),
@@ -547,7 +550,7 @@ class TestArbitrageOpportunity:
             ),
         }
 
-        path = ["BTCUSDT", "ETHBTC", "ETHUSDT"]
+        path = ["BTC/USD", "ETHBTC", "ETH/USD"]
         signal = await strategy._check_triangular_path(path)
 
         # May or may not find opportunity depending on prices
@@ -560,7 +563,7 @@ class TestArbitrageOpportunity:
     async def test_post_trade_processing(self, strategy):
         """Test post-trade processing."""
         trade_result = {
-            "symbol": "BTCUSDT",
+            "symbol": "BTC/USD",
             "arbitrage_type": "cross_exchange",
             "pnl": 50.0,
             "execution_time_ms": 100,
@@ -578,7 +581,7 @@ class TestArbitrageOpportunity:
     async def test_post_trade_processing_error(self, strategy):
         """Test post-trade processing with error."""
         trade_result = {
-            "symbol": "BTCUSDT",
+            "symbol": "BTC/USD",
             "arbitrage_type": "cross_exchange",
             "pnl": "invalid_pnl",  # Invalid P&L
             "execution_time_ms": 100,

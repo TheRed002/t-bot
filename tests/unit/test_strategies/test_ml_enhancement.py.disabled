@@ -1,0 +1,1092 @@
+"""
+Comprehensive ML Service Integration Tests for Strategies
+
+This module provides extensive test coverage for ML service integration
+within the strategies module, focusing on:
+
+- ML-enhanced signal generation
+- Model prediction integration
+- Feature engineering coordination
+- Adaptive learning patterns
+- Error handling and model failures
+- Performance optimization
+- Edge cases and boundary conditions
+
+Coverage targets:
+- ML service integration: 100%
+- Model prediction workflows: 100%
+- Error handling scenarios: 100%
+- Edge case handling: 100%
+"""
+
+import asyncio
+from datetime import datetime, timezone
+from decimal import Decimal
+from unittest.mock import AsyncMock, Mock, patch
+import logging
+
+import pytest
+
+# Disable logging for performance
+logging.disable(logging.CRITICAL)
+
+from src.core.types import (
+    MarketData,
+    Signal,
+    StrategyConfig,
+    StrategyMetrics,
+    StrategyType,
+)
+from src.strategies.base import BaseStrategy
+from src.strategies.dependencies import StrategyServiceContainer
+
+
+class MLEnhancedMockStrategy(BaseStrategy):
+    """Mock strategy with ML enhancement capabilities."""
+    
+    @property
+    def strategy_type(self) -> StrategyType:
+        return StrategyType.TREND_FOLLOWING
+    
+    async def _generate_signals_impl(self, data: MarketData) -> list[Signal]:
+        """Generate signals with ML enhancement."""
+        signals = []
+        
+        # Base signal generation
+        base_signal = Signal(
+            symbol=data.symbol,
+            direction=1,
+            strength=0.6,  # Base strength
+            timestamp=data.timestamp,
+            price=data.price,
+        )
+        
+        # Enhance with ML if available
+        if self.services.ml_service:
+            try:
+                # Get ML prediction
+                ml_prediction = await self.services.ml_service.predict_signal_strength(
+                    symbol=data.symbol,
+                    market_data=data,
+                    strategy_type=self.strategy_type
+                )
+                
+                if ml_prediction:
+                    # Combine base signal with ML prediction
+                    enhanced_strength = min(1.0, base_signal.strength * ml_prediction.get('confidence', 1.0))
+                    base_signal.strength = enhanced_strength
+                    
+                    # Add ML metadata
+                    if hasattr(base_signal, 'metadata'):
+                        base_signal.metadata = base_signal.metadata or {}
+                        base_signal.metadata.update({
+                            'ml_enhanced': True,
+                            'ml_confidence': ml_prediction.get('confidence'),
+                            'ml_model_version': ml_prediction.get('model_version'),
+                        })
+                
+            except Exception as e:
+                # Fall back to base signal on ML error
+                self.logger.warning(f"ML enhancement failed, using base signal: {e}")
+        
+        signals.append(base_signal)
+        return signals
+    
+    async def initialize(self, config: StrategyConfig) -> None:
+        """Initialize strategy."""
+        pass
+    
+    async def validate_signal(self, signal: Signal) -> bool:
+        """Validate signal."""
+        return signal.strength >= 0.3
+    
+    def get_position_size(self, signal: Signal) -> Decimal:
+        """Get position size."""
+        return Decimal("100.0")
+    
+    def should_exit(self, position, data: MarketData) -> bool:
+        """Exit decision."""
+        return False
+    
+    async def start(self) -> None:
+        """Start strategy."""
+        self._status = StrategyStatus.ACTIVE
+    
+    async def stop(self) -> None:
+        """Stop strategy."""
+        self._status = StrategyStatus.STOPPED
+    
+    async def pause(self) -> None:
+        """Pause strategy."""
+        self._status = StrategyStatus.PAUSED
+    
+    async def resume(self) -> None:
+        """Resume strategy."""
+        self._status = StrategyStatus.ACTIVE
+    
+    async def prepare_for_backtest(self, config: dict) -> None:
+        """Prepare for backtest."""
+        self._is_backtesting = True
+        self._backtest_config = config
+    
+    async def process_historical_data(self, data: MarketData) -> list[Signal]:
+        """Process historical data."""
+        return await self._generate_signals_impl(data)
+    
+    async def get_backtest_metrics(self) -> dict:
+        """Get backtest metrics."""
+        return {"ml_enhanced": True}
+    
+    def get_real_time_metrics(self) -> dict:
+        """Get real-time metrics."""
+        return {"ml_predictions": 10}
+
+
+class TestMLServiceIntegration:
+    """Test ML service integration in strategies."""
+    
+    @pytest.fixture
+    def mock_ml_service(self):
+        """Create comprehensive mock ML service."""
+        mock_service = Mock()
+        mock_service.predict_signal_strength = AsyncMock()
+        mock_service.get_model_info = AsyncMock()
+        mock_service.train_model = AsyncMock()
+        mock_service.evaluate_model = AsyncMock()
+        mock_service.get_feature_importance = AsyncMock()
+        mock_service.preprocess_data = AsyncMock()
+        return mock_service
+    
+    @pytest.fixture
+    def ml_enhanced_strategy(self, mock_ml_service):
+        """Create ML-enhanced strategy."""
+        config = {
+            "name": "MLEnhancedStrategy",
+            "strategy_type": StrategyType.TREND_FOLLOWING.value,
+            "parameters": {"ml_enabled": True},
+        }
+        
+        services = StrategyServiceContainer(
+            risk_service=Mock(),
+            data_service=Mock(),
+            execution_service=Mock(),
+            ml_service=mock_ml_service,
+        )
+        
+        return MLEnhancedMockStrategy(config, services), mock_ml_service
+    
+    @pytest.mark.asyncio
+    async def test_ml_enhanced_signal_generation_success(self, ml_enhanced_strategy):
+        """Test successful ML-enhanced signal generation."""
+        strategy, mock_ml_service = ml_enhanced_strategy
+        
+        # Mock ML prediction
+        mock_prediction = {
+            'confidence': 1.2,  # Boost confidence
+            'model_version': 'v1.2.3',
+            'features_used': ['price', 'volume', 'volatility'],
+            'prediction_timestamp': datetime.now(timezone.utc).isoformat(),
+        }
+        mock_ml_service.predict_signal_strength.return_value = mock_prediction
+        
+        # Create market data
+        market_data = MarketData(
+            symbol="BTC/USDT",
+            timestamp=datetime.now(timezone.utc),
+            price=Decimal("50000.00"),
+            volume=Decimal("100.0"),
+            bid=Decimal("49999.00"),
+            ask=Decimal("50001.00"),
+        )
+        
+        # Generate signals
+        signals = await strategy._generate_signals_impl(market_data)
+        
+        assert len(signals) == 1
+        signal = signals[0]
+        
+        # Verify ML enhancement
+        assert signal.strength > 0.6  # Should be enhanced from base 0.6
+        expected_strength = min(1.0, 0.6 * 1.2)  # Base * ML confidence
+        assert abs(signal.strength - expected_strength) < 0.001
+        
+        # Verify ML service was called
+        mock_ml_service.predict_signal_strength.assert_called_once_with(
+            symbol="BTC/USDT",
+            market_data=market_data,
+            strategy_type=StrategyType.TREND_FOLLOWING
+        )
+    
+    @pytest.mark.asyncio
+    async def test_ml_enhanced_signal_generation_no_ml_service(self):
+        """Test signal generation without ML service."""
+        config = {
+            "name": "NoMLStrategy",
+            "strategy_type": StrategyType.TREND_FOLLOWING.value,
+            "parameters": {"ml_enabled": False},
+        }
+        
+        # No ML service in container
+        services = StrategyServiceContainer(
+            risk_service=Mock(),
+            data_service=Mock(),
+            execution_service=Mock(),
+        )
+        
+        strategy = MLEnhancedMockStrategy(config, services)
+        
+        market_data = MarketData(
+            symbol="BTC/USDT",
+            timestamp=datetime.now(timezone.utc),
+            price=Decimal("50000.00"),
+            volume=Decimal("100.0"),
+            bid=Decimal("49999.00"),
+            ask=Decimal("50001.00"),
+        )
+        
+        # Generate signals without ML
+        signals = await strategy._generate_signals_impl(market_data)
+        
+        assert len(signals) == 1
+        signal = signals[0]
+        
+        # Should use base strength without ML enhancement
+        assert signal.strength == 0.6
+    
+    @pytest.mark.asyncio
+    async def test_ml_enhanced_signal_generation_ml_failure(self, ml_enhanced_strategy):
+        """Test signal generation when ML service fails."""
+        strategy, mock_ml_service = ml_enhanced_strategy
+        
+        # Mock ML service failure
+        mock_ml_service.predict_signal_strength.side_effect = Exception("ML service error")
+        
+        market_data = MarketData(
+            symbol="BTC/USDT",
+            timestamp=datetime.now(timezone.utc),
+            price=Decimal("50000.00"),
+            volume=Decimal("100.0"),
+            bid=Decimal("49999.00"),
+            ask=Decimal("50001.00"),
+        )
+        
+        # Should fall back to base signal on ML error
+        signals = await strategy._generate_signals_impl(market_data)
+        
+        assert len(signals) == 1
+        signal = signals[0]
+        
+        # Should fall back to base strength
+        assert signal.strength == 0.6
+        
+        # ML service should have been called
+        mock_ml_service.predict_signal_strength.assert_called_once()
+    
+    @pytest.mark.asyncio
+    async def test_ml_enhanced_signal_generation_empty_prediction(self, ml_enhanced_strategy):
+        """Test signal generation with empty ML prediction."""
+        strategy, mock_ml_service = ml_enhanced_strategy
+        
+        # Mock ML service returning empty prediction
+        mock_ml_service.predict_signal_strength.return_value = None
+        
+        market_data = MarketData(
+            symbol="BTC/USDT",
+            timestamp=datetime.now(timezone.utc),
+            price=Decimal("50000.00"),
+            volume=Decimal("100.0"),
+            bid=Decimal("49999.00"),
+            ask=Decimal("50001.00"),
+        )
+        
+        signals = await strategy._generate_signals_impl(market_data)
+        
+        assert len(signals) == 1
+        signal = signals[0]
+        
+        # Should use base strength when ML returns empty
+        assert signal.strength == 0.6
+    
+    @pytest.mark.asyncio
+    async def test_ml_enhanced_signal_generation_partial_prediction(self, ml_enhanced_strategy):
+        """Test signal generation with partial ML prediction."""
+        strategy, mock_ml_service = ml_enhanced_strategy
+        
+        # Mock ML prediction with missing fields
+        mock_prediction = {
+            'confidence': 0.8,  # Only confidence, missing other fields
+        }
+        mock_ml_service.predict_signal_strength.return_value = mock_prediction
+        
+        market_data = MarketData(
+            symbol="BTC/USDT",
+            timestamp=datetime.now(timezone.utc),
+            price=Decimal("50000.00"),
+            volume=Decimal("100.0"),
+            bid=Decimal("49999.00"),
+            ask=Decimal("50001.00"),
+        )
+        
+        signals = await strategy._generate_signals_impl(market_data)
+        
+        assert len(signals) == 1
+        signal = signals[0]
+        
+        # Should apply confidence even with partial prediction
+        expected_strength = min(1.0, 0.6 * 0.8)  # Base * confidence
+        assert abs(signal.strength - expected_strength) < 0.001
+    
+    @pytest.mark.asyncio
+    async def test_ml_enhanced_signal_strength_capping(self, ml_enhanced_strategy):
+        """Test ML enhancement properly caps signal strength at 1.0."""
+        strategy, mock_ml_service = ml_enhanced_strategy
+        
+        # Mock ML prediction with very high confidence
+        mock_prediction = {
+            'confidence': 5.0,  # Very high confidence that would exceed 1.0
+            'model_version': 'v1.0.0',
+        }
+        mock_ml_service.predict_signal_strength.return_value = mock_prediction
+        
+        market_data = MarketData(
+            symbol="BTC/USDT",
+            timestamp=datetime.now(timezone.utc),
+            price=Decimal("50000.00"),
+            volume=Decimal("100.0"),
+            bid=Decimal("49999.00"),
+            ask=Decimal("50001.00"),
+        )
+        
+        signals = await strategy._generate_signals_impl(market_data)
+        
+        assert len(signals) == 1
+        signal = signals[0]
+        
+        # Should be capped at 1.0 despite high ML confidence
+        assert signal.strength == 1.0
+
+
+class TestMLServiceFeatureEngineering:
+    """Test ML service feature engineering integration."""
+    
+    @pytest.fixture
+    def feature_engineering_strategy(self):
+        """Create strategy with feature engineering capabilities."""
+        config = {
+            "name": "FeatureEngineeredStrategy",
+            "strategy_type": StrategyType.TREND_FOLLOWING.value,
+            "parameters": {"feature_engineering": True},
+        }
+        
+        # Mock ML service with feature engineering
+        mock_ml_service = Mock()
+        mock_ml_service.extract_features = AsyncMock()
+        mock_ml_service.preprocess_features = AsyncMock()
+        mock_ml_service.select_features = AsyncMock()
+        mock_ml_service.predict_with_features = AsyncMock()
+        
+        services = StrategyServiceContainer(
+            risk_service=Mock(),
+            data_service=Mock(),
+            execution_service=Mock(),
+            ml_service=mock_ml_service,
+        )
+        
+        return MLEnhancedMockStrategy(config, services), mock_ml_service
+    
+    @pytest.mark.asyncio
+    async def test_feature_extraction_integration(self, feature_engineering_strategy):
+        """Test feature extraction integration in ML workflow."""
+        strategy, mock_ml_service = feature_engineering_strategy
+        
+        # Mock feature extraction pipeline
+        mock_features = {
+            'technical_indicators': {
+                'rsi': 65.5,
+                'macd': 0.02,
+                'bollinger_position': 0.8,
+            },
+            'market_microstructure': {
+                'bid_ask_spread': 0.001,
+                'order_flow_imbalance': 0.15,
+                'volume_profile': [100, 150, 200, 180, 120],
+            },
+            'sentiment_features': {
+                'news_sentiment': 0.3,
+                'social_sentiment': 0.1,
+                'fear_greed_index': 72,
+            },
+        }
+        
+        mock_ml_service.extract_features.return_value = mock_features
+        mock_ml_service.preprocess_features.return_value = {
+            'processed_features': [0.65, 0.02, 0.8, 0.001, 0.15, 0.3, 0.1, 0.72],
+            'feature_names': ['rsi', 'macd', 'bb_pos', 'spread', 'flow', 'news', 'social', 'fear_greed'],
+        }
+        mock_ml_service.predict_with_features.return_value = {
+            'confidence': 0.85,
+            'features_importance': {'rsi': 0.3, 'macd': 0.25, 'bb_pos': 0.2},
+        }
+        
+        market_data = MarketData(
+            symbol="BTC/USDT",
+            timestamp=datetime.now(timezone.utc),
+            price=Decimal("50000.00"),
+            volume=Decimal("100.0"),
+            bid=Decimal("49999.00"),
+            ask=Decimal("50001.00"),
+        )
+        
+        # Test custom feature-based prediction method
+        if hasattr(strategy.services.ml_service, 'extract_features'):
+            features = await strategy.services.ml_service.extract_features(market_data)
+            processed_features = await strategy.services.ml_service.preprocess_features(features)
+            prediction = await strategy.services.ml_service.predict_with_features(processed_features)
+            
+            # Verify feature extraction pipeline
+            mock_ml_service.extract_features.assert_called_once_with(market_data)
+            mock_ml_service.preprocess_features.assert_called_once_with(mock_features)
+            mock_ml_service.predict_with_features.assert_called_once()
+            
+            # Verify prediction quality
+            assert prediction['confidence'] == 0.85
+            assert 'features_importance' in prediction
+    
+    @pytest.mark.asyncio
+    async def test_feature_selection_optimization(self, feature_engineering_strategy):
+        """Test feature selection optimization in ML pipeline."""
+        strategy, mock_ml_service = feature_engineering_strategy
+        
+        # Mock feature selection process
+        all_features = {
+            'technical': list(range(20)),  # 20 technical features
+            'fundamental': list(range(10)),  # 10 fundamental features
+            'sentiment': list(range(5)),  # 5 sentiment features
+        }
+        
+        selected_features = {
+            'technical': [0, 2, 5, 7, 12],  # Top 5 technical
+            'fundamental': [1, 3, 8],  # Top 3 fundamental
+            'sentiment': [0, 2],  # Top 2 sentiment
+        }
+        
+        mock_ml_service.select_features.return_value = {
+            'selected_features': selected_features,
+            'selection_scores': {
+                'technical': [0.8, 0.6, 0.7, 0.5, 0.9],
+                'fundamental': [0.65, 0.8, 0.55],
+                'sentiment': [0.7, 0.6],
+            },
+            'total_features_before': 35,
+            'total_features_after': 10,
+            'dimensionality_reduction': 0.71,  # 71% reduction
+        }
+        
+        # Test feature selection
+        if hasattr(strategy.services.ml_service, 'select_features'):
+            feature_selection = await strategy.services.ml_service.select_features(
+                all_features, strategy_type=StrategyType.TREND_FOLLOWING
+            )
+            
+            assert feature_selection['total_features_before'] == 35
+            assert feature_selection['total_features_after'] == 10
+            assert feature_selection['dimensionality_reduction'] > 0.7
+    
+    @pytest.mark.asyncio
+    async def test_feature_engineering_error_handling(self, feature_engineering_strategy):
+        """Test feature engineering error handling."""
+        strategy, mock_ml_service = feature_engineering_strategy
+        
+        # Test feature extraction failure
+        mock_ml_service.extract_features.side_effect = Exception("Feature extraction failed")
+        
+        market_data = MarketData(
+            symbol="BTC/USDT",
+            timestamp=datetime.now(timezone.utc),
+            price=Decimal("50000.00"),
+            volume=Decimal("100.0"),
+            bid=Decimal("49999.00"),
+            ask=Decimal("50001.00"),
+        )
+        
+        # Should handle feature extraction failure gracefully
+        try:
+            await strategy.services.ml_service.extract_features(market_data)
+            assert False, "Should have raised exception"
+        except Exception as e:
+            assert "Feature extraction failed" in str(e)
+        
+        # Test preprocessing failure
+        mock_ml_service.extract_features.side_effect = None
+        mock_ml_service.extract_features.return_value = {'features': [1, 2, 3]}
+        mock_ml_service.preprocess_features.side_effect = Exception("Preprocessing failed")
+        
+        features = await strategy.services.ml_service.extract_features(market_data)
+        
+        try:
+            await strategy.services.ml_service.preprocess_features(features)
+            assert False, "Should have raised exception"
+        except Exception as e:
+            assert "Preprocessing failed" in str(e)
+
+
+class TestMLModelManagement:
+    """Test ML model management and lifecycle integration."""
+    
+    @pytest.fixture
+    def model_management_strategy(self):
+        """Create strategy with model management capabilities."""
+        config = {
+            "name": "ModelManagedStrategy",
+            "strategy_type": StrategyType.TREND_FOLLOWING.value,
+            "parameters": {"model_management": True},
+        }
+        
+        # Mock ML service with model management
+        mock_ml_service = Mock()
+        mock_ml_service.get_model_info = AsyncMock()
+        mock_ml_service.load_model = AsyncMock()
+        mock_ml_service.update_model = AsyncMock()
+        mock_ml_service.evaluate_model_performance = AsyncMock()
+        mock_ml_service.trigger_model_retrain = AsyncMock()
+        mock_ml_service.get_model_metrics = AsyncMock()
+        
+        services = StrategyServiceContainer(
+            risk_service=Mock(),
+            data_service=Mock(),
+            execution_service=Mock(),
+            ml_service=mock_ml_service,
+        )
+        
+        return MLEnhancedMockStrategy(config, services), mock_ml_service
+    
+    @pytest.mark.asyncio
+    async def test_model_info_retrieval(self, model_management_strategy):
+        """Test model information retrieval."""
+        strategy, mock_ml_service = model_management_strategy
+        
+        # Mock model info
+        mock_model_info = {
+            'model_id': 'trend_following_v2.1',
+            'model_type': 'random_forest',
+            'version': '2.1.0',
+            'training_date': '2023-12-01T10:30:00Z',
+            'features_count': 15,
+            'accuracy': 0.78,
+            'precision': 0.82,
+            'recall': 0.75,
+            'f1_score': 0.79,
+            'auc_roc': 0.85,
+            'training_samples': 50000,
+            'validation_samples': 10000,
+            'last_updated': '2023-12-15T14:20:00Z',
+        }
+        
+        mock_ml_service.get_model_info.return_value = mock_model_info
+        
+        # Test model info retrieval
+        model_info = await strategy.services.ml_service.get_model_info(
+            strategy_type=StrategyType.TREND_FOLLOWING
+        )
+        
+        assert model_info['model_id'] == 'trend_following_v2.1'
+        assert model_info['accuracy'] == 0.78
+        assert model_info['features_count'] == 15
+        
+        mock_ml_service.get_model_info.assert_called_once_with(
+            strategy_type=StrategyType.TREND_FOLLOWING
+        )
+    
+    @pytest.mark.asyncio
+    async def test_model_performance_evaluation(self, model_management_strategy):
+        """Test model performance evaluation integration."""
+        strategy, mock_ml_service = model_management_strategy
+        
+        # Mock performance evaluation
+        mock_performance = {
+            'evaluation_period': '2023-12-01_to_2023-12-31',
+            'total_predictions': 1000,
+            'correct_predictions': 780,
+            'accuracy': 0.78,
+            'precision_by_class': {'buy': 0.82, 'sell': 0.75, 'hold': 0.80},
+            'recall_by_class': {'buy': 0.77, 'sell': 0.73, 'hold': 0.85},
+            'confusion_matrix': [[250, 30, 20], [25, 220, 55], [15, 45, 340]],
+            'feature_importance': {
+                'rsi': 0.15,
+                'macd': 0.12,
+                'volume': 0.10,
+                'price_change': 0.18,
+                'bollinger_bands': 0.08,
+            },
+            'model_drift_score': 0.05,  # Low drift is good
+            'recommendation': 'model_performing_well',
+        }
+        
+        mock_ml_service.evaluate_model_performance.return_value = mock_performance
+        
+        # Test model performance evaluation
+        performance = await strategy.services.ml_service.evaluate_model_performance(
+            strategy_type=StrategyType.TREND_FOLLOWING,
+            evaluation_period_days=30
+        )
+        
+        assert performance['accuracy'] == 0.78
+        assert performance['total_predictions'] == 1000
+        assert performance['model_drift_score'] == 0.05
+        assert performance['recommendation'] == 'model_performing_well'
+    
+    @pytest.mark.asyncio
+    async def test_model_retraining_trigger(self, model_management_strategy):
+        """Test model retraining trigger conditions."""
+        strategy, mock_ml_service = model_management_strategy
+        
+        # Mock retraining trigger
+        retrain_decision = {
+            'should_retrain': True,
+            'trigger_reasons': [
+                'performance_degradation',
+                'data_drift_detected',
+                'scheduled_retrain'
+            ],
+            'current_performance': 0.72,  # Below threshold
+            'performance_threshold': 0.75,
+            'drift_score': 0.15,  # High drift
+            'drift_threshold': 0.10,
+            'days_since_last_train': 35,
+            'retrain_schedule_days': 30,
+            'estimated_retrain_time': '4 hours',
+            'retrain_priority': 'high',
+        }
+        
+        mock_ml_service.trigger_model_retrain.return_value = retrain_decision
+        
+        # Test retrain trigger
+        decision = await strategy.services.ml_service.trigger_model_retrain(
+            strategy_type=StrategyType.TREND_FOLLOWING,
+            current_performance=0.72
+        )
+        
+        assert decision['should_retrain'] is True
+        assert 'performance_degradation' in decision['trigger_reasons']
+        assert decision['retrain_priority'] == 'high'
+    
+    @pytest.mark.asyncio
+    async def test_model_update_integration(self, model_management_strategy):
+        """Test model update integration."""
+        strategy, mock_ml_service = model_management_strategy
+        
+        # Mock model update process
+        update_result = {
+            'update_successful': True,
+            'old_version': '2.1.0',
+            'new_version': '2.2.0',
+            'performance_improvement': {
+                'accuracy': {'before': 0.78, 'after': 0.82},
+                'precision': {'before': 0.80, 'after': 0.84},
+                'recall': {'before': 0.75, 'after': 0.79},
+            },
+            'update_duration': '3.5 hours',
+            'validation_passed': True,
+            'rollback_available': True,
+            'deployment_status': 'completed',
+        }
+        
+        mock_ml_service.update_model.return_value = update_result
+        
+        # Test model update
+        result = await strategy.services.ml_service.update_model(
+            strategy_type=StrategyType.TREND_FOLLOWING,
+            new_model_path='/models/trend_following_v2.2.pkl'
+        )
+        
+        assert result['update_successful'] is True
+        assert result['new_version'] == '2.2.0'
+        assert result['performance_improvement']['accuracy']['after'] > \
+               result['performance_improvement']['accuracy']['before']
+
+
+class TestMLServiceErrorHandling:
+    """Test ML service error handling and resilience."""
+    
+    @pytest.fixture
+    def error_resilient_strategy(self):
+        """Create strategy with error resilience testing."""
+        config = {
+            "name": "ErrorResilientStrategy",
+            "strategy_type": StrategyType.TREND_FOLLOWING.value,
+            "parameters": {"error_testing": True},
+        }
+        
+        mock_ml_service = Mock()
+        mock_ml_service.predict_signal_strength = AsyncMock()
+        mock_ml_service.health_check = AsyncMock()
+        mock_ml_service.get_service_status = AsyncMock()
+        
+        services = StrategyServiceContainer(
+            risk_service=Mock(),
+            data_service=Mock(),
+            execution_service=Mock(),
+            ml_service=mock_ml_service,
+        )
+        
+        return MLEnhancedMockStrategy(config, services), mock_ml_service
+    
+    @pytest.mark.asyncio
+    async def test_ml_service_timeout_handling(self, error_resilient_strategy):
+        """Test ML service timeout handling."""
+        strategy, mock_ml_service = error_resilient_strategy
+        
+        # Mock timeout error
+        mock_ml_service.predict_signal_strength.side_effect = asyncio.TimeoutError("ML prediction timeout")
+        
+        market_data = MarketData(
+            symbol="BTC/USDT",
+            timestamp=datetime.now(timezone.utc),
+            price=Decimal("50000.00"),
+            volume=Decimal("100.0"),
+            bid=Decimal("49999.00"),
+            ask=Decimal("50001.00"),
+        )
+        
+        # Should handle timeout gracefully
+        signals = await strategy._generate_signals_impl(market_data)
+        
+        assert len(signals) == 1
+        signal = signals[0]
+        
+        # Should fall back to base signal strength
+        assert signal.strength == 0.6
+    
+    @pytest.mark.asyncio
+    async def test_ml_service_connection_error(self, error_resilient_strategy):
+        """Test ML service connection error handling."""
+        strategy, mock_ml_service = error_resilient_strategy
+        
+        # Mock connection error
+        mock_ml_service.predict_signal_strength.side_effect = ConnectionError("ML service unavailable")
+        
+        market_data = MarketData(
+            symbol="BTC/USDT",
+            timestamp=datetime.now(timezone.utc),
+            price=Decimal("50000.00"),
+            volume=Decimal("100.0"),
+            bid=Decimal("49999.00"),
+            ask=Decimal("50001.00"),
+        )
+        
+        # Should handle connection error gracefully
+        signals = await strategy._generate_signals_impl(market_data)
+        
+        assert len(signals) == 1
+        signal = signals[0]
+        
+        # Should fall back to base signal
+        assert signal.strength == 0.6
+    
+    @pytest.mark.asyncio
+    async def test_ml_service_invalid_response(self, error_resilient_strategy):
+        """Test ML service invalid response handling."""
+        strategy, mock_ml_service = error_resilient_strategy
+        
+        # Mock invalid response formats
+        invalid_responses = [
+            "invalid_string",
+            123,  # Wrong type
+            {'wrong_field': 'value'},  # Missing expected fields
+            {'confidence': 'not_a_number'},  # Invalid value type
+            {'confidence': -1.5},  # Invalid confidence value
+        ]
+        
+        market_data = MarketData(
+            symbol="BTC/USDT",
+            timestamp=datetime.now(timezone.utc),
+            price=Decimal("50000.00"),
+            volume=Decimal("100.0"),
+            bid=Decimal("49999.00"),
+            ask=Decimal("50001.00"),
+        )
+        
+        for invalid_response in invalid_responses:
+            mock_ml_service.predict_signal_strength.return_value = invalid_response
+            
+            # Should handle invalid response gracefully
+            signals = await strategy._generate_signals_impl(market_data)
+            
+            assert len(signals) == 1
+            signal = signals[0]
+            
+            # Should use base strength when response is invalid
+            assert signal.strength == 0.6
+    
+    @pytest.mark.asyncio
+    async def test_ml_service_intermittent_failures(self, error_resilient_strategy):
+        """Test ML service intermittent failure handling."""
+        strategy, mock_ml_service = error_resilient_strategy
+        
+        # Mock intermittent failures
+        call_count = 0
+        
+        async def intermittent_failure(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            
+            if call_count % 3 == 0:  # Every 3rd call fails
+                raise Exception(f"Intermittent failure {call_count}")
+            
+            return {'confidence': 0.9}
+        
+        mock_ml_service.predict_signal_strength.side_effect = intermittent_failure
+        
+        market_data = MarketData(
+            symbol="BTC/USDT",
+            timestamp=datetime.now(timezone.utc),
+            price=Decimal("50000.00"),
+            volume=Decimal("100.0"),
+            bid=Decimal("49999.00"),
+            ask=Decimal("50001.00"),
+        )
+        
+        # Test multiple calls with intermittent failures
+        results = []
+        for _ in range(6):
+            signals = await strategy._generate_signals_impl(market_data)
+            results.append(signals[0].strength)
+        
+        # Should have mix of enhanced (0.54) and base (0.6) strengths
+        enhanced_count = sum(1 for strength in results if abs(strength - 0.54) < 0.001)  # 0.6 * 0.9
+        base_count = sum(1 for strength in results if abs(strength - 0.6) < 0.001)
+        
+        # Should have 4 successful (enhanced) and 2 failed (base) calls
+        assert enhanced_count == 4
+        assert base_count == 2
+    
+    @pytest.mark.asyncio
+    async def test_ml_service_health_check_integration(self, error_resilient_strategy):
+        """Test ML service health check integration."""
+        strategy, mock_ml_service = error_resilient_strategy
+        
+        # Mock health check responses
+        healthy_response = {
+            'status': 'healthy',
+            'model_loaded': True,
+            'response_time_ms': 45,
+            'memory_usage_percent': 65,
+            'predictions_per_second': 150,
+            'error_rate_percent': 0.5,
+        }
+        
+        unhealthy_response = {
+            'status': 'unhealthy',
+            'model_loaded': False,
+            'error': 'Model loading failed',
+            'response_time_ms': 5000,  # High response time
+            'memory_usage_percent': 95,  # High memory usage
+            'predictions_per_second': 5,  # Low throughput
+            'error_rate_percent': 25,  # High error rate
+        }
+        
+        # Test healthy service
+        mock_ml_service.health_check.return_value = healthy_response
+        
+        health = await strategy.services.ml_service.health_check()
+        assert health['status'] == 'healthy'
+        assert health['model_loaded'] is True
+        
+        # Test unhealthy service
+        mock_ml_service.health_check.return_value = unhealthy_response
+        
+        health = await strategy.services.ml_service.health_check()
+        assert health['status'] == 'unhealthy'
+        assert health['model_loaded'] is False
+        assert health['error_rate_percent'] == 25
+
+
+class TestMLServicePerformanceOptimization:
+    """Test ML service performance optimization patterns."""
+    
+    @pytest.fixture
+    def performance_optimized_strategy(self):
+        """Create strategy with performance optimization testing."""
+        config = {
+            "name": "PerformanceOptimizedStrategy",
+            "strategy_type": StrategyType.TREND_FOLLOWING.value,
+            "parameters": {"performance_testing": True},
+        }
+        
+        mock_ml_service = Mock()
+        mock_ml_service.predict_signal_strength = AsyncMock()
+        mock_ml_service.batch_predict = AsyncMock()
+        mock_ml_service.get_cached_prediction = AsyncMock()
+        mock_ml_service.cache_prediction = AsyncMock()
+        
+        services = StrategyServiceContainer(
+            risk_service=Mock(),
+            data_service=Mock(),
+            execution_service=Mock(),
+            ml_service=mock_ml_service,
+        )
+        
+        return MLEnhancedMockStrategy(config, services), mock_ml_service
+    
+    @pytest.mark.asyncio
+    async def test_ml_batch_prediction_optimization(self, performance_optimized_strategy):
+        """Test ML batch prediction for performance optimization."""
+        strategy, mock_ml_service = performance_optimized_strategy
+        
+        # Mock batch prediction
+        batch_predictions = {
+            'predictions': [
+                {'symbol': 'BTC/USDT', 'confidence': 0.8},
+                {'symbol': 'ETH/USDT', 'confidence': 0.9},
+                {'symbol': 'ADA/USDT', 'confidence': 0.7},
+            ],
+            'batch_processing_time_ms': 150,
+            'individual_processing_time_ms': 300,  # Would be higher for individual calls
+            'performance_gain': 2.0,  # 2x faster than individual calls
+        }
+        
+        mock_ml_service.batch_predict.return_value = batch_predictions
+        
+        # Test batch prediction
+        market_data_batch = [
+            MarketData(symbol="BTC/USDT", timestamp=datetime.now(timezone.utc), price=Decimal("50000"), volume=Decimal("100"), bid=Decimal("49999"), ask=Decimal("50001")),
+            MarketData(symbol="ETH/USDT", timestamp=datetime.now(timezone.utc), price=Decimal("3000"), volume=Decimal("200"), bid=Decimal("2999"), ask=Decimal("3001")),
+            MarketData(symbol="ADA/USDT", timestamp=datetime.now(timezone.utc), price=Decimal("0.5"), volume=Decimal("10000"), bid=Decimal("0.499"), ask=Decimal("0.501")),
+        ]
+        
+        if hasattr(strategy.services.ml_service, 'batch_predict'):
+            result = await strategy.services.ml_service.batch_predict(market_data_batch)
+            
+            assert len(result['predictions']) == 3
+            assert result['performance_gain'] == 2.0
+            assert result['batch_processing_time_ms'] < result['individual_processing_time_ms']
+    
+    @pytest.mark.asyncio
+    async def test_ml_prediction_caching(self, performance_optimized_strategy):
+        """Test ML prediction caching for performance."""
+        strategy, mock_ml_service = performance_optimized_strategy
+        
+        # Mock caching behavior
+        cache_key = "BTC/USDT_50000_100"
+        cached_prediction = {
+            'confidence': 0.85,
+            'cached': True,
+            'cache_timestamp': datetime.now(timezone.utc).isoformat(),
+            'cache_ttl_seconds': 300,
+        }
+        
+        # First call - cache miss
+        mock_ml_service.get_cached_prediction.return_value = None
+        mock_ml_service.predict_signal_strength.return_value = {'confidence': 0.85}
+        mock_ml_service.cache_prediction.return_value = True
+        
+        market_data = MarketData(
+            symbol="BTC/USDT",
+            timestamp=datetime.now(timezone.utc),
+            price=Decimal("50000.00"),
+            volume=Decimal("100.0"),
+            bid=Decimal("49999.00"),
+            ask=Decimal("50001.00"),
+        )
+        
+        # First call - should miss cache and compute
+        if hasattr(strategy.services.ml_service, 'get_cached_prediction'):
+            cached = await strategy.services.ml_service.get_cached_prediction(cache_key)
+            assert cached is None
+            
+            # Compute prediction
+            prediction = await strategy.services.ml_service.predict_signal_strength(
+                symbol="BTC/USDT",
+                market_data=market_data,
+                strategy_type=StrategyType.TREND_FOLLOWING
+            )
+            
+            # Cache the result
+            await strategy.services.ml_service.cache_prediction(cache_key, prediction)
+            
+            mock_ml_service.cache_prediction.assert_called_once_with(cache_key, prediction)
+        
+        # Second call - should hit cache
+        mock_ml_service.get_cached_prediction.return_value = cached_prediction
+        
+        if hasattr(strategy.services.ml_service, 'get_cached_prediction'):
+            cached = await strategy.services.ml_service.get_cached_prediction(cache_key)
+            assert cached is not None
+            assert cached['cached'] is True
+            assert cached['confidence'] == 0.85
+    
+    @pytest.mark.asyncio
+    async def test_ml_concurrent_prediction_handling(self, performance_optimized_strategy):
+        """Test ML service handles concurrent predictions efficiently."""
+        strategy, mock_ml_service = performance_optimized_strategy
+        
+        # Mock concurrent prediction handling
+        prediction_times = []
+        
+        async def mock_predict_with_timing(*args, **kwargs):
+            start_time = datetime.now()
+            pass  # Removed sleep for performance
+            end_time = datetime.now()
+            prediction_times.append((end_time - start_time).total_seconds())
+            return {'confidence': 0.8}
+        
+        mock_ml_service.predict_signal_strength.side_effect = mock_predict_with_timing
+        
+        market_data = MarketData(
+            symbol="BTC/USDT",
+            timestamp=datetime.now(timezone.utc),
+            price=Decimal("50000.00"),
+            volume=Decimal("100.0"),
+            bid=Decimal("49999.00"),
+            ask=Decimal("50001.00"),
+        )
+        
+        # Create multiple concurrent prediction tasks
+        tasks = []
+        for i in range(10):
+            task = strategy.services.ml_service.predict_signal_strength(
+                symbol="BTC/USDT",
+                market_data=market_data,
+                strategy_type=StrategyType.TREND_FOLLOWING
+            )
+            tasks.append(task)
+        
+        # Execute concurrently
+        start_time = datetime.now()
+        results = await asyncio.gather(*tasks)
+        total_time = (datetime.now() - start_time).total_seconds()
+        
+        # Verify all predictions completed
+        assert len(results) == 10
+        assert all(result['confidence'] == 0.8 for result in results)
+        
+        # Verify concurrent execution was efficient
+        # Total time should be less than sum of individual times
+        individual_time_sum = sum(prediction_times)
+        assert total_time < individual_time_sum  # Parallelism benefit
+    
+    @pytest.mark.asyncio
+    async def test_ml_memory_usage_optimization(self, performance_optimized_strategy):
+        """Test ML service memory usage optimization."""
+        strategy, mock_ml_service = performance_optimized_strategy
+        
+        # Mock memory usage tracking
+        memory_usage_data = {
+            'before_prediction_mb': 512,
+            'during_prediction_mb': 768,
+            'after_prediction_mb': 520,
+            'peak_memory_mb': 768,
+            'memory_cleanup_successful': True,
+            'garbage_collected_mb': 248,
+        }
+        
+        mock_ml_service.get_memory_usage = Mock(return_value=memory_usage_data)
+        
+        # Test memory usage monitoring
+        if hasattr(strategy.services.ml_service, 'get_memory_usage'):
+            memory_info = strategy.services.ml_service.get_memory_usage()
+            
+            assert memory_info['before_prediction_mb'] == 512
+            assert memory_info['peak_memory_mb'] == 768
+            assert memory_info['memory_cleanup_successful'] is True
+            assert memory_info['garbage_collected_mb'] > 0

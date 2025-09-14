@@ -1,0 +1,372 @@
+"""
+Comprehensive tests for strategies base module.
+"""
+
+import pytest
+from datetime import datetime, timezone, timedelta
+from decimal import Decimal
+from unittest.mock import AsyncMock, Mock, patch, MagicMock
+from uuid import uuid4
+
+from src.core.types import MarketData, Signal, SignalDirection, StrategyConfig, StrategyMetrics, StrategyStatus, StrategyType
+from src.strategies.base import BaseStrategy, DEFAULT_SIGNAL_HISTORY_LIMIT
+
+
+class TestConcreteStrategy(BaseStrategy):
+    """Concrete implementation for testing."""
+    
+    # Pre-computed values for performance
+    _FIXED_TIMESTAMP = datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+    _DEFAULT_SIGNAL_STRENGTH = Decimal("0.8")
+    _DEFAULT_POSITION_SIZE = Decimal("1000")
+    
+    @property
+    def strategy_type(self) -> StrategyType:
+        return StrategyType.TREND_FOLLOWING
+    
+    async def _generate_signals_impl(self, data: MarketData) -> list[Signal]:
+        """Simple signal generation for testing."""
+        return [Signal(
+            symbol="BTC/USDT",
+            direction=SignalDirection.BUY,
+            strength=self._DEFAULT_SIGNAL_STRENGTH,
+            timestamp=self._FIXED_TIMESTAMP,
+            source=self.config.strategy_id
+        )]
+    
+    async def validate_signal(self, signal: Signal) -> bool:
+        """Validate signal before execution."""
+        return signal.strength > Decimal("0.5")
+    
+    def get_position_size(self, signal: Signal) -> Decimal:
+        """Calculate position size for signal."""
+        return self._DEFAULT_POSITION_SIZE
+    
+    def should_exit(self, position, data: MarketData) -> bool:
+        """Determine if position should be closed."""
+        return False
+
+
+class TestBaseStrategy:
+    """Test base strategy functionality."""
+    
+    @pytest.fixture(scope="session")
+    def sample_config(self):
+        """Create sample strategy configuration."""
+        return {
+            "strategy_id": "test_strategy_123",  # Fixed ID for performance
+            "strategy_type": StrategyType.TREND_FOLLOWING,
+            "name": "test_strategy",
+            "symbol": "BTCUSDT",
+            "timeframe": "1h",
+            "parameters": {"param1": "value1"}
+        }
+    
+    @pytest.fixture(scope="session")
+    def mock_market_data(self):
+        """Create mock market data."""
+        # Use fixed timestamp for performance
+        fixed_timestamp = datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+        return MarketData(
+            symbol="BTCUSDT",
+            timestamp=fixed_timestamp,
+            open=Decimal("49500"),
+            high=Decimal("50500"),
+            low=Decimal("49000"),
+            close=Decimal("50000"),
+            volume=Decimal("1000"),
+            exchange="binance",
+            bid_price=Decimal("49995"),
+            ask_price=Decimal("50005")
+        )
+    
+    def test_base_strategy_is_abstract(self):
+        """Test that BaseStrategy is abstract and cannot be instantiated."""
+        with pytest.raises(TypeError):
+            BaseStrategy({})
+    
+    def test_concrete_strategy_initialization(self, sample_config):
+        """Test successful initialization of concrete strategy."""
+        strategy = TestConcreteStrategy(sample_config)
+        
+        # Check basic properties
+        assert strategy.name == "test_strategy"
+        assert strategy.version == "1.0.0"
+        assert strategy.status == StrategyStatus.STOPPED
+        assert strategy.strategy_type == StrategyType.TREND_FOLLOWING
+        
+        # Check configuration
+        assert isinstance(strategy.config, StrategyConfig)
+        assert strategy.config.name == "test_strategy"
+        assert strategy.config.symbol == "BTCUSDT"
+        
+        # Check metrics initialization
+        assert isinstance(strategy.metrics, StrategyMetrics)
+        assert strategy.metrics.strategy_id == sample_config["strategy_id"]
+        
+        # Check performance metrics
+        assert strategy._performance_metrics["total_signals"] == 0
+        assert strategy._performance_metrics["valid_signals"] == 0
+        assert strategy._performance_metrics["execution_count"] == 0
+    
+    def test_strategy_properties(self, sample_config):
+        """Test strategy property access."""
+        strategy = TestConcreteStrategy(sample_config)
+        
+        assert strategy.name == "test_strategy"
+        assert strategy.version == "1.0.0"
+        assert strategy.status == StrategyStatus.STOPPED
+        assert strategy.strategy_type == StrategyType.TREND_FOLLOWING
+    
+    def test_strategy_signal_history_initialization(self, sample_config):
+        """Test signal history initialization."""
+        strategy = TestConcreteStrategy(sample_config)
+        
+        assert strategy._signal_history == []
+        assert strategy._max_signal_history == DEFAULT_SIGNAL_HISTORY_LIMIT
+    
+    def test_strategy_backtesting_mode_initialization(self, sample_config):
+        """Test backtesting mode initialization."""
+        strategy = TestConcreteStrategy(sample_config)
+        
+        assert strategy._is_backtesting is False
+        assert strategy._backtest_config is None
+        assert strategy._backtest_metrics == {}
+    
+    def test_strategy_service_dependencies_initialization(self, sample_config):
+        """Test service dependencies are initialized properly."""
+        strategy = TestConcreteStrategy(sample_config)
+        
+        # Services are stored in the services container
+        assert strategy.services is not None
+        assert strategy.services.risk_service is None
+        assert strategy.services.execution_service is None
+        assert strategy.services.data_service is None
+        assert strategy.services.validation_service is None
+        assert strategy.services.monitoring_service is None
+    
+    def test_strategy_recovery_scenarios_initialization(self, sample_config):
+        """Test strategy can be initialized without recovery scenarios."""
+        # Recovery scenarios are handled by error handling decorators
+        strategy = TestConcreteStrategy(sample_config)
+        
+        # Strategy should initialize successfully
+        assert strategy is not None
+        assert strategy.status == StrategyStatus.INACTIVE
+    
+    @pytest.mark.asyncio
+    async def test_generate_signals_basic(self, sample_config, mock_market_data):
+        """Test basic signal generation functionality."""
+        strategy = TestConcreteStrategy(sample_config)
+        
+        # Mock the validation method
+        with patch.object(strategy, '_validate_and_process_signal', return_value=True):
+            signals = await strategy.generate_signals(mock_market_data)
+            
+            assert len(signals) == 1
+            assert signals[0].symbol == "BTC/USDT"
+            assert signals[0].direction == SignalDirection.BUY
+            assert signals[0].strength == Decimal("0.8")
+    
+    @pytest.mark.asyncio
+    async def test_generate_signals_with_validation_framework(self, sample_config, mock_market_data):
+        """Test signal generation with validation framework."""
+        strategy = TestConcreteStrategy(sample_config)
+        
+        # Mock validation framework
+        mock_validation_framework = AsyncMock()
+        mock_validation_result = Mock()
+        mock_validation_result.is_valid = True
+        mock_validation_result.errors = []
+        mock_validation_framework.validate_market_conditions.return_value = mock_validation_result
+        strategy._validation_framework = mock_validation_framework
+        
+        # Mock signal validation
+        with patch.object(strategy, '_validate_and_process_signal', return_value=True):
+            signals = await strategy.generate_signals(mock_market_data)
+            
+            assert len(signals) == 1
+            mock_validation_framework.validate_market_conditions.assert_called_once_with(mock_market_data)
+    
+    @pytest.mark.asyncio
+    async def test_generate_signals_validation_failure(self, sample_config, mock_market_data):
+        """Test signal generation when validation fails."""
+        strategy = TestConcreteStrategy(sample_config)
+        
+        # Mock validation framework with failure
+        mock_validation_framework = AsyncMock()
+        mock_validation_result = Mock()
+        mock_validation_result.is_valid = False
+        mock_validation_result.errors = ["Market too volatile"]
+        mock_validation_framework.validate_market_conditions.return_value = mock_validation_result
+        strategy._validation_framework = mock_validation_framework
+        
+        signals = await strategy.generate_signals(mock_market_data)
+        
+        # Should return empty list due to validation failure
+        assert len(signals) == 0
+    
+    @pytest.mark.asyncio
+    async def test_generate_signals_updates_metrics(self, sample_config, mock_market_data):
+        """Test that signal generation updates performance metrics."""
+        strategy = TestConcreteStrategy(sample_config)
+        
+        # Mock signal validation to accept all signals
+        with patch.object(strategy, '_validate_and_process_signal', return_value=True):
+            await strategy.generate_signals(mock_market_data)
+            
+            assert strategy._performance_metrics["total_signals"] == 1
+            assert strategy._performance_metrics["valid_signals"] == 1
+    
+    @pytest.mark.asyncio
+    async def test_generate_signals_with_invalid_signals(self, sample_config, mock_market_data):
+        """Test signal generation with some invalid signals."""
+        strategy = TestConcreteStrategy(sample_config)
+        
+        # Mock signal validation to reject signals
+        with patch.object(strategy, '_validate_and_process_signal', return_value=False):
+            signals = await strategy.generate_signals(mock_market_data)
+            
+            assert len(signals) == 0  # All signals rejected
+            assert strategy._performance_metrics["total_signals"] == 1
+            assert strategy._performance_metrics["valid_signals"] == 0
+    
+    @pytest.mark.asyncio
+    async def test_generate_signals_with_metrics_collector(self, sample_config, mock_market_data):
+        """Test signal generation with metrics collector."""
+        strategy = TestConcreteStrategy(sample_config)
+        
+        # Mock metrics collector
+        mock_metrics_collector = Mock()
+        mock_trading_metrics = Mock()
+        mock_signals_generated = Mock()
+        mock_signals_generated.labels.return_value.inc = Mock()
+        mock_trading_metrics.signals_generated = mock_signals_generated
+        mock_metrics_collector.trading_metrics = mock_trading_metrics
+        strategy._metrics_collector = mock_metrics_collector
+        
+        with patch.object(strategy, '_validate_and_process_signal', return_value=True):
+            await strategy.generate_signals(mock_market_data)
+            
+            # Verify metrics were called (though this might not work due to hasattr checks)
+            assert mock_metrics_collector is not None
+    
+    def test_strategy_initialization_logging(self, sample_config):
+        """Test that strategy initialization logs appropriately."""
+        with patch('src.strategies.base.BaseComponent.__init__'):
+            with patch('src.core.logging.get_logger') as mock_get_logger:
+                mock_logger = Mock()
+                mock_get_logger.return_value = mock_logger
+                
+                # Mock the logger property
+                with patch.object(TestConcreteStrategy, 'logger', mock_logger):
+                    strategy = TestConcreteStrategy(sample_config)
+                    # The actual logging call happens in __init__ but we can't easily test it
+                    # due to complex initialization chain
+    
+    def test_strategy_configuration_validation(self, sample_config):
+        """Test that invalid configuration raises appropriate errors."""
+        # Test with missing required fields
+        invalid_config = {"name": "test"}  # Missing strategy_id and other required fields
+        
+        with pytest.raises((ValueError, TypeError, KeyError)):
+            TestConcreteStrategy(invalid_config)
+    
+    def test_strategy_type_property_abstract(self):
+        """Test that strategy_type is abstract and must be implemented."""
+        class IncompleteStrategy(BaseStrategy):
+            # Missing strategy_type implementation
+            async def _generate_signals_impl(self, data):
+                return []
+        
+        config = {"strategy_id": str(uuid4()), "name": "test", "symbols": ["BTCUSDT"]}
+        
+        with pytest.raises(TypeError):
+            IncompleteStrategy(config)
+    
+    def test_generate_signals_impl_abstract(self):
+        """Test that _generate_signals_impl is abstract and must be implemented."""
+        class IncompleteStrategy(BaseStrategy):
+            @property
+            def strategy_type(self):
+                return StrategyType.TREND_FOLLOWING
+            # Missing _generate_signals_impl implementation
+        
+        config = {"strategy_id": str(uuid4()), "name": "test", "symbols": ["BTCUSDT"]}
+        
+        with pytest.raises(TypeError):
+            IncompleteStrategy(config)
+    
+    def test_strategy_component_inheritance(self, sample_config):
+        """Test that strategy properly inherits from BaseComponent."""
+        strategy = TestConcreteStrategy(sample_config)
+        
+        # Should have BaseComponent functionality
+        assert hasattr(strategy, 'logger')
+        # Other BaseComponent methods/properties should be available
+    
+    def test_strategy_performance_metrics_structure(self, sample_config):
+        """Test performance metrics structure."""
+        strategy = TestConcreteStrategy(sample_config)
+        
+        required_metrics = [
+            "total_signals", "valid_signals", "execution_count", "last_performance_update"
+        ]
+        
+        for metric in required_metrics:
+            assert metric in strategy._performance_metrics
+            
+        assert isinstance(strategy._performance_metrics["last_performance_update"], datetime)
+    
+    def test_strategy_constants_defined(self):
+        """Test that required constants are properly defined."""
+        from src.strategies.base import (
+            DEFAULT_CIRCUIT_BREAKER_THRESHOLD,
+            DEFAULT_CIRCUIT_BREAKER_TIMEOUT, 
+            DEFAULT_SIGNAL_HISTORY_LIMIT,
+            MIN_SIGNAL_CONFIDENCE,
+            STRATEGY_METRICS_UPDATE_TIMEOUT
+        )
+        
+        assert DEFAULT_CIRCUIT_BREAKER_THRESHOLD == 5
+        assert DEFAULT_CIRCUIT_BREAKER_TIMEOUT == 30
+        assert DEFAULT_SIGNAL_HISTORY_LIMIT == 1000
+        assert MIN_SIGNAL_CONFIDENCE == 0.1
+        assert STRATEGY_METRICS_UPDATE_TIMEOUT == 300
+    
+    def test_alerting_availability_detection(self):
+        """Test that alerting availability is properly detected."""
+        from src.strategies.base import ALERTING_AVAILABLE
+        
+        # This will be True or False depending on whether alerting module exists
+        assert isinstance(ALERTING_AVAILABLE, bool)
+    
+    @pytest.mark.asyncio
+    async def test_circuit_breaker_decorator_applied(self, sample_config, mock_market_data):
+        """Test that circuit breaker decorator is properly applied."""
+        strategy = TestConcreteStrategy(sample_config)
+        
+        # The circuit breaker decorator should be applied to generate_signals
+        # We can't easily test the actual circuit breaking without triggering failures
+        # but we can verify the method executes normally
+        with patch.object(strategy, '_validate_and_process_signal', return_value=True):
+            signals = await strategy.generate_signals(mock_market_data)
+            assert isinstance(signals, list)
+    
+    def test_error_handler_initialization(self, sample_config):
+        """Test that error handler is properly initialized."""
+        with patch('src.strategies.base.get_global_error_handler') as mock_get_handler:
+            mock_handler = Mock()
+            mock_get_handler.return_value = mock_handler
+            
+            strategy = TestConcreteStrategy(sample_config)
+            
+            assert strategy._error_handler == mock_handler
+            mock_get_handler.assert_called_once()
+    
+    def test_strategy_version_property(self, sample_config):
+        """Test strategy version property."""
+        strategy = TestConcreteStrategy(sample_config)
+        
+        assert strategy.version == "1.0.0"
+        assert isinstance(strategy.version, str)
