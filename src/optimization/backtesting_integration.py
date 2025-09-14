@@ -10,9 +10,10 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
 
-from src.backtesting.service import BacktestRequest, BacktestService
+from src.backtesting.service import BacktestRequest
+from src.backtesting.interfaces import BacktestServiceInterface
 from src.core.base import BaseService
-from src.core.exceptions import OptimizationError
+from src.core.exceptions import OptimizationError, ServiceError, ValidationError
 from src.core.types import StrategyConfig, TradingMode
 from src.optimization.interfaces import IBacktestIntegrationService
 
@@ -25,17 +26,30 @@ class BacktestIntegrationService(BaseService, IBacktestIntegrationService):
     handling strategy evaluation and performance metric extraction.
     """
 
-    def __init__(self, backtest_service: BacktestService | None = None):
+    def __init__(
+        self,
+        backtest_service: BacktestServiceInterface | None = None,
+        name: str | None = None,
+        config: dict[str, Any] | None = None,
+        correlation_id: str | None = None,
+    ):
         """
         Initialize backtesting integration service.
 
         Args:
             backtest_service: Backtesting service instance
+            name: Service name for identification
+            config: Service configuration
+            correlation_id: Request correlation ID
         """
-        super().__init__()
+        super().__init__(name or "BacktestIntegrationService", config, correlation_id)
         self._backtest_service = backtest_service
 
-        self.logger.info("BacktestIntegrationService initialized")
+        # Add dependencies
+        if backtest_service:
+            self.add_dependency("BacktestService")
+
+        self._logger.info("BacktestIntegrationService initialized")
 
     async def evaluate_strategy(
         self,
@@ -69,8 +83,12 @@ class BacktestIntegrationService(BaseService, IBacktestIntegrationService):
             # Extract performance metrics
             return self._extract_performance_metrics(result)
 
+        except (ServiceError, ValidationError) as e:
+            # Handle backtesting-specific exceptions
+            self._logger.error(f"Backtesting service error during strategy evaluation: {e}")
+            raise OptimizationError(f"Backtesting failed: {e}") from e
         except Exception as e:
-            self.logger.warning(f"Strategy evaluation failed: {e}")
+            self._logger.warning(f"Strategy evaluation failed with unexpected error: {e}")
             # Return poor performance for failed evaluations
             return {
                 "total_return": -0.1,
@@ -111,13 +129,16 @@ class BacktestIntegrationService(BaseService, IBacktestIntegrationService):
                 Dictionary of performance metrics
             """
             try:
-                # Create strategy configuration
+                # Create strategy configuration with proper required fields
+                from src.core.types.strategy import StrategyType
+
                 strategy_config = StrategyConfig(
+                    strategy_id=f"optimization_{strategy_name}",
+                    strategy_type=StrategyType.CUSTOM,
                     name=strategy_name,
-                    strategy_type="static",
-                    enabled=True,
                     symbol=parameters.get("symbol", "BTCUSDT"),
                     timeframe=parameters.get("timeframe", "1h"),
+                    enabled=True,
                     parameters=parameters,
                 )
 
@@ -129,8 +150,12 @@ class BacktestIntegrationService(BaseService, IBacktestIntegrationService):
                     initial_capital=initial_capital,
                 )
 
+            except (ServiceError, ValidationError) as e:
+                # Re-raise backtesting exceptions as optimization errors
+                self._logger.error(f"Backtesting error in objective function: {e}")
+                raise OptimizationError(f"Objective function evaluation failed: {e}") from e
             except Exception as e:
-                self.logger.warning(f"Strategy evaluation failed: {e}")
+                self._logger.warning(f"Strategy evaluation failed: {e}")
                 # Return poor performance for failed evaluations
                 return {
                     "total_return": -0.1,
@@ -162,17 +187,38 @@ class BacktestIntegrationService(BaseService, IBacktestIntegrationService):
             "trading_mode": TradingMode.BACKTEST,
         }
 
-        # Create BacktestRequest
-        request = BacktestRequest(
-            parameters=backtest_config,
-            symbols=[getattr(strategy_config, "symbol", "BTCUSDT")],
-            strategy_name=strategy_config.name,
-            start_date=backtest_config["start_date"],
-            end_date=backtest_config["end_date"],
-            initial_capital=backtest_config["initial_capital"],
-            dry_run=True,
-            max_positions=10,
-        )
+        # Create BacktestRequest with correct field names and proper type handling
+        try:
+            # Convert StrategyConfig to dict properly
+            if isinstance(strategy_config, StrategyConfig):
+                strategy_dict = {
+                    "strategy_id": strategy_config.strategy_id,
+                    "strategy_type": strategy_config.strategy_type.value if hasattr(strategy_config.strategy_type, "value") else str(strategy_config.strategy_type),
+                    "name": strategy_config.name,
+                    "symbol": strategy_config.symbol,
+                    "timeframe": getattr(strategy_config, "timeframe", "1h"),
+                    "enabled": strategy_config.enabled,
+                    "parameters": strategy_config.parameters,
+                }
+            else:
+                # Fallback for dict-like objects
+                strategy_dict = dict(strategy_config) if hasattr(strategy_config, "keys") else strategy_config
+                # Ensure required fields are present
+                if "timeframe" not in strategy_dict:
+                    strategy_dict["timeframe"] = "1h"
+
+            request = BacktestRequest(
+                strategy_config=strategy_dict,
+                symbols=[strategy_config.symbol],
+                start_date=backtest_config["start_date"],
+                end_date=backtest_config["end_date"],
+                initial_capital=backtest_config["initial_capital"],
+                max_open_positions=10,
+                exchange="binance",  # Add missing required field
+                timeframe=strategy_config.timeframe if hasattr(strategy_config, "timeframe") else "1h"
+            )
+        except (AttributeError, TypeError) as e:
+            raise OptimizationError(f"Invalid strategy configuration for backtesting: {e}") from e
 
         # Execute backtest
         result = await self._backtest_service.run_backtest(request)
@@ -214,7 +260,7 @@ class BacktestIntegrationService(BaseService, IBacktestIntegrationService):
             }
 
         except Exception as e:
-            self.logger.warning(f"Failed to extract performance metrics: {e}")
+            self._logger.warning(f"Failed to extract performance metrics: {e}")
             return {
                 "total_return": 0.0,
                 "sharpe_ratio": 0.0,
