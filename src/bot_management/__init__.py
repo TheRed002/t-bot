@@ -1,42 +1,75 @@
 """
-Bot Management System for T-Bot Trading Platform - CONSOLIDATED.
+CONSOLIDATED Bot Management System for T-Bot Trading Platform.
 
-This module provides comprehensive bot orchestration and resource management
-capabilities, enabling multiple bots to run different strategies simultaneously
-with proper resource allocation and coordination.
-
-CONSOLIDATED: Removed duplicate orchestrator implementations, using bot_coordinator.py
-as the main orchestration component with proper service layer integration.
-
-CRITICAL: This module integrates with execution, strategies, exchanges, and
-capital management components through service layer dependencies.
+This module provides bot orchestration and resource management with
+simplified, clear architecture following the service layer pattern.
 
 Core Components:
-- BotService: Core bot management business logic with proper DI
-- BotCoordinator: Main orchestration and inter-bot coordination component
-- BotMonitor: Advanced monitoring using service dependencies
-
-Legacy Components (maintained for compatibility):
-- BotInstance: Individual bot that runs a specific strategy
+- BotService: Core bot management business logic
+- BotCoordinator: Bot coordination and communication
+- BotMonitor: Health monitoring and performance tracking
+- BotInstance: Individual bot implementation
 - BotLifecycle: Bot lifecycle management
-- ResourceManager: Shared resource allocation and management
+- ResourceManager: Resource allocation and management
 """
 
-# Core service layer components
-from .bot_coordinator import BotCoordinator
-from .bot_instance import BotInstance
-from .bot_lifecycle import BotLifecycle
-from .bot_monitor import BotMonitor
-from .resource_manager import ResourceManager
-from .service import BotService
-
+# Simplified exports
 __all__ = [
-    # Core components
-    "BotCoordinator",  # Main orchestration component
-    # Legacy components (maintained for compatibility)
+    "BotCoordinator",
     "BotInstance",
     "BotLifecycle",
-    "BotMonitor",  # Monitoring and health checks
-    "BotService",  # Service layer business logic
+    "BotMonitor",
+    "BotService",
     "ResourceManager",
 ]
+
+
+# Simplified submodule list for tests
+_submodules = [
+    "bot_coordinator",
+    "bot_instance",
+    "bot_lifecycle",
+    "bot_monitor",
+    "service",
+    "resource_manager",
+    "factory",
+    "repository",
+    "di_registration",
+]
+
+
+def __getattr__(name: str):
+    """Lazy import to prevent circular dependencies."""
+    # Handle submodule imports for tests
+    if name in _submodules:
+        import importlib
+
+        return importlib.import_module(f".{name}", __name__)
+
+    # Handle class imports
+    if name == "BotCoordinator":
+        from .bot_coordinator import BotCoordinator
+
+        return BotCoordinator
+    elif name == "BotInstance":
+        from .bot_instance import BotInstance
+
+        return BotInstance
+    elif name == "BotLifecycle":
+        from .bot_lifecycle import BotLifecycle
+
+        return BotLifecycle
+    elif name == "BotMonitor":
+        from .bot_monitor import BotMonitor
+
+        return BotMonitor
+    elif name == "BotService":
+        from .service import BotService
+
+        return BotService
+    elif name == "ResourceManager":
+        from .resource_manager import ResourceManager
+
+        return ResourceManager
+    else:
+        raise AttributeError(f"module '{__name__}' has no attribute '{name}'")

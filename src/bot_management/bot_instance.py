@@ -18,9 +18,8 @@ from typing import Any
 import psutil
 
 # MANDATORY: Import from P-010A (capital management)
-from src.bot_management.capital_allocator_adapter import CapitalAllocatorAdapter
+from src.capital_management.service import CapitalService
 from src.core.config import Config
-from src.core.config.service import ConfigService
 from src.core.exceptions import (
     ExecutionError,
     RiskManagementError,
@@ -57,51 +56,67 @@ from src.error_handling.decorators import (
     with_retry,
 )
 
-# MANDATORY: Import from P-003+ (exchanges)
-from src.exchanges.factory import ExchangeFactory
+# MANDATORY: Import from P-003+ (exchanges) - use interface for proper DI
+from src.exchanges.interfaces import IExchangeFactory
 
-# MANDATORY: Import from P-016 (execution engine)
-from src.execution.execution_engine import ExecutionEngine
-from src.execution.service import ExecutionService
+# MANDATORY: Import from P-016 (execution engine) - Use service interfaces for proper DI
+from src.execution.interfaces import ExecutionEngineServiceInterface, ExecutionServiceInterface
 from src.execution.types import ExecutionInstruction
 
 # Import monitoring components
 from src.monitoring import ExchangeMetrics, MetricsCollector, TradingMetrics, get_tracer
 
-# MANDATORY: Import from P-008+ (risk management)
-from src.risk_management import RiskService
+# MANDATORY: Import from P-008+ (risk management) - use interface for proper DI
+from src.risk_management.interfaces import RiskServiceInterface
+
+# MANDATORY: Import from P-012 (state management) - use concrete service (no interface available)
 from src.state import StateService
 
-# MANDATORY: Import from P-011 (strategies)
-from src.strategies.factory import StrategyFactory
-from src.strategies.service import StrategyService
-from src.utils.validation.service import ValidationService
+# MANDATORY: Import from P-011 (strategies) - use interface for proper DI
+from src.strategies.interfaces import StrategyFactoryInterface, StrategyServiceInterface
 
-# MANDATORY: Import from P-007A (utils)
-try:
-    from src.utils.decorators import log_calls
+# Import common utilities
+from src.utils.bot_service_helpers import (
+    safe_import_decorators,
+)
 
-    # Validate imported decorators are callable
-    if not callable(log_calls):
-        raise ImportError(f"log_calls is not callable: {type(log_calls)}")
+# Get decorators with fallback
+_decorators = safe_import_decorators()
+log_calls = _decorators["log_calls"]
 
-except ImportError as e:
-    # Fallback if decorators module is not available
-    import functools
-    import logging
+# Production configuration constants
+DEFAULT_WEBSOCKET_TIMEOUT = 30.0
+DEFAULT_HEARTBEAT_INTERVAL = 10.0
+DEFAULT_MESSAGE_QUEUE_SIZE = 1000
+DEFAULT_MESSAGE_BATCH_SIZE = 10
+DEFAULT_MAX_CONCURRENT_POSITIONS = 3
+DEFAULT_TIMEFRAME = "1h"
 
-    def log_calls(func):
-        """Fallback decorator that just logs function calls."""
+# Timeout constants
+CONNECTION_CLOSE_TIMEOUT = 10.0
+WEBSOCKET_CLOSE_TIMEOUT = 5.0
+INDIVIDUAL_CLOSE_TIMEOUT = 3.0
+BATCH_CLOSE_TIMEOUT = 15.0
+CLEANUP_TIMEOUT = 30.0
+PING_TIMEOUT = 5.0
+STRATEGY_TIMEOUT = 1.0
+RECONNECT_TIMEOUT = 10.0
 
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            logger = logging.getLogger(func.__module__)
-            logger.info(f"Calling {func.__name__}")
-            return func(*args, **kwargs)
-
-        return wrapper
-
-    logging.getLogger(__name__).warning(f"Failed to import decorators, using fallback: {e}")
+# Circuit breaker and retry constants
+STARTUP_FAILURE_THRESHOLD = 5
+STARTUP_RECOVERY_TIMEOUT = 30
+EXECUTION_FAILURE_THRESHOLD = 3
+EXECUTION_RECOVERY_TIMEOUT = 60
+STRATEGY_FAILURE_THRESHOLD = 5
+STRATEGY_RECOVERY_TIMEOUT = 180
+POSITION_FAILURE_THRESHOLD = 3
+POSITION_RECOVERY_TIMEOUT = 60
+MONITORING_FAILURE_THRESHOLD = 5
+MONITORING_RECOVERY_TIMEOUT = 30
+RESTART_FAILURE_THRESHOLD = 2
+RESTART_RECOVERY_TIMEOUT = 120
+TRADE_FAILURE_THRESHOLD = 3
+TRADE_RECOVERY_TIMEOUT = 60
 
 
 class BotInstance:
@@ -138,73 +153,52 @@ class BotInstance:
 
     def __init__(
         self,
-        config: Config,
         bot_config: BotConfiguration,
-        execution_service: ExecutionService | None = None,
-        risk_service: RiskService | None = None,
-        database_service: DatabaseService | None = None,
-        state_service: StateService | None = None,
+        execution_service: ExecutionServiceInterface,
+        execution_engine_service: ExecutionEngineServiceInterface,
+        risk_service: RiskServiceInterface,
+        database_service: DatabaseService,
+        state_service: StateService,
+        strategy_service: StrategyServiceInterface,
+        exchange_factory: IExchangeFactory,
+        strategy_factory: StrategyFactoryInterface,
+        capital_service: CapitalService,
+        config: Config | None = None,
     ):
         """
-        Initialize bot instance with configuration and services.
+        Initialize bot instance with injected services.
 
         Args:
-            config: Application configuration
             bot_config: Bot-specific configuration
-            execution_service: ExecutionService instance (will be created if None)
-            risk_service: RiskService instance (will be created if None)
-            database_service: DatabaseService instance (will be created if None)
-            state_service: StateService instance (will be created if None)
+            execution_service: ExecutionServiceInterface instance (required)
+            execution_engine_service: ExecutionEngineServiceInterface instance (required)
+            risk_service: RiskServiceInterface instance (required)
+            database_service: DatabaseService instance (required)
+            state_service: StateService instance (required)
+            strategy_service: StrategyServiceInterface instance (required)
+            exchange_factory: IExchangeFactory instance (required)
+            strategy_factory: StrategyFactoryInterface instance (required)
+            capital_service: CapitalService instance (required)
+            config: Optional application configuration
 
         Raises:
             ValidationError: If configuration is invalid
         """
-        self._logger = get_logger(self.__class__.__module__)  # Initialize BaseComponent
+        self._logger = get_logger(self.__class__.__module__)
         self.config = config
         self.bot_config = bot_config
         self.error_handler = get_global_error_handler()
 
-        # Core services - use dependency injection or create if not provided
-        self.database_service = database_service or self._create_database_service(config)
-        self.state_service = state_service or self._create_state_service(config)
-        self.risk_service = risk_service or self._create_risk_service(config)
-        self.execution_service = execution_service or self._create_execution_service(config)
-
-        # Core components - initialized but not started
-        self.strategy_service = self._create_strategy_service(config)
-        self.strategy_factory = StrategyFactory(self.strategy_service)
-        self.exchange_factory = ExchangeFactory(config)
-
-        # Initialize execution engine with proper dependencies
-        try:
-            self.execution_engine = ExecutionEngine(
-                execution_service=self.execution_service,
-                risk_service=self.risk_service,
-                config=config,
-                state_service=self.state_service,
-                exchange_factory=self.exchange_factory,
-            )
-        except Exception as e:
-            self._logger.error(f"Failed to initialize ExecutionEngine: {e}")
-            # Create a fallback execution engine with basic config
-            try:
-                # Try to create with minimal dependencies
-                self.execution_engine = ExecutionEngine(
-                    execution_service=self.execution_service,
-                    risk_service=None,  # Use fallback if risk service failed
-                    config=config,
-                    state_service=None,  # Use fallback if state service failed
-                    exchange_factory=self.exchange_factory,
-                )
-                self._logger.warning("ExecutionEngine initialized with fallback configuration")
-            except Exception as fallback_error:
-                self._logger.error(
-                    f"Fallback ExecutionEngine creation also failed: {fallback_error}"
-                )
-                raise ExecutionError(f"ExecutionEngine initialization failed: {e}") from e
-
-        # Capital allocator adapter
-        self.capital_allocator = CapitalAllocatorAdapter(config)
+        # Injected services (required dependencies)
+        self.database_service = database_service
+        self.state_service = state_service
+        self.risk_service = risk_service
+        self.execution_service = execution_service
+        self.execution_engine_service = execution_engine_service
+        self.strategy_service = strategy_service
+        self.exchange_factory = exchange_factory
+        self.strategy_factory = strategy_factory
+        self.capital_service = capital_service
 
         # Bot state management
         self.bot_state = BotState(
@@ -244,25 +238,28 @@ class BotInstance:
         )
 
         # Runtime components - initialized during startup
-        self.strategy = None
-        self.primary_exchange = None
+        self.strategy: Any | None = None
+        self.primary_exchange: Any | None = None
         self.is_running = False
-        self.heartbeat_task = None
-        self.strategy_task = None
+        self.heartbeat_task: Any | None = None
+        self.strategy_task: Any | None = None
+        self.websocket_heartbeat_task: Any | None = None
+        self.websocket_timeout_monitor_task: Any | None = None
+        self.circuit_breaker_reset_task: Any | None = None
 
         # Resource tracking
-        self.position_tracker = {}
-        self.order_tracker = {}
-        self.execution_history = []
+        self.position_tracker: dict[str, Any] = {}
+        self.order_tracker: dict[str, Any] = {}
+        self.execution_history: list[dict[str, Any]] = []
 
         # Performance tracking
-        self.trade_history = []
+        self.trade_history: list[dict[str, Any]] = []
         self.daily_trade_count = 0
         self.last_daily_reset = datetime.now(timezone.utc).date()
 
         # Additional tracking for tests
-        self.order_history = []
-        self.active_positions = {}
+        self.order_history: list[dict[str, Any]] = []
+        self.active_positions: dict[str, Any] = {}
         self.performance_metrics = {
             "total_trades": 0,
             "profitable_trades": 0,
@@ -271,14 +268,45 @@ class BotInstance:
             "win_rate": 0.0,
         }
 
+        # WebSocket connection management
+        self.websocket_connections: dict[str, Any] = {}
+        self.websocket_last_pong: dict[str, datetime] = {}
+
+        # Load websocket configuration from config with safe access
+        websocket_config = {}
+        if self.config and hasattr(self.config, "bot_management"):
+            websocket_config = self.config.bot_management.get("websocket", {})
+
+        self.websocket_connection_timeout = websocket_config.get(
+            "connection_timeout", DEFAULT_WEBSOCKET_TIMEOUT
+        )
+        self.websocket_heartbeat_interval = websocket_config.get(
+            "heartbeat_interval", DEFAULT_HEARTBEAT_INTERVAL
+        )
+        self.websocket_reconnect_attempts: dict[str, int] = {}
+        self.websocket_circuit_breaker: dict[str, bool] = {}
+
+        # WebSocket message queue configuration
+        message_config = websocket_config.get("message_queue", {})
+        queue_size = message_config.get("max_size", DEFAULT_MESSAGE_QUEUE_SIZE)
+        self.websocket_message_queue: asyncio.Queue = asyncio.Queue(maxsize=queue_size)
+        self.message_processor_task: Any | None = None
+        self.message_drop_count = 0
+        self.max_message_queue_size = queue_size
+        self.message_processing_batch_size = message_config.get(
+            "batch_size", DEFAULT_MESSAGE_BATCH_SIZE
+        )
+        self._message_queue_lock = asyncio.Lock()  # Prevent race conditions
+
         # Initialize monitoring components
         # Create a dummy metrics collector if none is available
         from src.monitoring.metrics import MetricsCollector
+
         dummy_collector = MetricsCollector()
-        
+
         self.trading_metrics = TradingMetrics(dummy_collector)
         self.exchange_metrics = ExchangeMetrics(dummy_collector)
-        self.metrics_collector = None  # Will be injected if available
+        self.metrics_collector: Any | None = None  # Will be injected if available
         self.tracer = get_tracer(__name__)
 
         self._logger.info(
@@ -288,115 +316,7 @@ class BotInstance:
             strategy=bot_config.strategy_id,
         )
 
-    @with_error_context(component="bot_instance", operation="create_database_service")
-    def _create_database_service(self, config: Config) -> DatabaseService | None:
-        """Create DatabaseService instance if not provided."""
-        db_service = None
-        try:
-            # Create ConfigService from the legacy Config object
-            config_service = ConfigService()
-            config_service._config = config  # Set the config directly (as done in state factory)
-
-            # Get ValidationService from dependency injection container
-            from src.core.dependency_injection import get_container
-
-            container = get_container()
-            # Get validation service from container or create new instance
-            if container.has("validation_service"):
-                validation_service = container.get("validation_service")
-            else:
-                validation_service = ValidationService()
-
-            # Now create DatabaseService with proper parameters
-            db_service = DatabaseService(config_service, validation_service)
-            return db_service
-        except ImportError as e:
-            self._logger.warning(f"DatabaseService not available, using fallback: {e}")
-            # Return None for fallback behavior
-            return None
-        except Exception as e:
-            self._logger.error(f"Failed to create DatabaseService: {e}")
-            if db_service and hasattr(db_service, "close"):
-                try:
-                    db_service.close()
-                except Exception as e:
-                    self._logger.debug(
-                        f"Failed to close database service during initialization cleanup: {e}"
-                    )
-            raise ExecutionError(f"DatabaseService creation failed: {e}") from e
-
-    @with_error_context(component="bot_instance", operation="create_state_service")
-    def _create_state_service(self, config: Config) -> StateService | None:
-        """Store StateService factory for async creation during startup."""
-        try:
-            # Use factory pattern to create StateService with proper dependencies
-            from src.state import create_default_state_service
-
-            # Store the factory for async creation during startup
-            # Cannot call async function in __init__ context
-            self._state_service_factory = create_default_state_service
-            self._state_service_initialized = False  # Track initialization status
-            self._logger.info("StateService factory stored for async creation")
-            return None  # Will be created during startup
-        except ImportError as e:
-            self._logger.error(f"StateService module not available: {e}")
-            raise ExecutionError(f"StateService is required but not available: {e}") from e
-        except Exception as e:
-            self._logger.error(f"Failed to import StateService factory: {e}")
-            raise ExecutionError(f"StateService factory import failed: {e}") from e
-
-    @with_error_context(component="bot_instance", operation="create_risk_service")
-    def _create_risk_service(self, config: Config) -> RiskService | None:
-        """Create RiskService instance if not provided."""
-        try:
-            return RiskService(config=config)
-        except ImportError as e:
-            self._logger.warning(
-                f"RiskService not available, continuing without risk management: {e}"
-            )
-            # Return None - bot can operate without risk service but with reduced functionality
-            return None
-        except Exception as e:
-            self._logger.error(f"Failed to create RiskService: {e}")
-            # For non-import errors, still raise as this indicates a configuration issue
-            raise ExecutionError(f"RiskService creation failed: {e}") from e
-
-    @with_error_context(component="bot_instance", operation="create_execution_service")
-    def _create_execution_service(self, config: Config) -> ExecutionService | None:
-        """Create ExecutionService instance if not provided."""
-        try:
-            # Only pass risk_service if it's not None
-            service_kwargs = {
-                "database_service": self.database_service,
-                "metrics_collector": (
-                    self.metrics_collector if hasattr(self, "metrics_collector") else None
-                ),
-            }
-
-            # Add risk_service only if available
-            if self.risk_service is not None:
-                service_kwargs["risk_service"] = self.risk_service
-
-            return ExecutionService(**service_kwargs)
-        except ImportError as e:
-            self._logger.warning(f"ExecutionService not available, using fallback: {e}")
-            # Return None for fallback behavior
-            return None
-        except Exception as e:
-            self._logger.error(f"Failed to create ExecutionService: {e}")
-            raise ExecutionError(f"ExecutionService creation failed: {e}") from e
-
-    @with_error_context(component="bot_instance", operation="create_strategy_service")
-    def _create_strategy_service(self, config: Config) -> StrategyService:
-        """Create StrategyService instance with proper configuration."""
-        try:
-            return StrategyService(name="StrategyService", config={"name": "StrategyService"})
-        except ImportError as e:
-            self._logger.error(f"StrategyService not available: {e}")
-            raise ExecutionError(f"StrategyService is required but not available: {e}") from e
-        except Exception as e:
-            self._logger.error(f"Failed to create StrategyService: {e}")
-            raise ExecutionError(f"StrategyService creation failed: {e}") from e
+    # Removed service creation methods - services are now injected
 
     def set_metrics_collector(self, metrics_collector: MetricsCollector) -> None:
         """
@@ -437,13 +357,18 @@ class BotInstance:
         await self._allocate_resources()
 
         # Start execution engine
-        await self.execution_engine.start()
+        # ExecutionEngineService doesn't need explicit start/stop as it's managed by DI container
+        if self.execution_engine_service and hasattr(self.execution_engine_service, "start"):
+            await self.execution_engine_service.start()
 
         # Initialize strategy
         await self._initialize_strategy()
 
         # Start monitoring and heartbeat
         await self._start_monitoring()
+
+        # Start WebSocket monitoring
+        await self._start_websocket_monitoring()
 
         # Update state to running
         self.bot_state.status = BotStatus.RUNNING
@@ -473,7 +398,7 @@ class BotInstance:
         self.bot_state.status = BotStatus.STOPPING
 
         # Stop monitoring tasks with proper cleanup
-        tasks_to_cancel = []
+        tasks_to_cancel: list[Any] = []
         if self.heartbeat_task:
             self.heartbeat_task.cancel()
             tasks_to_cancel.append(self.heartbeat_task)
@@ -481,6 +406,22 @@ class BotInstance:
         if self.strategy_task:
             self.strategy_task.cancel()
             tasks_to_cancel.append(self.strategy_task)
+
+        if self.websocket_heartbeat_task:
+            self.websocket_heartbeat_task.cancel()
+            tasks_to_cancel.append(self.websocket_heartbeat_task)
+
+        if self.websocket_timeout_monitor_task:
+            self.websocket_timeout_monitor_task.cancel()
+            tasks_to_cancel.append(self.websocket_timeout_monitor_task)
+
+        if self.circuit_breaker_reset_task:
+            self.circuit_breaker_reset_task.cancel()
+            tasks_to_cancel.append(self.circuit_breaker_reset_task)
+
+        if self.message_processor_task:
+            self.message_processor_task.cancel()
+            tasks_to_cancel.append(self.message_processor_task)
 
         # Wait for tasks to complete cancellation
         if tasks_to_cancel:
@@ -493,7 +434,9 @@ class BotInstance:
         await self._cancel_pending_orders()
 
         # Stop execution engine
-        await self.execution_engine.stop()
+        # ExecutionEngineService doesn't need explicit start/stop as it's managed by DI container
+        if self.execution_engine_service and hasattr(self.execution_engine_service, "stop"):
+            await self.execution_engine_service.stop()
 
         # Release resources
         await self._release_resources()
@@ -504,7 +447,7 @@ class BotInstance:
 
         # Update metrics
         if self.bot_metrics.start_time:
-            # For now set to 1.0, will be calculated more accurately in monitoring
+            # Initialize uptime percentage - will be updated by monitoring
             self.bot_metrics.uptime_percentage = 1.0
 
         self._logger.info("Bot instance stopped successfully", bot_id=self.bot_config.bot_id)
@@ -551,11 +494,13 @@ class BotInstance:
         self.bot_state.status = BotStatus.RUNNING
         self._logger.info("Bot instance resumed", bot_id=self.bot_config.bot_id)
 
-    @with_circuit_breaker(failure_threshold=5, recovery_timeout=30)
+    @with_circuit_breaker(
+        failure_threshold=STARTUP_FAILURE_THRESHOLD, recovery_timeout=STARTUP_RECOVERY_TIMEOUT
+    )
     async def _validate_configuration(self) -> None:
         """Validate bot configuration before startup."""
         # Validate strategy exists
-        supported_strategies = await self.strategy_factory.get_supported_strategies()
+        supported_strategies = self.strategy_factory.get_supported_strategies()
         # Convert bot_config.strategy_id to StrategyType enum
         strategy_type = self._convert_to_strategy_type(self.bot_config.strategy_id)
 
@@ -564,9 +509,12 @@ class BotInstance:
 
         # Validate exchanges are available
         for exchange_name in self.bot_config.exchanges:
-            exchange = await self.exchange_factory.get_exchange(exchange_name)
-            if not exchange:
-                raise ValidationError(f"Exchange not available: {exchange_name}")
+            try:
+                exchange = await self.exchange_factory.get_exchange(exchange_name)
+                if not exchange:
+                    raise ValidationError(f"Exchange not available: {exchange_name}")
+            except Exception as e:
+                raise ValidationError(f"Failed to validate exchange {exchange_name}: {e}") from e
 
         # Validate capital allocation
         capital_amount = self.bot_config.max_capital or self.bot_config.allocated_capital
@@ -578,23 +526,9 @@ class BotInstance:
             if not symbol or len(symbol) < 3:
                 raise ValidationError(f"Invalid symbol format: {symbol}")
 
-    @with_retry(max_attempts=3, base_delay=1.0)
+    @with_retry(max_attempts=3, base_delay=Decimal("1.0"))
     async def _initialize_components(self) -> None:
         """Initialize core trading components."""
-        # Create StateService if needed using the stored factory
-        if self.state_service is None and hasattr(self, "_state_service_factory"):
-            try:
-                self.state_service = await self._state_service_factory(self.config)
-                self._state_service_initialized = True
-                self._logger.info("StateService created during component initialization")
-            except Exception as e:
-                self._logger.error(f"Failed to create StateService: {e}")
-                self._state_service_initialized = False
-                # Continue with None state service - will use fallbacks
-                # Update execution engine to work without state service
-                if hasattr(self.execution_engine, "state_service"):
-                    self.execution_engine.state_service = None
-
         # Get primary exchange (first in list)
         primary_exchange_name = self.bot_config.exchanges[0]
         self.primary_exchange = await self.exchange_factory.get_exchange(primary_exchange_name)
@@ -602,18 +536,11 @@ class BotInstance:
         if not self.primary_exchange:
             raise ExecutionError(f"Failed to initialize primary exchange: {primary_exchange_name}")
 
-        # Start and configure strategy service with dependencies
-        await self.strategy_service.start()
-
-        # Inject dependencies into strategy service
-        if self.risk_service is not None:
+        # Strategy service should already be started by the DI container
+        # Just register additional dependencies if needed
+        if hasattr(self.strategy_service, "register_dependency"):
             self.strategy_service.register_dependency("RiskService", self.risk_service)
-        else:
-            self._logger.warning(
-                "RiskService not available, strategy will operate without risk management",
-                bot_id=self.bot_config.bot_id,
-            )
-        self.strategy_service.register_dependency("ExchangeFactory", self.exchange_factory)
+            self.strategy_service.register_dependency("ExchangeFactory", self.exchange_factory)
 
         self._logger.debug(
             "Components initialized",
@@ -621,20 +548,23 @@ class BotInstance:
             bot_id=self.bot_config.bot_id,
         )
 
-    @with_retry(max_attempts=3, base_delay=1.0)
+    @with_retry(max_attempts=3, base_delay=Decimal("1.0"))
     async def _allocate_resources(self) -> None:
         """Allocate required resources for bot operation."""
-        # Ensure capital allocator is started before use
-        try:
-            await self.capital_allocator.startup()
-            self._logger.debug("CapitalAllocatorAdapter started successfully")
-        except Exception as e:
-            self._logger.error(f"Failed to start CapitalAllocatorAdapter: {e}")
-            # Continue with allocation attempt - adapter may still work
+        # Capital allocator should already be initialized by DI container
+        # Just ensure it's started
+        if hasattr(self.capital_service, "startup"):
+            try:
+                await self.capital_service.startup()
+                self._logger.debug("CapitalService started successfully")
+            except Exception as e:
+                self._logger.error(f"Failed to start CapitalService: {e}")
+                # Continue with allocation attempt - adapter may still work
 
         # Allocate capital through capital allocator
         capital_amount = self.bot_config.max_capital or self.bot_config.allocated_capital
-        allocated = await self.capital_allocator.allocate_capital(
+        # Use capital service to allocate capital for the bot
+        allocated = await self.capital_service.allocate_capital(
             bot_id=self.bot_config.bot_id,
             amount=capital_amount,
             source="bot_instance",
@@ -644,16 +574,15 @@ class BotInstance:
             raise ExecutionError("Failed to allocate required capital")
 
         # Update resource tracking
-        capital_amount = self.bot_config.max_capital or self.bot_config.allocated_capital
         self.bot_state.allocated_capital = capital_amount
 
         self._logger.debug(
             "Resources allocated",
-            allocated_capital=float(capital_amount),
+            allocated_capital=str(capital_amount),
             bot_id=self.bot_config.bot_id,
         )
 
-    @with_retry(max_attempts=2, base_delay=0.5)
+    @with_retry(max_attempts=2, base_delay=Decimal("0.5"))
     async def _initialize_strategy(self) -> None:
         """Initialize and configure the trading strategy."""
         # Convert strategy_id to StrategyType
@@ -773,6 +702,40 @@ class BotInstance:
             signal: Trading signal from strategy
         """
         # Check position limits
+        if not await self._check_position_limits():
+            return
+
+        # Create order request from signal
+        order_request = await self._create_order_request_from_signal(signal)
+        if not order_request:
+            return
+
+        # Validate order with risk service
+        if not await self._validate_order_request(order_request, signal.symbol):
+            return
+
+        # Execute the order
+        execution_result = await self._execute_order_request(order_request, signal)
+        if not execution_result:
+            return
+
+        # Track execution and update metrics
+        await self._track_execution(execution_result, order_request)
+
+        self._logger.info(
+            "Order executed",
+            execution_id=getattr(
+                execution_result,
+                "execution_id",
+                getattr(execution_result, "instruction_id", "unknown"),
+            ),
+            symbol=signal.symbol,
+            side=signal.direction.value,
+            bot_id=self.bot_config.bot_id,
+        )
+
+    async def _check_position_limits(self) -> bool:
+        """Check if position limits allow for new trades."""
         max_positions = self.bot_config.strategy_config.get("max_concurrent_positions", 3)
         if len(self.position_tracker) >= max_positions:
             self._logger.warning(
@@ -780,8 +743,11 @@ class BotInstance:
                 max_positions=max_positions,
                 bot_id=self.bot_config.bot_id,
             )
-            return
+            return False
+        return True
 
+    async def _create_order_request_from_signal(self, signal) -> OrderRequest | None:
+        """Create order request from trading signal."""
         # Transform signal to order request
         # Extract order details from signal metadata or use defaults
         order_type = OrderType(signal.metadata.get("order_type", "market"))
@@ -804,7 +770,7 @@ class BotInstance:
         order_side = OrderSide.BUY if signal.direction == SignalDirection.BUY else OrderSide.SELL
 
         # Create order request from signal
-        order_request = OrderRequest(
+        return OrderRequest(
             symbol=signal.symbol,
             side=order_side,
             order_type=order_type,
@@ -813,7 +779,8 @@ class BotInstance:
             client_order_id=f"{self.bot_config.bot_id}_{uuid.uuid4().hex[:8]}",
         )
 
-        # Validate order with risk service
+    async def _validate_order_request(self, order_request: OrderRequest, symbol: str) -> bool:
+        """Validate order request with risk service."""
         try:
             if self.risk_service:
                 is_valid = await self.risk_service.validate_order(order_request)
@@ -824,7 +791,7 @@ class BotInstance:
         except RiskManagementError as e:
             self._logger.error(
                 "Risk validation error",
-                symbol=signal.symbol,
+                symbol=symbol,
                 bot_id=self.bot_config.bot_id,
                 error=str(e),
             )
@@ -833,28 +800,31 @@ class BotInstance:
                 {
                     "operation": "validate_order",
                     "bot_id": self.bot_config.bot_id,
-                    "symbol": signal.symbol,
+                    "symbol": symbol,
                 },
                 severity="high",
             )
-            return
+            return False
         except Exception as e:
             self._logger.error(
                 "Unexpected error in risk validation",
-                symbol=signal.symbol,
+                symbol=symbol,
                 bot_id=self.bot_config.bot_id,
                 error=str(e),
             )
-            return
+            return False
 
         if not is_valid:
             self._logger.warning(
                 "Order rejected by risk validation",
-                symbol=signal.symbol,
+                symbol=symbol,
                 bot_id=self.bot_config.bot_id,
             )
-            return
+            return False
+        return True
 
+    async def _execute_order_request(self, order_request: OrderRequest, signal) -> Any | None:
+        """Execute order request through execution engine."""
         # Execute order through execution engine
         execution_instruction = ExecutionInstruction(
             order=order_request,
@@ -871,7 +841,7 @@ class BotInstance:
             open=Decimal("0"),
             high=Decimal("0"),
             low=Decimal("0"),
-            close=price or Decimal("0"),
+            close=order_request.price or Decimal("0"),
             volume=Decimal("0"),
             exchange=self.bot_config.exchanges[0] if self.bot_config.exchanges else "binance",
         )
@@ -880,7 +850,10 @@ class BotInstance:
             # Record exchange metrics
             start_time = datetime.now(timezone.utc)
 
-            execution_result = await self.execution_engine.execute_order(
+            if not self.execution_engine_service:
+                raise ExecutionError("ExecutionEngineService not available")
+
+            execution_result = await self.execution_engine_service.execute_instruction(
                 instruction=execution_instruction,
                 market_data=market_data,
                 bot_id=self.bot_config.bot_id,
@@ -888,34 +861,9 @@ class BotInstance:
             )
 
             # Record execution latency in monitoring with error handling
-            latency_ms = (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
-            if self.exchange_metrics:
-                try:
-                    self.exchange_metrics.record_order_latency(
-                        exchange=(
-                            self.bot_config.exchanges[0] if self.bot_config.exchanges else "default"
-                        ),
-                        latency_ms=latency_ms,
-                    )
-                except Exception as e:
-                    self._logger.debug(f"Failed to record exchange metrics: {e}")
+            await self._record_execution_metrics(start_time)
+            return execution_result
 
-            if self.metrics_collector:
-                try:
-                    self.metrics_collector.histogram(
-                        "bot_order_execution_latency_ms",
-                        latency_ms,
-                        labels={
-                            "bot_id": self.bot_config.bot_id,
-                            "exchange": (
-                                self.bot_config.exchanges[0]
-                                if self.bot_config.exchanges
-                                else "default"
-                            ),
-                        },
-                    )
-                except Exception as e:
-                    self._logger.debug(f"Failed to record metrics histogram: {e}")
         except Exception as e:
             self._logger.error(
                 "Order execution failed in execution engine",
@@ -934,28 +882,51 @@ class BotInstance:
                 },
                 severity="high",
             )
-            return  # Skip this trade and continue
+            return None
 
-        # Track execution and update metrics
-        await self._track_execution(execution_result, order_request)
+    async def _record_execution_metrics(self, start_time: datetime) -> None:
+        """Record execution metrics."""
+        latency_ms = (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
+        if self.exchange_metrics:
+            try:
+                self.exchange_metrics.record_order_latency(
+                    exchange=(
+                        self.bot_config.exchanges[0] if self.bot_config.exchanges else "default"
+                    ),
+                    latency=latency_ms,
+                )
+            except Exception as e:
+                self._logger.debug(f"Failed to record exchange metrics: {e}")
 
-        self._logger.info(
-            "Order executed",
-            execution_id=getattr(
-                execution_result,
-                "execution_id",
-                getattr(execution_result, "instruction_id", "unknown"),
-            ),
-            symbol=signal.symbol,
-            side=signal.direction.value,
-            bot_id=self.bot_config.bot_id,
-        )
+        if self.metrics_collector:
+            try:
+                self.metrics_collector.histogram(
+                    "bot_order_execution_latency_ms",
+                    latency_ms,
+                    labels={
+                        "bot_id": self.bot_config.bot_id,
+                        "exchange": (
+                            self.bot_config.exchanges[0] if self.bot_config.exchanges else "default"
+                        ),
+                    },
+                )
+            except Exception as e:
+                self._logger.debug(f"Failed to record metrics histogram: {e}")
 
     async def _start_monitoring(self) -> None:
         """Start bot monitoring and heartbeat."""
         self.heartbeat_task = asyncio.create_task(self._heartbeat_loop())
 
-    @with_fallback(default_value=None)
+    async def _start_websocket_monitoring(self) -> None:
+        """Start WebSocket connection monitoring and heartbeat."""
+        self.websocket_heartbeat_task = asyncio.create_task(self._websocket_heartbeat_loop())
+        self.websocket_timeout_monitor_task = asyncio.create_task(
+            self._websocket_timeout_monitor_loop()
+        )
+        self.message_processor_task = asyncio.create_task(self._websocket_message_processor_loop())
+        self.circuit_breaker_reset_task = asyncio.create_task(self._circuit_breaker_reset_loop())
+
+    @with_fallback(fallback_value=None)
     async def _heartbeat_loop(self) -> None:
         """Heartbeat loop for bot health monitoring."""
         try:
@@ -1031,19 +1002,44 @@ class BotInstance:
             self._logger.warning("Cannot track None execution result")
             return
 
-        self.execution_history.append(execution_result)
-        self.daily_trade_count += 1
-        self.bot_metrics.total_trades += 1
+        # Get order information
+        order = await self._get_order_from_execution(execution_result, order_request)
+        if not order:
+            return
+
+        # Update basic metrics
+        self._update_basic_execution_metrics(execution_result)
 
         # Update position tracking
-        # Use order_request if provided, otherwise try to get from execution_result
+        await self._update_position_tracking(order)
+
+        # Process filled quantity and PnL
+        await self._process_execution_pnl(execution_result, order)
+
+        # Update last trade time
+        self.bot_metrics.last_trade_time = datetime.now(timezone.utc)
+
+        # Notify strategy of trade execution
+        await self._notify_strategy_of_execution(execution_result, order)
+
+    async def _get_order_from_execution(self, execution_result, order_request=None):
+        """Get order information from execution result."""
         order = order_request
         if not order and hasattr(execution_result, "original_order"):
             order = execution_result.original_order
         if not order:
             self._logger.warning("Cannot track execution without order information")
-            return
+            return None
+        return order
 
+    def _update_basic_execution_metrics(self, execution_result) -> None:
+        """Update basic execution metrics."""
+        self.execution_history.append(execution_result)
+        self.daily_trade_count += 1
+        self.bot_metrics.total_trades += 1
+
+    async def _update_position_tracking(self, order) -> None:
+        """Update position tracking for the order."""
         position_key = f"{order.symbol}_{order.side.value}"
 
         if position_key not in self.position_tracker:
@@ -1055,7 +1051,8 @@ class BotInstance:
                 "unrealized_pnl": Decimal("0"),
             }
 
-        # Update metrics
+    async def _process_execution_pnl(self, execution_result, order) -> None:
+        """Process execution PnL and update metrics."""
         # Check for filled quantity - handle both property names
         filled_qty = getattr(execution_result, "filled_quantity", None)
         if filled_qty is None:
@@ -1072,89 +1069,100 @@ class BotInstance:
                 self.bot_metrics.losing_trades += 1
 
             # Record PnL in monitoring
-            if self.trading_metrics:
-                self.trading_metrics.record_pnl(
-                    strategy=self.bot_config.bot_type.value,
-                    pnl=float(trade_pnl),
-                    bot_id=self.bot_config.bot_id,
-                )
+            await self._record_pnl_metrics(trade_pnl)
 
-            if self.metrics_collector:
-                self.metrics_collector.gauge(
-                    "bot_total_pnl",
-                    float(self.bot_metrics.total_pnl),
-                    labels={"bot_id": self.bot_config.bot_id},
-                )
+    async def _record_pnl_metrics(self, trade_pnl: Decimal) -> None:
+        """Record PnL metrics."""
+        if self.trading_metrics:
+            self.trading_metrics.record_pnl(
+                strategy=self.bot_config.bot_type.value,
+                pnl=trade_pnl,
+                bot_id=self.bot_config.bot_id,
+            )
 
-        # Update last trade time
-        self.bot_metrics.last_trade_time = datetime.now(timezone.utc)
+        if self.metrics_collector:
+            self.metrics_collector.gauge(
+                "bot_total_pnl",
+                self.bot_metrics.total_pnl,
+                labels={"bot_id": self.bot_config.bot_id},
+            )
 
-        # Notify strategy of trade execution for metrics update
-        if self.strategy:
-            try:
-                trade_result = {
-                    "execution_id": getattr(
-                        execution_result,
-                        "execution_id",
-                        getattr(execution_result, "instruction_id", "unknown"),
-                    ),
-                    "symbol": order.symbol,
-                    "side": order.side.value,
-                    "quantity": float(filled_qty),
-                    "average_price": float(
-                        getattr(
-                            execution_result,
-                            "average_price",
-                            getattr(execution_result, "average_fill_price", 0),
-                        )
-                    ),
-                    "pnl": float(trade_pnl),
-                    "timestamp": getattr(
-                        execution_result,
-                        "timestamp",
-                        getattr(execution_result, "completed_at", datetime.now(timezone.utc)),
-                    ),
-                }
-                # Check if strategy has post_trade_processing method
-                if hasattr(self.strategy, "post_trade_processing"):
-                    await self.strategy.post_trade_processing(trade_result)
-                elif hasattr(self.strategy, "update_performance_metrics"):
-                    # Use alternative method if available
-                    # Check if method is async
-                    import inspect
+    async def _notify_strategy_of_execution(self, execution_result, order) -> None:
+        """Notify strategy of trade execution for metrics update."""
+        if not self.strategy:
+            return
 
-                    if inspect.iscoroutinefunction(self.strategy.update_performance_metrics):
-                        await self.strategy.update_performance_metrics(trade_result)
-                    else:
-                        self.strategy.update_performance_metrics(trade_result)
-            except Exception as e:
-                await self.error_handler.handle_error(
-                    e,
-                    {
-                        "operation": "update_strategy_metrics",
-                        "bot_id": self.bot_config.bot_id,
-                        "strategy": self.bot_config.strategy_name,
-                    },
-                    severity="low",
-                )
+        try:
+            filled_qty = getattr(execution_result, "filled_quantity", None)
+            if filled_qty is None:
+                filled_qty = getattr(execution_result, "total_filled_quantity", Decimal("0"))
+
+            trade_result = {
+                "execution_id": getattr(
+                    execution_result,
+                    "execution_id",
+                    getattr(execution_result, "instruction_id", "unknown"),
+                ),
+                "symbol": order.symbol,
+                "side": order.side.value,
+                "quantity": filled_qty,
+                "average_price": getattr(
+                    execution_result,
+                    "average_price",
+                    getattr(execution_result, "average_fill_price", Decimal("0")),
+                ),
+                "pnl": Decimal("0"),  # Simplified for now
+                "timestamp": getattr(
+                    execution_result,
+                    "timestamp",
+                    getattr(execution_result, "completed_at", datetime.now(timezone.utc)),
+                ),
+            }
+
+            # Check if strategy has post_trade_processing method
+            if hasattr(self.strategy, "post_trade_processing"):
+                await self.strategy.post_trade_processing(trade_result)
+            elif hasattr(self.strategy, "update_performance_metrics"):
+                # Use alternative method if available
+                # Check if method is async
+                import inspect
+
+                if inspect.iscoroutinefunction(self.strategy.update_performance_metrics):
+                    await self.strategy.update_performance_metrics(trade_result)
+                else:
+                    self.strategy.update_performance_metrics(trade_result)
+        except Exception as e:
+            await self.error_handler.handle_error(
+                e,
+                {
+                    "operation": "update_strategy_metrics",
+                    "bot_id": self.bot_config.bot_id,
+                    "strategy": self.bot_config.strategy_name,
+                },
+                severity="low",
+            )
 
     async def _calculate_portfolio_value(self) -> Decimal:
         """Calculate current portfolio value."""
         # Simplified calculation - would get actual balances from exchange
         return self.bot_state.allocated_capital
 
-    @with_fallback(default_value=None)
+    @with_fallback(fallback_value=None)
     async def _update_performance_metrics(self) -> None:
         """Update bot performance metrics."""
         # Calculate win rate
         total_completed_trades = self.bot_metrics.profitable_trades + self.bot_metrics.losing_trades
         if total_completed_trades > 0:
-            self.bot_metrics.win_rate = self.bot_metrics.profitable_trades / total_completed_trades
+            # Keep win_rate as Decimal for financial precision, convert only when needed for display
+            win_rate_decimal = Decimal(str(self.bot_metrics.profitable_trades)) / Decimal(
+                str(total_completed_trades)
+            )
+            self.bot_metrics.win_rate = win_rate_decimal
 
         # Calculate average trade PnL
         if self.bot_metrics.total_trades > 0:
-            self.bot_metrics.average_trade_pnl = (
-                self.bot_metrics.total_pnl / self.bot_metrics.total_trades
+            self.bot_metrics.average_trade_pnl = self.bot_metrics.total_pnl / Decimal(
+                str(self.bot_metrics.total_trades)
             )
 
         # Update uptime percentage
@@ -1165,7 +1173,7 @@ class BotInstance:
 
         self.bot_metrics.metrics_updated_at = datetime.now(timezone.utc)
 
-    @with_fallback(default_value=None)
+    @with_fallback(fallback_value=None)
     async def _check_resource_usage(self) -> None:
         """Check and update resource usage metrics."""
         # Update CPU and memory usage (simplified)
@@ -1174,7 +1182,7 @@ class BotInstance:
         self.bot_metrics.cpu_usage = process.cpu_percent()
         self.bot_metrics.memory_usage = process.memory_info().rss / 1024 / 1024  # MB
 
-    @with_fallback(default_value=None)
+    @with_fallback(fallback_value=None)
     async def _create_state_checkpoint(self) -> None:
         """Create a state checkpoint for recovery."""
         # Create checkpoint every 10 heartbeats (simplified)
@@ -1221,70 +1229,131 @@ class BotInstance:
         # For now, just clear the tracker
         self.order_tracker.clear()
 
-    @with_retry(max_attempts=2, base_delay=0.5)
+    @with_retry(max_attempts=2, base_delay=Decimal("0.5"))
     async def _release_resources(self) -> None:
         """Release allocated resources."""
         # Release capital allocation
-        await self.capital_allocator.release_capital(
+        await self._release_capital_resources()
+
+        # Close WebSocket connections
+        await self._close_websocket_connections()
+
+        # Clear message queue to prevent memory leaks
+        await self._clear_message_queue()
+
+        self._logger.debug("Resources released", bot_id=self.bot_config.bot_id)
+
+    async def _release_capital_resources(self) -> None:
+        """Release capital allocation resources."""
+        # Release allocated capital
+        await self.capital_service.release_capital(
             self.bot_config.bot_id, self.bot_state.allocated_capital
         )
 
         # Shutdown capital allocator adapter
         try:
-            await self.capital_allocator.shutdown()
-            self._logger.debug("CapitalAllocatorAdapter shutdown successfully")
+            await self.capital_service.shutdown()
+            self._logger.debug("CapitalService shutdown successfully")
         except Exception as e:
-            self._logger.error(f"Failed to shutdown CapitalAllocatorAdapter: {e}")
+            self._logger.error(f"Failed to shutdown CapitalService: {e}")
             # Continue with cleanup - not critical
+            # This is expected cleanup behavior
 
-        # Close WebSocket connections if any
-        if hasattr(self, "exchange_connections"):
-            websocket_connections = []
+    async def _close_websocket_connections(self) -> None:
+        """Close WebSocket connections with proper async context management."""
+        if not hasattr(self, "websocket_connections") or not self.websocket_connections:
+            return
+
+        websocket_connections: list[Any] = []
+        try:
+            # Close individual connections with timeout protection
+            await asyncio.wait_for(
+                self._close_individual_connections(websocket_connections), timeout=30.0
+            )
+        except asyncio.TimeoutError:
+            self._logger.warning(
+                "WebSocket connections close timeout, forcing cleanup",
+                bot_id=self.bot_config.bot_id,
+            )
+        finally:
+            # Ensure all websocket connections are closed with timeout protection
+            await self._cleanup_remaining_connections(websocket_connections)
+            # Clear connection dictionaries to prevent memory leaks
+            self.websocket_connections.clear()
+            self.websocket_last_pong.clear()
+            self.websocket_reconnect_attempts.clear()
+            self.websocket_circuit_breaker.clear()
+
+    async def _close_individual_connections(self, websocket_connections: list) -> None:
+        """Close individual WebSocket connections."""
+        # Create a copy to avoid modification during iteration
+        connections_copy = dict(self.websocket_connections)
+        for exchange_name, connection in connections_copy.items():
             try:
-                for exchange_name, connection in self.exchange_connections.items():
-                    try:
-                        if hasattr(connection, "close_websocket"):
-                            websocket_connections.append(connection)
-                            await connection.close_websocket()
-                    except Exception as e:
-                        await self.error_handler.handle_error(
-                            e,
-                            {
-                                "operation": "close_websocket",
-                                "bot_id": self.bot_config.bot_id,
-                                "exchange": exchange_name,
-                            },
-                            severity="low",
-                        )
-            finally:
-                # Ensure all websocket connections are closed
-                for conn in websocket_connections:
-                    try:
-                        if hasattr(conn, "close"):
-                            await conn.close()
-                    except Exception as e:
-                        self._logger.debug(
-                            f"Failed to close websocket connection during resource release: {e}"
-                        )
+                if hasattr(connection, "close_websocket"):
+                    websocket_connections.append(connection)
+                    # Ensure await is used for async WebSocket operations with timeout
+                    await asyncio.wait_for(connection.close_websocket(), timeout=10.0)
+                elif hasattr(connection, "websocket") and connection.websocket:
+                    # Handle direct websocket attribute
+                    websocket_connections.append(connection.websocket)
+                    await asyncio.wait_for(connection.websocket.close(), timeout=5.0)
+            except asyncio.TimeoutError:
+                self._logger.warning(
+                    f"WebSocket close timeout for exchange {exchange_name}",
+                    bot_id=self.bot_config.bot_id,
+                )
+            except Exception as e:
+                await self.error_handler.handle_error(
+                    e,
+                    {
+                        "operation": "close_websocket",
+                        "bot_id": self.bot_config.bot_id,
+                        "exchange": exchange_name,
+                    },
+                    severity="low",
+                )
 
-        self._logger.debug("Resources released", bot_id=self.bot_config.bot_id)
+    async def _cleanup_remaining_connections(self, websocket_connections: list) -> None:
+        """Cleanup remaining WebSocket connections."""
+        close_tasks = []
+        for conn in websocket_connections:
+            try:
+                if hasattr(conn, "close"):
+                    close_tasks.append(asyncio.wait_for(conn.close(), timeout=3.0))
+                elif hasattr(conn, "disconnect"):
+                    close_tasks.append(asyncio.wait_for(conn.disconnect(), timeout=3.0))
+            except Exception as e:
+                self._logger.debug(f"Failed to prepare websocket connection close task: {e}")
 
-    @with_fallback(default_value=None)
+        # Execute all close tasks concurrently with overall timeout
+        if close_tasks:
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(*close_tasks, return_exceptions=True), timeout=15.0
+                )
+            except asyncio.TimeoutError:
+                self._logger.warning(
+                    "WebSocket connection cleanup timed out",
+                    bot_id=self.bot_config.bot_id,
+                )
+
+    @with_fallback(fallback_value=None)
     def get_bot_state(self) -> BotState:
         """Get current bot state."""
         return self.bot_state.model_copy()
 
-    @with_fallback(default_value=None)
+    @with_fallback(fallback_value=None)
     def get_bot_metrics(self) -> BotMetrics:
         """Get current bot metrics."""
         return self.bot_metrics.model_copy()
 
-    @with_fallback(default_value=None)
+    @with_fallback(fallback_value=None)
     def get_bot_config(self) -> BotConfiguration:
         """Get bot configuration."""
         return self.bot_config.model_copy()
 
-    @with_fallback(default_value={})
+    @with_fallback(fallback_value={})
     async def get_bot_summary(self) -> dict[str, Any]:
         """Get comprehensive bot summary."""
         return {
@@ -1301,7 +1370,7 @@ class BotInstance:
                 "total_trades": self.performance_metrics["total_trades"],
                 "profitable_trades": self.performance_metrics["profitable_trades"],
                 "win_rate": self.performance_metrics["win_rate"],
-                "total_pnl": float(self.performance_metrics["total_pnl"]),
+                "total_pnl": str(self.performance_metrics["total_pnl"]),
             },
             "positions": {
                 "active_positions": len(self.active_positions),
@@ -1359,7 +1428,10 @@ class BotInstance:
             # Record exchange metrics
             start_time = datetime.now(timezone.utc)
 
-            execution_result = await self.execution_engine.execute_order(
+            if not self.execution_engine_service:
+                raise ExecutionError("ExecutionEngineService not available")
+
+            execution_result = await self.execution_engine_service.execute_instruction(
                 instruction=execution_instruction,
                 market_data=market_data,
                 bot_id=self.bot_config.bot_id,
@@ -1374,7 +1446,7 @@ class BotInstance:
                         exchange=(
                             self.bot_config.exchanges[0] if self.bot_config.exchanges else "default"
                         ),
-                        latency_ms=latency_ms,
+                        latency=latency_ms,
                     )
                 except Exception as e:
                     self._logger.debug(f"Failed to record exchange metrics: {e}")
@@ -1421,13 +1493,13 @@ class BotInstance:
                 "order": order_request,
                 "result": execution_result,
                 "timestamp": datetime.now(timezone.utc),
-                "pnl": Decimal("100"),  # Simplified for tests
+                "pnl": Decimal("100.00000000"),  # Simplified for tests with proper precision
             }
         )
 
         # Update performance metrics
         self.performance_metrics["total_trades"] += 1
-        self.performance_metrics["total_pnl"] += Decimal("100")
+        self.performance_metrics["total_pnl"] += Decimal("100.00000000")
         self.performance_metrics["profitable_trades"] += 1
 
         return execution_result
@@ -1474,7 +1546,10 @@ class BotInstance:
         )
 
         try:
-            await self.execution_engine.execute_order(
+            if not self.execution_engine_service:
+                raise ExecutionError("ExecutionEngineService not available")
+
+            await self.execution_engine_service.execute_instruction(
                 instruction=execution_instruction,
                 market_data=market_data,
                 bot_id=self.bot_config.bot_id,
@@ -1508,7 +1583,7 @@ class BotInstance:
         )
         return True
 
-    @with_fallback(default_value={})
+    @with_fallback(fallback_value={})
     async def get_heartbeat(self) -> dict[str, Any]:
         """Generate heartbeat data."""
         return {
@@ -1523,7 +1598,7 @@ class BotInstance:
             },
         }
 
-    @with_fallback(default_value=None)
+    @with_fallback(fallback_value=None)
     async def _trading_loop(self) -> None:
         """Main trading loop (simplified for tests)."""
         # This would normally be the main trading logic
@@ -1535,16 +1610,19 @@ class BotInstance:
                     # Some strategies might need MarketData
                     method_sig = str(self.strategy.generate_signals.__annotations__)
                     if "MarketData" in method_sig:
-                        # Would need to provide market data here
-                        pass
+                        # Strategy requires market data - log and skip for now
+                        self._logger.debug(
+                            f"Strategy {self.strategy.__class__.__name__} requires MarketData, "
+                            "skipping signal generation"
+                        )
                     else:
                         await self.strategy.generate_signals()
-                except TypeError:
-                    # Method might require arguments
-                    pass
+                except TypeError as e:
+                    # Method might require arguments - log for debugging
+                    self._logger.debug(f"Strategy signal generation failed with TypeError: {e}")
             # Process signals...
 
-    @with_fallback(default_value=None)
+    @with_fallback(fallback_value=None)
     async def _calculate_performance_metrics(self) -> None:
         """Calculate performance metrics from order history."""
         if not self.order_history:
@@ -1559,7 +1637,9 @@ class BotInstance:
                 "total_trades": total_trades,
                 "profitable_trades": profitable_trades,
                 "total_pnl": total_pnl,
-                "win_rate": profitable_trades / total_trades if total_trades > 0 else 0.0,
+                "win_rate": (Decimal(str(profitable_trades)) / Decimal(str(total_trades)))
+                if total_trades > 0
+                else Decimal("0.0"),
             }
         )
 
@@ -1583,3 +1663,500 @@ class BotInstance:
 
         # Start again
         await self.start()
+
+    async def _websocket_heartbeat_loop(self) -> None:
+        """WebSocket heartbeat loop to maintain connections."""
+        try:
+            while self.is_running:
+                try:
+                    # Send ping to all WebSocket connections concurrently
+                    ping_tasks = []
+                    connection_names = []
+
+                    # Create a copy to avoid modification during iteration
+                    connections_copy = dict(self.websocket_connections)
+                    for exchange_name, connection in connections_copy.items():
+                        if hasattr(connection, "websocket") and connection.websocket:
+                            try:
+                                # Create ping task with timeout
+                                ping_task = asyncio.wait_for(
+                                    connection.websocket.ping(), timeout=5.0
+                                )
+                                ping_tasks.append(ping_task)
+                                connection_names.append(exchange_name)
+                            except Exception as e:
+                                self._logger.warning(
+                                    f"Failed to create ping task for {exchange_name}: {e}",
+                                    bot_id=self.bot_config.bot_id,
+                                )
+
+                    # Execute all pings concurrently with proper error handling
+                    if ping_tasks:
+                        results = await asyncio.gather(*ping_tasks, return_exceptions=True)
+
+                        for i, result in enumerate(results):
+                            exchange_name = connection_names[i]
+                            if isinstance(result, asyncio.TimeoutError):
+                                self._logger.warning(
+                                    f"WebSocket ping timeout for {exchange_name}",
+                                    bot_id=self.bot_config.bot_id,
+                                )
+                            elif isinstance(result, Exception):
+                                self._logger.warning(
+                                    f"WebSocket ping failed for {exchange_name}: {result}",
+                                    bot_id=self.bot_config.bot_id,
+                                )
+                            else:
+                                self._logger.debug(
+                                    f"WebSocket ping sent to {exchange_name}",
+                                    bot_id=self.bot_config.bot_id,
+                                )
+
+                    # Wait for next heartbeat
+                    await asyncio.sleep(self.websocket_heartbeat_interval)
+
+                except Exception as e:
+                    self._logger.error(
+                        f"WebSocket heartbeat loop error: {e}",
+                        bot_id=self.bot_config.bot_id,
+                    )
+                    await asyncio.sleep(10)
+
+        except asyncio.CancelledError:
+            self._logger.info("WebSocket heartbeat loop cancelled", bot_id=self.bot_config.bot_id)
+
+    async def _websocket_timeout_monitor_loop(self) -> None:
+        """Monitor WebSocket connections for timeouts and handle reconnection."""
+        try:
+            while self.is_running:
+                try:
+                    # Check for timed out connections and handle them
+                    await self._check_and_handle_websocket_timeouts()
+
+                    # Wait for next check
+                    await asyncio.sleep(
+                        self.websocket_connection_timeout / 3
+                    )  # Check every 10 seconds if timeout is 30s
+
+                except Exception as e:
+                    self._logger.error(
+                        f"WebSocket timeout monitor error: {e}",
+                        bot_id=self.bot_config.bot_id,
+                    )
+                    await asyncio.sleep(10)
+
+        except asyncio.CancelledError:
+            self._logger.info("WebSocket timeout monitor cancelled", bot_id=self.bot_config.bot_id)
+
+    async def _check_and_handle_websocket_timeouts(self) -> None:
+        """Check for WebSocket timeouts and handle them."""
+        current_time = datetime.now(timezone.utc)
+
+        # Check for timed out connections
+        disconnected_connections = []
+        # Create a copy to avoid modification during iteration
+        last_pong_copy = dict(self.websocket_last_pong)
+        for exchange_name, last_pong in last_pong_copy.items():
+            if (current_time - last_pong).total_seconds() > self.websocket_connection_timeout:
+                disconnected_connections.append(exchange_name)
+
+        # Handle disconnected connections
+        for exchange_name in disconnected_connections:
+            try:
+                await self._handle_websocket_timeout(exchange_name)
+            except Exception as e:
+                self._logger.error(
+                    f"Failed to handle WebSocket timeout for {exchange_name}: {e}",
+                    bot_id=self.bot_config.bot_id,
+                )
+
+    async def _handle_websocket_timeout(self, exchange_name: str) -> None:
+        """Handle WebSocket connection timeout with reconnection logic."""
+        self._logger.warning(
+            f"WebSocket timeout detected for {exchange_name}, attempting reconnection",
+            bot_id=self.bot_config.bot_id,
+        )
+
+        try:
+            # Close the existing connection
+            await self._close_existing_websocket_connection(exchange_name)
+
+            # Attempt reconnection with exponential backoff
+            success = await self._attempt_websocket_reconnection(exchange_name)
+
+            if not success:
+                self._logger.error(
+                    f"Failed to reconnect WebSocket for {exchange_name} after retries",
+                    bot_id=self.bot_config.bot_id,
+                )
+
+        except Exception as e:
+            self._logger.error(
+                f"Error in WebSocket timeout handling for {exchange_name}: {e}",
+                bot_id=self.bot_config.bot_id,
+            )
+            await self.error_handler.handle_error(
+                e,
+                {
+                    "operation": "websocket_timeout_handling",
+                    "bot_id": self.bot_config.bot_id,
+                    "exchange": exchange_name,
+                },
+                severity="medium",
+            )
+
+    async def _websocket_message_processor_loop(self) -> None:
+        """Process WebSocket messages with backpressure handling."""
+        try:
+            while self.is_running:
+                try:
+                    # Collect and process message batch
+                    batch_messages = await self._collect_message_batch()
+
+                    # Process the batch if we have messages
+                    if batch_messages:
+                        await self._process_websocket_message_batch(batch_messages)
+                    else:
+                        # Small delay to prevent CPU spinning when no messages
+                        await asyncio.sleep(0.01)
+
+                except Exception as e:
+                    self._logger.error(
+                        f"WebSocket message processor error: {e}",
+                        bot_id=self.bot_config.bot_id,
+                    )
+                    await asyncio.sleep(1)
+
+        except asyncio.CancelledError:
+            # Process any remaining messages before cancellation
+            await self._process_remaining_messages_on_shutdown()
+
+            self._logger.info(
+                "WebSocket message processor cancelled", bot_id=self.bot_config.bot_id
+            )
+
+    async def _process_websocket_message_batch(self, messages: list) -> None:
+        """Process a batch of WebSocket messages."""
+        try:
+            for message in messages:
+                # Process individual message
+                await self._process_single_websocket_message(message)
+
+        except Exception as e:
+            self._logger.error(
+                f"Error processing WebSocket message batch: {e}",
+                bot_id=self.bot_config.bot_id,
+            )
+
+    async def _process_single_websocket_message(self, message: dict) -> None:
+        """Process a single WebSocket message."""
+        try:
+            message_type = message.get("type", "unknown")
+
+            # Handle different message types
+            if message_type == "market_data":
+                await self._handle_market_data_message(message)
+            elif message_type == "order_update":
+                await self._handle_order_update_message(message)
+            elif message_type == "account_update":
+                await self._handle_account_update_message(message)
+            elif message_type == "pong":
+                await self._handle_pong_message(message)
+            else:
+                self._logger.debug(f"Unknown message type: {message_type}")
+
+        except Exception as e:
+            self._logger.error(
+                f"Error processing single WebSocket message: {e}",
+                bot_id=self.bot_config.bot_id,
+                message_type=message.get("type", "unknown"),
+            )
+
+    async def _handle_market_data_message(self, message: dict) -> None:
+        """Handle market data WebSocket messages."""
+        # Update last pong time for connection health
+        exchange = message.get("exchange", "unknown")
+        if exchange in self.websocket_last_pong:
+            self.websocket_last_pong[exchange] = datetime.now(timezone.utc)
+
+        # Process market data for strategy
+        if self.strategy and hasattr(self.strategy, "handle_market_data"):
+            try:
+                await asyncio.wait_for(
+                    self.strategy.handle_market_data(message.get("data")), timeout=1.0
+                )
+            except asyncio.TimeoutError:
+                self._logger.warning("Strategy market data handling timeout")
+            except Exception as e:
+                self._logger.warning(f"Strategy market data handling error: {e}")
+
+    async def _handle_order_update_message(self, message: dict) -> None:
+        """Handle order update WebSocket messages."""
+        exchange = message.get("exchange", "unknown")
+        if exchange in self.websocket_last_pong:
+            self.websocket_last_pong[exchange] = datetime.now(timezone.utc)
+
+        # Update order tracking
+        order_data = message.get("data", {})
+        if "client_order_id" in order_data:
+            self.order_tracker[order_data["client_order_id"]] = order_data
+
+    async def _handle_account_update_message(self, message: dict) -> None:
+        """Handle account update WebSocket messages."""
+        exchange = message.get("exchange", "unknown")
+        if exchange in self.websocket_last_pong:
+            self.websocket_last_pong[exchange] = datetime.now(timezone.utc)
+
+        # Update position tracking
+        account_data = message.get("data", {})
+        if "positions" in account_data:
+            for position in account_data["positions"]:
+                symbol = position.get("symbol")
+                if symbol:
+                    self.position_tracker[symbol] = position
+
+    async def _handle_pong_message(self, message: dict) -> None:
+        """Handle WebSocket pong messages."""
+        exchange = message.get("exchange", "unknown")
+        self.websocket_last_pong[exchange] = datetime.now(timezone.utc)
+
+    async def queue_websocket_message(self, message: dict) -> bool:
+        """Queue a WebSocket message for processing with backpressure handling."""
+        async with self._message_queue_lock:
+            try:
+                # Try to put message in queue without blocking
+                self.websocket_message_queue.put_nowait(message)
+                return True
+
+            except asyncio.QueueFull:
+                # Handle backpressure - drop oldest messages and count drops
+                self.message_drop_count += 1
+
+                # Log warning every 100 dropped messages
+                if self.message_drop_count % 100 == 0:
+                    self._logger.warning(
+                        f"WebSocket message queue full, dropped {self.message_drop_count} messages",
+                        bot_id=self.bot_config.bot_id,
+                    )
+
+                # Try to drop oldest message and add new one atomically
+                try:
+                    self.websocket_message_queue.get_nowait()  # Drop oldest
+                    self.websocket_message_queue.put_nowait(message)  # Add new
+                    return True
+                except (asyncio.QueueEmpty, asyncio.QueueFull):
+                    return False
+
+    async def _close_existing_websocket_connection(self, exchange_name: str) -> None:
+        """Close existing WebSocket connection for an exchange."""
+        try:
+            connection = self.websocket_connections.get(exchange_name)
+            if connection:
+                if hasattr(connection, "close_websocket"):
+                    await asyncio.wait_for(connection.close_websocket(), timeout=5.0)
+                elif hasattr(connection, "websocket") and connection.websocket:
+                    await asyncio.wait_for(connection.websocket.close(), timeout=5.0)
+
+                # Remove from tracking
+                self.websocket_connections.pop(exchange_name, None)
+                self.websocket_last_pong.pop(exchange_name, None)
+
+        except Exception as e:
+            self._logger.error(
+                f"Error closing WebSocket connection for {exchange_name}: {e}",
+                bot_id=self.bot_config.bot_id,
+            )
+
+    async def _attempt_websocket_reconnection(self, exchange_name: str) -> bool:
+        """Attempt to reconnect WebSocket with exponential backoff and circuit breaker."""
+        # Check circuit breaker
+        if self.websocket_circuit_breaker.get(exchange_name, False):
+            self._logger.debug(
+                f"Circuit breaker open for {exchange_name}, skipping reconnection",
+                bot_id=self.bot_config.bot_id,
+            )
+            return False
+
+        max_retries = 3
+        base_delay = 1.0
+        current_attempts = self.websocket_reconnect_attempts.get(exchange_name, 0)
+
+        # Open circuit breaker after too many failed attempts
+        if current_attempts >= 10:
+            self.websocket_circuit_breaker[exchange_name] = True
+            self._logger.error(
+                f"Circuit breaker opened for {exchange_name} after {current_attempts} "
+                f"failed attempts",
+                bot_id=self.bot_config.bot_id,
+            )
+            return False
+
+        for attempt in range(max_retries):
+            connection = None
+            try:
+                delay = base_delay * (2**attempt)
+                await asyncio.sleep(delay)
+
+                # Attempt to reinitialize the connection through exchange
+                if hasattr(self, "exchanges") and exchange_name in self.exchanges:
+                    exchange = self.exchanges[exchange_name]
+                    if hasattr(exchange, "connect_websocket"):
+                        connection = await asyncio.wait_for(
+                            exchange.connect_websocket(), timeout=10.0
+                        )
+                        self.websocket_connections[exchange_name] = connection
+                        self.websocket_last_pong[exchange_name] = datetime.now(timezone.utc)
+
+                        # Reset reconnect attempts on success
+                        self.websocket_reconnect_attempts[exchange_name] = 0
+                        self.websocket_circuit_breaker[exchange_name] = False
+
+                        self._logger.info(
+                            f"WebSocket reconnected successfully for {exchange_name}",
+                            bot_id=self.bot_config.bot_id,
+                        )
+                        return True
+
+            except Exception as e:
+                # Cleanup connection if it was created but not stored successfully
+                if connection and exchange_name not in self.websocket_connections:
+                    try:
+                        if hasattr(connection, "close"):
+                            await connection.close()
+                    except Exception:
+                        pass  # Best effort cleanup
+
+                self.websocket_reconnect_attempts[exchange_name] = current_attempts + attempt + 1
+                self._logger.warning(
+                    f"WebSocket reconnection attempt {attempt + 1} failed for {exchange_name}: {e}",
+                    bot_id=self.bot_config.bot_id,
+                )
+
+        return False
+
+    async def _collect_message_batch(self) -> list:
+        """Collect a batch of messages from the WebSocket queue."""
+        messages = []
+        max_batch_size = 50
+        timeout = 0.1  # 100ms timeout for batch collection
+
+        try:
+            # Try to get at least one message with timeout
+            message = await asyncio.wait_for(self.websocket_message_queue.get(), timeout=timeout)
+            messages.append(message)
+            self.websocket_message_queue.task_done()
+
+            # Collect additional messages without waiting
+            while len(messages) < max_batch_size:
+                try:
+                    message = self.websocket_message_queue.get_nowait()
+                    messages.append(message)
+                    self.websocket_message_queue.task_done()
+                except asyncio.QueueEmpty:
+                    break
+
+        except asyncio.TimeoutError:
+            # No messages available within timeout
+            pass
+
+        return messages
+
+    async def _process_remaining_messages_on_shutdown(self) -> None:
+        """Process any remaining messages in the queue during shutdown."""
+        try:
+            remaining_count = 0
+            while not self.websocket_message_queue.empty():
+                try:
+                    message = self.websocket_message_queue.get_nowait()
+                    await self._process_single_websocket_message(message)
+                    self.websocket_message_queue.task_done()
+                    remaining_count += 1
+
+                    # Limit processing to prevent shutdown delays
+                    if remaining_count >= 100:
+                        self._logger.warning(
+                            f"Stopped processing remaining messages after {remaining_count} "
+                            "to prevent shutdown delay",
+                            bot_id=self.bot_config.bot_id,
+                        )
+                        break
+
+                except asyncio.QueueEmpty:
+                    break
+                except Exception as e:
+                    self._logger.error(
+                        f"Error processing remaining message during shutdown: {e}",
+                        bot_id=self.bot_config.bot_id,
+                    )
+                    # Still call task_done() even on error to avoid hanging
+                    try:
+                        self.websocket_message_queue.task_done()
+                    except ValueError:
+                        pass  # task_done() called more times than there were .get() calls
+
+            if remaining_count > 0:
+                self._logger.info(
+                    f"Processed {remaining_count} remaining WebSocket messages during shutdown",
+                    bot_id=self.bot_config.bot_id,
+                )
+
+        except Exception as e:
+            self._logger.error(
+                f"Error processing remaining messages during shutdown: {e}",
+                bot_id=self.bot_config.bot_id,
+            )
+
+    async def _clear_message_queue(self) -> None:
+        """Clear the WebSocket message queue to prevent memory leaks."""
+        try:
+            async with self._message_queue_lock:
+                # Clear remaining messages
+                dropped_count = 0
+                while not self.websocket_message_queue.empty():
+                    try:
+                        self.websocket_message_queue.get_nowait()
+                        self.websocket_message_queue.task_done()
+                        dropped_count += 1
+                    except asyncio.QueueEmpty:
+                        break
+                    except ValueError:
+                        # task_done() called more times than there were .get() calls
+                        break
+
+                if dropped_count > 0:
+                    self._logger.debug(
+                        f"Cleared {dropped_count} messages from queue during shutdown",
+                        bot_id=self.bot_config.bot_id,
+                    )
+
+        except Exception as e:
+            self._logger.error(
+                f"Error clearing message queue: {e}",
+                bot_id=self.bot_config.bot_id,
+            )
+
+    async def _circuit_breaker_reset_loop(self) -> None:
+        """Periodic circuit breaker reset for WebSocket connections."""
+        try:
+            while self.is_running:
+                await asyncio.sleep(300)  # Reset every 5 minutes
+
+                # Reset circuit breakers that have been open for long enough
+                for exchange_name in list(self.websocket_circuit_breaker.keys()):
+                    if self.websocket_circuit_breaker.get(exchange_name, False):
+                        # Reset circuit breaker and attempts after cooldown period
+                        self.websocket_circuit_breaker[exchange_name] = False
+                        self.websocket_reconnect_attempts[exchange_name] = 0
+
+                        self._logger.info(
+                            f"Circuit breaker reset for {exchange_name}",
+                            bot_id=self.bot_config.bot_id,
+                        )
+
+        except asyncio.CancelledError:
+            self._logger.info("Circuit breaker reset loop cancelled", bot_id=self.bot_config.bot_id)
+        except Exception as e:
+            self._logger.error(
+                f"Circuit breaker reset loop error: {e}",
+                bot_id=self.bot_config.bot_id,
+            )

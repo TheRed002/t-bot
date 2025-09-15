@@ -1,0 +1,697 @@
+"""
+Comprehensive tests for CapitalAllocatorAdapter class.
+
+Tests cover all capital allocation adapter functionality including:
+- Capital allocation and deallocation
+- Balance management
+- Position tracking
+- Risk limit enforcement
+- Portfolio synchronization
+"""
+
+from datetime import datetime
+from decimal import Decimal
+from unittest.mock import AsyncMock, MagicMock, call, patch
+
+import pytest
+
+from src.bot_management.capital_allocator_adapter import CapitalAllocatorAdapter
+from src.core.exceptions import (
+    CapitalError,
+    InsufficientCapitalError,
+    RiskLimitExceededError,
+    ServiceError,
+    ValidationError,
+)
+from src.core.types.capital import (
+    AllocationRequest,
+    AllocationResult,
+    CapitalAllocation,
+    CapitalMetrics,
+    PortfolioAllocation,
+)
+from src.core.types.trading import Position, PositionSide
+
+
+@pytest.fixture
+def mock_capital_service():
+    """Create mock capital management service."""
+    service = AsyncMock()
+    service.allocate_capital = AsyncMock()
+    service.deallocate_capital = AsyncMock()
+    service.get_available_capital = AsyncMock()
+    service.get_allocated_capital = AsyncMock()
+    service.update_position_value = AsyncMock()
+    service.get_portfolio_metrics = AsyncMock()
+    return service
+
+
+@pytest.fixture
+def mock_risk_service():
+    """Create mock risk management service."""
+    service = AsyncMock()
+    service.validate_allocation = AsyncMock()
+    service.check_risk_limits = AsyncMock()
+    service.calculate_position_risk = AsyncMock()
+    service.get_risk_metrics = AsyncMock()
+    return service
+
+
+@pytest.fixture
+def mock_database_service():
+    """Create mock database service."""
+    service = AsyncMock()
+    service.save_allocation = AsyncMock()
+    service.get_allocations = AsyncMock()
+    service.update_allocation = AsyncMock()
+    service.get_bot_capital = AsyncMock()
+    return service
+
+
+@pytest.fixture
+def mock_logger():
+    """Create mock logger."""
+    with patch("src.bot_management.capital_allocator_adapter.get_logger") as mock_get_logger:
+        logger = MagicMock()
+        mock_get_logger.return_value = logger
+        yield logger
+
+
+@pytest.fixture
+def capital_allocator_adapter(mock_capital_service, mock_risk_service, mock_database_service):
+    """Create CapitalAllocatorAdapter instance with mocked dependencies."""
+    return CapitalAllocatorAdapter(
+        capital_service=mock_capital_service,
+        risk_service=mock_risk_service,
+        database_service=mock_database_service,
+    )
+
+
+@pytest.fixture
+def sample_allocation_request():
+    """Create sample allocation request."""
+    return AllocationRequest(
+        bot_id="test_bot_001",
+        amount=Decimal("5000.00"),
+        currency="USDT",
+        purpose="trading",
+        strategy_id="strategy_001",
+    )
+
+
+@pytest.fixture
+def sample_position():
+    """Create sample position."""
+    return Position(
+        position_id="pos_001",
+        symbol="BTC/USDT",
+        side=PositionSide.LONG,
+        quantity=Decimal("0.5"),
+        entry_price=Decimal("50000.00"),
+        current_price=Decimal("51000.00"),
+        unrealized_pnl=Decimal("500.00"),
+        realized_pnl=Decimal("0.00"),
+    )
+
+
+class TestCapitalAllocatorAdapterInitialization:
+    """Test CapitalAllocatorAdapter initialization."""
+
+    def test_initialization_with_all_services(self, capital_allocator_adapter):
+        """Test initialization with all services provided."""
+        assert capital_allocator_adapter._capital_service is not None
+        assert capital_allocator_adapter._risk_service is not None
+        assert capital_allocator_adapter._database_service is not None
+        assert capital_allocator_adapter._allocations == {}
+        assert capital_allocator_adapter._bot_balances == {}
+
+    def test_initialization_minimal_services(self):
+        """Test initialization with minimal required services."""
+        adapter = CapitalAllocatorAdapter(
+            capital_service=AsyncMock(),
+        )
+        assert adapter._capital_service is not None
+        assert adapter._risk_service is None
+        assert adapter._database_service is None
+
+
+class TestAllocateCapital:
+    """Test capital allocation functionality."""
+
+    @pytest.mark.asyncio
+    async def test_allocate_capital_success(
+        self,
+        capital_allocator_adapter,
+        sample_allocation_request,
+        mock_capital_service,
+        mock_risk_service,
+    ):
+        """Test successful capital allocation."""
+        mock_risk_service.validate_allocation.return_value = True
+        mock_capital_service.allocate_capital.return_value = AllocationResult(
+            allocation_id="alloc_001",
+            bot_id=sample_allocation_request.bot_id,
+            amount=sample_allocation_request.amount,
+            success=True,
+        )
+
+        result = await capital_allocator_adapter.allocate_capital(sample_allocation_request)
+
+        assert result.success is True
+        assert result.amount == sample_allocation_request.amount
+        mock_risk_service.validate_allocation.assert_called_once()
+        mock_capital_service.allocate_capital.assert_called_once_with(sample_allocation_request)
+
+    @pytest.mark.asyncio
+    async def test_allocate_capital_risk_validation_failure(
+        self,
+        capital_allocator_adapter,
+        sample_allocation_request,
+        mock_risk_service,
+    ):
+        """Test capital allocation with risk validation failure."""
+        mock_risk_service.validate_allocation.side_effect = RiskLimitExceededError(
+            "Allocation exceeds risk limits"
+        )
+
+        with pytest.raises(RiskLimitExceededError):
+            await capital_allocator_adapter.allocate_capital(sample_allocation_request)
+
+    @pytest.mark.asyncio
+    async def test_allocate_capital_insufficient_funds(
+        self,
+        capital_allocator_adapter,
+        sample_allocation_request,
+        mock_capital_service,
+        mock_risk_service,
+    ):
+        """Test capital allocation with insufficient funds."""
+        mock_risk_service.validate_allocation.return_value = True
+        mock_capital_service.allocate_capital.side_effect = InsufficientCapitalError(
+            "Insufficient capital available"
+        )
+
+        with pytest.raises(InsufficientCapitalError):
+            await capital_allocator_adapter.allocate_capital(sample_allocation_request)
+
+    @pytest.mark.asyncio
+    async def test_allocate_capital_with_database_save(
+        self,
+        capital_allocator_adapter,
+        sample_allocation_request,
+        mock_capital_service,
+        mock_database_service,
+        mock_risk_service,
+    ):
+        """Test capital allocation with database persistence."""
+        mock_risk_service.validate_allocation.return_value = True
+        allocation_result = AllocationResult(
+            allocation_id="alloc_001",
+            bot_id=sample_allocation_request.bot_id,
+            amount=sample_allocation_request.amount,
+            success=True,
+        )
+        mock_capital_service.allocate_capital.return_value = allocation_result
+
+        result = await capital_allocator_adapter.allocate_capital(sample_allocation_request)
+
+        assert result.success is True
+        mock_database_service.save_allocation.assert_called_once()
+        saved_allocation = mock_database_service.save_allocation.call_args[0][0]
+        assert saved_allocation.allocation_id == "alloc_001"
+        assert saved_allocation.amount == sample_allocation_request.amount
+
+
+class TestDeallocateCapital:
+    """Test capital deallocation functionality."""
+
+    @pytest.mark.asyncio
+    async def test_deallocate_capital_success(
+        self,
+        capital_allocator_adapter,
+        mock_capital_service,
+    ):
+        """Test successful capital deallocation."""
+        bot_id = "test_bot_001"
+        amount = Decimal("2000.00")
+        
+        # Set up existing allocation
+        capital_allocator_adapter._allocations[bot_id] = CapitalAllocation(
+            allocation_id="alloc_001",
+            bot_id=bot_id,
+            amount=Decimal("5000.00"),
+            allocated_at=datetime.utcnow(),
+        )
+        
+        mock_capital_service.deallocate_capital.return_value = True
+
+        result = await capital_allocator_adapter.deallocate_capital(bot_id, amount)
+
+        assert result is True
+        mock_capital_service.deallocate_capital.assert_called_once_with(bot_id, amount)
+        assert capital_allocator_adapter._allocations[bot_id].amount == Decimal("3000.00")
+
+    @pytest.mark.asyncio
+    async def test_deallocate_capital_full_amount(
+        self,
+        capital_allocator_adapter,
+        mock_capital_service,
+    ):
+        """Test full capital deallocation."""
+        bot_id = "test_bot_001"
+        amount = Decimal("5000.00")
+        
+        capital_allocator_adapter._allocations[bot_id] = CapitalAllocation(
+            allocation_id="alloc_001",
+            bot_id=bot_id,
+            amount=amount,
+            allocated_at=datetime.utcnow(),
+        )
+        
+        mock_capital_service.deallocate_capital.return_value = True
+
+        result = await capital_allocator_adapter.deallocate_capital(bot_id, amount)
+
+        assert result is True
+        assert bot_id not in capital_allocator_adapter._allocations
+
+    @pytest.mark.asyncio
+    async def test_deallocate_capital_exceeds_allocated(
+        self,
+        capital_allocator_adapter,
+    ):
+        """Test deallocation exceeding allocated amount."""
+        bot_id = "test_bot_001"
+        
+        capital_allocator_adapter._allocations[bot_id] = CapitalAllocation(
+            allocation_id="alloc_001",
+            bot_id=bot_id,
+            amount=Decimal("1000.00"),
+            allocated_at=datetime.utcnow(),
+        )
+
+        with pytest.raises(ValidationError):
+            await capital_allocator_adapter.deallocate_capital(bot_id, Decimal("2000.00"))
+
+    @pytest.mark.asyncio
+    async def test_deallocate_capital_no_allocation(
+        self,
+        capital_allocator_adapter,
+    ):
+        """Test deallocation without existing allocation."""
+        with pytest.raises(ValidationError):
+            await capital_allocator_adapter.deallocate_capital("unknown_bot", Decimal("1000.00"))
+
+
+class TestBalanceManagement:
+    """Test balance management functionality."""
+
+    @pytest.mark.asyncio
+    async def test_get_available_balance_success(
+        self,
+        capital_allocator_adapter,
+        mock_capital_service,
+    ):
+        """Test getting available balance."""
+        bot_id = "test_bot_001"
+        mock_capital_service.get_available_capital.return_value = Decimal("10000.00")
+
+        balance = await capital_allocator_adapter.get_available_balance(bot_id)
+
+        assert balance == Decimal("10000.00")
+        mock_capital_service.get_available_capital.assert_called_once_with(bot_id)
+
+    @pytest.mark.asyncio
+    async def test_get_allocated_balance_success(
+        self,
+        capital_allocator_adapter,
+        mock_capital_service,
+    ):
+        """Test getting allocated balance."""
+        bot_id = "test_bot_001"
+        mock_capital_service.get_allocated_capital.return_value = Decimal("5000.00")
+
+        balance = await capital_allocator_adapter.get_allocated_balance(bot_id)
+
+        assert balance == Decimal("5000.00")
+        mock_capital_service.get_allocated_capital.assert_called_once_with(bot_id)
+
+    @pytest.mark.asyncio
+    async def test_update_bot_balance(
+        self,
+        capital_allocator_adapter,
+        mock_database_service,
+    ):
+        """Test updating bot balance."""
+        bot_id = "test_bot_001"
+        new_balance = Decimal("15000.00")
+
+        await capital_allocator_adapter.update_bot_balance(bot_id, new_balance)
+
+        assert capital_allocator_adapter._bot_balances[bot_id] == new_balance
+        mock_database_service.update_allocation.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_get_total_balance(
+        self,
+        capital_allocator_adapter,
+        mock_capital_service,
+    ):
+        """Test getting total balance (available + allocated)."""
+        bot_id = "test_bot_001"
+        mock_capital_service.get_available_capital.return_value = Decimal("10000.00")
+        mock_capital_service.get_allocated_capital.return_value = Decimal("5000.00")
+
+        total = await capital_allocator_adapter.get_total_balance(bot_id)
+
+        assert total == Decimal("15000.00")
+
+
+class TestPositionTracking:
+    """Test position tracking functionality."""
+
+    @pytest.mark.asyncio
+    async def test_update_position_value_success(
+        self,
+        capital_allocator_adapter,
+        sample_position,
+        mock_capital_service,
+    ):
+        """Test updating position value."""
+        bot_id = "test_bot_001"
+        mock_capital_service.update_position_value.return_value = True
+
+        result = await capital_allocator_adapter.update_position_value(bot_id, sample_position)
+
+        assert result is True
+        mock_capital_service.update_position_value.assert_called_once_with(
+            bot_id, sample_position
+        )
+
+    @pytest.mark.asyncio
+    async def test_track_multiple_positions(
+        self,
+        capital_allocator_adapter,
+        mock_capital_service,
+    ):
+        """Test tracking multiple positions."""
+        bot_id = "test_bot_001"
+        positions = [
+            Position(
+                position_id=f"pos_{i}",
+                symbol=f"COIN{i}/USDT",
+                side=PositionSide.LONG,
+                quantity=Decimal("1.0"),
+                entry_price=Decimal("100.00"),
+                current_price=Decimal("110.00"),
+            )
+            for i in range(3)
+        ]
+
+        for position in positions:
+            await capital_allocator_adapter.update_position_value(bot_id, position)
+
+        assert mock_capital_service.update_position_value.call_count == 3
+
+    @pytest.mark.asyncio
+    async def test_calculate_position_impact(
+        self,
+        capital_allocator_adapter,
+        sample_position,
+        mock_risk_service,
+    ):
+        """Test calculating position impact on capital."""
+        bot_id = "test_bot_001"
+        mock_risk_service.calculate_position_risk.return_value = {
+            "position_value": Decimal("25500.00"),
+            "risk_value": Decimal("2550.00"),
+            "impact_percentage": Decimal("0.17"),
+        }
+
+        impact = await capital_allocator_adapter.calculate_position_impact(
+            bot_id, sample_position
+        )
+
+        assert impact["position_value"] == Decimal("25500.00")
+        mock_risk_service.calculate_position_risk.assert_called_once()
+
+
+class TestRiskLimitEnforcement:
+    """Test risk limit enforcement functionality."""
+
+    @pytest.mark.asyncio
+    async def test_check_allocation_limits_success(
+        self,
+        capital_allocator_adapter,
+        sample_allocation_request,
+        mock_risk_service,
+    ):
+        """Test checking allocation within limits."""
+        mock_risk_service.check_risk_limits.return_value = {
+            "within_limits": True,
+            "available_allocation": Decimal("10000.00"),
+        }
+
+        result = await capital_allocator_adapter.check_allocation_limits(
+            sample_allocation_request
+        )
+
+        assert result["within_limits"] is True
+        mock_risk_service.check_risk_limits.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_check_allocation_limits_exceeded(
+        self,
+        capital_allocator_adapter,
+        sample_allocation_request,
+        mock_risk_service,
+    ):
+        """Test checking allocation exceeding limits."""
+        mock_risk_service.check_risk_limits.return_value = {
+            "within_limits": False,
+            "reason": "Exceeds maximum position size",
+        }
+
+        result = await capital_allocator_adapter.check_allocation_limits(
+            sample_allocation_request
+        )
+
+        assert result["within_limits"] is False
+        assert "reason" in result
+
+    @pytest.mark.asyncio
+    async def test_enforce_portfolio_limits(
+        self,
+        capital_allocator_adapter,
+        mock_risk_service,
+    ):
+        """Test enforcing portfolio-wide limits."""
+        bot_id = "test_bot_001"
+        mock_risk_service.get_risk_metrics.return_value = {
+            "total_exposure": Decimal("50000.00"),
+            "max_exposure": Decimal("100000.00"),
+            "utilization": Decimal("0.5"),
+        }
+
+        metrics = await capital_allocator_adapter.get_portfolio_risk_metrics(bot_id)
+
+        assert metrics["utilization"] == Decimal("0.5")
+        assert metrics["total_exposure"] <= metrics["max_exposure"]
+
+
+class TestPortfolioSynchronization:
+    """Test portfolio synchronization functionality."""
+
+    @pytest.mark.asyncio
+    async def test_sync_portfolio_allocations(
+        self,
+        capital_allocator_adapter,
+        mock_capital_service,
+        mock_database_service,
+    ):
+        """Test synchronizing portfolio allocations."""
+        mock_database_service.get_allocations.return_value = [
+            CapitalAllocation(
+                allocation_id="alloc_001",
+                bot_id="bot_001",
+                amount=Decimal("5000.00"),
+                allocated_at=datetime.utcnow(),
+            ),
+            CapitalAllocation(
+                allocation_id="alloc_002",
+                bot_id="bot_002",
+                amount=Decimal("3000.00"),
+                allocated_at=datetime.utcnow(),
+            ),
+        ]
+
+        await capital_allocator_adapter.sync_portfolio_allocations()
+
+        assert len(capital_allocator_adapter._allocations) == 2
+        assert "bot_001" in capital_allocator_adapter._allocations
+        assert "bot_002" in capital_allocator_adapter._allocations
+
+    @pytest.mark.asyncio
+    async def test_get_portfolio_metrics(
+        self,
+        capital_allocator_adapter,
+        mock_capital_service,
+    ):
+        """Test getting portfolio metrics."""
+        mock_capital_service.get_portfolio_metrics.return_value = CapitalMetrics(
+            total_capital=Decimal("100000.00"),
+            allocated_capital=Decimal("60000.00"),
+            available_capital=Decimal("40000.00"),
+            utilization_rate=Decimal("0.6"),
+            return_on_capital=Decimal("0.15"),
+        )
+
+        metrics = await capital_allocator_adapter.get_portfolio_metrics()
+
+        assert metrics.total_capital == Decimal("100000.00")
+        assert metrics.utilization_rate == Decimal("0.6")
+        mock_capital_service.get_portfolio_metrics.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_rebalance_portfolio(
+        self,
+        capital_allocator_adapter,
+        mock_capital_service,
+    ):
+        """Test portfolio rebalancing."""
+        target_allocations = {
+            "bot_001": Decimal("0.4"),
+            "bot_002": Decimal("0.3"),
+            "bot_003": Decimal("0.3"),
+        }
+
+        mock_capital_service.get_portfolio_metrics.return_value = CapitalMetrics(
+            total_capital=Decimal("100000.00"),
+        )
+
+        await capital_allocator_adapter.rebalance_portfolio(target_allocations)
+
+        # Should deallocate and reallocate as needed
+        assert mock_capital_service.deallocate_capital.called or \
+               mock_capital_service.allocate_capital.called
+
+
+class TestErrorHandling:
+    """Test error handling in capital allocator adapter."""
+
+    @pytest.mark.asyncio
+    async def test_handle_service_unavailable(
+        self,
+        capital_allocator_adapter,
+        sample_allocation_request,
+        mock_capital_service,
+        mock_risk_service,
+    ):
+        """Test handling service unavailability."""
+        mock_risk_service.validate_allocation.return_value = True
+        mock_capital_service.allocate_capital.side_effect = ServiceError("Service unavailable")
+
+        with pytest.raises(ServiceError):
+            await capital_allocator_adapter.allocate_capital(sample_allocation_request)
+
+    @pytest.mark.asyncio
+    async def test_handle_invalid_amount(
+        self,
+        capital_allocator_adapter,
+    ):
+        """Test handling invalid allocation amounts."""
+        request = AllocationRequest(
+            bot_id="test_bot",
+            amount=Decimal("-1000.00"),  # Negative amount
+            currency="USDT",
+        )
+
+        with pytest.raises(ValidationError):
+            await capital_allocator_adapter.allocate_capital(request)
+
+    @pytest.mark.asyncio
+    async def test_handle_database_error(
+        self,
+        capital_allocator_adapter,
+        sample_allocation_request,
+        mock_capital_service,
+        mock_database_service,
+        mock_risk_service,
+    ):
+        """Test handling database errors."""
+        mock_risk_service.validate_allocation.return_value = True
+        mock_capital_service.allocate_capital.return_value = AllocationResult(
+            allocation_id="alloc_001",
+            bot_id=sample_allocation_request.bot_id,
+            amount=sample_allocation_request.amount,
+            success=True,
+        )
+        mock_database_service.save_allocation.side_effect = ServiceError("Database error")
+
+        # Should still succeed but log the error
+        result = await capital_allocator_adapter.allocate_capital(sample_allocation_request)
+        assert result.success is True
+
+
+class TestConcurrency:
+    """Test concurrent operations in capital allocator adapter."""
+
+    @pytest.mark.asyncio
+    async def test_concurrent_allocations(
+        self,
+        capital_allocator_adapter,
+        mock_capital_service,
+        mock_risk_service,
+    ):
+        """Test handling concurrent allocation requests."""
+        mock_risk_service.validate_allocation.return_value = True
+        
+        allocation_requests = [
+            AllocationRequest(
+                bot_id=f"bot_{i}",
+                amount=Decimal("1000.00"),
+                currency="USDT",
+            )
+            for i in range(5)
+        ]
+        
+        mock_capital_service.allocate_capital.side_effect = [
+            AllocationResult(
+                allocation_id=f"alloc_{i}",
+                bot_id=req.bot_id,
+                amount=req.amount,
+                success=True,
+            )
+            for i, req in enumerate(allocation_requests)
+        ]
+
+        import asyncio
+        results = await asyncio.gather(
+            *[capital_allocator_adapter.allocate_capital(req) for req in allocation_requests]
+        )
+
+        assert len(results) == 5
+        assert all(r.success for r in results)
+
+    @pytest.mark.asyncio
+    async def test_concurrent_balance_updates(
+        self,
+        capital_allocator_adapter,
+        mock_database_service,
+    ):
+        """Test concurrent balance updates."""
+        bot_ids = [f"bot_{i}" for i in range(3)]
+        
+        import asyncio
+        await asyncio.gather(
+            *[
+                capital_allocator_adapter.update_bot_balance(bot_id, Decimal("5000.00"))
+                for bot_id in bot_ids
+            ]
+        )
+
+        assert len(capital_allocator_adapter._bot_balances) == 3
+        assert all(
+            capital_allocator_adapter._bot_balances[bot_id] == Decimal("5000.00")
+            for bot_id in bot_ids
+        )

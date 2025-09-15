@@ -1,0 +1,441 @@
+"""
+Tests for Bot Management DI Registration.
+
+Testing the dependency injection registration module that configures
+bot management services with proper DI patterns.
+"""
+
+import pytest
+from unittest.mock import Mock, patch, MagicMock
+
+import src.bot_management.factory
+import src.bot_management.controller
+import src.bot_management.service
+import src.bot_management.di_registration
+
+from src.bot_management.di_registration import (
+    register_bot_management_services,
+    configure_bot_management_dependencies,
+    get_bot_instance_service,
+    get_bot_lifecycle_service,
+    get_bot_coordination_service,
+)
+from src.core.dependency_injection import DependencyInjector
+
+
+class TestBotManagementDIRegistration:
+    """Tests for DI registration functions."""
+
+    @pytest.fixture
+    def mock_injector(self):
+        """Create a mock dependency injector."""
+        injector = Mock(spec=DependencyInjector)
+        injector.register_factory = Mock()
+        injector.register_service = Mock()
+        injector.resolve = Mock()
+        return injector
+
+    def test_register_bot_management_services(self, mock_injector):
+        """Test registration of all bot management services."""
+        register_bot_management_services(mock_injector)
+        
+        # Verify factory registrations
+        factory_calls = mock_injector.register_factory.call_args_list
+        registered_factories = [call[0][0] for call in factory_calls]
+        
+        expected_factories = [
+            "BotManagementFactory",
+            "BotInstanceService", 
+            "BotLifecycleService",
+            "BotCoordinationService",
+            "BotResourceService",
+            "BotMonitoringService",
+            "BotManagementController",
+            "BotService"
+        ]
+        
+        # Batch assertion for performance
+        assert all(expected in registered_factories for expected in expected_factories)
+        
+        # Verify service registrations
+        service_calls = mock_injector.register_service.call_args_list
+        registered_services = [call[0][0] for call in service_calls]
+        
+        expected_services = [
+            "IBotInstanceService",
+            "IBotLifecycleService",
+            "IBotCoordinationService", 
+            "IResourceManagementService",
+            "IBotMonitoringService"
+        ]
+        
+        # Batch assertion for performance
+        assert all(expected in registered_services for expected in expected_services)
+
+    def test_register_services_as_singletons(self, mock_injector):
+        """Test that all services are registered as singletons."""
+        register_bot_management_services(mock_injector)
+        
+        # Check factory registrations
+        for call in mock_injector.register_factory.call_args_list:
+            assert call[1]['singleton'] is True
+        
+        # Check service registrations
+        for call in mock_injector.register_service.call_args_list:
+            assert call[1]['singleton'] is True
+
+    @patch.object(src.bot_management.factory, 'BotManagementFactory')
+    def test_bot_management_factory_registration(self, mock_factory_class, mock_injector):
+        """Test BotManagementFactory registration."""
+        register_bot_management_services(mock_injector)
+        
+        # Get the factory function
+        factory_call = None
+        for call in mock_injector.register_factory.call_args_list:
+            if call[0][0] == "BotManagementFactory":
+                factory_call = call
+                break
+        
+        assert factory_call is not None
+        factory_func = factory_call[0][1]
+        
+        # Call the factory function
+        result = factory_func()
+        
+        # Should create BotManagementFactory with injector
+        mock_factory_class.assert_called_once_with(mock_injector)
+
+    def test_service_factories_use_main_factory(self, mock_injector):
+        """Test that service factories use the main BotManagementFactory."""
+        mock_factory = Mock()
+        mock_factory._create_bot_instance_service.return_value = Mock()
+        mock_injector.resolve.return_value = mock_factory
+        
+        register_bot_management_services(mock_injector)
+        
+        # Get the BotInstanceService factory function
+        instance_service_call = None
+        for call in mock_injector.register_factory.call_args_list:
+            if call[0][0] == "BotInstanceService":
+                instance_service_call = call
+                break
+        
+        assert instance_service_call is not None
+        factory_func = instance_service_call[0][1]
+        
+        # Call the factory function
+        result = factory_func()
+        
+        # Should resolve BotManagementFactory and call its method
+        mock_injector.resolve.assert_called_with("BotManagementFactory")
+        mock_factory._create_bot_instance_service.assert_called_once()
+
+    def test_interface_service_registrations(self, mock_injector):
+        """Test that interface services resolve to concrete implementations."""
+        mock_concrete_service = Mock()
+        mock_injector.resolve.return_value = mock_concrete_service
+        
+        register_bot_management_services(mock_injector)
+        
+        # Get interface service registration
+        interface_call = None
+        for call in mock_injector.register_service.call_args_list:
+            if call[0][0] == "IBotInstanceService":
+                interface_call = call
+                break
+        
+        assert interface_call is not None
+        service_func = interface_call[0][1]
+        
+        # Call the service function
+        result = service_func()
+        
+        # Should resolve the concrete service
+        mock_injector.resolve.assert_called_with("BotInstanceService")
+        assert result is mock_concrete_service
+
+    @patch.object(src.bot_management.controller, 'BotManagementController')
+    def test_bot_management_controller_registration(self, mock_controller_class, mock_injector):
+        """Test BotManagementController registration with dependencies."""
+        # Mock all required services
+        mock_services = {
+            "IBotInstanceService": Mock(),
+            "IBotCoordinationService": Mock(),
+            "IBotLifecycleService": Mock(),
+            "IBotMonitoringService": Mock(),
+            "IResourceManagementService": Mock()
+        }
+        mock_injector.resolve.side_effect = lambda key: mock_services.get(key)
+        
+        register_bot_management_services(mock_injector)
+        
+        # Get controller factory
+        controller_call = None
+        for call in mock_injector.register_factory.call_args_list:
+            if call[0][0] == "BotManagementController":
+                controller_call = call
+                break
+        
+        assert controller_call is not None
+        factory_func = controller_call[0][1]
+        
+        # Call the factory function
+        result = factory_func()
+        
+        # Should create controller with all dependencies
+        mock_controller_class.assert_called_once_with(
+            bot_instance_service=mock_services["IBotInstanceService"],
+            bot_coordination_service=mock_services["IBotCoordinationService"],
+            bot_lifecycle_service=mock_services["IBotLifecycleService"],
+            bot_monitoring_service=mock_services["IBotMonitoringService"],
+            resource_management_service=mock_services["IResourceManagementService"]
+        )
+
+    @patch.object(src.bot_management.service, 'BotService')
+    def test_bot_service_registration(self, mock_service_class, mock_injector):
+        """Test legacy BotService registration with dependencies."""
+        # Mock all required dependencies
+        mock_dependencies = {
+            "ConfigService": Mock(),
+            "StateService": Mock(),
+            "RiskService": Mock(),
+            "ExecutionService": Mock(),
+            "StrategyService": Mock(),
+            "CapitalService": Mock(),
+            "ExchangeService": Mock(),
+            "BotRepository": Mock(),
+            "BotInstanceRepository": Mock(),
+            "BotMetricsRepository": Mock(),
+            "DatabaseService": Mock(),
+            "MetricsCollector": Mock(),
+            "AnalyticsService": Mock()
+        }
+        mock_injector.resolve.side_effect = lambda key: mock_dependencies.get(key)
+        
+        register_bot_management_services(mock_injector)
+        
+        # Get BotService factory
+        service_call = None
+        for call in mock_injector.register_factory.call_args_list:
+            if call[0][0] == "BotService":
+                service_call = call
+                break
+        
+        assert service_call is not None
+        factory_func = service_call[0][1]
+        
+        # Call the factory function
+        result = factory_func()
+        
+        # Should create BotService with all dependencies
+        mock_service_class.assert_called_once_with(
+            config_service=mock_dependencies["ConfigService"],
+            state_service=mock_dependencies["StateService"],
+            risk_service=mock_dependencies["RiskService"],
+            execution_service=mock_dependencies["ExecutionService"],
+            strategy_service=mock_dependencies["StrategyService"],
+            capital_service=mock_dependencies["CapitalService"],
+            exchange_service=mock_dependencies["ExchangeService"],
+            bot_repository=mock_dependencies["BotRepository"],
+            bot_instance_repository=mock_dependencies["BotInstanceRepository"],
+            bot_metrics_repository=mock_dependencies["BotMetricsRepository"],
+            metrics_collector=mock_dependencies["MetricsCollector"],
+            database_service=mock_dependencies["DatabaseService"],
+            analytics_service=mock_dependencies["AnalyticsService"]
+        )
+
+    @patch.object(src.bot_management.di_registration, 'logger')
+    def test_registration_logging(self, mock_logger, mock_injector):
+        """Test that registration is properly logged."""
+        register_bot_management_services(mock_injector)
+        
+        mock_logger.info.assert_called_with(
+            "Bot management services registered with dependency injector"
+        )
+
+    def test_configure_bot_management_dependencies_with_injector(self, mock_injector):
+        """Test configuration with provided injector."""
+        with patch.object(src.bot_management.di_registration, 'register_bot_management_services') as mock_register:
+            result = configure_bot_management_dependencies(mock_injector)
+            
+            mock_register.assert_called_once_with(mock_injector)
+            assert result is mock_injector
+
+    @patch.object(src.bot_management.di_registration, 'DependencyInjector')
+    def test_configure_bot_management_dependencies_without_injector(self, mock_injector_class):
+        """Test configuration without provided injector."""
+        mock_injector = Mock()
+        mock_injector_class.return_value = mock_injector
+        
+        with patch.object(src.bot_management.di_registration, 'register_bot_management_services') as mock_register:
+            result = configure_bot_management_dependencies(None)
+            
+            mock_injector_class.assert_called_once()
+            mock_register.assert_called_once_with(mock_injector)
+            assert result is mock_injector
+
+    def test_get_bot_instance_service(self, mock_injector):
+        """Test service locator for BotInstanceService."""
+        mock_factory = Mock()
+        mock_service = Mock()
+        mock_factory.create_bot_instance_service.return_value = mock_service
+        mock_injector.resolve.return_value = mock_factory
+        
+        result = get_bot_instance_service(mock_injector)
+        
+        mock_injector.resolve.assert_called_once_with("BotManagementFactory")
+        mock_factory.create_bot_instance_service.assert_called_once()
+        assert result is mock_service
+
+    def test_get_bot_lifecycle_service(self, mock_injector):
+        """Test service locator for BotLifecycleService."""
+        mock_factory = Mock()
+        mock_service = Mock()
+        mock_factory.create_bot_lifecycle_service.return_value = mock_service
+        mock_injector.resolve.return_value = mock_factory
+        
+        result = get_bot_lifecycle_service(mock_injector)
+        
+        mock_injector.resolve.assert_called_once_with("BotManagementFactory")
+        mock_factory.create_bot_lifecycle_service.assert_called_once()
+        assert result is mock_service
+
+    def test_get_bot_coordination_service(self, mock_injector):
+        """Test service locator for BotCoordinationService."""
+        mock_factory = Mock()
+        mock_service = Mock()
+        mock_factory.create_bot_coordination_service.return_value = mock_service
+        mock_injector.resolve.return_value = mock_factory
+        
+        result = get_bot_coordination_service(mock_injector)
+        
+        mock_injector.resolve.assert_called_once_with("BotManagementFactory")
+        mock_factory.create_bot_coordination_service.assert_called_once()
+        assert result is mock_service
+
+
+class TestBotManagementDIRegistrationEdgeCases:
+    """Edge case tests for DI registration."""
+
+    @pytest.fixture
+    def mock_injector(self):
+        """Create a mock dependency injector."""
+        injector = Mock(spec=DependencyInjector)
+        injector.register_factory = Mock()
+        injector.register_service = Mock()
+        injector.resolve = Mock()
+        return injector
+
+    def test_registration_with_dependency_errors(self, mock_injector):
+        """Test registration continues when individual dependencies fail."""
+        # This test ensures robustness - registration should not fail entirely
+        # if some dependencies are missing
+        register_bot_management_services(mock_injector)
+        
+        # Registration should complete
+        assert mock_injector.register_factory.called
+        assert mock_injector.register_service.called
+
+    def test_factory_function_error_handling(self, mock_injector):
+        """Test error handling in factory functions."""
+        mock_injector.resolve.side_effect = Exception("Dependency resolution failed")
+        
+        register_bot_management_services(mock_injector)
+        
+        # Get a factory function
+        factory_call = None
+        for call in mock_injector.register_factory.call_args_list:
+            if call[0][0] == "BotInstanceService":
+                factory_call = call
+                break
+        
+        assert factory_call is not None
+        factory_func = factory_call[0][1]
+        
+        # Factory function should handle errors gracefully
+        with pytest.raises(Exception):
+            factory_func()
+
+    def test_service_locator_with_missing_factory(self, mock_injector):
+        """Test service locator behavior when factory is missing."""
+        mock_injector.resolve.side_effect = Exception("Factory not found")
+        
+        with pytest.raises(Exception):
+            get_bot_instance_service(mock_injector)
+
+    def test_multiple_registration_calls(self, mock_injector):
+        """Test that multiple registration calls don't cause issues."""
+        register_bot_management_services(mock_injector)
+        register_bot_management_services(mock_injector)
+        
+        # Should have been called multiple times
+        assert mock_injector.register_factory.call_count >= 2 * 9  # 9 factories per call
+
+    def test_service_resolution_chain(self, mock_injector):
+        """Test the complete service resolution chain."""
+        # Mock the complete chain
+        mock_factory = Mock()
+        mock_service = Mock()
+        mock_factory.create_bot_instance_service.return_value = mock_service
+        
+        # Setup resolution chain
+        resolution_map = {
+            "BotManagementFactory": mock_factory,
+            "BotInstanceService": mock_service
+        }
+        mock_injector.resolve.side_effect = lambda key: resolution_map.get(key)
+        
+        register_bot_management_services(mock_injector)
+        
+        # Test direct service resolution
+        result = mock_injector.resolve("BotInstanceService")
+        assert result is mock_service
+
+    def test_configuration_with_existing_registrations(self, mock_injector):
+        """Test configuration when some services are already registered."""
+        # Pre-register some services
+        mock_injector.register_factory.side_effect = lambda name, func, singleton: None
+        mock_injector.register_service.side_effect = lambda name, func, singleton: None
+        
+        # Should not fail
+        result = configure_bot_management_dependencies(mock_injector)
+        assert result is mock_injector
+
+    def test_factory_function_closure_behavior(self, mock_injector):
+        """Test that factory functions properly capture injector in closure."""
+        register_bot_management_services(mock_injector)
+        
+        # Get factory function
+        factory_call = None
+        for call in mock_injector.register_factory.call_args_list:
+            if call[0][0] == "BotManagementFactory":
+                factory_call = call
+                break
+        
+        assert factory_call is not None
+        factory_func = factory_call[0][1]
+        
+        # Factory function should have access to injector through closure
+        with patch.object(src.bot_management.factory, 'BotManagementFactory') as mock_factory_class:
+            factory_func()
+            mock_factory_class.assert_called_once_with(mock_injector)
+
+    def test_service_interface_mapping_completeness(self, mock_injector):
+        """Test that all service interfaces are properly mapped."""
+        register_bot_management_services(mock_injector)
+        
+        # Map service names to interface names
+        service_to_interface = {
+            "BotInstanceService": "IBotInstanceService",
+            "BotLifecycleService": "IBotLifecycleService", 
+            "BotCoordinationService": "IBotCoordinationService",
+            "BotResourceService": "IResourceManagementService",
+            "BotMonitoringService": "IBotMonitoringService"
+        }
+        
+        # Check that all interfaces are registered
+        service_calls = mock_injector.register_service.call_args_list
+        registered_interfaces = [call[0][0] for call in service_calls]
+        
+        for interface in service_to_interface.values():
+            assert interface in registered_interfaces

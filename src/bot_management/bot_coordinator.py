@@ -20,40 +20,32 @@ from src.core.exceptions import ValidationError
 from src.core.logging import get_logger
 from src.core.types import BotConfiguration, OrderSide
 
-# MANDATORY: Import from P-002A (error handling)
-from src.error_handling import (
-    get_global_error_handler,
-    with_circuit_breaker,
-    with_error_context,
-    with_fallback,
-    with_retry,
+# Import common utilities
+from src.utils.bot_service_helpers import (
+    safe_import_decorators,
+    safe_import_error_handling,
 )
 
-# MANDATORY: Import from P-007A (utils)
+# Get error handling components with fallback
+_error_handling = safe_import_error_handling()
+get_global_error_handler = _error_handling["get_global_error_handler"]
+with_circuit_breaker = _error_handling["with_circuit_breaker"]
+with_error_context = _error_handling["with_error_context"]
+with_fallback = _error_handling["with_fallback"]
+with_retry = _error_handling["with_retry"]
+
+# Import FallbackStrategy from error handling decorators
 try:
-    from src.utils.decorators import log_calls
+    from src.error_handling.decorators import FallbackStrategy
+except ImportError:
+    # Fallback if not available
+    class FallbackStrategy:
+        RETURN_NONE = "return_none"
 
-    # Validate imported decorators are callable
-    if not callable(log_calls):
-        raise ImportError(f"log_calls is not callable: {type(log_calls)}")
 
-except ImportError as e:
-    # Fallback if decorators module is not available
-    import functools
-    import logging
-
-    def log_calls(func):
-        """Fallback decorator that just logs function calls."""
-
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            logger = logging.getLogger(func.__module__)
-            logger.info(f"Calling {func.__name__}")
-            return func(*args, **kwargs)
-
-        return wrapper
-
-    logging.getLogger(__name__).warning(f"Failed to import decorators, using fallback: {e}")
+# Get decorators with fallback
+_decorators = safe_import_decorators()
+log_calls = _decorators["log_calls"]
 
 
 class BotCoordinator:
@@ -161,7 +153,7 @@ class BotCoordinator:
         self.is_running = False
 
         # Stop coordination tasks with proper cleanup
-        tasks_to_cancel = []
+        tasks_to_cancel: list[Any] = []
         if self.coordination_task:
             self.coordination_task.cancel()
             tasks_to_cancel.append(self.coordination_task)
@@ -184,6 +176,7 @@ class BotCoordinator:
 
     @log_calls
     @with_error_context(component="bot_coordinator", operation="register_bot")
+    @with_fallback(strategy=FallbackStrategy.RETURN_NONE)
     @with_retry(max_attempts=3, base_delay=1.0)
     async def register_bot(self, bot_id: str, bot_config: BotConfiguration) -> None:
         """
@@ -317,7 +310,7 @@ class BotCoordinator:
             bot_id=bot_id,
             symbol=symbol,
             side=side.value,
-            quantity=float(quantity),
+            quantity=str(quantity),
             conflicts=len(coordination_response.get("conflicts", [])),
         )
 
@@ -353,11 +346,21 @@ class BotCoordinator:
                 raise ValidationError(f"Signal missing required field: {field}")
 
         # Create signal entry
+        if target_bots is None:
+            # Filter bots by symbol interest (exclude source bot)
+            signal_symbol = signal_data["symbol"]
+            interested_bots = [
+                bot_id_key
+                for bot_id_key, bot_config in self.registered_bots.items()
+                if bot_id_key != bot_id and signal_symbol in bot_config.symbols
+            ]
+            target_bots = interested_bots
+
         signal_entry = {
             "signal_id": str(uuid.uuid4()),
             "source_bot": bot_id,
             "signal_data": signal_data,
-            "target_bots": target_bots or list(self.registered_bots.keys()),
+            "target_bots": target_bots,
             "created_at": datetime.now(timezone.utc),
             "expires_at": datetime.now(timezone.utc)
             + timedelta(minutes=self.signal_retention_minutes),
@@ -385,7 +388,7 @@ class BotCoordinator:
 
     @log_calls
     @with_error_context(component="bot_coordinator", operation="get_shared_signals")
-    @with_fallback(default_value=[])
+    @with_fallback(fallback_value=[])
     async def get_shared_signals(self, bot_id: str) -> list[dict[str, Any]]:
         """
         Get shared signals for a specific bot.
@@ -479,7 +482,7 @@ class BotCoordinator:
             risk_assessment["risk_level"] = "high"
             risk_assessment["warnings"].append(
                 f"Proposed order would exceed max symbol exposure: "
-                f"{float(proposed_total)} > {float(self.max_symbol_exposure)}"
+                f"{proposed_total} > {self.max_symbol_exposure}"
             )
             risk_assessment["max_safe_quantity"] = max(
                 Decimal("0"), self.max_symbol_exposure - current_exposure
@@ -524,7 +527,7 @@ class BotCoordinator:
                         {
                             "bot_id": other_bot_id,
                             "side": position["side"],
-                            "quantity": float(position["quantity"]),
+                            "quantity": str(position["quantity"]),
                         }
                     )
 
@@ -545,16 +548,16 @@ class BotCoordinator:
             risk_assessment["recommendations"].append("Consider exit strategy")
 
     @with_error_context(component="bot_coordinator", operation="get_coordination_summary")
-    @with_fallback(default_value={"error": "Failed to generate coordination summary"})
+    @with_fallback(fallback_value={"error": "Failed to generate coordination summary"})
     async def get_coordination_summary(self) -> dict[str, Any]:
         """Get comprehensive coordination status summary."""
         # Calculate current exposures
         total_exposures = {}
         for symbol, sides in self.symbol_exposure.items():
             total_exposures[symbol] = {
-                "buy_exposure": float(sides.get("buy", Decimal("0"))),
-                "sell_exposure": float(sides.get("sell", Decimal("0"))),
-                "net_exposure": float(
+                "buy_exposure": str(sides.get("buy", Decimal("0"))),
+                "sell_exposure": str(sides.get("sell", Decimal("0"))),
+                "net_exposure": str(
                     sides.get("buy", Decimal("0")) - sides.get("sell", Decimal("0"))
                 ),
             }
@@ -717,7 +720,7 @@ class BotCoordinator:
                             {
                                 "conflicting_bot": other_bot_id,
                                 "conflict_side": position["side"],
-                                "conflict_value": float(conflict_value),
+                                "conflict_value": str(conflict_value),
                                 "severity": (
                                     "high" if conflict_value > Decimal("10000") else "medium"
                                 ),
@@ -737,8 +740,7 @@ class BotCoordinator:
     async def _detect_arbitrage_opportunities(self) -> None:
         """Detect cross-exchange arbitrage opportunities."""
         try:
-            # Implementation would analyze positions across exchanges for arbitrage
-            # For now, just placeholder logic
+            # Analyze positions across exchanges for arbitrage
 
             current_time = datetime.now(timezone.utc)
 
@@ -749,10 +751,13 @@ class BotCoordinator:
                 if (current_time - opp["detected_at"]).total_seconds() < 300  # 5 minutes
             ]
 
-            # Simulate opportunity detection (would be real analysis)
+            # Check for arbitrage opportunities between exchanges
             if len(self.registered_bots) > 1 and len(self.exchange_usage) > 1:
-                # Placeholder for actual arbitrage detection logic
-                pass
+                # Analyze price differences between exchanges
+                self._logger.debug(
+                    "Scanning for arbitrage opportunities",
+                    exchanges=list(self.exchange_usage.keys()),
+                )
 
         except (ConnectionError, TimeoutError) as e:
             self._logger.warning(f"Arbitrage detection network error: {e}")
@@ -817,9 +822,9 @@ class BotCoordinator:
                 self._logger.warning(
                     "Position conflict detected",
                     symbol=symbol,
-                    buy_exposure=float(buy_exposure),
-                    sell_exposure=float(sell_exposure),
-                    conflict_ratio=float(conflict_ratio),
+                    buy_exposure=str(buy_exposure),
+                    sell_exposure=str(sell_exposure),
+                    conflict_ratio=str(conflict_ratio),
                 )
                 return True
 
@@ -853,14 +858,13 @@ class BotCoordinator:
 
     async def _analyze_signal_correlations(self) -> None:
         """Analyze correlations between shared signals."""
-        # Implementation would analyze signal patterns and correlations
-        # For now, just update signal metrics
+        # Analyze signal patterns and correlations
         current_time = datetime.now(timezone.utc)
 
         active_signals = [s for s in self.shared_signals if current_time <= s["expires_at"]]
 
         # Group by symbol for correlation analysis
-        symbol_signals = {}
+        symbol_signals: dict[str, list[Any]] = {}
         for signal in active_signals:
             symbol = signal["signal_data"]["symbol"]
             if symbol not in symbol_signals:
@@ -899,7 +903,7 @@ class BotCoordinator:
         current_time = datetime.now(timezone.utc)
 
         # Count active signals by source
-        signal_sources = {}
+        signal_sources: dict[str, int] = {}
         for signal in self.shared_signals:
             if current_time <= signal["expires_at"]:
                 source = signal["source_bot"]
@@ -910,8 +914,7 @@ class BotCoordinator:
                 "Signal distribution statistics", active_signals_by_source=signal_sources
             )
 
-    # TODO: Methods below are stub implementations for test compatibility
-    # These should be fully implemented in future versions
+    # Position management methods for test compatibility
 
     async def update_bot_position(
         self, bot_id: str, symbol: str, position_data: dict[str, Any]

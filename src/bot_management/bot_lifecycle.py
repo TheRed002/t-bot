@@ -11,6 +11,7 @@ lifecycle management capabilities for bot instances.
 
 import asyncio
 import uuid
+from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
@@ -29,47 +30,15 @@ from src.error_handling.decorators import (
     with_retry,
 )
 
-# MANDATORY: Import from P-007A (utils)
-try:
-    from src.utils.decorators import log_calls, time_execution
+# Import common utilities
+from src.utils.bot_service_helpers import (
+    safe_import_decorators,
+)
 
-    # Validate imported decorators are callable
-    if not callable(log_calls):
-        raise ImportError(f"log_calls is not callable: {type(log_calls)}")
-    if not callable(time_execution):
-        raise ImportError(f"time_execution is not callable: {type(time_execution)}")
-
-except ImportError as e:
-    # Fallback if decorators module is not available
-    import functools
-    import logging
-    import time
-
-    def log_calls(func):
-        """Fallback decorator that just logs function calls."""
-
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            logger = logging.getLogger(func.__module__)
-            logger.info(f"Calling {func.__name__}")
-            return func(*args, **kwargs)
-
-        return wrapper
-
-    def time_execution(func):
-        """Fallback decorator that times function execution."""
-
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            start = time.time()
-            result = func(*args, **kwargs)
-            logger = logging.getLogger(func.__module__)
-            logger.info(f"{func.__name__} took {time.time() - start:.3f}s")
-            return result
-
-        return wrapper
-
-    logging.getLogger(__name__).warning(f"Failed to import decorators, using fallback: {e}")
+# Get decorators with fallback
+_decorators = safe_import_decorators()
+log_calls = _decorators["log_calls"]
+time_execution = _decorators["time_execution"]
 
 # Import other bot management components
 
@@ -101,7 +70,7 @@ class BotLifecycle:
         # Lifecycle tracking
         self.bot_lifecycles: dict[str, dict[str, Any]] = {}
         self.bot_templates: dict[str, dict[str, Any]] = {}
-        self.deployment_strategies: dict[str, callable] = {}
+        self.deployment_strategies: dict[str, Callable[..., Any]] = {}
 
         # Lifecycle state
         self.is_running = False
@@ -591,13 +560,13 @@ class BotLifecycle:
 
         return False
 
-    @with_fallback(default_value={"error": "Lifecycle summary unavailable"})
+    @with_fallback(fallback_value={"error": "Lifecycle summary unavailable"})
     async def get_lifecycle_summary(self) -> dict[str, Any]:
         """Get comprehensive lifecycle management summary."""
         try:
             # Aggregate lifecycle states
-            deployment_states = {}
-            termination_states = {}
+            deployment_states: dict[str, int] = {}
+            termination_states: dict[str, int] = {}
 
             for _bot_id, lifecycle in self.bot_lifecycles.items():
                 # Count by deployment state
@@ -617,7 +586,7 @@ class BotLifecycle:
             ]
 
             # Event type counts
-            event_type_counts = {}
+            event_type_counts: dict[str, int] = {}
             for event in recent_events:
                 event_type = event["event_type"]
                 event_type_counts[event_type] = event_type_counts.get(event_type, 0) + 1
@@ -658,7 +627,7 @@ class BotLifecycle:
             await self.error_handler.handle_error(e, {"component": "lifecycle_summary"}, "medium")
             return {"error": "Unable to generate lifecycle summary"}
 
-    @with_fallback(default_value=None)
+    @with_fallback(fallback_value=None)
     async def get_bot_lifecycle_details(self, bot_id: str) -> dict[str, Any] | None:
         """
         Get detailed lifecycle information for a specific bot.
@@ -907,6 +876,28 @@ class BotLifecycle:
 
     async def _update_lifecycle_statistics(self) -> None:
         """Update lifecycle statistics."""
-        # Update statistics based on current state
-        # Implementation would calculate various lifecycle metrics
-        pass
+        try:
+            # Calculate deployment success rates
+            total_deployments = len(self.lifecycle_history)
+            successful_deployments = sum(
+                1
+                for events in self.lifecycle_history.values()
+                if any(event.get("event_type") == "deployment_successful" for event in events)
+            )
+
+            # Update deployment metrics
+            self.deployment_stats.update(
+                {
+                    "total_deployments": total_deployments,
+                    "successful_deployments": successful_deployments,
+                    "success_rate": (
+                        successful_deployments / total_deployments if total_deployments > 0 else 0
+                    ),
+                    "last_updated": datetime.utcnow().isoformat(),
+                }
+            )
+
+            self._logger.debug(f"Updated lifecycle statistics: {self.deployment_stats}")
+
+        except Exception as e:
+            self._logger.error(f"Failed to update lifecycle statistics: {e}")

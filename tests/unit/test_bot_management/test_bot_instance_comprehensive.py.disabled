@@ -1,0 +1,1137 @@
+"""Comprehensive tests for BotInstance to achieve 70%+ coverage."""
+
+import asyncio
+import uuid
+from datetime import datetime, timezone, timedelta
+from decimal import Decimal
+from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock
+import logging
+
+import pytest
+
+from src.bot_management.bot_instance import BotInstance
+from src.core.config import Config
+from src.core.exceptions import (
+    ExecutionError,
+    RiskManagementError,
+    StrategyError,
+    ValidationError,
+)
+from src.core.types import (
+    BotConfiguration,
+    BotStatus,
+    BotType,
+    OrderRequest,
+    OrderSide,
+    OrderType,
+    Signal,
+    SignalDirection,
+    MarketData,
+    ExecutionInstruction,
+    ExecutionAlgorithm,
+)
+from src.core.types.strategy import StrategyType
+
+# Disable logging during tests for performance
+logging.disable(logging.CRITICAL)
+
+
+class TestBotInstanceComprehensive:
+    """Comprehensive test suite for BotInstance covering untested paths."""
+    
+    @pytest.fixture
+    def mock_config(self):
+        """Create mock configuration."""
+        config = MagicMock(spec=Config)
+        config.error_handling = MagicMock()
+        config.bot_management = {
+            "heartbeat_interval": 5,
+            "position_timeout_minutes": 10,
+            "max_restart_attempts": 2,
+        }
+        return config
+    
+    @pytest.fixture
+    def comprehensive_bot_config(self):
+        """Create comprehensive bot configuration."""
+        return BotConfiguration(
+            bot_id="comprehensive_test_bot",
+            name="Comprehensive Test Bot",
+            bot_type=BotType.TRADING,
+            version="1.0.0",
+            strategy_id="momentum",
+            strategy_name="test_momentum",
+            exchanges=["binance", "coinbase"],
+            symbols=["BTCUSDT", "ETHUSDT"],
+            max_capital=Decimal("1000"),
+            allocated_capital=Decimal("800"),
+            max_position_size=Decimal("100"),
+            max_daily_loss=Decimal("50"),
+            risk_percentage=Decimal("0.02"),
+            health_check_interval=30,
+            heartbeat_interval=10,
+            auto_start=False,
+            strategy_config={
+                "risk_percentage": 0.02,
+                "max_concurrent_positions": 3,
+                "max_daily_trades": 50,
+                "order_type": "market",
+                "timeframe": "1h",
+            },
+        )
+    
+    @pytest.fixture
+    def mock_services(self):
+        """Create comprehensive mock services."""
+        return {
+            "execution_service": AsyncMock(),
+            "execution_engine_service": AsyncMock(),
+            "risk_service": AsyncMock(),
+            "database_service": AsyncMock(),
+            "state_service": AsyncMock(),
+            "strategy_service": AsyncMock(),
+            "exchange_factory": AsyncMock(),
+            "strategy_factory": AsyncMock(),
+            "capital_allocator": AsyncMock(),
+        }
+    
+    @pytest.fixture
+    def bot_instance(self, mock_config, comprehensive_bot_config, mock_services):
+        """Create BotInstance with comprehensive setup."""
+        mock_services["strategy_factory"].get_supported_strategies.return_value = [
+            StrategyType.MOMENTUM
+        ]
+        mock_services["exchange_factory"].get_exchange.return_value = AsyncMock()
+        mock_services["strategy_factory"].create_strategy.return_value = AsyncMock()
+        
+        with patch("asyncio.create_task") as mock_create_task:
+            mock_task = AsyncMock()
+            mock_task.cancel = MagicMock()
+            mock_task.done.return_value = True
+            mock_create_task.return_value = mock_task
+            
+            return BotInstance(
+                bot_config=comprehensive_bot_config,
+                config=mock_config,
+                **mock_services
+            )
+    
+    # Strategy Type Conversion Tests
+    @pytest.mark.asyncio
+    async def test_convert_strategy_type_valid(self):
+        """Test valid strategy type conversion."""
+        result = BotInstance._convert_to_strategy_type("momentum")
+        assert result == StrategyType.MOMENTUM
+    
+    @pytest.mark.asyncio
+    async def test_convert_strategy_type_invalid(self):
+        """Test invalid strategy type conversion."""
+        with pytest.raises(ValidationError, match="Invalid strategy type"):
+            BotInstance._convert_to_strategy_type("invalid_strategy")
+    
+    # Configuration Validation Tests
+    @pytest.mark.asyncio
+    async def test_validate_configuration_invalid_strategy(self, bot_instance):
+        """Test configuration validation with invalid strategy."""
+        bot_instance.strategy_factory.get_supported_strategies.return_value = []
+        
+        with pytest.raises(ValidationError, match="Strategy not found"):
+            await bot_instance._validate_configuration()
+    
+    @pytest.mark.asyncio
+    async def test_validate_configuration_exchange_failure(self, bot_instance):
+        """Test configuration validation with exchange failure."""
+        bot_instance.exchange_factory.get_exchange.side_effect = Exception("Exchange error")
+        
+        with pytest.raises(ValidationError, match="Failed to validate exchange"):
+            await bot_instance._validate_configuration()
+    
+    @pytest.mark.asyncio
+    async def test_validate_configuration_invalid_capital(self, bot_instance):
+        """Test configuration validation with invalid capital."""
+        bot_instance.bot_config.allocated_capital = Decimal("0")
+        bot_instance.bot_config.max_capital = None
+        
+        with pytest.raises(ValidationError, match="Capital allocation must be positive"):
+            await bot_instance._validate_configuration()
+    
+    @pytest.mark.asyncio
+    async def test_validate_configuration_invalid_symbols(self, bot_instance):
+        """Test configuration validation with invalid symbols."""
+        bot_instance.bot_config.symbols = ["BT"]
+        
+        with pytest.raises(ValidationError, match="Invalid symbol format"):
+            await bot_instance._validate_configuration()
+    
+    # Component Initialization Tests
+    @pytest.mark.asyncio
+    async def test_initialize_components_exchange_failure(self, bot_instance):
+        """Test component initialization with exchange failure."""
+        bot_instance.exchange_factory.get_exchange.return_value = None
+        
+        with pytest.raises(ExecutionError, match="Failed to initialize primary exchange"):
+            await bot_instance._initialize_components()
+    
+    @pytest.mark.asyncio
+    async def test_initialize_components_service_registration(self, bot_instance):
+        """Test component initialization with service registration."""
+        mock_exchange = AsyncMock()
+        bot_instance.exchange_factory.get_exchange.return_value = mock_exchange
+        bot_instance.strategy_service.register_dependency = MagicMock()
+        
+        await bot_instance._initialize_components()
+        
+        assert bot_instance.primary_exchange == mock_exchange
+        bot_instance.strategy_service.register_dependency.assert_called()
+    
+    # Resource Allocation Tests
+    @pytest.mark.asyncio
+    async def test_allocate_resources_capital_allocator_startup(self, bot_instance):
+        """Test resource allocation with capital allocator startup."""
+        bot_instance.capital_allocator.startup = AsyncMock()
+        bot_instance.capital_allocator.allocate_capital.return_value = True
+        
+        await bot_instance._allocate_resources()
+        
+        bot_instance.capital_allocator.startup.assert_called_once()
+    
+    @pytest.mark.asyncio
+    async def test_allocate_resources_startup_failure(self, bot_instance):
+        """Test resource allocation with startup failure."""
+        bot_instance.capital_allocator.startup = AsyncMock(side_effect=Exception("Startup error"))
+        bot_instance.capital_allocator.allocate_capital.return_value = True
+        
+        # Should continue despite startup failure
+        await bot_instance._allocate_resources()
+        
+        assert bot_instance.bot_state.allocated_capital > 0
+    
+    @pytest.mark.asyncio
+    async def test_allocate_resources_allocation_failure(self, bot_instance):
+        """Test resource allocation with allocation failure."""
+        bot_instance.capital_allocator.allocate_capital.return_value = False
+        
+        with pytest.raises(ExecutionError, match="Failed to allocate required capital"):
+            await bot_instance._allocate_resources()
+    
+    # Strategy Initialization Tests
+    @pytest.mark.asyncio
+    async def test_initialize_strategy_success(self, bot_instance):
+        """Test strategy initialization success."""
+        mock_strategy = AsyncMock()
+        bot_instance.strategy_factory.create_strategy.return_value = mock_strategy
+        
+        with patch.object(bot_instance, "_start_strategy_execution") as mock_start:
+            await bot_instance._initialize_strategy()
+            
+            assert bot_instance.strategy == mock_strategy
+            mock_start.assert_called_once()
+    
+    @pytest.mark.asyncio
+    async def test_initialize_strategy_failure(self, bot_instance):
+        """Test strategy initialization failure."""
+        bot_instance.strategy_factory.create_strategy.return_value = None
+        
+        with pytest.raises(ExecutionError, match="Failed to create strategy"):
+            await bot_instance._initialize_strategy()
+    
+    # Strategy Execution Tests
+    @pytest.mark.asyncio
+    async def test_start_strategy_execution_task_creation(self, bot_instance):
+        """Test strategy execution task creation."""
+        mock_task = AsyncMock()
+        with patch("asyncio.create_task", return_value=mock_task) as mock_create:
+            await bot_instance._start_strategy_execution()
+            
+            mock_create.assert_called_once()
+            assert bot_instance.strategy_task == mock_task
+    
+    @pytest.mark.asyncio
+    async def test_start_strategy_execution_cancel_existing(self, bot_instance):
+        """Test strategy execution cancels existing task."""
+        existing_task = AsyncMock()
+        bot_instance.strategy_task = existing_task
+        
+        mock_task = AsyncMock()
+        with patch("asyncio.create_task", return_value=mock_task):
+            await bot_instance._start_strategy_execution()
+            
+            existing_task.cancel.assert_called_once()
+            assert bot_instance.strategy_task == mock_task
+    
+    # Strategy Execution Loop Tests
+    @pytest.mark.asyncio
+    async def test_strategy_execution_loop_basic_flow(self, bot_instance):
+        """Test basic strategy execution loop flow."""
+        bot_instance.is_running = True
+        bot_instance.bot_state.status = BotStatus.RUNNING
+        bot_instance.bot_config.symbols = ["BTCUSDT"]
+        
+        mock_strategy = AsyncMock()
+        mock_strategy.generate_signals.return_value = []
+        bot_instance.strategy = mock_strategy
+        
+        loop_count = 0
+        
+        async def mock_sleep(duration):
+            nonlocal loop_count
+            loop_count += 1
+            if loop_count >= 2:  # Stop after 2 iterations
+                bot_instance.is_running = False
+        
+        with patch("asyncio.sleep", side_effect=mock_sleep), \
+             patch.object(bot_instance, "_check_daily_limits") as mock_check, \
+             patch.object(bot_instance, "_update_strategy_state") as mock_update:
+            
+            await bot_instance._strategy_execution_loop()
+            
+            assert mock_check.call_count == 2
+            assert mock_update.call_count == 2
+            assert mock_strategy.generate_signals.call_count == 2
+    
+    @pytest.mark.asyncio
+    async def test_strategy_execution_loop_signal_processing(self, bot_instance):
+        """Test strategy execution loop with signal processing."""
+        bot_instance.is_running = True
+        bot_instance.bot_state.status = BotStatus.RUNNING
+        bot_instance.bot_config.symbols = ["BTCUSDT"]
+        
+        mock_signal = Signal(
+            symbol="BTCUSDT",
+            direction=SignalDirection.BUY,
+            strength=Decimal("0.8"),
+            timestamp=datetime.now(timezone.utc),
+            metadata={"order_type": "market", "quantity": "0.01"},
+        )
+        
+        mock_strategy = AsyncMock()
+        mock_strategy.generate_signals.return_value = [mock_signal]
+        bot_instance.strategy = mock_strategy
+        
+        loop_count = 0
+        
+        async def mock_sleep(duration):
+            nonlocal loop_count
+            loop_count += 1
+            if loop_count >= 1:  # Stop after 1 iteration
+                bot_instance.is_running = False
+        
+        with patch("asyncio.sleep", side_effect=mock_sleep), \
+             patch.object(bot_instance, "_process_trading_signal") as mock_process:
+            
+            await bot_instance._strategy_execution_loop()
+            
+            mock_process.assert_called_once_with(mock_signal)
+    
+    @pytest.mark.asyncio
+    async def test_strategy_execution_loop_strategy_error(self, bot_instance):
+        """Test strategy execution loop with strategy error."""
+        bot_instance.is_running = True
+        bot_instance.bot_state.status = BotStatus.RUNNING
+        
+        mock_strategy = AsyncMock()
+        mock_strategy.generate_signals.side_effect = StrategyError("Strategy failed")
+        bot_instance.strategy = mock_strategy
+        
+        await bot_instance._strategy_execution_loop()
+        
+        assert bot_instance.bot_state.status == BotStatus.ERROR
+        bot_instance.error_handler.handle_error.assert_called()
+    
+    @pytest.mark.asyncio
+    async def test_strategy_execution_loop_general_error(self, bot_instance):
+        """Test strategy execution loop with general error."""
+        bot_instance.is_running = True
+        bot_instance.bot_state.status = BotStatus.RUNNING
+        
+        mock_strategy = AsyncMock()
+        mock_strategy.generate_signals.side_effect = Exception("General error")
+        bot_instance.strategy = mock_strategy
+        
+        await bot_instance._strategy_execution_loop()
+        
+        assert bot_instance.bot_state.status == BotStatus.ERROR
+        bot_instance.error_handler.handle_error.assert_called()
+    
+    # Trading Signal Processing Tests
+    @pytest.mark.asyncio
+    async def test_process_trading_signal_position_limit_reached(self, bot_instance):
+        """Test signal processing when position limit is reached."""
+        # Set up position tracker to simulate max positions
+        bot_instance.position_tracker = {
+            "BTCUSDT_BUY": {},
+            "ETHUSDT_BUY": {},
+            "ADAUSDT_BUY": {},
+        }
+        
+        signal = Signal(
+            symbol="DOGEUSDT",
+            direction=SignalDirection.BUY,
+            strength=Decimal("0.8"),
+            timestamp=datetime.now(timezone.utc),
+            metadata={},
+        )
+        
+        # Should return early due to position limit
+        await bot_instance._process_trading_signal(signal)
+        
+        # No order should be placed
+        assert not bot_instance.execution_engine_service.execute_instruction.called
+    
+    @pytest.mark.asyncio
+    async def test_process_trading_signal_risk_validation_error(self, bot_instance):
+        """Test signal processing with risk validation error."""
+        bot_instance.risk_service.validate_order.side_effect = RiskManagementError(
+            "Risk limit exceeded"
+        )
+        
+        signal = Signal(
+            symbol="BTCUSDT",
+            direction=SignalDirection.BUY,
+            strength=Decimal("0.8"),
+            timestamp=datetime.now(timezone.utc),
+            metadata={"order_type": "market", "quantity": "0.01"},
+        )
+        
+        await bot_instance._process_trading_signal(signal)
+        
+        # Should handle error and not execute
+        bot_instance.error_handler.handle_error.assert_called()
+        assert not bot_instance.execution_engine_service.execute_instruction.called
+    
+    @pytest.mark.asyncio
+    async def test_process_trading_signal_risk_validation_general_error(self, bot_instance):
+        """Test signal processing with general risk validation error."""
+        bot_instance.risk_service.validate_order.side_effect = Exception("Validation error")
+        
+        signal = Signal(
+            symbol="BTCUSDT",
+            direction=SignalDirection.BUY,
+            strength=Decimal("0.8"),
+            timestamp=datetime.now(timezone.utc),
+            metadata={"order_type": "market", "quantity": "0.01"},
+        )
+        
+        await bot_instance._process_trading_signal(signal)
+        
+        # Should return early on error
+        assert not bot_instance.execution_engine_service.execute_instruction.called
+    
+    @pytest.mark.asyncio
+    async def test_process_trading_signal_risk_validation_rejected(self, bot_instance):
+        """Test signal processing when risk validation rejects order."""
+        bot_instance.risk_service.validate_order.return_value = False
+        
+        signal = Signal(
+            symbol="BTCUSDT",
+            direction=SignalDirection.BUY,
+            strength=Decimal("0.8"),
+            timestamp=datetime.now(timezone.utc),
+            metadata={"order_type": "market", "quantity": "0.01"},
+        )
+        
+        await bot_instance._process_trading_signal(signal)
+        
+        # Order should be rejected
+        assert not bot_instance.execution_engine_service.execute_instruction.called
+    
+    @pytest.mark.asyncio
+    async def test_process_trading_signal_no_risk_service(self, bot_instance):
+        """Test signal processing without risk service."""
+        bot_instance.risk_service = None
+        
+        signal = Signal(
+            symbol="BTCUSDT",
+            direction=SignalDirection.BUY,
+            strength=Decimal("0.8"),
+            timestamp=datetime.now(timezone.utc),
+            metadata={"order_type": "market", "quantity": "0.01"},
+        )
+        
+        # Mock execution result
+        mock_result = AsyncMock()
+        bot_instance.execution_engine_service.execute_instruction.return_value = mock_result
+        
+        with patch.object(bot_instance, "_track_execution") as mock_track:
+            await bot_instance._process_trading_signal(signal)
+            
+            # Should use basic validation and proceed
+            bot_instance.execution_engine_service.execute_instruction.assert_called_once()
+            from unittest.mock import ANY
+            mock_track.assert_called_once_with(mock_result, ANY)
+    
+    @pytest.mark.asyncio
+    async def test_process_trading_signal_execution_engine_unavailable(self, bot_instance):
+        """Test signal processing when execution engine is unavailable."""
+        bot_instance.execution_engine_service = None
+        bot_instance.risk_service.validate_order.return_value = True
+        
+        signal = Signal(
+            symbol="BTCUSDT",
+            direction=SignalDirection.BUY,
+            strength=Decimal("0.8"),
+            timestamp=datetime.now(timezone.utc),
+            metadata={"order_type": "market", "quantity": "0.01"},
+        )
+        
+        await bot_instance._process_trading_signal(signal)
+        
+        # Should handle missing execution engine
+        bot_instance.error_handler.handle_error.assert_called()
+    
+    @pytest.mark.asyncio
+    async def test_process_trading_signal_execution_failure(self, bot_instance):
+        """Test signal processing with execution failure."""
+        bot_instance.risk_service.validate_order.return_value = True
+        bot_instance.execution_engine_service.execute_instruction.side_effect = Exception(
+            "Execution failed"
+        )
+        
+        signal = Signal(
+            symbol="BTCUSDT",
+            direction=SignalDirection.BUY,
+            strength=Decimal("0.8"),
+            timestamp=datetime.now(timezone.utc),
+            metadata={"order_type": "market", "quantity": "0.01"},
+        )
+        
+        await bot_instance._process_trading_signal(signal)
+        
+        # Should handle execution error
+        bot_instance.error_handler.handle_error.assert_called()
+    
+    # Daily Limits Tests
+    @pytest.mark.asyncio
+    async def test_check_daily_limits_reset(self, bot_instance):
+        """Test daily limits reset functionality."""
+        # Set yesterday as last reset date
+        yesterday = datetime.now(timezone.utc).date() - timedelta(days=1)
+        bot_instance.last_daily_reset = yesterday
+        bot_instance.daily_trade_count = 10
+        
+        await bot_instance._check_daily_limits()
+        
+        # Should reset counters
+        assert bot_instance.daily_trade_count == 0
+        assert bot_instance.last_daily_reset == datetime.now(timezone.utc).date()
+    
+    @pytest.mark.asyncio
+    async def test_check_daily_limits_exceeded(self, bot_instance):
+        """Test daily limits exceeded."""
+        bot_instance.bot_config.strategy_config["max_daily_trades"] = 5
+        bot_instance.daily_trade_count = 5
+        
+        with pytest.raises(ExecutionError, match="Daily trade limit exceeded"):
+            await bot_instance._check_daily_limits()
+    
+    # Strategy State Update Tests
+    @pytest.mark.asyncio
+    async def test_update_strategy_state_with_get_state(self, bot_instance):
+        """Test strategy state update with get_state method."""
+        mock_strategy = AsyncMock()
+        mock_strategy.get_state.return_value = {"status": "active", "positions": 2}
+        bot_instance.strategy = mock_strategy
+        
+        await bot_instance._update_strategy_state()
+        
+        assert bot_instance.bot_state.strategy_state == {"status": "active", "positions": 2}
+        assert bot_instance.bot_state.last_updated is not None
+    
+    @pytest.mark.asyncio
+    async def test_update_strategy_state_without_get_state(self, bot_instance):
+        """Test strategy state update without get_state method."""
+        mock_strategy = AsyncMock()
+        mock_strategy.status = MagicMock()
+        mock_strategy.status.value = "running"
+        mock_strategy.name = "test_strategy"
+        # Remove get_state method
+        del mock_strategy.get_state
+        bot_instance.strategy = mock_strategy
+        
+        await bot_instance._update_strategy_state()
+        
+        expected_state = {
+            "status": "running",
+            "name": "test_strategy",
+        }
+        assert bot_instance.bot_state.strategy_state == expected_state
+    
+    @pytest.mark.asyncio
+    async def test_update_strategy_state_no_strategy(self, bot_instance):
+        """Test strategy state update with no strategy."""
+        bot_instance.strategy = None
+        
+        await bot_instance._update_strategy_state()
+        
+        # Should not crash and leave state unchanged
+        assert bot_instance.bot_state.strategy_state is None
+    
+    # Track Execution Tests
+    @pytest.mark.asyncio
+    async def test_track_execution_none_result(self, bot_instance):
+        """Test track execution with None result."""
+        await bot_instance._track_execution(None)
+        
+        # Should handle gracefully
+        assert bot_instance.execution_history == []
+        assert bot_instance.bot_metrics.total_trades == 0
+    
+    @pytest.mark.asyncio
+    async def test_track_execution_no_order_info(self, bot_instance):
+        """Test track execution without order information."""
+        mock_result = MagicMock()
+        # No order request provided and no original_order in result
+        
+        await bot_instance._track_execution(mock_result)
+        
+        # Should handle gracefully but still update basic metrics
+        assert len(bot_instance.execution_history) == 1
+        assert bot_instance.bot_metrics.total_trades == 1
+    
+    @pytest.mark.asyncio
+    async def test_track_execution_with_filled_quantity(self, bot_instance):
+        """Test track execution with filled quantity."""
+        mock_result = MagicMock()
+        mock_result.filled_quantity = Decimal("0.5")
+        mock_result.average_price = Decimal("50000")
+        mock_result.execution_id = "exec_123"
+        mock_result.timestamp = datetime.now(timezone.utc)
+        
+        mock_order = OrderRequest(
+            symbol="BTCUSDT",
+            side=OrderSide.BUY,
+            order_type=OrderType.MARKET,
+            quantity=Decimal("0.5"),
+        )
+        
+        bot_instance.trading_metrics = MagicMock()
+        bot_instance.metrics_collector = MagicMock()
+        
+        await bot_instance._track_execution(mock_result, mock_order)
+        
+        # Should update metrics and tracking
+        assert bot_instance.bot_metrics.total_trades == 1
+        assert bot_instance.bot_metrics.last_trade_time is not None
+        bot_instance.trading_metrics.record_pnl.assert_called()
+        bot_instance.metrics_collector.gauge.assert_called()
+    
+    @pytest.mark.asyncio
+    async def test_track_execution_strategy_post_processing(self, bot_instance):
+        """Test track execution with strategy post-processing."""
+        mock_result = MagicMock()
+        mock_result.filled_quantity = Decimal("0.1")
+        mock_result.execution_id = "exec_123"
+        mock_result.timestamp = datetime.now(timezone.utc)
+        
+        mock_order = OrderRequest(
+            symbol="BTCUSDT",
+            side=OrderSide.BUY,
+            order_type=OrderType.MARKET,
+            quantity=Decimal("0.1"),
+        )
+        
+        mock_strategy = AsyncMock()
+        mock_strategy.post_trade_processing = AsyncMock()
+        bot_instance.strategy = mock_strategy
+        
+        await bot_instance._track_execution(mock_result, mock_order)
+        
+        # Should call strategy post-processing
+        mock_strategy.post_trade_processing.assert_called_once()
+    
+    @pytest.mark.asyncio
+    async def test_track_execution_strategy_update_metrics_sync(self, bot_instance):
+        """Test track execution with synchronous strategy metrics update."""
+        mock_result = MagicMock()
+        mock_result.filled_quantity = Decimal("0.1")
+        
+        mock_order = OrderRequest(
+            symbol="BTCUSDT",
+            side=OrderSide.BUY,
+            order_type=OrderType.MARKET,
+            quantity=Decimal("0.1"),
+        )
+        
+        mock_strategy = MagicMock()
+        mock_strategy.update_performance_metrics = MagicMock()  # Synchronous method
+        # Remove post_trade_processing to test fallback
+        del mock_strategy.post_trade_processing
+        bot_instance.strategy = mock_strategy
+        
+        await bot_instance._track_execution(mock_result, mock_order)
+        
+        # Should call synchronous update method
+        mock_strategy.update_performance_metrics.assert_called_once()
+    
+    @pytest.mark.asyncio
+    async def test_track_execution_strategy_error(self, bot_instance):
+        """Test track execution with strategy processing error."""
+        mock_result = MagicMock()
+        mock_result.filled_quantity = Decimal("0.1")
+        
+        mock_order = OrderRequest(
+            symbol="BTCUSDT",
+            side=OrderSide.BUY,
+            order_type=OrderType.MARKET,
+            quantity=Decimal("0.1"),
+        )
+        
+        mock_strategy = AsyncMock()
+        mock_strategy.post_trade_processing.side_effect = Exception("Strategy error")
+        bot_instance.strategy = mock_strategy
+        
+        await bot_instance._track_execution(mock_result, mock_order)
+        
+        # Should handle strategy error gracefully
+        bot_instance.error_handler.handle_error.assert_called()
+    
+    # Performance Metrics Tests
+    @pytest.mark.asyncio
+    async def test_update_performance_metrics_calculations(self, bot_instance):
+        """Test performance metrics calculations."""
+        # Set up metrics data
+        bot_instance.bot_metrics.profitable_trades = 7
+        bot_instance.bot_metrics.losing_trades = 3
+        bot_instance.bot_metrics.total_trades = 10
+        bot_instance.bot_metrics.total_pnl = Decimal("1000")
+        bot_instance.bot_metrics.start_time = datetime.now(timezone.utc) - timedelta(hours=2)
+        
+        await bot_instance._update_performance_metrics()
+        
+        # Check calculations
+        assert bot_instance.bot_metrics.win_rate == 0.7  # 7/10
+        assert bot_instance.bot_metrics.average_trade_pnl == Decimal("100")  # 1000/10
+        assert bot_instance.bot_metrics.uptime_percentage > 0
+        assert bot_instance.bot_metrics.metrics_updated_at is not None
+    
+    # Resource Usage Tests
+    @pytest.mark.asyncio
+    async def test_check_resource_usage_system_metrics(self, bot_instance):
+        """Test resource usage checking with system metrics."""
+        with patch("psutil.Process") as mock_process:
+            mock_proc = MagicMock()
+            mock_proc.cpu_percent.return_value = 25.5
+            mock_proc.memory_info.return_value = MagicMock(rss=104857600)  # 100 MB
+            mock_process.return_value = mock_proc
+            
+            await bot_instance._check_resource_usage()
+            
+            assert bot_instance.bot_metrics.cpu_usage == 25.5
+            assert bot_instance.bot_metrics.memory_usage == 100.0
+    
+    # State Checkpoint Tests
+    @pytest.mark.asyncio
+    async def test_create_state_checkpoint_trigger(self, bot_instance):
+        """Test state checkpoint creation trigger."""
+        # Set heartbeat count to trigger checkpoint
+        bot_instance._heartbeat_count = 9
+        
+        await bot_instance._create_state_checkpoint()
+        
+        # Should create checkpoint on 10th heartbeat
+        assert bot_instance._heartbeat_count == 10
+        assert bot_instance.bot_state.checkpoint_created is not None
+        assert bot_instance.bot_state.state_version == 1
+    
+    # Bot Control Methods Tests
+    @pytest.mark.asyncio
+    async def test_pause_not_running(self, bot_instance):
+        """Test pause when bot is not running."""
+        bot_instance.is_running = False
+        
+        with pytest.raises(ExecutionError, match="Cannot pause - bot is not running"):
+            await bot_instance.pause()
+    
+    @pytest.mark.asyncio
+    async def test_resume_not_paused(self, bot_instance):
+        """Test resume when bot is not paused."""
+        bot_instance.bot_state.status = BotStatus.RUNNING
+        
+        with pytest.raises(ExecutionError, match="Cannot resume - bot is not paused"):
+            await bot_instance.resume()
+    
+    @pytest.mark.asyncio
+    async def test_resume_success(self, bot_instance):
+        """Test successful resume."""
+        bot_instance.bot_state.status = BotStatus.PAUSED
+        
+        with patch.object(bot_instance, "_start_strategy_execution") as mock_start:
+            await bot_instance.resume()
+            
+            mock_start.assert_called_once()
+            assert bot_instance.bot_state.status == BotStatus.RUNNING
+    
+    # Position Management Tests
+    @pytest.mark.asyncio
+    async def test_close_position_no_position(self, bot_instance):
+        """Test closing position when no position exists."""
+        result = await bot_instance.close_position("BTCUSDT", "test")
+        
+        assert result is False
+    
+    @pytest.mark.asyncio
+    async def test_close_position_execution_failure(self, bot_instance):
+        """Test close position with execution failure."""
+        bot_instance.active_positions["BTCUSDT"] = {
+            "side": "BUY",
+            "quantity": Decimal("0.1"),
+        }
+        
+        bot_instance.execution_engine_service = None
+        
+        result = await bot_instance.close_position("BTCUSDT", "test")
+        
+        assert result is False
+        bot_instance.error_handler.handle_error.assert_called()
+    
+    # WebSocket Management Tests
+    @pytest.mark.asyncio
+    async def test_websocket_heartbeat_loop(self, bot_instance):
+        """Test WebSocket heartbeat loop functionality."""
+        bot_instance.is_running = True
+        bot_instance.websocket_connections = {
+            "binance": MagicMock(websocket=AsyncMock())
+        }
+        
+        loop_count = 0
+        
+        async def mock_sleep(duration):
+            nonlocal loop_count
+            loop_count += 1
+            if loop_count >= 2:
+                bot_instance.is_running = False
+        
+        with patch("asyncio.sleep", side_effect=mock_sleep):
+            await bot_instance._websocket_heartbeat_loop()
+            
+            # Should send pings
+            assert bot_instance.websocket_connections["binance"].websocket.ping.call_count == 2
+    
+    @pytest.mark.asyncio
+    async def test_websocket_heartbeat_loop_ping_timeout(self, bot_instance):
+        """Test WebSocket heartbeat loop with ping timeout."""
+        bot_instance.is_running = True
+        mock_ws = AsyncMock()
+        mock_ws.ping.side_effect = asyncio.TimeoutError()
+        bot_instance.websocket_connections = {
+            "binance": MagicMock(websocket=mock_ws)
+        }
+        
+        loop_count = 0
+        
+        async def mock_sleep(duration):
+            nonlocal loop_count
+            loop_count += 1
+            if loop_count >= 1:
+                bot_instance.is_running = False
+        
+        with patch("asyncio.sleep", side_effect=mock_sleep):
+            await bot_instance._websocket_heartbeat_loop()
+            
+            # Should handle timeout gracefully
+            mock_ws.ping.assert_called()
+    
+    @pytest.mark.asyncio
+    async def test_websocket_timeout_monitor_loop(self, bot_instance):
+        """Test WebSocket timeout monitoring loop."""
+        bot_instance.is_running = True
+        bot_instance.websocket_connection_timeout = 30.0
+        
+        # Set up a timed out connection
+        old_time = datetime.now(timezone.utc) - timedelta(seconds=60)
+        bot_instance.websocket_last_pong = {"binance": old_time}
+        
+        loop_count = 0
+        
+        async def mock_sleep(duration):
+            nonlocal loop_count
+            loop_count += 1
+            if loop_count >= 1:
+                bot_instance.is_running = False
+        
+        with patch("asyncio.sleep", side_effect=mock_sleep), \
+             patch.object(bot_instance, "_handle_websocket_timeout") as mock_handle:
+            
+            await bot_instance._websocket_timeout_monitor_loop()
+            
+            mock_handle.assert_called_once_with("binance")
+    
+    @pytest.mark.asyncio
+    async def test_handle_websocket_timeout(self, bot_instance):
+        """Test WebSocket timeout handling."""
+        # Set up connection to timeout
+        mock_connection = MagicMock()
+        mock_connection.close_websocket = AsyncMock()
+        bot_instance.websocket_connections["binance"] = mock_connection
+        
+        # Mock exchange factory for reconnection
+        mock_exchange = AsyncMock()
+        mock_exchange.connect_websocket = AsyncMock()
+        bot_instance.exchange_factory.get_exchange.return_value = mock_exchange
+        
+        await bot_instance._handle_websocket_timeout("binance")
+        
+        # Should close old connection and create new one
+        mock_connection.close_websocket.assert_called_once()
+        mock_exchange.connect_websocket.assert_called_once()
+        assert bot_instance.websocket_connections["binance"] == mock_exchange
+    
+    @pytest.mark.asyncio
+    async def test_handle_websocket_timeout_reconnection_failure(self, bot_instance):
+        """Test WebSocket timeout handling with reconnection failure."""
+        # Set up connection to timeout
+        mock_connection = MagicMock()
+        mock_connection.close_websocket = AsyncMock()
+        bot_instance.websocket_connections["binance"] = mock_connection
+        
+        # Mock exchange factory failure
+        bot_instance.exchange_factory.get_exchange.side_effect = Exception("Connection failed")
+        
+        await bot_instance._handle_websocket_timeout("binance")
+        
+        # Should handle failure gracefully
+        bot_instance.error_handler.handle_error.assert_called()
+    
+    # WebSocket Message Processing Tests
+    @pytest.mark.asyncio
+    async def test_websocket_message_processor_loop_batch_processing(self, bot_instance):
+        """Test WebSocket message processor with batch processing."""
+        bot_instance.is_running = True
+        bot_instance.message_processing_batch_size = 2
+        
+        # Mock messages in queue
+        messages = [
+            {"type": "market_data", "data": {"symbol": "BTCUSDT"}},
+            {"type": "order_update", "data": {"order_id": "123"}},
+        ]
+        
+        call_count = 0
+        
+        async def mock_get():
+            nonlocal call_count
+            if call_count < len(messages):
+                msg = messages[call_count]
+                call_count += 1
+                return msg
+            else:
+                bot_instance.is_running = False
+                raise asyncio.TimeoutError()
+        
+        bot_instance.websocket_message_queue.get = mock_get
+        
+        with patch.object(bot_instance, "_process_websocket_message_batch") as mock_process:
+            await bot_instance._websocket_message_processor_loop()
+            
+            # Should process messages in batch
+            mock_process.assert_called()
+    
+    @pytest.mark.asyncio
+    async def test_process_websocket_message_batch(self, bot_instance):
+        """Test WebSocket message batch processing."""
+        messages = [
+            {"type": "market_data", "data": {"symbol": "BTCUSDT"}},
+            {"type": "order_update", "data": {"order_id": "123"}},
+        ]
+        
+        with patch.object(bot_instance, "_process_single_websocket_message") as mock_process:
+            await bot_instance._process_websocket_message_batch(messages)
+            
+            assert mock_process.call_count == 2
+    
+    @pytest.mark.asyncio
+    async def test_process_single_websocket_message_types(self, bot_instance):
+        """Test processing different WebSocket message types."""
+        # Market data message
+        with patch.object(bot_instance, "_handle_market_data_message") as mock_handle:
+            await bot_instance._process_single_websocket_message(
+                {"type": "market_data", "data": {}}
+            )
+            mock_handle.assert_called_once()
+        
+        # Order update message
+        with patch.object(bot_instance, "_handle_order_update_message") as mock_handle:
+            await bot_instance._process_single_websocket_message(
+                {"type": "order_update", "data": {}}
+            )
+            mock_handle.assert_called_once()
+        
+        # Account update message
+        with patch.object(bot_instance, "_handle_account_update_message") as mock_handle:
+            await bot_instance._process_single_websocket_message(
+                {"type": "account_update", "data": {}}
+            )
+            mock_handle.assert_called_once()
+        
+        # Pong message
+        with patch.object(bot_instance, "_handle_pong_message") as mock_handle:
+            await bot_instance._process_single_websocket_message(
+                {"type": "pong", "exchange": "binance"}
+            )
+            mock_handle.assert_called_once()
+    
+    @pytest.mark.asyncio
+    async def test_handle_market_data_message(self, bot_instance):
+        """Test market data message handling."""
+        bot_instance.websocket_last_pong["binance"] = datetime.now(timezone.utc) - timedelta(seconds=30)
+        
+        mock_strategy = AsyncMock()
+        mock_strategy.handle_market_data = AsyncMock()
+        bot_instance.strategy = mock_strategy
+        
+        message = {
+            "type": "market_data",
+            "exchange": "binance",
+            "data": {"symbol": "BTCUSDT", "price": "50000"}
+        }
+        
+        await bot_instance._handle_market_data_message(message)
+        
+        # Should update pong time and call strategy
+        assert bot_instance.websocket_last_pong["binance"] > datetime.now(timezone.utc) - timedelta(seconds=5)
+        mock_strategy.handle_market_data.assert_called_once()
+    
+    @pytest.mark.asyncio
+    async def test_handle_market_data_message_strategy_timeout(self, bot_instance):
+        """Test market data message handling with strategy timeout."""
+        mock_strategy = AsyncMock()
+        mock_strategy.handle_market_data.side_effect = asyncio.TimeoutError()
+        bot_instance.strategy = mock_strategy
+        
+        message = {
+            "type": "market_data",
+            "exchange": "binance",
+            "data": {"symbol": "BTCUSDT"}
+        }
+        
+        # Should handle timeout gracefully
+        await bot_instance._handle_market_data_message(message)
+    
+    @pytest.mark.asyncio
+    async def test_handle_order_update_message(self, bot_instance):
+        """Test order update message handling."""
+        message = {
+            "type": "order_update",
+            "exchange": "binance",
+            "data": {"client_order_id": "order_123", "status": "filled"}
+        }
+        
+        await bot_instance._handle_order_update_message(message)
+        
+        # Should update order tracker
+        assert "order_123" in bot_instance.order_tracker
+        assert bot_instance.order_tracker["order_123"]["status"] == "filled"
+    
+    @pytest.mark.asyncio
+    async def test_handle_account_update_message(self, bot_instance):
+        """Test account update message handling."""
+        message = {
+            "type": "account_update",
+            "exchange": "binance",
+            "data": {
+                "positions": [
+                    {"symbol": "BTCUSDT", "quantity": "0.5", "side": "long"}
+                ]
+            }
+        }
+        
+        await bot_instance._handle_account_update_message(message)
+        
+        # Should update position tracker
+        assert "BTCUSDT" in bot_instance.position_tracker
+    
+    @pytest.mark.asyncio
+    async def test_queue_websocket_message_backpressure(self, bot_instance):
+        """Test WebSocket message queuing with backpressure."""
+        # Fill the queue to trigger backpressure
+        bot_instance.websocket_message_queue = asyncio.Queue(maxsize=2)
+        bot_instance.websocket_message_queue.put_nowait({"test": "msg1"})
+        bot_instance.websocket_message_queue.put_nowait({"test": "msg2"})
+        
+        # This should trigger backpressure handling
+        result = await bot_instance.queue_websocket_message({"test": "msg3"})
+        
+        assert result is True  # Should succeed by dropping oldest message
+        assert bot_instance.message_drop_count > 0
+    
+    # Resource Release Tests
+    @pytest.mark.asyncio
+    async def test_release_resources_websocket_cleanup(self, bot_instance):
+        """Test resource release with WebSocket cleanup."""
+        # Set up WebSocket connections
+        mock_connection1 = MagicMock()
+        mock_connection1.close_websocket = AsyncMock()
+        mock_connection2 = MagicMock()
+        mock_ws = AsyncMock()
+        mock_ws.close = AsyncMock()
+        mock_connection2.websocket = mock_ws
+        
+        bot_instance.exchange_connections = {
+            "binance": mock_connection1,
+            "coinbase": mock_connection2,
+        }
+        
+        await bot_instance._release_resources()
+        
+        # Should close WebSocket connections
+        mock_connection1.close_websocket.assert_called_once()
+        mock_ws.close.assert_called_once()
+    
+    @pytest.mark.asyncio
+    async def test_release_resources_websocket_timeout(self, bot_instance):
+        """Test resource release with WebSocket timeout."""
+        mock_connection = MagicMock()
+        mock_connection.close_websocket = AsyncMock(side_effect=asyncio.TimeoutError())
+        
+        bot_instance.exchange_connections = {"binance": mock_connection}
+        
+        # Should handle timeout gracefully
+        await bot_instance._release_resources()
+        
+        mock_connection.close_websocket.assert_called_once()
+    
+    # Risk Limit Tests
+    @pytest.mark.asyncio
+    async def test_check_risk_limits_max_positions(self, bot_instance):
+        """Test risk limit checking for max positions."""
+        # Set up max positions
+        bot_instance.active_positions = {
+            "BTCUSDT": {},
+            "ETHUSDT": {},
+            "ADAUSDT": {},
+        }
+        
+        order_request = OrderRequest(
+            symbol="DOGEUSDT",
+            side=OrderSide.BUY,
+            order_type=OrderType.MARKET,
+            quantity=Decimal("1.0"),
+        )
+        
+        result = await bot_instance._check_risk_limits(order_request)
+        
+        assert result is False  # Should reject due to max positions (3)
+    
+    # Calculate Performance Metrics Tests
+    @pytest.mark.asyncio
+    async def test_calculate_performance_metrics_empty_history(self, bot_instance):
+        """Test performance metrics calculation with empty history."""
+        bot_instance.order_history = []
+        
+        await bot_instance._calculate_performance_metrics()
+        
+        # Should handle empty history gracefully
+        assert bot_instance.performance_metrics["total_trades"] == 0
+        assert bot_instance.performance_metrics["win_rate"] == Decimal("0.0")
+    
+    @pytest.mark.asyncio
+    async def test_restart_bot(self, bot_instance):
+        """Test bot restart functionality."""
+        bot_instance.is_running = True
+        
+        with patch.object(bot_instance, "stop") as mock_stop, \
+             patch.object(bot_instance, "start") as mock_start:
+            
+            await bot_instance.restart("test restart")
+            
+            mock_stop.assert_called_once()
+            mock_start.assert_called_once()

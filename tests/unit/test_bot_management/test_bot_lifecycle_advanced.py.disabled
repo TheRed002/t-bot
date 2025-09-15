@@ -1,0 +1,914 @@
+"""
+Advanced comprehensive tests for BotLifecycle class.
+
+Tests cover all lifecycle management functionality including:
+- Bot creation and initialization
+- Start/stop/restart operations
+- Deployment strategies
+- Template management
+- Health checks
+- Resource cleanup
+"""
+
+import asyncio
+from datetime import datetime, timedelta
+from decimal import Decimal
+from unittest.mock import AsyncMock, MagicMock, call, patch
+
+import pytest
+from freezegun import freeze_time
+
+from src.bot_management.bot_lifecycle import BotLifecycle
+from src.core.exceptions import (
+    ComponentError,
+    ConfigurationError,
+    AllocationError,
+    ServiceError,
+    StateError,
+    ValidationError,
+)
+from src.core.types.bot import (
+    BotConfiguration,
+    BotDeploymentStrategy,
+    BotHealthMetrics,
+    BotInstance,
+    BotLifecyclePhase,
+    BotMetrics,
+    BotResourceRequirements,
+    BotState,
+    BotTemplate,
+    BotTemplateConfig,
+)
+from src.core.types.trading import OrderRequest, OrderSide, OrderStatus, OrderType
+
+
+@pytest.fixture
+def mock_database_service():
+    """Create mock database service."""
+    service = AsyncMock()
+    service.get_bot = AsyncMock()
+    service.create_bot = AsyncMock()
+    service.update_bot = AsyncMock()
+    service.save_bot_state = AsyncMock()
+    return service
+
+
+@pytest.fixture
+def mock_state_service():
+    """Create mock state service."""
+    service = AsyncMock()
+    service.get_bot_state = AsyncMock()
+    service.save_bot_state = AsyncMock()
+    service.update_bot_state = AsyncMock()
+    service.clear_bot_state = AsyncMock()
+    return service
+
+
+@pytest.fixture
+def mock_monitoring_service():
+    """Create mock monitoring service."""
+    service = AsyncMock()
+    service.start_monitoring = AsyncMock()
+    service.stop_monitoring = AsyncMock()
+    service.get_bot_health = AsyncMock()
+    service.check_health = AsyncMock()
+    return service
+
+
+@pytest.fixture
+def mock_resource_service():
+    """Create mock resource service."""
+    service = AsyncMock()
+    service.allocate_resources = AsyncMock()
+    service.release_resources = AsyncMock()
+    service.check_resource_availability = AsyncMock()
+    service.get_resource_usage = AsyncMock()
+    return service
+
+
+@pytest.fixture
+def mock_coordination_service():
+    """Create mock coordination service."""
+    service = AsyncMock()
+    service.coordinate_startup = AsyncMock()
+    service.coordinate_shutdown = AsyncMock()
+    service.register_bot = AsyncMock()
+    service.unregister_bot = AsyncMock()
+    return service
+
+
+@pytest.fixture
+def mock_logger():
+    """Create mock logger."""
+    with patch("src.bot_management.bot_lifecycle.get_logger") as mock_get_logger:
+        logger = MagicMock()
+        mock_get_logger.return_value = logger
+        yield logger
+
+
+@pytest.fixture
+def bot_lifecycle(
+    mock_database_service,
+    mock_state_service,
+    mock_monitoring_service,
+    mock_resource_service,
+    mock_coordination_service,
+):
+    """Create BotLifecycle instance with mocked dependencies."""
+    return BotLifecycle(
+        database_service=mock_database_service,
+        state_service=mock_state_service,
+        monitoring_service=mock_monitoring_service,
+        resource_service=mock_resource_service,
+        coordination_service=mock_coordination_service,
+    )
+
+
+@pytest.fixture
+def sample_bot_config():
+    """Create sample bot configuration."""
+    return BotConfiguration(
+        bot_id="test_bot_001",
+        name="Test Bot",
+        strategy_id="strategy_001",
+        exchange_id="binance",
+        capital_allocation=Decimal("10000.00"),
+        risk_parameters={
+            "max_position_size": Decimal("1000.00"),
+            "stop_loss": Decimal("0.02"),
+            "take_profit": Decimal("0.05"),
+        },
+        trading_pairs=["BTC/USDT", "ETH/USDT"],
+        enabled=True,
+    )
+
+
+@pytest.fixture
+def sample_bot_template():
+    """Create sample bot template."""
+    return BotTemplate(
+        template_id="template_001",
+        name="Scalping Template",
+        description="High-frequency scalping template",
+        config=BotTemplateConfig(
+            strategy_type="scalping",
+            default_capital=Decimal("5000.00"),
+            risk_profile="conservative",
+            supported_exchanges=["binance", "coinbase"],
+            default_pairs=["BTC/USDT"],
+        ),
+        version="1.0.0",
+    )
+
+
+class TestBotLifecycleInitialization:
+    """Test BotLifecycle initialization."""
+
+    def test_initialization_with_all_services(self, bot_lifecycle):
+        """Test initialization with all services provided."""
+        assert bot_lifecycle._database_service is not None
+        assert bot_lifecycle._state_service is not None
+        assert bot_lifecycle._monitoring_service is not None
+        assert bot_lifecycle._resource_service is not None
+        assert bot_lifecycle._coordination_service is not None
+        assert bot_lifecycle._lifecycle_phases == {}
+        assert bot_lifecycle._deployment_strategies == {}
+        assert bot_lifecycle._templates == {}
+
+    def test_initialization_minimal_services(self):
+        """Test initialization with minimal required services."""
+        lifecycle = BotLifecycle(
+            database_service=AsyncMock(),
+            state_service=AsyncMock(),
+        )
+        assert lifecycle._database_service is not None
+        assert lifecycle._state_service is not None
+        assert lifecycle._monitoring_service is None
+        assert lifecycle._resource_service is None
+        assert lifecycle._coordination_service is None
+
+
+class TestCreateBot:
+    """Test bot creation functionality."""
+
+    @pytest.mark.asyncio
+    async def test_create_bot_success(
+        self, bot_lifecycle, sample_bot_config, mock_database_service, mock_state_service
+    ):
+        """Test successful bot creation."""
+        mock_database_service.create_bot.return_value = {"bot_id": sample_bot_config.bot_id}
+        mock_state_service.save_bot_state.return_value = True
+
+        result = await bot_lifecycle.create_bot(sample_bot_config)
+
+        assert result["bot_id"] == sample_bot_config.bot_id
+        mock_database_service.create_bot.assert_called_once_with(sample_bot_config)
+        mock_state_service.save_bot_state.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_create_bot_with_template(
+        self, bot_lifecycle, sample_bot_template, mock_database_service
+    ):
+        """Test bot creation from template."""
+        bot_lifecycle._templates["template_001"] = sample_bot_template
+        mock_database_service.create_bot.return_value = {"bot_id": "new_bot_001"}
+
+        result = await bot_lifecycle.create_bot_from_template(
+            template_id="template_001",
+            bot_name="New Bot",
+            capital=Decimal("7500.00"),
+        )
+
+        assert result["bot_id"] == "new_bot_001"
+        create_call = mock_database_service.create_bot.call_args[0][0]
+        assert create_call.name == "New Bot"
+        assert create_call.capital_allocation == Decimal("7500.00")
+
+    @pytest.mark.asyncio
+    async def test_create_bot_validation_error(self, bot_lifecycle, sample_bot_config):
+        """Test bot creation with invalid configuration."""
+        sample_bot_config.capital_allocation = Decimal("-1000.00")  # Invalid negative capital
+
+        with pytest.raises(ValidationError):
+            await bot_lifecycle.create_bot(sample_bot_config)
+
+    @pytest.mark.asyncio
+    async def test_create_bot_database_error(
+        self, bot_lifecycle, sample_bot_config, mock_database_service
+    ):
+        """Test bot creation with database error."""
+        mock_database_service.create_bot.side_effect = ServiceError("Database connection failed")
+
+        with pytest.raises(ServiceError):
+            await bot_lifecycle.create_bot(sample_bot_config)
+
+
+class TestInitializeBot:
+    """Test bot initialization functionality."""
+
+    @pytest.mark.asyncio
+    async def test_initialize_bot_success(
+        self,
+        bot_lifecycle,
+        mock_database_service,
+        mock_state_service,
+        mock_resource_service,
+    ):
+        """Test successful bot initialization."""
+        bot_id = "test_bot_001"
+        mock_database_service.get_bot.return_value = {
+            "bot_id": bot_id,
+            "state": BotState.CREATED,
+        }
+        mock_resource_service.check_resource_availability.return_value = True
+        mock_resource_service.allocate_resources.return_value = True
+
+        result = await bot_lifecycle.initialize_bot(bot_id)
+
+        assert result["success"] is True
+        assert result["bot_id"] == bot_id
+        mock_resource_service.allocate_resources.assert_called_once()
+        mock_state_service.update_bot_state.assert_called()
+
+    @pytest.mark.asyncio
+    async def test_initialize_bot_insufficient_resources(
+        self, bot_lifecycle, mock_database_service, mock_resource_service
+    ):
+        """Test bot initialization with insufficient resources."""
+        bot_id = "test_bot_001"
+        mock_database_service.get_bot.return_value = {"bot_id": bot_id}
+        mock_resource_service.check_resource_availability.return_value = False
+
+        with pytest.raises(AllocationError):
+            await bot_lifecycle.initialize_bot(bot_id)
+
+    @pytest.mark.asyncio
+    async def test_initialize_bot_already_initialized(
+        self, bot_lifecycle, mock_database_service
+    ):
+        """Test initializing an already initialized bot."""
+        bot_id = "test_bot_001"
+        mock_database_service.get_bot.return_value = {
+            "bot_id": bot_id,
+            "state": BotState.RUNNING,
+        }
+
+        with pytest.raises(StateError):
+            await bot_lifecycle.initialize_bot(bot_id)
+
+
+class TestStartBot:
+    """Test bot starting functionality."""
+
+    @pytest.mark.asyncio
+    async def test_start_bot_success(
+        self,
+        bot_lifecycle,
+        mock_database_service,
+        mock_state_service,
+        mock_monitoring_service,
+        mock_coordination_service,
+    ):
+        """Test successful bot start."""
+        bot_id = "test_bot_001"
+        mock_database_service.get_bot.return_value = {
+            "bot_id": bot_id,
+            "state": BotState.INITIALIZED,
+        }
+        mock_coordination_service.coordinate_startup.return_value = True
+        mock_monitoring_service.start_monitoring.return_value = True
+
+        result = await bot_lifecycle.start_bot(bot_id)
+
+        assert result["success"] is True
+        assert result["state"] == BotState.RUNNING
+        mock_coordination_service.coordinate_startup.assert_called_once()
+        mock_monitoring_service.start_monitoring.assert_called_once()
+        mock_state_service.update_bot_state.assert_called()
+
+    @pytest.mark.asyncio
+    async def test_start_bot_with_deployment_strategy(
+        self, bot_lifecycle, mock_database_service, mock_coordination_service
+    ):
+        """Test starting bot with specific deployment strategy."""
+        bot_id = "test_bot_001"
+        mock_database_service.get_bot.return_value = {
+            "bot_id": bot_id,
+            "state": BotState.INITIALIZED,
+        }
+
+        deployment_strategy = BotDeploymentStrategy.GRADUAL
+        result = await bot_lifecycle.start_bot(bot_id, deployment_strategy=deployment_strategy)
+
+        assert result["success"] is True
+        assert result["deployment_strategy"] == deployment_strategy
+
+    @pytest.mark.asyncio
+    async def test_start_bot_already_running(self, bot_lifecycle, mock_database_service):
+        """Test starting an already running bot."""
+        bot_id = "test_bot_001"
+        mock_database_service.get_bot.return_value = {
+            "bot_id": bot_id,
+            "state": BotState.RUNNING,
+        }
+
+        result = await bot_lifecycle.start_bot(bot_id)
+        assert result["success"] is True
+        assert result["message"] == "Bot already running"
+
+    @pytest.mark.asyncio
+    async def test_start_bot_coordination_failure(
+        self, bot_lifecycle, mock_database_service, mock_coordination_service
+    ):
+        """Test bot start with coordination failure."""
+        bot_id = "test_bot_001"
+        mock_database_service.get_bot.return_value = {
+            "bot_id": bot_id,
+            "state": BotState.INITIALIZED,
+        }
+        mock_coordination_service.coordinate_startup.side_effect = ServiceError(
+            "Coordination failed"
+        )
+
+        with pytest.raises(ServiceError):
+            await bot_lifecycle.start_bot(bot_id)
+
+
+class TestStopBot:
+    """Test bot stopping functionality."""
+
+    @pytest.mark.asyncio
+    async def test_stop_bot_success(
+        self,
+        bot_lifecycle,
+        mock_database_service,
+        mock_state_service,
+        mock_monitoring_service,
+        mock_coordination_service,
+    ):
+        """Test successful bot stop."""
+        bot_id = "test_bot_001"
+        mock_database_service.get_bot.return_value = {
+            "bot_id": bot_id,
+            "state": BotState.RUNNING,
+        }
+        mock_coordination_service.coordinate_shutdown.return_value = True
+        mock_monitoring_service.stop_monitoring.return_value = True
+
+        result = await bot_lifecycle.stop_bot(bot_id)
+
+        assert result["success"] is True
+        assert result["state"] == BotState.STOPPED
+        mock_coordination_service.coordinate_shutdown.assert_called_once()
+        mock_monitoring_service.stop_monitoring.assert_called_once()
+        mock_state_service.update_bot_state.assert_called()
+
+    @pytest.mark.asyncio
+    async def test_stop_bot_graceful_shutdown(
+        self, bot_lifecycle, mock_database_service, mock_coordination_service
+    ):
+        """Test graceful bot shutdown."""
+        bot_id = "test_bot_001"
+        mock_database_service.get_bot.return_value = {
+            "bot_id": bot_id,
+            "state": BotState.RUNNING,
+            "open_positions": [],
+        }
+
+        result = await bot_lifecycle.stop_bot(bot_id, graceful=True, timeout=30)
+
+        assert result["success"] is True
+        assert result["graceful_shutdown"] is True
+        coordination_call = mock_coordination_service.coordinate_shutdown.call_args
+        assert coordination_call[1]["graceful"] is True
+        assert coordination_call[1]["timeout"] == 30
+
+    @pytest.mark.asyncio
+    async def test_stop_bot_force_shutdown(
+        self, bot_lifecycle, mock_database_service, mock_resource_service
+    ):
+        """Test forced bot shutdown."""
+        bot_id = "test_bot_001"
+        mock_database_service.get_bot.return_value = {
+            "bot_id": bot_id,
+            "state": BotState.RUNNING,
+        }
+
+        result = await bot_lifecycle.stop_bot(bot_id, force=True)
+
+        assert result["success"] is True
+        assert result["forced_shutdown"] is True
+        mock_resource_service.release_resources.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_stop_bot_already_stopped(self, bot_lifecycle, mock_database_service):
+        """Test stopping an already stopped bot."""
+        bot_id = "test_bot_001"
+        mock_database_service.get_bot.return_value = {
+            "bot_id": bot_id,
+            "state": BotState.STOPPED,
+        }
+
+        result = await bot_lifecycle.stop_bot(bot_id)
+        assert result["success"] is True
+        assert result["message"] == "Bot already stopped"
+
+
+class TestTerminateBot:
+    """Test bot termination functionality."""
+
+    @pytest.mark.asyncio
+    async def test_terminate_bot_success(
+        self,
+        bot_lifecycle,
+        mock_database_service,
+        mock_state_service,
+        mock_resource_service,
+    ):
+        """Test successful bot termination."""
+        bot_id = "test_bot_001"
+        mock_database_service.get_bot.return_value = {
+            "bot_id": bot_id,
+            "state": BotState.STOPPED,
+        }
+
+        result = await bot_lifecycle.terminate_bot(bot_id)
+
+        assert result["success"] is True
+        assert result["terminated"] is True
+        mock_resource_service.release_resources.assert_called_once()
+        mock_state_service.clear_bot_state.assert_called_once()
+        mock_database_service.update_bot.assert_called()
+
+    @pytest.mark.asyncio
+    async def test_terminate_running_bot(self, bot_lifecycle, mock_database_service):
+        """Test terminating a running bot (should fail)."""
+        bot_id = "test_bot_001"
+        mock_database_service.get_bot.return_value = {
+            "bot_id": bot_id,
+            "state": BotState.RUNNING,
+        }
+
+        with pytest.raises(StateError):
+            await bot_lifecycle.terminate_bot(bot_id)
+
+    @pytest.mark.asyncio
+    async def test_terminate_bot_force(
+        self, bot_lifecycle, mock_database_service, mock_resource_service
+    ):
+        """Test forced bot termination."""
+        bot_id = "test_bot_001"
+        mock_database_service.get_bot.return_value = {
+            "bot_id": bot_id,
+            "state": BotState.RUNNING,
+        }
+
+        result = await bot_lifecycle.terminate_bot(bot_id, force=True)
+
+        assert result["success"] is True
+        assert result["forced_termination"] is True
+        mock_resource_service.release_resources.assert_called_once()
+
+
+class TestRestartBot:
+    """Test bot restart functionality."""
+
+    @pytest.mark.asyncio
+    async def test_restart_bot_success(self, bot_lifecycle, mock_database_service):
+        """Test successful bot restart."""
+        bot_id = "test_bot_001"
+        mock_database_service.get_bot.return_value = {
+            "bot_id": bot_id,
+            "state": BotState.RUNNING,
+        }
+
+        with patch.object(bot_lifecycle, "stop_bot") as mock_stop:
+            with patch.object(bot_lifecycle, "start_bot") as mock_start:
+                mock_stop.return_value = {"success": True}
+                mock_start.return_value = {"success": True}
+
+                result = await bot_lifecycle.restart_bot(bot_id)
+
+                assert result["success"] is True
+                assert result["restarted"] is True
+                mock_stop.assert_called_once_with(bot_id, graceful=True)
+                mock_start.assert_called_once_with(bot_id)
+
+    @pytest.mark.asyncio
+    async def test_restart_bot_with_config_update(
+        self, bot_lifecycle, mock_database_service, sample_bot_config
+    ):
+        """Test bot restart with configuration update."""
+        bot_id = "test_bot_001"
+        mock_database_service.get_bot.return_value = {
+            "bot_id": bot_id,
+            "state": BotState.RUNNING,
+        }
+
+        with patch.object(bot_lifecycle, "stop_bot") as mock_stop:
+            with patch.object(bot_lifecycle, "update_bot_config") as mock_update:
+                with patch.object(bot_lifecycle, "start_bot") as mock_start:
+                    mock_stop.return_value = {"success": True}
+                    mock_update.return_value = {"success": True}
+                    mock_start.return_value = {"success": True}
+
+                    result = await bot_lifecycle.restart_bot(
+                        bot_id, new_config=sample_bot_config
+                    )
+
+                    assert result["success"] is True
+                    mock_update.assert_called_once_with(bot_id, sample_bot_config)
+
+    @pytest.mark.asyncio
+    async def test_restart_bot_failure_rollback(self, bot_lifecycle, mock_database_service):
+        """Test bot restart failure with rollback."""
+        bot_id = "test_bot_001"
+        mock_database_service.get_bot.return_value = {
+            "bot_id": bot_id,
+            "state": BotState.RUNNING,
+        }
+
+        with patch.object(bot_lifecycle, "stop_bot") as mock_stop:
+            with patch.object(bot_lifecycle, "start_bot") as mock_start:
+                mock_stop.return_value = {"success": True}
+                mock_start.side_effect = ServiceError("Start failed")
+
+                with pytest.raises(ServiceError):
+                    await bot_lifecycle.restart_bot(bot_id)
+
+
+class TestLifecyclePhases:
+    """Test lifecycle phase management."""
+
+    @pytest.mark.asyncio
+    async def test_register_lifecycle_phase(self, bot_lifecycle):
+        """Test registering a custom lifecycle phase."""
+        phase = BotLifecyclePhase(
+            name="custom_phase",
+            description="Custom lifecycle phase",
+            required_state=BotState.INITIALIZED,
+            next_state=BotState.RUNNING,
+        )
+
+        bot_lifecycle.register_lifecycle_phase(phase)
+
+        assert "custom_phase" in bot_lifecycle._lifecycle_phases
+        assert bot_lifecycle._lifecycle_phases["custom_phase"] == phase
+
+    @pytest.mark.asyncio
+    async def test_execute_lifecycle_phase(self, bot_lifecycle, mock_database_service):
+        """Test executing a lifecycle phase."""
+        bot_id = "test_bot_001"
+        phase = BotLifecyclePhase(
+            name="test_phase",
+            description="Test phase",
+            required_state=BotState.INITIALIZED,
+            next_state=BotState.RUNNING,
+            execute=AsyncMock(return_value={"success": True}),
+        )
+
+        bot_lifecycle.register_lifecycle_phase(phase)
+        mock_database_service.get_bot.return_value = {
+            "bot_id": bot_id,
+            "state": BotState.INITIALIZED,
+        }
+
+        result = await bot_lifecycle.execute_phase(bot_id, "test_phase")
+
+        assert result["success"] is True
+        phase.execute.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_execute_invalid_phase(self, bot_lifecycle):
+        """Test executing an invalid lifecycle phase."""
+        with pytest.raises(ConfigurationError):
+            await bot_lifecycle.execute_phase("bot_id", "non_existent_phase")
+
+
+class TestDeploymentStrategies:
+    """Test deployment strategy management."""
+
+    def test_register_deployment_strategy(self, bot_lifecycle):
+        """Test registering a deployment strategy."""
+        strategy = BotDeploymentStrategy.BLUE_GREEN
+
+        def blue_green_deploy(bot_id):
+            return {"deployed": True}
+
+        bot_lifecycle.register_deployment_strategy(strategy, blue_green_deploy)
+
+        assert strategy in bot_lifecycle._deployment_strategies
+        assert bot_lifecycle._deployment_strategies[strategy] == blue_green_deploy
+
+    @pytest.mark.asyncio
+    async def test_deploy_with_strategy(self, bot_lifecycle, mock_database_service):
+        """Test deploying bot with specific strategy."""
+        bot_id = "test_bot_001"
+        strategy = BotDeploymentStrategy.CANARY
+
+        async def canary_deploy(bot_id):
+            return {"deployed": True, "strategy": "canary"}
+
+        bot_lifecycle.register_deployment_strategy(strategy, canary_deploy)
+        mock_database_service.get_bot.return_value = {"bot_id": bot_id}
+
+        result = await bot_lifecycle.deploy_bot(bot_id, strategy=strategy)
+
+        assert result["deployed"] is True
+        assert result["strategy"] == "canary"
+
+
+class TestTemplateManagement:
+    """Test bot template management."""
+
+    def test_register_template(self, bot_lifecycle, sample_bot_template):
+        """Test registering a bot template."""
+        bot_lifecycle.register_template(sample_bot_template)
+
+        assert sample_bot_template.template_id in bot_lifecycle._templates
+        assert bot_lifecycle._templates[sample_bot_template.template_id] == sample_bot_template
+
+    def test_get_template(self, bot_lifecycle, sample_bot_template):
+        """Test retrieving a bot template."""
+        bot_lifecycle.register_template(sample_bot_template)
+
+        template = bot_lifecycle.get_template(sample_bot_template.template_id)
+
+        assert template == sample_bot_template
+
+    def test_list_templates(self, bot_lifecycle):
+        """Test listing all templates."""
+        template1 = BotTemplate(
+            template_id="t1",
+            name="Template 1",
+            config=BotTemplateConfig(),
+        )
+        template2 = BotTemplate(
+            template_id="t2",
+            name="Template 2",
+            config=BotTemplateConfig(),
+        )
+
+        bot_lifecycle.register_template(template1)
+        bot_lifecycle.register_template(template2)
+
+        templates = bot_lifecycle.list_templates()
+
+        assert len(templates) == 2
+        assert "t1" in templates
+        assert "t2" in templates
+
+
+class TestHealthChecks:
+    """Test health check functionality."""
+
+    @pytest.mark.asyncio
+    async def test_check_bot_health_healthy(
+        self, bot_lifecycle, mock_database_service, mock_monitoring_service
+    ):
+        """Test health check for healthy bot."""
+        bot_id = "test_bot_001"
+        mock_database_service.get_bot.return_value = {
+            "bot_id": bot_id,
+            "state": BotState.RUNNING,
+        }
+        mock_monitoring_service.get_bot_health.return_value = BotHealthMetrics(
+            cpu_usage=45.0,
+            memory_usage=60.0,
+            error_rate=0.01,
+            response_time=0.5,
+            uptime=3600,
+            is_healthy=True,
+        )
+
+        health = await bot_lifecycle.check_bot_health(bot_id)
+
+        assert health.is_healthy is True
+        assert health.cpu_usage == 45.0
+        assert health.memory_usage == 60.0
+        mock_monitoring_service.get_bot_health.assert_called_once_with(bot_id)
+
+    @pytest.mark.asyncio
+    async def test_check_bot_health_unhealthy(
+        self, bot_lifecycle, mock_database_service, mock_monitoring_service
+    ):
+        """Test health check for unhealthy bot."""
+        bot_id = "test_bot_001"
+        mock_database_service.get_bot.return_value = {
+            "bot_id": bot_id,
+            "state": BotState.RUNNING,
+        }
+        mock_monitoring_service.get_bot_health.return_value = BotHealthMetrics(
+            cpu_usage=95.0,
+            memory_usage=90.0,
+            error_rate=0.15,
+            response_time=5.0,
+            uptime=3600,
+            is_healthy=False,
+        )
+
+        health = await bot_lifecycle.check_bot_health(bot_id)
+
+        assert health.is_healthy is False
+        assert health.cpu_usage == 95.0
+        assert health.error_rate == 0.15
+
+    @pytest.mark.asyncio
+    async def test_auto_recovery_on_unhealthy(
+        self, bot_lifecycle, mock_database_service, mock_monitoring_service
+    ):
+        """Test automatic recovery when bot is unhealthy."""
+        bot_id = "test_bot_001"
+        mock_database_service.get_bot.return_value = {
+            "bot_id": bot_id,
+            "state": BotState.RUNNING,
+        }
+        mock_monitoring_service.get_bot_health.return_value = BotHealthMetrics(
+            is_healthy=False
+        )
+
+        with patch.object(bot_lifecycle, "restart_bot") as mock_restart:
+            mock_restart.return_value = {"success": True}
+
+            await bot_lifecycle.check_and_recover_health(bot_id)
+
+            mock_restart.assert_called_once_with(bot_id)
+
+
+class TestCleanup:
+    """Test cleanup operations."""
+
+    @pytest.mark.asyncio
+    async def test_cleanup_bot_resources(
+        self, bot_lifecycle, mock_resource_service, mock_state_service
+    ):
+        """Test cleaning up bot resources."""
+        bot_id = "test_bot_001"
+
+        await bot_lifecycle.cleanup_bot_resources(bot_id)
+
+        mock_resource_service.release_resources.assert_called_once_with(bot_id)
+        mock_state_service.clear_bot_state.assert_called_once_with(bot_id)
+
+    @pytest.mark.asyncio
+    async def test_cleanup_all_bots(
+        self, bot_lifecycle, mock_database_service, mock_resource_service
+    ):
+        """Test cleaning up resources for all bots."""
+        mock_database_service.get_all_bots.return_value = [
+            {"bot_id": "bot1"},
+            {"bot_id": "bot2"},
+            {"bot_id": "bot3"},
+        ]
+
+        await bot_lifecycle.cleanup_all_resources()
+
+        assert mock_resource_service.release_resources.call_count == 3
+        calls = [call("bot1"), call("bot2"), call("bot3")]
+        mock_resource_service.release_resources.assert_has_calls(calls, any_order=True)
+
+    @pytest.mark.asyncio
+    async def test_emergency_shutdown(
+        self,
+        bot_lifecycle,
+        mock_database_service,
+        mock_coordination_service,
+        mock_monitoring_service,
+    ):
+        """Test emergency shutdown of all bots."""
+        mock_database_service.get_all_running_bots.return_value = [
+            {"bot_id": "bot1", "state": BotState.RUNNING},
+            {"bot_id": "bot2", "state": BotState.RUNNING},
+        ]
+
+        await bot_lifecycle.emergency_shutdown()
+
+        assert mock_coordination_service.coordinate_shutdown.call_count == 2
+        assert mock_monitoring_service.stop_monitoring.call_count == 2
+        mock_database_service.update_bot.assert_called()
+
+
+class TestEdgeCases:
+    """Test edge cases and error conditions."""
+
+    @pytest.mark.asyncio
+    async def test_concurrent_lifecycle_operations(self, bot_lifecycle, mock_database_service):
+        """Test handling concurrent lifecycle operations."""
+        bot_id = "test_bot_001"
+        mock_database_service.get_bot.return_value = {
+            "bot_id": bot_id,
+            "state": BotState.RUNNING,
+        }
+
+        # Simulate concurrent stop operations
+        with patch.object(bot_lifecycle, "_lifecycle_locks", {bot_id: asyncio.Lock()}):
+            async def concurrent_stop():
+                return await bot_lifecycle.stop_bot(bot_id)
+
+            results = await asyncio.gather(
+                concurrent_stop(),
+                concurrent_stop(),
+                return_exceptions=True,
+            )
+
+            # One should succeed, one should get lock error
+            success_count = sum(1 for r in results if isinstance(r, dict) and r.get("success"))
+            assert success_count >= 1
+
+    @pytest.mark.asyncio
+    async def test_lifecycle_transition_validation(self, bot_lifecycle, mock_database_service):
+        """Test lifecycle state transition validation."""
+        bot_id = "test_bot_001"
+
+        # Invalid transition: CREATED -> RUNNING (should go through INITIALIZED)
+        mock_database_service.get_bot.return_value = {
+            "bot_id": bot_id,
+            "state": BotState.CREATED,
+        }
+
+        with pytest.raises(StateError):
+            await bot_lifecycle.start_bot(bot_id)
+
+    @pytest.mark.asyncio
+    async def test_resource_cleanup_on_failure(
+        self,
+        bot_lifecycle,
+        mock_database_service,
+        mock_resource_service,
+        mock_coordination_service,
+    ):
+        """Test resource cleanup when operations fail."""
+        bot_id = "test_bot_001"
+        mock_database_service.get_bot.return_value = {
+            "bot_id": bot_id,
+            "state": BotState.INITIALIZED,
+        }
+        mock_resource_service.allocate_resources.return_value = True
+        mock_coordination_service.coordinate_startup.side_effect = ServiceError("Startup failed")
+
+        with pytest.raises(ServiceError):
+            await bot_lifecycle.start_bot(bot_id)
+
+        # Resources should be released on failure
+        mock_resource_service.release_resources.assert_called_once_with(bot_id)
+
+    @pytest.mark.asyncio
+    async def test_state_recovery_after_crash(
+        self, bot_lifecycle, mock_database_service, mock_state_service
+    ):
+        """Test state recovery after system crash."""
+        bot_id = "test_bot_001"
+        mock_database_service.get_bot.return_value = {
+            "bot_id": bot_id,
+            "state": BotState.UNKNOWN,
+        }
+        mock_state_service.get_bot_state.return_value = {
+            "last_known_state": BotState.RUNNING,
+            "timestamp": datetime.utcnow() - timedelta(minutes=5),
+        }
+
+        result = await bot_lifecycle.recover_bot_state(bot_id)
+
+        assert result["recovered"] is True
+        assert result["state"] == BotState.RUNNING
+        mock_state_service.update_bot_state.assert_called()

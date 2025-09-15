@@ -1,0 +1,90 @@
+"""
+Simple test for simplified BotService to verify basic functionality.
+"""
+
+import pytest
+from unittest.mock import MagicMock
+
+from src.bot_management.service import BotService
+from src.core.exceptions import ServiceError
+
+
+class TestSimplifiedBotService:
+    """Test simplified bot service functionality."""
+
+    def test_bot_service_init_with_required_dependencies(self):
+        """Test service initialization with required dependencies."""
+        # Create mock services
+        exchange_service = MagicMock()
+        capital_service = MagicMock()
+
+        # Create service with required dependencies
+        service = BotService(
+            exchange_service=exchange_service,
+            capital_service=capital_service
+        )
+
+        assert service._name == "BotService"
+        assert service._exchange_service == exchange_service
+        assert service._capital_service == capital_service
+
+    def test_bot_service_init_missing_exchange_service(self):
+        """Test service initialization fails without exchange service."""
+        capital_service = MagicMock()
+
+        with pytest.raises(ServiceError, match="ExchangeService is required"):
+            BotService(
+                exchange_service=None,
+                capital_service=capital_service
+            )
+
+    def test_bot_service_init_missing_capital_service(self):
+        """Test service initialization fails without capital service."""
+        exchange_service = MagicMock()
+
+        with pytest.raises(ServiceError, match="CapitalService is required"):
+            BotService(
+                exchange_service=exchange_service,
+                capital_service=None
+            )
+
+    def test_bot_service_init_with_optional_dependencies(self):
+        """Test service initialization with optional dependencies."""
+        # Create mock services
+        exchange_service = MagicMock()
+        capital_service = MagicMock()
+        execution_service = MagicMock()
+        risk_service = MagicMock()
+
+        # Create service with optional dependencies
+        service = BotService(
+            exchange_service=exchange_service,
+            capital_service=capital_service,
+            execution_service=execution_service,
+            risk_service=risk_service
+        )
+
+        assert service._execution_service == execution_service
+        assert service._risk_service == risk_service
+
+    def test_bot_service_init_with_repositories(self):
+        """Test service initialization with repository dependencies."""
+        # Create mock services and repositories
+        exchange_service = MagicMock()
+        capital_service = MagicMock()
+        bot_repository = MagicMock()
+        bot_instance_repository = MagicMock()
+        bot_metrics_repository = MagicMock()
+
+        # Create service with repositories
+        service = BotService(
+            exchange_service=exchange_service,
+            capital_service=capital_service,
+            bot_repository=bot_repository,
+            bot_instance_repository=bot_instance_repository,
+            bot_metrics_repository=bot_metrics_repository
+        )
+
+        assert service._bot_repository == bot_repository
+        assert service._bot_instance_repository == bot_instance_repository
+        assert service._bot_metrics_repository == bot_metrics_repository
