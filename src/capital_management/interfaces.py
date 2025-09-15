@@ -1,37 +1,36 @@
 """
-Capital Management Service Interfaces
+Capital Management Service Interfaces.
 
-This module defines the abstract protocols and interfaces for all capital management
-services to ensure proper service layer architecture and contract enforcement.
-
-All interfaces are infrastructure-agnostic and focus on business operations,
-not implementation details like databases or external APIs.
-
-Version: 2.0.0 - Production Ready
-Author: Trading Bot Framework
+Simple interfaces for capital management services.
 """
 
 from abc import ABC, abstractmethod
 from decimal import Decimal
 from typing import Any, Protocol
 
+from src.capital_management.constants import DEFAULT_BASE_CURRENCY, DEFAULT_EXCHANGE
+from src.core.types import CapitalAllocation, CapitalMetrics
 from src.core.types.capital import (
     CapitalCurrencyExposure,
     CapitalExchangeAllocation,
     CapitalFundFlow,
 )
-from src.core.types.risk import CapitalAllocation, CapitalMetrics
 
 
-# Infrastructure-agnostic repository protocols
+# Repository protocols
 class CapitalRepositoryProtocol(Protocol):
     """Protocol for capital allocation repository operations."""
 
     async def create(self, allocation_data: dict[str, Any]) -> Any: ...
+
     async def update(self, allocation_data: dict[str, Any]) -> Any: ...
+
     async def delete(self, allocation_id: str) -> bool: ...
+
     async def get_by_strategy_exchange(self, strategy_id: str, exchange: str) -> Any | None: ...
+
     async def get_by_strategy(self, strategy_id: str) -> list[Any]: ...
+
     async def get_all(self, limit: int | None = None) -> list[Any]: ...
 
 
@@ -41,17 +40,7 @@ class AuditRepositoryProtocol(Protocol):
     async def create(self, audit_data: dict[str, Any]) -> Any: ...
 
 
-class ExchangeDataServiceProtocol(Protocol):
-    """Protocol for exchange data service operations."""
-
-    async def get_tickers(self) -> dict[str, Any]: ...
-    async def get_order_book(
-        self, exchange: str, symbol: str, limit: int = 50
-    ) -> dict[str, Any]: ...
-    async def get_status(self, exchange: str) -> dict[str, Any]: ...
-    async def get_fees(self, exchange: str) -> dict[str, Any]: ...
-
-
+# Service protocols
 class CapitalServiceProtocol(Protocol):
     """Protocol for capital management service operations."""
 
@@ -59,27 +48,23 @@ class CapitalServiceProtocol(Protocol):
         self,
         strategy_id: str,
         exchange: str,
-        requested_amount: Decimal,
-        bot_id: str | None = None,
+        amount: Decimal,
+        min_allocation: Decimal | None = None,
+        max_allocation: Decimal | None = None,
+        target_allocation_pct: Decimal | None = None,
         authorized_by: str | None = None,
-        risk_context: dict[str, Any] | None = None,
     ) -> CapitalAllocation:
-        """Allocate capital to a strategy with full audit trail.
-
-        This is a pure business operation that should not depend on
-        specific database implementations or external APIs.
-        """
+        """Allocate capital to a strategy."""
         ...
 
     async def release_capital(
         self,
         strategy_id: str,
         exchange: str,
-        release_amount: Decimal,
-        bot_id: str | None = None,
+        amount: Decimal,
         authorized_by: str | None = None,
     ) -> bool:
-        """Release allocated capital with full audit trail."""
+        """Release allocated capital."""
         ...
 
     async def update_utilization(
@@ -87,7 +72,7 @@ class CapitalServiceProtocol(Protocol):
         strategy_id: str,
         exchange: str,
         utilized_amount: Decimal,
-        bot_id: str | None = None,
+        authorized_by: str | None = None,
     ) -> bool:
         """Update capital utilization for a strategy."""
         ...
@@ -100,6 +85,38 @@ class CapitalServiceProtocol(Protocol):
         """Get all capital allocations for a specific strategy."""
         ...
 
+    async def get_all_allocations(self, limit: int | None = None) -> list[CapitalAllocation]:
+        """Get all capital allocations across all strategies."""
+        ...
+
+
+class CapitalAllocatorProtocol(Protocol):
+    """Protocol for capital allocator operations."""
+
+    async def allocate_capital(
+        self,
+        strategy_id: str,
+        exchange: str,
+        requested_amount: Decimal,
+        **kwargs,
+    ) -> CapitalAllocation:
+        """Allocate capital to a strategy."""
+        ...
+
+    async def release_capital(
+        self,
+        strategy_id: str,
+        exchange: str,
+        release_amount: Decimal,
+        **kwargs,
+    ) -> bool:
+        """Release allocated capital."""
+        ...
+
+    async def get_capital_metrics(self) -> CapitalMetrics:
+        """Get current capital metrics."""
+        ...
+
 
 class CurrencyManagementServiceProtocol(Protocol):
     """Protocol for currency management service operations."""
@@ -107,11 +124,7 @@ class CurrencyManagementServiceProtocol(Protocol):
     async def update_currency_exposures(
         self, balances: dict[str, dict[str, Decimal]]
     ) -> dict[str, CapitalCurrencyExposure]:
-        """Update currency exposures based on current balances.
-
-        This operation processes balance data and calculates exposures
-        without depending on specific exchange implementations.
-        """
+        """Update currency exposures based on current balances."""
         ...
 
     async def calculate_hedging_requirements(self) -> dict[str, Decimal]:
@@ -135,15 +148,11 @@ class ExchangeDistributionServiceProtocol(Protocol):
     async def distribute_capital(
         self, total_amount: Decimal
     ) -> dict[str, CapitalExchangeAllocation]:
-        """Distribute capital across exchanges based on optimization criteria.
-
-        This is a business logic operation that should work with exchange
-        abstractions, not specific exchange implementations.
-        """
+        """Distribute capital across exchanges."""
         ...
 
     async def rebalance_exchanges(self) -> dict[str, CapitalExchangeAllocation]:
-        """Rebalance capital across exchanges based on current metrics."""
+        """Rebalance capital across exchanges."""
         ...
 
     async def get_exchange_allocation(self, exchange: str) -> CapitalExchangeAllocation | None:
@@ -159,23 +168,22 @@ class FundFlowManagementServiceProtocol(Protocol):
     """Protocol for fund flow management service operations."""
 
     async def process_deposit(
-        self, amount: Decimal, currency: str = "USDT", exchange: str = "binance"
+        self,
+        amount: Decimal,
+        currency: str = DEFAULT_BASE_CURRENCY,
+        exchange: str = DEFAULT_EXCHANGE,
     ) -> CapitalFundFlow:
-        """Process a deposit request.
-
-        This operation handles deposit business logic including validation
-        and flow tracking without depending on specific infrastructure.
-        """
+        """Process a deposit request."""
         ...
 
     async def process_withdrawal(
         self,
         amount: Decimal,
-        currency: str = "USDT",
-        exchange: str = "binance",
+        currency: str = DEFAULT_BASE_CURRENCY,
+        exchange: str = DEFAULT_EXCHANGE,
         reason: str = "withdrawal",
     ) -> CapitalFundFlow:
-        """Process a withdrawal request with rule validation."""
+        """Process a withdrawal request."""
         ...
 
     async def process_strategy_reallocation(
@@ -189,9 +197,7 @@ class FundFlowManagementServiceProtocol(Protocol):
         ...
 
 
-# Abstract base classes for service implementations
-
-
+# Abstract base classes
 class AbstractCapitalService(ABC):
     """Abstract base class for capital service implementations."""
 
@@ -200,12 +206,13 @@ class AbstractCapitalService(ABC):
         self,
         strategy_id: str,
         exchange: str,
-        requested_amount: Decimal,
-        bot_id: str | None = None,
+        amount: Decimal,
+        min_allocation: Decimal | None = None,
+        max_allocation: Decimal | None = None,
+        target_allocation_pct: Decimal | None = None,
         authorized_by: str | None = None,
-        risk_context: dict[str, Any] | None = None,
     ) -> CapitalAllocation:
-        """Allocate capital to a strategy with full audit trail."""
+        """Allocate capital to a strategy."""
         pass
 
     @abstractmethod
@@ -213,16 +220,20 @@ class AbstractCapitalService(ABC):
         self,
         strategy_id: str,
         exchange: str,
-        release_amount: Decimal,
-        bot_id: str | None = None,
+        amount: Decimal,
         authorized_by: str | None = None,
     ) -> bool:
-        """Release allocated capital with full audit trail."""
+        """Release allocated capital."""
         pass
 
     @abstractmethod
     async def get_capital_metrics(self) -> CapitalMetrics:
         """Get current capital management metrics."""
+        pass
+
+    @abstractmethod
+    async def get_all_allocations(self, limit: int | None = None) -> list[CapitalAllocation]:
+        """Get all capital allocations."""
         pass
 
 
@@ -249,12 +260,12 @@ class AbstractExchangeDistributionService(ABC):
     async def distribute_capital(
         self, total_amount: Decimal
     ) -> dict[str, CapitalExchangeAllocation]:
-        """Distribute capital across exchanges based on optimization criteria."""
+        """Distribute capital across exchanges."""
         pass
 
     @abstractmethod
     async def rebalance_exchanges(self) -> dict[str, CapitalExchangeAllocation]:
-        """Rebalance capital across exchanges based on current metrics."""
+        """Rebalance capital across exchanges."""
         pass
 
 
@@ -263,7 +274,10 @@ class AbstractFundFlowManagementService(ABC):
 
     @abstractmethod
     async def process_deposit(
-        self, amount: Decimal, currency: str = "USDT", exchange: str = "binance"
+        self,
+        amount: Decimal,
+        currency: str = DEFAULT_BASE_CURRENCY,
+        exchange: str = DEFAULT_EXCHANGE,
     ) -> CapitalFundFlow:
         """Process a deposit request."""
         pass
@@ -272,9 +286,9 @@ class AbstractFundFlowManagementService(ABC):
     async def process_withdrawal(
         self,
         amount: Decimal,
-        currency: str = "USDT",
-        exchange: str = "binance",
+        currency: str = DEFAULT_BASE_CURRENCY,
+        exchange: str = DEFAULT_EXCHANGE,
         reason: str = "withdrawal",
     ) -> CapitalFundFlow:
-        """Process a withdrawal request with rule validation."""
+        """Process a withdrawal request."""
         pass

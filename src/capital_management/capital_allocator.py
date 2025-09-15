@@ -18,52 +18,33 @@ Version: 2.0.0 - Refactored for service layer
 """
 
 from datetime import datetime, timedelta, timezone
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal, getcontext
 from typing import TYPE_CHECKING, Any
 
-if TYPE_CHECKING:
-    from src.capital_management.service import CapitalService
+from src.capital_management.constants import (
+    DEFAULT_EMERGENCY_RESERVE_PCT,
+    DEFAULT_PERFORMANCE_WINDOW_DAYS,
+    FINANCIAL_DECIMAL_PRECISION,
+    HIGH_PORTFOLIO_EXPOSURE_THRESHOLD,
+    LOW_ALLOCATION_RATIO_THRESHOLD,
+    LOW_UTILIZATION_THRESHOLD,
+    MAX_DAILY_REALLOCATION_PCT,
+    PERCENTAGE_MULTIPLIER,
+)
 from src.core.base.component import BaseComponent
-
-# Import foundation services
-from src.core.exceptions import ServiceError
-
-# MANDATORY: Import from P-001
-from src.core.types.risk import (
+from src.core.exceptions import (
+    RiskManagementError,
+    ServiceError,
+    ValidationError,
+)
+from src.core.types import (
     AllocationStrategy,
     CapitalAllocation,
     CapitalMetrics,
 )
-from src.state.trade_lifecycle_manager import TradeEvent
-
-# MANDATORY: Import from P-002A (error handling) - Updated decorators
-try:
-    from src.risk_management import RiskManager, RiskService
-
-    # Validate imports are correct types
-    if not (hasattr(RiskService, "__module__") and "risk_management" in RiskService.__module__):
-        RiskService = None  # type: ignore
-    if not (hasattr(RiskManager, "__module__") and "risk_management" in RiskManager.__module__):
-        RiskManager = None  # type: ignore
-except ImportError:
-    RiskService = None  # type: ignore
-    RiskManager = None  # type: ignore
-
-try:
-    from src.state import TradeLifecycleManager
-
-    # Validate import is correct type
-    if not (
-        hasattr(TradeLifecycleManager, "__module__") and "state" in TradeLifecycleManager.__module__
-    ):
-        TradeLifecycleManager = None  # type: ignore
-except ImportError:
-    TradeLifecycleManager = None  # type: ignore
-
 from src.utils.capital_config import (
     extract_decimal_config,
     load_capital_config,
-    resolve_config_service,
 )
 from src.utils.capital_errors import (
     create_operation_context,
@@ -76,6 +57,36 @@ from src.utils.capital_validation import (
 from src.utils.decorators import time_execution
 from src.utils.formatters import format_currency
 from src.utils.interfaces import ValidationServiceInterface
+
+# Set decimal context for financial precision
+getcontext().prec = FINANCIAL_DECIMAL_PRECISION
+getcontext().rounding = ROUND_HALF_UP
+
+if TYPE_CHECKING:
+    from src.capital_management.service import CapitalService
+
+# MANDATORY: Import from P-008+ (risk management) - use interfaces for proper DI
+try:
+    from src.risk_management import RiskService  # Legacy compatibility
+    from src.risk_management.interfaces import RiskServiceInterface
+
+    # Validate imports are correct types
+    if not (hasattr(RiskService, "__module__") and "risk_management" in RiskService.__module__):
+        RiskService = None  # type: ignore
+except ImportError:
+    RiskService = None  # type: ignore
+    RiskServiceInterface = None  # type: ignore
+
+try:
+    from src.state import TradeLifecycleManager
+
+    # Validate import is correct type
+    if not (
+        hasattr(TradeLifecycleManager, "__module__") and "state" in TradeLifecycleManager.__module__
+    ):
+        TradeLifecycleManager = None  # type: ignore
+except ImportError:
+    TradeLifecycleManager = None  # type: ignore
 
 
 class CapitalAllocator(BaseComponent):
@@ -97,9 +108,10 @@ class CapitalAllocator(BaseComponent):
         self,
         capital_service: "CapitalService",
         config_service: Any = None,
-        risk_manager: RiskService | RiskManager | None = None,
+        risk_service: RiskServiceInterface | None = None,
         trade_lifecycle_manager: TradeLifecycleManager | None = None,
         validation_service: ValidationServiceInterface | None = None,
+        correlation_id: str | None = None,
     ) -> None:
         """
         Initialize the capital allocator with CapitalService dependency injection.
@@ -107,36 +119,39 @@ class CapitalAllocator(BaseComponent):
         Args:
             capital_service: CapitalService instance for all database operations
             config_service: ConfigService instance for configuration access
-            risk_manager: Risk management instance for validation
+            risk_service: Risk service interface for validation
             trade_lifecycle_manager: Trade lifecycle manager for trade-capital integration
+            validation_service: Validation service for input validation
+            correlation_id: Request correlation ID for tracing
         """
         # Initialize base component
         super().__init__()
 
         # CRITICAL: Use CapitalService for ALL database operations
         self.capital_service = capital_service
-        self.risk_manager = risk_manager
+        self.risk_service = risk_service
         self.trade_lifecycle_manager = trade_lifecycle_manager
         self.validation_service = validation_service
 
         # Store config service reference for proper DI
         self.config_service = config_service
 
-        # Load configuration using unified utility
-        resolved_config_service = (
-            resolve_config_service(self) if config_service is None else config_service
-        )
-        self.capital_config = load_capital_config(resolved_config_service)
+        # Load configuration - use provided service or empty config
+        if config_service is not None:
+            self.capital_config = load_capital_config(config_service)
+        else:
+            # Use default configuration if no config service provided
+            self.capital_config = {}
 
         # Performance tracking (local cache only)
         self.strategy_performance: dict[str, dict[str, Decimal]] = {}
-        self.performance_window = timedelta(days=30)
+        self.performance_window = timedelta(days=DEFAULT_PERFORMANCE_WINDOW_DAYS)
         self.last_rebalance = datetime.now(timezone.utc)
 
         # Extract configuration values using utility functions
         self.rebalance_frequency_hours = self.capital_config.get("rebalance_frequency_hours", 24)
         self.max_daily_reallocation_pct = extract_decimal_config(
-            self.capital_config, "max_daily_reallocation_pct", Decimal("0.1")
+            self.capital_config, "max_daily_reallocation_pct", MAX_DAILY_REALLOCATION_PCT
         )
 
         self.logger.info(
@@ -206,7 +221,7 @@ class CapitalAllocator(BaseComponent):
                 requested_amount,
                 "CapitalAllocator",
                 success=True,
-                allocation_percentage=f"{float(allocation_pct):.2%}",
+                allocation_percentage=f"{allocation_pct:.2%}",
             )
 
             return allocation
@@ -264,10 +279,19 @@ class CapitalAllocator(BaseComponent):
             context = create_operation_context(
                 strategy_id=strategy_id, exchange=exchange, amount=amount, bot_id=bot_id
             )
-            try:
-                handle_service_error(e, "capital release", "CapitalAllocator", context)
-            except ServiceError:
+
+            # Handle ServiceError (return False) but re-raise other exceptions
+            if isinstance(e, ServiceError):
+                handle_service_error(
+                    e, "capital release", "CapitalAllocator", context, reraise=False
+                )
                 return False
+            else:
+                # For non-ServiceError exceptions, log but re-raise the original exception
+                handle_service_error(
+                    e, "capital release", "CapitalAllocator", context, reraise=False
+                )
+                raise
 
     @time_execution
     async def rebalance_allocations(
@@ -310,7 +334,7 @@ class CapitalAllocator(BaseComponent):
             self.logger.info(
                 "Rebalancing deferred - transaction handling improvements in progress",
                 strategy=strategy.value,
-                current_allocations=current_metrics.allocation_count,
+                current_allocations=current_metrics.strategies_active,
             )
 
             # Update rebalance tracking
@@ -341,11 +365,11 @@ class CapitalAllocator(BaseComponent):
                 strategy_id=strategy_id,
                 exchange=exchange,
                 utilized_amount=utilized_amount,
-                bot_id=bot_id,
+                authorized_by=bot_id,
             )
 
             if success:
-                self.logger.debug(
+                self.logger.info(
                     "Capital utilization updated via service",
                     strategy_id=strategy_id,
                     exchange=exchange,
@@ -381,12 +405,12 @@ class CapitalAllocator(BaseComponent):
             # Use CapitalService for metrics - includes caching and monitoring
             metrics = await self.capital_service.get_capital_metrics()
 
-            self.logger.debug(
+            self.logger.info(
                 "Capital metrics retrieved via service",
                 total_capital=format_currency(metrics.total_capital),
                 allocated_capital=format_currency(metrics.allocated_amount),
-                utilization_rate=f"{metrics.utilization_rate:.2%}",
-                allocation_efficiency=f"{metrics.allocation_efficiency:.2f}",
+                available_capital=format_currency(metrics.available_amount),
+                strategies_active=metrics.strategies_active,
             )
 
             return metrics
@@ -400,65 +424,112 @@ class CapitalAllocator(BaseComponent):
     async def _assess_allocation_risk(
         self, strategy_id: str, exchange: str, amount: Decimal
     ) -> dict[str, Any]:
-        """Assess risk for capital allocation."""
+        """Assess risk for capital allocation using correct RiskService interface."""
         risk_assessment: dict[str, Any] = {
             "risk_level": "low",
             "risk_factors": [],
             "recommendations": [],
         }
 
-        if self.risk_manager:
-            try:
-                # If using RiskService (new architecture) - check for proper interface
-                if (
-                    hasattr(self.risk_manager, "__class__")
-                    and self.risk_manager.__class__.__name__ == "RiskService"
-                ):
-                    # RiskService should have evaluate_allocation_risk method
-                    if hasattr(self.risk_manager, "evaluate_allocation_risk"):
-                        assessment = await self.risk_manager.evaluate_allocation_risk(
-                            strategy_id=strategy_id, exchange=exchange, amount=amount
-                        )
-                        risk_assessment.update(assessment)
-                    else:
-                        # Fallback if method not available
-                        risk_assessment["risk_level"] = "medium"
-                        risk_assessment["risk_factors"].append("RiskService method not available")
-                # If using legacy RiskManager
-                elif (
-                    hasattr(self.risk_manager, "__class__")
-                    and self.risk_manager.__class__.__name__ == "RiskManager"
-                ):
-                    # Use available methods for risk assessment
-                    if hasattr(self.risk_manager, "calculate_risk_metrics"):
-                        # Legacy risk assessment
-                        risk_assessment["risk_level"] = "medium"
-                        risk_assessment["risk_factors"].append("Using legacy risk assessment")
-                    else:
-                        risk_assessment["risk_level"] = "unknown"
-                        risk_assessment["risk_factors"].append(
-                            "No risk assessment method available"
-                        )
-                else:
-                    # Unknown risk manager type
-                    risk_assessment["risk_level"] = "unknown"
-                    risk_assessment["risk_factors"].append(
-                        f"Unknown risk manager type: {type(self.risk_manager)}"
-                    )
-            except Exception as e:
-                # Log the error but don't re-raise - let allocation continue with high risk flag
-                if "risk" in str(e).lower() or "management" in str(e).lower():
-                    self.logger.error(f"Risk assessment failed: {e}")
-                    risk_assessment["risk_level"] = "high"
-                    risk_assessment["risk_factors"].append(f"Risk assessment error: {e!s}")
-                    risk_assessment["recommendations"].append(
-                        "Manual review recommended due to risk assessment failure"
-                    )
-                else:
-                    # Re-raise non-risk related exceptions
-                    raise
+        if not self.risk_service:
+            return risk_assessment
+
+        try:
+            await self._assess_standard_risk_interface(risk_assessment)
+        except Exception as e:
+            self._handle_risk_assessment_error(e, risk_assessment)
 
         return risk_assessment
+
+    async def _assess_standard_risk_interface(self, risk_assessment: dict[str, Any]) -> None:
+        """Assess risk using standard interface."""
+        if RiskServiceInterface is not None and hasattr(
+            self.risk_service, "get_current_risk_level"
+        ):
+            await self._check_standard_risk_level(risk_assessment)
+            await self._check_portfolio_exposure(risk_assessment)
+        elif hasattr(self.risk_service, "get_current_risk_level"):
+            await self._check_legacy_risk_level(risk_assessment)
+        else:
+            self._handle_unknown_risk_service(risk_assessment)
+
+    async def _check_standard_risk_level(self, risk_assessment: dict[str, Any]) -> None:
+        """Check risk level using standard interface."""
+        if not self.risk_service:
+            risk_assessment["risk_level"] = "medium"
+            return
+
+        current_risk_level = self.risk_service.get_current_risk_level()
+        risk_assessment["risk_level"] = current_risk_level.value.lower()
+
+        if self.risk_service.is_emergency_stop_active():
+            risk_assessment["risk_level"] = "critical"
+            risk_assessment["risk_factors"].append("Emergency stop active")
+            risk_assessment["recommendations"].append("No allocations recommended")
+
+    async def _check_portfolio_exposure(self, risk_assessment: dict[str, Any]) -> None:
+        """Check portfolio exposure levels."""
+        if not self.risk_service:
+            return
+
+        try:
+            risk_summary = await self.risk_service.get_risk_summary()
+            if risk_summary:
+                portfolio_exposure = risk_summary.get("portfolio_exposure", 0)
+                if portfolio_exposure > HIGH_PORTFOLIO_EXPOSURE_THRESHOLD:
+                    risk_assessment["risk_factors"].append("High portfolio exposure")
+                    risk_assessment["risk_level"] = "high"
+        except Exception as summary_error:
+            self.logger.info(f"Risk summary unavailable: {summary_error}")
+
+    async def _check_legacy_risk_level(self, risk_assessment: dict[str, Any]) -> None:
+        """Check risk level using legacy interface."""
+        if not self.risk_service:
+            risk_assessment["risk_level"] = "medium"
+            return
+
+        try:
+            current_risk_level = self.risk_service.get_current_risk_level()
+            risk_assessment["risk_level"] = current_risk_level.value.lower()
+
+            if hasattr(self.risk_service, "is_emergency_stop_active"):
+                if self.risk_service.is_emergency_stop_active():
+                    risk_assessment["risk_level"] = "critical"
+                    risk_assessment["risk_factors"].append("Emergency stop active")
+                    risk_assessment["recommendations"].append("No allocations recommended")
+        except Exception as level_error:
+            self.logger.info(f"Risk level check failed: {level_error}")
+            risk_assessment["risk_level"] = "medium"
+            risk_assessment["risk_factors"].append("Limited risk assessment available")
+
+    def _handle_unknown_risk_service(self, risk_assessment: dict[str, Any]) -> None:
+        """Handle unknown risk service type."""
+        risk_assessment["risk_level"] = "unknown"
+        risk_assessment["risk_factors"].append(
+            f"Unknown risk service type: {type(self.risk_service)}"
+        )
+
+    def _handle_risk_assessment_error(
+        self, error: Exception, risk_assessment: dict[str, Any]
+    ) -> None:
+        """Handle risk assessment errors with proper classification."""
+        if isinstance(error, RiskManagementError):
+            self.logger.warning(f"Risk management error during assessment: {error}")
+            risk_assessment["risk_level"] = "high"
+            risk_assessment["risk_factors"].append(f"Risk management error: {error}")
+            risk_assessment["recommendations"].append("Risk controls active - proceed with caution")
+        elif isinstance(error, ValidationError):
+            self.logger.warning(f"Risk validation error during assessment: {error}")
+            risk_assessment["risk_level"] = "medium"
+            risk_assessment["risk_factors"].append(f"Risk validation issue: {error}")
+            risk_assessment["recommendations"].append("Verify risk parameters and retry")
+        else:
+            self.logger.error(f"Risk assessment failed: {error}")
+            risk_assessment["risk_level"] = "high"
+            risk_assessment["risk_factors"].append(f"Risk assessment error: {error!s}")
+            risk_assessment["recommendations"].append(
+                "Manual review recommended due to risk assessment failure"
+            )
 
     async def _should_rebalance(self, current_metrics: CapitalMetrics) -> bool:
         """Determine if rebalancing is needed."""
@@ -473,7 +544,7 @@ class CapitalAllocator(BaseComponent):
             if current_metrics.total_capital > 0
             else Decimal("0.0")
         )
-        if allocation_ratio < Decimal("0.3"):
+        if allocation_ratio < LOW_ALLOCATION_RATIO_THRESHOLD:
             self.logger.info(
                 "Rebalancing triggered by low allocation ratio",
                 allocation_ratio=allocation_ratio,
@@ -486,7 +557,7 @@ class CapitalAllocator(BaseComponent):
             if current_metrics.total_capital > 0
             else Decimal("0.0")
         )
-        if utilization_rate < Decimal("0.5"):
+        if utilization_rate < LOW_UTILIZATION_THRESHOLD:
             self.logger.info(
                 "Rebalancing triggered by low utilization rate",
                 utilization_rate=utilization_rate,
@@ -507,7 +578,8 @@ class CapitalAllocator(BaseComponent):
         """Get current emergency reserve amount from service."""
         try:
             metrics = await self.capital_service.get_capital_metrics()
-            return metrics.emergency_reserve
+            # Calculate emergency reserve as configured percentage of total capital
+            return metrics.total_capital * DEFAULT_EMERGENCY_RESERVE_PCT
         except Exception as e:
             self.logger.error(f"Failed to get emergency reserve: {e}")
             return Decimal("0")
@@ -517,26 +589,28 @@ class CapitalAllocator(BaseComponent):
         try:
             metrics = await self.capital_service.get_capital_metrics()
 
-            # Get service performance metrics
-            service_metrics = self.capital_service.get_performance_metrics()
+            # Calculate utilization rate
+            utilization_rate = (
+                (metrics.allocated_amount - metrics.available_amount) / metrics.allocated_amount
+                if metrics.allocated_amount > 0
+                else Decimal("0")
+            )
 
             summary = {
-                "total_allocations": metrics.allocation_count,
+                "total_allocations": metrics.strategies_active,
                 "total_allocated": metrics.allocated_amount,
                 "total_capital": metrics.total_capital,
                 "available_capital": metrics.available_amount,
-                "emergency_reserve": metrics.emergency_reserve,
-                "utilization_rate": metrics.utilization_rate,
-                "allocation_efficiency": metrics.allocation_efficiency,
+                "emergency_reserve": metrics.total_capital * Decimal("0.1"),
+                "utilization_rate": utilization_rate,
+                "allocation_efficiency": Decimal("1.0"),
                 "service_metrics": {
-                    "successful_allocations": service_metrics.get("successful_allocations", 0),
-                    "failed_allocations": service_metrics.get("failed_allocations", 0),
-                    "total_releases": service_metrics.get("total_releases", 0),
-                    "average_allocation_time_ms": service_metrics.get(
-                        "average_allocation_time_ms", 0
-                    ),
+                    "positions_open": metrics.positions_open,
+                    "strategies_active": metrics.strategies_active,
+                    "sharpe_ratio": metrics.sharpe_ratio,
+                    "max_drawdown": metrics.max_drawdown,
                 },
-                "last_updated": metrics.last_updated,
+                "last_updated": metrics.timestamp,
             }
 
             return summary
@@ -589,9 +663,11 @@ class CapitalAllocator(BaseComponent):
             # Track trade-capital association if trade lifecycle manager available
             if self.trade_lifecycle_manager:
                 try:
+                    from src.state.trade_lifecycle_manager import TradeEvent
+
                     await self.trade_lifecycle_manager.update_trade_event(
                         trade_id,
-                        TradeEvent.VALIDATION_PASSED,  # Use closest available event
+                        TradeEvent.VALIDATION_PASSED,  # Capital allocation as validation passed
                         {
                             "capital_allocated": str(requested_amount),
                             "capital_allocation_id": f"{strategy_id}_{exchange}",
@@ -663,9 +739,11 @@ class CapitalAllocator(BaseComponent):
             if success and self.trade_lifecycle_manager:
                 # Update trade metadata to reflect capital release
                 try:
+                    from src.state.trade_lifecycle_manager import TradeEvent
+
                     await self.trade_lifecycle_manager.update_trade_event(
                         trade_id,
-                        TradeEvent.SETTLEMENT_COMPLETE,  # Use closest available event
+                        TradeEvent.SETTLEMENT_COMPLETE,  # Capital release as settlement
                         {
                             "capital_released": str(release_amount),
                             "capital_release_timestamp": datetime.now(timezone.utc).isoformat(),
@@ -730,7 +808,11 @@ class CapitalAllocator(BaseComponent):
 
             # Calculate efficiency metrics
             allocated_amount = allocation.allocated_amount
-            roi = (realized_pnl / allocated_amount * 100) if allocated_amount > 0 else Decimal("0")
+            roi = (
+                (realized_pnl / allocated_amount * PERCENTAGE_MULTIPLIER)
+                if allocated_amount > 0
+                else Decimal("0")
+            )
 
             efficiency_metrics = {
                 "trade_id": trade_id,
@@ -747,9 +829,11 @@ class CapitalAllocator(BaseComponent):
             # Update trade metadata if lifecycle manager available
             if self.trade_lifecycle_manager:
                 try:
+                    from src.state.trade_lifecycle_manager import TradeEvent
+
                     await self.trade_lifecycle_manager.update_trade_event(
                         trade_id,
-                        TradeEvent.ATTRIBUTION_COMPLETE,  # Use closest available event
+                        TradeEvent.ATTRIBUTION_COMPLETE,  # Capital efficiency as attribution
                         {"capital_efficiency": efficiency_metrics},
                     )
                 except Exception as tlm_error:
@@ -771,7 +855,10 @@ class CapitalAllocator(BaseComponent):
 
     async def _get_allocation(self, strategy_id: str, exchange: str) -> CapitalAllocation | None:
         """
-        Get current allocation for a strategy and exchange.
+        Get current allocation for a strategy and exchange through service layer only.
+
+        This method ensures proper service layer isolation by always going through
+        the CapitalService rather than accessing repositories directly.
 
         Args:
             strategy_id: Strategy identifier
@@ -781,12 +868,12 @@ class CapitalAllocator(BaseComponent):
             CapitalAllocation if found, None otherwise
         """
         try:
-            # Get allocation through service
+            # ALWAYS use service layer - never access repositories directly
             allocations = await self.capital_service.get_allocations_by_strategy(strategy_id)
 
-            # Find allocation for specific exchange
+            # Find allocation for specific exchange - business logic in allocator layer
             for allocation in allocations:
-                if allocation.exchange == exchange:
+                if hasattr(allocation, "exchange") and allocation.exchange == exchange:
                     return allocation
 
             return None

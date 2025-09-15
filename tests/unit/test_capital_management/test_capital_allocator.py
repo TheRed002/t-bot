@@ -212,15 +212,15 @@ class TestCapitalAllocator:
             strategy_id=strategy_name,
             exchange=exchange_name,
             utilized_amount=utilized_amount,
-            bot_id=None,
+            authorized_by=None,
         )
 
     @pytest.mark.asyncio
     async def test_get_emergency_reserve(self, capital_allocator, mock_capital_service):
         """Test getting emergency reserve."""
-        # Create mock metrics with emergency reserve (proper type)
+        # Create mock metrics with total capital for 10% emergency reserve calculation
         mock_metrics = Mock()
-        mock_metrics.emergency_reserve = Decimal("10000")  # Field expected by implementation
+        mock_metrics.total_capital = Decimal("100000")  # 10% = 10000
         mock_capital_service.get_capital_metrics.return_value = mock_metrics
 
         result = await capital_allocator.get_emergency_reserve()
@@ -236,11 +236,14 @@ class TestCapitalAllocator:
         mock_metrics.total_capital = Decimal("100000")
         mock_metrics.allocated_amount = Decimal("45000")
         mock_metrics.available_amount = Decimal("45000")
-        mock_metrics.allocation_count = 3
+        mock_metrics.strategies_active = 3
         mock_metrics.emergency_reserve = Decimal("10000")
         mock_metrics.utilization_rate = Decimal("0.45")
         mock_metrics.allocation_efficiency = Decimal("0.85")
-        mock_metrics.last_updated = datetime.now(timezone.utc)  # Add required field
+        mock_metrics.positions_open = 5
+        mock_metrics.sharpe_ratio = Decimal("1.2")
+        mock_metrics.max_drawdown = Decimal("0.15")
+        mock_metrics.timestamp = datetime.now(timezone.utc)
         mock_capital_service.get_capital_metrics.return_value = mock_metrics
 
         # Mock performance metrics
@@ -647,7 +650,7 @@ class TestCapitalAllocator:
             strategy_id="test_strategy",
             exchange="binance",
             utilized_amount=Decimal("0"),
-            bot_id=None,
+            authorized_by=None,
         )
 
     @pytest.mark.asyncio

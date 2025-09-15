@@ -54,7 +54,7 @@ class TestCurrencyManager:
         """Create currency manager instance."""
         # Create mock exchange data service
         mock_exchange_data_service = Mock()
-        mock_exchange_data_service.get_tickers.return_value = {}
+        mock_exchange_data_service.get_tickers = AsyncMock(return_value={})
 
         # Create mock validation service
         mock_validation_service = Mock()
@@ -834,10 +834,10 @@ class TestCurrencyManager:
         """Test exchange rate updates."""
         # Mock exchange data service
         currency_manager.exchange_data_service = Mock()
-        currency_manager.exchange_data_service.fetch_tickers.return_value = {
+        currency_manager.exchange_data_service.fetch_tickers = AsyncMock(return_value={
             "BTC/USDT": {"last": 40000.0},
             "ETH/USDT": {"last": 2000.0},
-        }
+        })
 
         await currency_manager._update_exchange_rates()
 

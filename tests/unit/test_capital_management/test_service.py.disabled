@@ -22,7 +22,7 @@ logging.getLogger().setLevel(logging.CRITICAL)
 
 from src.capital_management.service import CapitalService
 from src.core.base.interfaces import HealthStatus
-from src.core.exceptions import DependencyError, ServiceError, ValidationError
+from src.core.exceptions import CapitalAllocationError, DependencyError, ServiceError, ValidationError
 from src.core.types.risk import CapitalAllocation, CapitalMetrics
 from src.state import StateService
 
@@ -75,12 +75,11 @@ def reset_mocks(mock_capital_repository, mock_audit_repository):
 
 
 @pytest.fixture
-def capital_service(mock_capital_repository, mock_audit_repository, mock_state_service):
+def capital_service(mock_capital_repository, mock_audit_repository):
     """Create CapitalService instance for testing."""
     return CapitalService(
         capital_repository=mock_capital_repository,
         audit_repository=mock_audit_repository,
-        state_service=mock_state_service,
         correlation_id="test-correlation-123",
     )
 
@@ -109,21 +108,19 @@ class TestCapitalServiceInitialization:
     """Test CapitalService initialization and configuration."""
 
     def test_init_with_all_dependencies(
-        self, mock_capital_repository, mock_audit_repository, mock_state_service
+        self, mock_capital_repository, mock_audit_repository
     ):
         """Test successful initialization with all dependencies."""
         # Act
         service = CapitalService(
             capital_repository=mock_capital_repository,
             audit_repository=mock_audit_repository,
-            state_service=mock_state_service,
             correlation_id="test-123",
         )
 
         # Assert
         assert service._capital_repository == mock_capital_repository
         assert service._audit_repository == mock_audit_repository
-        assert service.state_service == mock_state_service
         assert service._correlation_id == "test-123"
         assert service.total_capital == Decimal("100000")  # Default value
         assert service.emergency_reserve_pct == Decimal("0.1")
@@ -140,19 +137,11 @@ class TestCapitalServiceInitialization:
         assert service.state_service is None
         assert service.total_capital == Decimal("100000")
 
-    def test_init_performance_metrics_initialized(self, capital_service):
-        """Test that performance metrics are properly initialized."""
+    def test_init_allocations_count_initialized(self, capital_service):
+        """Test that allocations count is properly initialized."""
         # Assert
-        metrics = capital_service._performance_metrics
-        assert metrics["total_allocations"] == 0
-        assert metrics["successful_allocations"] == 0
-        assert metrics["failed_allocations"] == 0
-        assert metrics["total_releases"] == 0
-        assert metrics["total_rebalances"] == 0
-        assert metrics["average_allocation_time_ms"] == 0.0
-        assert metrics["total_capital_managed"] == Decimal("100000")
-        assert metrics["emergency_reserve_maintained"] is True
-        assert metrics["risk_limit_violations"] == 0
+        assert hasattr(capital_service, '_allocations_count')
+        assert capital_service._allocations_count == 0
 
     def test_init_cache_configuration(self, capital_service):
         """Test cache configuration on initialization."""
@@ -182,7 +171,7 @@ class TestCapitalServiceLifecycle:
 
         # Assert
         mock_capital_repository.get_all.assert_called_once()
-        assert capital_service._performance_metrics["total_allocations"] == 0
+        assert capital_service._allocations_count == 0
 
     @pytest.mark.asyncio
     async def test_start_without_capital_repository(self):
@@ -242,50 +231,30 @@ class TestCapitalServiceLifecycle:
         # Arrange
         capital_service.cleanup_resources = AsyncMock(side_effect=Exception("Cleanup failed"))
 
-        # Act & Assert
-        with pytest.raises(ServiceError, match="CapitalService shutdown failed"):
-            await capital_service._do_stop()
+        # Act - safe_service_shutdown handles exceptions gracefully
+        await capital_service._do_stop()
+
+        # Assert - Should complete without raising (safe_service_shutdown pattern)
+        capital_service.cleanup_resources.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_initialize_capital_state_success(self, capital_service, mock_capital_repository):
-        """Test successful capital state initialization."""
-        # Arrange
-        mock_allocation = Mock()
-        mock_allocation.allocated_amount = Decimal("1000")
-        mock_capital_repository.get_all.return_value = [mock_allocation]
-
-        # Reset mock to track only the current method call
-        mock_capital_repository.get_all.reset_mock()
-
-        # Act
-        await capital_service._initialize_capital_state()
-
-        # Assert
-        mock_capital_repository.get_all.assert_called_once()
-        assert capital_service._performance_metrics["total_allocations"] == 1
+    async def test_service_available_methods(self, capital_service):
+        """Test that the service has the expected public methods."""
+        # These are the actual methods that exist in CapitalService
+        assert hasattr(capital_service, 'allocate_capital')
+        assert hasattr(capital_service, 'release_capital')
+        assert hasattr(capital_service, 'update_utilization')
+        assert hasattr(capital_service, 'get_capital_metrics')
+        assert hasattr(capital_service, 'get_allocations_by_strategy')
+        assert hasattr(capital_service, 'get_all_allocations')
 
     @pytest.mark.asyncio
-    async def test_initialize_capital_state_without_repository(self, capital_service):
-        """Test capital state initialization without repository."""
-        # Arrange
-        capital_service._capital_repository = None
-
-        # Act
-        await capital_service._initialize_capital_state()
-
-        # Assert - Should not fail, just log warning
-        assert True  # Method should complete without error
-
-    @pytest.mark.asyncio
-    async def test_initialize_capital_state_error_handling(
-        self, capital_service, mock_capital_repository
-    ):
-        """Test error handling in capital state initialization."""
-        # Arrange
-        mock_capital_repository.get_all.side_effect = Exception("Repository error")
-
-        # Act
-        await capital_service._initialize_capital_state()
+    async def test_service_inheritance(self, capital_service):
+        """Test that the service has proper inheritance."""
+        from src.capital_management.interfaces import AbstractCapitalService
+        from src.core.base.service import TransactionalService
+        assert isinstance(capital_service, AbstractCapitalService)
+        assert isinstance(capital_service, TransactionalService)
 
         # Assert - Should not raise, just log error
         assert True  # Method should complete without raising
@@ -344,7 +313,7 @@ class TestCapitalAllocation:
         capital_service._get_available_capital = AsyncMock(return_value=Decimal("500"))
 
         # Act & Assert
-        with pytest.raises(ValidationError, match="Insufficient capital"):
+        with pytest.raises(ServiceError, match="Insufficient capital"):
             await capital_service.allocate_capital(
                 strategy_id="test-strategy", exchange="binance", requested_amount=Decimal("1000")
             )
@@ -355,7 +324,7 @@ class TestCapitalAllocation:
         # Arrange
         capital_service._get_available_capital = AsyncMock(return_value=Decimal("50000"))
 
-        # Act & Assert
+        # Act & Assert - ValidationError is raised for limit violations
         with pytest.raises(ValidationError, match="exceeds maximum allocation"):
             await capital_service.allocate_capital(
                 strategy_id="test-strategy",
@@ -481,28 +450,28 @@ class TestCapitalRelease:
             exchange="binance",
             release_amount=Decimal("500"),  # More than allocated
         )
-        
-        # Assert - error handling returns None as fallback
-        assert result is None
+
+        # Assert - AllocationError handled, returns False
+        assert result is False
 
     @pytest.mark.asyncio
     async def test_release_capital_validation_errors(self, capital_service):
         """Test capital release validation errors."""
-        # Test empty strategy ID - error handling returns None as fallback
+        # Test empty strategy ID - ValidationError handled, returns False
         result = await capital_service.release_capital("", "binance", Decimal("500"))
-        assert result is None
+        assert result is False
 
-        # Test empty exchange - error handling returns None as fallback
+        # Test empty exchange - ValidationError handled, returns False
         result = await capital_service.release_capital("strategy", "", Decimal("500"))
-        assert result is None
+        assert result is False
 
-        # Test negative amount - error handling returns None as fallback
+        # Test negative amount - ValidationError handled, returns False
         result = await capital_service.release_capital("strategy", "binance", Decimal("-500"))
-        assert result is None
+        assert result is False
 
-        # Test zero amount - error handling returns None as fallback
+        # Test zero amount - ValidationError handled, returns False
         result = await capital_service.release_capital("strategy", "binance", Decimal("0"))
-        assert result is None
+        assert result is False
 
 
 class TestCapitalUtilization:
@@ -534,13 +503,13 @@ class TestCapitalUtilization:
         # Arrange
         mock_capital_repository.get_by_strategy_exchange.return_value = sample_allocation
 
-        # Act & Assert - error handling returns None as fallback
+        # Act & Assert - warning logged, returns False for validation failure
         result = await capital_service.update_utilization(
             strategy_id="momentum-strategy",
             exchange="binance",
             utilized_amount=Decimal("1500"),  # More than allocated 1000
         )
-        assert result is None
+        assert result is False
 
     @pytest.mark.asyncio
     async def test_update_utilization_no_allocation(self, capital_service, mock_capital_repository):
@@ -696,6 +665,7 @@ class TestHealthChecks:
         """Test service health check when healthy."""
         # Arrange
         capital_service._capital_repository = Mock()
+        capital_service._capital_repository.get_all = AsyncMock(return_value=[])
         capital_service._audit_repository = Mock()
 
         # Act
@@ -716,47 +686,6 @@ class TestHealthChecks:
         # Assert
         assert isinstance(health, HealthStatus)
         # Additional assertions based on health status implementation
-
-
-class TestStateManagement:
-    """Test state management integration."""
-
-    @pytest.mark.asyncio
-    async def test_save_capital_state_snapshot(self, capital_service, mock_state_service):
-        """Test saving capital state snapshot."""
-        # Arrange - reset the mock to clear previous test calls
-        mock_state_service.set_state.reset_mock()
-        
-        # Act
-        await capital_service._save_capital_state_snapshot("test_reason")
-
-        # Assert
-        mock_state_service.set_state.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_restore_capital_state_success(self, capital_service, mock_state_service):
-        """Test successful capital state restoration."""
-        # Arrange
-        mock_state_service.get_state.return_value = {"total_capital": "100000"}
-
-        # Act
-        result = await capital_service.restore_capital_state()
-
-        # Assert
-        assert result is True
-        mock_state_service.get_state.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_restore_capital_state_no_state(self, capital_service, mock_state_service):
-        """Test capital state restoration when no state exists."""
-        # Arrange
-        mock_state_service.get_state.return_value = None
-
-        # Act
-        result = await capital_service.restore_capital_state()
-
-        # Assert
-        assert result is False
 
 
 class TestUtilityMethods:
@@ -829,72 +758,64 @@ class TestUtilityMethods:
         expected_efficiency = Decimal("230") / Decimal("300")  # 230/300 = 0.7667
         assert abs(efficiency - expected_efficiency) < Decimal("0.001")
 
-    def test_performance_metrics_updates(self, capital_service):
-        """Test performance metrics tracking."""
+    def test_allocations_count_tracking(self, capital_service):
+        """Test allocations count tracking."""
         # Initial state
-        assert capital_service._performance_metrics["total_allocations"] == 0
+        assert capital_service._allocations_count == 0
 
-        # Performance metrics should be updated during operations
-        # This is tested indirectly through operation tests
-        assert "successful_allocations" in capital_service._performance_metrics
-        assert "failed_allocations" in capital_service._performance_metrics
-        assert "average_allocation_time_ms" in capital_service._performance_metrics
+        # Allocations count should be updated during service start
+        # This is tested through the service lifecycle tests
 
 
 class TestValidationMethods:
     """Test validation method coverage."""
 
     @pytest.mark.asyncio
-    async def test_validate_allocation_request_consistent(self, capital_service):
-        """Test allocation request validation."""
-        # Should not raise for valid data
-        await capital_service._validate_allocation_request_consistent(
-            "test-strategy", "binance", Decimal("1000")
-        )
-
+    async def test_allocate_capital_validation_empty_strategy(self, capital_service):
+        """Test allocation validation for empty strategy."""
         # Invalid requests should raise ValidationError
-        with pytest.raises(ValidationError):
-            await capital_service._validate_allocation_request_consistent("", "binance", Decimal("1000"))
+        with pytest.raises(ValidationError, match="Strategy ID and exchange are required"):
+            await capital_service.allocate_capital("", "binance", Decimal("1000"))
 
     @pytest.mark.asyncio
-    async def test_validate_allocation_limits_consistent(self, capital_service):
-        """Test allocation limits validation."""
-        # Arrange
-        capital_service._get_available_capital = AsyncMock(return_value=Decimal("50000"))
-
-        # Should not raise for valid allocation
-        await capital_service._validate_allocation_limits_consistent(
-            "test-strategy", "binance", Decimal("5000")  # 5% of total capital
-        )
-
-        # Invalid allocation exceeding limits
-        with pytest.raises(ValidationError, match="exceeds maximum allocation"):
-            await capital_service._validate_allocation_limits_consistent(
-                "test-strategy", "binance", Decimal("25000")  # 25% of total capital (exceeds 20% max)
-            )
+    async def test_allocate_capital_validation_zero_amount(self, capital_service):
+        """Test allocation validation for zero amount."""
+        # Invalid requests should raise ValidationError
+        with pytest.raises(ValidationError, match="Allocation amount must be positive"):
+            await capital_service.allocate_capital("test-strategy", "binance", Decimal("0"))
 
 
 class TestRepositoryIntegration:
-    """Test repository integration methods."""
+    """Test repository integration through public API."""
 
     @pytest.mark.asyncio
-    async def test_create_allocation(self, capital_service, mock_capital_repository):
-        """Test allocation creation via repository."""
+    async def test_allocate_capital_uses_repository(self, capital_service, mock_capital_repository):
+        """Test allocation creation uses repository."""
         # Arrange
-        allocation_data = {
-            "strategy_id": "test-strategy",
-            "exchange": "binance",
-            "allocated_amount": Decimal("1000"),
-            "available_amount": Decimal("1000"),
-            "utilized_amount": Decimal("0"),
-        }
-        mock_capital_repository.create.return_value = Mock(allocation_id="alloc-123")
+        from src.core.types import CapitalAllocation
+        mock_allocation = CapitalAllocation(
+            allocation_id="alloc-123",
+            strategy_id="test-strategy",
+            exchange="binance",
+            allocated_amount=Decimal("1000"),
+            available_amount=Decimal("1000"),
+            utilized_amount=Decimal("0"),
+            allocation_percentage=Decimal("0.01"),
+            target_allocation_pct=Decimal("0.01"),
+            min_allocation=Decimal("100"),
+            max_allocation=Decimal("10000"),
+            last_rebalance=datetime.now(timezone.utc),
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+            status="active"
+        )
+        mock_capital_repository.create.return_value = mock_allocation
 
         # Act
-        result = await capital_service._create_allocation(allocation_data)
+        result = await capital_service.allocate_capital("test-strategy", "binance", Decimal("1000"))
 
         # Assert
-        mock_capital_repository.create.assert_called_once_with(allocation_data)
+        mock_capital_repository.create.assert_called_once()
         assert result is not None
 
     @pytest.mark.asyncio

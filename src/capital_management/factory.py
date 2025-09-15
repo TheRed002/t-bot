@@ -1,14 +1,14 @@
 """
 Capital Management Factory Implementation.
 
-This module provides a factory pattern for creating capital management service instances
-with proper dependency injection, configuration management, and lifecycle support.
+Simple factory for creating capital management service instances.
 """
 
 from typing import TYPE_CHECKING, Any
 
 from src.core.base.factory import BaseFactory
-from src.core.exceptions import CreationError
+from src.core.exceptions import CreationError, ServiceError
+from src.core.logging import get_logger
 
 if TYPE_CHECKING:
     from src.capital_management.capital_allocator import CapitalAllocator
@@ -22,482 +22,457 @@ class CapitalServiceFactory(BaseFactory["CapitalService"]):
     """Factory for creating CapitalService instances."""
 
     def __init__(self, dependency_container: Any = None, correlation_id: str | None = None):
-        """
-        Initialize capital service factory.
-
-        Args:
-            dependency_container: Dependency injection container
-            correlation_id: Request correlation ID
-        """
-        # Import at runtime to avoid circular imports
         from src.capital_management.service import CapitalService
 
-        super().__init__(
-            product_type=CapitalService,
-            name="CapitalServiceFactory",
-            correlation_id=correlation_id,
-        )
+        super().__init__(product_type=CapitalService, correlation_id=correlation_id)
+        self._dependency_container = dependency_container
 
-        if dependency_container:
-            self.configure_dependencies(dependency_container)
-
-        # Register default creator
-        self.register(
-            "default",
-            self._create_capital_service,
-            singleton=True,
-        )
-
-    def _create_capital_service(
-        self,
-        capital_repository: Any = None,
-        audit_repository: Any = None,
-        state_service: Any = None,
-        correlation_id: str | None = None,
+    def create(
+        self, name: str = "", *args, config: dict[str, Any] | None = None, **kwargs
     ) -> "CapitalService":
-        """
-        Create CapitalService instance with dependency injection.
-
-        Args:
-            capital_repository: Capital repository instance (optional)
-            audit_repository: Audit repository instance (optional)
-            state_service: State service instance (optional)
-            correlation_id: Request correlation ID (optional)
-
-        Returns:
-            CapitalService instance
-        """
-        # Get optional dependencies from DI container if not provided
-        if self._dependency_container:
-            if capital_repository is None:
-                try:
-                    capital_repository = self._dependency_container.get("CapitalRepository")
-                except Exception:
-                    pass  # Optional dependency
-
-            if audit_repository is None:
-                try:
-                    audit_repository = self._dependency_container.get("AuditRepository")
-                except Exception:
-                    pass  # Optional dependency
-
-            if state_service is None:
-                try:
-                    state_service = self._dependency_container.get("StateService")
-                except Exception:
-                    pass  # Optional dependency
-
-        # Import at runtime to avoid circular imports
-        from src.capital_management.service import CapitalService
-
-        return CapitalService(
-            capital_repository=capital_repository,
-            audit_repository=audit_repository,
-            state_service=state_service,
-            correlation_id=correlation_id or self._correlation_id,
-        )
+        """Create CapitalService instance."""
+        factory = CapitalManagementFactory(self._dependency_container, self._correlation_id)
+        if "correlation_id" not in kwargs:
+            kwargs["correlation_id"] = self._correlation_id
+        return factory.create_capital_service(**kwargs)
 
 
 class CapitalAllocatorFactory(BaseFactory["CapitalAllocator"]):
     """Factory for creating CapitalAllocator instances."""
 
     def __init__(self, dependency_container: Any = None, correlation_id: str | None = None):
-        """
-        Initialize capital allocator factory.
-
-        Args:
-            dependency_container: Dependency injection container
-            correlation_id: Request correlation ID
-        """
-        # Import at runtime to avoid circular imports
         from src.capital_management.capital_allocator import CapitalAllocator
 
-        super().__init__(
-            product_type=CapitalAllocator,
-            name="CapitalAllocatorFactory",
-            correlation_id=correlation_id,
-        )
+        super().__init__(product_type=CapitalAllocator, correlation_id=correlation_id)
+        self._dependency_container = dependency_container
 
-        if dependency_container:
-            self.configure_dependencies(dependency_container)
-
-        # Register default creator
-        self.register(
-            "default",
-            self._create_capital_allocator,
-            singleton=True,
-        )
-
-    def _create_capital_allocator(
-        self,
-        capital_service: "CapitalService | None" = None,
-        config_service: Any = None,
-        risk_manager: Any = None,
-        trade_lifecycle_manager: Any = None,
-        validation_service: Any = None,
+    def create(
+        self, name: str = "", *args, config: dict[str, Any] | None = None, **kwargs
     ) -> "CapitalAllocator":
-        """
-        Create CapitalAllocator instance with dependency injection.
-
-        Args:
-            capital_service: Capital service instance (required)
-            config_service: Config service instance (optional)
-            risk_manager: Risk manager instance (optional)
-            trade_lifecycle_manager: Trade lifecycle manager instance (optional)
-            validation_service: Validation service instance (optional)
-
-        Returns:
-            CapitalAllocator instance
-
-        Raises:
-            CreationError: If capital_service is not provided or available
-        """
-        # Get dependencies from DI container if not provided
-        if self._dependency_container:
-            if capital_service is None:
-                try:
-                    capital_service = self._dependency_container.get("CapitalService")
-                except Exception as e:
-                    raise CreationError(f"CapitalService is required but not available: {e}") from e
-
-            if config_service is None:
-                try:
-                    config_service = self._dependency_container.get("ConfigService")
-                except Exception:
-                    pass  # Optional dependency
-
-            if risk_manager is None:
-                try:
-                    risk_manager = self._dependency_container.get("RiskService")
-                except Exception:
-                    try:
-                        risk_manager = self._dependency_container.get("RiskManager")
-                    except Exception:
-                        pass  # Optional dependency
-
-            if trade_lifecycle_manager is None:
-                try:
-                    trade_lifecycle_manager = self._dependency_container.get(
-                        "TradeLifecycleManager"
-                    )
-                except Exception:
-                    pass  # Optional dependency
-
-            if validation_service is None:
-                try:
-                    validation_service = self._dependency_container.get("ValidationService")
-                except Exception:
-                    pass  # Optional dependency
-
-        if capital_service is None:
-            raise CreationError("CapitalService is required for CapitalAllocator")
-
-        # Import at runtime to avoid circular imports
-        from src.capital_management.capital_allocator import CapitalAllocator
-
-        return CapitalAllocator(
-            capital_service=capital_service,
-            config_service=config_service,
-            risk_manager=risk_manager,
-            trade_lifecycle_manager=trade_lifecycle_manager,
-            validation_service=validation_service,
-        )
+        """Create CapitalAllocator instance."""
+        factory = CapitalManagementFactory(self._dependency_container, self._correlation_id)
+        if "correlation_id" not in kwargs:
+            kwargs["correlation_id"] = self._correlation_id
+        return factory.create_capital_allocator(**kwargs)
 
 
 class CurrencyManagerFactory(BaseFactory["CurrencyManager"]):
     """Factory for creating CurrencyManager instances."""
 
     def __init__(self, dependency_container: Any = None, correlation_id: str | None = None):
-        """
-        Initialize currency manager factory.
-
-        Args:
-            dependency_container: Dependency injection container
-            correlation_id: Request correlation ID
-        """
-        # Import at runtime to avoid circular imports
         from src.capital_management.currency_manager import CurrencyManager
 
-        super().__init__(
-            product_type=CurrencyManager,
-            name="CurrencyManagerFactory",
-            correlation_id=correlation_id,
-        )
+        super().__init__(product_type=CurrencyManager, correlation_id=correlation_id)
+        self._dependency_container = dependency_container
 
-        if dependency_container:
-            self.configure_dependencies(dependency_container)
-
-        # Register default creator
-        self.register(
-            "default",
-            self._create_currency_manager,
-            singleton=True,
-        )
-
-    def _create_currency_manager(
-        self,
-        exchange_data_service: Any = None,
-        validation_service: Any = None,
-        correlation_id: str | None = None,
+    def create(
+        self, name: str = "", *args, config: dict[str, Any] | None = None, **kwargs
     ) -> "CurrencyManager":
-        """
-        Create CurrencyManager instance with dependency injection.
-
-        Args:
-            exchange_data_service: Exchange data service instance (optional)
-            validation_service: Validation service instance (optional)
-            correlation_id: Request correlation ID (optional)
-
-        Returns:
-            CurrencyManager instance
-        """
-        # Get optional dependencies from DI container if not provided
-        if self._dependency_container:
-            if exchange_data_service is None:
-                try:
-                    exchange_data_service = self._dependency_container.get("ExchangeDataService")
-                except Exception:
-                    pass  # Optional dependency
-
-            if validation_service is None:
-                try:
-                    validation_service = self._dependency_container.get("ValidationService")
-                except Exception:
-                    pass  # Optional dependency
-
-        # Import at runtime to avoid circular imports
-        from src.capital_management.currency_manager import CurrencyManager
-
-        return CurrencyManager(
-            exchange_data_service=exchange_data_service,
-            validation_service=validation_service,
-            correlation_id=correlation_id or self._correlation_id,
-        )
+        """Create CurrencyManager instance."""
+        factory = CapitalManagementFactory(self._dependency_container, self._correlation_id)
+        if "correlation_id" not in kwargs:
+            kwargs["correlation_id"] = self._correlation_id
+        return factory.create_currency_manager(**kwargs)
 
 
 class ExchangeDistributorFactory(BaseFactory["ExchangeDistributor"]):
     """Factory for creating ExchangeDistributor instances."""
 
     def __init__(self, dependency_container: Any = None, correlation_id: str | None = None):
-        """
-        Initialize exchange distributor factory.
-
-        Args:
-            dependency_container: Dependency injection container
-            correlation_id: Request correlation ID
-        """
-        # Import at runtime to avoid circular imports
         from src.capital_management.exchange_distributor import ExchangeDistributor
 
-        super().__init__(
-            product_type=ExchangeDistributor,
-            name="ExchangeDistributorFactory",
-            correlation_id=correlation_id,
-        )
+        super().__init__(product_type=ExchangeDistributor, correlation_id=correlation_id)
+        self._dependency_container = dependency_container
 
-        if dependency_container:
-            self.configure_dependencies(dependency_container)
-
-        # Register default creator
-        self.register(
-            "default",
-            self._create_exchange_distributor,
-            singleton=True,
-        )
-
-    def _create_exchange_distributor(
-        self,
-        exchanges: dict[str, Any] | None = None,
-        validation_service: Any = None,
-        correlation_id: str | None = None,
+    def create(
+        self, name: str = "", *args, config: dict[str, Any] | None = None, **kwargs
     ) -> "ExchangeDistributor":
-        """
-        Create ExchangeDistributor instance with dependency injection.
-
-        Args:
-            exchanges: Dictionary of exchange instances (optional)
-            validation_service: Validation service instance (optional)
-            correlation_id: Request correlation ID (optional)
-
-        Returns:
-            ExchangeDistributor instance
-        """
-        # Get optional dependencies from DI container if not provided
-        if self._dependency_container:
-            if exchanges is None:
-                try:
-                    exchanges = self._dependency_container.get("ExchangeRegistry")
-                except Exception:
-                    exchanges = {}  # Use empty dict as fallback
-
-            if validation_service is None:
-                try:
-                    validation_service = self._dependency_container.get("ValidationService")
-                except Exception:
-                    pass  # Optional dependency
-
-        # Import at runtime to avoid circular imports
-        from src.capital_management.exchange_distributor import ExchangeDistributor
-
-        return ExchangeDistributor(
-            exchanges=exchanges,
-            validation_service=validation_service,
-            correlation_id=correlation_id or self._correlation_id,
-        )
+        """Create ExchangeDistributor instance."""
+        factory = CapitalManagementFactory(self._dependency_container, self._correlation_id)
+        if "correlation_id" not in kwargs:
+            kwargs["correlation_id"] = self._correlation_id
+        return factory.create_exchange_distributor(**kwargs)
 
 
 class FundFlowManagerFactory(BaseFactory["FundFlowManager"]):
     """Factory for creating FundFlowManager instances."""
 
     def __init__(self, dependency_container: Any = None, correlation_id: str | None = None):
-        """
-        Initialize fund flow manager factory.
-
-        Args:
-            dependency_container: Dependency injection container
-            correlation_id: Request correlation ID
-        """
-        # Import at runtime to avoid circular imports
         from src.capital_management.fund_flow_manager import FundFlowManager
 
-        super().__init__(
-            product_type=FundFlowManager,
-            name="FundFlowManagerFactory",
-            correlation_id=correlation_id,
-        )
+        super().__init__(product_type=FundFlowManager, correlation_id=correlation_id)
+        self._dependency_container = dependency_container
 
-        if dependency_container:
-            self.configure_dependencies(dependency_container)
-
-        # Register default creator
-        self.register(
-            "default",
-            self._create_fund_flow_manager,
-            singleton=True,
-        )
-
-    def _create_fund_flow_manager(
-        self,
-        cache_service: Any = None,
-        time_series_service: Any = None,
-        validation_service: Any = None,
-        correlation_id: str | None = None,
+    def create(
+        self, name: str = "", *args, config: dict[str, Any] | None = None, **kwargs
     ) -> "FundFlowManager":
+        """Create FundFlowManager instance."""
+        factory = CapitalManagementFactory(self._dependency_container, self._correlation_id)
+        if "correlation_id" not in kwargs:
+            kwargs["correlation_id"] = self._correlation_id
+        return factory.create_fund_flow_manager(**kwargs)
+
+
+class CapitalManagementFactory:
+    """Simple factory for all capital management services."""
+
+    def __init__(self, dependency_container: Any = None, correlation_id: str | None = None):
         """
-        Create FundFlowManager instance with dependency injection.
+        Initialize factory.
 
         Args:
-            cache_service: Cache service instance (optional)
-            time_series_service: Time series service instance (optional)
-            validation_service: Validation service instance (optional)
-            correlation_id: Request correlation ID (optional)
+            dependency_container: Dependency injection container (optional)
+            correlation_id: Correlation ID for tracking (optional)
+        """
+        self._dependency_container = dependency_container
+        self._correlation_id = correlation_id
+        self._logger = get_logger(self.__class__.__name__)
+
+    @property
+    def dependency_container(self) -> Any:
+        """Get the dependency container."""
+        return self._dependency_container
+
+    @property
+    def correlation_id(self) -> str | None:
+        """Get the correlation ID."""
+        return self._correlation_id
+
+    @property
+    def capital_service_factory(self) -> "CapitalServiceFactory":
+        """Get CapitalService factory."""
+        return CapitalServiceFactory(self._dependency_container, self._correlation_id)
+
+    @property
+    def capital_allocator_factory(self) -> "CapitalAllocatorFactory":
+        """Get CapitalAllocator factory."""
+        return CapitalAllocatorFactory(self._dependency_container, self._correlation_id)
+
+    @property
+    def currency_manager_factory(self) -> "CurrencyManagerFactory":
+        """Get CurrencyManager factory."""
+        return CurrencyManagerFactory(self._dependency_container, self._correlation_id)
+
+    @property
+    def exchange_distributor_factory(self) -> "ExchangeDistributorFactory":
+        """Get ExchangeDistributor factory."""
+        return ExchangeDistributorFactory(self._dependency_container, self._correlation_id)
+
+    @property
+    def fund_flow_manager_factory(self) -> "FundFlowManagerFactory":
+        """Get FundFlowManager factory."""
+        return FundFlowManagerFactory(self._dependency_container, self._correlation_id)
+
+    def create_capital_service(self, **kwargs) -> "CapitalService":
+        """
+        Create CapitalService instance.
+
+        Args:
+            **kwargs: Constructor arguments
+
+        Returns:
+            CapitalService instance
+        """
+        try:
+            from src.capital_management.service import CapitalService
+
+            capital_repository = None
+            audit_repository = None
+
+            if self._dependency_container:
+                try:
+                    capital_repository = self._dependency_container.get("CapitalRepository")
+                except (KeyError, AttributeError, ServiceError):
+                    pass
+                try:
+                    audit_repository = self._dependency_container.get("AuditRepository")
+                except (KeyError, AttributeError, ServiceError):
+                    pass
+
+            capital_repository = kwargs.get("capital_repository", capital_repository)
+            audit_repository = kwargs.get("audit_repository", audit_repository)
+
+            return CapitalService(
+                capital_repository=capital_repository,
+                audit_repository=audit_repository,
+                correlation_id=kwargs.get("correlation_id", self._correlation_id),
+            )
+
+        except Exception as e:
+            self._logger.error(f"Failed to create CapitalService: {e}")
+            raise CreationError(f"Failed to create CapitalService: {e}") from e
+
+    def create_capital_allocator(self, **kwargs) -> "CapitalAllocator":
+        """
+        Create CapitalAllocator instance.
+
+        Args:
+            **kwargs: Constructor arguments
+
+        Returns:
+            CapitalAllocator instance
+        """
+        try:
+            from src.capital_management.capital_allocator import CapitalAllocator
+
+            capital_service = None
+            config_service = None
+            risk_service = None
+            trade_lifecycle_manager = None
+            validation_service = None
+
+            if self._dependency_container:
+                try:
+                    capital_service = self._dependency_container.get("CapitalService")
+                except (KeyError, AttributeError, ServiceError):
+                    pass
+                try:
+                    config_service = self._dependency_container.get("ConfigService")
+                except (KeyError, AttributeError, ServiceError):
+                    pass
+                try:
+                    risk_service = self._dependency_container.get("RiskService")
+                except (KeyError, AttributeError, ServiceError):
+                    pass
+                try:
+                    trade_lifecycle_manager = self._dependency_container.get(
+                        "TradeLifecycleManager"
+                    )
+                except (KeyError, AttributeError, ServiceError):
+                    pass
+                try:
+                    validation_service = self._dependency_container.get("ValidationService")
+                except (KeyError, AttributeError, ServiceError):
+                    pass
+
+            capital_service = kwargs.get("capital_service", capital_service)
+            config_service = kwargs.get("config_service", config_service)
+            risk_service = kwargs.get("risk_service", risk_service)
+            trade_lifecycle_manager = kwargs.get("trade_lifecycle_manager", trade_lifecycle_manager)
+            validation_service = kwargs.get("validation_service", validation_service)
+
+            if capital_service is None:
+                raise CreationError("CapitalService is required for CapitalAllocator")
+
+            return CapitalAllocator(
+                capital_service=capital_service,
+                config_service=config_service,
+                risk_service=risk_service,
+                trade_lifecycle_manager=trade_lifecycle_manager,
+                validation_service=validation_service,
+                correlation_id=kwargs.get("correlation_id", self._correlation_id),
+            )
+
+        except Exception as e:
+            self._logger.error(f"Failed to create CapitalAllocator: {e}")
+            raise CreationError(f"Failed to create CapitalAllocator: {e}") from e
+
+    def create_currency_manager(self, **kwargs) -> "CurrencyManager":
+        """
+        Create CurrencyManager instance.
+
+        Args:
+            **kwargs: Constructor arguments
+
+        Returns:
+            CurrencyManager instance
+        """
+        try:
+            from src.capital_management.currency_manager import CurrencyManager
+
+            exchange_data_service = None
+            validation_service = None
+            risk_service = None
+
+            if self._dependency_container:
+                try:
+                    exchange_data_service = self._dependency_container.get("ExchangeDataService")
+                except (KeyError, AttributeError, ServiceError):
+                    pass
+                try:
+                    validation_service = self._dependency_container.get("ValidationService")
+                except (KeyError, AttributeError, ServiceError):
+                    pass
+                try:
+                    risk_service = self._dependency_container.get("RiskService")
+                except (KeyError, AttributeError, ServiceError):
+                    pass
+
+            exchange_data_service = kwargs.get("exchange_data_service", exchange_data_service)
+            validation_service = kwargs.get("validation_service", validation_service)
+            risk_service = kwargs.get("risk_service", risk_service)
+
+            return CurrencyManager(
+                exchange_data_service=exchange_data_service,
+                validation_service=validation_service,
+                risk_service=risk_service,
+                correlation_id=kwargs.get("correlation_id", self._correlation_id),
+            )
+
+        except Exception as e:
+            self._logger.error(f"Failed to create CurrencyManager: {e}")
+            raise CreationError(f"Failed to create CurrencyManager: {e}") from e
+
+    def create_exchange_distributor(self, **kwargs) -> "ExchangeDistributor":
+        """
+        Create ExchangeDistributor instance.
+
+        Args:
+            **kwargs: Constructor arguments
+
+        Returns:
+            ExchangeDistributor instance
+        """
+        try:
+            from src.capital_management.exchange_distributor import ExchangeDistributor
+
+            exchanges = None
+            validation_service = None
+            exchange_info_service = None
+
+            if self._dependency_container:
+                try:
+                    exchanges = self._dependency_container.get("Exchanges")
+                except (KeyError, AttributeError, ServiceError):
+                    pass
+                try:
+                    validation_service = self._dependency_container.get("ValidationService")
+                except (KeyError, AttributeError, ServiceError):
+                    pass
+                try:
+                    exchange_info_service = self._dependency_container.get("ExchangeInfoService")
+                except (KeyError, AttributeError, ServiceError):
+                    pass
+
+            exchanges = kwargs.get("exchanges", exchanges)
+            validation_service = kwargs.get("validation_service", validation_service)
+            exchange_info_service = kwargs.get("exchange_info_service", exchange_info_service)
+
+            return ExchangeDistributor(
+                exchanges=exchanges,
+                validation_service=validation_service,
+                exchange_info_service=exchange_info_service,
+                correlation_id=kwargs.get("correlation_id", self._correlation_id),
+            )
+
+        except Exception as e:
+            self._logger.error(f"Failed to create ExchangeDistributor: {e}")
+            raise CreationError(f"Failed to create ExchangeDistributor: {e}") from e
+
+    def create_fund_flow_manager(self, **kwargs) -> "FundFlowManager":
+        """
+        Create FundFlowManager instance.
+
+        Args:
+            **kwargs: Constructor arguments
 
         Returns:
             FundFlowManager instance
         """
-        # Get optional dependencies from DI container if not provided
-        if self._dependency_container:
-            if cache_service is None:
+        try:
+            from src.capital_management.fund_flow_manager import FundFlowManager
+
+            cache_service = None
+            time_series_service = None
+            validation_service = None
+            capital_allocator = None
+
+            if self._dependency_container:
                 try:
                     cache_service = self._dependency_container.get("CacheService")
-                except Exception:
-                    pass  # Optional dependency
-
-            if time_series_service is None:
+                except (KeyError, AttributeError, ServiceError):
+                    pass
                 try:
                     time_series_service = self._dependency_container.get("TimeSeriesService")
-                except Exception:
-                    pass  # Optional dependency
-
-            if validation_service is None:
+                except (KeyError, AttributeError, ServiceError):
+                    pass
                 try:
                     validation_service = self._dependency_container.get("ValidationService")
-                except Exception:
-                    pass  # Optional dependency
+                except (KeyError, AttributeError, ServiceError):
+                    pass
+                try:
+                    capital_allocator = self._dependency_container.get("CapitalAllocator")
+                except (KeyError, AttributeError, ServiceError):
+                    pass
 
-        # Import at runtime to avoid circular imports
-        from src.capital_management.fund_flow_manager import FundFlowManager
+            cache_service = kwargs.get("cache_service", cache_service)
+            time_series_service = kwargs.get("time_series_service", time_series_service)
+            validation_service = kwargs.get("validation_service", validation_service)
+            capital_allocator = kwargs.get("capital_allocator", capital_allocator)
 
-        return FundFlowManager(
-            cache_service=cache_service,
-            time_series_service=time_series_service,
-            validation_service=validation_service,
-            correlation_id=correlation_id or self._correlation_id,
-        )
+            return FundFlowManager(
+                cache_service=cache_service,
+                time_series_service=time_series_service,
+                validation_service=validation_service,
+                capital_allocator=capital_allocator,
+                correlation_id=kwargs.get("correlation_id", self._correlation_id),
+            )
 
-
-class CapitalManagementFactory:
-    """
-    Composite factory for all capital management services.
-
-    Provides a single entry point for creating all capital management
-    service instances with proper dependency resolution.
-    """
-
-    def __init__(self, dependency_container: Any = None, correlation_id: str | None = None):
-        """
-        Initialize capital management factory.
-
-        Args:
-            dependency_container: Dependency injection container
-            correlation_id: Request correlation ID
-        """
-        self.dependency_container = dependency_container
-        self.correlation_id = correlation_id
-
-        # Initialize sub-factories
-        self.capital_service_factory = CapitalServiceFactory(dependency_container, correlation_id)
-        self.capital_allocator_factory = CapitalAllocatorFactory(
-            dependency_container, correlation_id
-        )
-        self.currency_manager_factory = CurrencyManagerFactory(dependency_container, correlation_id)
-        self.exchange_distributor_factory = ExchangeDistributorFactory(
-            dependency_container, correlation_id
-        )
-        self.fund_flow_manager_factory = FundFlowManagerFactory(
-            dependency_container, correlation_id
-        )
-
-    def create_capital_service(self, **kwargs) -> "CapitalService":
-        """Create CapitalService instance."""
-        return self.capital_service_factory.create("default", **kwargs)
-
-    def create_capital_allocator(self, **kwargs) -> "CapitalAllocator":
-        """Create CapitalAllocator instance."""
-        return self.capital_allocator_factory.create("default", **kwargs)
-
-    def create_currency_manager(self, **kwargs) -> "CurrencyManager":
-        """Create CurrencyManager instance."""
-        return self.currency_manager_factory.create("default", **kwargs)
-
-    def create_exchange_distributor(self, **kwargs) -> "ExchangeDistributor":
-        """Create ExchangeDistributor instance."""
-        return self.exchange_distributor_factory.create("default", **kwargs)
-
-    def create_fund_flow_manager(self, **kwargs) -> "FundFlowManager":
-        """Create FundFlowManager instance."""
-        return self.fund_flow_manager_factory.create("default", **kwargs)
+        except Exception as e:
+            self._logger.error(f"Failed to create FundFlowManager: {e}")
+            raise CreationError(f"Failed to create FundFlowManager: {e}") from e
 
     def register_factories(self, container: Any) -> None:
         """
-        Register all factories with the dependency injection container.
+        Register all factories in the dependency injection container.
 
         Args:
             container: Dependency injection container
         """
-        container.register(
-            "CapitalServiceFactory", lambda: self.capital_service_factory, singleton=True
-        )
-        container.register(
-            "CapitalAllocatorFactory", lambda: self.capital_allocator_factory, singleton=True
-        )
-        container.register(
-            "CurrencyManagerFactory", lambda: self.currency_manager_factory, singleton=True
-        )
-        container.register(
-            "ExchangeDistributorFactory", lambda: self.exchange_distributor_factory, singleton=True
-        )
-        container.register(
-            "FundFlowManagerFactory", lambda: self.fund_flow_manager_factory, singleton=True
-        )
-        container.register("CapitalManagementFactory", lambda: self, singleton=True)
+        if not container:
+            return
+
+        try:
+            container.register(
+                "CapitalServiceFactory", lambda: self.create_capital_service, singleton=True
+            )
+            container.register(
+                "CapitalAllocatorFactory", lambda: self.create_capital_allocator, singleton=True
+            )
+            container.register(
+                "CurrencyManagerFactory", lambda: self.create_currency_manager, singleton=True
+            )
+            container.register(
+                "ExchangeDistributorFactory",
+                lambda: self.create_exchange_distributor,
+                singleton=True,
+            )
+            container.register(
+                "FundFlowManagerFactory", lambda: self.create_fund_flow_manager, singleton=True
+            )
+
+            self._logger.info("Capital management factories registered successfully")
+
+        except Exception as e:
+            self._logger.error(f"Failed to register factories: {e}")
+            raise CreationError(f"Failed to register factories: {e}") from e
+
+
+def create_capital_service(**kwargs) -> "CapitalService":
+    """Create CapitalService instance using factory."""
+    factory = CapitalManagementFactory()
+    return factory.create_capital_service(**kwargs)
+
+
+def create_capital_allocator(**kwargs) -> "CapitalAllocator":
+    """Create CapitalAllocator instance using factory."""
+    factory = CapitalManagementFactory()
+    return factory.create_capital_allocator(**kwargs)
+
+
+def create_currency_manager(**kwargs) -> "CurrencyManager":
+    """Create CurrencyManager instance using factory."""
+    factory = CapitalManagementFactory()
+    return factory.create_currency_manager(**kwargs)
+
+
+def create_exchange_distributor(**kwargs) -> "ExchangeDistributor":
+    """Create ExchangeDistributor instance using factory."""
+    factory = CapitalManagementFactory()
+    return factory.create_exchange_distributor(**kwargs)
+
+
+def create_fund_flow_manager(**kwargs) -> "FundFlowManager":
+    """Create FundFlowManager instance using factory."""
+    factory = CapitalManagementFactory()
+    return factory.create_fund_flow_manager(**kwargs)

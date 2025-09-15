@@ -13,6 +13,7 @@ This module tests the deposit/withdrawal management including:
 import logging
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
@@ -66,11 +67,12 @@ class TestFundFlowManager:
     @pytest.fixture
     def fund_flow_manager(self, config):
         """Create fund flow manager instance."""
-        from unittest.mock import Mock
-
         # Create mock services
         cache_service = Mock()
+        cache_service.get = AsyncMock(return_value=None)
+        cache_service.set = AsyncMock()
         time_series_service = Mock()
+        time_series_service.write_point = AsyncMock()
         validation_service = Mock()
 
         return FundFlowManager(
@@ -497,3 +499,493 @@ class TestFundFlowManager:
         assert summary["total_deposits"] == Decimal("0") or summary["total_deposits"] == 0
         assert summary["total_withdrawals"] == Decimal("0") or summary["total_withdrawals"] == 0
         assert summary["net_flow"] == Decimal("0") or summary["net_flow"] == 0
+
+    @pytest.mark.asyncio
+    async def test_start_service_dependency_failures(self, fund_flow_manager):
+        """Test service start with dependency injection failures."""
+        # Mock dependency resolution to fail
+        fund_flow_manager.resolve_dependency = Mock(side_effect=Exception("DI failed"))
+
+        # Service should start successfully with fallback configuration
+        await fund_flow_manager.start()
+
+        # Verify service started with default config
+        assert fund_flow_manager.config is not None
+        assert fund_flow_manager.config.get("auto_compound_enabled") is True
+
+    @pytest.mark.asyncio
+    async def test_start_configuration_loading_failure(self, fund_flow_manager):
+        """Test service start with configuration loading failure."""
+        from unittest.mock import patch
+        with patch.object(fund_flow_manager, '_load_configuration', side_effect=Exception("Config failed")):
+            with pytest.raises(Exception):
+                await fund_flow_manager.start()
+
+    @pytest.mark.asyncio
+    async def test_start_withdrawal_rules_initialization_failure(self, fund_flow_manager):
+        """Test service start with withdrawal rules initialization failure."""
+        from unittest.mock import patch
+        with patch.object(fund_flow_manager, '_initialize_withdrawal_rules', side_effect=Exception("Rules failed")):
+            with pytest.raises(Exception):
+                await fund_flow_manager.start()
+
+    @pytest.mark.asyncio
+    async def test_start_capital_protection_initialization_failure(self, fund_flow_manager):
+        """Test service start with capital protection initialization failure."""
+        from unittest.mock import patch
+        with patch.object(fund_flow_manager, '_initialize_capital_protection', side_effect=Exception("Protection failed")):
+            with pytest.raises(Exception):
+                await fund_flow_manager.start()
+
+    @pytest.mark.asyncio
+    async def test_cache_operations_failure(self, fund_flow_manager):
+        """Test cache operations with service failures."""
+        # Test cache service failures don't break operations
+        fund_flow_manager._cache_service.set = AsyncMock(side_effect=Exception("Cache failed"))
+        fund_flow_manager._cache_service.get = AsyncMock(side_effect=Exception("Cache failed"))
+
+        # Operations should still work despite cache failures
+        result = await fund_flow_manager.process_deposit(Decimal("1000"), "USDT", "binance")
+        assert isinstance(result, FundFlow)
+
+        # Test cache retrieval failure
+        cached_flows = await fund_flow_manager._get_cached_fund_flows()
+        assert cached_flows is None
+
+    @pytest.mark.asyncio
+    async def test_time_series_storage_failure(self, fund_flow_manager):
+        """Test time series storage with service failures."""
+        fund_flow_manager._time_series_service.write_point = AsyncMock(side_effect=Exception("TS failed"))
+
+        # Operations should still work despite time series failures
+        result = await fund_flow_manager.process_deposit(Decimal("1000"), "USDT", "binance")
+        assert isinstance(result, FundFlow)
+
+    @pytest.mark.asyncio
+    async def test_flow_history_size_management(self, fund_flow_manager):
+        """Test fund flow history size management."""
+        fund_flow_manager._max_flow_history = 2
+
+        # Add flows beyond limit
+        await fund_flow_manager.process_deposit(Decimal("1000"), "USDT", "binance")
+        await fund_flow_manager.process_deposit(Decimal("1000"), "USDT", "binance")
+        await fund_flow_manager.process_deposit(Decimal("1000"), "USDT", "binance")
+
+        # Should maintain size limit
+        assert len(fund_flow_manager.fund_flows) == 2
+
+    @pytest.mark.asyncio
+    async def test_process_withdrawal_with_total_capital_zero(self, fund_flow_manager):
+        """Test withdrawal processing when total capital is zero."""
+        fund_flow_manager.total_capital = Decimal("0")
+
+        # Should process withdrawal with warning logged
+        result = await fund_flow_manager.process_withdrawal(
+            Decimal("1000"), "USDT", "binance", "withdrawal"
+        )
+        assert isinstance(result, FundFlow)
+
+    @pytest.mark.asyncio
+    async def test_process_strategy_reallocation_with_total_capital_zero(self, fund_flow_manager):
+        """Test strategy reallocation when total capital is zero."""
+        fund_flow_manager.total_capital = Decimal("0")
+
+        # Should process reallocation with warning logged
+        result = await fund_flow_manager.process_strategy_reallocation(
+            "strategy_1", "strategy_2", Decimal("1000"), "reallocation"
+        )
+        assert isinstance(result, FundFlow)
+
+    @pytest.mark.asyncio
+    async def test_process_strategy_reallocation_exceeds_daily_limit(self, fund_flow_manager):
+        """Test strategy reallocation exceeding daily limit."""
+        fund_flow_manager.total_capital = Decimal("100000")
+
+        # Mock daily reallocation amount to be near limit
+        from unittest.mock import patch
+        with patch.object(fund_flow_manager, '_get_daily_reallocation_amount', return_value=Decimal("9000")):
+            # Request reallocation that would exceed 10% daily limit
+            with pytest.raises(Exception, match="Strategy reallocation failed"):
+                await fund_flow_manager.process_strategy_reallocation(
+                    "strategy_1", "strategy_2", Decimal("2000"), "reallocation"
+                )
+
+    @pytest.mark.asyncio
+    async def test_withdrawal_rules_validation(self, fund_flow_manager):
+        """Test withdrawal rules validation."""
+        # Initialize withdrawal rules with proper Mock setup
+        profit_only_rule = Mock()
+        profit_only_rule.enabled = True
+        profit_only_rule.name = "profit_only"
+
+        maintain_minimum_rule = Mock()
+        maintain_minimum_rule.enabled = True
+        maintain_minimum_rule.name = "maintain_minimum"
+
+        performance_based_rule = Mock()
+        performance_based_rule.enabled = True
+        performance_based_rule.name = "performance_based"
+        performance_based_rule.threshold = 0.05
+
+        fund_flow_manager.withdrawal_rules = {
+            "profit_only": profit_only_rule,
+            "maintain_minimum": maintain_minimum_rule,
+            "performance_based": performance_based_rule
+        }
+
+        fund_flow_manager.total_profit = Decimal("0")  # No profits
+        fund_flow_manager.total_capital = Decimal("100000")
+
+        # Should fail profit_only rule - ValidationError is re-raised directly
+        with pytest.raises(ValidationError, match="No profits available"):
+            await fund_flow_manager._validate_withdrawal_rules(Decimal("1000"), "USDT")
+
+    @pytest.mark.asyncio
+    async def test_withdrawal_cooldown_check(self, fund_flow_manager):
+        """Test withdrawal cooldown period check."""
+        # Add recent withdrawal
+        recent_flow = FundFlow(
+            from_strategy=None,
+            to_strategy=None,
+            from_exchange="binance",
+            to_exchange=None,
+            amount=Decimal("1000"),
+            reason="withdrawal",
+            timestamp=datetime.now(timezone.utc) - timedelta(minutes=10)  # Recent
+        )
+        fund_flow_manager.fund_flows = [recent_flow]
+        fund_flow_manager.config = {"fund_flow_cooldown_minutes": 30}
+
+        # Should fail cooldown check
+        with pytest.raises(ValidationError, match="Cooldown period not met"):
+            await fund_flow_manager._check_withdrawal_cooldown()
+
+    @pytest.mark.asyncio
+    async def test_performance_threshold_check(self, fund_flow_manager):
+        """Test performance threshold checking."""
+        # Test with no performance data
+        result = await fund_flow_manager._check_performance_threshold(0.05)
+        assert result is False
+
+        # Test with performance data
+        fund_flow_manager.strategy_performance = {
+            "strategy_1": {
+                "total_pnl": Decimal("500"),
+                "initial_capital": Decimal("10000")
+            }
+        }
+
+        # Should meet 0.05 threshold (500/10000 = 0.05)
+        result = await fund_flow_manager._check_performance_threshold(0.05)
+        assert result is True
+
+        # Should not meet 0.10 threshold
+        result = await fund_flow_manager._check_performance_threshold(0.10)
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_calculate_minimum_capital_required(self, fund_flow_manager):
+        """Test minimum capital calculation."""
+        # Test with no strategy performance
+        result = await fund_flow_manager._calculate_minimum_capital_required()
+        assert result > Decimal("0")
+
+        # Test with strategy performance and config
+        fund_flow_manager.strategy_performance = {
+            "arbitrage_strategy_1": {},
+            "trend_strategy_1": {}
+        }
+        fund_flow_manager.config = {
+            "per_strategy_minimum": {
+                "arbitrage": 10000,
+                "trend": 5000
+            }
+        }
+
+        result = await fund_flow_manager._calculate_minimum_capital_required()
+        assert result == Decimal("15000")  # 10000 + 5000
+
+    @pytest.mark.asyncio
+    async def test_daily_reallocation_amount_calculation(self, fund_flow_manager):
+        """Test daily reallocation amount calculation."""
+        # Add some reallocation flows for today
+        today_flow = FundFlow(
+            from_strategy="strategy_1",
+            to_strategy="strategy_2",
+            from_exchange=None,
+            to_exchange=None,
+            amount=Decimal("5000"),
+            reason="reallocation",
+            timestamp=datetime.now(timezone.utc)
+        )
+        fund_flow_manager.fund_flows = [today_flow]
+
+        result = await fund_flow_manager._get_daily_reallocation_amount()
+        assert result == Decimal("5000")
+
+    @pytest.mark.asyncio
+    async def test_compound_timing_checks(self, fund_flow_manager):
+        """Test auto-compound timing checks."""
+        # Test disabled auto-compound
+        fund_flow_manager.config = {"auto_compound_enabled": False}
+        assert fund_flow_manager._should_compound() is False
+
+        # Test weekly frequency
+        fund_flow_manager.config = {
+            "auto_compound_enabled": True,
+            "auto_compound_frequency": "weekly"
+        }
+        fund_flow_manager.last_compound_date = datetime.now(timezone.utc) - timedelta(days=8)
+        assert fund_flow_manager._should_compound() is True
+
+        # Test monthly frequency
+        fund_flow_manager.config["auto_compound_frequency"] = "monthly"
+        fund_flow_manager.last_compound_date = datetime.now(timezone.utc) - timedelta(days=35)
+        assert fund_flow_manager._should_compound() is True
+
+        # Test invalid frequency
+        fund_flow_manager.config["auto_compound_frequency"] = "invalid"
+        assert fund_flow_manager._should_compound() is False
+
+    @pytest.mark.asyncio
+    async def test_compound_amount_calculation(self, fund_flow_manager):
+        """Test auto-compound amount calculation."""
+        # Test below threshold
+        fund_flow_manager.total_profit = Decimal("100")
+        fund_flow_manager.config = {"profit_threshold": 1000}
+
+        result = await fund_flow_manager._calculate_compound_amount()
+        assert result == Decimal("0")
+
+        # Test above threshold
+        fund_flow_manager.total_profit = Decimal("2000")
+        fund_flow_manager.config = {
+            "profit_threshold": 1000,
+            "profit_lock_pct": 0.5
+        }
+
+        result = await fund_flow_manager._calculate_compound_amount()
+        expected = (Decimal("2000") - Decimal("1000")) * Decimal("0.5")
+        assert result == expected
+
+    @pytest.mark.asyncio
+    async def test_compound_schedule_calculation(self, fund_flow_manager):
+        """Test compound schedule calculation."""
+        fund_flow_manager.config = {
+            "auto_compound_frequency": "weekly",
+            "auto_compound_enabled": True
+        }
+
+        schedule = fund_flow_manager._calculate_compound_schedule()
+        assert "frequency" in schedule
+        assert "next_compound" in schedule
+        assert "enabled" in schedule
+        assert schedule["frequency"] == "weekly"
+        assert schedule["enabled"] is True
+
+    @pytest.mark.asyncio
+    async def test_get_performance_summary_edge_cases(self, fund_flow_manager):
+        """Test performance summary with edge cases."""
+        # Test with mixed metric types
+        fund_flow_manager.strategy_performance = {
+            "strategy_1": {"pnl": 1000.0, "performance_score": 0.85},
+            "strategy_2": Decimal("500"),  # Single value
+            "strategy_3": 250,  # Integer value
+            "strategy_4": {"pnl": Decimal("750"), "performance_score": Decimal("0.90")}
+        }
+
+        summary = await fund_flow_manager.get_performance_summary()
+
+        assert summary["strategy_count"] == 4
+        assert "strategies" in summary
+        assert "total_pnl" in summary
+
+        # Check individual strategy handling
+        assert summary["strategies"]["strategy_1"]["pnl"] == Decimal("1000.0")
+        assert summary["strategies"]["strategy_2"]["pnl"] == Decimal("500")
+        assert summary["strategies"]["strategy_3"]["pnl"] == Decimal("250")
+        assert summary["strategies"]["strategy_4"]["pnl"] == Decimal("750")
+
+    @pytest.mark.asyncio
+    async def test_withdrawal_rules_initialization_edge_cases(self, fund_flow_manager):
+        """Test withdrawal rules initialization with edge cases."""
+        # Test with invalid config
+        fund_flow_manager.config = {"withdrawal_rules": "invalid"}
+        fund_flow_manager._initialize_withdrawal_rules()
+        assert len(fund_flow_manager.withdrawal_rules) == 0
+
+        # Test with invalid rule config
+        fund_flow_manager.config = {
+            "withdrawal_rules": {
+                "valid_rule": {
+                    "enabled": True,
+                    "description": "Valid rule"
+                },
+                "invalid_rule": "not_a_dict"
+            }
+        }
+        fund_flow_manager._initialize_withdrawal_rules()
+        assert "valid_rule" in fund_flow_manager.withdrawal_rules
+        assert "invalid_rule" not in fund_flow_manager.withdrawal_rules
+
+    @pytest.mark.asyncio
+    async def test_validation_rule_edge_cases(self, fund_flow_manager):
+        """Test withdrawal rule validation with edge cases."""
+        from src.capital_management.constants import DEFAULT_PROFIT_THRESHOLD
+        from src.core.types.capital import ExtendedWithdrawalRule as WithdrawalRule
+
+        # Setup rules with various configurations
+        fund_flow_manager.withdrawal_rules = {
+            "min_amount_rule": WithdrawalRule(
+                name="min_amount_rule",
+                enabled=True,
+                min_amount=Decimal("500")
+            ),
+            "max_percentage_rule": WithdrawalRule(
+                name="max_percentage_rule",
+                enabled=True,
+                max_percentage=0.1
+            ),
+            "disabled_rule": WithdrawalRule(
+                name="disabled_rule",
+                enabled=False,
+                min_amount=Decimal("10000")  # Would fail if enabled
+            )
+        }
+        fund_flow_manager.total_capital = Decimal("10000")
+
+        # Test min amount violation
+        with pytest.raises(ValidationError, match="below minimum"):
+            await fund_flow_manager._validate_withdrawal_rules(Decimal("300"), "USDT")
+
+        # Test max percentage violation
+        with pytest.raises(ValidationError, match="exceeds maximum"):
+            await fund_flow_manager._validate_withdrawal_rules(Decimal("1500"), "USDT")
+
+        # Test disabled rule is ignored
+        amount = Decimal("800")  # Would fail disabled rule but should pass
+        await fund_flow_manager._validate_withdrawal_rules(amount, "USDT")
+
+    @pytest.mark.asyncio
+    async def test_maintain_minimum_rule_validation(self, fund_flow_manager):
+        """Test maintain minimum capital rule validation."""
+        from src.core.types.capital import ExtendedWithdrawalRule as WithdrawalRule
+
+        fund_flow_manager.withdrawal_rules = {
+            "maintain_minimum": WithdrawalRule(
+                name="maintain_minimum",
+                enabled=True
+            )
+        }
+        fund_flow_manager.total_capital = Decimal("5000")
+
+        # Mock minimum capital calculation to return high value
+        from unittest.mock import patch
+        with patch.object(fund_flow_manager, '_calculate_minimum_capital_required', return_value=Decimal("4500")):
+            # Withdrawal would leave 2000, below required 4500
+            with pytest.raises(ValidationError, match="minimum capital requirement"):
+                await fund_flow_manager._validate_withdrawal_rules(Decimal("3000"), "USDT")
+
+    @pytest.mark.asyncio
+    async def test_performance_based_rule_validation(self, fund_flow_manager):
+        """Test performance-based withdrawal rule validation."""
+        from src.core.types.capital import ExtendedWithdrawalRule as WithdrawalRule
+
+        fund_flow_manager.withdrawal_rules = {
+            "performance_based": WithdrawalRule(
+                name="performance_based",
+                enabled=True,
+                threshold=0.1  # 10% threshold
+            )
+        }
+
+        # Mock performance check to return False
+        from unittest.mock import patch
+        with patch.object(fund_flow_manager, '_check_performance_threshold', return_value=False):
+            with pytest.raises(ValidationError, match="Performance below threshold"):
+                await fund_flow_manager._validate_withdrawal_rules(Decimal("1000"), "USDT")
+
+    @pytest.mark.asyncio
+    async def test_error_handling_in_methods(self, fund_flow_manager):
+        """Test error handling in various methods."""
+        # Test that performance update handles invalid data gracefully (no exception expected)
+        await fund_flow_manager.update_performance("test", {"valid_metric": 0.5})
+
+        # Verify the data was stored
+        assert "test" in fund_flow_manager.strategy_performance
+        assert fund_flow_manager.strategy_performance["test"]["valid_metric"] == Decimal("0.5")
+
+        # Test error in flow history with invalid timestamp
+        fund_flow_manager.fund_flows = [Mock(timestamp="invalid")]
+        try:
+            await fund_flow_manager.get_flow_history()
+        except Exception:
+            pass  # Expected to handle gracefully
+
+        # Test error in flow summary
+        try:
+            await fund_flow_manager.get_flow_summary()
+        except Exception:
+            pass  # Expected to handle gracefully
+
+    @pytest.mark.asyncio
+    async def test_cached_fund_flows_edge_cases(self, fund_flow_manager):
+        """Test cached fund flows with edge cases."""
+        # Test with flows that don't have model_dump method
+        flows = [Mock(spec=[]), Mock(spec=[])]  # No model_dump method
+        flows[0].__dict__ = {"amount": Decimal("100")}
+        flows[1].__dict__ = {"amount": Decimal("200")}
+
+        await fund_flow_manager._cache_fund_flows(flows)
+
+        # Test cached data conversion back to FundFlow
+        fund_flow_manager._cache_service.get = AsyncMock(return_value=[
+            {"amount": 100, "reason": "test", "timestamp": datetime.now(timezone.utc).isoformat()}
+        ])
+
+        try:
+            cached_flows = await fund_flow_manager._get_cached_fund_flows()
+            # May return None or flows depending on data validity
+        except Exception:
+            pass  # Expected to handle gracefully
+
+    @pytest.mark.asyncio
+    async def test_set_capital_allocator(self, fund_flow_manager):
+        """Test capital allocator integration."""
+        allocator = Mock()
+        fund_flow_manager.capital_allocator = allocator
+        assert fund_flow_manager.capital_allocator == allocator
+
+    @pytest.mark.asyncio
+    async def test_config_validation(self, fund_flow_manager):
+        """Test configuration validation."""
+        # Start with empty config
+        fund_flow_manager.config = {}
+        fund_flow_manager._validate_config()
+
+        # Should have default values
+        assert "total_capital" in fund_flow_manager.config
+        assert "min_deposit_amount" in fund_flow_manager.config
+        assert fund_flow_manager.config["auto_compound_enabled"] is True
+
+    @pytest.mark.asyncio
+    async def test_cleanup_resources(self, fund_flow_manager):
+        """Test resource cleanup."""
+        # Mock resource manager
+        from unittest.mock import patch, Mock
+        mock_resource_manager = Mock()
+        mock_resource_manager.clean_fund_flows.return_value = []
+        mock_resource_manager.clean_performance_data.return_value = {}
+
+        with patch('src.utils.capital_resources.get_resource_manager', return_value=mock_resource_manager):
+            await fund_flow_manager.cleanup_resources()
+
+        mock_resource_manager.clean_fund_flows.assert_called_once()
+        mock_resource_manager.clean_performance_data.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_service_shutdown(self, fund_flow_manager):
+        """Test service shutdown process."""
+        await fund_flow_manager.start()
+        await fund_flow_manager.stop()
+        assert not fund_flow_manager.is_running

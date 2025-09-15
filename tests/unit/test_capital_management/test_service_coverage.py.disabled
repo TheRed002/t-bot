@@ -1,0 +1,252 @@
+"""
+Simple tests to cover missing lines in CapitalService.
+Focus on error paths, edge cases, and exception handling.
+"""
+
+import pytest
+import logging
+from decimal import Decimal
+from unittest.mock import AsyncMock, Mock, patch
+from datetime import datetime, timezone
+
+# Disable logging during tests
+logging.getLogger().setLevel(logging.CRITICAL)
+
+from src.capital_management.service import CapitalService
+from src.core.exceptions import ServiceError, ValidationError
+
+
+class TestCapitalServiceCoverage:
+    """Tests to cover missing lines in CapitalService."""
+
+    @pytest.fixture
+    def mock_capital_repository(self):
+        """Create mock capital repository."""
+        repo = AsyncMock()
+        repo.create = AsyncMock()
+        repo.update = AsyncMock()
+        repo.delete = AsyncMock()
+        repo.get_by_strategy_exchange = AsyncMock()
+        repo.get_by_strategy = AsyncMock()
+        repo.get_all = AsyncMock()
+        return repo
+
+    @pytest.fixture
+    def mock_audit_repository(self):
+        """Create mock audit repository."""
+        repo = AsyncMock()
+        repo.create = AsyncMock()
+        return repo
+
+    @pytest.fixture
+    def capital_service(self, mock_capital_repository, mock_audit_repository):
+        """Create CapitalService with mocked dependencies."""
+        return CapitalService(
+            capital_repository=mock_capital_repository,
+            audit_repository=mock_audit_repository
+        )
+
+    @pytest.fixture
+    def minimal_capital_service(self):
+        """Create CapitalService with minimal dependencies."""
+        return CapitalService()
+
+    # Test startup error paths
+    async def test_start_service_with_missing_dependencies(self, minimal_capital_service):
+        """Test start service when dependencies are missing."""
+        # This should handle missing dependencies gracefully
+        await minimal_capital_service.start()
+        assert minimal_capital_service.is_running
+
+    # Test initialization edge cases
+    def test_initialization_with_none_dependencies(self):
+        """Test initialization with None dependencies."""
+        service = CapitalService(
+            capital_repository=None,
+            audit_repository=None,
+            config_service=None,
+            cache_service=None,
+            time_series_service=None,
+            validation_service=None
+        )
+        assert service is not None
+
+    # Test configuration loading edge cases
+    def test_load_configuration_fallback(self, minimal_capital_service):
+        """Test configuration loading with fallback values."""
+        minimal_capital_service._load_configuration()
+
+        # Should have default values set
+        assert hasattr(minimal_capital_service, 'config')
+
+    # Test allocation validation edge cases
+    async def test_validate_allocation_request_with_invalid_data(self, capital_service):
+        """Test allocation request validation with invalid data."""
+        with pytest.raises(ValidationError):
+            await capital_service._validate_allocation_request_consistent("", "binance", Decimal("1000"))
+
+        with pytest.raises(ValidationError):
+            await capital_service._validate_allocation_request_consistent("strategy", "", Decimal("1000"))
+
+        with pytest.raises(ValidationError):
+            await capital_service._validate_allocation_request_consistent("strategy", "binance", Decimal("0"))
+
+    # Test allocation limits validation
+    async def test_validate_allocation_limits_edge_cases(self, capital_service):
+        """Test allocation limits validation edge cases."""
+        # Test with very large amount
+        with pytest.raises(ValidationError):
+            await capital_service._validate_allocation_limits_consistent(
+                "strategy", "binance", Decimal("999999999")
+            )
+
+    # Test business rules validation
+    async def test_validate_allocation_business_rules_edge_cases(self, capital_service):
+        """Test business rules validation edge cases."""
+        # Test with invalid allocation data
+        invalid_data = {
+            "strategy_id": "",
+            "exchange": "binance",
+            "amount": Decimal("1000")
+        }
+
+        with pytest.raises(ValidationError):
+            await capital_service._validate_allocation_business_rules(invalid_data)
+
+    # Test capital metrics calculation edge cases
+    async def test_get_capital_metrics_with_no_allocations(self, capital_service, mock_capital_repository):
+        """Test capital metrics calculation when no allocations exist."""
+        mock_capital_repository.get_all.return_value = []
+
+        metrics = await capital_service.get_capital_metrics()
+        assert metrics.allocated_capital == Decimal("0")
+        assert metrics.utilization_ratio == Decimal("0")
+
+    # Test allocation efficiency calculation
+    async def test_calculate_allocation_efficiency_empty_list(self, capital_service):
+        """Test allocation efficiency calculation with empty list."""
+        efficiency = await capital_service._calculate_allocation_efficiency([])
+        assert efficiency == 0.0
+
+    # Test audit log creation edge cases
+    async def test_create_audit_log_with_none_audit_repository(self, minimal_capital_service):
+        """Test audit log creation when audit repository is None."""
+        # Should not raise exception even without audit repository
+        await minimal_capital_service._create_audit_log(
+            "test_operation", "test_strategy", "binance", {"amount": "1000"}
+        )
+
+    # Test error propagation edge cases
+    def test_propagate_capital_error_consistently(self, capital_service):
+        """Test error propagation with different error types."""
+        # Should handle different error types
+        capital_service._propagate_capital_error_consistently(
+            ValueError("Test error"), "test_operation", "test_id"
+        )
+
+        capital_service._propagate_capital_error_consistently(
+            ServiceError("Service error"), "test_operation", "test_id"
+        )
+
+    # Test health check edge cases
+    async def test_service_health_check_with_failures(self, capital_service, mock_capital_repository):
+        """Test service health check when dependencies fail."""
+        mock_capital_repository.get_all.side_effect = Exception("Database error")
+
+        health_status = await capital_service._service_health_check()
+        assert health_status.status != "healthy"
+
+    # Test performance metrics edge cases
+    def test_get_performance_metrics_after_reset(self, capital_service):
+        """Test performance metrics after reset."""
+        capital_service.reset_metrics()
+        metrics = capital_service.get_performance_metrics()
+
+        assert "allocation_count" in metrics
+        assert "total_operations" in metrics
+
+    # Test configuration edge cases
+    def test_safe_decimal_conversion_edge_cases(self, capital_service):
+        """Test safe decimal conversion with edge cases."""
+        # Test with None
+        result = capital_service._safe_decimal_conversion(None)
+        assert result == Decimal("0")
+
+        # Test with string
+        result = capital_service._safe_decimal_conversion("123.45")
+        assert result == Decimal("123.45")
+
+        # Test with invalid string
+        result = capital_service._safe_decimal_conversion("invalid")
+        assert result == Decimal("0")
+
+    # Test safe get value edge cases
+    def test_safe_get_value_edge_cases(self, capital_service):
+        """Test safe get value with edge cases."""
+        # Test with None object
+        result = capital_service._safe_get_value(None, "key", "default")
+        assert result == "default"
+
+        # Test with object without attribute
+        obj = object()
+        result = capital_service._safe_get_value(obj, "nonexistent", "default")
+        assert result == "default"
+
+    # Test state management edge cases
+    async def test_save_capital_state_snapshot_without_time_series(self, minimal_capital_service):
+        """Test state snapshot saving without time series service."""
+        # Should not raise exception even without time series service
+        await minimal_capital_service._save_capital_state_snapshot("test_reason")
+
+    async def test_build_consistent_state_data_edge_cases(self, capital_service):
+        """Test building consistent state data with edge cases."""
+        # Test with empty allocations
+        state_data = await capital_service._build_consistent_state_data([], "test_reason")
+        assert "allocations" in state_data
+        assert state_data["allocations"] == []
+
+    # Test allocation cleanup edge cases
+    async def test_cleanup_resources_multiple_times(self, capital_service):
+        """Test cleanup resources called multiple times."""
+        await capital_service.cleanup_resources()
+        await capital_service.cleanup_resources()  # Should not raise exception
+
+    # Test transaction edge cases
+    async def test_restore_allocations_in_transaction_empty_list(self, capital_service):
+        """Test restoring allocations with empty list."""
+        # Should handle empty list gracefully
+        await capital_service._restore_allocations_in_transaction([])
+
+    # Test available capital calculation edge cases
+    async def test_get_available_capital_with_none_config(self, minimal_capital_service):
+        """Test available capital calculation with None config."""
+        available = await minimal_capital_service._get_available_capital()
+        assert isinstance(available, Decimal)
+        assert available >= Decimal("0")
+
+    # Test allocation retrieval edge cases
+    async def test_get_existing_allocation_not_found(self, capital_service, mock_capital_repository):
+        """Test getting existing allocation when not found."""
+        mock_capital_repository.get_by_strategy_exchange.return_value = None
+
+        result = await capital_service._get_existing_allocation("nonexistent", "binance")
+        assert result is None
+
+    # Test deletion edge cases
+    async def test_delete_allocation_not_found(self, capital_service, mock_capital_repository):
+        """Test deleting allocation that doesn't exist."""
+        mock_capital_repository.delete.return_value = False
+
+        result = await capital_service._delete_allocation("nonexistent")
+        assert result is False
+
+    # Test update metrics with different scenarios
+    def test_update_allocation_metrics_edge_cases(self, capital_service):
+        """Test updating allocation metrics with edge cases."""
+        # Test with current time
+        start_time = datetime.now(timezone.utc)
+        capital_service._update_allocation_metrics(start_time)
+
+        # Should not raise exception
+        metrics = capital_service.get_performance_metrics()
+        assert isinstance(metrics, dict)

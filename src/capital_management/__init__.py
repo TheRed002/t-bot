@@ -1,5 +1,4 @@
-"""
-Capital Management System Implementation (P-010A)
+"""Capital Management System Implementation (P-010A)
 
 This module implements comprehensive capital allocation and fund management system
 for the trading bot framework. It provides dynamic capital allocation across
@@ -24,16 +23,13 @@ Author: Trading Bot Framework
 Version: 1.0.0
 """
 
-# Export capital-specific types for convenience
-# Import DI registration function (no circular dependencies)
 from src.capital_management.di_registration import register_capital_management_services
-
-# Import service interfaces first (no circular dependencies)
 from src.capital_management.interfaces import (
     AbstractCapitalService,
     AbstractCurrencyManagementService,
     AbstractExchangeDistributionService,
     AbstractFundFlowManagementService,
+    CapitalAllocatorProtocol,
     CapitalServiceProtocol,
     CurrencyManagementServiceProtocol,
     ExchangeDistributionServiceProtocol,
@@ -48,7 +44,6 @@ from src.core.types.capital import (
 )
 
 
-# Use lazy imports for concrete implementations to avoid circular dependencies
 def __getattr__(name: str):
     """Lazy import to avoid circular dependencies."""
     imports = {
@@ -57,9 +52,9 @@ def __getattr__(name: str):
         "ExchangeDistributor": "src.capital_management.exchange_distributor",
         "FundFlowManager": "src.capital_management.fund_flow_manager",
         "CapitalService": "src.capital_management.service",
-        "CapitalAllocatorFactory": "src.capital_management.factory",
         "CapitalManagementFactory": "src.capital_management.factory",
         "CapitalServiceFactory": "src.capital_management.factory",
+        "CapitalAllocatorFactory": "src.capital_management.factory",
         "CurrencyManagerFactory": "src.capital_management.factory",
         "ExchangeDistributorFactory": "src.capital_management.factory",
         "FundFlowManagerFactory": "src.capital_management.factory",
@@ -82,6 +77,7 @@ __all__ = [
     "AuditRepository",
     "CapitalAllocator",
     "CapitalAllocatorFactory",
+    "CapitalAllocatorProtocol",
     "CapitalCurrencyExposure",
     "CapitalExchangeAllocation",
     "CapitalFundFlow",
