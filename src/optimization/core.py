@@ -18,6 +18,7 @@ Critical for Financial Applications:
 - Type safety and validation
 """
 
+import asyncio
 import uuid
 from abc import ABC, abstractmethod
 from collections.abc import Callable
@@ -31,6 +32,9 @@ from pydantic import BaseModel, Field, field_validator
 from src.core.exceptions import ValidationError
 from src.core.logging import get_logger
 from src.core.types import TradingMode
+
+# Constants for timeout
+DEFAULT_OBJECTIVE_TIMEOUT_SECONDS = 30
 
 
 class OptimizationStatus(Enum):
@@ -64,7 +68,7 @@ class OptimizationObjective(BaseModel):
     direction: ObjectiveDirection = Field(description="Optimization direction")
     weight: Decimal = Field(
         default=Decimal("1.0"),
-        ge=Decimal("0"),
+        ge=0,
         description="Objective weight in multi-objective optimization",
     )
     target_value: Decimal | None = Field(
@@ -151,11 +155,11 @@ class OptimizationConstraint(BaseModel):
         default="inequality", description="Type of constraint (equality, inequality, etc.)"
     )
     tolerance: Decimal = Field(
-        default=Decimal("1e-6"), ge=Decimal("0"), description="Constraint violation tolerance"
+        default=Decimal("1e-6"), ge=0, description="Constraint violation tolerance"
     )
     penalty_weight: Decimal = Field(
         default=Decimal("1000"),
-        ge=Decimal("0"),
+        ge=0,
         description="Penalty weight for constraint violations",
     )
     is_hard: bool = Field(
@@ -183,8 +187,8 @@ class OptimizationProgress(BaseModel):
     total_iterations: int = Field(default=0, ge=0, description="Total iterations")
     completion_percentage: Decimal = Field(
         default=Decimal("0"),
-        ge=Decimal("0"),
-        le=Decimal("100"),
+        ge=0,
+        le=100,
         description="Completion percentage",
     )
 
@@ -254,9 +258,7 @@ class OptimizationProgress(BaseModel):
         """Add a warning to the progress tracker."""
         self.warnings.append(warning)
         logger = get_logger(self.__class__.__name__)
-        logger.warning(
-            f"Optimization warning: {warning}", optimization_id=self.optimization_id
-        )
+        logger.warning(f"Optimization warning: {warning}", optimization_id=self.optimization_id)
 
     def estimate_completion_time(self) -> None:
         """Estimate completion time based on current progress."""
@@ -292,7 +294,7 @@ class OptimizationConfig(BaseModel):
 
     # Convergence criteria
     convergence_tolerance: Decimal = Field(
-        default=Decimal("1e-6"), gt=Decimal("0"), description="Convergence tolerance"
+        default=Decimal("1e-6"), gt=0, description="Convergence tolerance"
     )
     max_stagnation_iterations: int = Field(
         default=50, ge=1, description="Maximum iterations without improvement"
@@ -338,7 +340,7 @@ class OptimizationConfig(BaseModel):
     )
     risk_free_rate: Decimal = Field(
         default=Decimal("0.02"),
-        ge=Decimal("0"),
+        ge=0,
         description="Risk-free rate for performance calculations",
     )
 
@@ -380,7 +382,7 @@ class OptimizationResult(BaseModel):
     start_time: datetime = Field(description="Optimization start time")
     end_time: datetime = Field(description="Optimization end time")
     total_duration_seconds: Decimal = Field(
-        ge=Decimal("0"), description="Total optimization duration in seconds"
+        ge=0, description="Total optimization duration in seconds"
     )
 
     # Quality metrics
@@ -470,7 +472,7 @@ class OptimizationEngine(ABC):
         self.optimization_id = str(uuid.uuid4())
 
         # Initialize logger
-        self.logger = get_logger(self.__class__.__name__)
+        self._logger = get_logger(self.__class__.__name__)
 
         # Initialize progress tracking
         self.progress = OptimizationProgress(
@@ -483,7 +485,7 @@ class OptimizationEngine(ABC):
         # Validation
         self._validate_configuration()
 
-        self.logger.info(
+        self._logger.info(
             "Optimization engine initialized",
             optimization_id=self.optimization_id,
             engine_type=self.__class__.__name__,
@@ -564,7 +566,7 @@ class OptimizationEngine(ABC):
 
         # Log progress periodically
         if iteration % self.config.progress_callback_interval == 0:
-            self.logger.info(
+            self._logger.info(
                 "Optimization progress update",
                 optimization_id=self.optimization_id,
                 iteration=iteration,
@@ -638,7 +640,72 @@ class OptimizationEngine(ABC):
     async def stop(self) -> None:
         """Stop the optimization process."""
         self.progress.status = OptimizationStatus.CANCELLED
-        self.logger.info("Optimization stopped", optimization_id=self.optimization_id)
+        self._logger.info("Optimization stopped", optimization_id=self.optimization_id)
+
+    def _get_primary_objective_value(self, objective_values: dict[str, Decimal]) -> Decimal:
+        """
+        Get primary objective value from results.
+
+        Shared implementation extracted from BayesianOptimizer and BruteForceOptimizer
+        to eliminate code duplication.
+        """
+        # Find primary objective
+        primary_obj = None
+        for obj in self.objectives:
+            if obj.is_primary:
+                primary_obj = obj
+                break
+
+        if primary_obj is None:
+            primary_obj = self.objectives[0] if self.objectives else None
+
+        if primary_obj is None:
+            return Decimal("0")
+
+        return objective_values.get(primary_obj.name, Decimal("0"))
+
+    async def _run_objective_function(
+        self, objective_function: Callable, parameters: dict[str, Any], parameter_space: Any = None
+    ) -> Any:
+        """
+        Run objective function with parameters.
+
+        Shared implementation extracted from BayesianOptimizer and BruteForceOptimizer
+        to eliminate code duplication.
+        """
+        try:
+            # Convert parameters to appropriate types if parameter_space provided
+            if parameter_space is not None:
+                converted_params = parameter_space.clip_parameters(parameters)
+            else:
+                converted_params = parameters
+
+            # Run function with timeout
+            if asyncio.iscoroutinefunction(objective_function):
+                result = await asyncio.wait_for(
+                    objective_function(converted_params), timeout=DEFAULT_OBJECTIVE_TIMEOUT_SECONDS
+                )
+            else:
+                # Run in executor for CPU-bound functions
+                loop = asyncio.get_event_loop()
+                result = await asyncio.wait_for(
+                    loop.run_in_executor(None, objective_function, converted_params),
+                    timeout=DEFAULT_OBJECTIVE_TIMEOUT_SECONDS,
+                )
+
+            return result
+
+        except asyncio.TimeoutError:
+            self._logger.warning("Objective function execution timed out")
+            return None
+        except (ValueError, TypeError, KeyError) as e:
+            self._logger.warning(
+                f"Objective function execution failed due to parameter/data issue: {e!s}"
+            )
+            return None
+        except Exception as e:
+            self._logger.error(f"Objective function execution failed unexpectedly: {e!s}")
+            return None
 
 
 # Utility functions for common optimization patterns

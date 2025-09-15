@@ -49,9 +49,6 @@ from .bayesian import (
 from .brute_force import (
     BruteForceOptimizer,
     GridSearchConfig,
-    OptimizationResult,
-    ParameterSpace,
-    ValidationConfig as BruteForceValidationConfig,
 )
 from .controller import OptimizationController
 from .core import (
@@ -60,6 +57,7 @@ from .core import (
     OptimizationConstraint,
     OptimizationEngine,
     OptimizationObjective,
+    OptimizationResult,
     OptimizationStatus,
 )
 from .factory import (
@@ -82,6 +80,7 @@ from .parameter_space import (
     ContinuousParameter,
     DiscreteParameter,
     ParameterDefinition,
+    ParameterSpace,
     ParameterSpaceBuilder,
     ParameterType,
 )
@@ -105,7 +104,6 @@ __all__ = [
     "BayesianConfig",
     "BayesianOptimizer",
     "BruteForceOptimizer",
-    "BruteForceValidationConfig",
     "CategoricalParameter",
     "ConditionalParameter",
     "ContinuousParameter",

@@ -1,0 +1,915 @@
+"""
+Tests for optimization data transformer.
+
+This module ensures comprehensive testing of the OptimizationDataTransformer class,
+covering all data transformation methods including financial precision and edge cases.
+"""
+
+import pytest
+from unittest.mock import Mock, patch, MagicMock
+from datetime import datetime, timezone
+from decimal import Decimal
+from typing import Any
+
+from src.optimization.data_transformer import OptimizationDataTransformer
+from src.optimization.core import (
+    OptimizationObjective,
+    OptimizationProgress,
+    OptimizationResult,
+    OptimizationStatus,
+    ObjectiveDirection,
+)
+from src.optimization.parameter_space import ParameterSpace, ParameterType
+
+
+class TestOptimizationDataTransformer:
+    """Test cases for OptimizationDataTransformer class."""
+
+    @pytest.fixture
+    def sample_optimization_result(self):
+        """Create a sample OptimizationResult for testing."""
+        start_time = datetime.now(timezone.utc)
+        end_time = start_time.replace(second=start_time.second + 45)
+
+        return OptimizationResult(
+            optimization_id="test-opt-123",
+            algorithm_name="brute_force",
+            optimal_parameters={"param1": Decimal("0.15"), "param2": Decimal("0.25")},
+            optimal_objective_value=Decimal("1500.75"),
+            objective_values={"profit": Decimal("1500.75"), "sharpe": Decimal("2.1")},
+            iterations_completed=100,
+            evaluations_completed=250,
+            convergence_achieved=True,
+            start_time=start_time,
+            end_time=end_time,
+            total_duration_seconds=Decimal("45.0"),
+            validation_score=Decimal("0.85"),
+        )
+
+    @pytest.fixture
+    def sample_optimization_progress(self):
+        """Create a sample OptimizationProgress for testing."""
+        return OptimizationProgress(
+            optimization_id="test-progress-456",
+            status=OptimizationStatus.RUNNING,
+            current_iteration=50,
+            total_iterations=100,
+            completion_percentage=Decimal("50.0"),
+            best_objective_value=Decimal("1200.0"),
+            current_objective_value=Decimal("1100.0"),
+            evaluations_completed=125,
+            current_parameters={"param1": Decimal("0.1"), "param2": Decimal("0.2")},
+            message="Optimization in progress",
+            warnings=["Warning 1", "Warning 2"],
+        )
+
+    @pytest.fixture
+    def sample_optimization_objective(self):
+        """Create a sample OptimizationObjective for testing."""
+        return OptimizationObjective(
+            name="profit_maximization",
+            direction=ObjectiveDirection.MAXIMIZE,
+            weight=Decimal("1.0"),
+            target_value=Decimal("2000.0"),
+            constraint_min=Decimal("100.0"),
+            constraint_max=Decimal("5000.0"),
+            description="Maximize trading profit",
+            is_primary=True,
+        )
+
+    @pytest.fixture
+    def sample_parameter_space(self):
+        """Create a sample ParameterSpace for testing."""
+        mock_param1 = Mock()
+        mock_param1.parameter_type = ParameterType.CONTINUOUS
+        mock_param1.min_value = Decimal("0.01")
+        mock_param1.max_value = Decimal("0.50")
+
+        mock_param2 = Mock()
+        mock_param2.parameter_type = ParameterType.DISCRETE
+        mock_param2.values = [1, 2, 3, 4, 5]
+
+        mock_space = Mock(spec=ParameterSpace)
+        mock_space.parameters = {"param1": mock_param1, "param2": mock_param2}
+        mock_space.constraints = ["param1 < param2"]
+
+        return mock_space
+
+
+class TestTransformOptimizationResult(TestOptimizationDataTransformer):
+    """Test transform_optimization_result_to_event_data method."""
+
+    def test_transform_optimization_result_basic(self, sample_optimization_result):
+        """Test basic optimization result transformation."""
+        result = OptimizationDataTransformer.transform_optimization_result_to_event_data(
+            sample_optimization_result
+        )
+
+        assert result["optimization_id"] == "test-opt-123"
+        assert result["algorithm_name"] == "brute_force"
+        assert result["optimal_parameters"] == {"param1": Decimal("0.15"), "param2": Decimal("0.25")}
+        assert result["optimal_objective_value"] == "1500.75"
+        assert result["objective_values"] == {"profit": "1500.75", "sharpe": "2.1"}
+        assert result["iterations_completed"] == 100
+        assert result["evaluations_completed"] == 250
+        assert result["convergence_achieved"] is True
+        assert result["total_duration_seconds"] == "45.5"
+        assert result["validation_score"] == "0.85"
+        assert result["statistical_significance"] == "0.95"
+        assert result["processing_mode"] == "batch"
+        assert result["data_format"] == "event_data_v1"
+        assert "timestamp" in result
+        assert result["metadata"] == {}
+
+    def test_transform_optimization_result_with_metadata(self, sample_optimization_result):
+        """Test optimization result transformation with metadata."""
+        metadata = {"run_id": "run-123", "experiment": "test_exp"}
+        result = OptimizationDataTransformer.transform_optimization_result_to_event_data(
+            sample_optimization_result, metadata
+        )
+
+        assert result["metadata"] == metadata
+
+    def test_transform_optimization_result_with_none_values(self):
+        """Test transformation with None values for optional fields."""
+        result_with_nones = OptimizationResult(
+            optimization_id="test-none",
+            algorithm_name="test_algo",
+            optimal_parameters={},
+            optimal_objective_value=Decimal("100.0"),
+            objective_values={"profit": Decimal("100.0")},
+            iterations_completed=10,
+            evaluations_completed=20,
+            convergence_achieved=False,
+            total_duration_seconds=Decimal("10.0"),
+            validation_score=None,  # None value
+            statistical_significance=None,  # None value
+        )
+
+        result = OptimizationDataTransformer.transform_optimization_result_to_event_data(
+            result_with_nones
+        )
+
+        assert result["validation_score"] is None
+        assert result["statistical_significance"] is None
+
+    def test_transform_optimization_result_timestamp_format(self, sample_optimization_result):
+        """Test that timestamp is properly formatted."""
+        with patch('src.optimization.data_transformer.datetime') as mock_datetime:
+            mock_now = datetime(2023, 1, 15, 12, 30, 45, 123456, timezone.utc)
+            mock_datetime.now.return_value = mock_now
+
+            result = OptimizationDataTransformer.transform_optimization_result_to_event_data(
+                sample_optimization_result
+            )
+
+            assert result["timestamp"] == "2023-01-15T12:30:45.123456+00:00"
+
+    def test_transform_optimization_result_decimal_string_conversion(self, sample_optimization_result):
+        """Test that Decimal values are properly converted to strings."""
+        result = OptimizationDataTransformer.transform_optimization_result_to_event_data(
+            sample_optimization_result
+        )
+
+        # All decimal values should be strings
+        assert isinstance(result["optimal_objective_value"], str)
+        assert isinstance(result["total_duration_seconds"], str)
+        assert isinstance(result["validation_score"], str)
+        assert isinstance(result["statistical_significance"], str)
+
+        # Objective values dict should have string values
+        for value in result["objective_values"].values():
+            assert isinstance(value, str)
+
+
+class TestTransformOptimizationProgress(TestOptimizationDataTransformer):
+    """Test transform_optimization_progress_to_event_data method."""
+
+    def test_transform_optimization_progress_basic(self, sample_optimization_progress):
+        """Test basic optimization progress transformation."""
+        result = OptimizationDataTransformer.transform_optimization_progress_to_event_data(
+            sample_optimization_progress
+        )
+
+        assert result["optimization_id"] == "test-progress-456"
+        assert result["status"] == "running"
+        assert result["current_iteration"] == 50
+        assert result["total_iterations"] == 100
+        assert result["completion_percentage"] == "50.0"
+        assert result["best_objective_value"] == "1200.0"
+        assert result["current_objective_value"] == "1100.0"
+        assert result["evaluations_completed"] == 125
+        assert result["current_parameters"] == {"param1": Decimal("0.1"), "param2": Decimal("0.2")}
+        assert result["message"] == "Optimization in progress"
+        assert result["warnings"] == ["Warning 1", "Warning 2"]
+        assert result["processing_mode"] == "stream"  # Progress is streamed
+        assert result["data_format"] == "event_data_v1"
+
+    def test_transform_optimization_progress_with_none_values(self):
+        """Test progress transformation with None values."""
+        progress_with_nones = OptimizationProgress(
+            optimization_id="test-none-progress",
+            status=OptimizationStatus.PENDING,
+            current_iteration=0,
+            total_iterations=100,
+            completion_percentage=Decimal("0.0"),
+            best_objective_value=None,  # None value
+            current_objective_value=None,  # None value
+            evaluations_completed=0,
+            current_parameters={},
+            message="",
+            warnings=[],
+        )
+
+        result = OptimizationDataTransformer.transform_optimization_progress_to_event_data(
+            progress_with_nones
+        )
+
+        assert result["best_objective_value"] is None
+        assert result["current_objective_value"] is None
+
+    def test_transform_optimization_progress_with_metadata(self, sample_optimization_progress):
+        """Test progress transformation with metadata."""
+        metadata = {"session_id": "session-789"}
+        result = OptimizationDataTransformer.transform_optimization_progress_to_event_data(
+            sample_optimization_progress, metadata
+        )
+
+        assert result["metadata"] == metadata
+
+
+class TestTransformParameterSpace(TestOptimizationDataTransformer):
+    """Test transform_parameter_space_to_event_data method."""
+
+    def test_transform_parameter_space_basic(self, sample_parameter_space):
+        """Test basic parameter space transformation."""
+        result = OptimizationDataTransformer.transform_parameter_space_to_event_data(
+            sample_parameter_space
+        )
+
+        assert result["parameter_count"] == 2
+        assert "param1" in result["parameters"]
+        assert "param2" in result["parameters"]
+
+        param1_data = result["parameters"]["param1"]
+        assert param1_data["type"] == "continuous"
+        assert param1_data["min_value"] == "0.01"
+        assert param1_data["max_value"] == "0.50"
+        assert param1_data["values"] is None
+
+        param2_data = result["parameters"]["param2"]
+        assert param2_data["type"] == "discrete"
+        assert param2_data["values"] == [1, 2, 3, 4, 5]
+
+        assert result["constraints"] == ["param1 < param2"]
+        assert result["processing_mode"] == "batch"
+        assert result["data_format"] == "event_data_v1"
+
+    def test_transform_parameter_space_with_metadata(self, sample_parameter_space):
+        """Test parameter space transformation with metadata."""
+        metadata = {"space_version": "v1.0"}
+        result = OptimizationDataTransformer.transform_parameter_space_to_event_data(
+            sample_parameter_space, metadata
+        )
+
+        assert result["metadata"] == metadata
+
+    def test_transform_parameter_space_empty(self):
+        """Test transformation of empty parameter space."""
+        mock_space = Mock(spec=ParameterSpace)
+        mock_space.parameters = {}
+        mock_space.constraints = []
+
+        result = OptimizationDataTransformer.transform_parameter_space_to_event_data(mock_space)
+
+        assert result["parameter_count"] == 0
+        assert result["parameters"] == {}
+        assert result["constraints"] == []
+
+
+class TestTransformObjective(TestOptimizationDataTransformer):
+    """Test transform_objective_to_event_data method."""
+
+    def test_transform_objective_basic(self, sample_optimization_objective):
+        """Test basic objective transformation."""
+        result = OptimizationDataTransformer.transform_objective_to_event_data(
+            sample_optimization_objective
+        )
+
+        assert result["name"] == "profit_maximization"
+        assert result["direction"] == "maximize"
+        assert result["weight"] == "1.0"
+        assert result["target_value"] == "2000.0"
+        assert result["constraint_min"] == "100.0"
+        assert result["constraint_max"] == "5000.0"
+        assert result["description"] == "Maximize trading profit"
+        assert result["is_primary"] is True
+        assert result["processing_mode"] == "batch"
+        assert result["data_format"] == "event_data_v1"
+
+    def test_transform_objective_with_none_values(self):
+        """Test objective transformation with None values."""
+        objective_with_nones = OptimizationObjective(
+            name="test_objective",
+            direction=ObjectiveDirection.MINIMIZE,
+            weight=Decimal("0.5"),
+            target_value=None,  # None value
+            constraint_min=None,  # None value
+            constraint_max=None,  # None value
+            description="Test objective",
+            is_primary=False,
+        )
+
+        result = OptimizationDataTransformer.transform_objective_to_event_data(
+            objective_with_nones
+        )
+
+        assert result["target_value"] is None
+        assert result["constraint_min"] is None
+        assert result["constraint_max"] is None
+
+    def test_transform_objective_with_metadata(self, sample_optimization_objective):
+        """Test objective transformation with metadata."""
+        metadata = {"objective_version": "2.0"}
+        result = OptimizationDataTransformer.transform_objective_to_event_data(
+            sample_optimization_objective, metadata
+        )
+
+        assert result["metadata"] == metadata
+
+
+class TestValidateFinancialPrecision(TestOptimizationDataTransformer):
+    """Test validate_financial_precision method."""
+
+    def test_validate_financial_precision_basic(self):
+        """Test basic financial precision validation."""
+        data = {
+            "optimal_objective_value": "1500.75",
+            "weight": "1.0",
+            "completion_percentage": "85.5",
+            "non_financial_field": "some_value",
+        }
+
+        result = OptimizationDataTransformer.validate_financial_precision(data)
+
+        # Financial fields should be converted through Decimal
+        assert result["optimal_objective_value"] == "1500.75"
+        assert result["weight"] == "1.0"
+        assert result["completion_percentage"] == "85.5"
+        # Non-financial fields should be unchanged
+        assert result["non_financial_field"] == "some_value"
+
+    def test_validate_financial_precision_with_none_values(self):
+        """Test financial precision validation with None values."""
+        data = {
+            "optimal_objective_value": None,
+            "weight": "",
+            "target_value": "100.0",
+        }
+
+        result = OptimizationDataTransformer.validate_financial_precision(data)
+
+        # None and empty values should be left unchanged
+        assert result["optimal_objective_value"] is None
+        assert result["weight"] == ""
+        assert result["target_value"] == "100.0"
+
+    @patch('src.optimization.data_transformer.to_decimal')
+    def test_validate_financial_precision_conversion_error(self, mock_to_decimal):
+        """Test handling of decimal conversion errors."""
+        mock_to_decimal.side_effect = ValueError("Cannot convert")
+
+        data = {"optimal_objective_value": "invalid_decimal"}
+        result = OptimizationDataTransformer.validate_financial_precision(data)
+
+        # Should keep original value if conversion fails
+        assert result["optimal_objective_value"] == "invalid_decimal"
+
+    def test_validate_financial_precision_high_precision(self):
+        """Test validation with high precision decimal values."""
+        data = {
+            "optimal_objective_value": "1234.567890123456789",
+            "weight": "0.123456789012345678",
+        }
+
+        result = OptimizationDataTransformer.validate_financial_precision(data)
+
+        # High precision should be preserved
+        assert "1234.567890123456789" in result["optimal_objective_value"]
+        assert "0.123456789012345678" in result["weight"]
+
+    def test_validate_financial_precision_all_financial_fields(self):
+        """Test validation with all financial fields present."""
+        data = {
+            "optimal_objective_value": "1000.0",
+            "weight": "1.0",
+            "target_value": "500.0",
+            "constraint_min": "100.0",
+            "constraint_max": "2000.0",
+            "completion_percentage": "75.5",
+            "best_objective_value": "900.0",
+            "current_objective_value": "850.0",
+            "total_duration_seconds": "120.5",
+        }
+
+        result = OptimizationDataTransformer.validate_financial_precision(data)
+
+        # All fields should be processed
+        for key, value in data.items():
+            assert key in result
+            assert isinstance(result[key], str)
+
+
+class TestEnsureBoundaryFields(TestOptimizationDataTransformer):
+    """Test ensure_boundary_fields method."""
+
+    def test_ensure_boundary_fields_basic(self):
+        """Test basic boundary fields addition."""
+        data = {"test_field": "test_value"}
+        result = OptimizationDataTransformer.ensure_boundary_fields(data)
+
+        assert result["processing_mode"] == "batch"
+        assert result["data_format"] == "event_data_v1"
+        assert "timestamp" in result
+        assert result["source"] == "optimization"
+        assert result["metadata"] == {}
+        assert result["message_pattern"] == "req_reply"
+        assert result["boundary_crossed"] is True
+
+    def test_ensure_boundary_fields_with_existing_values(self):
+        """Test boundary fields addition with existing values."""
+        data = {
+            "processing_mode": "stream",
+            "data_format": "custom_format",
+            "timestamp": "2023-01-01T00:00:00Z",
+            "source": "custom_source",
+            "metadata": {"key": "value"},
+            "message_pattern": "pub_sub",
+        }
+
+        result = OptimizationDataTransformer.ensure_boundary_fields(data)
+
+        # Existing values should be preserved
+        assert result["processing_mode"] == "stream"
+        assert result["data_format"] == "custom_format"
+        assert result["timestamp"] == "2023-01-01T00:00:00Z"
+        assert result["source"] == "custom_source"
+        assert result["metadata"] == {"key": "value"}
+        assert result["message_pattern"] == "pub_sub"
+        assert result["boundary_crossed"] is True
+
+    def test_ensure_boundary_fields_custom_source(self):
+        """Test boundary fields with custom source."""
+        data = {"test_field": "test_value"}
+        result = OptimizationDataTransformer.ensure_boundary_fields(data, source="custom_module")
+
+        assert result["source"] == "custom_module"
+
+    def test_ensure_boundary_fields_timestamp_format(self):
+        """Test that generated timestamp is properly formatted."""
+        with patch('src.optimization.data_transformer.datetime') as mock_datetime:
+            mock_now = datetime(2023, 1, 15, 12, 30, 45, 123456, timezone.utc)
+            mock_datetime.now.return_value = mock_now
+
+            data = {}
+            result = OptimizationDataTransformer.ensure_boundary_fields(data)
+
+            assert result["timestamp"] == "2023-01-15T12:30:45.123456+00:00"
+
+
+class TestTransformForPubSub(TestOptimizationDataTransformer):
+    """Test transform_for_pub_sub method."""
+
+    def test_transform_for_pub_sub_with_optimization_result(self, sample_optimization_result):
+        """Test pub/sub transformation with OptimizationResult."""
+        result = OptimizationDataTransformer.transform_for_pub_sub(
+            "optimization_completed", sample_optimization_result
+        )
+
+        assert result["event_type"] == "optimization_completed"
+        assert result["message_pattern"] == "pub_sub"
+        assert result["boundary_crossed"] is True
+        assert result["validation_status"] == "validated"
+        assert result["optimization_id"] == "test-opt-123"
+
+    def test_transform_for_pub_sub_with_optimization_progress(self, sample_optimization_progress):
+        """Test pub/sub transformation with OptimizationProgress."""
+        result = OptimizationDataTransformer.transform_for_pub_sub(
+            "optimization_progress", sample_optimization_progress
+        )
+
+        assert result["event_type"] == "optimization_progress"
+        assert result["message_pattern"] == "pub_sub"
+        assert result["optimization_id"] == "test-progress-456"
+        assert result["status"] == "running"
+
+    def test_transform_for_pub_sub_with_parameter_space(self, sample_parameter_space):
+        """Test pub/sub transformation with ParameterSpace."""
+        result = OptimizationDataTransformer.transform_for_pub_sub(
+            "parameter_space_defined", sample_parameter_space
+        )
+
+        assert result["event_type"] == "parameter_space_defined"
+        assert result["parameter_count"] == 2
+
+    def test_transform_for_pub_sub_with_objective(self, sample_optimization_objective):
+        """Test pub/sub transformation with OptimizationObjective."""
+        result = OptimizationDataTransformer.transform_for_pub_sub(
+            "objective_defined", sample_optimization_objective
+        )
+
+        assert result["event_type"] == "objective_defined"
+        assert result["name"] == "profit_maximization"
+
+    def test_transform_for_pub_sub_with_dict(self):
+        """Test pub/sub transformation with dictionary data."""
+        data = {"optimization_id": "test-123", "status": "completed"}
+        result = OptimizationDataTransformer.transform_for_pub_sub("custom_event", data)
+
+        assert result["event_type"] == "custom_event"
+        assert result["optimization_id"] == "test-123"
+        assert result["status"] == "completed"
+
+    def test_transform_for_pub_sub_with_generic_data(self):
+        """Test pub/sub transformation with generic data."""
+        data = "simple string data"
+        result = OptimizationDataTransformer.transform_for_pub_sub("generic_event", data)
+
+        assert result["event_type"] == "generic_event"
+        assert result["payload"] == "simple string data"
+        assert result["type"] == "str"
+
+    def test_transform_for_pub_sub_with_metadata(self, sample_optimization_result):
+        """Test pub/sub transformation with metadata."""
+        metadata = {"run_id": "run-456"}
+        result = OptimizationDataTransformer.transform_for_pub_sub(
+            "optimization_event", sample_optimization_result, metadata
+        )
+
+        assert result["metadata"] == metadata
+
+
+class TestTransformForReqReply(TestOptimizationDataTransformer):
+    """Test transform_for_req_reply method."""
+
+    def test_transform_for_req_reply_basic(self, sample_optimization_result):
+        """Test basic request/reply transformation."""
+        result = OptimizationDataTransformer.transform_for_req_reply(
+            "optimization_request", sample_optimization_result, "corr-123"
+        )
+
+        assert result["request_type"] == "optimization_request"
+        assert result["correlation_id"] == "corr-123"
+        assert result["processing_mode"] == "request_reply"
+        assert result["message_pattern"] == "req_reply"
+        assert result["optimization_id"] == "test-opt-123"
+
+    def test_transform_for_req_reply_without_correlation_id(self, sample_optimization_result):
+        """Test request/reply transformation without correlation ID."""
+        with patch('src.optimization.data_transformer.datetime') as mock_datetime:
+            mock_now = datetime(2023, 1, 15, 12, 30, 45, 123456, timezone.utc)
+            mock_datetime.now.return_value = mock_now
+
+            result = OptimizationDataTransformer.transform_for_req_reply(
+                "optimization_request", sample_optimization_result
+            )
+
+            assert result["correlation_id"] == "2023-01-15T12:30:45.123456+00:00"
+
+
+class TestTransformForBatchProcessing(TestOptimizationDataTransformer):
+    """Test transform_for_batch_processing method."""
+
+    def test_transform_for_batch_processing_basic(self, sample_optimization_result):
+        """Test basic batch processing transformation."""
+        data_items = [sample_optimization_result]
+        result = OptimizationDataTransformer.transform_for_batch_processing(
+            "optimization_batch", data_items, "batch-123"
+        )
+
+        assert result["batch_type"] == "optimization_batch"
+        assert result["batch_id"] == "batch-123"
+        assert result["batch_size"] == 1
+        assert len(result["items"]) == 1
+        assert result["processing_mode"] == "batch"
+        assert result["data_format"] == "batch_event_data_v1"
+        assert result["source"] == "optimization"
+
+    def test_transform_for_batch_processing_mixed_types(
+        self, sample_optimization_result, sample_optimization_progress
+    ):
+        """Test batch processing with mixed data types."""
+        data_items = [sample_optimization_result, sample_optimization_progress]
+        result = OptimizationDataTransformer.transform_for_batch_processing(
+            "mixed_batch", data_items
+        )
+
+        assert result["batch_size"] == 2
+        assert len(result["items"]) == 2
+
+        # First item should be optimization result
+        assert result["items"][0]["optimization_id"] == "test-opt-123"
+        # Second item should be optimization progress
+        assert result["items"][1]["optimization_id"] == "test-progress-456"
+
+    def test_transform_for_batch_processing_with_dict(self):
+        """Test batch processing with dictionary data."""
+        data_items = [{"key1": "value1"}, {"key2": "value2"}]
+        result = OptimizationDataTransformer.transform_for_batch_processing(
+            "dict_batch", data_items
+        )
+
+        assert result["batch_size"] == 2
+        assert result["items"][0]["key1"] == "value1"
+        assert result["items"][1]["key2"] == "value2"
+
+    def test_transform_for_batch_processing_with_generic_data(self):
+        """Test batch processing with generic data."""
+        data_items = ["string1", 123, {"dict": "data"}]
+        result = OptimizationDataTransformer.transform_for_batch_processing(
+            "generic_batch", data_items
+        )
+
+        assert result["batch_size"] == 3
+        assert result["items"][0]["payload"] == "string1"
+        assert result["items"][0]["type"] == "str"
+        assert result["items"][1]["payload"] == "123"
+        assert result["items"][1]["type"] == "int"
+
+    def test_transform_for_batch_processing_empty_list(self):
+        """Test batch processing with empty data list."""
+        result = OptimizationDataTransformer.transform_for_batch_processing(
+            "empty_batch", []
+        )
+
+        assert result["batch_size"] == 0
+        assert result["items"] == []
+
+    def test_transform_for_batch_processing_with_metadata(self):
+        """Test batch processing with metadata."""
+        metadata = {"batch_version": "v1.0"}
+        result = OptimizationDataTransformer.transform_for_batch_processing(
+            "test_batch", ["data"], metadata=metadata
+        )
+
+        assert result["metadata"] == metadata
+
+    def test_transform_for_batch_processing_generated_batch_id(self):
+        """Test batch processing with generated batch ID."""
+        with patch('src.optimization.data_transformer.datetime') as mock_datetime:
+            mock_now = datetime(2023, 1, 15, 12, 30, 45, 123456, timezone.utc)
+            mock_datetime.now.return_value = mock_now
+
+            result = OptimizationDataTransformer.transform_for_batch_processing(
+                "test_batch", ["data"]
+            )
+
+            assert result["batch_id"] == "2023-01-15T12:30:45.123456+00:00"
+
+
+class TestAlignProcessingParadigm(TestOptimizationDataTransformer):
+    """Test align_processing_paradigm method."""
+
+    @patch('src.optimization.data_transformer.ProcessingParadigmAligner')
+    def test_align_processing_paradigm_to_batch(self, mock_aligner):
+        """Test processing paradigm alignment to batch mode."""
+        data = {"test": "data", "processing_mode": "stream"}
+        mock_aligner.align_processing_modes.return_value = data.copy()
+
+        result = OptimizationDataTransformer.align_processing_paradigm(data, "batch")
+
+        mock_aligner.align_processing_modes.assert_called_once_with(
+            source_mode="stream",
+            target_mode="batch",
+            data=data
+        )
+        assert result["data_format"] == "batch_event_data_v1"
+        assert result["message_pattern"] == "batch"
+        assert result["boundary_crossed"] is True
+        assert "batch_id" in result
+        assert result["validation_status"] == "validated"
+
+    @patch('src.optimization.data_transformer.ProcessingParadigmAligner')
+    def test_align_processing_paradigm_to_request_reply(self, mock_aligner):
+        """Test processing paradigm alignment to request/reply mode."""
+        data = {"test": "data"}
+        mock_aligner.align_processing_modes.return_value = data.copy()
+
+        result = OptimizationDataTransformer.align_processing_paradigm(data, "request_reply")
+
+        assert result["data_format"] == "request_reply_data_v1"
+        assert result["message_pattern"] == "req_reply"
+        assert "correlation_id" in result
+
+    @patch('src.optimization.data_transformer.ProcessingParadigmAligner')
+    def test_align_processing_paradigm_to_stream(self, mock_aligner):
+        """Test processing paradigm alignment to stream mode."""
+        data = {"test": "data"}
+        mock_aligner.align_processing_modes.return_value = data.copy()
+
+        result = OptimizationDataTransformer.align_processing_paradigm(data, "stream")
+
+        assert result["data_format"] == "event_data_v1"
+        assert result["message_pattern"] == "pub_sub"
+        assert "stream_position" in result
+
+    @patch('src.optimization.data_transformer.ProcessingParadigmAligner')
+    def test_align_processing_paradigm_with_existing_ids(self, mock_aligner):
+        """Test alignment preserves existing IDs."""
+        data = {
+            "test": "data",
+            "batch_id": "existing-batch-123",
+            "correlation_id": "existing-corr-456"
+        }
+        mock_aligner.align_processing_modes.return_value = data.copy()
+
+        batch_result = OptimizationDataTransformer.align_processing_paradigm(data, "batch")
+        assert batch_result["batch_id"] == "existing-batch-123"
+
+        req_result = OptimizationDataTransformer.align_processing_paradigm(data, "request_reply")
+        assert req_result["correlation_id"] == "existing-corr-456"
+
+
+class TestApplyCrossModuleValidation(TestOptimizationDataTransformer):
+    """Test apply_cross_module_validation method."""
+
+    @patch('src.optimization.data_transformer.ProcessingParadigmAligner')
+    @patch('src.optimization.data_transformer.BoundaryValidator')
+    def test_apply_cross_module_validation_to_execution(self, mock_validator, mock_aligner):
+        """Test cross-module validation to execution module."""
+        data = {"test": "data", "processing_mode": "batch"}
+        mock_aligner.align_processing_modes.return_value = data.copy()
+
+        result = OptimizationDataTransformer.apply_cross_module_validation(
+            data, "optimization", "execution"
+        )
+
+        # Should align to stream mode for execution
+        mock_aligner.align_processing_modes.assert_called_once_with(
+            source_mode="batch",
+            target_mode="stream",
+            data=data
+        )
+
+        assert result["cross_module_validation"] is True
+        assert result["source_module"] == "optimization"
+        assert result["target_module"] == "execution"
+        assert result["data_flow_aligned"] is True
+        assert "boundary_validation_timestamp" in result
+
+        # Should validate database entity
+        mock_validator.validate_database_entity.assert_called_once()
+
+    @patch('src.optimization.data_transformer.ProcessingParadigmAligner')
+    @patch('src.optimization.data_transformer.BoundaryValidator')
+    def test_apply_cross_module_validation_to_backtesting(self, mock_validator, mock_aligner):
+        """Test cross-module validation to backtesting module."""
+        data = {"optimization_id": "test-123", "parameters": {"param1": 0.1}}
+        mock_aligner.align_processing_modes.return_value = data.copy()
+
+        result = OptimizationDataTransformer.apply_cross_module_validation(
+            data, "optimization", "backtesting"
+        )
+
+        # Should keep batch mode for backtesting
+        mock_aligner.align_processing_modes.assert_called_once()
+        mock_validator.validate_database_entity.assert_called_once()
+
+    @patch('src.optimization.data_transformer.ProcessingParadigmAligner')
+    @patch('src.optimization.data_transformer.BoundaryValidator')
+    def test_apply_cross_module_validation_boundary_error(self, mock_validator, mock_aligner):
+        """Test cross-module validation handles boundary validation errors."""
+        data = {"test": "data"}
+        mock_aligner.align_processing_modes.return_value = data.copy()
+        mock_validator.validate_database_entity.side_effect = ValueError("Boundary validation failed")
+
+        # Should not raise exception, just log and continue
+        result = OptimizationDataTransformer.apply_cross_module_validation(data)
+
+        assert result["cross_module_validation"] is True
+
+    @patch('src.optimization.data_transformer.ProcessingParadigmAligner')
+    def test_apply_cross_module_validation_other_module(self, mock_aligner):
+        """Test cross-module validation to other modules."""
+        data = {"test": "data", "processing_mode": "stream"}
+        mock_aligner.align_processing_modes.return_value = data.copy()
+
+        result = OptimizationDataTransformer.apply_cross_module_validation(
+            data, "optimization", "analytics"
+        )
+
+        # Should keep source mode for other modules
+        mock_aligner.align_processing_modes.assert_called_once_with(
+            source_mode="stream",
+            target_mode="stream",
+            data=data
+        )
+
+
+class TestDataTransformerEdgeCases(TestOptimizationDataTransformer):
+    """Test edge cases and error conditions."""
+
+    def test_transform_result_with_extreme_decimal_values(self):
+        """Test transformation with extreme decimal values."""
+        result = OptimizationResult(
+            optimization_id="extreme-test",
+            algorithm_name="test",
+            optimal_parameters={"param": Decimal("0.000000000000001")},
+            optimal_objective_value=Decimal("999999999999999.999999999"),
+            objective_values={"profit": Decimal("-999999999999999.999999999")},
+            iterations_completed=1,
+            evaluations_completed=1,
+            convergence_achieved=True,
+            total_duration_seconds=Decimal("0.000001"),
+        )
+
+        transformed = OptimizationDataTransformer.transform_optimization_result_to_event_data(result)
+
+        # Should handle extreme values without error
+        assert "999999999999999.999999999" in transformed["optimal_objective_value"]
+        assert "-999999999999999.999999999" in transformed["objective_values"]["profit"]
+
+    def test_transform_with_empty_objective_values(self):
+        """Test transformation with empty objective values."""
+        result = OptimizationResult(
+            optimization_id="empty-test",
+            algorithm_name="test",
+            optimal_parameters={},
+            optimal_objective_value=Decimal("0"),
+            objective_values={},  # Empty dict
+            iterations_completed=0,
+            evaluations_completed=0,
+            convergence_achieved=False,
+            total_duration_seconds=Decimal("0"),
+        )
+
+        transformed = OptimizationDataTransformer.transform_optimization_result_to_event_data(result)
+
+        assert transformed["objective_values"] == {}
+
+    def test_financial_precision_with_invalid_types(self):
+        """Test financial precision validation with invalid data types."""
+        data = {
+            "optimal_objective_value": ["list", "instead", "of", "number"],
+            "weight": {"dict": "instead of number"},
+            "target_value": object(),  # Invalid object
+        }
+
+        # Should not raise exception, just preserve original values
+        result = OptimizationDataTransformer.validate_financial_precision(data)
+
+        assert result["optimal_objective_value"] == ["list", "instead", "of", "number"]
+        assert result["weight"] == {"dict": "instead of number"}
+        assert isinstance(result["target_value"], object)
+
+
+class TestDataTransformerFinancialEdgeCases(TestOptimizationDataTransformer):
+    """Test financial calculation specific edge cases."""
+
+    def test_zero_values_precision(self):
+        """Test precision handling with zero values."""
+        data = {
+            "optimal_objective_value": "0.0",
+            "weight": "0.000000000",
+            "completion_percentage": "0",
+        }
+
+        result = OptimizationDataTransformer.validate_financial_precision(data)
+
+        # Zero values should be preserved with proper decimal precision
+        assert result["optimal_objective_value"] == "0.0"
+        assert result["weight"] == "0.000000000"
+        assert result["completion_percentage"] == "0"
+
+    def test_negative_financial_values(self):
+        """Test handling of negative financial values."""
+        result = OptimizationResult(
+            optimization_id="negative-test",
+            algorithm_name="test",
+            optimal_parameters={"param": Decimal("-0.5")},
+            optimal_objective_value=Decimal("-1000.0"),
+            objective_values={"loss": Decimal("-500.0")},
+            iterations_completed=10,
+            evaluations_completed=20,
+            convergence_achieved=True,
+            total_duration_seconds=Decimal("30.0"),
+        )
+
+        transformed = OptimizationDataTransformer.transform_optimization_result_to_event_data(result)
+
+        assert transformed["optimal_objective_value"] == "-1000.0"
+        assert transformed["objective_values"]["loss"] == "-500.0"
+
+    def test_high_precision_financial_calculations(self):
+        """Test preservation of high precision in financial calculations."""
+        high_precision_value = "1234567890.123456789012345678"
+        data = {
+            "optimal_objective_value": high_precision_value,
+            "weight": "0.123456789012345678901234567890",
+        }
+
+        result = OptimizationDataTransformer.validate_financial_precision(data)
+
+        # High precision should be maintained
+        assert high_precision_value in result["optimal_objective_value"]
+        assert "0.123456789012345678901234567890" in result["weight"]

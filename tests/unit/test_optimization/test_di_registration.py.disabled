@@ -1,0 +1,543 @@
+"""
+Tests for optimization dependency injection registration.
+
+This module ensures comprehensive testing of the DI registration functions,
+covering all dependency registrations and service locator patterns.
+"""
+
+import pytest
+from unittest.mock import Mock, patch, MagicMock
+from typing import Any
+
+from src.optimization.di_registration import (
+    register_optimization_dependencies,
+    configure_optimization_module,
+    get_optimization_service,
+    get_optimization_controller,
+    get_optimization_repository,
+)
+from src.core.dependency_injection import DependencyInjector
+from src.optimization.factory import OptimizationFactory
+from src.optimization.interfaces import IOptimizationService
+
+
+class TestOptimizationDIRegistration:
+    """Test cases for optimization dependency injection registration."""
+
+    @pytest.fixture
+    def mock_injector(self):
+        """Create a mock dependency injector."""
+        injector = Mock(spec=DependencyInjector)
+        injector.resolve = Mock()
+        injector.register_factory = Mock()
+        injector.register_service = Mock()
+        return injector
+
+    @pytest.fixture
+    def mock_factory(self):
+        """Create a mock optimization factory."""
+        factory = Mock(spec=OptimizationFactory)
+        factory.create = Mock()
+        return factory
+
+    @pytest.fixture
+    def mock_service(self):
+        """Create a mock optimization service."""
+        return Mock(spec=IOptimizationService)
+
+
+class TestRegisterOptimizationDependencies(TestOptimizationDIRegistration):
+    """Test register_optimization_dependencies function."""
+
+    @patch('src.optimization.di_registration.OptimizationFactory')
+    def test_register_optimization_dependencies_basic(self, mock_factory_class, mock_injector):
+        """Test basic dependency registration."""
+        mock_factory_instance = Mock()
+        mock_factory_class.return_value = mock_factory_instance
+
+        register_optimization_dependencies(mock_injector)
+
+        # Verify OptimizationFactory is registered as singleton
+        assert mock_injector.register_factory.call_count >= 5
+
+        # Check factory registration
+        factory_call = mock_injector.register_factory.call_args_list[0]
+        assert factory_call[0][0] == "OptimizationFactory"
+        assert factory_call[1]["singleton"] is True
+
+        # Check repository registration
+        repository_call = mock_injector.register_factory.call_args_list[1]
+        assert repository_call[0][0] == "OptimizationRepository"
+        assert repository_call[1]["singleton"] is False
+
+        # Check service registration
+        service_call = mock_injector.register_factory.call_args_list[3]
+        assert service_call[0][0] == "OptimizationService"
+        assert service_call[1]["singleton"] is True
+
+        # Check controller registration
+        controller_call = mock_injector.register_factory.call_args_list[4]
+        assert controller_call[0][0] == "OptimizationController"
+        assert controller_call[1]["singleton"] is True
+
+    def test_register_optimization_dependencies_service_interfaces(self, mock_injector):
+        """Test interface service registrations."""
+        register_optimization_dependencies(mock_injector)
+
+        # Verify interface service registrations
+        assert mock_injector.register_service.call_count == 3
+
+        service_calls = mock_injector.register_service.call_args_list
+
+        # Check IOptimizationService registration
+        iopt_service_call = service_calls[0]
+        assert iopt_service_call[0][0] == "IOptimizationService"
+        assert iopt_service_call[1]["singleton"] is True
+
+        # Check BacktestIntegrationProtocol registration
+        backtest_call = service_calls[1]
+        assert backtest_call[0][0] == "BacktestIntegrationProtocol"
+        assert backtest_call[1]["singleton"] is False
+
+        # Check OptimizationRepositoryProtocol registration
+        repo_protocol_call = service_calls[2]
+        assert repo_protocol_call[0][0] == "OptimizationRepositoryProtocol"
+        assert repo_protocol_call[1]["singleton"] is False
+
+    def test_factory_factory_function(self, mock_injector):
+        """Test that factory factory function creates OptimizationFactory correctly."""
+        with patch('src.optimization.di_registration.OptimizationFactory') as mock_factory_class:
+            mock_factory_instance = Mock()
+            mock_factory_class.return_value = mock_factory_instance
+
+            register_optimization_dependencies(mock_injector)
+
+            # Get the factory function that was registered
+            factory_call = mock_injector.register_factory.call_args_list[0]
+            factory_function = factory_call[0][1]
+
+            # Call the factory function
+            result = factory_function()
+
+            # Verify OptimizationFactory was created with injector
+            mock_factory_class.assert_called_once_with(mock_injector)
+            assert result == mock_factory_instance
+
+    def test_repository_factory_function(self, mock_injector, mock_factory):
+        """Test repository factory function."""
+        mock_injector.resolve.return_value = mock_factory
+        mock_repository = Mock()
+        mock_factory.create.return_value = mock_repository
+
+        register_optimization_dependencies(mock_injector)
+
+        # Get the repository factory function
+        repository_call = mock_injector.register_factory.call_args_list[1]
+        repository_function = repository_call[0][1]
+
+        # Call the repository factory function
+        result = repository_function()
+
+        # Verify factory resolution and creation
+        mock_injector.resolve.assert_called_with("OptimizationFactory")
+        mock_factory.create.assert_called_with("repository")
+        assert result == mock_repository
+
+    def test_backtest_integration_factory_function(self, mock_injector, mock_factory):
+        """Test backtest integration factory function."""
+        mock_injector.resolve.return_value = mock_factory
+        mock_integration = Mock()
+        mock_factory.create.return_value = mock_integration
+
+        register_optimization_dependencies(mock_injector)
+
+        # Get the backtest integration factory function
+        backtest_call = mock_injector.register_factory.call_args_list[2]
+        backtest_function = backtest_call[0][1]
+
+        # Call the backtest integration factory function
+        result = backtest_function()
+
+        # Verify factory resolution and creation
+        mock_injector.resolve.assert_called_with("OptimizationFactory")
+        mock_factory.create.assert_called_with("backtest_integration")
+        assert result == mock_integration
+
+    def test_service_factory_function(self, mock_injector, mock_factory):
+        """Test service factory function."""
+        mock_injector.resolve.return_value = mock_factory
+        mock_service = Mock()
+        mock_factory.create.return_value = mock_service
+
+        register_optimization_dependencies(mock_injector)
+
+        # Get the service factory function
+        service_call = mock_injector.register_factory.call_args_list[3]
+        service_function = service_call[0][1]
+
+        # Call the service factory function
+        result = service_function()
+
+        # Verify factory resolution and creation
+        mock_injector.resolve.assert_called_with("OptimizationFactory")
+        mock_factory.create.assert_called_with("service")
+        assert result == mock_service
+
+    def test_controller_factory_function(self, mock_injector, mock_factory):
+        """Test controller factory function."""
+        mock_injector.resolve.return_value = mock_factory
+        mock_controller = Mock()
+        mock_factory.create.return_value = mock_controller
+
+        register_optimization_dependencies(mock_injector)
+
+        # Get the controller factory function
+        controller_call = mock_injector.register_factory.call_args_list[4]
+        controller_function = controller_call[0][1]
+
+        # Call the controller factory function
+        result = controller_function()
+
+        # Verify factory resolution and creation
+        mock_injector.resolve.assert_called_with("OptimizationFactory")
+        mock_factory.create.assert_called_with("controller")
+        assert result == mock_controller
+
+    def test_interface_service_functions(self, mock_injector, mock_service):
+        """Test interface service lambda functions."""
+        mock_injector.resolve.return_value = mock_service
+
+        register_optimization_dependencies(mock_injector)
+
+        # Test IOptimizationService interface function
+        iopt_service_call = mock_injector.register_service.call_args_list[0]
+        iopt_service_function = iopt_service_call[0][1]
+
+        result = iopt_service_function()
+        mock_injector.resolve.assert_called_with("OptimizationService")
+        assert result == mock_service
+
+        # Test BacktestIntegrationProtocol interface function
+        mock_injector.resolve.reset_mock()
+        backtest_call = mock_injector.register_service.call_args_list[1]
+        backtest_function = backtest_call[0][1]
+
+        result = backtest_function()
+        mock_injector.resolve.assert_called_with("BacktestIntegration")
+
+        # Test OptimizationRepositoryProtocol interface function
+        mock_injector.resolve.reset_mock()
+        repo_call = mock_injector.register_service.call_args_list[2]
+        repo_function = repo_call[0][1]
+
+        result = repo_function()
+        mock_injector.resolve.assert_called_with("OptimizationRepository")
+
+
+class TestConfigureOptimizationModule(TestOptimizationDIRegistration):
+    """Test configure_optimization_module function."""
+
+    @patch('src.optimization.di_registration.register_optimization_dependencies')
+    @patch('src.optimization.di_registration.logger')
+    def test_configure_optimization_module_without_config(
+        self, mock_logger, mock_register, mock_injector
+    ):
+        """Test module configuration without custom config."""
+        configure_optimization_module(mock_injector)
+
+        mock_register.assert_called_once_with(mock_injector)
+        mock_logger.debug.assert_not_called()
+
+    @patch('src.optimization.di_registration.register_optimization_dependencies')
+    @patch('src.optimization.di_registration.logger')
+    def test_configure_optimization_module_with_config(
+        self, mock_logger, mock_register, mock_injector
+    ):
+        """Test module configuration with custom config."""
+        config = {"custom_setting": "value", "timeout": 30}
+
+        configure_optimization_module(mock_injector, config)
+
+        mock_register.assert_called_once_with(mock_injector)
+        mock_logger.debug.assert_called_once_with(
+            "Custom optimization configuration applied: %s", config
+        )
+
+    @patch('src.optimization.di_registration.register_optimization_dependencies')
+    def test_configure_optimization_module_with_empty_config(
+        self, mock_register, mock_injector
+    ):
+        """Test module configuration with empty config."""
+        configure_optimization_module(mock_injector, {})
+
+        mock_register.assert_called_once_with(mock_injector)
+
+    @patch('src.optimization.di_registration.register_optimization_dependencies')
+    def test_configure_optimization_module_with_none_config(
+        self, mock_register, mock_injector
+    ):
+        """Test module configuration with None config."""
+        configure_optimization_module(mock_injector, None)
+
+        mock_register.assert_called_once_with(mock_injector)
+
+
+class TestServiceLocatorFunctions(TestOptimizationDIRegistration):
+    """Test service locator pattern functions."""
+
+    def test_get_optimization_service(self, mock_injector, mock_service):
+        """Test get_optimization_service function."""
+        mock_injector.resolve.return_value = mock_service
+
+        result = get_optimization_service(mock_injector)
+
+        mock_injector.resolve.assert_called_once_with("OptimizationService")
+        assert result == mock_service
+
+    def test_get_optimization_controller(self, mock_injector):
+        """Test get_optimization_controller function."""
+        mock_controller = Mock()
+        mock_injector.resolve.return_value = mock_controller
+
+        result = get_optimization_controller(mock_injector)
+
+        mock_injector.resolve.assert_called_once_with("OptimizationController")
+        assert result == mock_controller
+
+    def test_get_optimization_repository(self, mock_injector):
+        """Test get_optimization_repository function."""
+        mock_repository = Mock()
+        mock_injector.resolve.return_value = mock_repository
+
+        result = get_optimization_repository(mock_injector)
+
+        mock_injector.resolve.assert_called_once_with("OptimizationRepository")
+        assert result == mock_repository
+
+    def test_service_locator_with_injection_errors(self, mock_injector):
+        """Test service locator functions handle injection errors."""
+        mock_injector.resolve.side_effect = KeyError("Service not found")
+
+        with pytest.raises(KeyError):
+            get_optimization_service(mock_injector)
+
+        with pytest.raises(KeyError):
+            get_optimization_controller(mock_injector)
+
+        with pytest.raises(KeyError):
+            get_optimization_repository(mock_injector)
+
+
+class TestDIRegistrationIntegration(TestOptimizationDIRegistration):
+    """Test integration scenarios for DI registration."""
+
+    def test_full_dependency_registration_flow(self, mock_injector):
+        """Test complete dependency registration flow."""
+        with patch('src.optimization.di_registration.OptimizationFactory'):
+            register_optimization_dependencies(mock_injector)
+
+            # Verify all expected registrations occurred
+            assert mock_injector.register_factory.call_count == 5
+            assert mock_injector.register_service.call_count == 3
+
+            # Verify specific registrations
+            factory_names = [call[0][0] for call in mock_injector.register_factory.call_args_list]
+            assert "OptimizationFactory" in factory_names
+            assert "OptimizationRepository" in factory_names
+            assert "BacktestIntegration" in factory_names
+            assert "OptimizationService" in factory_names
+            assert "OptimizationController" in factory_names
+
+            service_names = [call[0][0] for call in mock_injector.register_service.call_args_list]
+            assert "IOptimizationService" in service_names
+            assert "BacktestIntegrationProtocol" in service_names
+            assert "OptimizationRepositoryProtocol" in service_names
+
+    def test_singleton_configurations(self, mock_injector):
+        """Test that singleton configurations are correct."""
+        register_optimization_dependencies(mock_injector)
+
+        # Check singleton settings for factories
+        factory_calls = mock_injector.register_factory.call_args_list
+
+        # OptimizationFactory should be singleton
+        assert factory_calls[0][1]["singleton"] is True
+
+        # Repository should not be singleton
+        assert factory_calls[1][1]["singleton"] is False
+
+        # BacktestIntegration should not be singleton
+        assert factory_calls[2][1]["singleton"] is False
+
+        # OptimizationService should be singleton
+        assert factory_calls[3][1]["singleton"] is True
+
+        # OptimizationController should be singleton
+        assert factory_calls[4][1]["singleton"] is True
+
+        # Check singleton settings for services
+        service_calls = mock_injector.register_service.call_args_list
+
+        # IOptimizationService should be singleton
+        assert service_calls[0][1]["singleton"] is True
+
+        # BacktestIntegrationProtocol should not be singleton
+        assert service_calls[1][1]["singleton"] is False
+
+        # OptimizationRepositoryProtocol should not be singleton
+        assert service_calls[2][1]["singleton"] is False
+
+    def test_factory_dependency_chain(self, mock_injector):
+        """Test that factory functions create proper dependency chains."""
+        mock_factory = Mock()
+        mock_repository = Mock()
+        mock_service = Mock()
+        mock_controller = Mock()
+        mock_integration = Mock()
+
+        # Set up resolve chain
+        def resolve_side_effect(name):
+            if name == "OptimizationFactory":
+                return mock_factory
+            return None
+
+        mock_injector.resolve.side_effect = resolve_side_effect
+
+        # Set up factory create returns
+        def create_side_effect(component_type):
+            if component_type == "repository":
+                return mock_repository
+            elif component_type == "service":
+                return mock_service
+            elif component_type == "controller":
+                return mock_controller
+            elif component_type == "backtest_integration":
+                return mock_integration
+            return None
+
+        mock_factory.create.side_effect = create_side_effect
+
+        with patch('src.optimization.di_registration.OptimizationFactory', return_value=mock_factory):
+            register_optimization_dependencies(mock_injector)
+
+            # Test each factory function
+            factory_calls = mock_injector.register_factory.call_args_list
+
+            # Test repository factory
+            repo_factory = factory_calls[1][0][1]
+            result = repo_factory()
+            assert result == mock_repository
+
+            # Test backtest integration factory
+            backtest_factory = factory_calls[2][0][1]
+            result = backtest_factory()
+            assert result == mock_integration
+
+            # Test service factory
+            service_factory = factory_calls[3][0][1]
+            result = service_factory()
+            assert result == mock_service
+
+            # Test controller factory
+            controller_factory = factory_calls[4][0][1]
+            result = controller_factory()
+            assert result == mock_controller
+
+
+class TestDIRegistrationEdgeCases(TestOptimizationDIRegistration):
+    """Test edge cases and error conditions."""
+
+    def test_register_dependencies_with_factory_creation_error(self, mock_injector):
+        """Test dependency registration handles factory creation errors."""
+        with patch('src.optimization.di_registration.OptimizationFactory') as mock_factory_class:
+            mock_factory_class.side_effect = RuntimeError("Factory creation failed")
+
+            register_optimization_dependencies(mock_injector)
+
+            # Registration should still complete (factory function is registered, not called)
+            assert mock_injector.register_factory.call_count == 5
+
+            # But calling the factory function should raise the error
+            factory_call = mock_injector.register_factory.call_args_list[0]
+            factory_function = factory_call[0][1]
+
+            with pytest.raises(RuntimeError, match="Factory creation failed"):
+                factory_function()
+
+    def test_factory_functions_with_resolve_errors(self, mock_injector):
+        """Test factory functions handle resolve errors."""
+        mock_injector.resolve.side_effect = KeyError("Factory not found")
+
+        register_optimization_dependencies(mock_injector)
+
+        # Test that resolve errors propagate through factory functions
+        repository_call = mock_injector.register_factory.call_args_list[1]
+        repository_function = repository_call[0][1]
+
+        with pytest.raises(KeyError, match="Factory not found"):
+            repository_function()
+
+    def test_factory_functions_with_create_errors(self, mock_injector, mock_factory):
+        """Test factory functions handle create method errors."""
+        mock_injector.resolve.return_value = mock_factory
+        mock_factory.create.side_effect = ValueError("Component creation failed")
+
+        register_optimization_dependencies(mock_injector)
+
+        # Test that create errors propagate through factory functions
+        service_call = mock_injector.register_factory.call_args_list[3]
+        service_function = service_call[0][1]
+
+        with pytest.raises(ValueError, match="Component creation failed"):
+            service_function()
+
+    def test_interface_service_functions_with_resolve_errors(self, mock_injector):
+        """Test interface service functions handle resolve errors."""
+        mock_injector.resolve.side_effect = KeyError("Service not found")
+
+        register_optimization_dependencies(mock_injector)
+
+        # Test IOptimizationService interface function
+        iopt_service_call = mock_injector.register_service.call_args_list[0]
+        iopt_service_function = iopt_service_call[0][1]
+
+        with pytest.raises(KeyError, match="Service not found"):
+            iopt_service_function()
+
+    def test_configure_module_with_large_config(self, mock_injector):
+        """Test module configuration with large configuration."""
+        large_config = {f"setting_{i}": f"value_{i}" for i in range(100)}
+
+        with patch('src.optimization.di_registration.register_optimization_dependencies'):
+            configure_optimization_module(mock_injector, large_config)
+            # Should handle large configs without issues
+
+    def test_concurrent_dependency_registration(self, mock_injector):
+        """Test that dependency registration is thread-safe."""
+        import threading
+        import time
+
+        results = []
+        exceptions = []
+
+        def register_dependencies():
+            try:
+                with patch('src.optimization.di_registration.OptimizationFactory'):
+                    register_optimization_dependencies(mock_injector)
+                    results.append("success")
+            except Exception as e:
+                exceptions.append(e)
+
+        # Create multiple threads
+        threads = [threading.Thread(target=register_dependencies) for _ in range(5)]
+
+        # Start all threads
+        for thread in threads:
+            thread.start()
+
+        # Wait for all threads to complete
+        for thread in threads:
+            thread.join(timeout=1.0)
+
+        # All should complete successfully (though only one may actually register due to mocking)
+        assert len(exceptions) == 0

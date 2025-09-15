@@ -73,22 +73,22 @@ class AcquisitionFunction(BaseModel):
     name: str = Field(description="Acquisition function name")
     exploration_factor: Decimal = Field(
         default=Decimal("2.0"),
-        gt=Decimal("0"),
+        gt=0,
         description="Exploration factor (higher = more exploration)",
     )
     jitter: Decimal = Field(
-        default=Decimal("0.01"), ge=Decimal("0"), description="Jitter for numerical stability"
+        default=Decimal("0.01"), ge=0, description="Jitter for numerical stability"
     )
 
     # Function-specific parameters
     xi: Decimal = Field(
         default=Decimal("0.01"),
-        ge=Decimal("0"),
+        ge=0,
         description="Improvement threshold for Expected Improvement",
     )
     kappa: Decimal = Field(
         default=Decimal("2.576"),
-        gt=Decimal("0"),
+        gt=0,
         description="Confidence parameter for UCB (95% = 1.96, 99% = 2.576)",
     )
 
@@ -114,16 +114,21 @@ class GaussianProcessConfig(BaseModel):
     kernel_type: str = Field(
         default="matern", description="Kernel type: 'rbf', 'matern', 'rational_quadratic'"
     )
-    length_scale: float = Field(default=1.0, gt=0, description="Initial length scale for kernel")
-    length_scale_bounds: tuple[float, float] = Field(
-        default=(1e-5, 1e5), description="Bounds for length scale optimization"
+    length_scale: Decimal = Field(
+        default=Decimal("1.0"), gt=0, description="Initial length scale for kernel"
+    )
+    length_scale_bounds: tuple[Decimal, Decimal] = Field(
+        default=(Decimal("1e-5"), Decimal("1e5")),
+        description="Bounds for length scale optimization",
     )
 
     # Noise handling
-    alpha: float = Field(default=1e-10, gt=0, description="Noise level (regularization parameter)")
+    alpha: Decimal = Field(
+        default=Decimal("1e-10"), gt=0, description="Noise level (regularization parameter)"
+    )
     white_kernel: bool = Field(default=True, description="Include white noise kernel")
-    noise_level_bounds: tuple[float, float] = Field(
-        default=(1e-10, 1e-1), description="Bounds for noise level"
+    noise_level_bounds: tuple[Decimal, Decimal] = Field(
+        default=(Decimal("1e-10"), Decimal("1e-1")), description="Bounds for noise level"
     )
 
     # Optimization settings
@@ -182,13 +187,13 @@ class BayesianConfig(BaseModel):
 
     # Convergence criteria
     convergence_tolerance: Decimal = Field(
-        default=Decimal("1e-6"), gt=Decimal("0"), description="Convergence tolerance"
+        default=Decimal("1e-6"), gt=0, description="Convergence tolerance"
     )
     patience: int = Field(default=10, ge=1, description="Patience for early stopping")
 
     # Constraint handling
     constraint_tolerance: Decimal = Field(
-        default=Decimal("0.01"), ge=Decimal("0"), description="Constraint violation tolerance"
+        default=Decimal("0.01"), ge=0, description="Constraint violation tolerance"
     )
 
     @field_validator("batch_strategy")
@@ -551,7 +556,7 @@ class AcquisitionOptimizer:
     ) -> list[dict[str, Any]]:
         """Optimize acquisition function for batch of points."""
         # For simplicity, use greedy batch selection
-        selected_points = []
+        selected_points: list[dict[str, Any]] = []
 
         for _i in range(n_points):
             # Create temporary points list including previously selected
@@ -686,7 +691,10 @@ class BayesianOptimizer(OptimizationEngine):
 
         # Convergence tracking
         self.stagnation_count = 0
-        self.recent_improvements = []
+        self.recent_improvements: list[Decimal] = []
+
+        # Concurrent task management for race condition prevention
+        self._active_tasks: set[asyncio.Task] = set()
 
         logger.info(
             "BayesianOptimizer initialized",
@@ -776,6 +784,17 @@ class BayesianOptimizer(OptimizationEngine):
             raise OptimizationError(f"Bayesian optimization failed: {e!s}") from e
 
         finally:
+            # Cancel all active tasks to prevent race conditions
+            if self._active_tasks:
+                for task in self._active_tasks:
+                    if not task.done():
+                        task.cancel()
+
+                # Wait for all tasks to complete cancellation
+                if self._active_tasks:
+                    await asyncio.gather(*self._active_tasks, return_exceptions=True)
+                    self._active_tasks.clear()
+
             # Clean up resources
             try:
                 if hasattr(self, "gp_model") and self.gp_model:
@@ -849,15 +868,22 @@ class BayesianOptimizer(OptimizationEngine):
         """Evaluate a single point."""
         try:
             # Run objective function
-            result = await self._run_objective_function(objective_function, point.parameters)
+            result = await self._run_objective_function(
+                objective_function, point.parameters, self.parameter_space
+            )
 
             if result is not None:
-                if isinstance(result, dict):
-                    # Multi-objective case
-                    objective_values = {k: Decimal(str(v)) for k, v in result.items()}
-                    primary_objective = self._get_primary_objective_value(objective_values)
-                else:
-                    primary_objective = Decimal(str(result))
+                try:
+                    if isinstance(result, dict):
+                        # Multi-objective case
+                        objective_values = {k: Decimal(str(v)) for k, v in result.items()}
+                        primary_objective = self._get_primary_objective_value(objective_values)
+                    else:
+                        primary_objective = Decimal(str(result))
+                except (ValueError, TypeError, OverflowError) as e:
+                    logger.error(f"Failed to convert objective value to Decimal: {e}")
+                    point.mark_failed(str(e))
+                    return
 
                 point.mark_evaluated(primary_objective)
 
@@ -879,59 +905,6 @@ class BayesianOptimizer(OptimizationEngine):
             logger.error(
                 "Point evaluation failed unexpectedly", point_id=point.point_id, error=str(e)
             )
-
-    async def _run_objective_function(
-        self, objective_function: Callable, parameters: dict[str, Any]
-    ) -> Any:
-        """Run objective function with parameters."""
-        try:
-            # Convert parameters to appropriate types
-            converted_params = self.parameter_space.clip_parameters(parameters)
-
-            # Run function with timeout
-            if asyncio.iscoroutinefunction(objective_function):
-                result = await asyncio.wait_for(
-                    objective_function(converted_params),
-                    timeout=DEFAULT_OBJECTIVE_TIMEOUT_SECONDS
-                )
-            else:
-                # Run in executor for CPU-bound functions
-                loop = asyncio.get_event_loop()
-                result = await asyncio.wait_for(
-                    loop.run_in_executor(None, objective_function, converted_params),
-                    timeout=DEFAULT_OBJECTIVE_TIMEOUT_SECONDS
-                )
-
-            return result
-
-        except asyncio.TimeoutError:
-            logger.warning("Objective function execution timed out")
-            return None
-        except (ValueError, TypeError, KeyError) as e:
-            logger.warning(
-                f"Objective function execution failed due to parameter/data issue: {e!s}"
-            )
-            return None
-        except Exception as e:
-            logger.error(f"Objective function execution failed unexpectedly: {e!s}")
-            return None
-
-    def _get_primary_objective_value(self, objective_values: dict[str, Decimal]) -> Decimal:
-        """Get primary objective value."""
-        # Find primary objective
-        primary_obj = None
-        for obj in self.objectives:
-            if obj.is_primary:
-                primary_obj = obj
-                break
-
-        if primary_obj is None:
-            primary_obj = self.objectives[0] if self.objectives else None
-
-        if primary_obj is None:
-            return Decimal("0")
-
-        return objective_values.get(primary_obj.name, Decimal("0"))
 
     def _update_best_point(self) -> None:
         """Update best point found so far."""
@@ -979,6 +952,9 @@ class BayesianOptimizer(OptimizationEngine):
 
     async def _finalize_optimization(self) -> OptimizationResult:
         """Finalize optimization and create result."""
+        # Yield control to event loop
+        await asyncio.sleep(0)
+
         if not self.best_point:
             raise OptimizationError("No valid points found")
 

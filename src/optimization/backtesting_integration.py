@@ -8,10 +8,12 @@ with the backtesting system, following proper service layer patterns.
 from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from typing import Any
+from typing import Any, cast
 
-from src.backtesting.service import BacktestRequest
+import structlog
+
 from src.backtesting.interfaces import BacktestServiceInterface
+from src.backtesting.service import BacktestRequest
 from src.core.base import BaseService
 from src.core.exceptions import OptimizationError, ServiceError, ValidationError
 from src.core.types import StrategyConfig, TradingMode
@@ -49,7 +51,7 @@ class BacktestIntegrationService(BaseService, IBacktestIntegrationService):
         if backtest_service:
             self.add_dependency("BacktestService")
 
-        self._logger.info("BacktestIntegrationService initialized")
+        cast(structlog.BoundLogger, self._logger).info("BacktestIntegrationService initialized")
 
     async def evaluate_strategy(
         self,
@@ -57,7 +59,7 @@ class BacktestIntegrationService(BaseService, IBacktestIntegrationService):
         start_date: datetime | None = None,
         end_date: datetime | None = None,
         initial_capital: Decimal = Decimal("100000"),
-    ) -> dict[str, float]:
+    ) -> dict[str, Decimal]:
         """
         Evaluate strategy performance using backtesting.
 
@@ -85,17 +87,21 @@ class BacktestIntegrationService(BaseService, IBacktestIntegrationService):
 
         except (ServiceError, ValidationError) as e:
             # Handle backtesting-specific exceptions
-            self._logger.error(f"Backtesting service error during strategy evaluation: {e}")
+            cast(structlog.BoundLogger, self._logger).error(
+                f"Backtesting service error during strategy evaluation: {e}"
+            )
             raise OptimizationError(f"Backtesting failed: {e}") from e
         except Exception as e:
-            self._logger.warning(f"Strategy evaluation failed with unexpected error: {e}")
+            cast(structlog.BoundLogger, self._logger).warning(
+                f"Strategy evaluation failed with unexpected error: {e}"
+            )
             # Return poor performance for failed evaluations
             return {
-                "total_return": -0.1,
-                "sharpe_ratio": -1.0,
-                "max_drawdown": 0.5,
-                "win_rate": 0.3,
-                "profit_factor": 0.5,
+                "total_return": Decimal("-0.1"),
+                "sharpe_ratio": Decimal("-1.0"),
+                "max_drawdown": Decimal("0.5"),
+                "win_rate": Decimal("0.3"),
+                "profit_factor": Decimal("0.5"),
             }
 
     def create_objective_function(
@@ -118,7 +124,7 @@ class BacktestIntegrationService(BaseService, IBacktestIntegrationService):
             Async objective function for optimization
         """
 
-        async def strategy_objective(parameters: dict[str, Any]) -> dict[str, float]:
+        async def strategy_objective(parameters: dict[str, Any]) -> dict[str, Decimal]:
             """
             Evaluate strategy performance with given parameters.
 
@@ -152,17 +158,21 @@ class BacktestIntegrationService(BaseService, IBacktestIntegrationService):
 
             except (ServiceError, ValidationError) as e:
                 # Re-raise backtesting exceptions as optimization errors
-                self._logger.error(f"Backtesting error in objective function: {e}")
+                cast(structlog.BoundLogger, self._logger).error(
+                    f"Backtesting error in objective function: {e}"
+                )
                 raise OptimizationError(f"Objective function evaluation failed: {e}") from e
             except Exception as e:
-                self._logger.warning(f"Strategy evaluation failed: {e}")
+                cast(structlog.BoundLogger, self._logger).warning(
+                    f"Strategy evaluation failed: {e}"
+                )
                 # Return poor performance for failed evaluations
                 return {
-                    "total_return": -0.1,
-                    "sharpe_ratio": -1.0,
-                    "max_drawdown": 0.5,
-                    "win_rate": 0.3,
-                    "profit_factor": 0.5,
+                    "total_return": Decimal("-0.1"),
+                    "sharpe_ratio": Decimal("-1.0"),
+                    "max_drawdown": Decimal("0.5"),
+                    "win_rate": Decimal("0.3"),
+                    "profit_factor": Decimal("0.5"),
                 }
 
         return strategy_objective
@@ -193,7 +203,9 @@ class BacktestIntegrationService(BaseService, IBacktestIntegrationService):
             if isinstance(strategy_config, StrategyConfig):
                 strategy_dict = {
                     "strategy_id": strategy_config.strategy_id,
-                    "strategy_type": strategy_config.strategy_type.value if hasattr(strategy_config.strategy_type, "value") else str(strategy_config.strategy_type),
+                    "strategy_type": strategy_config.strategy_type.value
+                    if hasattr(strategy_config.strategy_type, "value")
+                    else str(strategy_config.strategy_type),
                     "name": strategy_config.name,
                     "symbol": strategy_config.symbol,
                     "timeframe": getattr(strategy_config, "timeframe", "1h"),
@@ -202,7 +214,9 @@ class BacktestIntegrationService(BaseService, IBacktestIntegrationService):
                 }
             else:
                 # Fallback for dict-like objects
-                strategy_dict = dict(strategy_config) if hasattr(strategy_config, "keys") else strategy_config
+                strategy_dict = (
+                    dict(strategy_config) if hasattr(strategy_config, "keys") else strategy_config
+                )
                 # Ensure required fields are present
                 if "timeframe" not in strategy_dict:
                     strategy_dict["timeframe"] = "1h"
@@ -210,12 +224,14 @@ class BacktestIntegrationService(BaseService, IBacktestIntegrationService):
             request = BacktestRequest(
                 strategy_config=strategy_dict,
                 symbols=[strategy_config.symbol],
-                start_date=backtest_config["start_date"],
-                end_date=backtest_config["end_date"],
-                initial_capital=backtest_config["initial_capital"],
+                start_date=cast(datetime, backtest_config["start_date"]),
+                end_date=cast(datetime, backtest_config["end_date"]),
+                initial_capital=cast(Decimal, backtest_config["initial_capital"]),
                 max_open_positions=10,
                 exchange="binance",  # Add missing required field
-                timeframe=strategy_config.timeframe if hasattr(strategy_config, "timeframe") else "1h"
+                timeframe=strategy_config.timeframe
+                if hasattr(strategy_config, "timeframe")
+                else "1h",
             )
         except (AttributeError, TypeError) as e:
             raise OptimizationError(f"Invalid strategy configuration for backtesting: {e}") from e
@@ -224,29 +240,29 @@ class BacktestIntegrationService(BaseService, IBacktestIntegrationService):
         result = await self._backtest_service.run_backtest(request)
         return result
 
-    def _extract_performance_metrics(self, backtest_result: Any) -> dict[str, float]:
+    def _extract_performance_metrics(self, backtest_result: Any) -> dict[str, Decimal]:
         """Extract performance metrics from backtest result."""
         try:
             # Extract key metrics from backtest result
-            total_return = float(getattr(backtest_result, "total_return", 0))
-            sharpe_ratio = float(getattr(backtest_result, "sharpe_ratio", 0))
-            max_drawdown = float(getattr(backtest_result, "max_drawdown", 0))
+            total_return = Decimal(str(getattr(backtest_result, "total_return", 0)))
+            sharpe_ratio = Decimal(str(getattr(backtest_result, "sharpe_ratio", 0)))
+            max_drawdown = Decimal(str(getattr(backtest_result, "max_drawdown", 0)))
 
             # Calculate additional metrics
             trades = getattr(backtest_result, "trades", [])
             if trades:
-                winning_trades = [t for t in trades if getattr(t, "pnl", 0) > 0]
-                losing_trades = [t for t in trades if getattr(t, "pnl", 0) < 0]
+                winning_trades = [t for t in trades if Decimal(str(getattr(t, "pnl", 0))) > 0]
+                losing_trades = [t for t in trades if Decimal(str(getattr(t, "pnl", 0))) < 0]
 
-                win_rate = len(winning_trades) / len(trades)
+                win_rate = Decimal(str(len(winning_trades))) / Decimal(str(len(trades)))
 
                 # Profit factor
-                gross_profit = sum(getattr(t, "pnl", 0) for t in winning_trades)
-                gross_loss = abs(sum(getattr(t, "pnl", 0) for t in losing_trades))
-                profit_factor = gross_profit / gross_loss if gross_loss > 0 else 1.0
+                gross_profit = sum(Decimal(str(getattr(t, "pnl", 0))) for t in winning_trades)
+                gross_loss = abs(sum(Decimal(str(getattr(t, "pnl", 0))) for t in losing_trades))
+                profit_factor = gross_profit / gross_loss if gross_loss > 0 else Decimal("1")
             else:
-                win_rate = 0.0
-                profit_factor = 1.0
+                win_rate = Decimal("0")
+                profit_factor = Decimal("1")
 
             return {
                 "total_return": total_return,
@@ -254,46 +270,56 @@ class BacktestIntegrationService(BaseService, IBacktestIntegrationService):
                 "max_drawdown": abs(max_drawdown),
                 "win_rate": win_rate,
                 "profit_factor": profit_factor,
-                "total_trades": len(trades),
-                "winning_trades": len([t for t in trades if getattr(t, "pnl", 0) > 0]),
-                "losing_trades": len([t for t in trades if getattr(t, "pnl", 0) <= 0]),
+                "total_trades": Decimal(str(len(trades))),
+                "winning_trades": Decimal(
+                    str(len([t for t in trades if Decimal(str(getattr(t, "pnl", 0))) > 0]))
+                ),
+                "losing_trades": Decimal(
+                    str(len([t for t in trades if Decimal(str(getattr(t, "pnl", 0))) <= 0]))
+                ),
             }
 
         except Exception as e:
-            self._logger.warning(f"Failed to extract performance metrics: {e}")
+            cast(structlog.BoundLogger, self._logger).warning(
+                f"Failed to extract performance metrics: {e}"
+            )
             return {
-                "total_return": 0.0,
-                "sharpe_ratio": 0.0,
-                "max_drawdown": 0.0,
-                "win_rate": 0.0,
-                "profit_factor": 1.0,
+                "total_return": Decimal("0"),
+                "sharpe_ratio": Decimal("0"),
+                "max_drawdown": Decimal("0"),
+                "win_rate": Decimal("0"),
+                "profit_factor": Decimal("1"),
             }
 
-    def _simulate_performance(self, parameters: dict[str, Any]) -> dict[str, float]:
+    def _simulate_performance(self, parameters: dict[str, Any]) -> dict[str, Decimal]:
         """Simulate strategy performance for testing."""
-        # Simple simulation based on parameters
-        position_size = float(parameters.get("position_size_pct", 0.02))
-        stop_loss = float(parameters.get("stop_loss_pct", 0.02))
-        take_profit = float(parameters.get("take_profit_pct", 0.04))
+        # Simple simulation based on parameters - use Decimal for financial precision
+        position_size = Decimal(str(parameters.get("position_size_pct", 0.02)))
+        stop_loss = Decimal(str(parameters.get("stop_loss_pct", 0.02)))
+        take_profit = Decimal(str(parameters.get("take_profit_pct", 0.04)))
 
         # Simulate risk-return tradeoff
-        risk_factor = position_size * 10
-        risk_adjusted_return = 0.1 * (1 + risk_factor) * (1 - stop_loss * 2)
+        risk_factor = position_size * Decimal("10")
+        risk_adjusted_return = (
+            Decimal("0.1")
+            * (Decimal("1") + risk_factor)
+            * (Decimal("1") - stop_loss * Decimal("2"))
+        )
 
         # Simulate Sharpe ratio
-        volatility = 0.15 * (1 + risk_factor)
-        sharpe_ratio = risk_adjusted_return / volatility if volatility > 0 else 0
+        volatility = Decimal("0.15") * (Decimal("1") + risk_factor)
+        sharpe_ratio = risk_adjusted_return / volatility if volatility > 0 else Decimal("0")
 
         # Simulate drawdown
-        max_drawdown = volatility * 0.5
+        max_drawdown = volatility * Decimal("0.5")
 
         # Simulate win rate based on stop loss / take profit ratio
-        win_rate = 0.5 * (take_profit / (take_profit + stop_loss))
+        win_rate = Decimal("0.5") * (take_profit / (take_profit + stop_loss))
 
         return {
             "total_return": risk_adjusted_return,
             "sharpe_ratio": sharpe_ratio,
             "max_drawdown": max_drawdown,
             "win_rate": win_rate,
-            "profit_factor": 1.0 + risk_adjusted_return,
+            "profit_factor": Decimal("1") + risk_adjusted_return,
         }

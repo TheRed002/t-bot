@@ -39,8 +39,23 @@ from src.core.exceptions import (
 )
 from src.core.logging import get_logger
 from src.utils.decorators import time_execution
+from src.utils.financial_calculations import (
+    calculate_var_cvar,
+    calculate_volatility as utils_calculate_volatility,
+)
 
 logger = get_logger(__name__)
+
+# Configuration constants for risk and quality scoring
+VOLATILITY_NORMALIZATION_THRESHOLD = Decimal("0.5")
+DRAWDOWN_NORMALIZATION_THRESHOLD = Decimal("0.3")
+SHARPE_NORMALIZATION_FACTOR = Decimal("2")
+SORTINO_NORMALIZATION_FACTOR = Decimal("3")
+PROFIT_FACTOR_NORMALIZATION = Decimal("2")
+CORRELATION_SIGNIFICANCE_THRESHOLD = Decimal("0.3")
+P_VALUE_SIGNIFICANCE_THRESHOLD = Decimal("0.05")
+DEFAULT_RISK_FREE_RATE = Decimal("0.02")
+DEFAULT_VAR_CONFIDENCE = Decimal("0.95")
 
 
 class PerformanceMetrics(BaseModel):
@@ -100,34 +115,34 @@ class PerformanceMetrics(BaseModel):
     def get_risk_score(self) -> Decimal:
         """Calculate overall risk score (0-1, lower is better)."""
         risk_components = [
-            min(self.volatility / Decimal("0.5"), Decimal("1")),  # Normalize volatility
-            min(self.max_drawdown / Decimal("0.3"), Decimal("1")),  # Normalize drawdown
-            max(Decimal("0"), Decimal("1") - self.sharpe_ratio / Decimal("2")),  # Inverse Sharpe
+            min(self.volatility / VOLATILITY_NORMALIZATION_THRESHOLD, Decimal("1")),
+            min(self.max_drawdown / DRAWDOWN_NORMALIZATION_THRESHOLD, Decimal("1")),
+            max(Decimal("0"), Decimal("1") - self.sharpe_ratio / SHARPE_NORMALIZATION_FACTOR),
         ]
-        return sum(risk_components) / len(risk_components)
+        return Decimal(sum(risk_components)) / Decimal(len(risk_components))
 
     def get_quality_score(self) -> Decimal:
         """Calculate overall quality score (0-1, higher is better)."""
         quality_components = [
             (
-                min(self.sharpe_ratio / Decimal("2"), Decimal("1"))
+                min(self.sharpe_ratio / SHARPE_NORMALIZATION_FACTOR, Decimal("1"))
                 if self.sharpe_ratio > 0
                 else Decimal("0")
             ),
             (
-                min(self.sortino_ratio / Decimal("3"), Decimal("1"))
+                min(self.sortino_ratio / SORTINO_NORMALIZATION_FACTOR, Decimal("1"))
                 if self.sortino_ratio > 0
                 else Decimal("0")
             ),
             self.win_rate,
             (
-                min(self.profit_factor / Decimal("2"), Decimal("1"))
+                min(self.profit_factor / PROFIT_FACTOR_NORMALIZATION, Decimal("1"))
                 if self.profit_factor > 0
                 else Decimal("0")
             ),
             self.consistency_score,
         ]
-        return sum(quality_components) / len(quality_components)
+        return Decimal(sum(quality_components)) / Decimal(len(quality_components))
 
 
 class SensitivityAnalysis(BaseModel):
@@ -240,7 +255,7 @@ class StabilityAnalysis(BaseModel):
                     market_consistency = Decimal("0")
                 components.append(market_consistency)
 
-        return sum(components) / len(components)
+        return Decimal(sum(components)) / Decimal(len(components))
 
 
 class ParameterImportanceAnalyzer:
@@ -302,9 +317,9 @@ class ParameterImportanceAnalyzer:
 
     def _extract_parameter_data(
         self, optimization_results: list[dict[str, Any]], parameter_names: list[str]
-    ) -> dict[str, list[float]]:
+    ) -> dict[str, list[Decimal]]:
         """Extract parameter data from optimization results."""
-        parameter_data: dict[str, list[float]] = {name: [] for name in parameter_names}
+        parameter_data: dict[str, list[Decimal]] = {name: [] for name in parameter_names}
 
         for result in optimization_results:
             parameters = result.get("parameters", {})
@@ -313,20 +328,23 @@ class ParameterImportanceAnalyzer:
                 if param_name in parameters:
                     value = parameters[param_name]
 
-                    # Convert to float for analysis
+                    # Convert to Decimal for analysis
                     if isinstance(value, int | float | Decimal):
-                        parameter_data[param_name].append(float(value))
+                        parameter_data[param_name].append(Decimal(str(value)))
                     elif isinstance(value, bool):
-                        parameter_data[param_name].append(1.0 if value else 0.0)
+                        parameter_data[param_name].append(Decimal("1") if value else Decimal("0"))
                     elif isinstance(value, str):
-                        # For categorical parameters, we'll handle separately
-                        parameter_data[param_name].append(hash(value) % 1000 / 1000.0)
+                        # For categorical parameters, convert to numeric representation
+                        hash_val = hash(value) % 1000
+                        parameter_data[param_name].append(Decimal(str(hash_val)) / Decimal("1000"))
                     else:
-                        parameter_data[param_name].append(0.0)
+                        parameter_data[param_name].append(Decimal("0"))
 
         return parameter_data
 
-    def _extract_performance_data(self, optimization_results: list[dict[str, Any]]) -> list[float]:
+    def _extract_performance_data(
+        self, optimization_results: list[dict[str, Any]]
+    ) -> list[Decimal]:
         """Extract performance data from optimization results."""
         performance_data = []
 
@@ -341,28 +359,30 @@ class ParameterImportanceAnalyzer:
 
             if performance is not None:
                 if isinstance(performance, int | float | Decimal):
-                    performance_data.append(float(performance))
+                    performance_data.append(Decimal(str(performance)))
                 else:
-                    performance_data.append(0.0)
+                    performance_data.append(Decimal("0"))
             else:
-                performance_data.append(0.0)
+                performance_data.append(Decimal("0"))
 
         return performance_data
 
     def _analyze_single_parameter(
         self,
         param_name: str,
-        param_values: list[float],
-        performance_values: list[float],
-        all_parameter_data: dict[str, list[float]],
+        param_values: list[Decimal],
+        performance_values: list[Decimal],
+        all_parameter_data: dict[str, list[Decimal]],
     ) -> SensitivityAnalysis | None:
         """Analyze a single parameter's importance."""
         if len(param_values) != len(performance_values) or len(param_values) < 3:
             return None
 
         try:
-            # Calculate correlation
-            correlation, p_value = pearsonr(param_values, performance_values)
+            # Calculate correlation using Decimal precision
+            float_param_values = [float(p) for p in param_values]
+            float_performance_values = [float(p) for p in performance_values]
+            correlation, p_value = pearsonr(float_param_values, float_performance_values)
 
             # Calculate sensitivity score
             sensitivity_score = abs(correlation)
@@ -375,11 +395,11 @@ class ParameterImportanceAnalyzer:
             top_quartile_params = [x[0] for x in combined_data[:top_quartile_size]]
 
             if top_quartile_params:
-                optimal_min = Decimal(str(min(top_quartile_params)))
-                optimal_max = Decimal(str(max(top_quartile_params)))
+                optimal_min = min(top_quartile_params)
+                optimal_max = max(top_quartile_params)
             else:
-                optimal_min = Decimal(str(min(param_values)))
-                optimal_max = Decimal(str(max(param_values)))
+                optimal_min = min(param_values)
+                optimal_max = max(param_values)
 
             # Calculate stability (consistency across different data subsets)
             stability = self._calculate_parameter_stability(param_values, performance_values)
@@ -409,11 +429,11 @@ class ParameterImportanceAnalyzer:
             raise
 
     def _calculate_parameter_stability(
-        self, param_values: list[float], performance_values: list[float]
-    ) -> float:
+        self, param_values: list[Decimal], performance_values: list[Decimal]
+    ) -> Decimal:
         """Calculate stability of parameter across different subsets."""
         if len(param_values) < 10:
-            return 0.0
+            return Decimal("0")
 
         # Split data into thirds and calculate correlations
         n = len(param_values)
@@ -430,7 +450,10 @@ class ParameterImportanceAnalyzer:
 
             if len(subset_params) > 2:
                 try:
-                    corr, _ = pearsonr(subset_params, subset_performance)
+                    # Convert to float for scipy calculation
+                    float_params = [float(p) for p in subset_params]
+                    float_performance = [float(p) for p in subset_performance]
+                    corr, _ = pearsonr(float_params, float_performance)
                     if not math.isnan(corr):
                         correlations.append(corr)
                 except (ValueError, RuntimeWarning) as e:
@@ -441,23 +464,23 @@ class ParameterImportanceAnalyzer:
                     # Continue analysis with other subsets
 
         if len(correlations) < 2:
-            return 0.0
+            return Decimal("0")
 
-        # Stability is inverse of standard deviation
-        std_corr = statistics.stdev(correlations)
-        stability = 1.0 / (1.0 + std_corr)
+        # Stability is inverse of standard deviation using Decimal precision
+        std_corr = Decimal(str(statistics.stdev(correlations)))
+        stability = Decimal("1") / (Decimal("1") + std_corr)
 
         return stability
 
     def _find_interaction_partners(
         self,
         param_name: str,
-        all_parameter_data: dict[str, list[float]],
-        performance_values: list[float],
+        all_parameter_data: dict[str, list[Decimal]],
+        performance_values: list[Decimal],
     ) -> tuple[list[str], dict[str, Decimal]]:
         """Find parameters that interact significantly with the given parameter."""
         interaction_partners: list[str] = []
-        interaction_strengths: dict[str, float] = {}
+        interaction_strengths: dict[str, Decimal] = {}
 
         target_param_values = all_parameter_data.get(param_name, [])
 
@@ -478,7 +501,7 @@ class ParameterImportanceAnalyzer:
                 interaction_corr, interaction_p = pearsonr(interaction_values, performance_values)
 
                 # Check if interaction is significant
-                if abs(interaction_corr) > 0.3 and interaction_p < 0.05:
+                if abs(interaction_corr) > CORRELATION_SIGNIFICANCE_THRESHOLD and interaction_p < P_VALUE_SIGNIFICANCE_THRESHOLD:
                     interaction_partners.append(other_param)
                     interaction_strengths[other_param] = Decimal(str(abs(interaction_corr)))
 
@@ -503,7 +526,7 @@ class PerformanceAnalyzer:
     for trading strategies with proper risk adjustment.
     """
 
-    def __init__(self, risk_free_rate: Decimal = Decimal("0.02")):
+    def __init__(self, risk_free_rate: Decimal = DEFAULT_RISK_FREE_RATE):
         """
         Initialize performance analyzer.
 
@@ -538,37 +561,34 @@ class PerformanceAnalyzer:
         if not returns:
             return self._create_empty_metrics(start_date, end_date)
 
-        # Convert to float for calculations
-        float_returns = [float(r) for r in returns]
-
-        # Basic return calculations
-        total_return = self._calculate_total_return(float_returns)
+        # Basic return calculations using Decimal precision
+        total_return = self._calculate_total_return(returns)
         annualized_return = self._calculate_annualized_return(total_return, start_date, end_date)
 
-        # Risk calculations
-        volatility = self._calculate_volatility(float_returns)
-        downside_volatility = self._calculate_downside_volatility(float_returns)
-        max_drawdown, current_drawdown = self._calculate_drawdowns(float_returns)
+        # Risk calculations using Decimal precision
+        volatility = self._calculate_volatility(returns)
+        downside_volatility = self._calculate_downside_volatility(returns)
+        max_drawdown, current_drawdown = self._calculate_drawdowns(returns)
 
-        # Risk-adjusted metrics
+        # Risk-adjusted metrics using Decimal precision
         sharpe_ratio = self._calculate_sharpe_ratio(annualized_return, volatility)
         sortino_ratio = self._calculate_sortino_ratio(annualized_return, downside_volatility)
         calmar_ratio = self._calculate_calmar_ratio(annualized_return, max_drawdown)
-        omega_ratio = self._calculate_omega_ratio(float_returns)
+        omega_ratio = self._calculate_omega_ratio(returns)
 
         # Trading metrics
         trade_metrics = self._calculate_trade_metrics(trades)
 
-        # Advanced risk metrics
-        var_95 = self._calculate_var(float_returns, 0.95)
-        cvar_95 = self._calculate_conditional_var(float_returns, 0.95)
-        skewness = self._calculate_skewness(float_returns)
-        kurtosis = self._calculate_kurtosis(float_returns)
+        # Advanced risk metrics using Decimal precision
+        var_95 = self._calculate_var(returns, DEFAULT_VAR_CONFIDENCE)
+        cvar_95 = self._calculate_conditional_var(returns, DEFAULT_VAR_CONFIDENCE)
+        skewness = self._calculate_skewness(returns)
+        kurtosis = self._calculate_kurtosis(returns)
 
-        # Recovery and stability
+        # Recovery and stability using Decimal precision
         recovery_factor = self._calculate_recovery_factor(total_return, max_drawdown)
-        stability_ratio = self._calculate_stability_ratio(float_returns)
-        consistency_score = self._calculate_consistency_score(float_returns)
+        stability_ratio = self._calculate_stability_ratio(returns)
+        consistency_score = self._calculate_consistency_score(returns)
 
         # Fee calculations
         total_fees = sum(Decimal(str(trade.get("fee", 0))) for trade in trades)
@@ -576,32 +596,32 @@ class PerformanceAnalyzer:
         turnover_ratio = self._calculate_turnover_ratio(trades, initial_capital)
 
         return PerformanceMetrics(
-            total_return=Decimal(str(total_return)),
-            annualized_return=Decimal(str(annualized_return)),
-            excess_return=Decimal(str(annualized_return - float(self.risk_free_rate))),
-            volatility=Decimal(str(volatility)),
-            downside_volatility=Decimal(str(downside_volatility)),
-            max_drawdown=Decimal(str(max_drawdown)),
-            current_drawdown=Decimal(str(current_drawdown)),
-            sharpe_ratio=Decimal(str(sharpe_ratio)),
-            sortino_ratio=Decimal(str(sortino_ratio)),
-            calmar_ratio=Decimal(str(calmar_ratio)),
-            omega_ratio=Decimal(str(omega_ratio)),
+            total_return=total_return,
+            annualized_return=annualized_return,
+            excess_return=annualized_return - self.risk_free_rate,
+            volatility=volatility,
+            downside_volatility=downside_volatility,
+            max_drawdown=max_drawdown,
+            current_drawdown=current_drawdown,
+            sharpe_ratio=sharpe_ratio,
+            sortino_ratio=sortino_ratio,
+            calmar_ratio=calmar_ratio,
+            omega_ratio=omega_ratio,
             win_rate=trade_metrics["win_rate"],
             profit_factor=trade_metrics["profit_factor"],
             average_win=trade_metrics["average_win"],
             average_loss=trade_metrics["average_loss"],
             largest_win=trade_metrics["largest_win"],
             largest_loss=trade_metrics["largest_loss"],
-            value_at_risk_95=Decimal(str(var_95)),
-            conditional_var_95=Decimal(str(cvar_95)),
-            skewness=Decimal(str(skewness)),
-            kurtosis=Decimal(str(kurtosis)),
-            recovery_factor=Decimal(str(recovery_factor)),
-            stability_ratio=Decimal(str(stability_ratio)),
-            consistency_score=Decimal(str(consistency_score)),
+            value_at_risk_95=var_95,
+            conditional_var_95=cvar_95,
+            skewness=skewness,
+            kurtosis=kurtosis,
+            recovery_factor=recovery_factor,
+            stability_ratio=stability_ratio,
+            consistency_score=consistency_score,
             total_fees=total_fees,
-            fee_adjusted_return=Decimal(str(fee_adjusted_return)),
+            fee_adjusted_return=fee_adjusted_return,
             turnover_ratio=turnover_ratio,
             periods_analyzed=len(returns),
             start_date=start_date,
@@ -643,127 +663,153 @@ class PerformanceAnalyzer:
             end_date=end_date,
         )
 
-    def _calculate_total_return(self, returns: list[float]) -> float:
+    def _calculate_total_return(self, returns: list[Decimal]) -> Decimal:
         """Calculate total return from period returns."""
         if not returns:
-            return 0.0
+            return Decimal("0")
 
         # Compound returns
-        total = 1.0
+        total = Decimal("1")
         for r in returns:
-            total *= 1.0 + r
+            # Ensure r is converted to Decimal to handle mixed types
+            r_decimal = Decimal(str(r)) if not isinstance(r, Decimal) else r
+            total *= Decimal("1") + r_decimal
 
-        return total - 1.0
+        return total - Decimal("1")
 
     def _calculate_annualized_return(
-        self, total_return: float, start_date: datetime, end_date: datetime
-    ) -> float:
+        self, total_return: Decimal, start_date: datetime, end_date: datetime
+    ) -> Decimal:
         """Calculate annualized return."""
-        if total_return <= -1.0:
-            return -1.0
+        # Ensure total_return is a Decimal
+        total_return_decimal = Decimal(str(total_return)) if not isinstance(total_return, Decimal) else total_return
+
+        if total_return_decimal <= Decimal("-1"):
+            return Decimal("-1")
 
         days = (end_date - start_date).days
         if days <= 0:
-            return 0.0
+            return Decimal("0")
 
-        years = days / 365.25
+        years = Decimal(str(days)) / Decimal("365.25")
         if years <= 0:
-            return 0.0
+            return Decimal("0")
 
-        return (1.0 + total_return) ** (1.0 / years) - 1.0
+        return (Decimal("1") + total_return_decimal) ** (Decimal("1") / years) - Decimal("1")
 
-    def _calculate_volatility(self, returns: list[float]) -> float:
-        """Calculate annualized volatility."""
-        if len(returns) < 2:
-            return 0.0
+    def _calculate_volatility(self, returns: list[Decimal]) -> Decimal:
+        """Calculate annualized volatility using shared utility."""
+        import numpy as np
 
-        # Calculate standard deviation
-        std_dev = statistics.stdev(returns)
+        returns_array = np.array([float(r) for r in returns])
+        return utils_calculate_volatility(returns_array)
 
-        # Annualize (assuming daily returns)
-        return std_dev * math.sqrt(252)
-
-    def _calculate_downside_volatility(self, returns: list[float]) -> float:
+    def _calculate_downside_volatility(self, returns: list[Decimal]) -> Decimal:
         """Calculate downside volatility."""
         if len(returns) < 2:
-            return 0.0
+            return Decimal("0")
 
-        # Only consider negative returns
-        downside_returns = [r for r in returns if r < 0]
+        # Convert to Decimal and only consider negative returns
+        decimal_returns = [Decimal(str(r)) if not isinstance(r, Decimal) else r for r in returns]
+        downside_returns = [r for r in decimal_returns if r < Decimal("0")]
 
         if len(downside_returns) < 2:
-            return 0.0
+            return Decimal("0")
 
-        # Calculate standard deviation of downside returns
-        std_dev = statistics.stdev(downside_returns)
+        # Calculate mean of downside returns using Decimal precision
+        mean_downside = sum(downside_returns) / Decimal(str(len(downside_returns)))
 
-        # Annualize
-        return std_dev * math.sqrt(252)
+        # Calculate variance using Decimal precision
+        variance = sum((r - mean_downside) ** 2 for r in downside_returns) / Decimal(
+            str(len(downside_returns) - 1)
+        )
 
-    def _calculate_drawdowns(self, returns: list[float]) -> tuple[float, float]:
+        # Calculate standard deviation using Decimal precision
+        std_dev = variance.sqrt()
+
+        # Annualize using Decimal precision
+        return std_dev * Decimal("252").sqrt()
+
+    def _calculate_drawdowns(self, returns: list[Decimal]) -> tuple[Decimal, Decimal]:
         """Calculate maximum and current drawdown."""
         if not returns:
-            return 0.0, 0.0
+            return Decimal("0"), Decimal("0")
 
         # Calculate cumulative returns
-        cumulative = [1.0]
+        cumulative = [Decimal("1")]
         for r in returns:
-            cumulative.append(cumulative[-1] * (1.0 + r))
+            # Ensure r is converted to Decimal to handle mixed types
+            r_decimal = Decimal(str(r)) if not isinstance(r, Decimal) else r
+            cumulative.append(cumulative[-1] * (Decimal("1") + r_decimal))
 
         # Calculate drawdowns
         running_max = cumulative[0]
-        max_drawdown = 0.0
+        max_drawdown = Decimal("0")
         drawdowns = []
 
         for value in cumulative:
             if value > running_max:
                 running_max = value
 
-            drawdown = (running_max - value) / running_max
+            drawdown = (running_max - value) / running_max if running_max > 0 else Decimal("0")
             drawdowns.append(drawdown)
             max_drawdown = max(max_drawdown, drawdown)
 
-        current_drawdown = drawdowns[-1] if drawdowns else 0.0
+        current_drawdown = drawdowns[-1] if drawdowns else Decimal("0")
 
         return max_drawdown, current_drawdown
 
-    def _calculate_sharpe_ratio(self, annualized_return: float, volatility: float) -> float:
-        """Calculate Sharpe ratio."""
-        if volatility == 0:
-            return 0.0
+    def _calculate_sharpe_ratio(self, annualized_return: Decimal, volatility: Decimal) -> Decimal:
+        """Calculate Sharpe ratio using shared utility."""
+        # Ensure inputs are Decimal
+        annualized_return_decimal = Decimal(str(annualized_return)) if not isinstance(annualized_return, Decimal) else annualized_return
+        volatility_decimal = Decimal(str(volatility)) if not isinstance(volatility, Decimal) else volatility
 
-        excess_return = annualized_return - float(self.risk_free_rate)
-        return excess_return / volatility
+        if volatility_decimal == 0:
+            return Decimal("0")
+        excess_return = annualized_return_decimal - self.risk_free_rate
+        return excess_return / volatility_decimal
 
     def _calculate_sortino_ratio(
-        self, annualized_return: float, downside_volatility: float
-    ) -> float:
+        self, annualized_return: Decimal, downside_volatility: Decimal
+    ) -> Decimal:
         """Calculate Sortino ratio."""
-        if downside_volatility == 0:
-            return 0.0
+        # Ensure inputs are Decimal
+        annualized_return_decimal = Decimal(str(annualized_return)) if not isinstance(annualized_return, Decimal) else annualized_return
+        downside_volatility_decimal = Decimal(str(downside_volatility)) if not isinstance(downside_volatility, Decimal) else downside_volatility
 
-        excess_return = annualized_return - float(self.risk_free_rate)
-        return excess_return / downside_volatility
+        if downside_volatility_decimal == 0:
+            return Decimal("0")
 
-    def _calculate_calmar_ratio(self, annualized_return: float, max_drawdown: float) -> float:
+        excess_return = annualized_return_decimal - self.risk_free_rate
+        return excess_return / downside_volatility_decimal
+
+    def _calculate_calmar_ratio(self, annualized_return: Decimal, max_drawdown: Decimal) -> Decimal:
         """Calculate Calmar ratio."""
-        if max_drawdown == 0:
-            return 0.0
+        # Ensure inputs are Decimal
+        annualized_return_decimal = Decimal(str(annualized_return)) if not isinstance(annualized_return, Decimal) else annualized_return
+        max_drawdown_decimal = Decimal(str(max_drawdown)) if not isinstance(max_drawdown, Decimal) else max_drawdown
 
-        return annualized_return / max_drawdown
+        if max_drawdown_decimal == 0:
+            return Decimal("0")
 
-    def _calculate_omega_ratio(self, returns: list[float]) -> float:
+        return annualized_return_decimal / max_drawdown_decimal
+
+    def _calculate_omega_ratio(self, returns: list[Decimal]) -> Decimal:
         """Calculate Omega ratio."""
         if not returns:
-            return 0.0
+            return Decimal("0")
 
-        threshold = 0.0  # Use zero as threshold
+        threshold = Decimal("0")  # Use zero as threshold
 
-        gains = sum(max(0, r - threshold) for r in returns)
-        losses = sum(max(0, threshold - r) for r in returns)
+        # Convert to Decimal to handle mixed types
+        decimal_returns = [Decimal(str(r)) if not isinstance(r, Decimal) else r for r in returns]
+
+        gains = sum(max(Decimal("0"), r - threshold) for r in decimal_returns)
+        losses = sum(max(Decimal("0"), threshold - r) for r in decimal_returns)
 
         if losses == 0:
-            return float("inf") if gains > 0 else 0.0
+            return Decimal("inf") if gains > 0 else Decimal("0")
 
         return gains / losses
 
@@ -813,109 +859,184 @@ class PerformanceAnalyzer:
             "largest_loss": largest_loss,
         }
 
-    def _calculate_var(self, returns: list[float], confidence: float) -> float:
-        """Calculate Value at Risk."""
-        if not returns:
-            return 0.0
+    def _calculate_var(self, returns: list[Decimal], confidence: Decimal) -> Decimal:
+        """Calculate Value at Risk using shared utility."""
+        import numpy as np
 
-        # Sort returns
-        sorted_returns = sorted(returns)
+        returns_array = np.array([float(r) for r in returns])
+        var, _ = calculate_var_cvar(returns_array, float(confidence))
+        return var
 
-        # Find VaR at confidence level
-        index = int((1 - confidence) * len(sorted_returns))
-        index = max(0, min(index, len(sorted_returns) - 1))
-
-        return abs(sorted_returns[index])
-
-    def _calculate_conditional_var(self, returns: list[float], confidence: float) -> float:
+    def _calculate_conditional_var(self, returns: list[Decimal], confidence: Decimal) -> Decimal:
         """Calculate Conditional VaR (Expected Shortfall)."""
         if not returns:
-            return 0.0
+            return Decimal("0")
+
+        # Convert to Decimal to handle mixed types
+        decimal_returns = [Decimal(str(r)) if not isinstance(r, Decimal) else r for r in returns]
+        confidence_decimal = Decimal(str(confidence)) if not isinstance(confidence, Decimal) else confidence
 
         # Sort returns
-        sorted_returns = sorted(returns)
+        sorted_returns = sorted(decimal_returns)
 
         # Find tail returns
-        index = int((1 - confidence) * len(sorted_returns))
+        index = int((Decimal("1") - confidence_decimal) * Decimal(str(len(sorted_returns))))
         tail_returns = sorted_returns[:index] if index > 0 else [sorted_returns[0]]
 
         # Average of tail returns
-        return abs(sum(tail_returns) / len(tail_returns)) if tail_returns else 0.0
+        return (
+            abs(sum(tail_returns) / Decimal(str(len(tail_returns))))
+            if tail_returns
+            else Decimal("0")
+        )
 
-    def _calculate_skewness(self, returns: list[float]) -> float:
+    def _calculate_skewness(self, returns: list[Decimal]) -> Decimal:
         """Calculate return distribution skewness."""
         if len(returns) < 3:
-            return 0.0
+            return Decimal("0")
 
         try:
-            return stats.skew(returns)
+            # Calculate using Decimal precision
+            n = Decimal(str(len(returns)))
+            mean_return = sum(returns) / n
+
+            # Calculate standard deviation using Decimal precision
+            variance = sum((r - mean_return) ** 2 for r in returns) / (n - Decimal("1"))
+            std_dev = variance.sqrt()
+
+            if std_dev == 0:
+                return Decimal("0")
+
+            # Calculate skewness using Decimal precision
+            skew_sum = sum(((r - mean_return) / std_dev) ** 3 for r in returns)
+            skewness = (n / ((n - Decimal("1")) * (n - Decimal("2")))) * skew_sum
+
+            return skewness
         except (ValueError, RuntimeWarning) as e:
             logger.debug(f"Skewness calculation failed: {e}")
-            return 0.0
+            return Decimal("0")
         except Exception as e:
             logger.warning(f"Unexpected error calculating returns skewness: {e}")
-            return 0.0
+            return Decimal("0")
 
-    def _calculate_kurtosis(self, returns: list[float]) -> float:
+    def _calculate_kurtosis(self, returns: list[Decimal]) -> Decimal:
         """Calculate return distribution kurtosis."""
         if len(returns) < 4:
-            return 0.0
+            return Decimal("0")
 
         try:
-            return stats.kurtosis(returns)
+            # Calculate using Decimal precision
+            n = Decimal(str(len(returns)))
+            mean_return = sum(returns) / n
+
+            # Calculate standard deviation using Decimal precision
+            variance = sum((r - mean_return) ** 2 for r in returns) / (n - Decimal("1"))
+            std_dev = variance.sqrt()
+
+            if std_dev == 0:
+                return Decimal("0")
+
+            # Calculate kurtosis using Decimal precision (excess kurtosis)
+            kurt_sum = sum(((r - mean_return) / std_dev) ** 4 for r in returns)
+            kurtosis = (
+                (n * (n + Decimal("1")))
+                / ((n - Decimal("1")) * (n - Decimal("2")) * (n - Decimal("3")))
+            ) * kurt_sum
+            excess_kurtosis = kurtosis - (
+                Decimal("3") * (n - Decimal("1")) ** 2 / ((n - Decimal("2")) * (n - Decimal("3")))
+            )
+
+            return excess_kurtosis
         except (ValueError, RuntimeWarning) as e:
             logger.debug(f"Kurtosis calculation failed: {e}")
-            return 0.0
+            return Decimal("0")
         except Exception as e:
             logger.warning(f"Unexpected error calculating returns kurtosis: {e}")
-            return 0.0
+            return Decimal("0")
 
-    def _calculate_recovery_factor(self, total_return: float, max_drawdown: float) -> float:
+    def _calculate_recovery_factor(self, total_return: Decimal, max_drawdown: Decimal) -> Decimal:
         """Calculate recovery factor."""
-        if max_drawdown == 0:
-            return 0.0
+        # Ensure inputs are Decimal
+        total_return_decimal = Decimal(str(total_return)) if not isinstance(total_return, Decimal) else total_return
+        max_drawdown_decimal = Decimal(str(max_drawdown)) if not isinstance(max_drawdown, Decimal) else max_drawdown
 
-        return total_return / max_drawdown
+        if max_drawdown_decimal == 0:
+            return Decimal("0")
 
-    def _calculate_stability_ratio(self, returns: list[float]) -> float:
+        return total_return_decimal / max_drawdown_decimal
+
+    def _calculate_stability_ratio(self, returns: list[Decimal]) -> Decimal:
         """Calculate stability ratio."""
         if len(returns) < 12:  # Need sufficient data
-            return 0.0
+            return Decimal("0")
+
+        # Convert to Decimal to handle mixed types
+        decimal_returns = [Decimal(str(r)) if not isinstance(r, Decimal) else r for r in returns]
 
         # Split returns into periods and calculate correlation
-        n = len(returns)
+        n = len(decimal_returns)
         mid = n // 2
 
-        first_half = returns[:mid]
-        second_half = returns[mid:]
+        first_half = decimal_returns[:mid]
+        second_half = decimal_returns[mid:]
 
         try:
-            correlation, _ = pearsonr(first_half, second_half[: len(first_half)])
-            return max(0.0, correlation)
-        except (ValueError, RuntimeWarning) as e:
+            # Calculate correlation manually using Decimal precision
+            if len(first_half) != len(second_half):
+                min_len = min(len(first_half), len(second_half))
+                first_half = first_half[:min_len]
+                second_half = second_half[:min_len]
+
+            if len(first_half) < 2:
+                return Decimal("0")
+
+            # Calculate means
+            mean1 = sum(first_half) / Decimal(str(len(first_half)))
+            mean2 = sum(second_half) / Decimal(str(len(second_half)))
+
+            # Calculate covariance and standard deviations
+            covariance = sum(
+                (x - mean1) * (y - mean2) for x, y in zip(first_half, second_half, strict=False)
+            ) / Decimal(str(len(first_half) - 1))
+
+            var1 = sum((x - mean1) ** 2 for x in first_half) / Decimal(str(len(first_half) - 1))
+            var2 = sum((y - mean2) ** 2 for y in second_half) / Decimal(str(len(second_half) - 1))
+
+            std1 = var1.sqrt()
+            std2 = var2.sqrt()
+
+            if std1 == 0 or std2 == 0:
+                return Decimal("0")
+
+            correlation = covariance / (std1 * std2)
+            return max(Decimal("0"), correlation)
+        except (ValueError, ArithmeticError) as e:
             logger.debug(f"Returns consistency calculation failed: {e}")
-            return 0.0
+            return Decimal("0")
         except Exception as e:
             logger.warning(f"Unexpected error in returns consistency analysis: {e}")
-            return 0.0
+            return Decimal("0")
 
-    def _calculate_consistency_score(self, returns: list[float]) -> float:
+    def _calculate_consistency_score(self, returns: list[Decimal]) -> Decimal:
         """Calculate consistency score."""
         if len(returns) < 12:
-            return 0.0
+            return Decimal("0")
+
+        # Convert to Decimal to handle mixed types
+        decimal_returns = [Decimal(str(r)) if not isinstance(r, Decimal) else r for r in returns]
 
         # Calculate rolling 12-period returns
         rolling_returns = []
-        for i in range(12, len(returns) + 1):
-            period_return = self._calculate_total_return(returns[i - 12 : i])
+        for i in range(12, len(decimal_returns) + 1):
+            period_return = self._calculate_total_return(decimal_returns[i - 12 : i])
             rolling_returns.append(period_return)
 
         if not rolling_returns:
-            return 0.0
+            return Decimal("0")
 
         # Consistency is based on positive rolling returns
-        positive_periods = sum(1 for r in rolling_returns if r > 0)
-        return positive_periods / len(rolling_returns)
+        positive_periods = sum(1 for r in rolling_returns if r > Decimal("0"))
+        return Decimal(str(positive_periods)) / Decimal(str(len(rolling_returns)))
 
     def _calculate_turnover_ratio(
         self, trades: list[dict[str, Any]], initial_capital: Decimal
@@ -945,7 +1066,7 @@ class ResultsAnalyzer:
     performance metrics, parameter importance, and stability analysis.
     """
 
-    def __init__(self, risk_free_rate: Decimal = Decimal("0.02")):
+    def __init__(self, risk_free_rate: Decimal = DEFAULT_RISK_FREE_RATE):
         """
         Initialize results analyzer.
 
@@ -1000,7 +1121,7 @@ class ResultsAnalyzer:
             # 4. Optimization landscape analysis
             logger.info("Analyzing optimization landscape")
             landscape_analysis = self._analyze_optimization_landscape(optimization_results)
-            analysis_results["landscape_analysis"] = landscape_analysis
+            analysis_results["optimization_landscape"] = landscape_analysis
 
             # 5. Best result detailed analysis
             if best_result:
@@ -1037,13 +1158,38 @@ class ResultsAnalyzer:
 
         for result in optimization_results:
             performance = None
-            for key in ["objective_value", "performance", "total_return"]:
-                if key in result:
-                    performance = result[key]
-                    break
+
+            # Try different approaches to extract performance value
+            if "objective_value" in result:
+                performance = result["objective_value"]
+            elif "total_return" in result:
+                performance = result["total_return"]
+            elif "performance" in result:
+                perf_dict = result["performance"]
+                if isinstance(perf_dict, dict):
+                    # Extract a meaningful metric from performance dictionary
+                    if "return" in perf_dict:
+                        performance = perf_dict["return"]
+                    elif "sharpe" in perf_dict:
+                        performance = perf_dict["sharpe"]
+                    elif "profit" in perf_dict:
+                        performance = perf_dict["profit"]
+                else:
+                    performance = perf_dict
+            elif "objective_values" in result:
+                obj_values = result["objective_values"]
+                if isinstance(obj_values, dict):
+                    # Take the first objective value
+                    performance = next(iter(obj_values.values()), None)
+                else:
+                    performance = obj_values
 
             if performance is not None:
-                performance_values.append(float(performance))
+                try:
+                    performance_values.append(float(performance))
+                except (TypeError, ValueError):
+                    # Skip values that can't be converted to float
+                    continue
 
         if not performance_values:
             return {}
@@ -1071,9 +1217,9 @@ class ResultsAnalyzer:
 
     def _calculate_parameter_correlations(
         self, optimization_results: list[dict[str, Any]], parameter_names: list[str]
-    ) -> dict[str, dict[str, float]]:
+    ) -> dict[str, dict[str, Decimal]]:
         """Calculate correlation matrix between parameters."""
-        parameter_data: dict[str, list[Any]] = {}
+        parameter_data: dict[str, list[Decimal]] = {}
 
         # Extract parameter data
         for param_name in parameter_names:
@@ -1084,14 +1230,14 @@ class ResultsAnalyzer:
                 value = parameters.get(param_name, 0)
 
                 if isinstance(value, int | float | Decimal):
-                    parameter_data[param_name].append(float(value))
+                    parameter_data[param_name].append(Decimal(str(value)))
                 elif isinstance(value, bool):
-                    parameter_data[param_name].append(1.0 if value else 0.0)
+                    parameter_data[param_name].append(Decimal("1") if value else Decimal("0"))
                 else:
-                    parameter_data[param_name].append(0.0)
+                    parameter_data[param_name].append(Decimal("0"))
 
         # Calculate correlation matrix
-        correlation_matrix: dict[str, dict[str, float]] = {}
+        correlation_matrix: dict[str, dict[str, Decimal]] = {}
 
         for param1 in parameter_names:
             correlation_matrix[param1] = {}
@@ -1104,16 +1250,21 @@ class ResultsAnalyzer:
                     and len(parameter_data[param1]) > 1
                 ):
                     try:
-                        corr, _ = pearsonr(parameter_data[param1], parameter_data[param2])
-                        correlation_matrix[param1][param2] = corr if not math.isnan(corr) else 0.0
+                        # Convert to float for scipy calculation
+                        float_data1 = [float(v) for v in parameter_data[param1]]
+                        float_data2 = [float(v) for v in parameter_data[param2]]
+                        corr, _ = pearsonr(float_data1, float_data2)
+                        correlation_matrix[param1][param2] = (
+                            Decimal(str(corr)) if not math.isnan(corr) else Decimal("0")
+                        )
                     except (ValueError, RuntimeWarning) as e:
                         logger.debug(f"Parameter correlation failed for {param1}-{param2}: {e}")
-                        correlation_matrix[param1][param2] = 0.0
+                        correlation_matrix[param1][param2] = Decimal("0")
                     except Exception as e:
                         logger.warning(
                             f"Unexpected error in parameter correlation {param1}-{param2}: {e}"
                         )
-                        correlation_matrix[param1][param2] = 0.0
+                        correlation_matrix[param1][param2] = Decimal("0")
                 else:
                     correlation_matrix[param1][param2] = 0.0
 
@@ -1130,13 +1281,38 @@ class ResultsAnalyzer:
         performance_values = []
         for result in optimization_results:
             performance = None
-            for key in ["objective_value", "performance", "total_return"]:
-                if key in result:
-                    performance = result[key]
-                    break
+
+            # Try different approaches to extract performance value (same as performance distribution)
+            if "objective_value" in result:
+                performance = result["objective_value"]
+            elif "total_return" in result:
+                performance = result["total_return"]
+            elif "performance" in result:
+                perf_dict = result["performance"]
+                if isinstance(perf_dict, dict):
+                    # Extract a meaningful metric from performance dictionary
+                    if "return" in perf_dict:
+                        performance = perf_dict["return"]
+                    elif "sharpe" in perf_dict:
+                        performance = perf_dict["sharpe"]
+                    elif "profit" in perf_dict:
+                        performance = perf_dict["profit"]
+                else:
+                    performance = perf_dict
+            elif "objective_values" in result:
+                obj_values = result["objective_values"]
+                if isinstance(obj_values, dict):
+                    # Take the first objective value
+                    performance = next(iter(obj_values.values()), None)
+                else:
+                    performance = obj_values
 
             if performance is not None:
-                performance_values.append(float(performance))
+                try:
+                    performance_values.append(float(performance))
+                except (TypeError, ValueError):
+                    # Skip values that can't be converted to float
+                    continue
 
         if not performance_values:
             return {}
@@ -1343,13 +1519,38 @@ class ResultsAnalyzer:
 
         for result in optimization_results:
             performance = None
-            for key in ["objective_value", "performance", "total_return"]:
-                if key in result:
-                    performance = result[key]
-                    break
+
+            # Try different approaches to extract performance value (same as performance distribution)
+            if "objective_value" in result:
+                performance = result["objective_value"]
+            elif "total_return" in result:
+                performance = result["total_return"]
+            elif "performance" in result:
+                perf_dict = result["performance"]
+                if isinstance(perf_dict, dict):
+                    # Extract a meaningful metric from performance dictionary
+                    if "return" in perf_dict:
+                        performance = perf_dict["return"]
+                    elif "sharpe" in perf_dict:
+                        performance = perf_dict["sharpe"]
+                    elif "profit" in perf_dict:
+                        performance = perf_dict["profit"]
+                else:
+                    performance = perf_dict
+            elif "objective_values" in result:
+                obj_values = result["objective_values"]
+                if isinstance(obj_values, dict):
+                    # Take the first objective value
+                    performance = next(iter(obj_values.values()), None)
+                else:
+                    performance = obj_values
 
             if performance is not None:
-                performance_sequence.append(float(performance))
+                try:
+                    performance_sequence.append(float(performance))
+                except (TypeError, ValueError):
+                    # Skip values that can't be converted to float
+                    continue
 
         if len(performance_sequence) < 2:
             return {}
@@ -1411,8 +1612,8 @@ class ResultsAnalyzer:
                 "performance_std": perf_dist.get("std", 0),
             }
 
-        if "landscape_analysis" in analysis_results:
-            landscape = analysis_results["landscape_analysis"]
+        if "optimization_landscape" in analysis_results:
+            landscape = analysis_results["optimization_landscape"]
             summary["landscape_characteristics"] = {
                 "ruggedness": landscape.get("ruggedness", 0),
                 "has_multiple_modes": landscape.get("multimodality", {}).get(

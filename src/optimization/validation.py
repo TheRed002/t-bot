@@ -25,7 +25,6 @@ Critical for Financial Applications:
 """
 
 import asyncio
-import math
 import random
 from collections.abc import Callable
 from datetime import datetime, timedelta
@@ -42,6 +41,7 @@ from src.core.exceptions import (
 )
 from src.core.logging import get_logger
 from src.utils.decorators import time_execution
+from src.utils.financial_calculations import calculate_std
 
 # Removed external optimization_utils dependency - functions implemented locally
 
@@ -159,7 +159,7 @@ class ValidationConfig(BaseModel):
     out_of_sample_ratio: Decimal = Field(
         default=Decimal("0.25"),
         gt=0,
-        lt=Decimal("0.5"),
+        lt=0.5,
         description="Ratio of data reserved for out-of-sample testing",
     )
     require_oos_significance: bool = Field(
@@ -199,7 +199,7 @@ class ValidationConfig(BaseModel):
     robustness_perturbation: Decimal = Field(
         default=Decimal("0.05"),
         gt=0,
-        lt=Decimal("0.5"),
+        lt=0.5,
         description="Parameter perturbation for robustness testing",
     )
     robustness_samples: int = Field(
@@ -472,21 +472,25 @@ class WalkForwardValidator:
             if asyncio.iscoroutinefunction(objective_function):
                 result = await asyncio.wait_for(
                     objective_function(period_params),
-                    timeout=30.0  # 30 second timeout per period
+                    timeout=30.0,  # 30 second timeout per period
                 )
             else:
                 # Run in executor with timeout for sync functions
                 loop = asyncio.get_event_loop()
                 result = await asyncio.wait_for(
                     loop.run_in_executor(None, objective_function, period_params),
-                    timeout=30.0  # 30 second timeout per period
+                    timeout=30.0,  # 30 second timeout per period
                 )
 
-            if isinstance(result, dict):
-                # Extract primary metric
-                return Decimal(str(result.get("total_return", 0)))
-            else:
-                return Decimal(str(result))
+            try:
+                if isinstance(result, dict):
+                    # Extract primary metric
+                    return Decimal(str(result.get("total_return", 0)))
+                else:
+                    return Decimal(str(result))
+            except (ValueError, TypeError, OverflowError) as decimal_error:
+                logger.error(f"Failed to convert evaluation result to Decimal: {decimal_error}")
+                return None
 
         except asyncio.TimeoutError:
             logger.warning("Period evaluation timed out")
@@ -556,7 +560,7 @@ class OverfittingDetector:
         # Validation consistency test
         if validation_scores:
             validation_mean = sum(validation_scores) / len(validation_scores)
-            validation_std = self._calculate_std(validation_scores)
+            validation_std = calculate_std(validation_scores)
 
             metrics["validation_mean"] = validation_mean
             metrics["validation_std"] = validation_std
@@ -586,16 +590,6 @@ class OverfittingDetector:
         )
 
         return has_overfitting, metrics
-
-    def _calculate_std(self, values: list[Decimal]) -> Decimal:
-        """Calculate standard deviation of decimal values."""
-        if len(values) < 2:
-            return Decimal("0")
-
-        mean = sum(values) / len(values)
-        variance = sum((v - mean) ** 2 for v in values) / (len(values) - 1)
-
-        return Decimal(str(math.sqrt(float(variance))))
 
 
 class StatisticalTester:
@@ -627,7 +621,9 @@ class StatisticalTester:
         )
 
     async def test_significance(
-        self, optimization_results: list[Decimal], baseline_results: list[Decimal] | None = None
+        self,
+        optimization_results: list[Decimal] | None = None,
+        baseline_results: list[Decimal] | None = None,
     ) -> tuple[Decimal, tuple[Decimal, Decimal], bool]:
         """
         Test statistical significance of optimization results.
@@ -639,6 +635,9 @@ class StatisticalTester:
         Returns:
             Tuple of (p_value, confidence_interval, is_significant)
         """
+        # Yield control to event loop
+        await asyncio.sleep(0)
+
         if not optimization_results:
             return Decimal("1"), (Decimal("0"), Decimal("0")), False
 
@@ -782,14 +781,14 @@ class RobustnessAnalyzer:
                     if asyncio.iscoroutinefunction(objective_function):
                         result = await asyncio.wait_for(
                             objective_function(perturbed_params),
-                            timeout=30.0  # 30 second timeout per perturbation
+                            timeout=30.0,  # 30 second timeout per perturbation
                         )
                     else:
                         # Run in executor with timeout for sync functions
                         loop = asyncio.get_event_loop()
                         result = await asyncio.wait_for(
                             loop.run_in_executor(None, objective_function, perturbed_params),
-                            timeout=30.0  # 30 second timeout per perturbation
+                            timeout=30.0,  # 30 second timeout per perturbation
                         )
 
                     if isinstance(result, dict):
@@ -816,20 +815,20 @@ class RobustnessAnalyzer:
             # Calculate robustness metrics
             if perturbation_results:
                 mean_perturbed = sum(perturbation_results) / len(perturbation_results)
-                std_perturbed = self._calculate_std(perturbation_results)
+                std_perturbed = calculate_std(perturbation_results)
 
                 # Get original performance with timeout
                 try:
                     if asyncio.iscoroutinefunction(objective_function):
                         original_result = await asyncio.wait_for(
                             objective_function(optimal_parameters),
-                            timeout=30.0  # 30 second timeout
+                            timeout=30.0,  # 30 second timeout
                         )
                     else:
                         loop = asyncio.get_event_loop()
                         original_result = await asyncio.wait_for(
                             loop.run_in_executor(None, objective_function, optimal_parameters),
-                            timeout=30.0  # 30 second timeout
+                            timeout=30.0,  # 30 second timeout
                         )
 
                     if isinstance(original_result, dict):
@@ -949,16 +948,6 @@ class RobustnessAnalyzer:
 
         return sensitivities
 
-    def _calculate_std(self, values: list[Decimal]) -> Decimal:
-        """Calculate standard deviation."""
-        if len(values) < 2:
-            return Decimal("0")
-
-        mean = sum(values) / len(values)
-        variance = sum((v - mean) ** 2 for v in values) / (len(values) - 1)
-
-        return Decimal(str(math.sqrt(float(variance))))
-
 
 class ValidationEngine:
     """
@@ -1016,7 +1005,7 @@ class ValidationEngine:
         validation_scores = []
         walk_forward_scores = []
         optimization_scores = []
-        robustness_details = {}
+        robustness_details: dict[str, Any] = {}
 
         try:
             # 1. In-sample vs Out-of-sample evaluation
@@ -1124,14 +1113,13 @@ class ValidationEngine:
             try:
                 if asyncio.iscoroutinefunction(objective_function):
                     result = await asyncio.wait_for(
-                        objective_function(parameters),
-                        timeout=DEFAULT_OBJECTIVE_TIMEOUT_SECONDS
+                        objective_function(parameters), timeout=DEFAULT_OBJECTIVE_TIMEOUT_SECONDS
                     )
                 else:
                     loop = asyncio.get_event_loop()
                     result = await asyncio.wait_for(
                         loop.run_in_executor(None, objective_function, parameters),
-                        timeout=DEFAULT_OBJECTIVE_TIMEOUT_SECONDS
+                        timeout=DEFAULT_OBJECTIVE_TIMEOUT_SECONDS,
                     )
 
                 if isinstance(result, dict):
@@ -1168,14 +1156,13 @@ class ValidationEngine:
 
             if asyncio.iscoroutinefunction(objective_function):
                 in_result = await asyncio.wait_for(
-                    objective_function(in_sample_params),
-                    timeout=DEFAULT_OBJECTIVE_TIMEOUT_SECONDS
+                    objective_function(in_sample_params), timeout=DEFAULT_OBJECTIVE_TIMEOUT_SECONDS
                 )
             else:
                 loop = asyncio.get_event_loop()
                 in_result = await asyncio.wait_for(
                     loop.run_in_executor(None, objective_function, in_sample_params),
-                    timeout=DEFAULT_OBJECTIVE_TIMEOUT_SECONDS
+                    timeout=DEFAULT_OBJECTIVE_TIMEOUT_SECONDS,
                 )
 
             if isinstance(in_result, dict):
@@ -1201,14 +1188,13 @@ class ValidationEngine:
 
             if asyncio.iscoroutinefunction(objective_function):
                 oos_result = await asyncio.wait_for(
-                    objective_function(oos_params),
-                    timeout=DEFAULT_OBJECTIVE_TIMEOUT_SECONDS
+                    objective_function(oos_params), timeout=DEFAULT_OBJECTIVE_TIMEOUT_SECONDS
                 )
             else:
                 loop = asyncio.get_event_loop()
                 oos_result = await asyncio.wait_for(
                     loop.run_in_executor(None, objective_function, oos_params),
-                    timeout=DEFAULT_OBJECTIVE_TIMEOUT_SECONDS
+                    timeout=DEFAULT_OBJECTIVE_TIMEOUT_SECONDS,
                 )
 
             if isinstance(oos_result, dict):
@@ -1270,14 +1256,13 @@ class ValidationEngine:
 
                 if asyncio.iscoroutinefunction(objective_function):
                     result = await asyncio.wait_for(
-                        objective_function(fold_params),
-                        timeout=DEFAULT_OBJECTIVE_TIMEOUT_SECONDS
+                        objective_function(fold_params), timeout=DEFAULT_OBJECTIVE_TIMEOUT_SECONDS
                     )
                 else:
                     loop = asyncio.get_event_loop()
                     result = await asyncio.wait_for(
                         loop.run_in_executor(None, objective_function, fold_params),
-                        timeout=DEFAULT_OBJECTIVE_TIMEOUT_SECONDS
+                        timeout=DEFAULT_OBJECTIVE_TIMEOUT_SECONDS,
                     )
 
                 if isinstance(result, dict):
@@ -1310,7 +1295,7 @@ class ValidationEngine:
         # CV stability
         if validation_scores and len(validation_scores) > 1:
             mean_cv = sum(validation_scores) / len(validation_scores)
-            std_cv = self._calculate_std(validation_scores)
+            std_cv = calculate_std(validation_scores)
 
             if mean_cv != 0:
                 cv_stability = Decimal("1") / (Decimal("1") + abs(std_cv / mean_cv))
@@ -1322,7 +1307,7 @@ class ValidationEngine:
         # Walk-forward stability
         if walk_forward_scores and len(walk_forward_scores) > 1:
             mean_wf = sum(walk_forward_scores) / len(walk_forward_scores)
-            std_wf = self._calculate_std(walk_forward_scores)
+            std_wf = calculate_std(walk_forward_scores)
 
             if mean_wf != 0:
                 wf_stability = Decimal("1") / (Decimal("1") + abs(std_wf / mean_wf))
@@ -1341,13 +1326,3 @@ class ValidationEngine:
             return sum(stability_components) / len(stability_components)
         else:
             return Decimal("0")
-
-    def _calculate_std(self, values: list[Decimal]) -> Decimal:
-        """Calculate standard deviation."""
-        if len(values) < 2:
-            return Decimal("0")
-
-        mean = sum(values) / len(values)
-        variance = sum((v - mean) ** 2 for v in values) / (len(values) - 1)
-
-        return Decimal(str(math.sqrt(float(variance))))

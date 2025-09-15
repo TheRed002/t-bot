@@ -84,17 +84,23 @@ class TestContinuousParameter:
             name="test_param", min_value=Decimal("0.0"), max_value=Decimal("10.0"), precision=2
         )
 
-        # Test uniform sampling with mocked random for determinism
-        with patch('random.uniform', return_value=0.5):
-            for _ in range(5):  # Reduced iterations
+        # Test uniform sampling with realistic varied values
+        test_values = [0.1, 0.3, 0.7, 0.9, 0.5]  # Varied realistic values
+        with patch('random.uniform', side_effect=test_values):
+            for expected_ratio in test_values:
                 value = param.sample(SamplingStrategy.UNIFORM)
                 assert param.min_value <= value <= param.max_value
+                # Check that sampling returns values in the valid range
+                assert isinstance(value, Decimal)
 
-        # Test Gaussian sampling with mocked random
-        with patch('random.gauss', return_value=5.0):
-            for _ in range(5):  # Reduced iterations
+        # Test Gaussian sampling with realistic center and spread values
+        test_gauss_values = [4.8, 5.2, 4.5, 5.8, 5.0]  # Values around center
+        with patch('random.gauss', side_effect=test_gauss_values):
+            for _ in range(len(test_gauss_values)):
                 value = param.sample(SamplingStrategy.GAUSSIAN)
                 assert isinstance(value, Decimal)
+                # Gaussian sampling should still respect bounds after clipping
+                assert param.min_value <= value <= param.max_value
 
     def test_continuous_parameter_validation_methods(self):
         """Test parameter validation methods."""

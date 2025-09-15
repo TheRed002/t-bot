@@ -26,7 +26,6 @@ from decimal import Decimal
 from enum import Enum
 from typing import Any
 
-import numpy as np
 from pydantic import BaseModel, Field, field_validator
 
 
@@ -82,7 +81,7 @@ class ParameterDefinition(BaseModel, ABC):
         Returns:
             Sampled parameter value
         """
-        pass
+        raise NotImplementedError("Subclasses must implement sample")
 
     @abstractmethod
     def validate_value(self, value: Any) -> bool:
@@ -95,7 +94,7 @@ class ParameterDefinition(BaseModel, ABC):
         Returns:
             True if value is valid
         """
-        pass
+        raise NotImplementedError("Subclasses must implement validate_value")
 
     @abstractmethod
     def clip_value(self, value: Any) -> Any:
@@ -108,7 +107,7 @@ class ParameterDefinition(BaseModel, ABC):
         Returns:
             Clipped value
         """
-        pass
+        raise NotImplementedError("Subclasses must implement clip_value")
 
     @abstractmethod
     def get_bounds(self) -> tuple[Any, Any]:
@@ -118,7 +117,7 @@ class ParameterDefinition(BaseModel, ABC):
         Returns:
             Tuple of (min_value, max_value)
         """
-        pass
+        raise NotImplementedError("Subclasses must implement get_bounds")
 
     def is_active(self, context: dict[str, Any]) -> bool:
         """
@@ -198,11 +197,23 @@ class ContinuousParameter(ParameterDefinition):
         """Sample a value from the continuous parameter space."""
         if strategy == SamplingStrategy.UNIFORM:
             if self.log_scale:
-                # Log-uniform sampling
-                log_min = float(self.min_value.ln())
-                log_max = float(self.max_value.ln())
-                log_value = random.uniform(log_min, log_max)
-                value = Decimal(str(np.exp(log_value)))
+                # Log-uniform sampling using Decimal precision
+                try:
+                    # Use Decimal arithmetic for log calculations
+                    log_min_dec = self.min_value.ln()
+                    log_max_dec = self.max_value.ln()
+
+                    # Generate random factor and interpolate in log space
+                    random_factor = Decimal(str(random.random()))
+                    log_value_dec = log_min_dec + (log_max_dec - log_min_dec) * random_factor
+
+                    # Convert back from log space using Decimal precision
+                    value = log_value_dec.exp()
+                except (ValueError, OverflowError):
+                    # Fallback to linear sampling if log fails
+                    range_size = self.max_value - self.min_value
+                    random_factor = Decimal(str(random.random()))
+                    value = self.min_value + range_size * random_factor
             else:
                 # Linear uniform sampling
                 range_size = self.max_value - self.min_value
@@ -210,17 +221,38 @@ class ContinuousParameter(ParameterDefinition):
                 value = self.min_value + range_size * random_factor
 
         elif strategy == SamplingStrategy.GAUSSIAN:
-            # Gaussian sampling centered at midpoint
-            center = (self.min_value + self.max_value) / 2
-            std_dev = (self.max_value - self.min_value) / 6  # 3-sigma rule
-            value = center + Decimal(str(random.gauss(0, float(std_dev))))
+            # Gaussian sampling centered at midpoint using Decimal precision
+            try:
+                center = (self.min_value + self.max_value) / Decimal("2")
+                std_dev = (self.max_value - self.min_value) / Decimal("6")  # 3-sigma rule
+
+                # Generate Gaussian random value using Decimal-safe method
+                gaussian_value = Decimal(str(random.gauss(0, 1)))
+                value = center + std_dev * gaussian_value
+            except (ValueError, OverflowError):
+                # Fallback to uniform sampling if Gaussian fails
+                range_size = self.max_value - self.min_value
+                random_factor = Decimal(str(random.random()))
+                value = self.min_value + range_size * random_factor
 
         elif strategy == SamplingStrategy.LOG_UNIFORM:
-            # Force log-uniform sampling regardless of log_scale setting
-            log_min = float(self.min_value.ln())
-            log_max = float(self.max_value.ln())
-            log_value = random.uniform(log_min, log_max)
-            value = Decimal(str(np.exp(log_value)))
+            # Force log-uniform sampling regardless of log_scale setting using Decimal precision
+            try:
+                # Use Decimal arithmetic for log calculations
+                log_min_dec = self.min_value.ln()
+                log_max_dec = self.max_value.ln()
+
+                # Generate random factor and interpolate in log space
+                random_factor = Decimal(str(random.random()))
+                log_value_dec = log_min_dec + (log_max_dec - log_min_dec) * random_factor
+
+                # Convert back from log space using Decimal precision
+                value = log_value_dec.exp()
+            except (ValueError, OverflowError):
+                # Fallback to uniform sampling if log fails
+                range_size = self.max_value - self.min_value
+                random_factor = Decimal(str(random.random()))
+                value = self.min_value + range_size * random_factor
 
         else:
             # Default to uniform sampling
@@ -363,7 +395,7 @@ class CategoricalParameter(ParameterDefinition):
 
     parameter_type: ParameterType = Field(default=ParameterType.CATEGORICAL)
     choices: list[Any] = Field(description="List of valid parameter choices")
-    weights: list[float] | None = Field(
+    weights: list[Decimal] | None = Field(
         default=None, description="Sampling weights for choices (must match choices length)"
     )
     default_value: Any | None = Field(default=None, description="Default parameter value")
@@ -386,7 +418,7 @@ class CategoricalParameter(ParameterDefinition):
             choices = values.data.get("choices", [])
             if len(v) != len(choices):
                 raise ValueError("weights must have same length as choices")
-            if any(w <= 0 for w in v):
+            if any(w <= Decimal("0") for w in v):
                 raise ValueError("all weights must be positive")
         return v
 
@@ -427,7 +459,11 @@ class CategoricalParameter(ParameterDefinition):
         """Get index of choice value."""
         try:
             return self.choices.index(value)
-        except ValueError:
+        except ValueError as e:
+            from src.core.logging import get_logger
+
+            logger = get_logger(__name__)
+            logger.debug(f"Value {value} not found in choices {self.choices}: {e}")
             return 0
 
 
@@ -446,7 +482,7 @@ class BooleanParameter(ParameterDefinition):
 
     def sample(self, strategy: SamplingStrategy = SamplingStrategy.UNIFORM) -> bool:
         """Sample a boolean value."""
-        return random.random() < float(self.true_probability)
+        return Decimal(str(random.random())) < self.true_probability
 
     def validate_value(self, value: Any) -> bool:
         """Validate if value is boolean."""
@@ -722,7 +758,7 @@ class ParameterSpace(BaseModel):
         Returns:
             Dictionary with parameter information
         """
-        info = {}
+        info: dict[str, dict[str, Any]] = {}
 
         for param_name, param_def in self.parameters.items():
             info[param_name] = {
@@ -787,11 +823,11 @@ class ParameterSpaceBuilder:
     def add_continuous(
         self,
         name: str,
-        min_value: Decimal | float,
-        max_value: Decimal | float,
+        min_value: Decimal,
+        max_value: Decimal,
         precision: int | None = None,
         log_scale: bool = False,
-        default_value: Decimal | float | None = None,
+        default_value: Decimal | None = None,
         description: str = "",
         **kwargs,
     ) -> "ParameterSpaceBuilder":
@@ -836,7 +872,7 @@ class ParameterSpaceBuilder:
         self,
         name: str,
         choices: list[Any],
-        weights: list[float] | None = None,
+        weights: list[Decimal] | None = None,
         default_value: Any | None = None,
         description: str = "",
         **kwargs,
@@ -1092,7 +1128,7 @@ def create_risk_management_space() -> ParameterSpace:
     # Circuit breakers
     builder.add_boolean(
         "enable_correlation_breaker",
-        true_probability=0.8,
+        true_probability=Decimal("0.8"),
         default_value=True,
         description="Enable correlation-based circuit breaker",
     )

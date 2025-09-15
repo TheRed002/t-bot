@@ -54,6 +54,10 @@ logger = get_logger(__name__)
 # Configuration constants
 DEFAULT_OBJECTIVE_TIMEOUT_SECONDS = 60.0
 DEFAULT_BATCH_TIMEOUT_SECONDS = 300.0
+DEFAULT_REFINEMENT_FACTOR = Decimal("0.3")
+DEFAULT_EARLY_STOPPING_THRESHOLD = Decimal("0.1")
+DEFAULT_PARAMETER_PERTURBATION_FACTOR = 0.01
+DEFAULT_STATISTICAL_SIGNIFICANCE_THRESHOLD = Decimal("1.0")
 
 
 class GridSearchConfig(BaseModel):
@@ -74,8 +78,11 @@ class GridSearchConfig(BaseModel):
     refinement_iterations: int = Field(
         default=3, ge=1, description="Number of refinement iterations"
     )
-    refinement_factor: float = Field(
-        default=0.3, gt=0, lt=1, description="Factor by which to shrink grid for refinement"
+    refinement_factor: Decimal = Field(
+        default=DEFAULT_REFINEMENT_FACTOR,
+        gt=0,
+        lt=1,
+        description="Factor by which to shrink grid for refinement",
     )
 
     # Sampling strategies
@@ -109,7 +116,7 @@ class GridSearchConfig(BaseModel):
         default=100, ge=10, description="Patience for early stopping"
     )
     early_stopping_threshold: Decimal = Field(
-        default=Decimal("0.1"), gt=Decimal("0"), description="Threshold for early stopping"
+        default=DEFAULT_EARLY_STOPPING_THRESHOLD, gt=0, description="Threshold for early stopping"
     )
 
     # Quality control
@@ -434,7 +441,7 @@ class GridGenerator:
         return combinations
 
     def generate_refined_grid(
-        self, best_candidates: list[OptimizationCandidate], refinement_factor: float
+        self, best_candidates: list[OptimizationCandidate], refinement_factor: Decimal
     ) -> list[dict[str, Any]]:
         """
         Generate refined grid around best candidates.
@@ -567,6 +574,10 @@ class BruteForceOptimizer(OptimizationEngine):
         self.active_evaluations = 0
         self.evaluation_executor: ProcessPoolExecutor | None = None
 
+        # Concurrent task management
+        self._task_semaphore = asyncio.Semaphore(self.grid_config.max_concurrent_evaluations)
+        self._active_tasks: set[asyncio.Task] = set()
+
         # Performance tracking
         self.evaluation_times: list[float] = []
         self.memory_usage_samples: list[float] = []
@@ -655,6 +666,17 @@ class BruteForceOptimizer(OptimizationEngine):
             raise OptimizationError(f"Brute force optimization failed: {e!s}") from e
 
         finally:
+            # Cancel all active tasks to prevent race conditions
+            if self._active_tasks:
+                for task in self._active_tasks:
+                    if not task.done():
+                        task.cancel()
+
+                # Wait for all tasks to complete cancellation
+                if self._active_tasks:
+                    await asyncio.gather(*self._active_tasks, return_exceptions=True)
+                    self._active_tasks.clear()
+
             # Ensure executor is properly cleaned up
             if self.evaluation_executor:
                 try:
@@ -712,7 +734,9 @@ class BruteForceOptimizer(OptimizationEngine):
     ) -> None:
         """Evaluate a batch of candidates."""
         tasks = []
-        processed_in_batch = []  # Track candidates processed in this batch
+        processed_in_batch: list[
+            OptimizationCandidate
+        ] = []  # Track candidates processed in this batch
 
         for candidate in batch:
             if self.grid_config.duplicate_detection and self._is_duplicate(
@@ -727,15 +751,18 @@ class BruteForceOptimizer(OptimizationEngine):
 
             # Add to processed list before creating task
             processed_in_batch.append(candidate)
-            task = self._evaluate_candidate(candidate, objective_function)
+            task = asyncio.create_task(
+                self._evaluate_candidate_with_semaphore(candidate, objective_function)
+            )
             tasks.append(task)
+            self._active_tasks.add(task)
 
         if tasks:
             # Use timeout to prevent hanging tasks
             try:
                 await asyncio.wait_for(
                     asyncio.gather(*tasks, return_exceptions=True),
-                    timeout=DEFAULT_BATCH_TIMEOUT_SECONDS
+                    timeout=DEFAULT_BATCH_TIMEOUT_SECONDS,
                 )
             except asyncio.TimeoutError:
                 logger.warning(f"Batch evaluation timed out, canceling {len(tasks)} tasks")
@@ -744,6 +771,17 @@ class BruteForceOptimizer(OptimizationEngine):
                         task.cancel()
                 # Wait briefly for cancellation to complete
                 await asyncio.gather(*tasks, return_exceptions=True)
+
+            # Clean up completed tasks from active set
+            for task in tasks:
+                self._active_tasks.discard(task)
+
+    async def _evaluate_candidate_with_semaphore(
+        self, candidate: OptimizationCandidate, objective_function: Callable
+    ) -> None:
+        """Evaluate candidate with semaphore-controlled concurrency."""
+        async with self._task_semaphore:
+            await self._evaluate_candidate(candidate, objective_function)
 
     async def _evaluate_candidate(
         self, candidate: OptimizationCandidate, objective_function: Callable
@@ -754,7 +792,9 @@ class BruteForceOptimizer(OptimizationEngine):
             self.active_evaluations += 1
 
             # Run objective function
-            result = await self._run_objective_function(objective_function, candidate.parameters)
+            result = await self._run_objective_function(
+                objective_function, candidate.parameters, self.parameter_space
+            )
 
             if result is not None:
                 # Extract objective values
@@ -810,59 +850,6 @@ class BruteForceOptimizer(OptimizationEngine):
                     candidate._temp_data.clear()
             except Exception as e:
                 logger.debug(f"Error cleaning up candidate resources: {e}")
-
-    async def _run_objective_function(
-        self, objective_function: Callable, parameters: dict[str, Any]
-    ) -> Any:
-        """Run the objective function with given parameters."""
-        try:
-            # Convert parameters to appropriate types if parameter_space provided
-            converted_params = self.parameter_space.clip_parameters(parameters)
-
-            # Run function with timeout
-            if asyncio.iscoroutinefunction(objective_function):
-                result = await asyncio.wait_for(
-                    objective_function(converted_params),
-                    timeout=DEFAULT_OBJECTIVE_TIMEOUT_SECONDS
-                )
-            else:
-                # Run in executor for CPU-bound functions
-                loop = asyncio.get_event_loop()
-                result = await asyncio.wait_for(
-                    loop.run_in_executor(None, objective_function, converted_params),
-                    timeout=DEFAULT_OBJECTIVE_TIMEOUT_SECONDS
-                )
-
-            return result
-
-        except asyncio.TimeoutError:
-            logger.warning("Objective function execution timed out")
-            return None
-        except (ValueError, TypeError, KeyError) as e:
-            logger.warning(
-                f"Objective function execution failed due to parameter/data issue: {e!s}"
-            )
-            return None
-        except Exception as e:
-            logger.error(f"Objective function execution failed unexpectedly: {e!s}")
-            return None
-
-    def _get_primary_objective_value(self, objective_values: dict[str, Decimal]) -> Decimal:
-        """Get primary objective value from results."""
-        # Find primary objective
-        primary_obj = None
-        for obj in self.objectives:
-            if obj.is_primary:
-                primary_obj = obj
-                break
-
-        if primary_obj is None:
-            primary_obj = self.objectives[0] if self.objectives else None
-
-        if primary_obj is None:
-            return Decimal("0")
-
-        return objective_values.get(primary_obj.name, Decimal("0"))
 
     def _is_better_candidate(self, candidate: OptimizationCandidate) -> bool:
         """Check if candidate is better than current best."""
@@ -934,8 +921,10 @@ class BruteForceOptimizer(OptimizationEngine):
 
             for _fold in range(self.validation_config.cv_folds):
                 # Run objective function with slight parameter perturbation
-                perturbed_params = self._perturb_parameters(candidate.parameters, 0.01)
-                result = await self._run_objective_function(objective_function, perturbed_params)
+                perturbed_params = self._perturb_parameters(candidate.parameters, DEFAULT_PARAMETER_PERTURBATION_FACTOR)
+                result = await self._run_objective_function(
+                    objective_function, perturbed_params, self.parameter_space
+                )
 
                 if result is not None:
                     if isinstance(result, dict):
@@ -1037,7 +1026,7 @@ class BruteForceOptimizer(OptimizationEngine):
                 break
 
             # Create and evaluate refined candidates
-            refined_candidates = []
+            refined_candidates: list[OptimizationCandidate] = []
             for params in refined_grid:
                 candidate = OptimizationCandidate(
                     candidate_id=f"{self.optimization_id}_refined_{iteration}_{len(refined_candidates)}",
@@ -1101,6 +1090,9 @@ class BruteForceOptimizer(OptimizationEngine):
 
     async def _calculate_statistical_significance(self) -> Decimal | None:
         """Calculate statistical significance of results."""
+        # Yield control to event loop
+        await asyncio.sleep(0)
+
         if len(self.completed_candidates) < 10:
             return None
 
@@ -1133,7 +1125,7 @@ class BruteForceOptimizer(OptimizationEngine):
             if float(lower_bound) > 0 or float(upper_bound) < 0:
                 return self.validation_config.significance_level
             else:
-                return Decimal("1.0")  # Not significant
+                return DEFAULT_STATISTICAL_SIGNIFICANCE_THRESHOLD  # Not significant
 
         except (ValueError, ArithmeticError, IndexError) as e:
             logger.warning(f"Statistical significance calculation failed due to data issue: {e!s}")
@@ -1144,7 +1136,7 @@ class BruteForceOptimizer(OptimizationEngine):
 
     def _analyze_parameter_stability(self) -> dict[str, Decimal]:
         """Analyze stability of parameters across top candidates."""
-        stability_scores = {}
+        stability_scores: dict[str, Decimal] = {}
 
         top_candidates = self._get_top_candidates(min(10, len(self.completed_candidates)))
 

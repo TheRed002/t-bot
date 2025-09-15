@@ -108,6 +108,9 @@ class TestOptimizeStrategy:
             mock_create_objectives.return_value = [Mock(spec=OptimizationObjective)]
             
             mock_result = Mock(spec=OptimizationResult)
+            mock_result.optimization_id = "test_opt_123"
+            mock_result.algorithm_name = "brute_force"
+            mock_result.convergence_achieved = True
             mock_result.optimal_parameters = {"param1": Decimal("0.5")}
             mock_result.optimal_objective_value = Decimal("0.85")
             mock_result.iterations_completed = 100
@@ -144,6 +147,9 @@ class TestOptimizeStrategy:
             mock_create_obj.return_value = lambda params: Decimal("0.75")
             mock_create_objectives.return_value = [Mock()]
             mock_result = Mock(spec=OptimizationResult)
+            mock_result.optimization_id = "test_opt_124"
+            mock_result.algorithm_name = "bayesian"
+            mock_result.convergence_achieved = False
             mock_result.optimal_parameters = {"param1": Decimal("0.5")}
             mock_result.optimal_objective_value = Decimal("0.75")
             mock_result.iterations_completed = 50
@@ -176,13 +182,19 @@ class TestOptimizeStrategy:
             strategy_name="test_strategy",
             parameter_space=sample_parameter_space,
         )
-        
+
         # Should get results from simulation objective function
-        assert result is not None
+        assert isinstance(result, dict)
         assert "optimization_result" in result
         assert "analysis" in result
         assert "strategy_name" in result
         assert result["strategy_name"] == "test_strategy"
+
+        # Verify optimization result structure
+        opt_result = result["optimization_result"]
+        assert hasattr(opt_result, 'optimization_id')
+        assert hasattr(opt_result, 'optimal_parameters')
+        assert isinstance(result["analysis"], dict)
 
 
 class TestOptimizeParameters:
@@ -226,11 +238,12 @@ class TestOptimizeParameters:
         sample_objectives, sample_parameter_space
     ):
         """Test parameter optimization using brute force method."""
-        with patch('src.optimization.service.BruteForceOptimizer') as mock_optimizer_class:
+        with patch.object(optimization_service, '_create_brute_force_optimizer') as mock_create_optimizer:
             mock_optimizer = AsyncMock()
             mock_result = Mock(spec=OptimizationResult)
+            mock_result.optimization_id = "test_opt_125"
             mock_optimizer.optimize.return_value = mock_result
-            mock_optimizer_class.return_value = mock_optimizer
+            mock_create_optimizer.return_value = mock_optimizer
             
             result = await optimization_service.optimize_parameters(
                 objective_function=sample_objective_function,
@@ -238,9 +251,9 @@ class TestOptimizeParameters:
                 objectives=sample_objectives,
                 method="brute_force",
             )
-            
+
             assert result == mock_result
-            mock_optimizer_class.assert_called_once()
+            mock_create_optimizer.assert_called_once()
             mock_optimizer.optimize.assert_called_once_with(sample_objective_function)
 
     @pytest.mark.asyncio
@@ -249,11 +262,12 @@ class TestOptimizeParameters:
         sample_objectives, sample_parameter_space
     ):
         """Test parameter optimization using Bayesian method."""
-        with patch('src.optimization.service.BayesianOptimizer') as mock_optimizer_class:
+        with patch.object(optimization_service, '_create_bayesian_optimizer') as mock_create_optimizer:
             mock_optimizer = AsyncMock()
             mock_result = Mock(spec=OptimizationResult)
+            mock_result.optimization_id = "test_opt_126"
             mock_optimizer.optimize.return_value = mock_result
-            mock_optimizer_class.return_value = mock_optimizer
+            mock_create_optimizer.return_value = mock_optimizer
             
             result = await optimization_service.optimize_parameters(
                 objective_function=sample_objective_function,
@@ -261,9 +275,9 @@ class TestOptimizeParameters:
                 objectives=sample_objectives,
                 method="bayesian",
             )
-            
+
             assert result == mock_result
-            mock_optimizer_class.assert_called_once()
+            mock_create_optimizer.assert_called_once()
             mock_optimizer.optimize.assert_called_once_with(sample_objective_function)
 
     @pytest.mark.asyncio
@@ -287,12 +301,13 @@ class TestOptimizeParameters:
         
         service = OptimizationService(optimization_repository=mock_repository)
         
-        with patch('src.optimization.service.BruteForceOptimizer') as mock_optimizer_class:
+        with patch.object(service, '_create_brute_force_optimizer') as mock_create_optimizer:
             mock_optimizer = AsyncMock()
             mock_result = Mock(spec=OptimizationResult)
+            mock_result.optimization_id = "test_opt_127"
             mock_optimizer.optimize.return_value = mock_result
-            mock_optimizer_class.return_value = mock_optimizer
-            
+            mock_create_optimizer.return_value = mock_optimizer
+
             result = await service.optimize_parameters(
                 objective_function=lambda x: 0.5,
                 parameter_space=sample_parameter_space,
@@ -317,19 +332,24 @@ class TestAnalyzeOptimizationResults:
     async def test_analyze_results_with_analyzer(self, optimization_service):
         """Test result analysis when analyzer is available."""
         mock_result = Mock(spec=OptimizationResult)
+        mock_result.optimization_id = "test_opt_128"
+        mock_result.algorithm_name = "test_algorithm"
+        mock_result.convergence_achieved = True
+        mock_result.iterations_completed = 42
+        mock_result.objective_values = {"sharpe_ratio": Decimal("0.8")}
         mock_result.optimal_parameters = {"param1": Decimal("0.5")}
         mock_result.optimal_objective_value = Decimal("0.8")
         mock_parameter_space = Mock(spec=ParameterSpace)
         mock_parameter_space.parameters = {"param1": "continuous"}
         
         # Mock the results analyzer
-        mock_analyzer = Mock()
+        mock_analyzer = AsyncMock()
         mock_analyzer.analyze_optimization_results.return_value = {
             "parameter_sensitivity": {"param1": 0.8},
             "optimization_quality": 0.95,
         }
         
-        optimization_service._results_analyzer = mock_analyzer
+        optimization_service._analysis_service = mock_analyzer
         
         result = await optimization_service.analyze_optimization_results(
             optimization_result=mock_result,
@@ -344,13 +364,16 @@ class TestAnalyzeOptimizationResults:
     async def test_analyze_results_without_analyzer(self, optimization_service):
         """Test result analysis when no analyzer is available."""
         mock_result = Mock(spec=OptimizationResult)
+        mock_result.optimization_id = "test_opt_129"
+        mock_result.convergence_achieved = True
+        mock_result.iterations_completed = 42
         mock_result.optimal_parameters = {"param1": Decimal("0.5")}
         mock_result.optimal_objective_value = Decimal("0.8")
         mock_parameter_space = Mock(spec=ParameterSpace)
         mock_parameter_space.parameters = {"param1": "continuous"}
         
         # No analyzer set
-        optimization_service._results_analyzer = None
+        optimization_service._analysis_service = None
         
         result = await optimization_service.analyze_optimization_results(
             optimization_result=mock_result,
@@ -428,10 +451,10 @@ class TestErrorHandling:
         """Test optimization error handling."""
         sample_parameter_space = Mock(spec=ParameterSpace)
         
-        with patch('src.optimization.service.BruteForceOptimizer') as mock_optimizer_class:
+        with patch.object(optimization_service, '_create_brute_force_optimizer') as mock_create_optimizer:
             mock_optimizer = AsyncMock()
             mock_optimizer.optimize.side_effect = OptimizationError("Test error")
-            mock_optimizer_class.return_value = mock_optimizer
+            mock_create_optimizer.return_value = mock_optimizer
             
             with pytest.raises(OptimizationError):
                 await optimization_service.optimize_parameters(
@@ -450,6 +473,30 @@ class TestErrorHandling:
                 parameter_space=None,  # Invalid
                 objectives=[Mock()],
             )
+
+    @pytest.mark.asyncio
+    async def test_objective_function_failure_handling(self, optimization_service):
+        """Test handling of objective function failures."""
+        from src.optimization.parameter_space import ParameterSpaceBuilder
+
+        # Create parameter space
+        parameter_space = ParameterSpaceBuilder().add_continuous("param1", 0.0, 1.0).build()
+
+        # Create objective function that always fails
+        async def failing_objective(params):
+            raise RuntimeError("Objective function failed")
+
+        with patch.object(optimization_service, '_create_brute_force_optimizer') as mock_create_optimizer:
+            mock_optimizer = AsyncMock()
+            mock_optimizer.optimize.side_effect = OptimizationError("Objective evaluation failed")
+            mock_create_optimizer.return_value = mock_optimizer
+
+            with pytest.raises(OptimizationError):
+                await optimization_service.optimize_parameters(
+                    objective_function=failing_objective,
+                    parameter_space=parameter_space,
+                    objectives=[Mock()],
+                )
 
 
 class TestFinancialEdgeCases:
@@ -490,11 +537,11 @@ class TestFinancialEdgeCases:
     def test_trading_objective_constraints(self, optimization_service):
         """Test that trading objectives have proper constraints."""
         objectives = optimization_service._create_standard_trading_objectives()
-        
+
         for obj in objectives:
             # Financial objectives should have reasonable constraints
             assert obj.weight >= Decimal("0")  # Non-negative weights
-            
+
             # Check for reasonable constraint bounds if they exist
             if obj.constraint_min is not None:
                 assert isinstance(obj.constraint_min, Decimal)
@@ -502,3 +549,70 @@ class TestFinancialEdgeCases:
                 assert isinstance(obj.constraint_max, Decimal)
                 if obj.constraint_min is not None:
                     assert obj.constraint_max >= obj.constraint_min
+
+    @pytest.mark.asyncio
+    async def test_extreme_market_conditions_simulation(self, optimization_service):
+        """Test optimization under extreme market conditions."""
+        from src.optimization.parameter_space import ParameterSpaceBuilder
+
+        # Create parameter space for stress testing
+        parameter_space = ParameterSpaceBuilder().add_continuous("position_size", 0.001, 0.02).build()
+
+        # Simulate extreme market volatility scenario
+        extreme_objectives = [
+            OptimizationObjective(
+                name="max_drawdown",
+                direction=ObjectiveDirection.MINIMIZE,
+                weight=Decimal("3.0"),
+                constraint_max=Decimal("0.15"),  # 15% max drawdown limit
+                is_primary=False,
+            ),
+            OptimizationObjective(
+                name="var_95",
+                direction=ObjectiveDirection.MINIMIZE,
+                weight=Decimal("2.0"),
+                constraint_max=Decimal("0.05"),  # 5% VaR limit
+                is_primary=False,
+            )
+        ]
+
+        # This should handle the extreme risk constraints properly
+        result = await optimization_service.optimize_parameters(
+            objective_function=lambda params: {
+                "max_drawdown": Decimal("0.12"),
+                "var_95": Decimal("0.04")
+            },
+            parameter_space=parameter_space,
+            objectives=extreme_objectives,
+        )
+
+        # Verify risk constraints are respected
+        assert isinstance(result, OptimizationResult)
+        assert "max_drawdown" in result.objective_values
+        assert "var_95" in result.objective_values
+        assert result.objective_values["max_drawdown"] <= Decimal("0.15")
+        assert result.objective_values["var_95"] <= Decimal("0.05")
+
+    def test_currency_precision_edge_cases(self, optimization_service):
+        """Test handling of extreme currency precision."""
+        # Test with very small amounts (satoshi-level precision)
+        tiny_amount = Decimal("0.00000001")  # 1 satoshi
+
+        # Test with very large amounts (institutional scale)
+        large_amount = Decimal("1000000000.12345678")  # 1B+ with precision
+
+        objectives = optimization_service._create_standard_trading_objectives()
+
+        # All objectives should handle extreme precision without loss
+        for obj in objectives:
+            if obj.constraint_min is not None:
+                # Should be able to handle tiny constraints
+                obj.constraint_min = tiny_amount
+                assert obj.satisfies_constraints(tiny_amount) is True
+                assert obj.satisfies_constraints(tiny_amount / 2) is False
+
+            if obj.constraint_max is not None:
+                # Should be able to handle large constraints
+                obj.constraint_max = large_amount
+                assert obj.satisfies_constraints(large_amount) is True
+                assert obj.satisfies_constraints(large_amount * 2) is False

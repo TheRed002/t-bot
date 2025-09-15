@@ -1,0 +1,690 @@
+"""
+Tests for optimization integration utilities.
+
+This module ensures comprehensive testing of the deprecated integration utilities,
+covering legacy functionality and deprecation warnings.
+"""
+
+import pytest
+from unittest.mock import Mock, patch, AsyncMock, MagicMock
+from datetime import datetime
+from decimal import Decimal
+from typing import Any
+
+from src.optimization.integration import (
+    OptimizationIntegration,
+    create_strategy_optimization_space,
+    create_risk_optimization_space,
+    optimize_strategy_demo,
+)
+from src.optimization.interfaces import IOptimizationService
+from src.optimization.parameter_space import ParameterSpace, ParameterSpaceBuilder
+
+
+class TestOptimizationIntegration:
+    """Test cases for OptimizationIntegration class."""
+
+    @pytest.fixture
+    def mock_optimization_service(self):
+        """Create a mock optimization service."""
+        service = Mock(spec=IOptimizationService)
+        service.optimize_strategy = AsyncMock()
+        return service
+
+    @pytest.fixture
+    def sample_parameter_space(self):
+        """Create a sample parameter space."""
+        return Mock(spec=ParameterSpace)
+
+    @pytest.fixture
+    def sample_optimization_result(self):
+        """Create a sample optimization result."""
+        return {
+            "optimization_id": "test-opt-123",
+            "optimal_parameters": {"param1": Decimal("0.15")},
+            "optimal_objective_value": Decimal("1500.0"),
+            "convergence_achieved": True,
+        }
+
+
+class TestOptimizationIntegrationInitialization(TestOptimizationIntegration):
+    """Test OptimizationIntegration initialization."""
+
+    def test_initialization_with_service(self, mock_optimization_service):
+        """Test initialization with provided optimization service."""
+        with patch('src.optimization.integration.structlog') as mock_structlog:
+            mock_logger = Mock()
+            mock_structlog.BoundLogger = Mock()
+            mock_structlog.get_logger.return_value = mock_logger
+
+            integration = OptimizationIntegration(
+                optimization_service=mock_optimization_service,
+                name="TestIntegration",
+                correlation_id="test-123"
+            )
+
+            assert integration._optimization_service == mock_optimization_service
+            assert integration.name == "TestIntegration"
+            assert integration.correlation_id == "test-123"
+
+    @patch('src.optimization.integration.create_optimization_service')
+    def test_initialization_without_service(self, mock_create_service):
+        """Test initialization creates default service when none provided."""
+        mock_service = Mock(spec=IOptimizationService)
+        mock_create_service.return_value = mock_service
+
+        with patch('src.optimization.integration.structlog') as mock_structlog:
+            mock_logger = Mock()
+            mock_structlog.BoundLogger = Mock()
+
+            integration = OptimizationIntegration()
+
+            assert integration._optimization_service == mock_service
+            mock_create_service.assert_called_once_with()
+
+    def test_initialization_default_values(self):
+        """Test initialization with default values."""
+        with patch('src.optimization.integration.create_optimization_service'):
+            with patch('src.optimization.integration.structlog'):
+                integration = OptimizationIntegration()
+
+                assert integration.name == "OptimizationIntegration"
+                assert integration.config is None
+                assert integration.correlation_id is None
+
+    def test_initialization_deprecation_warning(self, mock_optimization_service):
+        """Test that initialization logs deprecation warning."""
+        with patch('src.optimization.integration.structlog') as mock_structlog:
+            mock_logger = Mock()
+            mock_structlog.BoundLogger = type(mock_logger)
+
+            integration = OptimizationIntegration(optimization_service=mock_optimization_service)
+
+            # Verify deprecation warning was logged
+            # Note: This tests the structure, not the exact mock call since structlog casting is complex
+            assert integration._optimization_service == mock_optimization_service
+
+
+class TestOptimizeStrategy(TestOptimizationIntegration):
+    """Test optimize_strategy method."""
+
+    @pytest.mark.asyncio
+    async def test_optimize_strategy_basic(
+        self,
+        mock_optimization_service,
+        sample_parameter_space,
+        sample_optimization_result
+    ):
+        """Test basic strategy optimization."""
+        mock_optimization_service.optimize_strategy.return_value = sample_optimization_result
+
+        with patch('src.optimization.integration.structlog'):
+            integration = OptimizationIntegration(optimization_service=mock_optimization_service)
+
+            result = await integration.optimize_strategy(
+                strategy_name="test_strategy",
+                parameter_space=sample_parameter_space,
+                optimization_method="brute_force",
+                initial_capital=Decimal("50000")
+            )
+
+            assert result == sample_optimization_result
+            mock_optimization_service.optimize_strategy.assert_called_once_with(
+                strategy_name="test_strategy",
+                parameter_space=sample_parameter_space,
+                optimization_method="brute_force",
+                data_start_date=None,
+                data_end_date=None,
+                initial_capital=Decimal("50000")
+            )
+
+    @pytest.mark.asyncio
+    async def test_optimize_strategy_with_dates(
+        self,
+        mock_optimization_service,
+        sample_parameter_space,
+        sample_optimization_result
+    ):
+        """Test strategy optimization with specific dates."""
+        mock_optimization_service.optimize_strategy.return_value = sample_optimization_result
+        start_date = datetime(2023, 1, 1)
+        end_date = datetime(2023, 12, 31)
+
+        with patch('src.optimization.integration.structlog'):
+            integration = OptimizationIntegration(optimization_service=mock_optimization_service)
+
+            result = await integration.optimize_strategy(
+                strategy_name="trend_following",
+                parameter_space=sample_parameter_space,
+                optimization_method="bayesian",
+                data_start_date=start_date,
+                data_end_date=end_date
+            )
+
+            assert result == sample_optimization_result
+            mock_optimization_service.optimize_strategy.assert_called_once_with(
+                strategy_name="trend_following",
+                parameter_space=sample_parameter_space,
+                optimization_method="bayesian",
+                data_start_date=start_date,
+                data_end_date=end_date,
+                initial_capital=Decimal("100000")  # Default value
+            )
+
+    @pytest.mark.asyncio
+    async def test_optimize_strategy_with_kwargs(
+        self,
+        mock_optimization_service,
+        sample_parameter_space,
+        sample_optimization_result
+    ):
+        """Test strategy optimization with additional keyword arguments."""
+        mock_optimization_service.optimize_strategy.return_value = sample_optimization_result
+
+        with patch('src.optimization.integration.structlog'):
+            integration = OptimizationIntegration(optimization_service=mock_optimization_service)
+
+            result = await integration.optimize_strategy(
+                strategy_name="mean_reversion",
+                parameter_space=sample_parameter_space,
+                grid_resolution=5,
+                n_calls=100,
+                random_state=42
+            )
+
+            assert result == sample_optimization_result
+            mock_optimization_service.optimize_strategy.assert_called_once_with(
+                strategy_name="mean_reversion",
+                parameter_space=sample_parameter_space,
+                optimization_method="brute_force",  # Default value
+                data_start_date=None,
+                data_end_date=None,
+                initial_capital=Decimal("100000"),
+                grid_resolution=5,
+                n_calls=100,
+                random_state=42
+            )
+
+    @pytest.mark.asyncio
+    async def test_optimize_strategy_without_service(self, sample_parameter_space):
+        """Test strategy optimization when service is None."""
+        with patch('src.optimization.integration.structlog'):
+            integration = OptimizationIntegration()
+            integration._optimization_service = None  # Force None
+
+            with pytest.raises(ValueError, match="No optimization service available"):
+                await integration.optimize_strategy(
+                    strategy_name="test",
+                    parameter_space=sample_parameter_space
+                )
+
+    @pytest.mark.asyncio
+    async def test_optimize_strategy_service_error(
+        self,
+        mock_optimization_service,
+        sample_parameter_space
+    ):
+        """Test strategy optimization when service raises an error."""
+        mock_optimization_service.optimize_strategy.side_effect = RuntimeError("Service error")
+
+        with patch('src.optimization.integration.structlog'):
+            integration = OptimizationIntegration(optimization_service=mock_optimization_service)
+
+            with pytest.raises(RuntimeError, match="Service error"):
+                await integration.optimize_strategy(
+                    strategy_name="test",
+                    parameter_space=sample_parameter_space
+                )
+
+    @pytest.mark.asyncio
+    async def test_optimize_strategy_deprecation_warning(
+        self,
+        mock_optimization_service,
+        sample_parameter_space,
+        sample_optimization_result
+    ):
+        """Test that optimize_strategy logs deprecation warning."""
+        mock_optimization_service.optimize_strategy.return_value = sample_optimization_result
+
+        with patch('src.optimization.integration.structlog') as mock_structlog:
+            mock_logger = Mock()
+            mock_structlog.BoundLogger = type(mock_logger)
+
+            integration = OptimizationIntegration(optimization_service=mock_optimization_service)
+
+            await integration.optimize_strategy(
+                strategy_name="test",
+                parameter_space=sample_parameter_space
+            )
+
+            # Verify that the method runs (deprecation warning testing is complex with structlog)
+            mock_optimization_service.optimize_strategy.assert_called_once()
+
+
+class TestCreateStrategyOptimizationSpace(TestOptimizationIntegration):
+    """Test create_strategy_optimization_space function."""
+
+    @patch('src.optimization.integration.ParameterSpaceBuilder')
+    def test_create_strategy_optimization_space_basic(self, mock_builder_class):
+        """Test basic strategy optimization space creation."""
+        mock_builder = Mock()
+        mock_builder_class.return_value = mock_builder
+
+        # Set up method chaining
+        mock_builder.add_continuous.return_value = mock_builder
+        mock_builder.add_discrete.return_value = mock_builder
+        mock_builder.add_categorical.return_value = mock_builder
+        mock_builder.build.return_value = Mock(spec=ParameterSpace)
+
+        result = create_strategy_optimization_space()
+
+        # Verify builder was created
+        mock_builder_class.assert_called_once_with()
+
+        # Verify all parameters were added
+        assert mock_builder.add_continuous.call_count == 4  # 4 continuous parameters
+        assert mock_builder.add_discrete.call_count == 1    # 1 discrete parameter
+        assert mock_builder.add_categorical.call_count == 1  # 1 categorical parameter
+
+        # Check specific parameter additions
+        continuous_calls = mock_builder.add_continuous.call_args_list
+        discrete_calls = mock_builder.add_discrete.call_args_list
+        categorical_calls = mock_builder.add_categorical.call_args_list
+
+        # Check position_size_pct parameter
+        assert continuous_calls[0][0] == ("position_size_pct", Decimal("0.01"), Decimal("0.05"))
+        assert continuous_calls[0][1]["precision"] == 3
+
+        # Check stop_loss_pct parameter
+        assert continuous_calls[1][0] == ("stop_loss_pct", Decimal("0.005"), Decimal("0.03"))
+
+        # Check lookback_period parameter
+        assert discrete_calls[0][0] == ("lookback_period", 5, 50)
+        assert discrete_calls[0][1]["step_size"] == 5
+
+        # Check timeframe parameter
+        assert categorical_calls[0][0] == ("timeframe", ["1m", "5m", "15m", "30m", "1h", "4h"])
+
+        # Verify build was called
+        mock_builder.build.assert_called_once()
+
+        # Verify result is returned
+        assert result == mock_builder.build.return_value
+
+    @patch('src.optimization.integration.ParameterSpaceBuilder')
+    def test_create_strategy_optimization_space_parameter_details(self, mock_builder_class):
+        """Test detailed parameter specifications."""
+        mock_builder = Mock()
+        mock_builder_class.return_value = mock_builder
+
+        # Set up method chaining
+        mock_builder.add_continuous.return_value = mock_builder
+        mock_builder.add_discrete.return_value = mock_builder
+        mock_builder.add_categorical.return_value = mock_builder
+        mock_builder.build.return_value = Mock(spec=ParameterSpace)
+
+        create_strategy_optimization_space()
+
+        # Check all continuous parameters have correct ranges and precision
+        continuous_calls = mock_builder.add_continuous.call_args_list
+
+        # position_size_pct: 0.01 to 0.05, precision 3
+        assert continuous_calls[0][0][1] == Decimal("0.01")
+        assert continuous_calls[0][0][2] == Decimal("0.05")
+
+        # stop_loss_pct: 0.005 to 0.03, precision 3
+        assert continuous_calls[1][0][1] == Decimal("0.005")
+        assert continuous_calls[1][0][2] == Decimal("0.03")
+
+        # take_profit_pct: 0.01 to 0.08, precision 3
+        assert continuous_calls[2][0][1] == Decimal("0.01")
+        assert continuous_calls[2][0][2] == Decimal("0.08")
+
+        # confidence_threshold: 0.5 to 0.9, precision 2
+        assert continuous_calls[3][0][1] == Decimal("0.5")
+        assert continuous_calls[3][0][2] == Decimal("0.9")
+        assert continuous_calls[3][1]["precision"] == 2
+
+
+class TestCreateRiskOptimizationSpace(TestOptimizationIntegration):
+    """Test create_risk_optimization_space function."""
+
+    @patch('src.optimization.integration.ParameterSpaceBuilder')
+    def test_create_risk_optimization_space_basic(self, mock_builder_class):
+        """Test basic risk optimization space creation."""
+        mock_builder = Mock()
+        mock_builder_class.return_value = mock_builder
+
+        # Set up method chaining
+        mock_builder.add_continuous.return_value = mock_builder
+        mock_builder.add_discrete.return_value = mock_builder
+        mock_builder.add_boolean.return_value = mock_builder
+        mock_builder.build.return_value = Mock(spec=ParameterSpace)
+
+        result = create_risk_optimization_space()
+
+        # Verify builder was created
+        mock_builder_class.assert_called_once_with()
+
+        # Verify all parameters were added
+        assert mock_builder.add_continuous.call_count == 4  # 4 continuous parameters
+        assert mock_builder.add_discrete.call_count == 1    # 1 discrete parameter
+        assert mock_builder.add_boolean.call_count == 1     # 1 boolean parameter
+
+        # Verify build was called
+        mock_builder.build.assert_called_once()
+
+        # Verify result is returned
+        assert result == mock_builder.build.return_value
+
+    @patch('src.optimization.integration.ParameterSpaceBuilder')
+    def test_create_risk_optimization_space_parameter_details(self, mock_builder_class):
+        """Test detailed risk parameter specifications."""
+        mock_builder = Mock()
+        mock_builder_class.return_value = mock_builder
+
+        # Set up method chaining
+        mock_builder.add_continuous.return_value = mock_builder
+        mock_builder.add_discrete.return_value = mock_builder
+        mock_builder.add_boolean.return_value = mock_builder
+        mock_builder.build.return_value = Mock(spec=ParameterSpace)
+
+        create_risk_optimization_space()
+
+        # Check continuous parameters
+        continuous_calls = mock_builder.add_continuous.call_args_list
+
+        # max_portfolio_exposure: 0.5 to 0.95, precision 2
+        assert continuous_calls[0][0] == ("max_portfolio_exposure", Decimal("0.5"), Decimal("0.95"))
+        assert continuous_calls[0][1]["precision"] == 2
+
+        # max_drawdown_limit: 0.05 to 0.25, precision 3
+        assert continuous_calls[1][0] == ("max_drawdown_limit", Decimal("0.05"), Decimal("0.25"))
+        assert continuous_calls[1][1]["precision"] == 3
+
+        # var_confidence_level: 0.9 to 0.99, precision 3
+        assert continuous_calls[2][0] == ("var_confidence_level", Decimal("0.9"), Decimal("0.99"))
+
+        # correlation_threshold: 0.7 to 0.95, precision 2
+        assert continuous_calls[3][0] == ("correlation_threshold", Decimal("0.7"), Decimal("0.95"))
+
+        # Check discrete parameter
+        discrete_calls = mock_builder.add_discrete.call_args_list
+        assert discrete_calls[0][0] == ("max_positions", 1, 20)
+
+        # Check boolean parameter
+        boolean_calls = mock_builder.add_boolean.call_args_list
+        assert boolean_calls[0][0] == ("enable_correlation_breaker",)
+        assert boolean_calls[0][1]["true_probability"] == Decimal("0.8")
+
+
+class TestOptimizeStrategyDemo(TestOptimizationIntegration):
+    """Test optimize_strategy_demo function."""
+
+    @pytest.mark.asyncio
+    @patch('src.optimization.integration.OptimizationIntegration')
+    @patch('src.optimization.integration.create_strategy_optimization_space')
+    async def test_optimize_strategy_demo_basic(self, mock_create_space, mock_integration_class):
+        """Test basic strategy optimization demo."""
+        # Set up mocks
+        mock_integration = Mock()
+        mock_integration.optimize_strategy = AsyncMock()
+        mock_integration_class.return_value = mock_integration
+
+        mock_parameter_space = Mock(spec=ParameterSpace)
+        mock_create_space.return_value = mock_parameter_space
+
+        expected_result = {"optimization_id": "demo-123"}
+        mock_integration.optimize_strategy.return_value = expected_result
+
+        # Call demo function
+        result = await optimize_strategy_demo()
+
+        # Verify integration was created
+        mock_integration_class.assert_called_once_with()
+
+        # Verify parameter space was created
+        mock_create_space.assert_called_once_with()
+
+        # Verify optimization was called with correct parameters
+        mock_integration.optimize_strategy.assert_called_once_with(
+            strategy_name="mean_reversion",
+            parameter_space=mock_parameter_space,
+            optimization_method="brute_force",
+            grid_resolution=3,
+            n_calls=20,
+            initial_capital=Decimal("100000")
+        )
+
+        assert result == expected_result
+
+    @pytest.mark.asyncio
+    @patch('src.optimization.integration.OptimizationIntegration')
+    @patch('src.optimization.integration.create_strategy_optimization_space')
+    async def test_optimize_strategy_demo_with_custom_params(self, mock_create_space, mock_integration_class):
+        """Test strategy optimization demo with custom parameters."""
+        mock_integration = Mock()
+        mock_integration.optimize_strategy = AsyncMock()
+        mock_integration_class.return_value = mock_integration
+
+        mock_parameter_space = Mock(spec=ParameterSpace)
+        mock_create_space.return_value = mock_parameter_space
+
+        expected_result = {"optimization_id": "custom-demo-456"}
+        mock_integration.optimize_strategy.return_value = expected_result
+
+        # Call with custom parameters
+        result = await optimize_strategy_demo(
+            strategy_name="trend_following",
+            optimization_method="bayesian"
+        )
+
+        # Verify optimization was called with custom parameters
+        mock_integration.optimize_strategy.assert_called_once_with(
+            strategy_name="trend_following",
+            parameter_space=mock_parameter_space,
+            optimization_method="bayesian",
+            grid_resolution=3,
+            n_calls=20,
+            initial_capital=Decimal("100000")
+        )
+
+        assert result == expected_result
+
+    @pytest.mark.asyncio
+    @patch('src.optimization.integration.OptimizationIntegration')
+    @patch('src.optimization.integration.create_strategy_optimization_space')
+    async def test_optimize_strategy_demo_integration_error(self, mock_create_space, mock_integration_class):
+        """Test demo function handles integration errors."""
+        mock_integration = Mock()
+        mock_integration.optimize_strategy = AsyncMock()
+        mock_integration.optimize_strategy.side_effect = RuntimeError("Demo optimization failed")
+        mock_integration_class.return_value = mock_integration
+
+        mock_parameter_space = Mock(spec=ParameterSpace)
+        mock_create_space.return_value = mock_parameter_space
+
+        with pytest.raises(RuntimeError, match="Demo optimization failed"):
+            await optimize_strategy_demo()
+
+    @pytest.mark.asyncio
+    @patch('src.optimization.integration.OptimizationIntegration')
+    @patch('src.optimization.integration.create_strategy_optimization_space')
+    async def test_optimize_strategy_demo_space_creation_error(self, mock_create_space, mock_integration_class):
+        """Test demo function handles parameter space creation errors."""
+        mock_create_space.side_effect = ValueError("Parameter space creation failed")
+
+        with pytest.raises(ValueError, match="Parameter space creation failed"):
+            await optimize_strategy_demo()
+
+        # Integration should not be created if space creation fails
+        mock_integration_class.assert_not_called()
+
+
+class TestIntegrationEdgeCases(TestOptimizationIntegration):
+    """Test edge cases and error conditions."""
+
+    def test_integration_inheritance(self, mock_optimization_service):
+        """Test that OptimizationIntegration properly inherits from BaseComponent."""
+        from src.core.base import BaseComponent
+
+        with patch('src.optimization.integration.structlog'):
+            integration = OptimizationIntegration(optimization_service=mock_optimization_service)
+
+            assert isinstance(integration, BaseComponent)
+            assert hasattr(integration, '_logger')
+            assert hasattr(integration, 'name')
+            assert hasattr(integration, 'config')
+            assert hasattr(integration, 'correlation_id')
+
+    @pytest.mark.asyncio
+    async def test_optimize_strategy_with_extreme_decimal_values(self, mock_optimization_service, sample_parameter_space):
+        """Test strategy optimization with extreme decimal values."""
+        sample_result = {"optimization_id": "extreme-test"}
+        mock_optimization_service.optimize_strategy.return_value = sample_result
+
+        with patch('src.optimization.integration.structlog'):
+            integration = OptimizationIntegration(optimization_service=mock_optimization_service)
+
+            extreme_capital = Decimal("0.000000000000001")
+            result = await integration.optimize_strategy(
+                strategy_name="test",
+                parameter_space=sample_parameter_space,
+                initial_capital=extreme_capital
+            )
+
+            mock_optimization_service.optimize_strategy.assert_called_once()
+            call_kwargs = mock_optimization_service.optimize_strategy.call_args[1]
+            assert call_kwargs["initial_capital"] == extreme_capital
+
+    @patch('src.optimization.integration.ParameterSpaceBuilder')
+    def test_parameter_space_creation_with_extreme_values(self, mock_builder_class):
+        """Test parameter space creation handles extreme decimal values correctly."""
+        mock_builder = Mock()
+        mock_builder_class.return_value = mock_builder
+
+        # Set up method chaining
+        mock_builder.add_continuous.return_value = mock_builder
+        mock_builder.add_discrete.return_value = mock_builder
+        mock_builder.add_categorical.return_value = mock_builder
+        mock_builder.build.return_value = Mock(spec=ParameterSpace)
+
+        # Should handle creation without errors
+        create_strategy_optimization_space()
+        create_risk_optimization_space()
+
+        # All builder methods should have been called
+        assert mock_builder.add_continuous.call_count > 0
+        assert mock_builder.add_discrete.call_count > 0
+        assert mock_builder.build.call_count == 2
+
+    def test_integration_with_custom_config(self, mock_optimization_service):
+        """Test integration with custom configuration."""
+        custom_config = {
+            "timeout": 300,
+            "max_iterations": 1000,
+            "custom_setting": "value"
+        }
+
+        with patch('src.optimization.integration.structlog'):
+            integration = OptimizationIntegration(
+                optimization_service=mock_optimization_service,
+                config=custom_config
+            )
+
+            assert integration.config == custom_config
+
+    @pytest.mark.asyncio
+    async def test_concurrent_optimization_calls(self, mock_optimization_service, sample_parameter_space):
+        """Test that integration can handle concurrent optimization calls."""
+        import asyncio
+
+        mock_optimization_service.optimize_strategy.return_value = {"result": "concurrent"}
+
+        with patch('src.optimization.integration.structlog'):
+            integration = OptimizationIntegration(optimization_service=mock_optimization_service)
+
+            # Run multiple optimizations concurrently
+            tasks = [
+                integration.optimize_strategy(f"strategy_{i}", sample_parameter_space)
+                for i in range(3)
+            ]
+
+            results = await asyncio.gather(*tasks)
+
+            # All should complete
+            assert len(results) == 3
+            assert all(r == {"result": "concurrent"} for r in results)
+            assert mock_optimization_service.optimize_strategy.call_count == 3
+
+
+class TestIntegrationFinancialEdgeCases(TestOptimizationIntegration):
+    """Test financial calculation specific edge cases."""
+
+    @pytest.mark.asyncio
+    async def test_zero_initial_capital(self, mock_optimization_service, sample_parameter_space):
+        """Test optimization with zero initial capital."""
+        mock_optimization_service.optimize_strategy.return_value = {"result": "zero_capital"}
+
+        with patch('src.optimization.integration.structlog'):
+            integration = OptimizationIntegration(optimization_service=mock_optimization_service)
+
+            result = await integration.optimize_strategy(
+                strategy_name="test",
+                parameter_space=sample_parameter_space,
+                initial_capital=Decimal("0.0")
+            )
+
+            call_kwargs = mock_optimization_service.optimize_strategy.call_args[1]
+            assert call_kwargs["initial_capital"] == Decimal("0.0")
+
+    @pytest.mark.asyncio
+    async def test_negative_initial_capital(self, mock_optimization_service, sample_parameter_space):
+        """Test optimization with negative initial capital."""
+        mock_optimization_service.optimize_strategy.return_value = {"result": "negative_capital"}
+
+        with patch('src.optimization.integration.structlog'):
+            integration = OptimizationIntegration(optimization_service=mock_optimization_service)
+
+            negative_capital = Decimal("-1000.0")
+            result = await integration.optimize_strategy(
+                strategy_name="test",
+                parameter_space=sample_parameter_space,
+                initial_capital=negative_capital
+            )
+
+            call_kwargs = mock_optimization_service.optimize_strategy.call_args[1]
+            assert call_kwargs["initial_capital"] == negative_capital
+
+    @patch('src.optimization.integration.ParameterSpaceBuilder')
+    def test_parameter_space_decimal_precision_preservation(self, mock_builder_class):
+        """Test that parameter spaces preserve decimal precision."""
+        mock_builder = Mock()
+        mock_builder_class.return_value = mock_builder
+
+        # Set up method chaining
+        mock_builder.add_continuous.return_value = mock_builder
+        mock_builder.add_discrete.return_value = mock_builder
+        mock_builder.add_categorical.return_value = mock_builder
+        mock_builder.add_boolean.return_value = mock_builder
+        mock_builder.build.return_value = Mock(spec=ParameterSpace)
+
+        create_strategy_optimization_space()
+
+        # Check that high precision decimals are preserved
+        continuous_calls = mock_builder.add_continuous.call_args_list
+
+        # All decimal values should maintain precision
+        for call in continuous_calls:
+            min_val, max_val = call[0][1], call[0][2]
+            assert isinstance(min_val, Decimal)
+            assert isinstance(max_val, Decimal)
+
+        create_risk_optimization_space()
+
+        # Additional precision checks for risk parameters
+        risk_continuous_calls = mock_builder.add_continuous.call_args_list[4:]  # Skip strategy calls
+        for call in risk_continuous_calls:
+            min_val, max_val = call[0][1], call[0][2]
+            assert isinstance(min_val, Decimal)
+            assert isinstance(max_val, Decimal)

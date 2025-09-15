@@ -189,13 +189,14 @@ class TestOptimizationObjective:
         assert objective.distance_to_target(Decimal("5.0")) == Decimal("0.0")
         assert objective.distance_to_target(Decimal("3.0")) == Decimal("2.0")
         assert objective.distance_to_target(Decimal("7.0")) == Decimal("2.0")
-        
-        # No target
+
+        # Test without target value
         no_target_obj = OptimizationObjective(
             name="return",
             direction=ObjectiveDirection.MAXIMIZE,
         )
         assert no_target_obj.distance_to_target(Decimal("100.0")) == Decimal("0.0")
+        assert no_target_obj.distance_to_target(Decimal("-100.0")) == Decimal("0.0")
 
 
 class TestOptimizationConstraint:

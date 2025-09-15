@@ -22,7 +22,8 @@ class OptimizationServiceProtocol(Protocol):
     async def optimize_strategy(
         self,
         strategy_name: str,
-        parameter_space: ParameterSpace,
+        parameter_space_config: dict[str, Any] | None = None,
+        parameter_space: ParameterSpace | None = None,
         optimization_method: str = "brute_force",
         **kwargs: Any,
     ) -> dict[str, Any]:
@@ -50,8 +51,18 @@ class BacktestIntegrationProtocol(Protocol):
         start_date: datetime | None = None,
         end_date: datetime | None = None,
         initial_capital: Decimal = Decimal("100000"),
-    ) -> dict[str, float]:
+    ) -> dict[str, Decimal]:
         """Evaluate strategy performance."""
+        ...
+
+    def create_objective_function(
+        self,
+        strategy_name: str,
+        data_start_date: datetime | None = None,
+        data_end_date: datetime | None = None,
+        initial_capital: Decimal = Decimal("100000"),
+    ) -> Callable[[dict[str, Any]], Any]:
+        """Create objective function for strategy optimization."""
         ...
 
 
@@ -71,7 +82,7 @@ class OptimizationAnalysisProtocol(Protocol):
         self,
         optimization_history: list[dict[str, Any]],
         parameter_names: list[str],
-    ) -> dict[str, float]:
+    ) -> dict[str, Decimal]:
         """Calculate parameter importance scores."""
         ...
 
@@ -107,12 +118,13 @@ class IOptimizationService(ABC):
     async def optimize_strategy(
         self,
         strategy_name: str,
-        parameter_space: ParameterSpace,
+        parameter_space_config: dict[str, Any] | None = None,
+        parameter_space: ParameterSpace | None = None,
         optimization_method: str = "brute_force",
         **kwargs: Any,
     ) -> dict[str, Any]:
         """Optimize a trading strategy."""
-        pass
+        raise NotImplementedError("Subclasses must implement optimize_strategy")
 
     @abstractmethod
     async def optimize_parameters(
@@ -124,7 +136,7 @@ class IOptimizationService(ABC):
         **kwargs: Any,
     ) -> OptimizationResult:
         """Optimize parameters using specified method."""
-        pass
+        raise NotImplementedError("Subclasses must implement optimize_parameters")
 
     @abstractmethod
     async def analyze_optimization_results(
@@ -133,7 +145,7 @@ class IOptimizationService(ABC):
         parameter_space: ParameterSpace,
     ) -> dict[str, Any]:
         """Analyze optimization results."""
-        pass
+        raise NotImplementedError("Subclasses must implement analyze_optimization_results")
 
 
 class IBacktestIntegrationService(ABC):
@@ -146,9 +158,9 @@ class IBacktestIntegrationService(ABC):
         start_date: datetime | None = None,
         end_date: datetime | None = None,
         initial_capital: Decimal = Decimal("100000"),
-    ) -> dict[str, float]:
+    ) -> dict[str, Decimal]:
         """Evaluate strategy performance using backtesting."""
-        pass
+        raise NotImplementedError("Subclasses must implement evaluate_strategy")
 
     @abstractmethod
     def create_objective_function(
@@ -159,4 +171,48 @@ class IBacktestIntegrationService(ABC):
         initial_capital: Decimal = Decimal("100000"),
     ) -> Callable[[dict[str, Any]], Any]:
         """Create objective function for strategy optimization."""
-        pass
+        raise NotImplementedError("Subclasses must implement create_objective_function")
+
+
+class IAnalysisService(ABC):
+    """Abstract base class for optimization analysis services."""
+
+    @abstractmethod
+    async def analyze_optimization_results(
+        self,
+        optimization_results: list[dict[str, Any]],
+        parameter_names: list[str],
+        best_result: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Analyze optimization results."""
+        raise NotImplementedError("Subclasses must implement analyze_optimization_results")
+
+    @abstractmethod
+    async def analyze_parameter_importance(
+        self,
+        optimization_results: list[dict[str, Any]],
+        parameter_names: list[str],
+    ) -> list[Any]:
+        """Analyze parameter importance."""
+        raise NotImplementedError("Subclasses must implement analyze_parameter_importance")
+
+
+class AnalysisServiceProtocol(Protocol):
+    """Protocol for optimization analysis services."""
+
+    async def analyze_optimization_results(
+        self,
+        optimization_results: list[dict[str, Any]],
+        parameter_names: list[str],
+        best_result: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Analyze optimization results."""
+        ...
+
+    async def analyze_parameter_importance(
+        self,
+        optimization_results: list[dict[str, Any]],
+        parameter_names: list[str],
+    ) -> list[Any]:
+        """Analyze parameter importance."""
+        ...

@@ -6,15 +6,19 @@ optimization results and metadata with proper database models,
 foreign key relationships, and financial data constraints.
 """
 
+import asyncio
 import json
 import uuid
+from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import joinedload
 
 from src.core.base import BaseComponent
+from src.core.event_constants import OptimizationEvents
 from src.core.exceptions import RepositoryError
 from src.database.models.optimization import (
     OptimizationResult as OptimizationResultDB,
@@ -33,16 +37,30 @@ class OptimizationRepository(BaseComponent, OptimizationRepositoryProtocol):
     parameter sets, and objectives with proper relationships and constraints.
     """
 
-    def __init__(self, session: AsyncSession):
+    def __init__(
+        self,
+        session: AsyncSession | None = None,
+        name: str | None = None,
+        config: dict[str, Any] | None = None,
+        correlation_id: str | None = None,
+    ):
         """
         Initialize optimization repository.
 
         Args:
-            session: Database session for database operations
+            session: Database session for database operations (optional for testing)
+            name: Component name for identification
+            config: Component configuration
+            correlation_id: Request correlation ID
         """
-        super().__init__()
+        super().__init__(name or "OptimizationRepository", config, correlation_id)
         self._session = session
-        self.logger.info("OptimizationRepository initialized with database session")
+
+        # Add database dependency if session is provided
+        if session:
+            self.add_dependency("AsyncSession")
+
+        self._logger.info("OptimizationRepository initialized", has_session=session is not None)
 
     async def save_optimization_result(
         self,
@@ -59,6 +77,13 @@ class OptimizationRepository(BaseComponent, OptimizationRepositoryProtocol):
         Returns:
             Optimization result ID
         """
+        if not self._session:
+            raise RepositoryError(
+                "Database session not available - cannot save optimization result",
+                error_code="REPO_001",
+                context={"result_id": result.optimization_id},
+            )
+
         try:
             # Create optimization run if it doesn't exist
             run_query = select(OptimizationRun).where(OptimizationRun.id == result.optimization_id)
@@ -129,18 +154,39 @@ class OptimizationRepository(BaseComponent, OptimizationRepositoryProtocol):
             self._session.add(db_result)
             await self._session.commit()
 
-            self.logger.info(
+            self._logger.info(
                 "Optimization result saved to database",
                 optimization_id=result.optimization_id,
                 algorithm=result.algorithm_name,
                 result_id=db_result.id,
             )
 
+            # Emit result saved event with proper async context and timeout
+            try:
+                if hasattr(self, "emit_event") and callable(self.emit_event):
+                    event_data = {
+                        "optimization_id": result.optimization_id,
+                        "algorithm_name": result.algorithm_name,
+                        "result_id": db_result.id,
+                        "optimal_objective_value": str(result.optimal_objective_value),
+                        "timestamp": datetime.now().isoformat(),
+                    }
+                    await asyncio.wait_for(
+                        self.emit_event(OptimizationEvents.RESULT_SAVED, event_data),
+                        timeout=5.0,  # 5 second timeout for WebSocket operations
+                    )
+            except (AttributeError, asyncio.TimeoutError) as e:
+                # Graceful fallback if event emission not available or times out
+                self._logger.debug(f"Event emission not available or timed out: {e}")
+            except Exception as e:
+                # Log but don't fail the save operation for WebSocket issues
+                self._logger.warning(f"Failed to emit result saved event: {e}")
+
             return result.optimization_id
 
         except Exception as e:
             await self._session.rollback()
-            self.logger.error(f"Failed to save optimization result: {e}")
+            self._logger.error(f"Failed to save optimization result: {e}")
             raise RepositoryError(f"Failed to save optimization result: {e}") from e
         finally:
             # Ensure session resources are properly handled
@@ -148,7 +194,7 @@ class OptimizationRepository(BaseComponent, OptimizationRepositoryProtocol):
                 # Expire all cached objects to prevent stale data
                 self._session.expunge_all()
             except Exception as cleanup_error:
-                self.logger.debug(f"Error during session cleanup: {cleanup_error}")
+                self._logger.debug(f"Error during session cleanup: {cleanup_error}")
 
     async def get_optimization_result(self, optimization_id: str) -> OptimizationResult | None:
         """
@@ -160,13 +206,17 @@ class OptimizationRepository(BaseComponent, OptimizationRepositoryProtocol):
         Returns:
             Optimization result or None if not found
         """
+        if not self._session:
+            self._logger.warning(
+                "Database session not available - cannot retrieve optimization result"
+            )
+            return None
+
         try:
             # Query database for optimization result
             query = (
-                select(OptimizationResultDB, OptimizationRun)
-                .join(
-                    OptimizationRun, OptimizationResultDB.optimization_run_id == OptimizationRun.id
-                )
+                select(OptimizationResultDB)
+                .options(joinedload(OptimizationResultDB.optimization_run))
                 .where(OptimizationResultDB.optimization_run_id == optimization_id)
             )
             result = await self._session.execute(query)
@@ -175,7 +225,8 @@ class OptimizationRepository(BaseComponent, OptimizationRepositoryProtocol):
             if not row:
                 return None
 
-            db_result, db_run = row
+            db_result = row[0]
+            db_run = db_result.optimization_run
 
             # Convert database model to domain model
             optimization_result = OptimizationResult(
@@ -209,7 +260,7 @@ class OptimizationRepository(BaseComponent, OptimizationRepositoryProtocol):
             return optimization_result
 
         except Exception as e:
-            self.logger.error(f"Failed to retrieve optimization result: {e}")
+            self._logger.error(f"Failed to retrieve optimization result: {e}")
             raise RepositoryError(f"Failed to retrieve optimization result: {e}") from e
 
     async def list_optimization_results(
@@ -229,19 +280,23 @@ class OptimizationRepository(BaseComponent, OptimizationRepositoryProtocol):
         Returns:
             List of optimization results
         """
+        if not self._session:
+            self._logger.warning("Database session not available - returning empty list")
+            return []
+
         try:
             # Build query with optional filtering
             query = (
-                select(OptimizationResultDB, OptimizationRun)
-                .join(
-                    OptimizationRun, OptimizationResultDB.optimization_run_id == OptimizationRun.id
-                )
+                select(OptimizationResultDB)
+                .options(joinedload(OptimizationResultDB.optimization_run))
                 .order_by(desc(OptimizationResultDB.created_at))
             )
 
             # Apply strategy name filter if provided
             if strategy_name:
-                query = query.where(OptimizationRun.strategy_name == strategy_name)
+                query = query.join(OptimizationRun).where(
+                    OptimizationRun.strategy_name == strategy_name
+                )
 
             # Apply pagination
             query = query.offset(offset).limit(limit)
@@ -251,7 +306,9 @@ class OptimizationRepository(BaseComponent, OptimizationRepositoryProtocol):
 
             # Convert database models to domain models
             optimization_results = []
-            for db_result, db_run in rows:
+            for row in rows:
+                db_result = row[0]
+                db_run = db_result.optimization_run
                 optimization_result = OptimizationResult(
                     optimization_id=db_result.optimization_run_id,
                     algorithm_name=db_run.algorithm_name,
@@ -284,7 +341,7 @@ class OptimizationRepository(BaseComponent, OptimizationRepositoryProtocol):
             return optimization_results
 
         except Exception as e:
-            self.logger.error(f"Failed to list optimization results: {e}")
+            self._logger.error(f"Failed to list optimization results: {e}")
             raise RepositoryError(f"Failed to list optimization results: {e}") from e
 
     async def delete_optimization_result(self, optimization_id: str) -> bool:
@@ -303,22 +360,22 @@ class OptimizationRepository(BaseComponent, OptimizationRepositoryProtocol):
             db_run = await self._session.scalar(run_query)
 
             if db_run:
-                await self._session.delete(db_run)
+                self._session.delete(db_run)
                 await self._session.commit()
 
-                self.logger.info(
+                self._logger.info(
                     "Optimization result deleted from database", optimization_id=optimization_id
                 )
                 return True
             else:
-                self.logger.warning(
+                self._logger.warning(
                     "Optimization result not found for deletion", optimization_id=optimization_id
                 )
                 return False
 
         except Exception as e:
             await self._session.rollback()
-            self.logger.error(f"Failed to delete optimization result: {e}")
+            self._logger.error(f"Failed to delete optimization result: {e}")
             raise RepositoryError(f"Failed to delete optimization result: {e}") from e
         finally:
             # Ensure session resources are properly handled
@@ -326,7 +383,7 @@ class OptimizationRepository(BaseComponent, OptimizationRepositoryProtocol):
                 # Clear any cached objects after deletion
                 self._session.expunge_all()
             except Exception as cleanup_error:
-                self.logger.debug(f"Error during deletion session cleanup: {cleanup_error}")
+                self._logger.debug(f"Error during deletion session cleanup: {cleanup_error}")
 
     async def save_parameter_set(
         self,
@@ -380,7 +437,7 @@ class OptimizationRepository(BaseComponent, OptimizationRepositoryProtocol):
             self._session.add(parameter_set)
             await self._session.commit()
 
-            self.logger.debug(
+            self._logger.debug(
                 "Parameter set saved",
                 optimization_id=optimization_id,
                 parameter_set_id=parameter_set.id,
@@ -391,7 +448,7 @@ class OptimizationRepository(BaseComponent, OptimizationRepositoryProtocol):
 
         except Exception as e:
             await self._session.rollback()
-            self.logger.error(f"Failed to save parameter set: {e}")
+            self._logger.error(f"Failed to save parameter set: {e}")
             raise RepositoryError(f"Failed to save parameter set: {e}") from e
         finally:
             # Ensure session resources are properly handled
@@ -399,7 +456,7 @@ class OptimizationRepository(BaseComponent, OptimizationRepositoryProtocol):
                 # Expire all cached objects to prevent memory leaks
                 self._session.expunge_all()
             except Exception as cleanup_error:
-                self.logger.debug(f"Error during parameter set session cleanup: {cleanup_error}")
+                self._logger.debug(f"Error during parameter set session cleanup: {cleanup_error}")
 
     async def get_parameter_sets(
         self,
@@ -451,5 +508,5 @@ class OptimizationRepository(BaseComponent, OptimizationRepositoryProtocol):
             return parameter_set_data
 
         except Exception as e:
-            self.logger.error(f"Failed to get parameter sets: {e}")
+            self._logger.error(f"Failed to get parameter sets: {e}")
             raise RepositoryError(f"Failed to get parameter sets: {e}") from e
