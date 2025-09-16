@@ -30,12 +30,16 @@ class BotStatusManager:
         self.user_subscriptions: dict[str, set[str]] = {}  # bot_id -> set of user_ids
 
     async def connect(self, websocket: WebSocket, user_id: str):
-        """Accept WebSocket connection."""
+        """Accept WebSocket connection with timeout and proper error handling."""
         try:
-            await websocket.accept()
+            # Use timeout for WebSocket accept to prevent hanging
+            await asyncio.wait_for(websocket.accept(), timeout=10.0)
             self.active_connections[user_id] = websocket
             self.bot_subscriptions[user_id] = set()
             logger.info("Bot status WebSocket connected", user_id=user_id)
+        except asyncio.TimeoutError:
+            logger.error(f"Timeout accepting bot status WebSocket connection for {user_id}")
+            raise
         except Exception as e:
             logger.error(f"Failed to accept bot status WebSocket connection: {e}", user_id=user_id)
             raise
@@ -90,51 +94,88 @@ class BotStatusManager:
             self.subscribe_to_bot(user_id, bot_id)
 
     async def send_to_user(self, user_id: str, message: dict):
-        """Send message to specific user."""
-        if user_id in self.active_connections:
-            try:
-                websocket = self.active_connections[user_id]
-                # Use asyncio timeout to prevent blocking
-                await asyncio.wait_for(websocket.send_text(json.dumps(message)), timeout=10.0)
-            except asyncio.TimeoutError:
-                logger.error("Timeout sending bot status message to user", user_id=user_id)
-                self.disconnect(user_id)
-            except Exception as e:
-                logger.error(
-                    "Failed to send bot status message to user", user_id=user_id, error=str(e)
-                )
-                self.disconnect(user_id)
+        """Send message to specific user with proper error handling and cleanup."""
+        if user_id not in self.active_connections:
+            return
+
+        websocket = self.active_connections[user_id]
+        try:
+            # Use asyncio timeout to prevent blocking with better timeout management
+            # Send message with timeout for better responsiveness
+            message_json = json.dumps(message, default=str)  # Handle Decimal serialization
+            await asyncio.wait_for(websocket.send_text(message_json), timeout=5.0)
+        except asyncio.TimeoutError:
+            logger.warning("Timeout sending bot status message to user", user_id=user_id)
+            self.disconnect(user_id)
+        except Exception as e:
+            logger.error("Failed to send bot status message to user", user_id=user_id, error=str(e))
+            self.disconnect(user_id)
 
     async def broadcast_to_bot_subscribers(self, bot_id: str, message: dict):
-        """Broadcast message to all subscribers of a bot."""
-        if bot_id in self.user_subscriptions:
-            disconnected_users = []
-            send_tasks = []
+        """Broadcast message to all subscribers of a bot with backpressure handling."""
+        if bot_id not in self.user_subscriptions or not self.user_subscriptions[bot_id]:
+            return
 
-            # Collect all send tasks
-            for user_id in self.user_subscriptions[bot_id]:
-                websocket = self.active_connections.get(user_id)
-                if websocket:
-                    send_tasks.append(self._send_with_timeout(websocket, message, user_id))
+        # Create snapshot to avoid race conditions during iteration
+        subscribers_snapshot = list(self.user_subscriptions[bot_id])
+        if not subscribers_snapshot:
+            return
 
-            # Execute all sends concurrently
-            if send_tasks:
-                results = await asyncio.gather(*send_tasks, return_exceptions=True)
-                subscriber_list = list(self.user_subscriptions[bot_id])
+        # Prepare message once for all subscribers
+        try:
+            message_json = json.dumps(message, default=str)
+        except Exception as e:
+            logger.error(f"Failed to serialize bot status message for bot {bot_id}: {e}")
+            return
+
+        send_tasks = []
+        # Collect all send tasks for active connections
+        for user_id in subscribers_snapshot:
+            websocket = self.active_connections.get(user_id)
+            if websocket:
+                send_tasks.append(
+                    self._send_with_timeout_broadcast(websocket, message_json, user_id)
+                )
+
+        # Execute all sends concurrently with overall timeout
+        if send_tasks:
+            try:
+                # Execute with overall broadcast timeout
+                results = await asyncio.wait_for(asyncio.gather(*send_tasks, return_exceptions=True), timeout=10.0)
+
+                # Clean up failed connections
                 for i, result in enumerate(results):
-                    if isinstance(result, Exception) and i < len(subscriber_list):
-                        disconnected_users.append(subscriber_list[i])
-
-            # Clean up disconnected users
-            for user_id in disconnected_users:
-                self.disconnect(user_id)
+                    if isinstance(result, Exception) and i < len(subscribers_snapshot):
+                        user_id = subscribers_snapshot[i]
+                        logger.debug(
+                            f"Disconnecting user {user_id} due to bot status send failure: {result}"
+                        )
+                        self.disconnect(user_id)
+            except asyncio.TimeoutError:
+                logger.warning(
+                    f"Timeout broadcasting to bot {bot_id} subscribers, cleaning up all connections"
+                )
+                # Clean up all subscribers on broadcast timeout
+                for user_id in subscribers_snapshot:
+                    self.disconnect(user_id)
 
     async def _send_with_timeout(self, websocket: WebSocket, message: dict, user_id: str):
         """Send message with timeout handling."""
         try:
-            await asyncio.wait_for(websocket.send_text(json.dumps(message)), timeout=5.0)
+            message_json = json.dumps(message, default=str)
+            await asyncio.wait_for(websocket.send_text(message_json), timeout=3.0)  # Shorter timeout for individual sends
         except Exception as e:
             logger.error(f"Failed to send to user {user_id}: {e}")
+            raise
+
+    async def _send_with_timeout_broadcast(
+        self, websocket: WebSocket, message_json: str, user_id: str
+    ):
+        """Send pre-serialized message with timeout handling for broadcasts."""
+        try:
+            await asyncio.wait_for(websocket.send_text(message_json), timeout=3.0)
+        except Exception as e:
+            logger.debug(f"Failed to broadcast bot status to user {user_id}: {e}")
             raise
 
 

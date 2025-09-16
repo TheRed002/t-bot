@@ -48,6 +48,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         else:
             # Default rate limiting config
             rate_limit_config = {
+                "enabled": True,  # Rate limiting enabled by default
                 "anonymous_limit": 60,
                 "authenticated_limit": 300,
                 "trader_limit": 600,
@@ -55,6 +56,16 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 "trading_limit": 120,
                 "bot_action_limit": 30,
             }
+
+        # Check if rate limiting is enabled
+        self.enabled = rate_limit_config.get("enabled", True)
+
+        # In test environment, check for explicit disable
+        if hasattr(config, "environment") and config.environment == "test":
+            # Allow disabling rate limiting in test mode
+            self.enabled = rate_limit_config.get("enabled", True)
+            if not self.enabled:
+                self.logger.info("Rate limiting disabled for testing environment")
 
         # Default rate limits (requests per minute)
         self.default_limits = {
@@ -98,6 +109,10 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         Raises:
             HTTPException: If rate limit exceeded
         """
+        # Skip rate limiting if disabled
+        if not self.enabled:
+            return await call_next(request)
+
         # Skip rate limiting for exempt paths
         if request.url.path in self.exempt_paths:
             return await call_next(request)

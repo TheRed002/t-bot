@@ -16,11 +16,11 @@ from uuid import uuid4
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field, field_validator
 
-from src.core.logging import get_logger
 from src.core.dependency_injection import DependencyInjector
+from src.core.logging import get_logger
+from src.optimization.di_registration import get_optimization_service
 from src.optimization.interfaces import IOptimizationService
 from src.optimization.parameter_space import ParameterSpaceBuilder
-from src.optimization.di_registration import get_optimization_service
 
 
 class TimeInterval(Enum):
@@ -257,9 +257,7 @@ async def create_optimization_job(
             )
 
         # Validate strategy exists
-        if strategy_factory and not strategy_factory.is_strategy_available(
-            request.strategy_name
-        ):
+        if strategy_factory and not strategy_factory.is_strategy_available(request.strategy_name):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Strategy '{request.strategy_name}' not available",
@@ -768,26 +766,37 @@ async def _run_optimization_job(job_id: str, optimization_service: IOptimization
 
         # Extract results from optimization service
         opt_result = optimization_result["optimization_result"]
-        
+
         # Convert to web interface format
         web_result = {
             "combination_id": str(uuid4()),
             "parameters": opt_result.optimal_parameters,
             "ml_model_id": None,
             # Performance metrics from optimization result
-            "total_return": float(opt_result.objective_values.get("total_return", 0)),
-            "sharpe_ratio": float(opt_result.objective_values.get("sharpe_ratio", 0)),
-            "max_drawdown": float(opt_result.objective_values.get("max_drawdown", 0)),
-            "profit_factor": float(opt_result.objective_values.get("profit_factor", 1)),
-            "win_rate": float(opt_result.objective_values.get("win_rate", 0)),
+            "total_return": str(opt_result.objective_values.get("total_return", Decimal("0"))),
+            "sharpe_ratio": str(opt_result.objective_values.get("sharpe_ratio", Decimal("0"))),
+            "max_drawdown": str(opt_result.objective_values.get("max_drawdown", Decimal("0"))),
+            "profit_factor": str(opt_result.objective_values.get("profit_factor", Decimal("1"))),
+            "win_rate": str(opt_result.objective_values.get("win_rate", Decimal("0"))),
             "total_trades": int(opt_result.objective_values.get("total_trades", 0)),
             # Risk metrics (mock for now)
-            "var_95": float(opt_result.objective_values.get("max_drawdown", 0)) * 0.7,
-            "expected_shortfall": float(opt_result.objective_values.get("max_drawdown", 0)) * 0.85,
-            "calmar_ratio": float(opt_result.optimal_objective_value) / float(opt_result.objective_values.get("max_drawdown", 0.01)),
+            "var_95": str(
+                opt_result.objective_values.get("max_drawdown", Decimal("0")) * Decimal("0.7")
+            ),
+            "expected_shortfall": str(
+                opt_result.objective_values.get("max_drawdown", Decimal("0")) * Decimal("0.85")
+            ),
+            "calmar_ratio": str(
+                opt_result.optimal_objective_value
+                / opt_result.objective_values.get("max_drawdown", Decimal("0.01"))
+            ),
             # Validation metrics
-            "in_sample_sharpe": float(opt_result.objective_values.get("sharpe_ratio", 0)) * 1.1,
-            "out_sample_sharpe": float(opt_result.objective_values.get("sharpe_ratio", 0)) * 0.9,
+            "in_sample_sharpe": str(
+                opt_result.objective_values.get("sharpe_ratio", Decimal("0")) * Decimal("1.1")
+            ),
+            "out_sample_sharpe": str(
+                opt_result.objective_values.get("sharpe_ratio", Decimal("0")) * Decimal("0.9")
+            ),
             "stability_score": float(opt_result.robustness_score or 0.8),
             # Execution details
             "execution_time_seconds": float(opt_result.total_duration_seconds or 0),
@@ -799,11 +808,13 @@ async def _run_optimization_job(job_id: str, optimization_service: IOptimization
         job["results"] = [web_result]
         job["total_combinations"] = opt_result.evaluations_completed
         job["completed_combinations"] = opt_result.evaluations_completed
-        job["metrics"]["best_metric_value"] = float(opt_result.optimal_objective_value)
+        job["metrics"]["best_metric_value"] = str(opt_result.optimal_objective_value)
         job["status"] = "completed"
         job["completed_at"] = datetime.now(timezone.utc)
 
-        logger.info(f"Completed optimization job {job_id} with optimal value {opt_result.optimal_objective_value}")
+        logger.info(
+            f"Completed optimization job {job_id} with optimal value {opt_result.optimal_objective_value}"
+        )
 
     except Exception as e:
         logger.error(f"Error running optimization job {job_id}: {e!s}")
@@ -816,16 +827,16 @@ async def _run_optimization_job(job_id: str, optimization_service: IOptimization
 def _build_parameter_space_from_request(request_data: dict[str, Any]) -> "ParameterSpace":
     """Build parameter space from web request data."""
     builder = ParameterSpaceBuilder()
-    
+
     for param_range in request_data["parameter_ranges"]:
         param_name = param_range["parameter_name"]
         param_type = param_range.get("parameter_type", "decimal")
-        
+
         if param_type in ["decimal", "float"]:
             builder.add_continuous(
                 name=param_name,
-                min_value=float(param_range["min_value"]),
-                max_value=float(param_range["max_value"]),
+                min_value=float(Decimal(str(param_range["min_value"]))),
+                max_value=float(Decimal(str(param_range["max_value"]))),
                 precision=3,
             )
         elif param_type == "int":
@@ -837,12 +848,12 @@ def _build_parameter_space_from_request(request_data: dict[str, Any]) -> "Parame
             )
         elif param_type == "bool":
             builder.add_boolean(name=param_name)
-    
+
     # Add fixed parameters
     for param_name, param_value in request_data.get("fixed_parameters", {}).items():
         # Add as categorical with single value for fixed parameters
         builder.add_categorical(name=param_name, values=[param_value])
-    
+
     return builder.build()
 
 

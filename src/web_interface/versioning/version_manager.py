@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Any
 
-from src.base import BaseComponent
+from src.core.base import BaseComponent
 
 
 class VersionStatus(Enum):
@@ -65,7 +65,7 @@ class APIVersion:
         # Check if there are no breaking changes between versions
         if self.major > other.major:
             # Check if any version between other and self has breaking changes
-            return len(self.breaking_changes) == 0
+            return len(self.breaking_changes or []) == 0
 
         return False
 
@@ -206,7 +206,10 @@ class VersionManager(BaseComponent):
             ValueError: If the requested version is invalid or sunset
         """
         if requested_version is None:
-            return self.get_default_version()
+            default = self.get_default_version()
+            if default is None:
+                raise ValueError("No default version configured")
+            return default
 
         # Check if the exact version exists
         version = self.get_version(requested_version)
@@ -237,7 +240,7 @@ class VersionManager(BaseComponent):
         api_version = self.get_version(version)
         if not api_version:
             return False
-        return feature in api_version.features
+        return feature in (api_version.features or set())
 
     def get_deprecation_info(self, version: str) -> dict[str, Any] | None:
         """Get deprecation information for a version."""
@@ -310,8 +313,12 @@ class VersionManager(BaseComponent):
         }
 
         # Convert sets to lists for JSON serialization
-        migration_info["new_features"] = list(migration_info["new_features"])
-        migration_info["deprecated_features"] = list(migration_info["deprecated_features"])
+        new_features = migration_info["new_features"]
+        deprecated_features = migration_info["deprecated_features"]
+        migration_info["new_features"] = list(new_features) if isinstance(new_features, set) else []
+        migration_info["deprecated_features"] = (
+            list(deprecated_features) if isinstance(deprecated_features, set) else []
+        )
 
         return migration_info
 

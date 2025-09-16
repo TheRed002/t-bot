@@ -220,8 +220,8 @@ class ConnectionPoolManager:
             if conn:
                 try:
                     await conn.close()
-                except Exception:
-                    pass
+                except Exception as close_e:
+                    logger.debug(f"Error closing database connection during cleanup: {close_e}")
             logger.error(f"Failed to initialize async database pool: {e}")
             # Don't raise, let the app continue without connection pool
             logger.warning("Continuing without database connection pool")
@@ -242,8 +242,8 @@ class ConnectionPoolManager:
             if hasattr(self, "redis_client") and self.redis_client:
                 try:
                     await self.redis_client.disconnect()
-                except Exception:
-                    pass
+                except Exception as close_e:
+                    logger.debug(f"Error closing Redis connection during cleanup: {close_e}")
                 self.redis_client = None
             logger.error(f"Failed to initialize Redis pool: {e}")
             # Don't raise for Redis, it's not critical
@@ -267,8 +267,9 @@ class ConnectionPoolManager:
             try:
                 yield session
                 await session.commit()
-            except Exception:
+            except Exception as e:
                 await session.rollback()
+                logger.error(f"Database session error, rolling back: {e}")
                 raise
 
     @asynccontextmanager
@@ -357,8 +358,8 @@ class ConnectionPoolManager:
             if session:
                 try:
                     await session.close()
-                except Exception:
-                    pass
+                except Exception as close_e:
+                    logger.debug(f"Error closing session during health check: {close_e}")
 
         # Check Redis pool
         try:

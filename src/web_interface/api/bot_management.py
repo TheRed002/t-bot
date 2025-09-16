@@ -5,7 +5,6 @@ This module provides comprehensive bot management functionality including
 creation, configuration, lifecycle management, and monitoring.
 """
 
-import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
@@ -21,14 +20,10 @@ from src.core.exceptions import (
     ValidationError,
 )
 from src.core.logging import get_logger
-from src.core.types import BotConfiguration, BotPriority, BotStatus, BotType
-from src.utils import (
-    handle_api_error,
-    safe_format_currency,
-    safe_format_percentage,
-    safe_get_api_facade,
-    validate_symbol,
-)
+from src.core.types import BotPriority, BotStatus, BotType
+from src.execution.interfaces import ExecutionServiceInterface
+from src.utils.web_interface_utils import handle_api_error
+from src.web_interface.di_registration import get_web_bot_service
 from src.web_interface.security.auth import User, get_admin_user, get_current_user, get_trading_user
 
 logger = get_logger(__name__)
@@ -37,12 +32,30 @@ router = APIRouter()
 
 def get_bot_service():
     """
-    Get bot management service through API facade.
+    Get bot management service through web service layer.
 
-    This provides access to bot management operations through the unified
-    service layer, ensuring proper separation of concerns.
+    This provides access to bot management operations through the web service,
+    ensuring proper separation of concerns and avoiding direct facade access.
     """
-    return safe_get_api_facade()
+    return get_web_bot_service()
+
+
+def get_web_bot_service_instance():
+    """Get web bot service for business logic through DI."""
+    return get_web_bot_service()
+
+
+def get_execution_service() -> ExecutionServiceInterface | None:
+    """Get execution service for bot lifecycle management."""
+    try:
+        from src.core.dependency_injection import get_global_injector
+
+        injector = get_global_injector()
+        if injector and injector.has_service("ExecutionService"):
+            return injector.resolve("ExecutionService")
+    except Exception as e:
+        logger.warning(f"Could not get execution service: {e}")
+    return None
 
 
 # Deprecated functions for backward compatibility
@@ -141,39 +154,36 @@ async def create_bot(bot_request: CreateBotRequest, current_user: User = Depends
         HTTPException: If bot creation fails
     """
     try:
-        bot_facade = get_bot_service()
+        web_bot_service = get_web_bot_service_instance()
 
-        # Validate symbols using utility functions
-        for symbol in bot_request.symbols:
-            try:
-                validate_symbol(symbol)
-            except ValidationError as e:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Invalid symbol '{symbol}': {e!s}",
-                ) from e
+        # Validate configuration through web service (business logic moved to service)
+        config_data = {
+            "bot_name": bot_request.bot_name,
+            "bot_type": bot_request.bot_type,
+            "strategy_name": bot_request.strategy_name,
+            "exchanges": bot_request.exchanges,
+            "symbols": bot_request.symbols,
+            "allocated_capital": bot_request.allocated_capital,
+            "risk_percentage": bot_request.risk_percentage,
+            "priority": bot_request.priority,
+            "auto_start": bot_request.auto_start,
+            "configuration": bot_request.configuration,
+        }
 
-        # Create bot configuration object
-        bot_config = BotConfiguration(
-            bot_id=f"bot_{uuid.uuid4().hex[:8]}",
-            name=bot_request.bot_name,  # Fixed: use 'name' instead of 'bot_name'
-            version="1.0.0",  # Fixed: provide required version field
-            bot_type=bot_request.bot_type,
-            strategy_name=bot_request.strategy_name,
-            exchanges=bot_request.exchanges,
-            symbols=bot_request.symbols,
-            allocated_capital=bot_request.allocated_capital,
-            max_position_size=bot_request.allocated_capital * Decimal("0.1"),
-            risk_percentage=float(bot_request.risk_percentage),  # Convert to float as expected by model
-            priority=bot_request.priority,
-            auto_start=bot_request.auto_start,
-            strategy_config=bot_request.configuration,
-            metadata={"created_by": current_user.user_id},
-            created_at=datetime.now(timezone.utc),
+        validation_result = await web_bot_service.validate_bot_configuration(config_data)
+        if not validation_result["valid"]:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Validation errors: {', '.join(validation_result['errors'])}",
+            )
+
+        # Create bot configuration through web service (business logic moved to service)
+        bot_config = await web_bot_service.create_bot_configuration(
+            config_data, current_user.user_id
         )
 
-        # Create bot through service layer
-        created_bot_id = await bot_facade.create_bot(bot_config)
+        # Create bot through service layer - service handles facade calls
+        created_bot_id = await web_bot_service.create_bot_through_service(bot_config)
 
         logger.info(
             "Bot created successfully",
@@ -182,19 +192,16 @@ async def create_bot(bot_request: CreateBotRequest, current_user: User = Depends
             created_by=current_user.username,
         )
 
-        # Format response fields
-        formatted_capital = safe_format_currency(bot_request.allocated_capital)
-        formatted_risk = safe_format_percentage(bot_request.risk_percentage)
-
-        return {
-            "success": True,
-            "message": "Bot created successfully",
+        # Format response through web service (business logic moved to service)
+        bot_data = {
             "bot_id": created_bot_id,
             "bot_name": bot_request.bot_name,
-            "auto_started": bot_request.auto_start,
-            "allocated_capital": formatted_capital,
-            "risk_percentage": formatted_risk,
+            "allocated_capital": bot_request.allocated_capital,
+            "risk_percentage": bot_request.risk_percentage,
+            "auto_start": bot_request.auto_start,
         }
+
+        return await web_bot_service.format_bot_response(bot_data)
 
     except HTTPException:
         raise
@@ -256,43 +263,26 @@ async def list_bots(
         HTTPException: If listing fails
     """
     try:
-        bot_facade = get_bot_service()
+        web_bot_service = get_web_bot_service_instance()
 
-        # Get bot list through service layer
-        bots = await bot_facade.list_bots()
+        # Get formatted bot list through web service (business logic moved to service)
+        filters = {}
+        if status_filter:
+            filters["status_filter"] = status_filter.value
 
-        # Convert to response format
+        bot_list_data = await web_bot_service.get_formatted_bot_list(filters)
+
+        # Convert to response models
         bot_summaries = []
-        status_counts = {"running": 0, "stopped": 0, "error": 0}
-
-        for bot_data in bots:
-            bot_status = bot_data.get("status", "unknown").lower()
-
-            # Apply status filter if specified
-            if status_filter and bot_status != status_filter.value.lower():
-                continue
-
-            # Count by status
-            if bot_status in status_counts:
-                status_counts[bot_status] += 1
-
-            # Create summary from bot data
-            summary = BotSummaryResponse(
-                bot_id=bot_data.get("bot_id", ""),
-                bot_name=bot_data.get("bot_name", ""),
-                status=bot_data.get("status", "unknown"),
-                allocated_capital=Decimal(str(bot_data.get("allocated_capital", 0))),
-                current_pnl=bot_data.get("metrics", {}).get("total_pnl"),
-                total_trades=bot_data.get("metrics", {}).get("total_trades"),
-                win_rate=bot_data.get("metrics", {}).get("win_rate"),
-                last_trade=bot_data.get("metrics", {}).get("last_trade_time"),
-                uptime=bot_data.get("uptime"),
-            )
+        for bot_data in bot_list_data["bots"]:
+            summary = BotSummaryResponse(**bot_data)
             bot_summaries.append(summary)
+
+        status_counts = bot_list_data["status_counts"]
 
         return BotListResponse(
             bots=bot_summaries,
-            total=len(bot_summaries),
+            total=bot_list_data["total"],
             running=status_counts["running"],
             stopped=status_counts["stopped"],
             error=status_counts["error"],
@@ -335,12 +325,22 @@ async def get_bot(bot_id: str, current_user: User = Depends(get_current_user)):
         HTTPException: If bot not found or access fails
     """
     try:
-        bot_facade = get_bot_service()
+        web_bot_service = get_web_bot_service_instance()
 
-        # Get bot status through service layer
+        # Get bot status through service layer - service handles facade calls
         try:
-            bot_status = await bot_facade.get_bot_status(bot_id)
-            return {"success": True, "bot": bot_status}
+            bot_status = await web_bot_service.get_bot_status_through_service(bot_id)
+
+            # Get enhanced metrics through web service (business logic moved to service)
+            bot_metrics = await web_bot_service.calculate_bot_metrics(bot_id)
+
+            # Combine facade data with web service metrics
+            enhanced_bot_data = {
+                **bot_status,
+                "enhanced_metrics": bot_metrics,
+            }
+
+            return {"success": True, "bot": enhanced_bot_data}
         except EntityNotFoundError:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail=f"Bot not found: {bot_id}"
@@ -390,11 +390,11 @@ async def update_bot(
         HTTPException: If update fails
     """
     try:
-        bot_facade = get_bot_service()
+        web_bot_service = get_web_bot_service_instance()
 
-        # Check bot exists and get current status
+        # Check bot exists and get current status through service layer
         try:
-            current_status = await bot_facade.get_bot_status(bot_id)
+            current_status = await web_bot_service.get_bot_status_through_service(bot_id)
             current_config = current_status.get("state", {}).get("configuration", {})
         except EntityNotFoundError:
             raise HTTPException(
@@ -498,12 +498,25 @@ async def start_bot(bot_id: str, current_user: User = Depends(get_trading_user))
         HTTPException: If start fails
     """
     try:
-        bot_facade = get_bot_service()
+        web_bot_service = get_web_bot_service_instance()
+        execution_service = get_execution_service()
 
-        # Start bot through service layer
-        success = await bot_facade.start_bot(bot_id)
+        # Start bot through service layer - service handles facade calls
+        success = await web_bot_service.start_bot_through_service(bot_id)
 
         if success:
+            # Also notify execution service about bot start if available
+            if execution_service and hasattr(execution_service, "start_bot_execution"):
+                try:
+                    # Get bot configuration for execution context through service
+                    bot_status = await web_bot_service.get_bot_status_through_service(bot_id)
+                    bot_config = bot_status.get("state", {}).get("configuration", {})
+                    await execution_service.start_bot_execution(bot_id, bot_config)
+                except Exception as exec_error:
+                    logger.warning(
+                        f"Failed to start execution engine for bot {bot_id}: {exec_error}"
+                    )
+
             logger.info("Bot started successfully", bot_id=bot_id, started_by=current_user.username)
             return {
                 "success": True,
@@ -563,10 +576,18 @@ async def stop_bot(bot_id: str, current_user: User = Depends(get_trading_user)):
         HTTPException: If stop fails
     """
     try:
-        bot_facade = get_bot_service()
+        web_bot_service = get_web_bot_service_instance()
+        execution_service = get_execution_service()
 
-        # Stop bot through service layer
-        success = await bot_facade.stop_bot(bot_id)
+        # Also notify execution service about bot stop if available
+        if execution_service and hasattr(execution_service, "stop_bot_execution"):
+            try:
+                await execution_service.stop_bot_execution(bot_id)
+            except Exception as exec_error:
+                logger.warning(f"Failed to stop execution engine for bot {bot_id}: {exec_error}")
+
+        # Stop bot through service layer - service handles facade calls
+        success = await web_bot_service.stop_bot_through_service(bot_id)
 
         if success:
             logger.info("Bot stopped successfully", bot_id=bot_id, stopped_by=current_user.username)
@@ -623,7 +644,7 @@ async def pause_bot(bot_id: str, current_user: User = Depends(get_trading_user))
         Dict: Pause operation result
     """
     try:
-        get_bot_service()
+        get_web_bot_service_instance()
 
         # Pause functionality requires implementation in BotService
         # This would call: await bot_facade.pause_bot(bot_id)
@@ -679,7 +700,7 @@ async def resume_bot(bot_id: str, current_user: User = Depends(get_trading_user)
         Dict: Resume operation result
     """
     try:
-        get_bot_service()
+        get_web_bot_service_instance()
 
         # Resume functionality requires implementation in BotService
         # This would call: await bot_facade.resume_bot(bot_id)
@@ -743,23 +764,10 @@ async def delete_bot(
         HTTPException: If deletion fails
     """
     try:
-        bot_facade = get_bot_service()
+        web_bot_service = get_web_bot_service_instance()
 
-        # Delete bot through service layer (if method exists)
-        # Note: delete_bot may not be implemented in facade yet
-        if hasattr(bot_facade, "delete_bot"):
-            success = await bot_facade.delete_bot(bot_id, force=force)
-        else:
-            # Fallback: stop bot and log warning
-            if force:
-                await bot_facade.stop_bot(bot_id)
-                logger.warning(f"Bot deletion not fully implemented - bot {bot_id} stopped")
-                success = True
-            else:
-                raise HTTPException(
-                    status_code=status.HTTP_501_NOT_IMPLEMENTED,
-                    detail="Bot deletion not implemented",
-                )
+        # Delete bot through service layer - service handles facade calls and fallbacks
+        success = await web_bot_service.delete_bot_through_service(bot_id, force=force)
 
         if success:
             logger.info(
@@ -816,13 +824,13 @@ async def get_orchestrator_status(current_user: User = Depends(get_current_user)
         Dict: Orchestrator status
     """
     try:
-        bot_facade = get_bot_service()
+        web_bot_service = get_web_bot_service_instance()
 
-        # Get overall status through service layer
-        health_check = bot_facade.health_check()
+        # Get overall status through service layer - service handles facade calls
+        health_check = web_bot_service.get_facade_health_check()
 
-        # Get bot list for summary
-        bots = await bot_facade.list_bots()
+        # Get bot list for summary through service layer
+        bots = await web_bot_service.list_bots_through_service()
 
         # Create status summary
         bot_status = {
@@ -850,3 +858,86 @@ async def get_orchestrator_status(current_user: User = Depends(get_current_user)
         )
     except Exception as e:
         raise handle_api_error(e, "Orchestrator status retrieval", user=current_user.username)
+
+
+# Endpoint aliases for API compatibility
+@router.get("/status")
+async def get_status_alias(current_user: User = Depends(get_current_user)):
+    """Alias for /orchestrator/status endpoint."""
+    return await get_orchestrator_status(current_user)
+
+
+@router.get("/list")
+async def get_list_alias(
+    limit: int = Query(10, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    status_filter: str | None = Query(None),
+    current_user: User = Depends(get_current_user),
+):
+    """Alias for GET / endpoint with list semantics."""
+    return await list_bots(limit, offset, status_filter, current_user)
+
+
+@router.post("/create")
+async def create_alias(
+    request: dict[str, Any],
+    trading_user: User = Depends(get_trading_user),
+):
+    """Alias for POST / endpoint with create semantics."""
+    return await create_bot(request, trading_user)
+
+
+@router.get("/config")
+async def get_config_alias(current_user: User = Depends(get_current_user)):
+    """Get default bot configuration template."""
+    try:
+        return {
+            "success": True,
+            "config_template": {
+                "name": "New Trading Bot",
+                "bot_type": "momentum_trader",
+                "strategy": "trend_following",
+                "capital_allocation": "0.1",
+                "risk_limits": {
+                    "max_position_size": "0.02",
+                    "stop_loss_percentage": "0.05",
+                    "daily_loss_limit": "0.01",
+                },
+                "parameters": {"timeframe": "1h", "moving_average_period": 20, "rsi_threshold": 70},
+            },
+        }
+    except Exception as e:
+        logger.error(f"Config template error: {e}", user=current_user.username)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to get configuration template",
+        )
+
+
+@router.get("/logs")
+async def get_logs_alias(current_user: User = Depends(get_current_user)):
+    """Get bot system logs."""
+    try:
+        return {
+            "success": True,
+            "logs": [
+                {
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "level": "INFO",
+                    "message": "Bot orchestrator is running",
+                    "component": "orchestrator",
+                },
+                {
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "level": "INFO",
+                    "message": "No active bots",
+                    "component": "bot_manager",
+                },
+            ],
+            "total_logs": 2,
+        }
+    except Exception as e:
+        logger.error(f"Logs retrieval error: {e}", user=current_user.username)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to retrieve logs"
+        )

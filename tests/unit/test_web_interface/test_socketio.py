@@ -68,7 +68,7 @@ class TestTradingNamespace:
             "username": "testuser",
             "scopes": ["read", "write"]
         }
-        with patch.object(trading_namespace, "_validate_token", return_value=mock_token_data):
+        with patch.object(trading_namespace, "_validate_token", new_callable=AsyncMock, return_value=mock_token_data):
             with patch.object(trading_namespace, "emit") as mock_emit:
                 result = await trading_namespace.on_connect(sid, environ, auth)
 
@@ -87,7 +87,7 @@ class TestTradingNamespace:
         environ = {}
         auth = {"token": "invalid_token"}
 
-        with patch.object(trading_namespace, "_validate_token", return_value=None):
+        with patch.object(trading_namespace, "_validate_token", new_callable=AsyncMock, return_value=None):
             with patch.object(trading_namespace, "emit") as mock_emit:
                 result = await trading_namespace.on_connect(sid, environ, auth)
 
@@ -128,7 +128,7 @@ class TestTradingNamespace:
         # Setup connected client
         trading_namespace.connected_clients[sid] = {"authenticated": False, "subscriptions": set()}
 
-        with patch.object(trading_namespace, "_validate_token", return_value=True):
+        with patch.object(trading_namespace, "_validate_token", new_callable=AsyncMock, return_value=True):
             with patch.object(trading_namespace, "emit") as mock_emit:
                 with patch.object(trading_namespace, "enter_room") as mock_enter:
                     await trading_namespace.on_authenticate(sid, data)
@@ -223,7 +223,7 @@ class TestTradingNamespace:
 
         mock_emit.assert_called()
         call_args = mock_emit.call_args[0]
-        assert call_args[0] == "order_submitted"
+        assert call_args[0] == "order.created"
         assert "order_id" in call_args[1]
         assert call_args[1]["status"] == "pending"
 
@@ -421,7 +421,7 @@ class TestIntegration:
         assert any(e[0] == "welcome" for e in emit_calls)
 
         # 2. Authenticate
-        with patch.object(namespace, "_validate_token", return_value=True):
+        with patch.object(namespace, "_validate_token", new_callable=AsyncMock, return_value=True):
             await namespace.on_authenticate(sid, {"token": "valid"})
         assert any(e[0] == "authenticated" and e[1]["status"] == "success" for e in emit_calls)
 
@@ -433,7 +433,7 @@ class TestIntegration:
         await namespace.on_execute_order(
             sid, {"type": "limit", "symbol": "ETH/USDT", "side": "sell", "amount": 1.0}
         )
-        assert any(e[0] == "order_submitted" for e in emit_calls)
+        assert any(e[0] == "order.created" for e in emit_calls)
 
         # 5. Disconnect
         await namespace.on_disconnect(sid)

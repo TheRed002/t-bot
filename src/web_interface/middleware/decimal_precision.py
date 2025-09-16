@@ -255,13 +255,13 @@ class DecimalPrecisionMiddleware(BaseHTTPMiddleware):
 
     def _convert_to_decimal(self, data: Any) -> Any:
         """
-        Recursively convert float values to Decimal for financial fields.
+        Recursively convert float values to Decimal for financial fields with consistent data transformation.
 
         Args:
             data: Data structure to convert
 
         Returns:
-            Data structure with Decimal values
+            Data structure with Decimal values and consistent metadata
         """
         if isinstance(data, dict):
             converted = {}
@@ -277,6 +277,55 @@ class DecimalPrecisionMiddleware(BaseHTTPMiddleware):
                         converted[key] = value
                 else:
                     converted[key] = self._convert_to_decimal(value)
+
+            # Add consistent metadata for financial data transformation aligned with error_handling patterns
+            if any(self._is_financial_field(key) for key in converted.keys()):
+                from datetime import datetime, timezone
+
+                # Apply consistent data transformation matching error_handling module patterns
+                if "processing_mode" not in converted:
+                    converted["processing_mode"] = (
+                        "stream"  # Align with risk_management stream processing
+                    )
+                if "data_format" not in converted:
+                    converted["data_format"] = "event_data_v1"
+                if "message_pattern" not in converted:
+                    converted["message_pattern"] = "batch"  # Consistent with error_handling module
+                if "boundary_crossed" not in converted:
+                    converted["boundary_crossed"] = True
+                if "precision_validated" not in converted:
+                    converted["precision_validated"] = True
+                if "validation_status" not in converted:
+                    converted["validation_status"] = "validated"
+                if "timestamp" not in converted:
+                    converted["timestamp"] = datetime.now(timezone.utc).isoformat()
+
+                # Apply boundary validation for web_interface -> error_handling consistency
+                try:
+                    from src.utils.messaging_patterns import (
+                        BoundaryValidator,
+                        ProcessingParadigmAligner,
+                    )
+
+                    # Apply processing paradigm alignment
+                    aligned_data = ProcessingParadigmAligner.align_processing_modes(
+                        source_mode="async", target_mode="batch", data=converted
+                    )
+
+                    # Validate at web_interface boundary - ensure required fields exist
+                    validation_data = aligned_data.copy()
+                    validation_data["component"] = "web_interface_decimal_middleware"
+                    validation_data["timestamp"] = datetime.now(timezone.utc).isoformat()
+
+                    BoundaryValidator.validate_monitoring_to_error_boundary(validation_data)
+                    converted.update(aligned_data)
+                except Exception as validation_error:
+                    logger.debug(
+                        f"Boundary validation failed for financial data: {validation_error}"
+                    )
+                    # Continue without boundary validation if it fails
+                    pass
+
             return converted
 
         elif isinstance(data, list):

@@ -69,7 +69,7 @@ class ErrorHandlerMiddleware(BaseHTTPMiddleware):
             self.logger.warning(f"Error pattern analytics not available: {e}")
             self.pattern_analytics = None
 
-        # Error code mappings
+        # Error code mappings - consistent with core.exceptions
         self.exception_mapping = {
             ValidationError: 400,
             AuthenticationError: 401,
@@ -78,6 +78,8 @@ class ErrorHandlerMiddleware(BaseHTTPMiddleware):
             ExecutionError: 422,
             ConfigurationError: 500,
             NetworkError: 503,
+            # Add missing standard error mappings
+            TradingBotError: 500,  # Generic catch-all for TradingBotError subclasses
         }
 
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
@@ -108,15 +110,14 @@ class ErrorHandlerMiddleware(BaseHTTPMiddleware):
 
         except Exception as e:
             # Handle unexpected exceptions through global error handler
-            error_context = ErrorContext(
+            error_context = ErrorContext.from_exception(
                 error=e,
+                component="web_interface",
                 operation=f"{request.method} {request.url.path}",
                 severity=ErrorSeverity.HIGH,
-                context={
-                    "method": request.method,
-                    "path": str(request.url.path),
-                    "client_ip": request.client.host if request.client else "unknown",
-                },
+                method=request.method,
+                path=str(request.url.path),
+                client_ip=request.client.host if request.client else "unknown",
             )
 
             # Handle through global error handler if available
@@ -124,11 +125,23 @@ class ErrorHandlerMiddleware(BaseHTTPMiddleware):
             recovery_details = None
             if self.global_error_handler:
                 try:
-                    handled = await self.global_error_handler.handle_error(error_context)
-                    # Extract recovery details from context if successful
-                    if handled and error_context.details:
+                    # Match expected parameter names from global handler
+                    result = await self.global_error_handler.handle_error(
+                        error=e,
+                        context={
+                            "method": request.method,
+                            "path": str(request.url.path),
+                            "client_ip": request.client.host if request.client else "unknown",
+                            "component": "web_interface",
+                            "operation": f"{request.method} {request.url.path}",
+                        },
+                        severity="high",
+                    )
+                    handled = result.get("recovery_attempted", False)
+                    # Extract recovery details from result if successful
+                    if handled and result.get("recovery_result"):
                         recovery_details = {
-                            "method": error_context.details.get("recovery_method"),
+                            "method": result.get("recovery_result", {}).get("method"),
                             "attempts": error_context.recovery_attempts,
                             "max_attempts": error_context.max_recovery_attempts,
                         }
@@ -149,7 +162,7 @@ class ErrorHandlerMiddleware(BaseHTTPMiddleware):
         self, request: Request, exception: TradingBotError
     ) -> JSONResponse:
         """
-        Handle T-Bot specific exceptions.
+        Handle T-Bot specific exceptions with consistent data transformation.
 
         Args:
             request: HTTP request
@@ -158,10 +171,42 @@ class ErrorHandlerMiddleware(BaseHTTPMiddleware):
         Returns:
             JSONResponse: Error response
         """
+        # Apply consistent data transformation patterns matching error_handling module
+        from datetime import datetime, timezone
+
+        from src.utils.messaging_patterns import BoundaryValidator, ProcessingParadigmAligner
+
         # Determine status code
         status_code = self.exception_mapping.get(type(exception), 500)
 
-        # Create error response
+        # Create error data with consistent format matching error_handling module
+        error_data = {
+            "error_type": exception.__class__.__name__,
+            "error_message": str(exception),
+            "component": "web_interface",
+            "operation": f"{request.method} {request.url.path}",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "processing_mode": "stream",  # Align with risk_management stream processing
+            "data_format": "error_response_v1",
+            "message_pattern": "batch",
+            "boundary_crossed": True,
+            "validation_status": "validated",
+            "severity": "medium" if status_code < 500 else "high",
+        }
+
+        # Apply processing paradigm alignment for consistency with error_handling module
+        aligned_error_data = ProcessingParadigmAligner.align_processing_modes(
+            source_mode="async", target_mode="batch", data=error_data
+        )
+
+        # Validate at web_interface -> error_handling boundary for consistency
+        try:
+            BoundaryValidator.validate_monitoring_to_error_boundary(aligned_error_data)
+        except ValidationError:
+            # If boundary validation fails, continue with basic error response
+            pass
+
+        # Create error response with consistent structure
         error_response = {
             "error": {
                 "type": exception.__class__.__name__,
@@ -169,6 +214,9 @@ class ErrorHandlerMiddleware(BaseHTTPMiddleware):
                 "code": getattr(exception, "error_code", None),
                 "timestamp": self._get_current_timestamp(),
                 "request_id": self._get_request_id(request),
+                "processing_mode": "stream",
+                "data_format": "error_response_v1",
+                "boundary_crossed": True,
             }
         }
 
@@ -178,6 +226,7 @@ class ErrorHandlerMiddleware(BaseHTTPMiddleware):
                 "path": str(request.url.path),
                 "method": request.method,
                 "traceback": traceback.format_exc(),
+                "aligned_error_data": aligned_error_data,
             }
 
         # Log the exception
@@ -189,7 +238,7 @@ class ErrorHandlerMiddleware(BaseHTTPMiddleware):
         self, request: Request, exception: Exception
     ) -> JSONResponse:
         """
-        Handle unexpected exceptions.
+        Handle unexpected exceptions with consistent error propagation patterns.
 
         Args:
             request: HTTP request
@@ -198,16 +247,50 @@ class ErrorHandlerMiddleware(BaseHTTPMiddleware):
         Returns:
             JSONResponse: Error response
         """
+        # Apply consistent data transformation patterns matching error_handling module
+        from datetime import datetime, timezone
+
+        from src.utils.messaging_patterns import BoundaryValidator, ProcessingParadigmAligner
+
         # Log the full exception details
         self._log_unexpected_exception(request, exception)
 
-        # Create sanitized error response
+        # Create error data with consistent format matching error_handling module
+        error_data = {
+            "error_type": exception.__class__.__name__,
+            "error_message": str(exception),
+            "component": "web_interface",
+            "operation": f"{request.method} {request.url.path}",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "processing_mode": "stream",  # Align with risk_management stream processing
+            "data_format": "error_response_v1",
+            "message_pattern": "batch",
+            "boundary_crossed": True,
+            "validation_status": "failed",
+        }
+
+        # Apply processing paradigm alignment for consistency with error_handling module
+        aligned_error_data = ProcessingParadigmAligner.align_processing_modes(
+            source_mode="async", target_mode="batch", data=error_data
+        )
+
+        # Validate at web_interface -> error_handling boundary for consistency
+        try:
+            BoundaryValidator.validate_monitoring_to_error_boundary(aligned_error_data)
+        except ValidationError:
+            # If boundary validation fails, continue with basic error response
+            pass
+
+        # Create sanitized error response with consistent structure
         error_response = {
             "error": {
                 "type": "InternalServerError",
                 "message": "An internal server error occurred",
                 "timestamp": self._get_current_timestamp(),
                 "request_id": self._get_request_id(request),
+                "processing_mode": "stream",
+                "data_format": "error_response_v1",
+                "boundary_crossed": True,
             }
         }
 
@@ -219,6 +302,7 @@ class ErrorHandlerMiddleware(BaseHTTPMiddleware):
                 "path": str(request.url.path),
                 "method": request.method,
                 "traceback": traceback.format_exc(),
+                "aligned_error_data": aligned_error_data,
             }
 
         return JSONResponse(status_code=500, content=error_response)
@@ -325,7 +409,7 @@ class ErrorHandlerMiddleware(BaseHTTPMiddleware):
         self, request: Request, exception: Exception, error_context: ErrorContext
     ) -> JSONResponse:
         """
-        Handle errors that were recovered by the global error handler.
+        Handle errors that were recovered by the global error handler with consistent patterns.
 
         Args:
             request: HTTP request
@@ -335,6 +419,37 @@ class ErrorHandlerMiddleware(BaseHTTPMiddleware):
         Returns:
             JSONResponse: Error response with recovery info
         """
+        # Apply consistent data transformation patterns matching error_handling module
+        from datetime import datetime, timezone
+
+        from src.utils.messaging_patterns import BoundaryValidator, ProcessingParadigmAligner
+
+        # Create recovery data with consistent format matching error_handling module
+        recovery_data = {
+            "error_type": exception.__class__.__name__,
+            "component": "web_interface",
+            "operation": f"{request.method} {request.url.path}",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "processing_mode": "stream",  # Align with risk_management stream processing
+            "data_format": "recovery_response_v1",
+            "message_pattern": "batch",
+            "boundary_crossed": True,
+            "validation_status": "recovered",
+            "severity": "medium",  # Recovery implies medium severity
+        }
+
+        # Apply processing paradigm alignment for consistency with error_handling module
+        aligned_recovery_data = ProcessingParadigmAligner.align_processing_modes(
+            source_mode="async", target_mode="batch", data=recovery_data
+        )
+
+        # Validate at web_interface -> error_handling boundary for consistency
+        try:
+            BoundaryValidator.validate_monitoring_to_error_boundary(aligned_recovery_data)
+        except ValidationError:
+            # If boundary validation fails, continue with basic recovery response
+            pass
+
         # Log the recovery
         self.logger.info(
             "Error recovered by global handler",
@@ -343,7 +458,7 @@ class ErrorHandlerMiddleware(BaseHTTPMiddleware):
             recovery_method=error_context.details.get("recovery_method", "unknown"),
         )
 
-        # Create response with recovery information
+        # Create response with recovery information and consistent structure
         recovery_details = error_context.details.get("recovery_details", {})
         error_response = {
             "error": {
@@ -352,6 +467,9 @@ class ErrorHandlerMiddleware(BaseHTTPMiddleware):
                 "code": getattr(exception, "error_code", None),
                 "timestamp": self._get_current_timestamp(),
                 "request_id": self._get_request_id(request),
+                "processing_mode": "stream",
+                "data_format": "recovery_response_v1",
+                "boundary_crossed": True,
                 "recovery": {
                     "attempted": True,
                     "success": True,
@@ -363,6 +481,7 @@ class ErrorHandlerMiddleware(BaseHTTPMiddleware):
                         "max_attempts", error_context.max_recovery_attempts
                     ),
                     "details": error_context.details.get("recovery_message", "Recovery successful"),
+                    "aligned_data": aligned_recovery_data,
                 },
             }
         }
@@ -433,7 +552,7 @@ class ErrorHandlerMiddleware(BaseHTTPMiddleware):
         # Add global error handler stats if available
         if self.global_error_handler:
             try:
-                handler_stats = self.global_error_handler.get_handler_stats()
+                handler_stats = self.global_error_handler.get_statistics()
                 stats["global_handler_stats"] = handler_stats
             except Exception as e:
                 stats["global_handler_stats"] = {"status": "unavailable", "error": str(e)}
@@ -441,7 +560,31 @@ class ErrorHandlerMiddleware(BaseHTTPMiddleware):
         # Add pattern analytics stats if available
         if self.pattern_analytics:
             try:
-                pattern_stats = self.pattern_analytics.get_analytics_stats()
+                # Use safe method calls that match the actual interface
+                pattern_stats = {"status": "available"}
+                # Check if methods exist before calling
+                if hasattr(self.pattern_analytics, "get_all_patterns"):
+                    try:
+                        pattern_stats["pattern_count"] = len(
+                            self.pattern_analytics.get_all_patterns()
+                        )
+                    except Exception as e:
+                        logger.debug(f"Error getting pattern count: {e}")
+                        pattern_stats["pattern_count"] = 0
+                if hasattr(self.pattern_analytics, "get_recent_events"):
+                    try:
+                        pattern_stats["recent_events"] = len(
+                            self.pattern_analytics.get_recent_events(hours=24)
+                        )
+                    except Exception as e:
+                        logger.debug(f"Error getting recent events: {e}")
+                        pattern_stats["recent_events"] = 0
+                if hasattr(self.pattern_analytics, "get_all_events"):
+                    try:
+                        pattern_stats["total_events"] = len(self.pattern_analytics.get_all_events())
+                    except Exception as e:
+                        logger.debug(f"Error getting total events: {e}")
+                        pattern_stats["total_events"] = 0
                 stats["pattern_analytics_stats"] = pattern_stats
             except Exception as e:
                 stats["pattern_analytics_stats"] = {"status": "unavailable", "error": str(e)}

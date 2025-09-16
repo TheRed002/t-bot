@@ -18,8 +18,6 @@ import socketio
 from socketio import AsyncNamespace, AsyncServer
 
 from src.core.base import BaseComponent
-
-
 from src.core.exceptions import AuthenticationError
 from src.core.logging import correlation_context
 from src.error_handling import (
@@ -32,6 +30,11 @@ from src.error_handling.recovery_scenarios import NetworkDisconnectionRecovery
 
 class TradingNamespace(AsyncNamespace):
     """Main namespace for trading-related Socket.IO events."""
+
+    # Configuration constants
+    CONNECTION_TIMEOUT = 10.0  # Timeout for connection manager operations
+    TOKEN_VALIDATION_TIMEOUT = 15.0  # Timeout for token validation during connection
+    TOKEN_AUTH_TIMEOUT = 10.0  # Timeout for token validation during auth
 
     def __init__(self, namespace: str = "/", jwt_handler=None):
         super().__init__(namespace)
@@ -58,21 +61,32 @@ class TradingNamespace(AsyncNamespace):
         self.max_connections_per_ip = 10
 
     async def on_connect(
-        self, sid: str, environ: dict[str, Any], auth: dict[str, Any] | None = None
+        self, sid: str, environ: dict[str, Any] | None = None, auth: dict[str, Any] = None
     ):
         """Handle client connection with security checks."""
         # Get client IP for rate limiting
-        client_ip = environ.get("REMOTE_ADDR", "unknown")
+        client_ip = environ.get("REMOTE_ADDR", "unknown") if environ else "unknown"
 
-        # Register connection with connection manager
+        # Register connection with connection manager with proper async context
         if self.connection_manager:
             try:
-                await self.connection_manager.add_connection(
-                    connection_id=sid,
-                    connection_type="socketio",
-                    metadata={"client_ip": client_ip, "namespace": self.namespace},
-                )
-                await self.connection_manager.update_state(sid, ConnectionState.CONNECTING)
+                try:
+                    # Add timeout for connection manager operations
+                    await asyncio.wait_for(
+                        self.connection_manager.add_connection(
+                            connection_id=sid,
+                            connection_type="socketio",
+                            metadata={"client_ip": client_ip, "namespace": self.namespace},
+                        ),
+                        timeout=self.CONNECTION_TIMEOUT
+                    )
+                    await asyncio.wait_for(
+                        self.connection_manager.update_state(sid, ConnectionState.CONNECTING),
+                        timeout=self.CONNECTION_TIMEOUT
+                    )
+                except asyncio.TimeoutError:
+                    self.logger.error(f"Timeout registering connection {sid} with manager")
+                    return False
             except Exception as e:
                 self.logger.warning(f"Failed to register connection {sid} with manager: {e}")
 
@@ -98,10 +112,14 @@ class TradingNamespace(AsyncNamespace):
             "client_ip": client_ip,
         }
 
-        # Check for authentication token
+        # Check for authentication token with proper async handling
         if auth and "token" in auth:
             try:
-                token_data = await self._validate_token(auth["token"])
+                # Add timeout for token validation
+                token_data = await asyncio.wait_for(
+                    self._validate_token(auth["token"]),
+                    timeout=self.TOKEN_VALIDATION_TIMEOUT
+                )
                 if token_data:
                     self.connected_clients[sid]["authenticated"] = True
                     self.connected_clients[sid]["user_id"] = token_data["user_id"]
@@ -115,12 +133,28 @@ class TradingNamespace(AsyncNamespace):
                     # Update connection state to active after successful auth
                     if self.connection_manager:
                         try:
-                            await self.connection_manager.update_state(sid, ConnectionState.ACTIVE)
+                            await asyncio.wait_for(
+                                self.connection_manager.update_state(
+                                    sid, ConnectionState.ACTIVE
+                                ),
+                                timeout=5.0
+                            )
+                        except asyncio.TimeoutError:
+                            self.logger.warning(
+                                f"Timeout updating connection state to active for {sid}"
+                            )
                         except Exception as e:
-                            self.logger.warning(f"Failed to update connection state to active: {e}")
+                            self.logger.warning(
+                                f"Failed to update connection state to active: {e}"
+                            )
                 else:
-                    await self.emit("auth_error", {"error": "Invalid or expired token"}, room=sid)
+                    await self.emit(
+                        "auth_error", {"error": "Invalid or expired token"}, room=sid
+                    )
                     self.logger.warning(f"Authentication failed for client {sid}")
+            except asyncio.TimeoutError:
+                self.logger.error(f"Authentication timeout for client {sid}")
+                await self.emit("auth_error", {"error": "Authentication timeout"}, room=sid)
             except Exception as e:
                 self.logger.error(f"Authentication error for client {sid}: {e}")
                 await self.emit("auth_error", {"error": "Authentication service error"}, room=sid)
@@ -151,17 +185,27 @@ class TradingNamespace(AsyncNamespace):
 
     @with_error_context(operation="socketio_disconnect")
     async def on_disconnect(self, sid: str):
-        """Handle client disconnection."""
+        """Handle client disconnection with proper cleanup and timeouts."""
         self.logger.info(f"Client disconnected: {sid}")
 
-        # Update connection state in connection manager with error handling
-        if self.connection_manager:
-            try:
-                await self.connection_manager.update_state(sid, ConnectionState.DISCONNECTED)
-            except Exception as e:
-                self.logger.warning(f"Failed to update connection state for {sid}: {e}")
+        # Use async context manager for proper cleanup
+        async def cleanup_connection_manager():
+            if self.connection_manager:
+                try:
+                    await asyncio.wait_for(
+                        self.connection_manager.update_state(
+                            sid, ConnectionState.DISCONNECTED
+                        ),
+                        timeout=5.0
+                    )
+                    await self.connection_manager.remove_connection(sid)
+                except asyncio.TimeoutError:
+                    self.logger.warning(f"Timeout during connection manager cleanup for {sid}")
+                except Exception as e:
+                    self.logger.warning(f"Failed to cleanup connection manager for {sid}: {e}")
 
         # Clean up client data and decrement connection count
+        client_cleanup_tasks = []
         if sid in self.connected_clients:
             client_data = self.connected_clients[sid]
             client_ip = client_data.get("client_ip")
@@ -179,12 +223,14 @@ class TradingNamespace(AsyncNamespace):
         if sid in self.authenticated_sessions:
             self.authenticated_sessions.remove(sid)
 
-        # Remove connection from manager
-        if self.connection_manager:
-            try:
-                await self.connection_manager.remove_connection(sid)
-            except Exception as e:
-                self.logger.warning(f"Failed to remove connection {sid} from manager: {e}")
+        # Perform connection manager cleanup concurrently
+        client_cleanup_tasks.append(cleanup_connection_manager())
+
+        # Execute cleanup tasks concurrently with timeout
+        try:
+            await asyncio.gather(*client_cleanup_tasks, return_exceptions=True)
+        except Exception as e:
+            self.logger.warning(f"Error during client disconnect cleanup: {e}")
 
     @with_error_context(operation="socketio_authenticate")
     async def on_authenticate(self, sid: str, data: dict[str, Any]):
@@ -276,8 +322,10 @@ class TradingNamespace(AsyncNamespace):
 
         # Execute order through trading engine
         # TBD: Integrate with actual trading engine when execution service is available
+        from src.core.event_constants import OrderEvents
+
         await self.emit(
-            "order_submitted",
+            OrderEvents.CREATED,
             {
                 "order_id": f"ORD-{sid}-{datetime.now(timezone.utc).timestamp()}",
                 "status": "pending",
@@ -311,19 +359,30 @@ class TradingNamespace(AsyncNamespace):
         await self.emit("portfolio_data", portfolio_data, room=sid)
 
     async def _validate_token(self, token: str) -> dict[str, Any] | None:
-        """Validate JWT authentication token."""
+        """Validate JWT authentication token with proper async handling."""
         try:
             if not self.jwt_handler:
                 self.logger.error("JWT handler not configured for WebSocket authentication")
                 return None
 
-            # Validate the JWT token - check if it's async
+            # Validate the JWT token with timeout and proper async handling
+            # Add timeout for token validation
             if callable(self.jwt_handler.validate_token) and asyncio.iscoroutinefunction(
                 self.jwt_handler.validate_token
             ):
-                token_data = await self.jwt_handler.validate_token(token)
+                token_data = await asyncio.wait_for(
+                    self.jwt_handler.validate_token(token),
+                    timeout=self.TOKEN_AUTH_TIMEOUT
+                )
             else:
-                token_data = self.jwt_handler.validate_token(token)
+                # Run sync function in thread pool to avoid blocking
+                loop = asyncio.get_running_loop()
+                token_data = await asyncio.wait_for(
+                    loop.run_in_executor(
+                        None, self.jwt_handler.validate_token, token
+                    ),
+                    timeout=self.TOKEN_AUTH_TIMEOUT
+                )
 
             if token_data:
                 return {
@@ -337,6 +396,9 @@ class TradingNamespace(AsyncNamespace):
 
             return None
 
+        except asyncio.TimeoutError:
+            self.logger.warning("Token validation timeout")
+            return None
         except AuthenticationError as e:
             self.logger.warning(f"JWT token validation failed: {e}")
             return None
@@ -430,22 +492,40 @@ class SocketIOManager(BaseComponent):
             self.logger.info("Background tasks started")
 
     async def stop_background_tasks(self):
-        """Stop all background tasks."""
+        """Stop all background tasks with proper timeout and cleanup."""
         self._is_running = False
 
         # Generate correlation ID for shutdown tasks
         correlation_id = correlation_context.generate_correlation_id()
         with correlation_context.correlation_context(correlation_id):
             try:
-                # Cancel all background tasks
+                # Cancel all background tasks with timeout
+                # Add overall timeout for shutdown
+                async def shutdown_tasks():
+                    cancel_tasks = []
+                    for task in self.background_tasks:
+                        if not task.done():
+                            task.cancel()
+                            cancel_tasks.append(task)
+
+                    # Wait for all tasks to complete or be cancelled with individual timeouts
+                    if cancel_tasks:
+                        await asyncio.gather(*cancel_tasks, return_exceptions=True)
+
+                await asyncio.wait_for(shutdown_tasks(), timeout=30.0)
+
+            except asyncio.TimeoutError:
+                self.logger.warning(
+                    "Timeout stopping background tasks, some tasks may not have completed"
+                )
+                # Force cleanup of remaining tasks
                 for task in self.background_tasks:
                     if not task.done():
                         task.cancel()
-
-                # Wait for all tasks to complete or be cancelled
-                if self.background_tasks:
-                    await asyncio.gather(*self.background_tasks, return_exceptions=True)
-
+                        try:
+                            await asyncio.wait_for(task, timeout=1.0)
+                        except (asyncio.CancelledError, asyncio.TimeoutError):
+                            pass
             except Exception as e:
                 self.logger.error(f"Error stopping background tasks: {e}")
             finally:

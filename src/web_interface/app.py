@@ -5,6 +5,9 @@ This module creates and configures the FastAPI application with all
 middleware, routes, and dependencies for the trading system web interface.
 """
 
+# Global instances with thread safety
+import os
+import threading
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -12,14 +15,9 @@ import socketio
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
-# Global instances with thread safety
-import threading
-
-from src.core.base import BaseComponent
-
 from src.core.config import Config
 from src.core.exceptions import ConfigurationError
-from src.core.logging import correlation_context
+from src.core.logging import correlation_context, get_logger
 from src.monitoring import (
     AlertManager,
     MetricsCollector,
@@ -35,6 +33,14 @@ from src.monitoring import (
 
 # New unified architecture imports
 from src.web_interface.auth import get_auth_manager, initialize_auth_manager
+from src.web_interface.constants import (
+    ANONYMOUS_RATE_LIMIT,
+    AUTHENTICATED_RATE_LIMIT,
+    DEFAULT_JWT_EXPIRE_MINUTES,
+    DEFAULT_PORT,
+    DEFAULT_SESSION_TIMEOUT_MINUTES,
+    DEV_ORIGINS,
+)
 from src.web_interface.facade import get_api_facade, get_service_registry
 
 # Import middleware
@@ -49,6 +55,9 @@ from src.web_interface.middleware.rate_limit import RateLimitMiddleware
 from src.web_interface.middleware.security import SecurityMiddleware
 from src.web_interface.versioning import VersioningMiddleware, VersionRoutingMiddleware
 from src.web_interface.websockets import get_unified_websocket_manager
+
+# Initialize logger
+logger = get_logger(__name__)
 
 app_config: Config | None = None
 bot_orchestrator = None
@@ -91,14 +100,14 @@ async def _initialize_services():
                     "secret_key": app_config.security.secret_key,
                     "algorithm": getattr(app_config.security, "jwt_algorithm", "HS256"),
                     "access_token_expire_minutes": getattr(
-                        app_config.security, "jwt_expire_minutes", 30
+                        app_config.security, "jwt_expire_minutes", DEFAULT_JWT_EXPIRE_MINUTES
                     ),
                     "refresh_token_expire_days": getattr(
                         app_config.security, "refresh_token_expire_days", 7
                     ),
                 },
                 "session": {
-                    "timeout_minutes": getattr(app_config.security, "session_timeout_minutes", 60)
+                    "timeout_minutes": getattr(app_config.security, "session_timeout_minutes", DEFAULT_SESSION_TIMEOUT_MINUTES)
                 },
             }
             initialize_auth_manager(auth_config)
@@ -143,13 +152,13 @@ async def _connect_api_endpoints_to_services(registry):
             from src.web_interface.api import bot_management
 
             bot_management.set_bot_service(bot_mgmt_service)
-            BaseComponent().logger.info("Connected bot management API to service")
+            logger.info("Connected bot management API to service")
 
         # Add other API connections here as needed
         # Example: trading API, portfolio API, etc.
 
     except Exception as e:
-        BaseComponent().logger.error(f"Error connecting API endpoints to services: {e}")
+        logger.error(f"Error connecting API endpoints to services: {e}")
 
 
 @asynccontextmanager
@@ -162,7 +171,7 @@ async def lifespan(app: FastAPI):
     # Startup
     startup_correlation_id = correlation_context.generate_correlation_id()
     with correlation_context.correlation_context(startup_correlation_id):
-        BaseComponent().logger.info("Starting T-Bot web interface with unified architecture")
+        logger.info("Starting T-Bot web interface with unified architecture")
 
     try:
         # Initialize service layer
@@ -173,25 +182,25 @@ async def lifespan(app: FastAPI):
             websocket_manager = get_unified_websocket_manager()
             await websocket_manager.start()
             with correlation_context.correlation_context(startup_correlation_id):
-                BaseComponent().logger.info("Unified WebSocket manager started")
+                logger.info("Unified WebSocket manager started")
         except Exception as e:
             with correlation_context.correlation_context(startup_correlation_id):
-                BaseComponent().logger.error(f"Failed to start WebSocket manager: {e}")
+                logger.error(f"Failed to start WebSocket manager: {e}")
                 raise
 
         # Initialize trading system components
         if bot_orchestrator:
             await bot_orchestrator.start()
             with correlation_context.correlation_context(startup_correlation_id):
-                BaseComponent().logger.info("Bot orchestrator started")
+                logger.info("Bot orchestrator started")
 
         if execution_engine:
             await execution_engine.start()
             with correlation_context.correlation_context(startup_correlation_id):
-                BaseComponent().logger.info("Execution engine started")
+                logger.info("Execution engine started")
 
         with correlation_context.correlation_context(startup_correlation_id):
-            BaseComponent().logger.info("T-Bot web interface startup completed")
+            logger.info("T-Bot web interface startup completed")
 
         yield
 
@@ -199,7 +208,7 @@ async def lifespan(app: FastAPI):
         # Shutdown
         shutdown_correlation_id = correlation_context.generate_correlation_id()
         with correlation_context.correlation_context(shutdown_correlation_id):
-            BaseComponent().logger.info("Shutting down T-Bot web interface")
+            logger.info("Shutting down T-Bot web interface")
 
         try:
             # Stop trading system components in reverse order of startup
@@ -207,39 +216,39 @@ async def lifespan(app: FastAPI):
                 try:
                     await execution_engine.stop()
                     with correlation_context.correlation_context(shutdown_correlation_id):
-                        BaseComponent().logger.info("Execution engine stopped")
+                        logger.info("Execution engine stopped")
                 except Exception as e:
                     with correlation_context.correlation_context(shutdown_correlation_id):
-                        BaseComponent().logger.error(f"Error stopping execution engine: {e}")
+                        logger.error(f"Error stopping execution engine: {e}")
 
             if bot_orchestrator and hasattr(bot_orchestrator, "stop"):
                 try:
                     await bot_orchestrator.stop()
                     with correlation_context.correlation_context(shutdown_correlation_id):
-                        BaseComponent().logger.info("Bot orchestrator stopped")
+                        logger.info("Bot orchestrator stopped")
                 except Exception as e:
                     with correlation_context.correlation_context(shutdown_correlation_id):
-                        BaseComponent().logger.error(f"Error stopping bot orchestrator: {e}")
+                        logger.error(f"Error stopping bot orchestrator: {e}")
 
             # Stop unified WebSocket manager
             try:
                 websocket_manager = get_unified_websocket_manager()
                 await websocket_manager.stop()
                 with correlation_context.correlation_context(shutdown_correlation_id):
-                    BaseComponent().logger.info("Unified WebSocket manager stopped")
+                    logger.info("Unified WebSocket manager stopped")
             except Exception as e:
                 with correlation_context.correlation_context(shutdown_correlation_id):
-                    BaseComponent().logger.error(f"Error stopping WebSocket manager: {e}")
+                    logger.error(f"Error stopping WebSocket manager: {e}")
 
             # Cleanup API facade and service registry
             try:
                 facade = get_api_facade()
                 await facade.cleanup()
                 with correlation_context.correlation_context(shutdown_correlation_id):
-                    BaseComponent().logger.info("API facade cleaned up")
+                    logger.info("API facade cleaned up")
             except Exception as e:
                 with correlation_context.correlation_context(shutdown_correlation_id):
-                    BaseComponent().logger.error(f"Error cleaning up API facade: {e}")
+                    logger.error(f"Error cleaning up API facade: {e}")
 
             try:
                 registry = get_service_registry()
@@ -248,34 +257,34 @@ async def lifespan(app: FastAPI):
                 try:
                     service_names = registry.get_all_service_names()
                 except Exception as e:
-                    BaseComponent().logger.warning(f"Could not get service names: {e}")
-                    
+                    logger.warning(f"Could not get service names: {e}")
+
                 for service_name in service_names:
                     try:
                         service = registry.get_service(service_name)
                         if hasattr(service, "cleanup"):
                             await service.cleanup()
                     except Exception as e:
-                        BaseComponent().logger.warning(f"Error cleaning up service {service_name}: {e}")
-                        
+                        logger.warning(f"Error cleaning up service {service_name}: {e}")
+
                 # Clear all services using the cleanup method
                 try:
                     await registry.cleanup_all()
                 except Exception as e:
-                    BaseComponent().logger.warning(f"Error during registry cleanup_all: {e}")
-                    
+                    logger.warning(f"Error during registry cleanup_all: {e}")
+
                 with correlation_context.correlation_context(shutdown_correlation_id):
-                    BaseComponent().logger.info("Service registry cleaned up")
+                    logger.info("Service registry cleaned up")
             except Exception as e:
                 with correlation_context.correlation_context(shutdown_correlation_id):
-                    BaseComponent().logger.error(f"Error cleaning up service registry: {e}")
+                    logger.error(f"Error cleaning up service registry: {e}")
 
             with correlation_context.correlation_context(shutdown_correlation_id):
-                BaseComponent().logger.info("T-Bot web interface shutdown completed")
+                logger.info("T-Bot web interface shutdown completed")
 
         except Exception as e:
             with correlation_context.correlation_context(shutdown_correlation_id):
-                BaseComponent().logger.error(f"Error during shutdown: {e}")
+                logger.error(f"Error during shutdown: {e}")
 
 
 def create_app(
@@ -312,17 +321,17 @@ def create_app(
         {
             "debug": getattr(config, "debug", False),
             "jwt": {
-                "secret_key": getattr(config.security, "secret_key", "default-secret-key"),
+                "secret_key": config.security.secret_key or os.environ.get("JWT_SECRET_KEY"),
                 "algorithm": getattr(config.security, "jwt_algorithm", "HS256"),
-                "access_token_expire_minutes": getattr(config.security, "jwt_expire_minutes", 30),
+                "access_token_expire_minutes": getattr(config.security, "jwt_expire_minutes", DEFAULT_JWT_EXPIRE_MINUTES),
             },
             "cors": {
-                "allow_origins": ["http://localhost:3000", "http://testserver"],
+                "allow_origins": DEV_ORIGINS,
                 "allow_credentials": True,
                 "allow_methods": ["*"],
                 "allow_headers": ["*"],
             },
-            "rate_limiting": {"anonymous_limit": 1000, "authenticated_limit": 5000},
+            "rate_limiting": {"anonymous_limit": ANONYMOUS_RATE_LIMIT, "authenticated_limit": AUTHENTICATED_RATE_LIMIT},
         },
     )
 
@@ -341,7 +350,7 @@ def create_app(
     cors_config = web_config.get("cors", {})
     fastapi_app.add_middleware(
         CORSMiddleware,
-        allow_origins=cors_config.get("allow_origins", ["http://localhost:3000"]),
+        allow_origins=cors_config.get("allow_origins", DEV_ORIGINS[:1]),
         allow_credentials=cors_config.get("allow_credentials", True),
         allow_methods=cors_config.get("allow_methods", ["*"]),
         allow_headers=cors_config.get("allow_headers", ["*"]),
@@ -372,12 +381,15 @@ def create_app(
             set_global_pool_manager,
         )
 
+        # Create and set up connection pool middleware
         connection_pool_middleware = ConnectionPoolMiddleware(fastapi_app, config)
-        fastapi_app.add_middleware(ConnectionPoolMiddleware, config=config)
         set_global_pool_manager(connection_pool_middleware.pool_manager)
+
+        # Add the middleware instance to FastAPI
+        fastapi_app.add_middleware(ConnectionPoolMiddleware, config=config)
     except Exception as e:
         error_msg = f"Connection pool middleware setup failed: {e}"
-        BaseComponent().logger.error(error_msg)
+        logger.error(error_msg)
         # In production, connection pooling is critical for performance
         if getattr(config, "environment", "development") == "production":
             raise RuntimeError(error_msg)
@@ -387,13 +399,13 @@ def create_app(
         fastapi_app.add_middleware(DecimalValidationMiddleware)
         fastapi_app.add_middleware(DecimalPrecisionMiddleware)
     except Exception as e:
-        BaseComponent().logger.warning(f"Decimal precision middleware setup failed: {e}")
+        logger.warning(f"Decimal precision middleware setup failed: {e}")
 
     # 7. Rate limiting
     try:
         fastapi_app.add_middleware(RateLimitMiddleware, config=config)
     except Exception as e:
-        BaseComponent().logger.warning(f"Rate limiting middleware setup failed: {e}")
+        logger.warning(f"Rate limiting middleware setup failed: {e}")
 
     # 8. Authentication middleware
     try:
@@ -402,11 +414,11 @@ def create_app(
         jwt_handler = JWTHandler(config)
         fastapi_app.add_middleware(AuthMiddleware, jwt_handler=jwt_handler)
     except ImportError as e:
-        BaseComponent().logger.error(f"Auth middleware setup failed - authentication disabled: {e}")
+        logger.error(f"Auth middleware setup failed - authentication disabled: {e}")
         if config.environment == "production":
             raise RuntimeError("Cannot start without authentication in production")
     except Exception as e:
-        BaseComponent().logger.error(f"Auth middleware setup failed: {e}")
+        logger.error(f"Auth middleware setup failed: {e}")
         if config.environment == "production":
             raise RuntimeError("Cannot start without authentication in production")
 
@@ -423,7 +435,7 @@ def create_app(
     websocket_manager = get_unified_websocket_manager()
 
     # Create Socket.IO server with CORS configuration
-    cors_origins = cors_config.get("allow_origins", ["http://localhost:3000"])
+    cors_origins = cors_config.get("allow_origins", DEV_ORIGINS[:1])
     websocket_manager.create_server(cors_allowed_origins=cors_origins)
 
     # Wrap FastAPI app with Socket.IO
@@ -434,7 +446,7 @@ def create_app(
     # Generate correlation ID for app creation completion
     app_creation_correlation_id = correlation_context.generate_correlation_id()
     with correlation_context.correlation_context(app_creation_correlation_id):
-        BaseComponent().logger.info("FastAPI application with unified WebSocket manager created")
+        logger.info("FastAPI application with unified WebSocket manager created")
     return combined_app
 
 
@@ -461,7 +473,7 @@ def _register_routes(app: FastAPI) -> None:
         try:
             facade = get_api_facade()
             if hasattr(facade, "health_check"):
-                health_status["components"]["api_facade"] = facade.health_check()
+                health_status["components"]["api_facade"] = await facade.health_check()
             else:
                 health_status["components"]["api_facade"] = {"status": "available"}
         except Exception as e:
@@ -543,8 +555,15 @@ def _register_routes(app: FastAPI) -> None:
 
     # Register all API routers
     routers = [
-        ("src.web_interface.api.auth", "router", "/auth", ["Authentication"]),
-        ("src.web_interface.api.bot_management", "router", "/api/bots", ["Bot Management"]),
+        ("src.web_interface.api.auth", "router", "/api/auth", ["Authentication"]),
+        (
+            "src.web_interface.api.auth",
+            "router",
+            "/auth",
+            ["Authentication Legacy"],
+        ),  # Backward compatibility
+        ("src.web_interface.api.health", "router", "/api/health", ["Health"]),
+        ("src.web_interface.api.bot_management", "router", "/api/bot", ["Bot Management"]),
         ("src.web_interface.api.portfolio", "router", "/api/portfolio", ["Portfolio"]),
         ("src.web_interface.api.trading", "router", "/api/trading", ["Trading"]),
         ("src.web_interface.api.strategies", "router", "/api/strategies", ["Strategies"]),
@@ -553,6 +572,11 @@ def _register_routes(app: FastAPI) -> None:
         ("src.web_interface.api.monitoring", "router", "/api/monitoring", ["Monitoring"]),
         ("src.web_interface.api.playground", "router", "/api/playground", ["Playground"]),
         ("src.web_interface.api.optimization", "router", "/api/optimization", ["Optimization"]),
+        # New comprehensive API endpoints
+        ("src.web_interface.api.analytics", "router", "", ["Analytics"]),
+        ("src.web_interface.api.capital", "router", "", ["Capital Management"]),
+        ("src.web_interface.api.data", "router", "", ["Data Management"]),
+        ("src.web_interface.api.exchanges", "router", "", ["Exchange Management"]),
     ]
 
     # Track critical routers that must be available
@@ -570,9 +594,9 @@ def _register_routes(app: FastAPI) -> None:
             module = importlib.import_module(module_path)
             router = getattr(module, router_name)
             app.include_router(router, prefix=prefix, tags=tags)
-            BaseComponent().logger.debug(f"Registered router: {module_path}")
+            logger.debug(f"Registered router: {module_path}")
         except (ImportError, AttributeError) as e:
-            BaseComponent().logger.error(f"Failed to import {module_path}: {e}")
+            logger.error(f"Failed to import {module_path}: {e}")
             if module_path in critical_routers:
                 failed_critical.append(module_path)
 
@@ -603,14 +627,14 @@ def _setup_monitoring(fastapi_app: FastAPI, config: Config) -> None:
     global _monitoring_setup_done
 
     if _monitoring_setup_done:
-        BaseComponent().logger.debug("Monitoring infrastructure already setup, skipping")
+        logger.debug("Monitoring infrastructure already setup, skipping")
         return
 
     try:
         # Generate correlation ID for monitoring setup
         monitoring_correlation_id = correlation_context.generate_correlation_id()
         with correlation_context.correlation_context(monitoring_correlation_id):
-            BaseComponent().logger.info("Setting up monitoring infrastructure")
+            logger.info("Setting up monitoring infrastructure")
 
         # Setup OpenTelemetry tracing
         try:
@@ -625,29 +649,29 @@ def _setup_monitoring(fastapi_app: FastAPI, config: Config) -> None:
             set_global_trading_tracer(trading_tracer)
             instrument_fastapi(fastapi_app, telemetry_config)
             with correlation_context.correlation_context(monitoring_correlation_id):
-                BaseComponent().logger.info("OpenTelemetry tracing configured")
+                logger.info("OpenTelemetry tracing configured")
         except Exception as e:
             with correlation_context.correlation_context(monitoring_correlation_id):
-                BaseComponent().logger.warning(f"Failed to setup OpenTelemetry: {e}")
+                logger.warning(f"Failed to setup OpenTelemetry: {e}")
 
         # Setup metrics collection
         try:
             MetricsCollector()
             with correlation_context.correlation_context(monitoring_correlation_id):
-                BaseComponent().logger.info("Prometheus metrics collector configured")
+                logger.info("Prometheus metrics collector configured")
         except Exception as e:
             with correlation_context.correlation_context(monitoring_correlation_id):
-                BaseComponent().logger.warning(f"Failed to setup metrics collector: {e}")
+                logger.warning(f"Failed to setup metrics collector: {e}")
 
         # Setup performance profiler
         try:
             profiler = PerformanceProfiler(enable_memory_tracking=True, enable_cpu_profiling=True)
             set_global_profiler(profiler)
             with correlation_context.correlation_context(monitoring_correlation_id):
-                BaseComponent().logger.info("Performance profiler configured")
+                logger.info("Performance profiler configured")
         except Exception as e:
             with correlation_context.correlation_context(monitoring_correlation_id):
-                BaseComponent().logger.warning(f"Failed to setup performance profiler: {e}")
+                logger.warning(f"Failed to setup performance profiler: {e}")
 
         # Setup alert manager
         try:
@@ -660,18 +684,18 @@ def _setup_monitoring(fastapi_app: FastAPI, config: Config) -> None:
             alert_manager = AlertManager(notification_config)
             set_global_alert_manager(alert_manager)
             with correlation_context.correlation_context(monitoring_correlation_id):
-                BaseComponent().logger.info("Alert manager configured")
+                logger.info("Alert manager configured")
         except Exception as e:
             with correlation_context.correlation_context(monitoring_correlation_id):
-                BaseComponent().logger.warning(f"Failed to setup alert manager: {e}")
+                logger.warning(f"Failed to setup alert manager: {e}")
 
         with correlation_context.correlation_context(monitoring_correlation_id):
-            BaseComponent().logger.info("Monitoring infrastructure setup completed")
+            logger.info("Monitoring infrastructure setup completed")
         _monitoring_setup_done = True
 
     except Exception as e:
         with correlation_context.correlation_context(monitoring_correlation_id):
-            BaseComponent().logger.error(f"Error setting up monitoring infrastructure: {e}")
+            logger.error(f"Error setting up monitoring infrastructure: {e}")
 
 
 # Router creators removed - using direct imports instead
@@ -689,9 +713,7 @@ def get_app():
 
     # Prevent multiple simultaneous app creation
     if _app_creation_in_progress:
-        BaseComponent().logger.warning(
-            "App creation already in progress, returning None to prevent duplication"
-        )
+        logger.warning("App creation already in progress, returning None to prevent duplication")
         return None
 
     if _app_instance is None:
@@ -700,20 +722,18 @@ def get_app():
             # Generate correlation ID for app creation
             app_creation_correlation_id = correlation_context.generate_correlation_id()
             with correlation_context.correlation_context(app_creation_correlation_id):
-                BaseComponent().logger.info("Creating single application instance")
+                logger.info("Creating single application instance")
             _app_config_instance = Config()
             _app_instance = create_app(_app_config_instance)
             with correlation_context.correlation_context(app_creation_correlation_id):
-                BaseComponent().logger.info(
-                    "Module-level combined FastAPI+Socket.IO app created successfully"
-                )
+                logger.info("Module-level combined FastAPI+Socket.IO app created successfully")
         except Exception as e:
             app_error_correlation_id = correlation_context.generate_correlation_id()
             with correlation_context.correlation_context(app_error_correlation_id):
-                BaseComponent().logger.error(f"Failed to create module-level app: {e}")
+                logger.error(f"Failed to create module-level app: {e}")
                 # Create a minimal app as fallback
                 _app_instance = FastAPI(title="T-Bot Trading System API (Fallback)")
-                BaseComponent().logger.warning("Created fallback FastAPI app")
+                logger.warning("Created fallback FastAPI app")
         finally:
             _app_creation_in_progress = False
 
@@ -767,15 +787,13 @@ if __name__ == "__main__":
         port = (
             _app_config_instance.api.port
             if _app_config_instance and hasattr(_app_config_instance, "api")
-            else 8000
+            else DEFAULT_PORT
         )
     except (AttributeError, TypeError, ValueError) as e:
-        BaseComponent().logger.warning(
-            f"Failed to read port from config: {e}, using default port 8000"
-        )
-        port = 8000
+        logger.warning(f"Failed to read port from config: {e}, using default port {DEFAULT_PORT}")
+        port = DEFAULT_PORT
     except Exception as e:
-        BaseComponent().logger.error(f"Unexpected error reading configuration: {e}")
+        logger.error(f"Unexpected error reading configuration: {e}")
         raise ConfigurationError(
             "Failed to read application configuration",
             config_section="api.port",
@@ -783,6 +801,6 @@ if __name__ == "__main__":
         ) from e
     host = "0.0.0.0"
 
-    BaseComponent().logger.info(f"Starting web server on {host}:{port}")
+    logger.info(f"Starting web server on {host}:{port}")
 
     uvicorn.run(app_instance, host=host, port=port, reload=False, log_level="info")

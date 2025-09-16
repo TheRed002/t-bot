@@ -1,15 +1,15 @@
 """
-Web Interface for T-Bot Trading System - Refactored Architecture.
+Web Interface for T-Bot Trading System.
 
 This module provides the FastAPI-based web interface for the T-Bot trading system,
 including authentication, REST APIs, WebSocket endpoints, and real-time data streaming.
 
-Refactored features:
+Features:
 - API facade pattern for service abstraction
-- Comprehensive authentication layer with RBAC
+- Authentication layer with RBAC
 - API versioning with backward compatibility
 - Unified WebSocket manager for real-time data
-- Service layer abstractions for decoupling
+- Service layer for business logic
 
 The web interface serves as the primary user interface for:
 - Bot management and monitoring
@@ -20,7 +20,7 @@ The web interface serves as the primary user interface for:
 - ML model management and inference
 """
 
-# Import core refactored components
+# Import core components
 from .auth import get_auth_manager
 from .di_registration import register_web_interface_services
 from .facade import get_api_facade, get_service_registry

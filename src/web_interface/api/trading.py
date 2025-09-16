@@ -5,33 +5,24 @@ This module provides trading operations including order placement, cancellation,
 order history, and trade analysis functionality.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
-from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
-from src.core.exceptions import NetworkError, ValidationError
+from src.core.exceptions import ErrorSeverity, NetworkError, TimeoutError
 from src.core.logging import get_logger
 from src.core.types import OrderSide, OrderType
 from src.error_handling import (
-    ErrorSeverity,
     get_global_error_handler,
     with_error_context,
     with_retry,
 )
 from src.error_handling.context import ErrorContext
-from src.utils import (
-    format_price,
-    format_quantity,
-    handle_api_error,
-    safe_get_api_facade,
-    validate_price,
-    validate_quantity,
-    validate_symbol,
-)
+from src.utils.web_interface_utils import handle_api_error
+from src.web_interface.di_registration import get_web_trading_service
 from src.web_interface.security.auth import User, get_current_user, get_trading_user
 
 logger = get_logger(__name__)
@@ -39,8 +30,15 @@ router = APIRouter()
 
 
 def get_trading_service() -> Any:
-    """Get trading service through API facade."""
-    return safe_get_api_facade()
+    """Get trading service through web service layer."""
+    # Controllers should only use web services, not facades directly
+    # The web service will handle facade interactions internally
+    return get_web_trading_service_instance()
+
+
+def get_web_trading_service_instance():
+    """Get web trading service for business logic through DI."""
+    return get_web_trading_service()
 
 
 # Deprecated function for backward compatibility
@@ -52,7 +50,7 @@ def set_dependencies(engine: Any, orchestrator: Any) -> None:
 class PlaceOrderRequest(BaseModel):
     """Request model for placing an order."""
 
-    symbol: str = Field(..., description="Trading symbol (e.g., BTCUSDT)")
+    symbol: str = Field(..., description="Trading symbol (e.g., BTC/USDT)")
     side: OrderSide = Field(..., description="Order side (buy/sell)")
     order_type: OrderType = Field(..., description="Order type")
     quantity: Decimal = Field(..., gt=0, description="Order quantity")
@@ -169,110 +167,146 @@ async def place_order(
     try:
         # Get global error handler for integrated recovery
         global_error_handler = get_global_error_handler()
-    except Exception:
+    except Exception as e:
+        logger.warning(f"Could not get global error handler: {e}")
         global_error_handler = None
 
     try:
-        trading_facade = get_trading_service()
+        web_trading_service = get_web_trading_service_instance()
+        # Controllers should not access facades directly - use service layer
+        # All operations should go through web_trading_service
 
-        # Validate inputs using utils validators
-        for validator, value, field_name in [
-            (validate_symbol, order_request.symbol, "symbol"),
-            (validate_quantity, order_request.quantity, "quantity"),
-        ]:
-            try:
-                validator(value)
-            except ValidationError as e:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Invalid {field_name}: {e!s}",
-                ) from e
+        # Apply boundary validation before service call
+        from src.utils.messaging_patterns import BoundaryValidator
 
-        # Validate optional price fields
-        if order_request.price:
-            try:
-                validate_price(order_request.price)
-            except ValidationError as e:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Invalid price: {e!s}",
-                ) from e
+        boundary_data = {
+            "component": "web_interface_trading",
+            "operation": "POST /orders",
+            "processing_mode": "stream",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "request_context": True,
+            "symbol": order_request.symbol,
+            "quantity": str(order_request.quantity),
+            "price": str(order_request.price) if order_request.price else None,
+        }
 
-        if order_request.stop_price:
-            try:
-                validate_price(order_request.stop_price)
-            except ValidationError as e:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Invalid stop price: {e!s}",
-                ) from e
+        # Validate web_interface to execution boundary
+        BoundaryValidator.validate_web_interface_to_error_boundary(boundary_data)
 
-        # Place order through service layer
-        order_id = await trading_facade.place_order(
+        # Validate order request through web trading service (business logic moved to service)
+        validation_result = await web_trading_service.validate_order_request(
             symbol=order_request.symbol,
-            side=order_request.side,
-            order_type=order_request.order_type,
-            amount=order_request.quantity,
+            side=order_request.side.value,
+            order_type=order_request.order_type.value,
+            quantity=order_request.quantity,
             price=order_request.price,
         )
+
+        if not validation_result["valid"]:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Validation errors: {', '.join(validation_result['errors'])}",
+            )
+
+        validated_data = validation_result["validated_data"]
+
+        # Place order through service layer - service will handle facade calls
+        order_result = await web_trading_service.place_order_through_service(
+            symbol=validated_data["symbol"],
+            side=validated_data["side"],
+            order_type=validated_data["order_type"],
+            quantity=validated_data["quantity"],
+            price=validated_data["price"],
+        )
+        order_id = order_result.get("order_id")
 
         logger.info(
             "Order placed successfully",
             order_id=order_id,
-            symbol=order_request.symbol,
-            side=order_request.side.value,
-            quantity=order_request.quantity,
+            symbol=validated_data["symbol"],
+            side=validated_data["side"],
+            quantity=validated_data["quantity"],
             exchange=order_request.exchange,
             user=current_user.username,
         )
 
-        # Format response
-        formatted_quantity = format_quantity(order_request.quantity)
-        formatted_price = format_price(order_request.price) if order_request.price else None
-
-        return {
-            "success": True,
-            "message": "Order placed successfully",
-            "order_id": order_id,
-            "client_order_id": order_request.client_order_id or f"web_{uuid4().hex[:8]}",
-            "status": "submitted",
-            "quantity": formatted_quantity,
-            "price": formatted_price,
+        # Format response through web trading service (business logic moved to service)
+        request_data = {
+            "symbol": validated_data["symbol"],
+            "side": validated_data["side"],
+            "order_type": validated_data["order_type"],
+            "quantity": validated_data["quantity"],
+            "price": validated_data["price"],
+            "client_order_id": order_request.client_order_id,
         }
+
+        order_result = {"order_id": order_id}
+        formatted_response = await web_trading_service.format_order_response(
+            order_result, request_data
+        )
+
+        return formatted_response
 
     except HTTPException:
         # Re-raise FastAPI exceptions
         raise
     except Exception as e:
-        # Create error context
-        error_context = ErrorContext(
+        # Create error context with consistent data transformation
+        from src.execution.data_transformer import ExecutionDataTransformer
+
+        error_data = {
+            "component": "trading_api",
+            "operation": "place_order",
+            "severity": "high",
+            "user": current_user.username,
+            "symbol": order_request.symbol,
+            "side": order_request.side.value,
+            "quantity": str(order_request.quantity),
+            "exchange": order_request.exchange,
+            "processing_mode": "stream",
+            "data_format": "event_data_v1",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+        # Apply consistent cross-module error transformation
+        error_data = ExecutionDataTransformer.apply_cross_module_validation(
+            error_data, source_module="web_interface", target_module="error_handling"
+        )
+
+        error_context = ErrorContext.from_exception(
             error=e,
+            component="trading_api",
             operation="place_order",
             severity=ErrorSeverity.HIGH,
-            context={
-                "user": current_user.username,
-                "symbol": order_request.symbol,
-                "side": order_request.side.value,
-                "quantity": str(order_request.quantity),
-                "exchange": order_request.exchange,
-            },
+            user=current_user.username,
+            symbol=order_request.symbol,
+            side=order_request.side.value,
+            quantity=str(order_request.quantity),
+            exchange=order_request.exchange,
         )
 
         # Try to handle through global error handler
         if global_error_handler:
             try:
-                handled = await global_error_handler.handle_error(error_context)
-                if handled:
+                # Use consistent error data with execution module patterns
+                result = await global_error_handler.handle_error(
+                    error=e,
+                    context=error_data,  # Use transformed error data
+                    severity="high",
+                )
+                if result.get("recovery_attempted"):
                     # Recovery was successful
                     logger.info(
                         "Order error recovered by global handler",
-                        recovery_method=error_context.details.get("recovery_method", "unknown"),
+                        recovery_method=result.get("recovery_result", {}).get("method", "unknown"),
                     )
                     return {
                         "success": False,
                         "message": "Order processed with recovery",
                         "recovery_attempted": True,
-                        "recovery_method": error_context.details.get("recovery_method", "unknown"),
+                        "recovery_method": result.get("recovery_result", {}).get(
+                            "method", "unknown"
+                        ),
                     }
             except Exception as handler_error:
                 logger.warning(f"Error handler failed: {handler_error}")
@@ -319,10 +353,10 @@ async def cancel_order(
         HTTPException: If cancellation fails
     """
     try:
-        trading_facade = get_trading_service()
+        web_trading_service = get_web_trading_service_instance()
 
-        # Cancel order through service layer
-        success = await trading_facade.cancel_order(order_id)
+        # Cancel order through service layer - service will handle facade calls
+        success = await web_trading_service.cancel_order_through_service(order_id)
 
         if success:
             logger.info(
@@ -345,15 +379,14 @@ async def cancel_order(
         raise
     except Exception as e:
         # Create error context
-        error_context = ErrorContext(
+        error_context = ErrorContext.from_exception(
             error=e,
+            component="trading_api",
             operation="cancel_order",
             severity=ErrorSeverity.MEDIUM,
-            context={
-                "user": current_user.username,
-                "order_id": order_id,
-                "exchange": exchange,
-            },
+            user=current_user.username,
+            order_id=order_id,
+            exchange=exchange,
         )
 
         logger.error(
@@ -396,52 +429,27 @@ async def get_orders(
         HTTPException: If retrieval fails
     """
     try:
-        # Mock order data (in production, get from database/exchange)
+        web_trading_service = get_web_trading_service_instance()
+
+        # Prepare filters for service layer (business logic moved to service)
+        filters = {
+            "symbol": symbol,
+            "exchange": exchange,
+            "status": status,
+            "bot_id": bot_id,
+            "limit": limit,
+        }
+
+        # Get formatted orders through service layer
+        order_data_list = await web_trading_service.get_formatted_orders(filters)
+
+        # Convert to response models
         mock_orders = []
+        for order_data in order_data_list:
+            order = OrderResponse(**order_data)
+            mock_orders.append(order)
 
-        # Generate some mock orders
-        symbols = ["BTCUSDT", "ETHUSDT", "ADAUSDT"] if not symbol else [symbol]
-        exchanges = ["binance", "coinbase"] if not exchange else [exchange]
-        statuses = ["filled", "cancelled", "partially_filled"] if not status else [status]
-
-        for i in range(min(limit, 20)):  # Limit mock data
-            order_symbol = symbols[i % len(symbols)]
-            order_exchange = exchanges[i % len(exchanges)]
-            order_status = statuses[i % len(statuses)]
-
-            quantity = Decimal("1.0") + Decimal(str(i * 0.1))
-            filled_qty = quantity if order_status == "filled" else quantity * Decimal("0.5")
-
-            mock_order = OrderResponse(
-                order_id=f"order_{i + 1:03d}",
-                client_order_id=f"web_{uuid4().hex[:8]}",
-                symbol=order_symbol,
-                side="buy" if i % 2 == 0 else "sell",
-                order_type="limit",
-                quantity=quantity,
-                price=Decimal("45000.00") + Decimal(str(i * 100)),
-                stop_price=None,
-                status=order_status,
-                filled_quantity=filled_qty,
-                remaining_quantity=quantity - filled_qty,
-                average_fill_price=(
-                    Decimal("45000.00") + Decimal(str(i * 50)) if filled_qty > 0 else None
-                ),
-                commission=Decimal("0.1") if filled_qty > 0 else None,
-                commission_asset="USDT",
-                exchange=order_exchange,
-                bot_id=f"bot_{(i % 3) + 1:03d}" if i % 4 != 0 else None,
-                created_at=datetime.now(timezone.utc) - timedelta(hours=i),
-                updated_at=datetime.now(timezone.utc) - timedelta(hours=i, minutes=30),
-            )
-
-            # Apply bot_id filter
-            if bot_id and mock_order.bot_id != bot_id:
-                continue
-
-            mock_orders.append(mock_order)
-
-        return mock_orders[:limit]
+        return mock_orders
 
     except Exception as e:
         raise handle_api_error(e, "Orders retrieval", user=current_user.username)
@@ -468,39 +476,14 @@ async def get_order(
         HTTPException: If order not found or retrieval fails
     """
     try:
-        # Mock order data (in production, get from database/exchange)
-        mock_order = OrderResponse(
-            order_id=order_id,
-            client_order_id=f"web_{uuid4().hex[:8]}",
-            symbol="BTCUSDT",
-            side="buy",
-            order_type="limit",
-            quantity=Decimal("1.0"),
-            price=Decimal("45000.00"),
-            stop_price=None,
-            status="filled",
-            filled_quantity=Decimal("1.0"),
-            remaining_quantity=Decimal("0.0"),
-            average_fill_price=Decimal("44950.00"),
-            commission=Decimal("0.1"),
-            commission_asset="USDT",
-            exchange=exchange,
-            bot_id="bot_001",
-            created_at=datetime.now(timezone.utc) - timedelta(hours=2),
-            updated_at=datetime.now(timezone.utc) - timedelta(hours=1),
-            fills=[
-                {
-                    "trade_id": "trade_001",
-                    "quantity": "1.0",
-                    "price": "44950.00",
-                    "commission": "0.1",
-                    "commission_asset": "USDT",
-                    "executed_at": (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat(),
-                }
-            ],
-        )
+        web_trading_service = get_web_trading_service_instance()
 
-        return mock_order
+        # Get order data through service layer (business logic moved to service)
+        order_data = await web_trading_service.get_order_details(order_id, exchange)
+
+        # Convert to response model
+        order = OrderResponse(**order_data)
+        return order
 
     except Exception as e:
         raise handle_api_error(
@@ -537,51 +520,28 @@ async def get_trades(
         HTTPException: If retrieval fails
     """
     try:
-        # Mock trade data (in production, get from database)
+        web_trading_service = get_web_trading_service_instance()
+
+        # Prepare filters for service layer (business logic moved to service)
+        filters = {
+            "symbol": symbol,
+            "exchange": exchange,
+            "bot_id": bot_id,
+            "start_date": start_date,
+            "end_date": end_date,
+            "limit": limit,
+        }
+
+        # Get formatted trades through service layer
+        trade_data_list = await web_trading_service.get_formatted_trades(filters)
+
+        # Convert to response models
         mock_trades = []
+        for trade_data in trade_data_list:
+            trade = TradeResponse(**trade_data)
+            mock_trades.append(trade)
 
-        # Generate some mock trades
-        symbols = ["BTCUSDT", "ETHUSDT", "ADAUSDT"] if not symbol else [symbol]
-        exchanges = ["binance", "coinbase"] if not exchange else [exchange]
-
-        for i in range(min(limit, 30)):  # Limit mock data
-            trade_symbol = symbols[i % len(symbols)]
-            trade_exchange = exchanges[i % len(exchanges)]
-
-            executed_at = datetime.now(timezone.utc) - timedelta(hours=i, minutes=i * 5)
-
-            # Apply date filters
-            if start_date and executed_at < start_date:
-                continue
-            if end_date and executed_at > end_date:
-                continue
-
-            quantity = Decimal("0.5") + Decimal(str(i * 0.1))
-            price = Decimal("45000.00") + Decimal(str(i * 50))
-            value = quantity * price
-
-            mock_trade = TradeResponse(
-                trade_id=f"trade_{i + 1:03d}",
-                order_id=f"order_{i + 1:03d}",
-                symbol=trade_symbol,
-                side="buy" if i % 2 == 0 else "sell",
-                quantity=quantity,
-                price=price,
-                value=value,
-                commission=value * Decimal("0.001"),  # 0.1% commission
-                commission_asset="USDT",
-                exchange=trade_exchange,
-                bot_id=f"bot_{(i % 3) + 1:03d}" if i % 4 != 0 else None,
-                executed_at=executed_at,
-            )
-
-            # Apply bot_id filter
-            if bot_id and mock_trade.bot_id != bot_id:
-                continue
-
-            mock_trades.append(mock_trade)
-
-        return mock_trades[:limit]
+        return mock_trades
 
     except Exception as e:
         raise handle_api_error(e, "Trades retrieval", user=current_user.username)
@@ -608,30 +568,24 @@ async def get_market_data(
         HTTPException: If retrieval fails
     """
     try:
-        # Mock market data (in production, get from exchange API)
-        base_price = Decimal("45000.00") if "BTC" in symbol else Decimal("3000.00")
+        web_trading_service = get_web_trading_service_instance()
 
-        # Add some realistic variation
-        from random import uniform
+        # Get market data through service layer (business logic moved to service)
+        market_data = await web_trading_service.get_market_data_with_context(symbol, exchange)
 
-        price_variation = Decimal(str(uniform(-0.02, 0.02)))  # ±2%
-        current_price = base_price * (Decimal("1") + price_variation)
-
-        bid = current_price * Decimal("0.9999")
-        ask = current_price * Decimal("1.0001")
-
+        # Convert to response model
         mock_data = MarketDataResponse(
-            symbol=symbol,
-            exchange=exchange,
-            price=current_price,
-            bid=bid,
-            ask=ask,
-            volume_24h=Decimal("1234567.89"),
-            change_24h=current_price - base_price,
-            change_24h_percentage=(current_price - base_price) / base_price * 100,
-            high_24h=current_price * Decimal("1.05"),
-            low_24h=current_price * Decimal("0.95"),
-            timestamp=datetime.now(timezone.utc),
+            symbol=market_data["symbol"],
+            exchange=market_data["exchange"],
+            price=market_data["price"],
+            bid=market_data["bid"],
+            ask=market_data["ask"],
+            volume_24h=market_data["volume_24h"],
+            change_24h=market_data["change_24h"],
+            change_24h_percentage=market_data["change_24h_percentage"],
+            high_24h=market_data["high_24h"],
+            low_24h=market_data["low_24h"],
+            timestamp=market_data["timestamp"],
         )
 
         return mock_data
@@ -665,31 +619,19 @@ async def get_order_book(
         HTTPException: If retrieval fails
     """
     try:
-        # Mock order book data (in production, get from exchange)
-        base_price = Decimal("45000.00") if "BTC" in symbol else Decimal("3000.00")
+        web_trading_service = get_web_trading_service_instance()
 
-        # Generate mock bids (below current price)
-        bids = []
-        from random import uniform
-
-        for i in range(depth):
-            price = base_price * (Decimal("1") - Decimal(str(0.0001 * (i + 1))))
-            quantity = Decimal(str(uniform(0.1, 5.0)))
-            bids.append([price, quantity])
-
-        # Generate mock asks (above current price)
-        asks = []
-        for i in range(depth):
-            price = base_price * (Decimal("1") + Decimal(str(0.0001 * (i + 1))))
-            quantity = Decimal(str(uniform(0.1, 5.0)))
-            asks.append([price, quantity])
+        # Generate order book through service layer (business logic moved to service)
+        order_book_data = await web_trading_service.generate_order_book_data(
+            symbol, exchange, depth
+        )
 
         return OrderBookResponse(
-            symbol=symbol,
-            exchange=exchange,
-            bids=bids,
-            asks=asks,
-            timestamp=datetime.now(timezone.utc),
+            symbol=order_book_data["symbol"],
+            exchange=order_book_data["exchange"],
+            bids=order_book_data["bids"],
+            asks=order_book_data["asks"],
+            timestamp=order_book_data["timestamp"],
         )
 
     except Exception as e:
@@ -710,10 +652,14 @@ async def get_execution_status(current_user: User = Depends(get_current_user)):
         Dict: Execution engine status
     """
     try:
-        trading_facade = get_trading_service()
+        web_trading_service = get_web_trading_service_instance()
 
-        # Get service health status
-        health_status = trading_facade.health_check()
+        # Get service health status through service layer
+        health_status = (
+            await web_trading_service.get_service_health()
+            if hasattr(web_trading_service, "get_service_health")
+            else {"status": "unknown"}
+        )
 
         return {
             "success": True,
@@ -726,3 +672,128 @@ async def get_execution_status(current_user: User = Depends(get_current_user)):
 
     except Exception as e:
         raise handle_api_error(e, "Execution status retrieval", user=current_user.username)
+
+
+@router.get("/orders/active")
+async def get_active_orders(current_user: User = Depends(get_current_user)):
+    """Get active/open orders only."""
+    try:
+        # Mock active orders for testing
+        return [
+            {
+                "order_id": "ord_12345",
+                "symbol": "BTCUSDT",
+                "side": "buy",
+                "type": "limit",
+                "quantity": "0.001",
+                "price": "45000.00",
+                "status": "open",
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "filled_quantity": "0.0000",
+                "remaining_quantity": "0.001",
+            },
+            {
+                "order_id": "ord_67890",
+                "symbol": "ETHUSDT",
+                "side": "sell",
+                "type": "limit",
+                "quantity": "0.1",
+                "price": "3200.00",
+                "status": "partially_filled",
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "filled_quantity": "0.05",
+                "remaining_quantity": "0.05",
+            },
+        ]
+
+    except Exception as e:
+        logger.error(f"Active orders retrieval failed: {e}", user=current_user.username)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to get active orders"
+        )
+
+
+@router.get("/positions")
+async def get_trading_positions(current_user: User = Depends(get_current_user)):
+    """Get current trading positions."""
+    try:
+        from decimal import Decimal
+
+        # Mock positions for testing
+        return [
+            {
+                "symbol": "BTCUSDT",
+                "side": "long",
+                "size": str(Decimal("0.005")),
+                "entry_price": str(Decimal("44500.00")),
+                "current_price": str(Decimal("45200.00")),
+                "unrealized_pnl": str(Decimal("3.50")),
+                "realized_pnl": str(Decimal("0.00")),
+                "percentage": "1.57%",
+                "margin_used": str(Decimal("225.00")),
+                "liquidation_price": str(Decimal("40000.00")),
+                "opened_at": datetime.now(timezone.utc).isoformat(),
+            },
+            {
+                "symbol": "ETHUSDT",
+                "side": "short",
+                "size": str(Decimal("0.1")),
+                "entry_price": str(Decimal("3250.00")),
+                "current_price": str(Decimal("3200.00")),
+                "unrealized_pnl": str(Decimal("5.00")),
+                "realized_pnl": str(Decimal("0.00")),
+                "percentage": "1.54%",
+                "margin_used": str(Decimal("162.50")),
+                "liquidation_price": str(Decimal("3600.00")),
+                "opened_at": datetime.now(timezone.utc).isoformat(),
+            },
+        ]
+
+    except Exception as e:
+        logger.error(f"Positions retrieval failed: {e}", user=current_user.username)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to get positions"
+        )
+
+
+@router.get("/balance")
+async def get_trading_balance(current_user: User = Depends(get_current_user)):
+    """Get trading account balance."""
+    try:
+        from decimal import Decimal
+
+        # Mock trading balance
+        return {
+            "success": True,
+            "balance": {
+                "total_balance": str(Decimal("50000.00")),
+                "available_balance": str(Decimal("48750.25")),
+                "used_margin": str(Decimal("1249.75")),
+                "free_margin": str(Decimal("47500.50")),
+                "equity": str(Decimal("50008.50")),
+                "margin_level": "3996.68%",
+                "currency": "USDT",
+            },
+            "balances_by_asset": [
+                {
+                    "asset": "USDT",
+                    "free": str(Decimal("48750.25")),
+                    "locked": str(Decimal("1249.75")),
+                    "total": str(Decimal("50000.00")),
+                },
+                {
+                    "asset": "BTC",
+                    "free": str(Decimal("0.00018750")),
+                    "locked": str(Decimal("0.0000")),
+                    "total": str(Decimal("0.00018750")),
+                },
+            ],
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+    except Exception as e:
+        logger.error(f"Balance retrieval failed: {e}", user=current_user.username)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to get trading balance",
+        )

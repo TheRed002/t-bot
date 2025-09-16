@@ -5,27 +5,25 @@ This module provides risk monitoring, limits management, and risk analysis
 functionality for the trading system.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
+from src.core.exceptions import ServiceError, ValidationError
 from src.core.logging import get_logger
+from src.web_interface.di_registration import get_web_risk_service
 from src.web_interface.security.auth import User, get_admin_user, get_current_user
 
 logger = get_logger(__name__)
 router = APIRouter()
 
-# Global references (set by app startup)
-risk_manager = None
 
-
-def set_dependencies(manager):
-    """Set global dependencies."""
-    global risk_manager
-    risk_manager = manager
+def get_web_risk_service_instance():
+    """Get web risk service for business logic through DI."""
+    return get_web_risk_service()
 
 
 class RiskMetricsResponse(BaseModel):
@@ -151,47 +149,42 @@ async def get_risk_metrics(current_user: User = Depends(get_current_user)):
         HTTPException: If retrieval fails
     """
     try:
-        # Mock risk metrics (in production, calculate from actual portfolio)
-        portfolio_value = Decimal("150000.00")
-        total_exposure = Decimal("135000.00")
-        leverage = total_exposure / portfolio_value
+        risk_service = get_web_risk_service_instance()
+        risk_data = await risk_service.get_risk_dashboard_data()
 
-        # Mock VaR calculations
-        var_1d = portfolio_value * Decimal("0.025")  # 2.5% VaR
-        var_5d = var_1d * Decimal("2.236")  # sqrt(5) scaling
-
-        max_drawdown = Decimal("-12500.00")
-        max_drawdown_pct = abs(max_drawdown) / portfolio_value * 100
-
-        # Risk scoring (0-100, where 100 is highest risk)
-        risk_score = min(Decimal("100"), leverage * 20 + max_drawdown_pct * 2)
-
-        if risk_score < 30:
-            risk_level = "low"
-        elif risk_score < 60:
-            risk_level = "medium"
-        elif risk_score < 80:
-            risk_level = "high"
-        else:
-            risk_level = "critical"
+        overview = risk_data.get("overview", {})
+        var_metrics = risk_data.get("var_metrics", {})
+        portfolio_risk = risk_data.get("portfolio_risk", {})
 
         return RiskMetricsResponse(
-            portfolio_value=portfolio_value,
-            total_exposure=total_exposure,
-            leverage=leverage,
-            var_1d=var_1d,
-            var_5d=var_5d,
-            expected_shortfall=var_1d * Decimal("1.3"),  # ES typically 1.3x VaR
-            max_drawdown=max_drawdown,
-            max_drawdown_percentage=max_drawdown_pct,
-            volatility=0.15,  # 15% annualized volatility
-            beta=1.2,  # Beta vs BTC
-            correlation_btc=0.85,  # Correlation with BTC
-            risk_score=risk_score,
-            risk_level=risk_level,
+            portfolio_value=overview.get("portfolio_value", Decimal("0")),
+            total_exposure=overview.get("total_exposure", Decimal("0")),
+            leverage=overview.get("leverage", Decimal("1")),
+            var_1d=var_metrics.get("var_1d", Decimal("0")),
+            var_5d=var_metrics.get("var_5d", Decimal("0")),
+            expected_shortfall=var_metrics.get("expected_shortfall", Decimal("0")),
+            max_drawdown=portfolio_risk.get("max_drawdown", Decimal("0")),
+            max_drawdown_percentage=portfolio_risk.get("max_drawdown_percentage", Decimal("0")),
+            volatility=portfolio_risk.get("volatility", Decimal("0")),
+            beta=portfolio_risk.get("beta"),
+            correlation_btc=portfolio_risk.get("correlation_btc"),
+            risk_score=overview.get("risk_score", Decimal("0")),
+            risk_level=overview.get("risk_level", "unknown"),
             last_updated=datetime.now(timezone.utc),
         )
 
+    except ServiceError as e:
+        logger.error(f"Risk service error: {e}", user=current_user.username)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Risk service unavailable: {e!s}",
+        )
+    except ValidationError as e:
+        logger.error(f"Risk data validation error: {e}", user=current_user.username)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid risk data: {e!s}",
+        )
     except Exception as e:
         logger.error(f"Risk metrics retrieval failed: {e}", user=current_user.username)
         raise HTTPException(
@@ -215,19 +208,19 @@ async def get_risk_limits(current_user: User = Depends(get_current_user)):
         HTTPException: If retrieval fails
     """
     try:
-        # Mock risk limits (in production, get from configuration/database)
+        # Business logic moved to service layer - mock data for development
         return RiskLimitsResponse(
-            max_portfolio_risk=0.20,  # 20% max portfolio risk
+            max_portfolio_risk=Decimal("0.20"),  # 20% max portfolio risk
             max_position_size=Decimal("25000.00"),  # $25k max position
-            max_leverage=3.0,  # 3x max leverage
+            max_leverage=Decimal("3.0"),  # 3x max leverage
             max_daily_loss=Decimal("5000.00"),  # $5k max daily loss
-            max_drawdown_limit=0.15,  # 15% max drawdown
-            concentration_limit=0.30,  # 30% max in single asset
-            correlation_limit=0.70,  # 70% max correlation
+            max_drawdown_limit=Decimal("0.15"),  # 15% max drawdown
+            concentration_limit=Decimal("0.30"),  # 30% max in single asset
+            correlation_limit=Decimal("0.70"),  # 70% max correlation
             var_limit=Decimal("7500.00"),  # $7.5k VaR limit
             stop_loss_required=True,
             position_sizing_method="kelly_criterion",
-            risk_per_trade=0.02,  # 2% risk per trade
+            risk_per_trade=Decimal("0.02"),  # 2% risk per trade
         )
 
     except Exception as e:
@@ -256,43 +249,55 @@ async def update_risk_limits(
         HTTPException: If update fails
     """
     try:
-        # Mock risk limits update (in production, update configuration/database)
-        updated_fields = {}
+        risk_service = get_web_risk_service_instance()
 
-        if limits_request.max_portfolio_risk is not None:
-            updated_fields["max_portfolio_risk"] = limits_request.max_portfolio_risk
+        # Prepare parameters for validation
+        parameters = limits_request.model_dump(exclude_none=True)
 
-        if limits_request.max_position_size is not None:
-            updated_fields["max_position_size"] = limits_request.max_position_size
+        # Validate parameters through service
+        validation_result = await risk_service.validate_risk_parameters(parameters)
 
-        if limits_request.max_leverage is not None:
-            updated_fields["max_leverage"] = limits_request.max_leverage
+        if not validation_result["valid"]:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Validation errors: {validation_result['errors']}",
+            )
 
-        if limits_request.max_daily_loss is not None:
-            updated_fields["max_daily_loss"] = limits_request.max_daily_loss
+        # Note: Actual risk limits update should go through risk management service
+        # This is currently validation only - full implementation would require
+        # integration with risk_management.service to update actual limits
 
-        if limits_request.max_drawdown_limit is not None:
-            updated_fields["max_drawdown_limit"] = limits_request.max_drawdown_limit
-
-        if limits_request.risk_per_trade is not None:
-            updated_fields["risk_per_trade"] = limits_request.risk_per_trade
-
-        logger.info(
-            "Risk limits updated", updated_fields=updated_fields, admin=current_user.username
-        )
+        logger.info("Risk limits validated", updated_fields=parameters, admin=current_user.username)
 
         return {
             "success": True,
-            "message": "Risk limits updated successfully",
-            "updated_fields": updated_fields,
-            "updated_by": current_user.username,
-            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "message": "Risk limits validated successfully (update not implemented)",
+            "validated_fields": parameters,
+            "validated_by": current_user.username,
+            "validated_at": datetime.now(timezone.utc).isoformat(),
+            "recommendations": validation_result.get("recommendations", []),
+            "note": "Full risk limits update requires integration with risk management service",
         }
 
-    except Exception as e:
-        logger.error(f"Risk limits update failed: {e}", user=current_user.username)
+    except ValidationError as e:
+        logger.error(f"Risk parameter validation failed: {e}", user=current_user.username)
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail=f"Risk limits update failed: {e!s}"
+            status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid risk parameters: {e!s}"
+        )
+    except ServiceError as e:
+        logger.error(f"Risk service error: {e}", user=current_user.username)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Risk service unavailable: {e!s}",
+        )
+    except HTTPException:
+        # Re-raise HTTP exceptions
+        raise
+    except Exception as e:
+        logger.error(f"Risk limits validation failed: {e}", user=current_user.username)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Risk limits validation failed: {e!s}",
         )
 
 
@@ -319,78 +324,36 @@ async def get_risk_alerts(
         HTTPException: If retrieval fails
     """
     try:
-        # Mock risk alerts (in production, get from alerting system)
-        mock_alerts = [
-            {
-                "alert_id": "alert_001",
-                "alert_type": "drawdown_limit",
-                "severity": "high",
-                "message": "Portfolio drawdown exceeded 12% threshold",
-                "triggered_at": datetime.now(timezone.utc) - timedelta(hours=2),
-                "current_value": 13.2,
-                "threshold_value": 12.0,
-                "affected_positions": ["BTCUSDT", "ETHUSDT"],
-                "recommended_action": "Reduce position sizes or hedge portfolio",
-                "is_resolved": False,
-                "resolved_at": None,
-            },
-            {
-                "alert_id": "alert_002",
-                "alert_type": "var_limit",
-                "severity": "medium",
-                "message": "Daily VaR approaching limit",
-                "triggered_at": datetime.now(timezone.utc) - timedelta(hours=4),
-                "current_value": 7200.0,
-                "threshold_value": 7500.0,
-                "affected_positions": None,
-                "recommended_action": "Monitor closely and consider reducing exposure",
-                "is_resolved": False,
-                "resolved_at": None,
-            },
-            {
-                "alert_id": "alert_003",
-                "alert_type": "concentration_risk",
-                "severity": "medium",
-                "message": "BTC concentration exceeds 35% of portfolio",
-                "triggered_at": datetime.now(timezone.utc) - timedelta(hours=6),
-                "current_value": 37.5,
-                "threshold_value": 35.0,
-                "affected_positions": ["BTCUSDT"],
-                "recommended_action": "Diversify holdings or reduce BTC exposure",
-                "is_resolved": True,
-                "resolved_at": datetime.now(timezone.utc) - timedelta(hours=1),
-            },
-            {
-                "alert_id": "alert_004",
-                "alert_type": "leverage_limit",
-                "severity": "low",
-                "message": "Portfolio leverage increased to 2.8x",
-                "triggered_at": datetime.now(timezone.utc) - timedelta(hours=8),
-                "current_value": 2.8,
-                "threshold_value": 3.0,
-                "affected_positions": None,
-                "recommended_action": "Monitor leverage and avoid additional exposure",
-                "is_resolved": False,
-                "resolved_at": None,
-            },
-        ]
+        risk_service = get_web_risk_service_instance()
 
-        # Apply filters
+        # Prepare filters for service layer (business logic moved to service)
+        filters = {
+            "severity": severity,
+            "unresolved_only": unresolved_only,
+            "limit": limit,
+        }
+
+        # Get alerts through service layer
+        alert_data_list = risk_service.generate_mock_risk_alerts(filters)
+
+        # Convert to response models
         filtered_alerts = []
-        for alert_data in mock_alerts:
-            # Apply severity filter
-            if severity and alert_data["severity"] != severity:
-                continue
+        for alert_data in alert_data_list:
+            try:
+                alert = RiskAlertResponse(**alert_data)
+                filtered_alerts.append(alert)
+            except Exception as model_error:
+                logger.warning(f"Failed to convert alert data to response model: {model_error}")
+                continue  # Skip invalid alert data
 
-            # Apply unresolved filter
-            if unresolved_only and alert_data["is_resolved"]:
-                continue
+        return filtered_alerts
 
-            alert = RiskAlertResponse(**alert_data)
-            filtered_alerts.append(alert)
-
-        return filtered_alerts[:limit]
-
+    except ServiceError as e:
+        logger.error(f"Risk service error: {e}", user=current_user.username)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Risk service unavailable: {e!s}",
+        )
     except Exception as e:
         logger.error(f"Risk alerts retrieval failed: {e}", user=current_user.username)
         raise HTTPException(
@@ -420,72 +383,20 @@ async def get_position_risks(
         HTTPException: If retrieval fails
     """
     try:
-        # Mock position risk data (in production, calculate from actual positions)
-        mock_positions = [
-            {
-                "position_id": "pos_001",
-                "symbol": "BTCUSDT",
-                "exchange": "binance",
-                "side": "long",
-                "quantity": Decimal("2.0"),
-                "market_value": Decimal("94000.00"),
-                "unrealized_pnl": Decimal("4000.00"),
-                "risk_amount": Decimal("1880.00"),  # 2% of market value
-                "risk_percentage": 2.0,
-                "var_contribution": Decimal("2350.00"),
-                "beta": 1.0,  # BTC beta vs itself
-                "correlation": 1.0,  # BTC correlation vs itself
-                "concentration_risk": 62.7,  # High concentration
-                "liquidity_risk": "low",
-                "time_decay_risk": None,
-            },
-            {
-                "position_id": "pos_002",
-                "symbol": "ETHUSDT",
-                "exchange": "binance",
-                "side": "long",
-                "quantity": Decimal("15.0"),
-                "market_value": Decimal("46500.00"),
-                "unrealized_pnl": Decimal("1500.00"),
-                "risk_amount": Decimal("930.00"),
-                "risk_percentage": 2.0,
-                "var_contribution": Decimal("1162.50"),
-                "beta": 1.3,  # ETH beta vs BTC
-                "correlation": 0.85,  # ETH correlation vs BTC
-                "concentration_risk": 31.0,
-                "liquidity_risk": "low",
-                "time_decay_risk": None,
-            },
-            {
-                "position_id": "pos_003",
-                "symbol": "ADAUSDT",
-                "exchange": "coinbase",
-                "side": "long",
-                "quantity": Decimal("25000.0"),
-                "market_value": Decimal("9500.00"),
-                "unrealized_pnl": Decimal("-500.00"),
-                "risk_amount": Decimal("190.00"),
-                "risk_percentage": 2.0,
-                "var_contribution": Decimal("285.00"),
-                "beta": 1.5,  # ADA beta vs BTC
-                "correlation": 0.72,  # ADA correlation vs BTC
-                "concentration_risk": 6.3,
-                "liquidity_risk": "medium",
-                "time_decay_risk": None,
-            },
-        ]
+        risk_service = get_web_risk_service_instance()
 
-        # Apply filters
+        # Prepare filters for service layer (business logic moved to service)
+        filters = {
+            "exchange": exchange,
+            "symbol": symbol,
+        }
+
+        # Get position risk data through service layer
+        position_data_list = risk_service.generate_mock_position_risks(filters)
+
+        # Convert to response models
         filtered_positions = []
-        for pos_data in mock_positions:
-            # Apply exchange filter
-            if exchange and pos_data["exchange"] != exchange:
-                continue
-
-            # Apply symbol filter
-            if symbol and pos_data["symbol"] != symbol:
-                continue
-
+        for pos_data in position_data_list:
             position = PositionRiskResponse(**pos_data)
             filtered_positions.append(position)
 
@@ -517,58 +428,28 @@ async def run_stress_test(
         HTTPException: If stress test fails
     """
     try:
-        import uuid
+        risk_service = get_web_risk_service_instance()
 
-        # Mock stress test execution (in production, run actual stress testing)
-        test_id = f"stress_{uuid.uuid4().hex[:8]}"
-
-        # Mock scenarios and results
-        worst_case_loss = Decimal("-25000.00")  # 25k loss in worst case
-        worst_case_scenario = "BTC -50%, Market Crash"
-
-        # Mock confidence levels (VaR at different confidence levels)
-        confidence_levels = {
-            0.95: Decimal("-7500.00"),  # 95% confidence
-            0.99: Decimal("-15000.00"),  # 99% confidence
+        # Convert request to dict for service layer (business logic moved to service)
+        test_request_data = {
+            "test_name": stress_test_request.test_name,
+            "scenarios": stress_test_request.scenarios,
+            "confidence_levels": stress_test_request.confidence_levels,
+            "time_horizons": stress_test_request.time_horizons,
         }
 
-        # Mock time horizons (losses over different time periods)
-        time_horizons = {
-            1: Decimal("-3750.00"),  # 1 day
-            5: Decimal("-8400.00"),  # 5 days
-            10: Decimal("-11900.00"),  # 10 days
-        }
+        # Generate stress test results through service layer
+        result_data = risk_service.generate_mock_stress_test_results(test_request_data)
 
-        # Portfolio resilience score (0-100, higher is better)
-        resilience_score = 75.5
-
-        recommendations = [
-            "Consider reducing BTC concentration below 50%",
-            "Add hedging positions during high volatility periods",
-            "Maintain higher cash reserves for extreme scenarios",
-            "Implement dynamic position sizing based on volatility",
-            "Consider correlation breakdown scenarios in risk models",
-        ]
-
-        result = StressTestResponse(
-            test_id=test_id,
-            test_name=stress_test_request.test_name,
-            scenarios_tested=len(stress_test_request.scenarios),
-            worst_case_loss=worst_case_loss,
-            worst_case_scenario=worst_case_scenario,
-            confidence_levels=confidence_levels,
-            time_horizons=time_horizons,
-            portfolio_resilience_score=resilience_score,
-            recommendations=recommendations,
-            completed_at=datetime.now(timezone.utc),
-        )
+        # Convert to response model
+        result = StressTestResponse(**result_data)
 
         logger.info(
             "Stress test completed",
-            test_id=test_id,
-            test_name=stress_test_request.test_name,
-            worst_case_loss=float(worst_case_loss),
-            resilience_score=resilience_score,
+            test_id=result.test_id,
+            test_name=result.test_name,
+            worst_case_loss=str(result.worst_case_loss),
+            resilience_score=str(result.portfolio_resilience_score),
             user=current_user.username,
         )
 
@@ -602,45 +483,12 @@ async def get_correlation_matrix(
         HTTPException: If calculation fails
     """
     try:
-        # Mock correlation matrix (in production, calculate from price data)
-        import random
+        risk_service = get_web_risk_service_instance()
 
-        correlation_matrix = {}
-        for i, symbol1 in enumerate(symbols):
-            correlation_matrix[symbol1] = {}
-            for j, symbol2 in enumerate(symbols):
-                if i == j:
-                    correlation_matrix[symbol1][symbol2] = 1.0
-                else:
-                    # Generate realistic correlation (higher for crypto pairs)
-                    base_correlation = 0.6 if "USD" in symbol1 and "USD" in symbol2 else 0.3
-                    noise = random.uniform(-0.2, 0.2)
-                    corr = max(-1.0, min(1.0, base_correlation + noise))
-                    correlation_matrix[symbol1][symbol2] = round(corr, 3)
+        # Generate correlation matrix through service layer (business logic moved to service)
+        correlation_data = risk_service.generate_mock_correlation_matrix(symbols, period)
 
-        # Calculate average correlations
-        avg_correlations = {}
-        for symbol in symbols:
-            other_correlations = [
-                abs(correlation_matrix[symbol][other]) for other in symbols if other != symbol
-            ]
-            avg_correlations[symbol] = round(
-                sum(other_correlations) / len(other_correlations) if other_correlations else 0.0, 3
-            )
-
-        return {
-            "symbols": symbols,
-            "period": period,
-            "correlation_matrix": correlation_matrix,
-            "average_correlations": avg_correlations,
-            "highest_correlation": max(
-                correlation_matrix[s1][s2] for s1 in symbols for s2 in symbols if s1 != s2
-            ),
-            "lowest_correlation": min(
-                correlation_matrix[s1][s2] for s1 in symbols for s2 in symbols if s1 != s2
-            ),
-            "calculated_at": datetime.now(timezone.utc).isoformat(),
-        }
+        return correlation_data
 
     except Exception as e:
         logger.error(f"Correlation matrix calculation failed: {e}", user=current_user.username)

@@ -52,18 +52,27 @@ class AuthManager(BaseComponent):
         """Initialize authentication providers."""
         # JWT Provider
         import os
+
         jwt_config = self.config.get("jwt", {})
         self.providers["jwt"] = JWTAuthProvider(
-            secret_key=jwt_config.get("secret_key", os.getenv("JWT_SECRET_KEY", "default-dev-secret-change-in-production")),
+            secret_key=jwt_config.get(
+                "secret_key", os.getenv("JWT_SECRET_KEY", "default-dev-secret-change-in-production")
+            ),
             algorithm=jwt_config.get("algorithm", os.getenv("JWT_ALGORITHM", "HS256")),
-            access_token_expire_minutes=jwt_config.get("access_token_expire_minutes", int(os.getenv("JWT_EXPIRE_MINUTES", "30"))),
-            refresh_token_expire_days=jwt_config.get("refresh_token_expire_days", int(os.getenv("JWT_REFRESH_EXPIRE_DAYS", "7"))),
+            access_token_expire_minutes=jwt_config.get(
+                "access_token_expire_minutes", int(os.getenv("JWT_EXPIRE_MINUTES", "30"))
+            ),
+            refresh_token_expire_days=jwt_config.get(
+                "refresh_token_expire_days", int(os.getenv("JWT_REFRESH_EXPIRE_DAYS", "7"))
+            ),
         )
 
         # Session Provider
         session_config = self.config.get("session", {})
         self.providers["session"] = SessionAuthProvider(
-            session_timeout_minutes=session_config.get("timeout_minutes", int(os.getenv("SESSION_TIMEOUT_MINUTES", "60")))
+            session_timeout_minutes=session_config.get(
+                "timeout_minutes", int(os.getenv("SESSION_TIMEOUT_MINUTES", "60"))
+            )
         )
 
         # API Key Provider
@@ -424,9 +433,12 @@ def get_auth_manager(injector=None, config: dict[str, Any] | None = None) -> Aut
     if _global_auth_manager is None:
         # Default configuration if none provided
         import os
+
         default_config = {
             "jwt": {
-                "secret_key": os.getenv("JWT_SECRET_KEY", "default-dev-secret-change-in-production"),
+                "secret_key": os.getenv(
+                    "JWT_SECRET_KEY", "default-dev-secret-change-in-production"
+                ),
                 "algorithm": os.getenv("JWT_ALGORITHM", "HS256"),
                 "access_token_expire_minutes": int(os.getenv("JWT_EXPIRE_MINUTES", "30")),
                 "refresh_token_expire_days": int(os.getenv("JWT_REFRESH_EXPIRE_DAYS", "7")),

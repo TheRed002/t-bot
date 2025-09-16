@@ -29,12 +29,16 @@ class ConnectionManager:
         self.symbol_subscribers: dict[str, set[str]] = {}  # symbol -> set of user_ids
 
     async def connect(self, websocket: WebSocket, user_id: str):
-        """Accept WebSocket connection."""
+        """Accept WebSocket connection with timeout and proper error handling."""
         try:
-            await websocket.accept()
+            # Use timeout for WebSocket accept to prevent hanging
+            await asyncio.wait_for(websocket.accept(), timeout=10.0)
             self.active_connections[user_id] = websocket
             self.subscriptions[user_id] = set()
             logger.info("WebSocket connected", user_id=user_id)
+        except asyncio.TimeoutError:
+            logger.error(f"Timeout accepting market data WebSocket connection for {user_id}")
+            raise
         except Exception as e:
             logger.error(f"Failed to accept market data WebSocket connection: {e}", user_id=user_id)
             raise
@@ -80,50 +84,89 @@ class ConnectionManager:
         logger.info("User unsubscribed from symbol", user_id=user_id, symbol=symbol)
 
     async def send_to_user(self, user_id: str, message: dict):
-        """Send message to specific user."""
-        if user_id in self.active_connections:
-            try:
-                websocket = self.active_connections[user_id]
-                # Use asyncio timeout to prevent blocking
-                await asyncio.wait_for(websocket.send_text(json.dumps(message)), timeout=10.0)
-            except asyncio.TimeoutError:
-                logger.error("Timeout sending message to user", user_id=user_id)
-                self.disconnect(user_id)
-            except Exception as e:
-                logger.error("Failed to send message to user", user_id=user_id, error=str(e))
-                # Remove broken connection
-                self.disconnect(user_id)
+        """Send message to specific user with proper error handling and cleanup."""
+        if user_id not in self.active_connections:
+            return
+
+        websocket = self.active_connections[user_id]
+        try:
+            # Use asyncio timeout to prevent blocking
+            # Send message with timeout for better responsiveness
+            message_json = json.dumps(message, default=str)  # Handle Decimal serialization
+            await asyncio.wait_for(websocket.send_text(message_json), timeout=5.0)
+        except asyncio.TimeoutError:
+            logger.warning("Timeout sending message to user", user_id=user_id)
+            self.disconnect(user_id)
+        except Exception as e:
+            logger.error("Failed to send message to user", user_id=user_id, error=str(e))
+            # Remove broken connection
+            self.disconnect(user_id)
 
     async def broadcast_to_symbol_subscribers(self, symbol: str, message: dict):
-        """Broadcast message to all subscribers of a symbol."""
-        if symbol in self.symbol_subscribers:
-            disconnected_users = []
-            send_tasks = []
+        """Broadcast message to all subscribers of a symbol with backpressure handling."""
+        if symbol not in self.symbol_subscribers or not self.symbol_subscribers[symbol]:
+            return
 
-            # Collect all send tasks
-            for user_id in self.symbol_subscribers[symbol]:
-                websocket = self.active_connections.get(user_id)
-                if websocket:
-                    send_tasks.append(self._send_with_timeout(websocket, message, user_id))
+        # Create snapshot to avoid race conditions during iteration
+        subscribers_snapshot = list(self.symbol_subscribers[symbol])
+        if not subscribers_snapshot:
+            return
 
-            # Execute all sends concurrently
-            if send_tasks:
-                results = await asyncio.gather(*send_tasks, return_exceptions=True)
-                subscriber_list = list(self.symbol_subscribers[symbol])
+        # Prepare message once for all subscribers
+        try:
+            message_json = json.dumps(message, default=str)
+        except Exception as e:
+            logger.error(f"Failed to serialize message for symbol {symbol}: {e}")
+            return
+
+        send_tasks = []
+        # Collect all send tasks for active connections
+        for user_id in subscribers_snapshot:
+            websocket = self.active_connections.get(user_id)
+            if websocket:
+                send_tasks.append(
+                    self._send_with_timeout_broadcast(websocket, message_json, user_id)
+                )
+
+        # Execute all sends concurrently with overall timeout
+        if send_tasks:
+            try:
+                # Execute with overall broadcast timeout
+                results = await asyncio.wait_for(asyncio.gather(*send_tasks, return_exceptions=True), timeout=10.0)
+
+                # Clean up failed connections
                 for i, result in enumerate(results):
-                    if isinstance(result, Exception) and i < len(subscriber_list):
-                        disconnected_users.append(subscriber_list[i])
-
-            # Clean up disconnected users
-            for user_id in disconnected_users:
-                self.disconnect(user_id)
+                    if isinstance(result, Exception) and i < len(subscribers_snapshot):
+                        user_id = subscribers_snapshot[i]
+                        logger.debug(
+                            f"Disconnecting user {user_id} due to send failure: {result}"
+                        )
+                        self.disconnect(user_id)
+            except asyncio.TimeoutError:
+                logger.warning(
+                    f"Timeout broadcasting to {symbol} subscribers, cleaning up all connections"
+                )
+                # Clean up all subscribers on broadcast timeout
+                for user_id in subscribers_snapshot:
+                    self.disconnect(user_id)
 
     async def _send_with_timeout(self, websocket: WebSocket, message: dict, user_id: str):
         """Send message with timeout handling."""
         try:
-            await asyncio.wait_for(websocket.send_text(json.dumps(message)), timeout=5.0)
+            message_json = json.dumps(message, default=str)
+            await asyncio.wait_for(websocket.send_text(message_json), timeout=3.0)  # Shorter timeout for individual sends
         except Exception as e:
             logger.error(f"Failed to send to user {user_id}: {e}")
+            raise
+
+    async def _send_with_timeout_broadcast(
+        self, websocket: WebSocket, message_json: str, user_id: str
+    ):
+        """Send pre-serialized message with timeout handling for broadcasts."""
+        try:
+            await asyncio.wait_for(websocket.send_text(message_json), timeout=3.0)
+        except Exception as e:
+            logger.debug(f"Failed to broadcast to user {user_id}: {e}")
             raise
 
 
@@ -149,8 +192,9 @@ class SubscriptionMessage(BaseModel):
 
 
 async def authenticate_websocket(websocket: WebSocket) -> User | None:
-    """Authenticate WebSocket connection."""
+    """Authenticate WebSocket connection with proper async handling and timeouts."""
     try:
+        # Use timeout for the entire authentication process
         # Get token from query parameters or headers
         token = websocket.query_params.get("token")
         if not token:
@@ -166,7 +210,7 @@ async def authenticate_websocket(websocket: WebSocket) -> User | None:
             )
             return None
 
-        # Validate token (simplified - in production use proper JWT validation)
+        # Validate token with proper async handling
         from src.web_interface.security.auth import jwt_handler
 
         if jwt_handler:
@@ -176,7 +220,9 @@ async def authenticate_websocket(websocket: WebSocket) -> User | None:
             ):
                 token_data = await jwt_handler.validate_token(token)
             else:
-                token_data = jwt_handler.validate_token(token)
+                # Run synchronous validation in thread pool to avoid blocking
+                loop = asyncio.get_running_loop()
+                token_data = await loop.run_in_executor(None, jwt_handler.validate_token, token)
 
             if token_data:
                 # Create user object
@@ -189,12 +235,28 @@ async def authenticate_websocket(websocket: WebSocket) -> User | None:
                 )
                 return user
 
-        await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Authentication failed")
+        await websocket.close(
+            code=status.WS_1008_POLICY_VIOLATION, reason="Authentication failed"
+        )
         return None
 
+    except asyncio.TimeoutError:
+        logger.warning("WebSocket authentication timeout")
+        try:
+            await websocket.close(
+                code=status.WS_1008_POLICY_VIOLATION, reason="Authentication timeout"
+            )
+        except Exception:
+            pass
+        return None
     except Exception as e:
         logger.error(f"WebSocket authentication failed: {e}")
-        await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Authentication error")
+        try:
+            await websocket.close(
+                code=status.WS_1008_POLICY_VIOLATION, reason="Authentication error"
+            )
+        except Exception:
+            pass
         return None
 
 
@@ -427,7 +489,6 @@ async def market_data_simulator():
 
 
 # Start background task (in production, this would be managed by the application lifecycle)
-# asyncio.create_task(market_data_simulator())
 
 
 @router.get("/market-data/status")

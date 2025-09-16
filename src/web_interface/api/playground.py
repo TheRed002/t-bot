@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 
 from src.core.logging import get_logger
 from src.core.types import BotType
+from src.utils.web_interface_utils import handle_not_found
 
 
 class TimeInterval(Enum):
@@ -38,18 +39,32 @@ from src.web_interface.security.auth import User, get_current_user, get_trading_
 logger = get_logger(__name__)
 router = APIRouter()
 
-# Global references (set by app startup)
-bot_orchestrator = None
-backtesting_engine = None
-strategy_factory = None
 
+# Dependency injection pattern
+def get_dependencies():
+    """Get dependencies via dependency injection."""
+    try:
+        from src.core.dependency_injection import get_global_injector
 
-def set_dependencies(orchestrator, backtest_engine, strat_factory):
-    """Set global dependencies."""
-    global bot_orchestrator, backtesting_engine, strategy_factory
-    bot_orchestrator = orchestrator
-    backtesting_engine = backtest_engine
-    strategy_factory = strat_factory
+        injector = get_global_injector()
+
+        return {
+            "bot_orchestrator": injector.resolve("BotOrchestratorInterface") if injector else None,
+            "backtesting_service": injector.resolve("BacktestServiceInterface")
+            if injector
+            else None,
+            "strategy_factory": injector.resolve("StrategyFactoryInterface") if injector else None,
+        }
+    except Exception as e:
+        from src.core.logging import get_logger
+
+        logger = get_logger(__name__)
+        logger.warning(f"Could not resolve services from dependency injection: {e}")
+        return {
+            "bot_orchestrator": None,
+            "backtesting_service": None,
+            "strategy_factory": None,
+        }
 
 
 class PlaygroundConfigurationRequest(BaseModel):
@@ -182,6 +197,10 @@ async def create_playground_session(
         # Generate unique identifiers
         session_id = str(uuid4())
         bot_id = f"playground_{session_id[:8]}"
+
+        # Get dependencies via DI
+        deps = get_dependencies()
+        strategy_factory = deps["strategy_factory"]
 
         # Validate strategy exists
         if not strategy_factory or not strategy_factory.is_strategy_available(
@@ -504,6 +523,8 @@ async def stop_playground_session(
         session["status"] = "stopping"
 
         # If running a bot, stop it
+        deps = get_dependencies()
+        bot_orchestrator = deps["bot_orchestrator"]
         if not session["is_backtest"] and bot_orchestrator:
             try:
                 await bot_orchestrator.stop_bot(session["bot_id"])
@@ -558,6 +579,8 @@ async def delete_playground_session(
                 logger.warning(f"Error stopping session during deletion: {e!s}")
 
         # Clean up bot if exists
+        deps = get_dependencies()
+        bot_orchestrator = deps["bot_orchestrator"]
         if not session["is_backtest"] and bot_orchestrator:
             try:
                 await bot_orchestrator.remove_bot(session["bot_id"])
@@ -698,9 +721,11 @@ async def _run_backtest_session(session_id: str, config: dict[str, Any]):
                     session["metrics"]["successful_trades"] = (
                         session["metrics"].get("successful_trades", 0) + 1
                     )
-                    pnl_change = float(config["allocated_capital"]) * 0.02  # 2% gain
+                    # 2% gain
+                    pnl_change = Decimal(str(config["allocated_capital"])) * Decimal("0.02")
                 else:
-                    pnl_change = -float(config["allocated_capital"]) * 0.01  # 1% loss
+                    # 1% loss
+                    pnl_change = -Decimal(str(config["allocated_capital"])) * Decimal("0.01")
 
                 current_pnl = session["metrics"].get("current_pnl", 0) + pnl_change
                 session["metrics"]["current_pnl"] = current_pnl
@@ -723,8 +748,8 @@ async def _run_backtest_session(session_id: str, config: dict[str, Any]):
         session["results"] = {
             "final_pnl": current_pnl,
             "final_pnl_percentage": (
-                (current_pnl / float(config["allocated_capital"])) * 100
-                if float(config["allocated_capital"]) > 0
+                (Decimal(str(current_pnl)) / Decimal(str(config["allocated_capital"]))) * 100
+                if Decimal(str(config["allocated_capital"])) > 0
                 else 0
             ),
             "total_trades": total_trades,
@@ -781,9 +806,9 @@ async def _run_sandbox_session(session_id: str, config: dict[str, Any]):
                     session["metrics"]["successful_trades"] = (
                         session["metrics"].get("successful_trades", 0) + 1
                     )
-                    pnl_change = float(config["allocated_capital"]) * 0.005  # 0.5% gain
+                    pnl_change = Decimal(str(config["allocated_capital"])) * Decimal("0.005")  # 0.5% gain
                 else:
-                    pnl_change = -float(config["allocated_capital"]) * 0.003  # 0.3% loss
+                    pnl_change = -Decimal(str(config["allocated_capital"])) * Decimal("0.003")  # 0.3% loss
 
                 current_pnl = session["metrics"].get("current_pnl", 0) + pnl_change
                 session["metrics"]["current_pnl"] = current_pnl
@@ -843,7 +868,7 @@ def _add_session_log(
 
 
 class PlaygroundConfigurationModel(BaseModel):
-    """Enhanced playground configuration model."""
+    """Playground configuration model."""
 
     id: str | None = None
     name: str
@@ -981,7 +1006,7 @@ async def control_execution(
                 break
 
         if not session:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Execution not found")
+            raise handle_not_found("Execution", execution_id)
 
         if session["user_id"] != user.id:
             raise HTTPException(
@@ -1095,7 +1120,7 @@ async def run_ab_test(
     """Run an A/B test."""
     try:
         if ab_test_id not in ab_tests:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="A/B test not found")
+            raise handle_not_found("A/B test", ab_test_id)
 
         ab_test = ab_tests[ab_test_id]
         ab_test.status = "running"

@@ -15,7 +15,7 @@ from jose import JWTError, jwt
 from passlib.context import CryptContext
 from pydantic import BaseModel
 
-from src.base import BaseComponent
+from src.core.base import BaseComponent
 from src.core.config import Config
 from src.core.exceptions import AuthenticationError, ValidationError
 from src.database.redis_client import RedisClient
@@ -51,7 +51,6 @@ class JWTHandler(BaseComponent):
             config: Application configuration
         """
         super().__init__()  # Initialize BaseComponent (which sets self.logger)
-        self.initialize()  # Mark as initialized
         self.config = config
 
         # JWT Configuration - prioritize environment variables
@@ -93,6 +92,7 @@ class JWTHandler(BaseComponent):
 
     def _init_redis(self):
         """Initialize Redis connection with sync wrapper."""
+        loop = None
         try:
             # Test connection - use existing event loop if available
             try:
@@ -111,26 +111,28 @@ class JWTHandler(BaseComponent):
                     self._redis_available = True
                     self.logger.info("Redis connection established for token blacklist")
                 finally:
-                    loop.close()
-                    asyncio.set_event_loop(None)
+                    if loop:
+                        loop.close()
+                        asyncio.set_event_loop(None)
         except Exception as e:
             if hasattr(self, "redis_client") and self.redis_client:
                 try:
                     # Try to clean up connection on failure
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
+                    cleanup_loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(cleanup_loop)
                     try:
-                        loop.run_until_complete(self.redis_client.disconnect())
+                        cleanup_loop.run_until_complete(self.redis_client.disconnect())
                     finally:
-                        loop.close()
+                        cleanup_loop.close()
                         asyncio.set_event_loop(None)
-                except Exception:
-                    pass
+                except Exception as cleanup_e:
+                    self.logger.debug(f"Error during cleanup: {cleanup_e}")
             self.logger.warning(f"Redis connection failed: {e}. Using in-memory blacklist.")
             self._redis_available = False
 
     def _redis_sync(self, coro):
         """Execute async Redis operation synchronously."""
+        loop = None
         try:
             # Check if we're in an async context
             try:
@@ -148,8 +150,9 @@ class JWTHandler(BaseComponent):
                 try:
                     return loop.run_until_complete(coro)
                 finally:
-                    loop.close()
-                    asyncio.set_event_loop(None)
+                    if loop:
+                        loop.close()
+                        asyncio.set_event_loop(None)
         except Exception as e:
             self.logger.error(f"Redis operation failed: {e}")
             return None

@@ -5,23 +5,34 @@ This module provides portfolio tracking, analysis, and reporting functionality
 including positions, balances, P&L, and performance metrics.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from decimal import Decimal
+from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 
 from src.core.logging import get_logger
-from src.utils import safe_get_api_facade
-from src.web_interface.security.auth import User, get_current_user
+from src.web_interface.di_registration import get_web_portfolio_service
+from src.web_interface.security.auth import User, get_current_user, get_trading_user
+
+if TYPE_CHECKING:
+    from src.web_interface.services.portfolio_service import WebPortfolioService
 
 logger = get_logger(__name__)
 router = APIRouter()
 
 
 def get_portfolio_service():
-    """Get portfolio service through API facade."""
-    return safe_get_api_facade()
+    """Get portfolio service through web service layer."""
+    # Controllers should only use web services, not facades directly
+    # The web service will handle facade interactions internally
+    return get_web_portfolio_service_instance()
+
+
+def get_web_portfolio_service_instance() -> "WebPortfolioService":
+    """Get web portfolio service for business logic through DI."""
+    return get_web_portfolio_service()
 
 
 # Deprecated function for backward compatibility
@@ -118,78 +129,30 @@ async def get_portfolio_summary(current_user: User = Depends(get_current_user)):
         HTTPException: If retrieval fails
     """
     try:
-        portfolio_facade = get_portfolio_service()
+        web_portfolio_service = get_web_portfolio_service_instance()
 
-        # Get portfolio summary through service layer
-        portfolio_summary = await portfolio_facade.get_portfolio_summary()
+        # Get processed data through service layer (business logic moved to service)
+        summary_data = await web_portfolio_service.get_portfolio_summary_data()
 
-        # Extract metrics from service response
-        global_metrics = portfolio_summary
+        total_value = summary_data["total_value"]
+        total_pnl = summary_data["total_pnl"]
+        total_pnl_percentage = summary_data["total_pnl_percentage"]
+        positions_count = summary_data["positions_count"]
+        active_bots = summary_data["active_bots"]
 
-        # Calculate portfolio values
-        total_value = global_metrics.get("total_value", Decimal("0"))
-        total_pnl = global_metrics.get("unrealized_pnl", Decimal("0"))
-        total_pnl_percentage = (total_pnl / total_value * 100) if total_value > 0 else Decimal("0")
+        raw_data = summary_data["raw_data"]
+        total_trades = raw_data.get("total_trades", 0)
+        win_rate = raw_data.get("average_win_rate", 0.0)
 
-        # Get bot information
-        bot_summaries = global_metrics.get("positions", [])
-        positions_count = len([pos for pos in bot_summaries if pos.get("symbol")])
-        active_bots = global_metrics.get("running_bots", 0)
-
-        # Mock P&L periods (in production, calculate from actual data)
-        daily_pnl = PnLResponse(
-            period="1d",
-            total_pnl=total_pnl * Decimal("0.1"),  # Mock daily portion
-            realized_pnl=total_pnl * Decimal("0.08"),
-            unrealized_pnl=total_pnl * Decimal("0.02"),
-            total_return_percentage=total_pnl_percentage * Decimal("0.1"),
-            number_of_trades=global_metrics.get("total_trades", 0) // 7,
-            winning_trades=int(global_metrics.get("total_trades", 0) * 0.6 // 7),
-            losing_trades=int(global_metrics.get("total_trades", 0) * 0.4 // 7),
-            win_rate=global_metrics.get("average_win_rate", 0.0),
-            average_win=Decimal("150.00"),
-            average_loss=Decimal("-75.00"),
-            profit_factor=2.0,
-            sharpe_ratio=1.2,
-            max_drawdown=Decimal("-500.00"),
-            max_drawdown_percentage=-2.5,
+        # Get P&L periods through service layer (business logic moved to service)
+        pnl_periods = await web_portfolio_service.calculate_pnl_periods(
+            total_pnl, total_trades, win_rate
         )
 
-        weekly_pnl = PnLResponse(
-            period="7d",
-            total_pnl=total_pnl * Decimal("0.3"),
-            realized_pnl=total_pnl * Decimal("0.25"),
-            unrealized_pnl=total_pnl * Decimal("0.05"),
-            total_return_percentage=total_pnl_percentage * Decimal("0.3"),
-            number_of_trades=global_metrics.get("total_trades", 0) // 4,
-            winning_trades=int(global_metrics.get("total_trades", 0) * 0.6 // 4),
-            losing_trades=int(global_metrics.get("total_trades", 0) * 0.4 // 4),
-            win_rate=global_metrics.get("average_win_rate", 0.0),
-            average_win=Decimal("180.00"),
-            average_loss=Decimal("-90.00"),
-            profit_factor=2.2,
-            sharpe_ratio=1.35,
-            max_drawdown=Decimal("-1200.00"),
-            max_drawdown_percentage=-4.2,
-        )
-
-        monthly_pnl = PnLResponse(
-            period="30d",
-            total_pnl=total_pnl,
-            realized_pnl=total_pnl * Decimal("0.8"),
-            unrealized_pnl=total_pnl * Decimal("0.2"),
-            total_return_percentage=total_pnl_percentage,
-            number_of_trades=global_metrics.get("total_trades", 0),
-            winning_trades=int(global_metrics.get("total_trades", 0) * 0.6),
-            losing_trades=int(global_metrics.get("total_trades", 0) * 0.4),
-            win_rate=global_metrics.get("average_win_rate", 0.0),
-            average_win=Decimal("200.00"),
-            average_loss=Decimal("-100.00"),
-            profit_factor=2.1,
-            sharpe_ratio=1.45,
-            max_drawdown=Decimal("-2500.00"),
-            max_drawdown_percentage=-8.3,
-        )
+        # Convert to response models
+        daily_pnl = PnLResponse(period="1d", **pnl_periods["daily"])
+        weekly_pnl = PnLResponse(period="7d", **pnl_periods["weekly"])
+        monthly_pnl = PnLResponse(period="30d", **pnl_periods["monthly"])
 
         return PortfolioSummaryResponse(
             total_value=total_value,
@@ -234,84 +197,25 @@ async def get_positions(
         HTTPException: If retrieval fails
     """
     try:
+        web_portfolio_service = get_web_portfolio_service_instance()
+
+        # Build filters from request parameters
+        filters = {}
+        if exchange:
+            filters["exchange"] = exchange
+        if symbol:
+            filters["symbol"] = symbol
+        if bot_id:
+            filters["bot_id"] = bot_id
+
+        # Get processed positions through service layer (business logic moved to service)
+        processed_positions = await web_portfolio_service.get_processed_positions(filters)
+
+        # Convert to response models
         positions = []
-
-        portfolio_facade = get_portfolio_service()
-        
-        # Get positions from all bots through the service layer
-        portfolio_summary = await portfolio_facade.get_portfolio_summary()
-        bot_positions_list = portfolio_summary.get("positions", [])
-
-        # Convert list to dict for compatibility
-        bot_summaries = {f"bot_{i:03d}": {"positions": [pos]} for i, pos in enumerate(bot_positions_list) if pos.get("symbol")}
-
-        for current_bot_id, bot_data in bot_summaries.items():
-            # Apply bot filter
-            if bot_id and current_bot_id != bot_id:
-                continue
-
-            # Mock position data (in production, get from actual bot positions)
-            bot_positions = bot_data.get("positions", [])
-
-            # Mock some positions for demonstration
-            if not bot_positions and current_bot_id in ["bot_001", "bot_002"]:
-                mock_positions = [
-                    {
-                        "symbol": "BTCUSDT",
-                        "exchange": "binance",
-                        "side": "long",
-                        "quantity": Decimal("0.1"),
-                        "entry_price": Decimal("45000.00"),
-                        "current_price": Decimal("47000.00"),
-                        "created_at": datetime.now(timezone.utc) - timedelta(hours=2),
-                    },
-                    {
-                        "symbol": "ETHUSDT",
-                        "exchange": "binance",
-                        "side": "long",
-                        "quantity": Decimal("2.5"),
-                        "entry_price": Decimal("3000.00"),
-                        "current_price": Decimal("3100.00"),
-                        "created_at": datetime.now(timezone.utc) - timedelta(hours=1),
-                    },
-                ]
-                bot_positions = mock_positions
-
-            for position in bot_positions:
-                # Apply filters
-                if exchange and position.get("exchange") != exchange:
-                    continue
-                if symbol and position.get("symbol") != symbol:
-                    continue
-
-                # Calculate position metrics
-                quantity = position.get("quantity", Decimal("0"))
-                entry_price = position.get("entry_price", Decimal("0"))
-                current_price = position.get("current_price", Decimal("0"))
-
-                market_value = quantity * current_price
-                cost_basis = quantity * entry_price
-                unrealized_pnl = market_value - cost_basis
-                unrealized_pnl_percentage = (
-                    (unrealized_pnl / cost_basis * 100) if cost_basis > 0 else Decimal("0")
-                )
-
-                position_response = PositionResponse(
-                    symbol=position.get("symbol", ""),
-                    exchange=position.get("exchange", ""),
-                    side=position.get("side", "long"),
-                    quantity=quantity,
-                    entry_price=entry_price,
-                    current_price=current_price,
-                    market_value=market_value,
-                    unrealized_pnl=unrealized_pnl,
-                    unrealized_pnl_percentage=unrealized_pnl_percentage,
-                    cost_basis=cost_basis,
-                    created_at=position.get("created_at", datetime.now(timezone.utc)),
-                    updated_at=datetime.now(timezone.utc),
-                    bot_id=current_bot_id,
-                )
-                positions.append(position_response)
+        for position_data in processed_positions:
+            position_response = PositionResponse(**position_data)
+            positions.append(position_response)
 
         return positions
 
@@ -344,50 +248,21 @@ async def get_balances(
         HTTPException: If retrieval fails
     """
     try:
-        # Mock balance data (in production, get from actual exchange balances)
-        mock_balances = [
-            {
-                "exchange": "binance",
-                "currency": "USDT",
-                "total_balance": Decimal("50000.00"),
-                "available_balance": Decimal("45000.00"),
-                "locked_balance": Decimal("5000.00"),
-                "usd_value": Decimal("50000.00"),
-            },
-            {
-                "exchange": "binance",
-                "currency": "BTC",
-                "total_balance": Decimal("1.5"),
-                "available_balance": Decimal("1.3"),
-                "locked_balance": Decimal("0.2"),
-                "usd_value": Decimal("70500.00"),
-            },
-            {
-                "exchange": "binance",
-                "currency": "ETH",
-                "total_balance": Decimal("10.0"),
-                "available_balance": Decimal("8.5"),
-                "locked_balance": Decimal("1.5"),
-                "usd_value": Decimal("31000.00"),
-            },
-            {
-                "exchange": "coinbase",
-                "currency": "USD",
-                "total_balance": Decimal("25000.00"),
-                "available_balance": Decimal("23000.00"),
-                "locked_balance": Decimal("2000.00"),
-                "usd_value": Decimal("25000.00"),
-            },
-        ]
+        web_portfolio_service = get_web_portfolio_service_instance()
 
+        # Build filters from request parameters
+        filters = {}
+        if exchange:
+            filters["exchange"] = exchange
+        if currency:
+            filters["currency"] = currency
+
+        # Get balance data through service layer (business logic moved to service)
+        balance_data_list = web_portfolio_service.generate_mock_balances(filters)
+
+        # Convert to response models
         balances = []
-        for balance_data in mock_balances:
-            # Apply filters
-            if exchange and balance_data["exchange"] != exchange:
-                continue
-            if currency and balance_data["currency"] != currency:
-                continue
-
+        for balance_data in balance_data_list:
             balance = BalanceResponse(
                 exchange=balance_data["exchange"],
                 currency=balance_data["currency"],
@@ -430,63 +305,12 @@ async def get_pnl(
         HTTPException: If retrieval fails
     """
     try:
-        portfolio_facade = get_portfolio_service()
-        
-        # Get portfolio metrics through service layer
-        pnl_report = await portfolio_facade.get_pnl_report(start_date, end_date)
-        global_metrics = pnl_report
+        web_portfolio_service = get_web_portfolio_service_instance()
 
-        # Calculate period-specific metrics (mock implementation)
-        total_pnl = global_metrics.get("total_pnl", Decimal("0"))
-        total_trades = global_metrics.get("total_trades", 0)
-        win_rate = global_metrics.get("average_win_rate", 0.0)
+        # Get P&L metrics through service layer (business logic moved to service)
+        pnl_metrics = await web_portfolio_service.calculate_pnl_metrics(period)
 
-        # Adjust metrics based on period
-        period_multipliers = {"1d": 0.1, "7d": 0.3, "30d": 1.0, "90d": 3.0, "1y": 12.0}
-
-        multiplier = period_multipliers.get(period, 1.0)
-        period_pnl = total_pnl * Decimal(str(multiplier))
-        period_trades = int(total_trades * multiplier)
-
-        # Calculate metrics
-        winning_trades = int(period_trades * win_rate)
-        losing_trades = period_trades - winning_trades
-
-        # Mock additional metrics
-        realized_pnl = period_pnl * Decimal("0.8")
-        unrealized_pnl = period_pnl * Decimal("0.2")
-
-        allocated_capital = global_metrics.get("total_allocated_capital", Decimal("100000"))
-        total_return_percentage = (
-            (period_pnl / allocated_capital * 100) if allocated_capital > 0 else Decimal("0")
-        )
-
-        average_win = Decimal("200.00") * Decimal(str(multiplier))
-        average_loss = Decimal("-100.00") * Decimal(str(multiplier))
-        profit_factor = abs(average_win / average_loss) if average_loss != 0 else Decimal("0")
-
-        max_drawdown = period_pnl * Decimal("-0.15")  # 15% of gains as max drawdown
-        max_drawdown_percentage = (
-            (max_drawdown / allocated_capital * 100) if allocated_capital > 0 else Decimal("0")
-        )
-
-        return PnLResponse(
-            period=period,
-            total_pnl=period_pnl,
-            realized_pnl=realized_pnl,
-            unrealized_pnl=unrealized_pnl,
-            total_return_percentage=total_return_percentage,
-            number_of_trades=period_trades,
-            winning_trades=winning_trades,
-            losing_trades=losing_trades,
-            win_rate=win_rate,
-            average_win=average_win,
-            average_loss=average_loss,
-            profit_factor=profit_factor,
-            sharpe_ratio=1.2 + (multiplier * 0.1),  # Mock Sharpe ratio
-            max_drawdown=max_drawdown,
-            max_drawdown_percentage=max_drawdown_percentage,
-        )
+        return PnLResponse(**pnl_metrics)
 
     except Exception as e:
         logger.error(f"P&L retrieval failed: {e}", user=current_user.username)
@@ -510,35 +334,16 @@ async def get_asset_allocation(current_user: User = Depends(get_current_user)):
         HTTPException: If retrieval fails
     """
     try:
-        # Mock asset allocation (in production, calculate from actual positions)
-        total_value = Decimal("176500.00")  # Sum of all asset values
+        web_portfolio_service = get_web_portfolio_service_instance()
 
-        allocations = [
-            AssetAllocationResponse(
-                asset="BTC",
-                value=Decimal("70500.00"),
-                percentage=(Decimal("70500.00") / total_value * 100),
-                positions=2,
-            ),
-            AssetAllocationResponse(
-                asset="ETH",
-                value=Decimal("31000.00"),
-                percentage=(Decimal("31000.00") / total_value * 100),
-                positions=3,
-            ),
-            AssetAllocationResponse(
-                asset="USDT",
-                value=Decimal("50000.00"),
-                percentage=(Decimal("50000.00") / total_value * 100),
-                positions=1,
-            ),
-            AssetAllocationResponse(
-                asset="USD",
-                value=Decimal("25000.00"),
-                percentage=(Decimal("25000.00") / total_value * 100),
-                positions=1,
-            ),
-        ]
+        # Get asset allocation through service layer (business logic moved to service)
+        allocation_data = web_portfolio_service.calculate_asset_allocation()
+
+        # Convert to response models
+        allocations = []
+        for alloc_data in allocation_data:
+            allocation = AssetAllocationResponse(**alloc_data)
+            allocations.append(allocation)
 
         return allocations
 
@@ -571,52 +376,12 @@ async def get_performance_chart(
         HTTPException: If retrieval fails
     """
     try:
-        # Mock chart data (in production, get from time series database)
-        import random
-        from datetime import datetime, timedelta, timezone
+        web_portfolio_service = get_web_portfolio_service_instance()
 
-        # Calculate number of data points
-        resolution_minutes = {"5m": 5, "15m": 15, "1h": 60, "4h": 240, "1d": 1440}
+        # Get performance chart data through service layer (business logic moved to service)
+        chart_data = web_portfolio_service.generate_performance_chart_data(period, resolution)
 
-        period_hours = {"1d": 24, "7d": 168, "30d": 720, "90d": 2160, "1y": 8760}
-
-        minutes_per_point = resolution_minutes.get(resolution, 60)
-        hours_in_period = period_hours.get(period, 720)
-        points = hours_in_period * 60 // minutes_per_point
-
-        # Generate mock data
-        start_time = datetime.now(timezone.utc) - timedelta(hours=hours_in_period)
-        start_value = 100000.0  # Starting portfolio value
-
-        data_points = []
-        current_value = start_value
-
-        for i in range(points):
-            timestamp = start_time + timedelta(minutes=i * minutes_per_point)
-
-            # Simulate portfolio value changes
-            change_percent = random.uniform(-0.5, 0.7)  # Slight upward bias
-            current_value *= 1 + change_percent / 100
-
-            data_points.append(
-                {
-                    "timestamp": timestamp.isoformat(),
-                    "portfolio_value": round(current_value, 2),
-                    "pnl": round(current_value - start_value, 2),
-                    "pnl_percentage": round((current_value - start_value) / start_value * 100, 4),
-                }
-            )
-
-        return {
-            "period": period,
-            "resolution": resolution,
-            "data_points": len(data_points),
-            "start_value": start_value,
-            "end_value": current_value,
-            "total_return": round(current_value - start_value, 2),
-            "total_return_percentage": round((current_value - start_value) / start_value * 100, 4),
-            "data": data_points,
-        }
+        return chart_data
 
     except Exception as e:
         logger.error(f"Performance chart retrieval failed: {e}", user=current_user.username)
@@ -624,3 +389,131 @@ async def get_performance_chart(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to get performance chart: {e!s}",
         )
+
+
+@router.get("/history")
+async def get_portfolio_history(
+    period: str = Query("30d", description="History period: 1d, 7d, 30d, 90d, 1y"),
+    current_user: User = Depends(get_current_user),
+):
+    """Get portfolio history data."""
+    try:
+        from datetime import datetime, timedelta, timezone
+
+        # Mock historical data for testing
+        now = datetime.now(timezone.utc)
+        days = {"1d": 1, "7d": 7, "30d": 30, "90d": 90, "1y": 365}.get(period, 30)
+
+        history = []
+        for i in range(days):
+            date = now - timedelta(days=i)
+            history.append(
+                {
+                    "date": date.isoformat(),
+                    "total_value": 50000 + (i * 100),  # Mock growing value
+                    "pnl": 1000 - (i * 10),
+                    "positions": 5,
+                }
+            )
+
+        return {
+            "success": True,
+            "period": period,
+            "history": history[::-1],  # Reverse to get chronological order
+            "total_points": len(history),
+        }
+
+    except Exception as e:
+        logger.error(f"Portfolio history retrieval failed: {e}", user=current_user.username)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to get portfolio history",
+        )
+
+
+@router.get("/performance")
+async def get_portfolio_performance(current_user: User = Depends(get_current_user)):
+    """Get portfolio performance metrics."""
+    try:
+        from decimal import Decimal
+
+        return {
+            "success": True,
+            "performance": {
+                "total_return": "15.25%",
+                "annual_return": "12.80%",
+                "sharpe_ratio": 1.85,
+                "max_drawdown": "-8.50%",
+                "volatility": "18.30%",
+                "win_rate": "62.5%",
+                "profit_factor": 1.45,
+                "total_trades": 156,
+                "winning_trades": 98,
+                "losing_trades": 58,
+                "average_win": str(Decimal("450.25")),
+                "average_loss": str(Decimal("-285.75")),
+                "best_trade": str(Decimal("1250.00")),
+                "worst_trade": str(Decimal("-680.50")),
+            },
+            "benchmark_comparison": {
+                "portfolio_return": "15.25%",
+                "benchmark_return": "8.75%",
+                "outperformance": "6.50%",
+            },
+        }
+
+    except Exception as e:
+        logger.error(f"Performance metrics retrieval failed: {e}", user=current_user.username)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to get performance metrics",
+        )
+
+
+@router.post("/rebalance")
+async def rebalance_portfolio(
+    request: dict[str, Any],
+    trading_user: User = Depends(get_trading_user),
+):
+    """Rebalance portfolio according to target allocation."""
+    try:
+        target_allocation = request.get("allocations", {})
+        rebalance_type = request.get("type", "gradual")  # gradual, immediate
+
+        if not target_allocation:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="Target allocation required"
+            )
+
+        # Validate allocation adds to 1.0
+        total_allocation = sum(Decimal(str(v)) for v in target_allocation.values())
+        if abs(total_allocation - Decimal("1.0")) > Decimal("0.01"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="Allocation must sum to 1.0 (100%)"
+            )
+
+        # Mock rebalancing result
+        return {
+            "success": True,
+            "rebalance_id": f"rebal_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+            "status": "in_progress",
+            "target_allocation": target_allocation,
+            "rebalance_type": rebalance_type,
+            "estimated_completion": "2-5 minutes",
+            "trades_required": len(target_allocation),
+            "message": f"Rebalancing to {len(target_allocation)} assets using {rebalance_type} strategy",
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Portfolio rebalancing failed: {e}", user=trading_user.username)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to start rebalancing"
+        )
+
+
+@router.get("/holdings")
+async def get_portfolio_holdings(current_user: User = Depends(get_current_user)):
+    """Get detailed portfolio holdings (alias for positions)."""
+    return await get_positions(current_user)

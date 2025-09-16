@@ -196,7 +196,7 @@ class TestConnectionManager:
         connection_manager.active_connections[user_id2] = mock_websocket2
         connection_manager.symbol_subscribers[symbol] = {user_id1, user_id2}
         
-        with patch.object(connection_manager, '_send_with_timeout', return_value=None) as mock_send:
+        with patch.object(connection_manager, '_send_with_timeout_broadcast', return_value=None) as mock_send:
             await connection_manager.broadcast_to_symbol_subscribers(symbol, message)
             assert mock_send.call_count == 2
 
@@ -218,7 +218,7 @@ class TestConnectionManager:
         connection_manager.active_connections[user_id] = mock_websocket
         connection_manager.symbol_subscribers[symbol] = {user_id}
         
-        with patch.object(connection_manager, '_send_with_timeout', 
+        with patch.object(connection_manager, '_send_with_timeout_broadcast',
                          side_effect=Exception("Send failed")) as mock_send, \
              patch.object(connection_manager, 'disconnect') as mock_disconnect:
             await connection_manager.broadcast_to_symbol_subscribers(symbol, message)

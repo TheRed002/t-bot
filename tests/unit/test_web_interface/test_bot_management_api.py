@@ -31,7 +31,7 @@ class TestBotManagementAPI:
 
         with patch("src.web_interface.api.bot_management.get_trading_user") as mock_get_user:
             with patch(
-                "src.web_interface.api.bot_management.get_bot_service"
+                "src.web_interface.api.bot_management.get_web_bot_service_instance"
             ) as mock_get_bot_service:
                 from src.web_interface.security.auth import User
 
@@ -45,12 +45,22 @@ class TestBotManagementAPI:
                 )
                 mock_get_user.return_value = mock_user
 
-                # Mock bot service facade
-                mock_facade = AsyncMock()
-                mock_facade.create_bot = AsyncMock(return_value="bot_123")
-                mock_get_bot_service.return_value = mock_facade
+                # Mock web bot service
+                mock_service = AsyncMock()
+                mock_service.validate_bot_configuration = AsyncMock(return_value={"valid": True, "errors": []})
+                mock_service.create_bot_configuration = AsyncMock(return_value={})
+                mock_service.create_bot_through_service = AsyncMock(return_value="bot_123")
+                mock_service.format_bot_response = AsyncMock(return_value={
+                    "success": True,
+                    "bot_id": "bot_123",
+                    "bot_name": "Test Trading Bot",
+                    "allocated_capital": "10000.0",
+                    "risk_percentage": "0.02",
+                    "auto_start": False
+                })
+                mock_get_bot_service.return_value = mock_service
 
-                response = test_client.post("/api/bots/", json=bot_data, headers=auth_headers)
+                response = test_client.post("/api/bot/", json=bot_data, headers=auth_headers)
 
                 assert response.status_code == status.HTTP_200_OK
                 data = response.json()
@@ -82,7 +92,7 @@ class TestBotManagementAPI:
             )
             mock_get_user.return_value = mock_user
 
-            response = test_client.post("/api/bots/", json=invalid_bot_data, headers=auth_headers)
+            response = test_client.post("/api/bot/", json=invalid_bot_data, headers=auth_headers)
 
             assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
 
@@ -90,7 +100,7 @@ class TestBotManagementAPI:
         """Test listing bots."""
         with patch("src.web_interface.api.bot_management.get_current_user") as mock_get_user:
             with patch(
-                "src.web_interface.api.bot_management.get_bot_service"
+                "src.web_interface.api.bot_management.get_web_bot_service_instance"
             ) as mock_get_bot_service:
                 from src.web_interface.security.auth import User
 
@@ -122,12 +132,16 @@ class TestBotManagementAPI:
                     },
                 ]
 
-                # Mock bot service facade
-                mock_facade = AsyncMock()
-                mock_facade.list_bots = AsyncMock(return_value=mock_bot_list)
-                mock_get_bot_service.return_value = mock_facade
+                # Mock web bot service
+                mock_service = AsyncMock()
+                mock_service.get_formatted_bot_list = AsyncMock(return_value={
+                    "bots": mock_bot_list,
+                    "total": 2,
+                    "status_counts": {"running": 1, "stopped": 1, "error": 0}
+                })
+                mock_get_bot_service.return_value = mock_service
 
-                response = test_client.get("/api/bots/", headers=auth_headers)
+                response = test_client.get("/api/bot/", headers=auth_headers)
 
                 assert response.status_code == status.HTTP_200_OK
                 data = response.json()
@@ -141,7 +155,7 @@ class TestBotManagementAPI:
 
         with patch("src.web_interface.api.bot_management.get_current_user") as mock_get_user:
             with patch(
-                "src.web_interface.api.bot_management.get_bot_service"
+                "src.web_interface.api.bot_management.get_web_bot_service_instance"
             ) as mock_get_bot_service:
                 from src.web_interface.security.auth import User
 
@@ -164,12 +178,13 @@ class TestBotManagementAPI:
                     "metrics": {"total_trades": 10, "total_pnl": 250.0},
                 }
 
-                # Mock bot service facade
-                mock_facade = AsyncMock()
-                mock_facade.get_bot_status = AsyncMock(return_value=mock_bot_status)
-                mock_get_bot_service.return_value = mock_facade
+                # Mock web bot service
+                mock_service = AsyncMock()
+                mock_service.get_bot_status_through_service = AsyncMock(return_value=mock_bot_status)
+                mock_service.calculate_bot_metrics = AsyncMock(return_value={"enhanced_pnl": 275.0})
+                mock_get_bot_service.return_value = mock_service
 
-                response = test_client.get(f"/api/bots/{bot_id}", headers=auth_headers)
+                response = test_client.get(f"/api/bot/{bot_id}", headers=auth_headers)
 
                 assert response.status_code == status.HTTP_200_OK
                 data = response.json()
@@ -182,7 +197,7 @@ class TestBotManagementAPI:
 
         with patch("src.web_interface.api.bot_management.get_current_user") as mock_get_user:
             with patch(
-                "src.web_interface.api.bot_management.get_bot_service"
+                "src.web_interface.api.bot_management.get_web_bot_service_instance"
             ) as mock_get_bot_service:
                 from src.web_interface.security.auth import User
                 from src.core.exceptions import EntityNotFoundError
@@ -196,12 +211,12 @@ class TestBotManagementAPI:
                 )
                 mock_get_user.return_value = mock_user
 
-                # Mock bot service facade to raise EntityNotFoundError
-                mock_facade = AsyncMock()
-                mock_facade.get_bot_status = AsyncMock(side_effect=EntityNotFoundError(f"Bot not found: {bot_id}"))
-                mock_get_bot_service.return_value = mock_facade
+                # Mock web bot service to raise EntityNotFoundError
+                mock_service = AsyncMock()
+                mock_service.get_bot_status_through_service = AsyncMock(side_effect=EntityNotFoundError(f"Bot not found: {bot_id}"))
+                mock_get_bot_service.return_value = mock_service
 
-                response = test_client.get(f"/api/bots/{bot_id}", headers=auth_headers)
+                response = test_client.get(f"/api/bot/{bot_id}", headers=auth_headers)
 
                 assert response.status_code == status.HTTP_404_NOT_FOUND
 
@@ -211,7 +226,7 @@ class TestBotManagementAPI:
 
         with patch("src.web_interface.api.bot_management.get_trading_user") as mock_get_user:
             with patch(
-                "src.web_interface.api.bot_management.get_bot_service"
+                "src.web_interface.api.bot_management.get_web_bot_service_instance"
             ) as mock_get_bot_service:
                 from src.web_interface.security.auth import User
 
@@ -225,12 +240,12 @@ class TestBotManagementAPI:
                 )
                 mock_get_user.return_value = mock_user
 
-                # Mock bot service facade
-                mock_facade = AsyncMock()
-                mock_facade.start_bot = AsyncMock(return_value=True)
-                mock_get_bot_service.return_value = mock_facade
+                # Mock web bot service
+                mock_service = AsyncMock()
+                mock_service.start_bot_through_service = AsyncMock(return_value=True)
+                mock_get_bot_service.return_value = mock_service
 
-                response = test_client.post(f"/api/bots/{bot_id}/start", headers=auth_headers)
+                response = test_client.post(f"/api/bot/{bot_id}/start", headers=auth_headers)
 
                 assert response.status_code == status.HTTP_200_OK
                 data = response.json()
@@ -243,7 +258,7 @@ class TestBotManagementAPI:
 
         with patch("src.web_interface.api.bot_management.get_trading_user") as mock_get_user:
             with patch(
-                "src.web_interface.api.bot_management.get_bot_service"
+                "src.web_interface.api.bot_management.get_web_bot_service_instance"
             ) as mock_get_bot_service:
                 from src.web_interface.security.auth import User
 
@@ -257,12 +272,12 @@ class TestBotManagementAPI:
                 )
                 mock_get_user.return_value = mock_user
 
-                # Mock bot service facade
-                mock_facade = AsyncMock()
-                mock_facade.stop_bot = AsyncMock(return_value=True)
-                mock_get_bot_service.return_value = mock_facade
+                # Mock web bot service
+                mock_service = AsyncMock()
+                mock_service.stop_bot_through_service = AsyncMock(return_value=True)
+                mock_get_bot_service.return_value = mock_service
 
-                response = test_client.post(f"/api/bots/{bot_id}/stop", headers=auth_headers)
+                response = test_client.post(f"/api/bot/{bot_id}/stop", headers=auth_headers)
 
                 assert response.status_code == status.HTTP_200_OK
                 data = response.json()
@@ -275,7 +290,7 @@ class TestBotManagementAPI:
 
         with patch("src.web_interface.api.bot_management.get_trading_user") as mock_get_user:
             with patch(
-                "src.web_interface.api.bot_management.get_bot_service"
+                "src.web_interface.api.bot_management.get_web_bot_service_instance"
             ) as mock_get_bot_service:
                 from src.web_interface.security.auth import User
 
@@ -289,11 +304,11 @@ class TestBotManagementAPI:
                 )
                 mock_get_user.return_value = mock_user
 
-                # Mock bot service facade - pause returns False (not implemented)
-                mock_facade = AsyncMock()
-                mock_get_bot_service.return_value = mock_facade
+                # Mock web bot service - pause returns False (not implemented)
+                mock_service = AsyncMock()
+                mock_get_bot_service.return_value = mock_service
 
-                response = test_client.post(f"/api/bots/{bot_id}/pause", headers=auth_headers)
+                response = test_client.post(f"/api/bot/{bot_id}/pause", headers=auth_headers)
 
                 # Pause functionality is not implemented in the API, expect 501
                 assert response.status_code == status.HTTP_501_NOT_IMPLEMENTED
@@ -304,7 +319,7 @@ class TestBotManagementAPI:
 
         with patch("src.web_interface.api.bot_management.get_trading_user") as mock_get_user:
             with patch(
-                "src.web_interface.api.bot_management.get_bot_service"
+                "src.web_interface.api.bot_management.get_web_bot_service_instance"
             ) as mock_get_bot_service:
                 from src.web_interface.security.auth import User
 
@@ -318,11 +333,11 @@ class TestBotManagementAPI:
                 )
                 mock_get_user.return_value = mock_user
 
-                # Mock bot service facade - resume returns False (not implemented)
-                mock_facade = AsyncMock()
-                mock_get_bot_service.return_value = mock_facade
+                # Mock web bot service - resume returns False (not implemented)
+                mock_service = AsyncMock()
+                mock_get_bot_service.return_value = mock_service
 
-                response = test_client.post(f"/api/bots/{bot_id}/resume", headers=auth_headers)
+                response = test_client.post(f"/api/bot/{bot_id}/resume", headers=auth_headers)
 
                 # Resume functionality is not implemented in the API, expect 501
                 assert response.status_code == status.HTTP_501_NOT_IMPLEMENTED
@@ -338,7 +353,7 @@ class TestBotManagementAPI:
 
         with patch("src.web_interface.api.bot_management.get_trading_user") as mock_get_user:
             with patch(
-                "src.web_interface.api.bot_management.get_bot_service"
+                "src.web_interface.api.bot_management.get_web_bot_service_instance"
             ) as mock_get_bot_service:
                 from src.web_interface.security.auth import User
                 from unittest.mock import MagicMock
@@ -365,13 +380,13 @@ class TestBotManagementAPI:
                     "bot_id": bot_id
                 }
 
-                # Mock bot service facade
-                mock_facade = AsyncMock()
-                mock_facade.get_bot_status = AsyncMock(return_value=mock_bot_status)
-                mock_get_bot_service.return_value = mock_facade
+                # Mock web bot service
+                mock_service = AsyncMock()
+                mock_service.get_bot_status_through_service = AsyncMock(return_value=mock_bot_status)
+                mock_get_bot_service.return_value = mock_service
 
                 response = test_client.put(
-                    f"/api/bots/{bot_id}", json=update_data, headers=auth_headers
+                    f"/api/bot/{bot_id}", json=update_data, headers=auth_headers
                 )
 
                 assert response.status_code == status.HTTP_200_OK
@@ -386,7 +401,7 @@ class TestBotManagementAPI:
 
         with patch("src.web_interface.api.bot_management.get_admin_user") as mock_get_admin:
             with patch(
-                "src.web_interface.api.bot_management.get_bot_service"
+                "src.web_interface.api.bot_management.get_web_bot_service_instance"
             ) as mock_get_bot_service:
                 from src.web_interface.security.auth import User
 
@@ -400,13 +415,12 @@ class TestBotManagementAPI:
                 )
                 mock_get_admin.return_value = mock_admin
 
-                # Mock bot service facade
-                mock_facade = AsyncMock()
-                mock_facade.delete_bot = AsyncMock(return_value=True)
-                mock_facade.stop_bot = AsyncMock(return_value=True)  # Fallback method
-                mock_get_bot_service.return_value = mock_facade
+                # Mock web bot service
+                mock_service = AsyncMock()
+                mock_service.delete_bot_through_service = AsyncMock(return_value=True)
+                mock_get_bot_service.return_value = mock_service
 
-                response = test_client.delete(f"/api/bots/{bot_id}", headers=admin_auth_headers)
+                response = test_client.delete(f"/api/bot/{bot_id}", headers=admin_auth_headers)
 
                 assert response.status_code == status.HTTP_200_OK
                 data = response.json()
@@ -417,7 +431,7 @@ class TestBotManagementAPI:
         """Test getting orchestrator status."""
         with patch("src.web_interface.api.bot_management.get_current_user") as mock_get_user:
             with patch(
-                "src.web_interface.api.bot_management.get_bot_service"
+                "src.web_interface.api.bot_management.get_web_bot_service_instance"
             ) as mock_get_bot_service:
                 from src.web_interface.security.auth import User
 
@@ -441,13 +455,13 @@ class TestBotManagementAPI:
                     {"status": "stopped"},
                 ]
 
-                # Mock bot service facade
-                mock_facade = AsyncMock()
-                mock_facade.health_check = MagicMock(return_value=mock_health)
-                mock_facade.list_bots = AsyncMock(return_value=mock_bots)
-                mock_get_bot_service.return_value = mock_facade
+                # Mock web bot service
+                mock_service = AsyncMock()
+                mock_service.get_facade_health_check = MagicMock(return_value=mock_health)
+                mock_service.list_bots_through_service = AsyncMock(return_value=mock_bots)
+                mock_get_bot_service.return_value = mock_service
 
-                response = test_client.get("/api/bots/orchestrator/status", headers=auth_headers)
+                response = test_client.get("/api/bot/orchestrator/status", headers=auth_headers)
 
                 assert response.status_code == status.HTTP_200_OK
                 data = response.json()
@@ -459,7 +473,7 @@ class TestBotManagementAPI:
         """Test API behavior when bot service is not available."""
         with patch("src.web_interface.api.bot_management.get_trading_user") as mock_get_user:
             with patch(
-                "src.web_interface.api.bot_management.get_bot_service"
+                "src.web_interface.api.bot_management.get_web_bot_service_instance"
             ) as mock_get_bot_service:
                 from src.web_interface.security.auth import User
                 from src.core.exceptions import ServiceError
@@ -486,6 +500,6 @@ class TestBotManagementAPI:
                     "risk_percentage": "0.02",  # Use string for Decimal validation
                 }
 
-                response = test_client.post("/api/bots/", json=bot_data, headers=auth_headers)
+                response = test_client.post("/api/bot/", json=bot_data, headers=auth_headers)
 
                 assert response.status_code == status.HTTP_503_SERVICE_UNAVAILABLE

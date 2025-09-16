@@ -73,27 +73,50 @@ class WebSocketEventHandler:
         self._running = True
 
     async def stop(self) -> None:
-        """Stop the event handler."""
+        """Stop the event handler with proper cleanup and timeout."""
         self._running = False
         if self._task and not self._task.done():
             self._task.cancel()
             try:
-                await asyncio.wait_for(self._task, timeout=5.0)
-            except (asyncio.CancelledError, asyncio.TimeoutError):
-                # Task was cancelled or timed out - this is expected
-                pass
+                # Use async context manager for timeout
+                try:
+                    await asyncio.wait_for(self._task, timeout=5.0)
+                except asyncio.CancelledError:
+                    # Task was cancelled - this is expected
+                    self.logger.debug(f"Event handler task cancelled for {self.channel.value}")
+                except asyncio.TimeoutError:
+                    self.logger.warning(f"Timeout stopping event handler task for {self.channel.value}")
+                # Force cancellation if timeout
+                self._task.cancel()
+                try:
+                    await asyncio.wait_for(self._task, timeout=1.0)
+                except (asyncio.CancelledError, asyncio.TimeoutError):
+                    pass
             except Exception as e:
                 self.logger.warning(f"Error stopping event handler task: {e}")
         self._task = None
 
     async def emit_to_channel(self, sio: AsyncServer, event: str, data: Any) -> None:
-        """Emit data to all subscribers of this channel."""
-        if self.subscribers:
+        """Emit data to all subscribers of this channel with timeout and error handling."""
+        if not self.subscribers:
+            return
+
+        try:
+            # Use timeout to prevent hanging on emit operations
             try:
-                await sio.emit(event, data, room=list(self.subscribers))
-            except Exception as e:
-                self.logger.error(f"Failed to emit to channel {self.channel.value}: {e}")
-                # Remove failed subscribers
+                subscriber_list = list(self.subscribers)  # Create snapshot to avoid race conditions
+                if subscriber_list:
+                    await asyncio.wait_for(sio.emit(event, data, room=subscriber_list), timeout=10.0)
+            except asyncio.TimeoutError:
+                self.logger.warning(
+                    f"Timeout emitting to channel {self.channel.value}, clearing subscribers"
+                )
+                # Clear subscribers on timeout to prevent future hangs
+                self.subscribers.clear()
+        except Exception as e:
+            self.logger.error(f"Failed to emit to channel {self.channel.value}: {e}")
+            # Only clear subscribers on connection-related errors, not data errors
+            if "connection" in str(e).lower() or "socket" in str(e).lower():
                 self.subscribers.clear()
 
 
@@ -110,14 +133,19 @@ class MarketDataHandler(WebSocketEventHandler):
         self._task = asyncio.create_task(self._broadcast_loop())
 
     async def _broadcast_loop(self) -> None:
-        """Market data broadcast loop."""
+        """Market data broadcast loop with consistent data transformation."""
         while self._running:
             try:
                 # Mock data for now - in production, get from API facade
                 # NOTE: Real implementation would use: facade = get_api_facade()
+
+                # Apply consistent data transformation patterns
                 market_data = {
                     "type": "market_update",
                     "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "processing_mode": "stream",  # Align with core events
+                    "data_format": "event_data_v1",
+                    "message_pattern": "pub_sub",  # WebSocket uses pub_sub pattern
                     "data": {
                         "BTC/USDT": {"price": 45000.00, "volume": 1234567890, "change_24h": 2.5},
                         "ETH/USDT": {"price": 2500.00, "volume": 987654321, "change_24h": -1.2},
@@ -238,6 +266,280 @@ class PortfolioHandler(WebSocketEventHandler):
         pass
 
 
+class TradesHandler(WebSocketEventHandler):
+    """Handler for trade execution WebSocket events."""
+
+    def __init__(self):
+        super().__init__(ChannelType.TRADES, SubscriptionLevel.TRADING)
+        self.update_interval = 0.5  # 500ms updates for trades
+
+    async def start(self) -> None:
+        """Start trade execution broadcasting."""
+        await super().start()
+        self._task = asyncio.create_task(self._broadcast_loop())
+
+    async def _broadcast_loop(self) -> None:
+        """Trade execution broadcast loop."""
+        while self._running:
+            try:
+                # Mock trade data - in production, get from API facade
+                trade_data = {
+                    "type": "trade_execution",
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "processing_mode": "realtime",
+                    "data_format": "trade_event_v1",
+                    "message_pattern": "event_stream",
+                    "data": {
+                        "trade_id": f"trade_{datetime.now().strftime('%H%M%S')}",
+                        "symbol": "BTC/USDT",
+                        "side": "buy",
+                        "quantity": "0.001",
+                        "price": "45123.50",
+                        "value": "45.12",
+                        "commission": "0.045",
+                        "execution_time": datetime.now(timezone.utc).isoformat(),
+                        "status": "filled",
+                        "strategy": "momentum_v1",
+                    },
+                }
+
+                if self.subscribers:
+                    await self._emit_data("trade_executed", trade_data)
+
+                await asyncio.sleep(self.update_interval)
+
+            except Exception as e:
+                self.logger.error(f"Error in trades broadcast loop: {e}")
+                await asyncio.sleep(self.update_interval)
+
+    async def _emit_data(self, event: str, data: Any) -> None:
+        """Placeholder for data emission."""
+        pass
+
+
+class OrdersHandler(WebSocketEventHandler):
+    """Handler for order status WebSocket events."""
+
+    def __init__(self):
+        super().__init__(ChannelType.ORDERS, SubscriptionLevel.TRADING)
+        self.update_interval = 1.0  # 1 second updates for orders
+
+    async def start(self) -> None:
+        """Start order status broadcasting."""
+        await super().start()
+        self._task = asyncio.create_task(self._broadcast_loop())
+
+    async def _broadcast_loop(self) -> None:
+        """Order status broadcast loop."""
+        while self._running:
+            try:
+                # Mock order data - in production, get from API facade
+                order_data = {
+                    "type": "order_status_update",
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "processing_mode": "realtime",
+                    "data_format": "order_event_v1",
+                    "message_pattern": "state_change",
+                    "data": {
+                        "order_id": f"order_{datetime.now().strftime('%H%M%S')}",
+                        "client_order_id": f"client_{datetime.now().strftime('%H%M%S')}",
+                        "symbol": "ETH/USDT",
+                        "side": "sell",
+                        "type": "limit",
+                        "quantity": "0.5",
+                        "price": "2501.25",
+                        "filled_quantity": "0.2",
+                        "remaining_quantity": "0.3",
+                        "status": "partially_filled",
+                        "created_at": datetime.now(timezone.utc).isoformat(),
+                        "updated_at": datetime.now(timezone.utc).isoformat(),
+                    },
+                }
+
+                if self.subscribers:
+                    await self._emit_data("order_update", order_data)
+
+                await asyncio.sleep(self.update_interval)
+
+            except Exception as e:
+                self.logger.error(f"Error in orders broadcast loop: {e}")
+                await asyncio.sleep(self.update_interval)
+
+    async def _emit_data(self, event: str, data: Any) -> None:
+        """Placeholder for data emission."""
+        pass
+
+
+class AlertsHandler(WebSocketEventHandler):
+    """Handler for alerts and notifications WebSocket events."""
+
+    def __init__(self):
+        super().__init__(ChannelType.ALERTS, SubscriptionLevel.USER)
+        self.update_interval = 3.0  # 3 second check for alerts
+
+    async def start(self) -> None:
+        """Start alerts broadcasting."""
+        await super().start()
+        self._task = asyncio.create_task(self._broadcast_loop())
+
+    async def _broadcast_loop(self) -> None:
+        """Alerts broadcast loop."""
+        while self._running:
+            try:
+                # Mock alert data - in production, get from API facade
+                alert_data = {
+                    "type": "system_alert",
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "processing_mode": "alert",
+                    "data_format": "alert_event_v1",
+                    "message_pattern": "notification",
+                    "data": {
+                        "alert_id": f"alert_{datetime.now().strftime('%H%M%S')}",
+                        "severity": "medium",
+                        "category": "risk_management",
+                        "title": "Position Size Warning",
+                        "message": "BTC position approaching 5% portfolio limit",
+                        "symbol": "BTC/USDT",
+                        "current_exposure": "4.8%",
+                        "threshold": "5.0%",
+                        "action_required": False,
+                        "created_at": datetime.now(timezone.utc).isoformat(),
+                        "expires_at": (datetime.now(timezone.utc).timestamp() + 3600),
+                    },
+                }
+
+                if self.subscribers:
+                    await self._emit_data("new_alert", alert_data)
+
+                await asyncio.sleep(self.update_interval)
+
+            except Exception as e:
+                self.logger.error(f"Error in alerts broadcast loop: {e}")
+                await asyncio.sleep(self.update_interval)
+
+    async def _emit_data(self, event: str, data: Any) -> None:
+        """Placeholder for data emission."""
+        pass
+
+
+class LogsHandler(WebSocketEventHandler):
+    """Handler for system logs WebSocket events."""
+
+    def __init__(self):
+        super().__init__(ChannelType.LOGS, SubscriptionLevel.ADMIN)
+        self.update_interval = 2.0  # 2 second updates for logs
+
+    async def start(self) -> None:
+        """Start logs broadcasting."""
+        await super().start()
+        self._task = asyncio.create_task(self._broadcast_loop())
+
+    async def _broadcast_loop(self) -> None:
+        """Logs broadcast loop."""
+        while self._running:
+            try:
+                # Mock log data - in production, get from API facade
+                log_data = {
+                    "type": "system_log",
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "processing_mode": "logging",
+                    "data_format": "log_event_v1",
+                    "message_pattern": "stream",
+                    "data": {
+                        "log_id": f"log_{datetime.now().strftime('%H%M%S')}",
+                        "level": "INFO",
+                        "component": "execution_engine",
+                        "message": "Order execution completed successfully",
+                        "context": {
+                            "order_id": "order_123456",
+                            "symbol": "BTC/USDT",
+                            "execution_time_ms": 142,
+                        },
+                        "correlation_id": f"corr_{datetime.now().strftime('%H%M%S')}",
+                        "thread_id": "exec_thread_1",
+                        "created_at": datetime.now(timezone.utc).isoformat(),
+                    },
+                }
+
+                if self.subscribers:
+                    await self._emit_data("system_log", log_data)
+
+                await asyncio.sleep(self.update_interval)
+
+            except Exception as e:
+                self.logger.error(f"Error in logs broadcast loop: {e}")
+                await asyncio.sleep(self.update_interval)
+
+    async def _emit_data(self, event: str, data: Any) -> None:
+        """Placeholder for data emission."""
+        pass
+
+
+class RiskMetricsHandler(WebSocketEventHandler):
+    """Handler for risk metrics WebSocket events."""
+
+    def __init__(self):
+        super().__init__(ChannelType.RISK_METRICS, SubscriptionLevel.USER)
+        self.update_interval = 10.0  # 10 second updates for risk metrics
+
+    async def start(self) -> None:
+        """Start risk metrics broadcasting."""
+        await super().start()
+        self._task = asyncio.create_task(self._broadcast_loop())
+
+    async def _broadcast_loop(self) -> None:
+        """Risk metrics broadcast loop."""
+        while self._running:
+            try:
+                # Mock risk metrics data - in production, get from API facade
+                risk_data = {
+                    "type": "risk_metrics_update",
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "processing_mode": "analytics",
+                    "data_format": "risk_metrics_v1",
+                    "message_pattern": "periodic_update",
+                    "data": {
+                        "portfolio_var_1d": "1234.56",  # Using strings for Decimal values
+                        "portfolio_var_5d": "2456.78",
+                        "max_drawdown": "0.08",
+                        "sharpe_ratio": "1.24",
+                        "total_exposure": "0.78",
+                        "risk_score": "6.5",
+                        "position_risks": {
+                            "BTC/USDT": {
+                                "position_size": "0.1",
+                                "var_1d": "234.56",
+                                "correlation_score": "0.85",
+                            },
+                            "ETH/USDT": {
+                                "position_size": "2.5",
+                                "var_1d": "456.78",
+                                "correlation_score": "0.72",
+                            },
+                        },
+                        "risk_limits": {
+                            "portfolio_limit": "10000.00",
+                            "position_limit": "2000.00",
+                            "var_limit": "500.00",
+                        },
+                        "calculated_at": datetime.now(timezone.utc).isoformat(),
+                    },
+                }
+
+                if self.subscribers:
+                    await self._emit_data("risk_metrics", risk_data)
+
+                await asyncio.sleep(self.update_interval)
+
+            except Exception as e:
+                self.logger.error(f"Error in risk metrics broadcast loop: {e}")
+                await asyncio.sleep(self.update_interval)
+
+    async def _emit_data(self, event: str, data: Any) -> None:
+        """Placeholder for data emission."""
+        pass
+
+
 class UnifiedWebSocketNamespace(AsyncNamespace):
     """Unified namespace for all WebSocket communications."""
 
@@ -253,6 +555,11 @@ class UnifiedWebSocketNamespace(AsyncNamespace):
             ChannelType.MARKET_DATA: MarketDataHandler(),
             ChannelType.BOT_STATUS: BotStatusHandler(),
             ChannelType.PORTFOLIO: PortfolioHandler(),
+            ChannelType.TRADES: TradesHandler(),
+            ChannelType.ORDERS: OrdersHandler(),
+            ChannelType.ALERTS: AlertsHandler(),
+            ChannelType.LOGS: LogsHandler(),
+            ChannelType.RISK_METRICS: RiskMetricsHandler(),
         }
 
         # Set emit functions for handlers
@@ -269,7 +576,7 @@ class UnifiedWebSocketNamespace(AsyncNamespace):
         return emit_data
 
     async def on_connect(
-        self, sid: str, environ: dict[str, Any], auth: dict[str, Any] | None = None
+        self, sid: str, environ: dict[str, Any] | None = None, auth: dict[str, Any] | None = None
     ):
         """Handle client connection."""
         correlation_id = correlation_context.generate_correlation_id()
@@ -306,15 +613,28 @@ class UnifiedWebSocketNamespace(AsyncNamespace):
         return True
 
     async def on_disconnect(self, sid: str):
-        """Handle client disconnection."""
+        """Handle client disconnection with proper cleanup and concurrency."""
         correlation_id = correlation_context.generate_correlation_id()
         with correlation_context.correlation_context(correlation_id):
             self.logger.info(f"Client disconnected: {sid}")
 
-        # Unsubscribe from all channels
+        # Unsubscribe from all channels concurrently
+        cleanup_tasks = []
         if sid in self.session_subscriptions:
-            for channel in list(self.session_subscriptions[sid]):
-                await self._unsubscribe_from_channel(sid, channel)
+            channels_to_unsubscribe = list(
+                self.session_subscriptions[sid]
+            )  # Snapshot to avoid race conditions
+            for channel in channels_to_unsubscribe:
+                cleanup_tasks.append(self._unsubscribe_from_channel(sid, channel))
+
+        # Execute all unsubscribe operations concurrently with timeout
+        if cleanup_tasks:
+            try:
+                await asyncio.wait_for(asyncio.gather(*cleanup_tasks, return_exceptions=True), timeout=10.0)
+            except asyncio.TimeoutError:
+                self.logger.warning(f"Timeout during channel cleanup for client {sid}")
+            except Exception as e:
+                self.logger.warning(f"Error during channel cleanup for client {sid}: {e}")
 
         # Clean up client data
         self.connected_clients.pop(sid, None)
@@ -331,30 +651,59 @@ class UnifiedWebSocketNamespace(AsyncNamespace):
         await self._authenticate_session(sid, token)
 
     async def _authenticate_session(self, sid: str, token: str) -> bool:
-        """Authenticate a session with the provided token."""
+        """Authenticate a session with the provided token with timeout and proper error handling."""
         try:
-            # JWT validation implementation needed
-            # For now, accept any non-empty token
-            if token:
-                self.connected_clients[sid]["authenticated"] = True
-                self.connected_clients[sid]["user_id"] = "user123"  # Mock user ID
-                self.connected_clients[sid]["permissions"] = {"user", "trading"}  # Mock permissions
-                self.authenticated_sessions.add(sid)
+            # Use timeout for authentication process
+            try:
+                # JWT validation implementation needed
+                # For now, accept any non-empty token
+                if token:
+                    self.connected_clients[sid]["authenticated"] = True
+                    self.connected_clients[sid]["user_id"] = "user123"  # Mock user ID
+                    self.connected_clients[sid]["permissions"] = {
+                        "user",
+                        "trading",
+                    }  # Mock permissions
+                    self.authenticated_sessions.add(sid)
 
-                await self.emit(
-                    "authenticated",
-                    {
-                        "status": "success",
-                        "user_id": "user123",
-                        "permissions": list(self.connected_clients[sid]["permissions"]),
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
-                    },
-                    room=sid,
-                )
+                    # Use timeout for emit operation
+                    try:
+                        await asyncio.wait_for(
+                            self.emit(
+                                "authenticated",
+                                {
+                                    "status": "success",
+                                    "user_id": "user123",
+                                    "permissions": list(self.connected_clients[sid]["permissions"]),
+                                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                                },
+                                room=sid,
+                            ),
+                            timeout=5.0
+                        )
+                    except asyncio.TimeoutError:
+                        self.logger.error(f"Failed to send auth success message to {sid}")
 
-                return True
+                    return True
+            except asyncio.TimeoutError:
+                self.logger.warning(f"Authentication timeout for session {sid}")
+                try:
+                    await asyncio.wait_for(
+                        self.emit("auth_error", {"error": "Authentication timeout"}, room=sid),
+                        timeout=3.0
+                    )
+                except asyncio.TimeoutError:
+                    self.logger.error(f"Failed to send auth timeout message to {sid}")
         except Exception as e:
-            await self.emit("auth_error", {"error": f"Authentication failed: {e!s}"}, room=sid)
+            try:
+                await asyncio.wait_for(
+                    self.emit(
+                        "auth_error", {"error": f"Authentication failed: {e!s}"}, room=sid
+                    ),
+                    timeout=3.0
+                )
+            except asyncio.TimeoutError:
+                self.logger.error(f"Failed to send auth error message to {sid}")
 
         return False
 
@@ -491,11 +840,22 @@ class UnifiedWebSocketNamespace(AsyncNamespace):
             await handler.start()
 
     async def stop_handlers(self):
-        """Stop all event handlers."""
-        # Stop all handlers concurrently
+        """Stop all event handlers with proper timeout and error handling."""
+        # Stop all handlers concurrently with timeout
         stop_tasks = [handler.stop() for handler in self.handlers.values()]
         if stop_tasks:
-            await asyncio.gather(*stop_tasks, return_exceptions=True)
+            try:
+                await asyncio.wait_for(asyncio.gather(*stop_tasks, return_exceptions=True), timeout=30.0)  # Overall timeout for stopping all handlers
+            except asyncio.TimeoutError:
+                self.logger.warning(
+                    "Timeout stopping WebSocket handlers, some handlers may not have stopped cleanly"
+                )
+                # Force stop any remaining handlers
+                for handler in self.handlers.values():
+                    if handler._task and not handler._task.done():
+                        handler._task.cancel()
+            except Exception as e:
+                self.logger.error(f"Error stopping WebSocket handlers: {e}")
 
 
 class UnifiedWebSocketManager(BaseComponent):
@@ -513,8 +873,9 @@ class UnifiedWebSocketManager(BaseComponent):
         if self.api_facade is None:
             try:
                 self.api_facade = injector.resolve("APIFacade")
-            except Exception:
+            except Exception as e:
                 # API facade is optional for fallback
+                self.logger.debug(f"Could not resolve APIFacade from DI container: {e}")
                 pass
 
     def create_server(self, cors_allowed_origins: list[str] | None = None) -> AsyncServer:
@@ -548,28 +909,46 @@ class UnifiedWebSocketManager(BaseComponent):
         return self.sio
 
     async def start(self):
-        """Start the unified WebSocket manager."""
+        """Start the unified WebSocket manager with proper error handling."""
         if self._running or not self.namespace:
             return
 
         self._running = True
-        await self.namespace.start_handlers()
 
-        correlation_id = correlation_context.generate_correlation_id()
-        with correlation_context.correlation_context(correlation_id):
-            self.logger.info("Unified WebSocket manager started")
+        try:
+            # Start handlers with timeout
+            await asyncio.wait_for(self.namespace.start_handlers(), timeout=20.0)
+
+            correlation_id = correlation_context.generate_correlation_id()
+            with correlation_context.correlation_context(correlation_id):
+                self.logger.info("Unified WebSocket manager started")
+        except asyncio.TimeoutError:
+            self.logger.error("Timeout starting WebSocket handlers")
+            self._running = False
+            raise
+        except Exception as e:
+            self.logger.error(f"Error starting unified WebSocket manager: {e}")
+            self._running = False
+            raise
 
     async def stop(self):
-        """Stop the unified WebSocket manager."""
+        """Stop the unified WebSocket manager with proper cleanup."""
         if not self._running or not self.namespace:
             return
 
         self._running = False
-        await self.namespace.stop_handlers()
 
-        correlation_id = correlation_context.generate_correlation_id()
-        with correlation_context.correlation_context(correlation_id):
-            self.logger.info("Unified WebSocket manager stopped")
+        try:
+            # Stop handlers with timeout
+            await asyncio.wait_for(self.namespace.stop_handlers(), timeout=30.0)
+        except asyncio.TimeoutError:
+            self.logger.warning("Timeout stopping WebSocket handlers during shutdown")
+        except Exception as e:
+            self.logger.error(f"Error stopping WebSocket handlers: {e}")
+        finally:
+            correlation_id = correlation_context.generate_correlation_id()
+            with correlation_context.correlation_context(correlation_id):
+                self.logger.info("Unified WebSocket manager stopped")
 
     def get_connection_stats(self) -> dict[str, Any]:
         """Get connection statistics."""

@@ -105,20 +105,27 @@ def _convert_db_user_to_user_in_db(db_user: DBUser) -> UserInDB:
     )
 
 
-async def get_user(username: str) -> UserInDB | None:
+async def get_user(username: str, database_service: DatabaseService = None) -> UserInDB | None:
     """
     Get user by username from database.
 
     Args:
         username: Username to lookup
+        database_service: Optional database service (will use DI if not provided)
 
     Returns:
         UserInDB: User data or None if not found
     """
     try:
-        # Use DatabaseService instead of direct repository access
-        database_service = DatabaseService()
-        await database_service.start()
+        # Get database service from DI if not provided
+        if database_service is None:
+            from src.core.dependency_injection import DependencyInjector
+
+            injector = DependencyInjector.get_instance()
+            database_service = injector.resolve("DatabaseService")
+            should_stop_service = False  # Service managed by DI container
+        else:
+            should_stop_service = True  # Service was explicitly passed
 
         try:
             # Query users by username filter
@@ -135,28 +142,38 @@ async def get_user(username: str) -> UserInDB | None:
 
             return _convert_db_user_to_user_in_db(db_user)
         finally:
-            await database_service.stop()
+            if should_stop_service:
+                await database_service.stop()
 
     except Exception as e:
         logger.error(f"Database error getting user {username}: {e}")
         return None
 
 
-async def authenticate_user(username: str, password: str) -> UserInDB | None:
+async def authenticate_user(
+    username: str, password: str, database_service: DatabaseService = None
+) -> UserInDB | None:
     """
     Authenticate user credentials with security measures.
 
     Args:
         username: Username
         password: Plain text password
+        database_service: Optional database service (will use DI if not provided)
 
     Returns:
         UserInDB: Authenticated user or None if authentication fails
     """
     try:
-        # Use DatabaseService instead of direct repository access
-        database_service = DatabaseService()
-        await database_service.start()
+        # Get database service from DI if not provided
+        if database_service is None:
+            from src.core.dependency_injection import DependencyInjector
+
+            injector = DependencyInjector.get_instance()
+            database_service = injector.resolve("DatabaseService")
+            should_stop_service = False
+        else:
+            should_stop_service = True
 
         try:
             # Query users by username filter
@@ -211,7 +228,8 @@ async def authenticate_user(username: str, password: str) -> UserInDB | None:
             logger.info("User authenticated successfully", username=username)
             return user_in_db
         finally:
-            await database_service.stop()
+            if should_stop_service:
+                await database_service.stop()
 
     except Exception as e:
         logger.error(f"Authentication error: {e}", username=username)
@@ -388,7 +406,11 @@ async def get_trading_user(current_user: User = Depends(get_current_user)) -> Us
 
 
 async def create_user(
-    username: str, email: str, password: str, scopes: list[str] | None = None
+    username: str,
+    email: str,
+    password: str,
+    scopes: list[str] | None = None,
+    database_service: DatabaseService = None,
 ) -> UserInDB:
     """
     Create a new user (for admin functionality).
@@ -409,9 +431,15 @@ async def create_user(
         if not jwt_handler:
             raise ValueError("Authentication system not initialized")
 
-        # Use DatabaseService instead of direct repository access
-        database_service = DatabaseService()
-        await database_service.start()
+        # Get database service from DI if not provided
+        if database_service is None:
+            from src.core.dependency_injection import DependencyInjector
+
+            injector = DependencyInjector.get_instance()
+            database_service = injector.resolve("DatabaseService")
+            should_stop_service = False
+        else:
+            should_stop_service = True
 
         try:
             # Check if user exists
@@ -440,14 +468,15 @@ async def create_user(
             logger.info("User created successfully", username=username, scopes=user_in_db.scopes)
             return user_in_db
         finally:
-            await database_service.stop()
+            if should_stop_service:
+                await database_service.stop()
 
     except Exception as e:
         logger.error(f"User creation failed: {e}", username=username)
         raise ValueError(f"User creation failed: {e}") from e
 
 
-async def get_auth_summary() -> dict:
+async def get_auth_summary(database_service: DatabaseService = None) -> dict:
     """
     Get authentication system summary.
 
@@ -458,16 +487,23 @@ async def get_auth_summary() -> dict:
         total_users = 0
         active_users = 0
 
-        # Use DatabaseService instead of direct repository access
-        database_service = DatabaseService()
-        await database_service.start()
+        # Get database service from DI if not provided
+        if database_service is None:
+            from src.core.dependency_injection import DependencyInjector
+
+            injector = DependencyInjector.get_instance()
+            database_service = injector.resolve("DatabaseService")
+            should_stop_service = False
+        else:
+            should_stop_service = True
 
         try:
             all_users = await database_service.list_entities(model_class=DBUser)
             total_users = len(all_users)
             active_users = sum(1 for user in all_users if user.is_active)
         finally:
-            await database_service.stop()
+            if should_stop_service:
+                await database_service.stop()
     except Exception as e:
         logger.error(f"Failed to get user stats: {e}")
 

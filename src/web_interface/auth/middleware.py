@@ -7,12 +7,17 @@ in the unified auth system.
 
 from collections.abc import Callable
 
-from fastapi import Request, Response
+from fastapi import Depends, HTTPException, Request, Response, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from src.base import BaseComponent
+from src.core.base import BaseComponent
+from src.database.models.user import User
 
 from .auth_manager import get_auth_manager
+
+# Security scheme for FastAPI
+security = HTTPBearer()
 
 
 class AuthMiddleware(BaseHTTPMiddleware, BaseComponent):
@@ -59,3 +64,33 @@ class AuthMiddleware(BaseHTTPMiddleware, BaseComponent):
             response.headers["X-User-Roles"] = ",".join(role.name for role in user.roles)
 
         return response
+
+
+async def get_current_user(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+) -> User:
+    """
+    Dependency to get the current authenticated user.
+
+    Args:
+        credentials: The HTTP bearer token credentials
+
+    Returns:
+        The authenticated user
+
+    Raises:
+        HTTPException: If authentication fails
+    """
+    auth_manager = get_auth_manager()
+
+    # Validate the token
+    user = await auth_manager.validate_token(credentials.credentials)
+
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authentication credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    return user

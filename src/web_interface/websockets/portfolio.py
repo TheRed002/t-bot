@@ -33,7 +33,7 @@ class PortfolioManager:
         self._connection_semaphore = asyncio.Semaphore(self.max_connections)
 
     async def connect(self, websocket: WebSocket, user_id: str):
-        """Accept WebSocket connection with backpressure control."""
+        """Accept WebSocket connection with backpressure control and timeout."""
         # Check connection limit
         if len(self.active_connections) >= self.max_connections:
             logger.warning(
@@ -43,11 +43,15 @@ class PortfolioManager:
             return
 
         try:
+            # Use timeout for the entire connection process
             async with self._connection_semaphore:
-                await websocket.accept()
+                await asyncio.wait_for(websocket.accept(), timeout=15.0)
                 self.active_connections[user_id] = websocket
                 self.subscriptions[user_id] = set()
                 logger.info("Portfolio WebSocket connected", user_id=user_id)
+        except asyncio.TimeoutError:
+            logger.error(f"Timeout accepting portfolio WebSocket connection for {user_id}")
+            raise
         except Exception as e:
             logger.error(f"Failed to accept portfolio WebSocket connection: {e}", user_id=user_id)
             raise
@@ -81,57 +85,93 @@ class PortfolioManager:
             )
 
     async def send_to_user(self, user_id: str, message: dict):
-        """Send message to specific user."""
-        if user_id in self.active_connections:
-            try:
-                websocket = self.active_connections[user_id]
-                # Use asyncio timeout to prevent blocking
-                await asyncio.wait_for(websocket.send_text(json.dumps(message)), timeout=10.0)
-            except asyncio.TimeoutError:
-                logger.error("Timeout sending portfolio message to user", user_id=user_id)
-                self.disconnect(user_id)
-            except Exception as e:
-                logger.error(
-                    "Failed to send portfolio message to user", user_id=user_id, error=str(e)
-                )
-                self.disconnect(user_id)
+        """Send message to specific user with proper error handling and cleanup."""
+        if user_id not in self.active_connections:
+            return
+
+        websocket = self.active_connections[user_id]
+        try:
+            # Use asyncio timeout to prevent blocking with better timeout management
+            # Send message with timeout for better responsiveness
+            # Handle Decimal serialization properly
+            message_json = json.dumps(message, default=str)
+            await asyncio.wait_for(websocket.send_text(message_json), timeout=5.0)
+        except asyncio.TimeoutError:
+            logger.warning("Timeout sending portfolio message to user", user_id=user_id)
+            self.disconnect(user_id)
+        except Exception as e:
+            logger.error("Failed to send portfolio message to user", user_id=user_id, error=str(e))
+            self.disconnect(user_id)
 
     async def broadcast_to_all(self, message: dict, update_type: str):
-        """Broadcast message to all users subscribed to update type."""
-        disconnected_users = []
+        """Broadcast message to all users subscribed to update type with backpressure handling."""
+        # Create snapshot of subscribers to avoid race conditions
+        subscribed_users = [
+            user_id
+            for user_id, user_subscriptions in self.subscriptions.items()
+            if update_type in user_subscriptions and user_id in self.active_connections
+        ]
+
+        if not subscribed_users:
+            return
+
+        # Prepare message once for all subscribers
+        try:
+            message_json = json.dumps(message, default=str)
+        except Exception as e:
+            logger.error(
+                f"Failed to serialize portfolio message for update type {update_type}: {e}"
+            )
+            return
+
         send_tasks = []
+        # Collect all send tasks for active connections
+        for user_id in subscribed_users:
+            websocket = self.active_connections.get(user_id)
+            if websocket:
+                send_tasks.append(
+                    self._send_with_timeout_broadcast(websocket, message_json, user_id)
+                )
 
-        # Collect all send tasks
-        for user_id, user_subscriptions in self.subscriptions.items():
-            if update_type in user_subscriptions:
-                websocket = self.active_connections.get(user_id)
-                if websocket:
-                    send_tasks.append(self._send_with_timeout(websocket, message, user_id))
-
-        # Execute all sends concurrently
+        # Execute all sends concurrently with overall timeout
         if send_tasks:
-            results = await asyncio.gather(*send_tasks, return_exceptions=True)
-            for i, result in enumerate(results):
-                if isinstance(result, Exception):
-                    # Find the corresponding user_id for cleanup
-                    user_ids = [
-                        uid
-                        for uid, subs in self.subscriptions.items()
-                        if update_type in subs and uid in self.active_connections
-                    ]
-                    if i < len(user_ids):
-                        disconnected_users.append(user_ids[i])
+            try:
+                # Execute with overall broadcast timeout
+                results = await asyncio.wait_for(asyncio.gather(*send_tasks, return_exceptions=True), timeout=10.0)
 
-        # Clean up disconnected users
-        for user_id in disconnected_users:
-            self.disconnect(user_id)
+                # Clean up failed connections
+                for i, result in enumerate(results):
+                    if isinstance(result, Exception) and i < len(subscribed_users):
+                        user_id = subscribed_users[i]
+                        logger.debug(
+                            f"Disconnecting user {user_id} due to portfolio broadcast failure: {result}"
+                        )
+                        self.disconnect(user_id)
+            except asyncio.TimeoutError:
+                logger.warning(
+                    f"Timeout broadcasting portfolio {update_type} updates, cleaning up all connections"
+                )
+                # Clean up all subscribers on broadcast timeout
+                for user_id in subscribed_users:
+                    self.disconnect(user_id)
 
     async def _send_with_timeout(self, websocket: WebSocket, message: dict, user_id: str):
         """Send message with timeout handling."""
         try:
-            await asyncio.wait_for(websocket.send_text(json.dumps(message)), timeout=5.0)
+            message_json = json.dumps(message, default=str)
+            await asyncio.wait_for(websocket.send_text(message_json), timeout=3.0)  # Shorter timeout for individual sends
         except Exception as e:
             logger.error(f"Failed to send to user {user_id}: {e}")
+            raise
+
+    async def _send_with_timeout_broadcast(
+        self, websocket: WebSocket, message_json: str, user_id: str
+    ):
+        """Send pre-serialized message with timeout handling for broadcasts."""
+        try:
+            await asyncio.wait_for(websocket.send_text(message_json), timeout=3.0)
+        except Exception as e:
+            logger.debug(f"Failed to broadcast portfolio update to user {user_id}: {e}")
             raise
 
 

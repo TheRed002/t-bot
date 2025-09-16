@@ -12,7 +12,7 @@ from typing import Any
 
 import jwt
 
-from src.base import BaseComponent
+from src.core.base import BaseComponent
 
 from .models import AuthToken, TokenType, User, UserStatus
 

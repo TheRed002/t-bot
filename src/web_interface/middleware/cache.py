@@ -8,6 +8,7 @@ performance while ensuring data freshness for trading operations.
 import hashlib
 import json
 import time
+from collections.abc import Callable
 from typing import Any
 
 from fastapi import Request, Response
@@ -140,7 +141,7 @@ class CacheMiddleware(BaseHTTPMiddleware):
             ],
         }
 
-    async def dispatch(self, request: Request, call_next):
+    async def dispatch(self, request: Request, call_next: Callable) -> Response:
         """
         Process request through caching middleware.
 
@@ -342,8 +343,16 @@ class CacheMiddleware(BaseHTTPMiddleware):
                 # For other response types, try to read body
                 if hasattr(response, "body") and response.body:
                     try:
-                        response_data = json.loads(response.body.decode())
-                    except (json.JSONDecodeError, AttributeError):
+                        if isinstance(response.body, (bytes, memoryview)):
+                            body_bytes = (
+                                bytes(response.body)
+                                if isinstance(response.body, memoryview)
+                                else response.body
+                            )
+                            response_data = json.loads(body_bytes.decode())
+                        else:
+                            response_data = response.body
+                    except (json.JSONDecodeError, AttributeError, UnicodeDecodeError):
                         return  # Don't cache non-JSON responses
                 else:
                     return
@@ -352,7 +361,9 @@ class CacheMiddleware(BaseHTTPMiddleware):
             expires_at = time.time() + ttl
             headers = dict(response.headers)
 
-            entry = CacheEntry(data=response_data, headers=headers, expires_at=expires_at, path=request.url.path)
+            entry = CacheEntry(
+                data=response_data, headers=headers, expires_at=expires_at, path=request.url.path
+            )
 
             # Evict old entries if cache is full
             if len(self.cache) >= self.max_cache_size:
@@ -497,7 +508,7 @@ class CacheMiddleware(BaseHTTPMiddleware):
             "cache_config_count": len(self.cache_config),
         }
 
-    def clear_cache(self, pattern: str | None = None):
+    def clear_cache(self, pattern: str | None = None) -> None:
         """
         Clear cache entries.
 

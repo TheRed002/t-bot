@@ -7,28 +7,38 @@ functionality for trading strategies.
 
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
 from src.core.exceptions import ServiceError
 from src.core.logging import get_logger
-from src.web_interface.facade import get_api_facade
 from src.web_interface.security.auth import User, get_admin_user, get_current_user
+
+if TYPE_CHECKING:
+    from src.web_interface.services.strategy_service import WebStrategyService
 
 logger = get_logger(__name__)
 router = APIRouter()
 
 
 def get_strategy_service():
-    """Get strategy service through API facade."""
+    """Get strategy service through web service layer."""
+    # Controllers should only use web services, not facades directly
+    return get_web_strategy_service_instance()
+
+
+def get_web_strategy_service_instance() -> "WebStrategyService":
+    """Get web strategy service for business logic through DI."""
     try:
-        facade = get_api_facade()
-        return facade
+        # Create service instance - in production this would be through DI
+        from src.web_interface.services.strategy_service import WebStrategyService
+
+        return WebStrategyService()
     except Exception as e:
-        logger.error(f"Error getting API facade: {e}")
-        raise ServiceError(f"Strategy service not available: {e}")
+        logger.error(f"Error getting web strategy service: {e}")
+        raise ServiceError(f"Web strategy service not available: {e}")
 
 
 # Deprecated function for backward compatibility
@@ -148,10 +158,10 @@ async def list_strategies(
         HTTPException: If retrieval fails
     """
     try:
-        strategy_facade = get_strategy_service()
+        web_strategy_service = get_web_strategy_service_instance()
 
-        # Get strategies through service layer
-        strategies = await strategy_facade.list_strategies()
+        # Get strategies through service layer - service handles facade calls and formatting
+        strategies = await web_strategy_service.get_formatted_strategies()
 
         # Filter strategies based on parameters
         filtered_strategies = []
@@ -191,7 +201,11 @@ async def list_strategies(
 
     except Exception as e:
         logger.error(f"Strategy listing failed: {e}", user=current_user.username)
-        # Fallback to mock data if service fails
+        # Service layer already handles fallbacks, so just re-raise
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to list strategies: {e!s}",
+        )
         mock_strategies = [
             {
                 "strategy_name": "trend_following",
@@ -323,10 +337,12 @@ async def get_strategy(strategy_name: str, current_user: User = Depends(get_curr
         HTTPException: If strategy not found
     """
     try:
-        strategy_facade = get_strategy_service()
+        web_strategy_service = get_web_strategy_service_instance()
 
         # Get strategy configuration through service layer
-        strategy_config = await strategy_facade.get_strategy_config(strategy_name)
+        strategy_config = await web_strategy_service.get_strategy_config_through_service(
+            strategy_name
+        )
 
         if strategy_config:
             # Convert service response to API response format
@@ -428,10 +444,10 @@ async def configure_strategy(
         HTTPException: If configuration fails
     """
     try:
-        strategy_facade = get_strategy_service()
+        web_strategy_service = get_web_strategy_service_instance()
 
         # Validate strategy configuration through service layer
-        is_valid = await strategy_facade.validate_strategy_config(
+        is_valid = await web_strategy_service.validate_strategy_config_through_service(
             strategy_name, config_request.parameters
         )
 
