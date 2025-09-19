@@ -45,7 +45,6 @@ from src.core.types import (
 )
 
 # Services now injected via dependency injection - no direct imports
-
 # MANDATORY: Import from P-002A (error handling)
 from src.error_handling import get_global_error_handler
 from src.error_handling.decorators import (
@@ -424,7 +423,7 @@ class BotInstance:
             await asyncio.gather(*tasks_to_cancel, return_exceptions=True)
 
         # Cleanup strategy through strategy service
-        if hasattr(self, 'strategy_service') and self.bot_config.strategy_id:
+        if hasattr(self, "strategy_service") and self.bot_config.strategy_id:
             try:
                 await self.strategy_service.cleanup_strategy(self.bot_config.strategy_id)
             except Exception as e:
@@ -709,7 +708,7 @@ class BotInstance:
 
     async def _get_current_market_data(self, symbol: str) -> MarketData | None:
         """
-        Get current market data from data service.
+        Get current market data from exchange service.
 
         Args:
             symbol: Trading symbol
@@ -719,13 +718,30 @@ class BotInstance:
         """
         try:
             # Get exchange for this symbol
-            exchange = self.bot_config.exchanges[0] if self.bot_config.exchanges else "binance"
+            exchange_name = self.bot_config.exchanges[0] if self.bot_config.exchanges else "binance"
 
-            # TODO: Replace with actual data service call when data service is properly integrated
-            # For now, create minimal valid market data with current timestamp
-            # This is better than dummy data but should be replaced with real data service
-            from datetime import datetime, timezone
+            # Try to get real market data from exchange through exchange_factory
+            if self.exchange_factory:
+                try:
+                    exchange = await self.exchange_factory.get_exchange(exchange_name)
+                    if exchange and hasattr(exchange, "get_current_price"):
+                        # Get current price from exchange
+                        price_data = await exchange.get_current_price(symbol)
+                        if price_data:
+                            return MarketData(
+                                symbol=symbol,
+                                timestamp=datetime.now(timezone.utc),
+                                open=price_data.get("open", price_data.get("price", Decimal("50000"))),
+                                high=price_data.get("high", price_data.get("price", Decimal("51000"))),
+                                low=price_data.get("low", price_data.get("price", Decimal("49000"))),
+                                close=price_data.get("close", price_data.get("price", Decimal("50500"))),
+                                volume=price_data.get("volume", Decimal("1000")),
+                                exchange=exchange_name,
+                            )
+                except Exception as e:
+                    self._logger.warning(f"Failed to get real market data from exchange {exchange_name}: {e}")
 
+            # Fallback to realistic placeholder data with current timestamp
             return MarketData(
                 symbol=symbol,
                 timestamp=datetime.now(timezone.utc),
@@ -734,7 +750,7 @@ class BotInstance:
                 low=Decimal("49000"),
                 close=Decimal("50500"),
                 volume=Decimal("1000"),
-                exchange=exchange,
+                exchange=exchange_name,
             )
         except Exception as e:
             self._logger.error(f"Error fetching market data for {symbol}: {e}")

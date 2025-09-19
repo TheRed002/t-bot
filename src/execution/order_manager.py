@@ -278,7 +278,7 @@ class OrderManager(BaseComponent):
         self.idempotency_service = idempotency_service  # Store injected service
         self.state_service = state_service
         self.metrics_collector = metrics_collector
-        
+
         # Initialize idempotency manager - either from service or create new
         if idempotency_service:
             self.idempotency_manager = idempotency_service
@@ -382,7 +382,7 @@ class OrderManager(BaseComponent):
             self._is_running = True
 
             # Start idempotency manager if it has a start method
-            if hasattr(self.idempotency_manager, 'start'):
+            if hasattr(self.idempotency_manager, "start"):
                 await self.idempotency_manager.start()
 
             self._start_cleanup_task()
@@ -390,8 +390,12 @@ class OrderManager(BaseComponent):
             # Start WebSocket connections for real-time updates
             # Initialize WebSocket connections through injected service
             if self.websocket_service:
+                # Get exchanges from config, with fallback to default exchanges
+                exchanges = getattr(self.config, "execution", {}).get("exchanges") or \
+                           getattr(self.config, "supported_exchanges", ["binance", "coinbase", "okx"])
+
                 await self.websocket_service.initialize_connections(
-                    exchanges=["binance", "coinbase", "okx"]  # TODO: Get from config
+                    exchanges=exchanges
                 )
 
             # Restore orders from StateService if available
@@ -707,17 +711,17 @@ class OrderManager(BaseComponent):
             self._logger.error(f"Unexpected error during order submission: {e}", exc_info=True)
             if "client_order_id" in locals() and client_order_id:
                 await self.idempotency_manager.mark_order_failed(client_order_id, str(e))
-            
+
             # Update statistics
             self.order_statistics["rejected_orders"] += 1
-            
+
             # Call error callback if provided
             if "managed_order" in locals() and managed_order.on_error_callback:
                 try:
                     await managed_order.on_error_callback(managed_order, str(e))
                 except Exception as callback_error:
                     self._logger.error(f"Error callback failed: {callback_error}")
-            
+
             raise ExecutionError(f"Order submission failed: {e}") from e
 
     # ========== P-020 Enhanced Order Management Methods ==========

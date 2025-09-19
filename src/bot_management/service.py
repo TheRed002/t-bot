@@ -25,21 +25,18 @@ from src.core.base.service import BaseService
 
 # Import event system for coordination
 from src.core.events import BotEvent, BotEventType, get_event_publisher
-
-# Caching will be implemented in a future module
-from .data_transformer import BotManagementDataTransformer
 from src.core.exceptions import ServiceError, StateConsistencyError, ValidationError
+
+# Import state types for StateService integration
 from src.core.types import (
     BotConfiguration,
     BotMetrics,
     BotPriority,
     BotState,
     BotStatus,
+    StatePriority,
     StateType,
 )
-
-# Import state types for StateService integration
-from src.core.types import StatePriority
 
 # Import common utilities
 from src.utils.bot_service_helpers import (
@@ -48,6 +45,9 @@ from src.utils.bot_service_helpers import (
     safe_close_connection,
     safe_import_monitoring,
 )
+
+# Caching will be implemented in a future module
+from .data_transformer import BotManagementDataTransformer
 
 # Get monitoring components with fallback
 _monitoring = safe_import_monitoring()
@@ -377,7 +377,7 @@ class BotService(BaseService):
                 # Apply boundary validation for cross-module communication
                 risk_data = BotManagementDataTransformer.apply_cross_module_validation(
                     {
-                        "bot_config": getattr(bot_config, '__dict__', {}),
+                        "bot_config": getattr(bot_config, "__dict__", {}),
                         "current_portfolio": current_portfolio,
                         "operation": "validate_bot_configuration"
                     },
@@ -1458,18 +1458,24 @@ class BotService(BaseService):
     def _setup_event_handlers(self) -> None:
         """Setup event handlers for analytics and risk monitoring integration."""
         try:
-            # Event management setup will be added when events module is complete
+            # Setup event handlers with available services
+            from src.core.events import setup_bot_management_events
 
-            # TODO: Setup event handlers with available services when function is implemented
-            # setup_bot_management_events(
-            #     analytics_service=self._analytics_service, risk_service=self._risk_service
-            # )
+            # Configure event publisher with analytics and risk services if available
+            event_publisher = setup_bot_management_events(
+                analytics_service=getattr(self, "_analytics_service", None),
+                risk_service=getattr(self, "_risk_service", None)
+            )
+
+            # Store reference to event publisher for potential usage in bot operations
+            self._event_publisher = event_publisher
 
             self._logger.info("Event handlers configured for bot management")
 
         except Exception as e:
             self._logger.warning(f"Failed to setup event handlers: {e}")
             # Continue without event handlers - graceful degradation
+            self._event_publisher = None
 
     def _calculate_bot_rate_requirements(self, bot_config: BotConfiguration) -> int:
         """
@@ -1993,7 +1999,7 @@ class BotService(BaseService):
                         health_result = await service.health_check()
                         # Handle both HealthCheckResult objects and dict responses
                         is_healthy = (
-                            health_result.healthy if hasattr(health_result, 'healthy')
+                            health_result.healthy if hasattr(health_result, "healthy")
                             else health_result.get("status") == "healthy" if isinstance(health_result, dict)
                             else False
                         )

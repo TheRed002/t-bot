@@ -71,8 +71,10 @@ class BacktestRepository(BaseComponent):
                     end_date=result_data.get("end_date", datetime.utcnow()),
                     strategy_config=request_data.get("strategy_config", {}),
                     risk_config=request_data.get("risk_config", {}),
-                    user_id=None,  # TODO: Add user context when available
-                    strategy_id=None,  # TODO: Add strategy context when available
+                    user_id=request_data.get("user_id") or request_data.get("created_by"),
+                    strategy_id=request_data.get("strategy_id") or
+                              request_data.get("strategy_config", {}).get("strategy_name") or
+                              request_data.get("strategy_name")
                 )
 
                 session.add(backtest_run)

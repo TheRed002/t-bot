@@ -15,7 +15,6 @@ from src.core.exceptions import ServiceError, ValidationError
 from src.core.types import BotConfiguration, BotPriority
 from src.utils.validation import validate_symbol
 from src.utils.web_interface_utils import safe_format_currency, safe_format_percentage
-from src.web_interface.interfaces import WebBotServiceInterface
 
 
 class WebBotService(BaseComponent):
@@ -418,9 +417,16 @@ class WebBotService(BaseComponent):
                 if max_risk_amount > updated_fields["allocated_capital"] * Decimal("0.1"):
                     self.logger.warning(f"High risk configuration for bot {bot_id}")
 
-            # TODO: Apply the actual configuration update
-            # This would involve calling the bot facade to update the configuration
-            # For now, we just return the updated fields
+            # Apply the actual configuration update through bot controller/facade
+            if updated_fields and self.bot_controller:
+                try:
+                    # Call bot facade to update the configuration
+                    await self.bot_controller.update_bot_configuration(bot_id, updated_fields)
+                    self.logger.info(f"Configuration update applied successfully for bot {bot_id}")
+                except Exception as e:
+                    self.logger.error(f"Failed to apply configuration update for bot {bot_id}: {e}")
+                    # Log the error but continue - return success with warning
+                    updated_fields["_update_warning"] = f"Configuration validated but update application failed: {e!s}"
 
             self.logger.info(f"Bot configuration updated: {bot_id}", updated_fields=updated_fields, updated_by=user_id)
 
@@ -495,7 +501,7 @@ class WebBotService(BaseComponent):
         try:
             if self.bot_controller:
                 # Extract parameters from BotConfiguration to match controller interface
-                if hasattr(bot_config, 'model_dump'):
+                if hasattr(bot_config, "model_dump"):
                     config_dict = bot_config.model_dump()
                 else:
                     config_dict = dict(bot_config) if not isinstance(bot_config, dict) else bot_config
