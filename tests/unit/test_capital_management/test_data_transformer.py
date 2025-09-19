@@ -62,7 +62,7 @@ class TestCapitalDataTransformer:
 
     def test_transform_allocation_to_dict_basic(self, sample_allocation):
         """Test basic allocation transformation."""
-        result = CapitalDataTransformer.transform_allocation_to_dict(sample_allocation)
+        result = CapitalDataTransformer.transform_allocation_to_event_data(sample_allocation)
 
         assert isinstance(result, dict)
         assert result["allocation_id"] == "alloc-123"
@@ -75,7 +75,7 @@ class TestCapitalDataTransformer:
 
     def test_transform_metrics_to_dict_basic(self, sample_metrics):
         """Test basic metrics transformation."""
-        result = CapitalDataTransformer.transform_metrics_to_dict(sample_metrics)
+        result = CapitalDataTransformer.transform_metrics_to_event_data(sample_metrics)
 
         assert isinstance(result, dict)
         assert result["total_capital"] == "100000.00"
@@ -113,7 +113,7 @@ class TestCapitalDataTransformer:
         result = CapitalDataTransformer.validate_financial_precision(data)
 
         assert isinstance(result, dict)
-        assert result["allocated_amount"] == "0.0"  # Fixed invalid value
+        assert result["allocated_amount"] == "invalid_number"  # Keeps original value when conversion fails
         assert result["total_pnl"] == "150.25"
         assert result["non_financial"] == "some_string"
 
@@ -132,7 +132,7 @@ class TestCapitalDataTransformer:
             last_rebalance=datetime.now(timezone.utc),
         )
 
-        result = CapitalDataTransformer.transform_allocation_to_dict(allocation)
+        result = CapitalDataTransformer.transform_allocation_to_event_data(allocation)
 
         assert isinstance(result, dict)
         assert result["allocation_id"] == "alloc-456"

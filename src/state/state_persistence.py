@@ -451,12 +451,12 @@ class StatePersistence(BaseComponent):
         """Process a batch of save operations concurrently with aligned processing paradigm."""
         try:
             # Use ProcessingParadigmAligner for consistent batch processing (align with utils patterns)
-            from src.utils.messaging_patterns import ProcessingParadigmAligner
+            from src.utils.messaging_patterns import ProcessingParadigmAligner, MessagePattern
 
             # Convert batch to aligned format
             batch_data = ProcessingParadigmAligner.create_batch_from_stream(batch)
             aligned_batch = ProcessingParadigmAligner.align_processing_modes(
-                "batch", "stream", batch_data
+                source_mode="batch", target_mode="stream", data=batch_data
             )
 
             save_tasks = []
@@ -465,7 +465,7 @@ class StatePersistence(BaseComponent):
                 save_item.update({
                     "processing_mode": "batch",
                     "data_format": "bot_event_v1",  # Align with core events
-                    "message_pattern": "batch",  # Batch messaging pattern
+                    "message_pattern": MessagePattern.BATCH.value,  # Batch messaging pattern
                     "batch_id": aligned_batch.get("batch_id"),
                     "boundary_crossed": True,  # Mark cross-module communication
                 })
@@ -489,12 +489,12 @@ class StatePersistence(BaseComponent):
         """Process a batch of delete operations concurrently with aligned processing paradigm."""
         try:
             # Use ProcessingParadigmAligner for consistent batch processing (align with utils patterns)
-            from src.utils.messaging_patterns import ProcessingParadigmAligner
+            from src.utils.messaging_patterns import ProcessingParadigmAligner, MessagePattern
 
             # Convert batch to aligned format
             batch_data = ProcessingParadigmAligner.create_batch_from_stream(batch)
             aligned_batch = ProcessingParadigmAligner.align_processing_modes(
-                "batch", "stream", batch_data
+                source_mode="batch", target_mode="stream", data=batch_data
             )
 
             delete_tasks = []
@@ -503,7 +503,7 @@ class StatePersistence(BaseComponent):
                 delete_item.update({
                     "processing_mode": "batch",
                     "data_format": "bot_event_v1",  # Align with core events
-                    "message_pattern": "batch",  # Batch messaging pattern
+                    "message_pattern": MessagePattern.BATCH.value,  # Batch messaging pattern
                     "batch_id": aligned_batch.get("batch_id"),
                     "boundary_crossed": True,  # Mark cross-module communication
                 })

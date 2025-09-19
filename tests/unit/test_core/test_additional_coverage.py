@@ -523,7 +523,7 @@ class TestConfigurationModules:
     def test_main_config_creation(self):
         """Test main config creation."""
         try:
-            from src.core.config.main import Config
+            from src.core.config import Config
 
             config = Config()
 

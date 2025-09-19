@@ -83,7 +83,7 @@ class RedisClient(BaseComponent, CacheClientInterface):
         # Apply environment variable substitution to Redis URL
         self.redis_url = substitute_env_vars(str(self.redis_url))
 
-        self.client: redis.Redis | None = None
+        self._client: redis.Redis | None = None
         # Use utils constants for default TTL
         self._default_ttl = TIMEOUTS.get("REDIS_DEFAULT_TTL", 3600)
         self.auto_close = auto_close
@@ -100,6 +100,11 @@ class RedisClient(BaseComponent, CacheClientInterface):
         self._heartbeat_interval = TIMEOUTS.get("REDIS_HEARTBEAT_INTERVAL", 30)
         self._heartbeat_task: asyncio.Task[None] | None = None
         self._connection_timeout = TIMEOUTS.get("REDIS_CONNECTION_TIMEOUT", 10)
+
+    @property
+    def client(self) -> redis.Redis | None:
+        """Get underlying Redis client instance."""
+        return self._client
 
     @time_execution
     @with_retry(max_attempts=3)
@@ -121,7 +126,7 @@ class RedisClient(BaseComponent, CacheClientInterface):
             self.redis_url = fallback_url
             self.logger.info(f"Using fallback Redis URL: {self.redis_url}")
 
-        self.client = redis.Redis.from_url(
+        self._client = redis.Redis.from_url(
             self.redis_url,
             decode_responses=True,
             max_connections=max_connections,
@@ -139,7 +144,7 @@ class RedisClient(BaseComponent, CacheClientInterface):
         )
 
         # Test connection with timeout
-        await asyncio.wait_for(self.client.ping(), timeout=5.0)
+        await asyncio.wait_for(self._client.ping(), timeout=5.0)
         self._last_heartbeat = asyncio.get_event_loop().time()
 
         # Start heartbeat monitoring
@@ -154,11 +159,11 @@ class RedisClient(BaseComponent, CacheClientInterface):
 
     async def _heartbeat_monitor(self) -> None:
         """Monitor connection with periodic heartbeat."""
-        while self.client is not None:
+        while self._client is not None:
             try:
                 await asyncio.sleep(self._heartbeat_interval)
-                if self.client:
-                    await asyncio.wait_for(self.client.ping(), timeout=5.0)
+                if self._client:
+                    await asyncio.wait_for(self._client.ping(), timeout=5.0)
                     self._last_heartbeat = asyncio.get_event_loop().time()
             except asyncio.CancelledError:
                 break
@@ -168,7 +173,7 @@ class RedisClient(BaseComponent, CacheClientInterface):
                 break
 
     async def _ensure_connected(self) -> None:
-        if self.client is None:
+        if self._client is None:
             await self.connect()
         else:
             # Check if heartbeat is recent enough
@@ -183,7 +188,7 @@ class RedisClient(BaseComponent, CacheClientInterface):
             else:
                 # Test connection health periodically with timeout
                 try:
-                    await asyncio.wait_for(self.client.ping(), timeout=2.0)
+                    await asyncio.wait_for(self._client.ping(), timeout=2.0)
                     self._last_heartbeat = current_time
                 except (asyncio.TimeoutError, Exception):
                     self.logger.warning("Redis connection unhealthy, reconnecting...")
@@ -198,7 +203,7 @@ class RedisClient(BaseComponent, CacheClientInterface):
                 await self._heartbeat_task
             except asyncio.CancelledError:
                 pass
-        self.client = None
+        self._client = None
 
     async def _with_backpressure(self, operation):
         """Execute Redis operation with backpressure control."""
@@ -218,21 +223,21 @@ class RedisClient(BaseComponent, CacheClientInterface):
             self._operation_queue_size -= 1
 
     async def _maybe_autoclose(self) -> None:
-        if self.auto_close and self.client is not None:
+        if self.auto_close and self._client is not None:
             async with self._close_lock:
                 # Double-check pattern to avoid race conditions
-                if self.client is not None:
+                if self._client is not None:
                     try:
                         # Check if aclose method exists (newer redis versions)
-                        if hasattr(self.client, "aclose") and callable(self.client.aclose):
-                            await self.client.aclose()
+                        if hasattr(self._client, "aclose") and callable(self._client.aclose):
+                            await self._client.aclose()
                         else:
                             # Fall back to close() for older versions
-                            await self.client.close()
+                            await self._client.close()
                     except Exception as e:
                         self.logger.warning(f"Error during auto-close: {e}")
                     finally:
-                        self.client = None
+                        self._client = None
 
     async def disconnect(self) -> None:
         """Disconnect from Redis."""
@@ -246,7 +251,7 @@ class RedisClient(BaseComponent, CacheClientInterface):
                 except asyncio.CancelledError:
                     pass
 
-            client = self.client
+            client = self._client
             if client:
                 # Check if aclose method exists (newer redis versions)
                 if hasattr(client, "aclose") and callable(client.aclose):
@@ -261,7 +266,7 @@ class RedisClient(BaseComponent, CacheClientInterface):
             self.logger.warning(f"Error during disconnect: {e}")
         finally:
             # Ensure references are cleared even if close fails
-            self.client = None
+            self._client = None
             self._heartbeat_task = None
 
     def _get_namespaced_key(self, key: str, namespace: str = "trading_bot") -> str:
@@ -286,9 +291,9 @@ class RedisClient(BaseComponent, CacheClientInterface):
 
             # Set with TTL
             if ttl is not None:
-                result = await self.client.setex(namespaced_key, ttl, serialized_value)
+                result = await self._client.setex(namespaced_key, ttl, serialized_value)
             else:
-                result = await self.client.setex(
+                result = await self._client.setex(
                     namespaced_key, self._default_ttl, serialized_value
                 )
             return result
@@ -309,7 +314,7 @@ class RedisClient(BaseComponent, CacheClientInterface):
         async def _get_operation():
             await self._ensure_connected()
             namespaced_key = self._get_namespaced_key(key, namespace)
-            value = await self.client.get(namespaced_key)
+            value = await self._client.get(namespaced_key)
 
             if value is None:
                 return None
@@ -334,7 +339,7 @@ class RedisClient(BaseComponent, CacheClientInterface):
         try:
             await self._ensure_connected()
             namespaced_key = self._get_namespaced_key(key, namespace)
-            result = await self.client.delete(namespaced_key)
+            result = await self._client.delete(namespaced_key)
             return result > 0
 
         except Exception as e:
@@ -348,7 +353,7 @@ class RedisClient(BaseComponent, CacheClientInterface):
         try:
             await self._ensure_connected()
             namespaced_key = self._get_namespaced_key(key, namespace)
-            result = await self.client.exists(namespaced_key)
+            result = await self._client.exists(namespaced_key)
             return result > 0
 
         except Exception as e:
@@ -362,7 +367,7 @@ class RedisClient(BaseComponent, CacheClientInterface):
         try:
             await self._ensure_connected()
             namespaced_key = self._get_namespaced_key(key, namespace)
-            result = await self.client.expire(namespaced_key, ttl)
+            result = await self._client.expire(namespaced_key, ttl)
             return result
 
         except Exception as e:
@@ -376,7 +381,7 @@ class RedisClient(BaseComponent, CacheClientInterface):
         try:
             await self._ensure_connected()
             namespaced_key = self._get_namespaced_key(key, namespace)
-            result = await self.client.ttl(namespaced_key)
+            result = await self._client.ttl(namespaced_key)
             return result
 
         except Exception as e:
@@ -398,7 +403,7 @@ class RedisClient(BaseComponent, CacheClientInterface):
             else:
                 serialized_value = str(value)
 
-            result = await self.client.hset(namespaced_key, field, serialized_value)
+            result = await self._client.hset(namespaced_key, field, serialized_value)
             return result >= 0
 
         except Exception as e:
@@ -412,7 +417,7 @@ class RedisClient(BaseComponent, CacheClientInterface):
         try:
             await self._ensure_connected()
             namespaced_key = self._get_namespaced_key(key, namespace)
-            value = await self.client.hget(namespaced_key, field)
+            value = await self._client.hget(namespaced_key, field)
 
             if value is None:
                 return None
@@ -434,7 +439,7 @@ class RedisClient(BaseComponent, CacheClientInterface):
         try:
             await self._ensure_connected()
             namespaced_key = self._get_namespaced_key(key, namespace)
-            result = await self.client.hgetall(namespaced_key)
+            result = await self._client.hgetall(namespaced_key)
 
             # Deserialize values
             deserialized = {}
@@ -457,7 +462,7 @@ class RedisClient(BaseComponent, CacheClientInterface):
         try:
             await self._ensure_connected()
             namespaced_key = self._get_namespaced_key(key, namespace)
-            result = await self.client.hdel(namespaced_key, field)
+            result = await self._client.hdel(namespaced_key, field)
             return result > 0
 
         except Exception as e:
@@ -479,7 +484,7 @@ class RedisClient(BaseComponent, CacheClientInterface):
             else:
                 serialized_value = str(value)
 
-            result = await self.client.lpush(namespaced_key, serialized_value)
+            result = await self._client.lpush(namespaced_key, serialized_value)
             return result
 
         except Exception as e:
@@ -500,7 +505,7 @@ class RedisClient(BaseComponent, CacheClientInterface):
             else:
                 serialized_value = str(value)
 
-            result = await self.client.rpush(namespaced_key, serialized_value)
+            result = await self._client.rpush(namespaced_key, serialized_value)
             return result
 
         except Exception as e:
@@ -516,7 +521,7 @@ class RedisClient(BaseComponent, CacheClientInterface):
         try:
             await self._ensure_connected()
             namespaced_key = self._get_namespaced_key(key, namespace)
-            result = await self.client.lrange(namespaced_key, start, end)
+            result = await self._client.lrange(namespaced_key, start, end)
 
             # Deserialize values
             deserialized = []
@@ -547,7 +552,7 @@ class RedisClient(BaseComponent, CacheClientInterface):
             else:
                 serialized_value = str(value)
 
-            result = await self.client.sadd(namespaced_key, serialized_value)
+            result = await self._client.sadd(namespaced_key, serialized_value)
             return result > 0
 
         except Exception as e:
@@ -561,7 +566,7 @@ class RedisClient(BaseComponent, CacheClientInterface):
         try:
             await self._ensure_connected()
             namespaced_key = self._get_namespaced_key(key, namespace)
-            result = await self.client.smembers(namespaced_key)
+            result = await self._client.smembers(namespaced_key)
 
             # Deserialize values
             deserialized = []
@@ -621,7 +626,7 @@ class RedisClient(BaseComponent, CacheClientInterface):
         """Ping Redis server."""
         try:
             await self._ensure_connected()
-            result = await self.client.ping()
+            result = await self._client.ping()
             return result
         except Exception as e:
             self.logger.error("Redis ping failed", error=str(e))
@@ -633,7 +638,7 @@ class RedisClient(BaseComponent, CacheClientInterface):
         """Get Redis info."""
         try:
             await self._ensure_connected()
-            info = await self.client.info()
+            info = await self._client.info()
             return info
         except Exception as e:
             self.logger.error("Redis info failed", error=str(e))

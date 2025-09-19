@@ -18,7 +18,7 @@ from src.utils.validation import validate_price, validate_quantity, validate_sym
 from src.web_interface.interfaces import WebTradingServiceInterface
 
 
-class WebTradingService(BaseComponent, WebTradingServiceInterface):
+class WebTradingService(BaseComponent):
     """Service handling trading business logic for web interface."""
 
     def __init__(self, trading_facade=None):
@@ -43,6 +43,25 @@ class WebTradingService(BaseComponent, WebTradingServiceInterface):
     ) -> dict[str, Any]:
         """Place order through service layer (wraps facade call)."""
         try:
+            # Apply boundary validation for web_interface -> trading flow
+            from src.utils.messaging_patterns import BoundaryValidator
+
+            order_data = {
+                "component": "web_interface_trading",
+                "operation": f"place_order_{side}_{order_type}",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "processing_mode": "request_reply",
+                "data_format": "trading_order_v1",
+                "message_pattern": "req_reply",
+                "boundary_crossed": True,
+                "symbol": symbol,
+                "quantity": str(quantity),
+                "price": str(price) if price else None,
+            }
+
+            # Validate trading boundary
+            BoundaryValidator.validate_monitoring_to_error_boundary(order_data)
+
             if self.trading_facade:
                 # Convert string parameters to enums
                 side_enum = OrderSide.BUY if side.lower() == "buy" else OrderSide.SELL
@@ -160,34 +179,25 @@ class WebTradingService(BaseComponent, WebTradingServiceInterface):
         try:
             validation_errors = []
 
-            # Apply consistent data transformation pattern matching execution module
-            from src.execution.data_transformer import ExecutionDataTransformer
+            # Apply web service validation patterns
             from src.utils.messaging_patterns import BoundaryValidator
 
-            # Transform using execution module pattern for consistency
+            # Transform data for validation
             validation_data = {
                 "symbol": symbol,
                 "side": side,
                 "order_type": order_type,
                 "quantity": str(quantity) if quantity else None,
                 "price": str(price) if price else None,
-                "processing_mode": "stream",  # Align with execution module
+                "processing_mode": "stream",
                 "data_format": "event_data_v1",
                 "boundary_crossed": True,
-                "id": str(uuid.uuid4()),  # Required for database entity validation
+                "id": str(uuid.uuid4()),
                 "component": "web_trading_service",
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             }
 
-            # Apply consistent boundary fields using execution pattern
-            validation_data = ExecutionDataTransformer.ensure_boundary_fields(
-                validation_data, "web_interface"
-            )
-
-            # Validate financial precision consistently
-            validation_data = ExecutionDataTransformer.validate_financial_precision(validation_data)
-
-            # Validate at module boundary with enhanced validation
+            # Validate at module boundary
             BoundaryValidator.validate_database_entity(validation_data, "update")
 
             # Validate symbol
@@ -217,7 +227,7 @@ class WebTradingService(BaseComponent, WebTradingServiceInterface):
             if quantity < Decimal("0.001"):
                 validation_errors.append("Quantity must be at least 0.001")
 
-            # Return with consistent data transformation pattern matching execution module
+            # Return validated data
             validated_data = {
                 "symbol": symbol.upper(),
                 "side": side.upper(),
@@ -227,15 +237,10 @@ class WebTradingService(BaseComponent, WebTradingServiceInterface):
                 "processing_mode": "stream",
                 "data_format": "event_data_v1",
                 "timestamp": self._get_current_timestamp(),
-                "message_pattern": "pub_sub",  # Consistent messaging pattern
+                "message_pattern": "pub_sub",
                 "boundary_crossed": True,
                 "validation_status": "validated",
             }
-
-            # Apply cross-module validation for consistency with execution
-            validated_data = ExecutionDataTransformer.apply_cross_module_validation(
-                validated_data, source_module="web_interface", target_module="execution"
-            )
 
             return {
                 "valid": len(validation_errors) == 0,
@@ -244,13 +249,9 @@ class WebTradingService(BaseComponent, WebTradingServiceInterface):
             }
 
         except Exception as e:
-            # Use consistent error propagation patterns
-            from src.utils.messaging_patterns import ErrorPropagationMixin
-
-            # Apply ErrorPropagationMixin patterns for consistency with execution module
-            error_mixin = ErrorPropagationMixin()
+            # Use inherited error propagation patterns
             try:
-                error_mixin.propagate_service_error(e, "order_validation")
+                self.propagate_service_error(e, "order_validation")
             except ServiceError as service_error:
                 self.logger.error(f"Error validating order request: {e}")
                 raise service_error
@@ -283,12 +284,9 @@ class WebTradingService(BaseComponent, WebTradingServiceInterface):
             }
 
         except Exception as e:
-            # Use consistent error propagation patterns
-            from src.utils.messaging_patterns import ErrorPropagationMixin
-
-            error_mixin = ErrorPropagationMixin()
+            # Use inherited error propagation patterns
             try:
-                error_mixin.propagate_service_error(e, "order_response_formatting")
+                self.propagate_service_error(e, "order_response_formatting")
             except ServiceError as service_error:
                 self.logger.error(f"Error formatting order response: {e}")
                 raise service_error
@@ -299,10 +297,7 @@ class WebTradingService(BaseComponent, WebTradingServiceInterface):
             filters = filters or {}
             formatted_orders = []
 
-            # Apply consistent processing paradigm alignment with execution module
-            from src.execution.data_transformer import ExecutionDataTransformer
-
-            # Align processing mode to stream for consistency
+            # Apply web service processing patterns
             processing_context = {
                 "processing_mode": "stream",
                 "data_format": "event_data_v1",
@@ -310,10 +305,6 @@ class WebTradingService(BaseComponent, WebTradingServiceInterface):
                 "component": "web_trading_service",
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             }
-
-            aligned_context = ExecutionDataTransformer.align_processing_paradigm(
-                processing_context, "stream"
-            )
 
             # Mock order data generation (business logic for development)
             symbols = (

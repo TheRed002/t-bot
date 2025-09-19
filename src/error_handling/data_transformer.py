@@ -32,18 +32,24 @@ class ErrorDataTransformer:
         Returns:
             Dict with consistent event data format matching core event system
         """
-        return {
+        from src.core.data_transformer import CoreDataTransformer
+
+        # Use core data transformer for consistency with web_interface
+        error_data = {
             "error_type": type(error).__name__,
             "error_message": str(error),
             "error_context": context or {},
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "source": "error_handling",
-            "processing_mode": "stream",  # Align with core events default
-            "data_format": "bot_event_v1",  # Consistent with core events
-            "message_pattern": "pub_sub",  # Consistent with core messaging
-            "boundary_crossed": True,  # Mark cross-module communication
-            "metadata": {**(metadata or {})},
         }
+
+        # Transform using core patterns like web_interface
+        transformed = CoreDataTransformer.transform_event_to_standard_format(
+            event_type="error_event",
+            data=error_data,
+            metadata=metadata,
+            source="error_handling"
+        )
+
+        return transformed
 
     @staticmethod
     def transform_context_to_event_data(
@@ -59,23 +65,30 @@ class ErrorDataTransformer:
         Returns:
             Dict with consistent event data format
         """
-        return {
+        from src.core.data_transformer import CoreDataTransformer
+
+        # Use core data transformer for consistency with web_interface
+        context_data = {
             "component": context.get("component", "unknown"),
             "operation": context.get("operation", "unknown"),
             "error_type": context.get("error_type", "unknown"),
             "error_message": context.get("error_message", ""),
-            "processing_mode": "stream",  # Align with core events default
-            "data_format": "bot_event_v1",  # Consistent with core events
-            "message_pattern": "pub_sub",  # Consistent with core messaging
-            "boundary_crossed": True,  # Mark cross-module communication
-            "timestamp": context.get("timestamp", datetime.now(timezone.utc).isoformat()),
-            "metadata": {**(context.get("metadata", {})), **(metadata or {})},
         }
+
+        # Transform using core patterns like web_interface
+        transformed = CoreDataTransformer.transform_event_to_standard_format(
+            event_type="context_event",
+            data=context_data,
+            metadata={**(context.get("metadata", {})), **(metadata or {})},
+            source="error_handling"
+        )
+
+        return transformed
 
     @staticmethod
     def validate_financial_precision(data: dict[str, Any]) -> dict[str, Any]:
         """
-        Ensure financial data has proper precision using Decimal.
+        Ensure financial data has proper precision using centralized financial utils.
 
         Args:
             data: Data dictionary to validate
@@ -83,40 +96,17 @@ class ErrorDataTransformer:
         Returns:
             Dict with validated financial precision
         """
-        financial_fields = [
-            "quantity",
-            "entry_price",
-            "current_price",
-            "unrealized_pnl",
-            "realized_pnl",
-            "var_1d",
-            "var_5d",
-            "expected_shortfall",
-            "max_drawdown",
-            "sharpe_ratio",
-            "volatility",
-            "beta",
-            "correlation",
-            "strength",
+        from src.utils.financial_utils import validate_financial_precision
+
+        # Define error handling-specific fields (same as risk management)
+        error_fields = [
+            "quantity", "entry_price", "current_price", "unrealized_pnl",
+            "realized_pnl", "var_1d", "var_5d", "expected_shortfall",
+            "max_drawdown", "sharpe_ratio", "volatility", "beta",
+            "correlation", "strength"
         ]
 
-        for field in financial_fields:
-            if field in data and data[field] is not None and data[field] != "":
-                try:
-                    # Convert to Decimal for financial precision
-                    decimal_value = to_decimal(data[field])
-                    # Convert back to string for consistent format
-                    data[field] = str(decimal_value)
-                except (ValueError, TypeError, KeyError) as e:
-                    logger.warning(
-                        f"Failed to convert financial field {field} to Decimal: {e}",
-                        field=field,
-                        value=data[field],
-                    )
-                    # Keep original value if conversion fails but log the issue
-                    # This is acceptable for data transformation where robustness is prioritized
-
-        return data
+        return validate_financial_precision(data, error_fields)
 
     @staticmethod
     def ensure_boundary_fields(
@@ -169,28 +159,33 @@ class ErrorDataTransformer:
         Returns:
             Dict formatted for pub/sub pattern
         """
-        # Base transformation
+        from src.core.data_transformer import CoreDataTransformer
+
+        # Base transformation using core patterns like web_interface
         if isinstance(data, Exception):
-            transformed = cls.transform_error_to_event_data(data, metadata)
+            transformed = cls.transform_error_to_event_data(data, metadata=metadata)
         elif isinstance(data, dict):
             transformed = cls.transform_context_to_event_data(data, metadata)
         else:
-            transformed = {"payload": str(data), "type": type(data).__name__}
+            # Use core transformer for consistency
+            transformed = CoreDataTransformer.transform_for_pub_sub_pattern(
+                event_type=event_type,
+                data=data,
+                metadata=metadata
+            )
 
-        # Ensure boundary fields
-        transformed = cls.ensure_boundary_fields(transformed)
+        # Apply pub/sub specific formatting using core patterns
+        if not isinstance(data, (Exception, dict)):
+            return transformed
 
-        # Validate financial precision
-        transformed = cls.validate_financial_precision(transformed)
+        # Apply consistent processing paradigm alignment
+        transformed = CoreDataTransformer.align_processing_paradigm(transformed, "stream")
 
-        # Add event type and enhanced boundary metadata
-        transformed.update(
-            {
-                "event_type": event_type,
-                "message_pattern": "pub_sub",  # Consistent messaging pattern
-                "boundary_crossed": True,  # Cross-module event flag
-                "validation_status": "validated",  # Boundary validation status
-            }
+        # Apply cross-module consistency
+        transformed = CoreDataTransformer.apply_cross_module_consistency(
+            transformed,
+            target_module="error_handling",
+            source_module="error_handling"
         )
 
         return transformed
@@ -210,14 +205,34 @@ class ErrorDataTransformer:
         Returns:
             Dict formatted for req/reply pattern
         """
-        # Use pub/sub transformation as base
-        transformed = cls.transform_for_pub_sub(request_type, data)
+        from src.core.data_transformer import CoreDataTransformer
 
-        # Add request/reply specific fields
-        transformed["request_type"] = request_type
-        transformed["correlation_id"] = correlation_id or datetime.now(timezone.utc).isoformat()
-        transformed["message_pattern"] = "req_reply"  # Override message pattern for req/reply
-        transformed["processing_mode"] = "request_reply"  # Override processing mode
+        # Base transformation using core patterns like web_interface
+        if isinstance(data, Exception):
+            transformed = cls.transform_error_to_event_data(data)
+        elif isinstance(data, dict):
+            transformed = cls.transform_context_to_event_data(data)
+        else:
+            # Use core transformer for req/reply pattern consistency
+            transformed = CoreDataTransformer.transform_for_request_reply_pattern(
+                request_type=request_type,
+                data=data,
+                correlation_id=correlation_id
+            )
+
+        # Apply req/reply specific formatting using core patterns
+        if not isinstance(data, (Exception, dict)):
+            return transformed
+
+        # Apply consistent processing paradigm alignment for request/reply
+        transformed = CoreDataTransformer.align_processing_paradigm(transformed, "request_reply")
+
+        # Apply cross-module consistency
+        transformed = CoreDataTransformer.apply_cross_module_consistency(
+            transformed,
+            target_module="error_handling",
+            source_module="error_handling"
+        )
 
         return transformed
 
@@ -235,51 +250,10 @@ class ErrorDataTransformer:
         Returns:
             Dict with aligned processing mode
         """
-        aligned_data = data.copy()
+        from src.core.data_transformer import CoreDataTransformer
 
-        # Use ProcessingParadigmAligner for consistency
-        from src.utils.messaging_patterns import ProcessingParadigmAligner
-
-        source_mode = aligned_data.get("processing_mode", "stream")
-        aligned_data = ProcessingParadigmAligner.align_processing_modes(
-            source_mode=source_mode, target_mode=target_mode, data=aligned_data
-        )
-
-        # Add mode-specific fields with enhanced boundary metadata (aligned with execution module)
-        if target_mode == "stream":
-            aligned_data.update(
-                {
-                    "stream_position": datetime.now(timezone.utc).timestamp(),
-                    "data_format": "bot_event_v1",  # Align with execution module
-                    "message_pattern": "pub_sub",  # Consistent messaging pattern
-                    "boundary_crossed": True,
-                }
-            )
-        elif target_mode == "batch":
-            if "batch_id" not in aligned_data:
-                aligned_data["batch_id"] = datetime.now(timezone.utc).isoformat()
-            aligned_data.update(
-                {
-                    "data_format": "bot_event_v1",  # Align with execution module
-                    "message_pattern": "batch",  # Batch messaging pattern
-                    "boundary_crossed": True,
-                }
-            )
-        elif target_mode == "request_reply":
-            if "correlation_id" not in aligned_data:
-                aligned_data["correlation_id"] = datetime.now(timezone.utc).isoformat()
-            aligned_data.update(
-                {
-                    "data_format": "bot_event_v1",  # Align with execution module
-                    "message_pattern": "req_reply",  # Request-reply messaging pattern
-                    "boundary_crossed": True,
-                }
-            )
-
-        # Add consistent validation status
-        aligned_data["validation_status"] = "validated"
-
-        return aligned_data
+        # Use CoreDataTransformer for consistency with web_interface
+        return CoreDataTransformer.align_processing_paradigm(data, target_mode)
 
     @classmethod
     def apply_cross_module_validation(
@@ -299,69 +273,11 @@ class ErrorDataTransformer:
         Returns:
             Dict with validated and aligned data for cross-module communication
         """
-        validated_data = data.copy()
+        from src.core.data_transformer import CoreDataTransformer
 
-        # Apply consistent messaging patterns
-        from src.utils.messaging_patterns import (
-            BoundaryValidator,
-            ProcessingParadigmAligner,
+        # Use CoreDataTransformer for consistency with web_interface
+        return CoreDataTransformer.apply_cross_module_consistency(
+            data=data,
+            target_module=target_module,
+            source_module=source_module
         )
-
-        # Apply processing paradigm alignment
-        source_mode = validated_data.get("processing_mode", "stream")
-        target_mode = "stream" if target_module in ["core", "state", "monitoring"] else source_mode
-
-        validated_data = ProcessingParadigmAligner.align_processing_modes(
-            source_mode=source_mode, target_mode=target_mode, data=validated_data
-        )
-
-        # Add comprehensive boundary metadata
-        validated_data.update(
-            {
-                "cross_module_validation": True,
-                "source_module": source_module,
-                "target_module": target_module,
-                "boundary_validation_timestamp": datetime.now(timezone.utc).isoformat(),
-                "data_flow_aligned": True,
-            }
-        )
-
-        # Apply target-module specific boundary validation with enhanced core alignment
-        try:
-            if target_module in ["core", "state", "monitoring", "risk_management"]:
-                # Validate at error_handling -> target boundary
-                boundary_data = {
-                    "component": validated_data.get("component", source_module),
-                    "operation": validated_data.get("operation", "error_handling_operation"),
-                    "timestamp": validated_data.get(
-                        "timestamp", datetime.now(timezone.utc).isoformat()
-                    ),
-                    "processing_mode": validated_data.get("processing_mode", "stream"),
-                    "data_format": validated_data.get("data_format", "bot_event_v1"),
-                    "message_pattern": validated_data.get("message_pattern", "pub_sub"),
-                    "boundary_crossed": True,
-                    "processing_paradigm": validated_data.get("processing_paradigm", "stream"),
-                }
-
-                # Apply appropriate boundary validation based on target
-                if target_module in ["execution", "monitoring", "web_interface"]:
-                    # Use correct validation for error_handling -> other modules
-                    BoundaryValidator.validate_monitoring_to_error_boundary(boundary_data)
-                elif target_module == "risk_management":
-                    BoundaryValidator.validate_risk_to_state_boundary(boundary_data)
-                else:
-                    BoundaryValidator.validate_monitoring_to_error_boundary(boundary_data)
-
-        except Exception as e:
-            # Log validation issues but don't fail the data flow
-            logger.warning(
-                f"Cross-module validation failed for {source_module} -> {target_module}: {e}",
-                extra={
-                    "source_module": source_module,
-                    "target_module": target_module,
-                    "validation_error": str(e),
-                    "data_format": validated_data.get("data_format", "unknown"),
-                }
-            )
-
-        return validated_data

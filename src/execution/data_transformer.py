@@ -224,7 +224,7 @@ class ExecutionDataTransformer:
     @staticmethod
     def validate_financial_precision(data: dict[str, Any]) -> dict[str, Any]:
         """
-        Ensure financial data has proper precision using Decimal.
+        Ensure financial data has proper precision using centralized financial utils.
 
         Args:
             data: Data dictionary to validate
@@ -232,32 +232,20 @@ class ExecutionDataTransformer:
         Returns:
             Dict with validated financial precision
         """
-        financial_fields = [
-            "price",
-            "quantity",
-            "volume",
-            "fees",
-            "target_quantity",
-            "filled_quantity",
+        from src.utils.financial_utils import validate_financial_precision
+
+        # Define execution-specific fields in addition to defaults
+        execution_fields = [
+            "price", "quantity", "volume", "fees",
+            "target_quantity", "filled_quantity"
         ]
 
-        for field in financial_fields:
-            if field in data and data[field] is not None and data[field] != "":
-                try:
-                    # Convert to Decimal for financial precision
-                    decimal_value = to_decimal(data[field])
-                    # Convert back to string for consistent format
-                    data[field] = str(decimal_value)
-                except (ValueError, TypeError, KeyError):
-                    # Keep original value if conversion fails
-                    pass
-
-        return data
+        return validate_financial_precision(data, execution_fields)
 
     @staticmethod
     def ensure_boundary_fields(data: dict[str, Any], source: str = "execution") -> dict[str, Any]:
         """
-        Ensure data has required boundary fields for cross-module communication.
+        Ensure data has required boundary fields using centralized financial utils.
 
         Args:
             data: Data dictionary to enhance
@@ -266,27 +254,16 @@ class ExecutionDataTransformer:
         Returns:
             Dict with required boundary fields
         """
-        # Ensure processing mode is set
-        if "processing_mode" not in data:
-            data["processing_mode"] = "stream"
+        from src.utils.financial_utils import ensure_boundary_fields
 
-        # Ensure data format is set
-        if "data_format" not in data:
-            data["data_format"] = "bot_event_v1"
+        # Use centralized boundary fields function
+        enhanced_data = ensure_boundary_fields(data, source)
 
-        # Ensure timestamp is set
-        if "timestamp" not in data:
-            data["timestamp"] = datetime.now(timezone.utc).isoformat()
+        # Ensure metadata exists (execution-specific)
+        if "metadata" not in enhanced_data:
+            enhanced_data["metadata"] = {}
 
-        # Add source information
-        if "source" not in data:
-            data["source"] = source
-
-        # Ensure metadata exists
-        if "metadata" not in data:
-            data["metadata"] = {}
-
-        return data
+        return enhanced_data
 
     @classmethod
     def transform_for_pub_sub(
@@ -384,10 +361,9 @@ class ExecutionDataTransformer:
         # Use pub/sub transformation as base
         transformed = cls.transform_for_pub_sub(request_type, data)
 
-        # Add request/reply specific fields aligned with risk_management module  
+        # Add request/reply specific fields aligned with risk_management module
         transformed["request_type"] = request_type
         transformed["correlation_id"] = correlation_id or datetime.now(timezone.utc).isoformat()
-        transformed["message_pattern"] = "req_reply"  # Override message pattern for req/reply
         transformed["message_pattern"] = "req_reply"  # Override message pattern for req/reply
         transformed["processing_mode"] = "request_reply"  # Override processing mode
 

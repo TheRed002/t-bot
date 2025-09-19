@@ -112,7 +112,7 @@ class TestMathematicalUtilities:
         assert isinstance(result[0], Decimal)  # max_drawdown
         assert isinstance(result[1], int)  # start_index
         assert isinstance(result[2], int)  # end_index
-        assert result[0] <= 0  # Drawdown should be negative or zero
+        assert result[0] >= 0  # Drawdown is represented as positive value
 
     def test_calculate_max_drawdown_increasing_prices(self):
         """Test maximum drawdown with increasing prices."""

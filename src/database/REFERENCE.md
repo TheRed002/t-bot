@@ -1,8 +1,8 @@
 # DATABASE Module Reference
 
 ## INTEGRATION
-**Dependencies**: core, error_handling, utils, web_interface
-**Used By**: analytics
+**Dependencies**: core, error_handling, risk_management, utils, web_interface
+**Used By**: strategies
 **Provides**: BotService, DatabaseConnectionManager, DatabaseManager, DatabaseService, MLService, MarketDataService, TradingService
 **Patterns**: Async Operations, Circuit Breaker, Component Architecture, Service Layer
 
@@ -23,8 +23,8 @@
 - DatabaseQueries inherits from base architecture
 
 ## MODULE OVERVIEW
-**Files**: 56 Python files
-**Classes**: 134
+**Files**: 57 Python files
+**Classes**: 138
 **Functions**: 50
 
 ## COMPLETE API REFERENCE
@@ -361,9 +361,9 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `is_running(self) -> bool` - Line 121
-- `win_rate(self) -> Decimal` - Line 125
-- `average_pnl(self) -> Decimal` - Line 133
+- `is_running(self) -> bool` - Line 124
+- `win_rate(self) -> Decimal` - Line 128
+- `average_pnl(self) -> Decimal` - Line 136
 
 ### Implementation: `Strategy` ✅
 
@@ -372,8 +372,8 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `is_active(self) -> bool` - Line 228
-- `signal_success_rate(self) -> Decimal` - Line 232
+- `is_active(self) -> bool` - Line 239
+- `signal_success_rate(self) -> Decimal` - Line 243
 
 ### Implementation: `Signal` ✅
 
@@ -382,8 +382,8 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `is_executed(self) -> bool` - Line 306
-- `is_successful(self) -> bool` - Line 310
+- `is_executed(self) -> bool` - Line 320
+- `is_successful(self) -> bool` - Line 324
 
 ### Implementation: `BotLog` ✅
 
@@ -400,8 +400,8 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `is_running(self) -> bool` - Line 113
-- `is_stopped(self) -> bool` - Line 117
+- `is_running(self) -> bool` - Line 129
+- `is_stopped(self) -> bool` - Line 133
 
 ### Implementation: `CapitalAllocationDB` ✅
 
@@ -706,9 +706,9 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `is_filled(self) -> bool` - Line 107
-- `is_active(self) -> bool` - Line 114
-- `remaining_quantity(self) -> Decimal` - Line 119
+- `is_filled(self) -> bool` - Line 108
+- `is_active(self) -> bool` - Line 115
+- `remaining_quantity(self) -> Decimal` - Line 120
 
 ### Implementation: `Position` ✅
 
@@ -717,9 +717,9 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `is_open(self) -> bool` - Line 208
-- `value(self) -> Decimal` - Line 213
-- `calculate_pnl(self, current_price: Decimal | None = None) -> Decimal` - Line 219
+- `is_open(self) -> bool` - Line 213
+- `value(self) -> Decimal` - Line 218
+- `calculate_pnl(self, current_price: Decimal | None = None) -> Decimal` - Line 224
 
 ### Implementation: `OrderFill` ✅
 
@@ -728,8 +728,8 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `value(self) -> Decimal` - Line 281
-- `net_value(self) -> Decimal` - Line 288
+- `value(self) -> Decimal` - Line 286
+- `net_value(self) -> Decimal` - Line 293
 
 ### Implementation: `Trade` ✅
 
@@ -738,8 +738,8 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `is_profitable(self) -> bool` - Line 369
-- `return_percentage(self) -> Decimal` - Line 376
+- `is_profitable(self) -> bool` - Line 374
+- `return_percentage(self) -> Decimal` - Line 381
 
 ### Implementation: `User` ✅
 
@@ -748,8 +748,8 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `full_name(self) -> str` - Line 73
-- `is_authenticated(self) -> bool` - Line 80
+- `full_name(self) -> str` - Line 95
+- `is_authenticated(self) -> bool` - Line 102
 
 ### Implementation: `DatabaseQueries` ✅
 
@@ -818,34 +818,35 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async connect(self) -> None` - Line 107
-- `async disconnect(self) -> None` - Line 237
-- `async set(self, ...) -> bool` - Line 272
-- `async get(self, key: str, namespace: str = 'trading_bot') -> Any | None` - Line 306
-- `async delete(self, key: str, namespace: str = 'trading_bot') -> bool` - Line 332
-- `async exists(self, key: str, namespace: str = 'trading_bot') -> bool` - Line 346
-- `async expire(self, key: str, ttl: int, namespace: str = 'trading_bot') -> bool` - Line 360
-- `async ttl(self, key: str, namespace: str = 'trading_bot') -> int` - Line 374
-- `async hset(self, key: str, field: str, value: Any, namespace: str = 'trading_bot') -> bool` - Line 389
-- `async hget(self, key: str, field: str, namespace: str = 'trading_bot') -> Any | None` - Line 410
-- `async hgetall(self, key: str, namespace: str = 'trading_bot') -> dict[str, Any]` - Line 432
-- `async hdel(self, key: str, field: str, namespace: str = 'trading_bot') -> bool` - Line 455
-- `async lpush(self, key: str, value: Any, namespace: str = 'trading_bot') -> int` - Line 470
-- `async rpush(self, key: str, value: Any, namespace: str = 'trading_bot') -> int` - Line 491
-- `async lrange(self, key: str, start: int = 0, end: int = Any, namespace: str = 'trading_bot') -> list[Any]` - Line 512
-- `async sadd(self, key: str, value: Any, namespace: str = 'trading_bot') -> bool` - Line 538
-- `async smembers(self, key: str, namespace: str = 'trading_bot') -> list[Any]` - Line 559
-- `async store_market_data(self, symbol: str, data: dict[str, Any], ttl: int = 300) -> bool` - Line 583
-- `async get_market_data(self, symbol: str) -> dict[str, Any] | None` - Line 588
-- `async store_position(self, bot_id: str, position: dict[str, Any]) -> bool` - Line 593
-- `async get_position(self, bot_id: str) -> dict[str, Any] | None` - Line 597
-- `async store_balance(self, user_id: str, exchange: str, balance: dict[str, Any]) -> bool` - Line 601
-- `async get_balance(self, user_id: str, exchange: str) -> dict[str, Any] | None` - Line 606
-- `async store_cache(self, key: str, value: Any, ttl: int = 3600) -> bool` - Line 611
-- `async get_cache(self, key: str) -> Any | None` - Line 615
-- `async ping(self) -> bool` - Line 620
-- `async info(self) -> dict[str, Any]` - Line 632
-- `async health_check(self) -> bool` - Line 644
+- `client(self) -> redis.Redis | None` - Line 105
+- `async connect(self) -> None` - Line 112
+- `async disconnect(self) -> None` - Line 242
+- `async set(self, ...) -> bool` - Line 277
+- `async get(self, key: str, namespace: str = 'trading_bot') -> Any | None` - Line 311
+- `async delete(self, key: str, namespace: str = 'trading_bot') -> bool` - Line 337
+- `async exists(self, key: str, namespace: str = 'trading_bot') -> bool` - Line 351
+- `async expire(self, key: str, ttl: int, namespace: str = 'trading_bot') -> bool` - Line 365
+- `async ttl(self, key: str, namespace: str = 'trading_bot') -> int` - Line 379
+- `async hset(self, key: str, field: str, value: Any, namespace: str = 'trading_bot') -> bool` - Line 394
+- `async hget(self, key: str, field: str, namespace: str = 'trading_bot') -> Any | None` - Line 415
+- `async hgetall(self, key: str, namespace: str = 'trading_bot') -> dict[str, Any]` - Line 437
+- `async hdel(self, key: str, field: str, namespace: str = 'trading_bot') -> bool` - Line 460
+- `async lpush(self, key: str, value: Any, namespace: str = 'trading_bot') -> int` - Line 475
+- `async rpush(self, key: str, value: Any, namespace: str = 'trading_bot') -> int` - Line 496
+- `async lrange(self, key: str, start: int = 0, end: int = Any, namespace: str = 'trading_bot') -> list[Any]` - Line 517
+- `async sadd(self, key: str, value: Any, namespace: str = 'trading_bot') -> bool` - Line 543
+- `async smembers(self, key: str, namespace: str = 'trading_bot') -> list[Any]` - Line 564
+- `async store_market_data(self, symbol: str, data: dict[str, Any], ttl: int = 300) -> bool` - Line 588
+- `async get_market_data(self, symbol: str) -> dict[str, Any] | None` - Line 593
+- `async store_position(self, bot_id: str, position: dict[str, Any]) -> bool` - Line 598
+- `async get_position(self, bot_id: str) -> dict[str, Any] | None` - Line 602
+- `async store_balance(self, user_id: str, exchange: str, balance: dict[str, Any]) -> bool` - Line 606
+- `async get_balance(self, user_id: str, exchange: str) -> dict[str, Any] | None` - Line 611
+- `async store_cache(self, key: str, value: Any, ttl: int = 3600) -> bool` - Line 616
+- `async get_cache(self, key: str) -> Any | None` - Line 620
+- `async ping(self) -> bool` - Line 625
+- `async info(self) -> dict[str, Any]` - Line 637
+- `async health_check(self) -> bool` - Line 649
 
 ### Implementation: `CapitalAuditLogRepository` ✅
 
@@ -897,15 +898,15 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async get_by(self, **kwargs)` - Line 158
-- `async get(self, entity_id: Any)` - Line 170
-- `async get_all(self, ...) -> list` - Line 174
-- `async exists(self, entity_id: Any) -> bool` - Line 196
-- `async soft_delete(self, entity_id: Any, deleted_by: str | None = None) -> bool` - Line 205
-- `async begin(self)` - Line 218
-- `async commit(self)` - Line 222
-- `async rollback(self)` - Line 226
-- `async refresh(self, entity)` - Line 230
+- `async get_by(self, **kwargs)` - Line 160
+- `async get(self, entity_id: Any)` - Line 172
+- `async get_all(self, ...) -> list` - Line 176
+- `async exists(self, entity_id: Any) -> bool` - Line 198
+- `async soft_delete(self, entity_id: Any, deleted_by: str | None = None) -> bool` - Line 207
+- `async begin(self)` - Line 220
+- `async commit(self)` - Line 224
+- `async rollback(self)` - Line 228
+- `async refresh(self, entity)` - Line 232
 
 ### Implementation: `RepositoryInterface` ✅
 
@@ -1194,6 +1195,56 @@
 
 **Implemented Methods:**
 
+### Implementation: `RiskMetricsRepository` ✅
+
+**Inherits**: DatabaseRepository
+**Purpose**: Repository for risk metrics data access
+**Status**: Complete
+
+**Implemented Methods:**
+- `async get_historical_returns(self, symbol: str, days: int) -> list[Decimal]` - Line 34
+- `async get_price_history(self, symbol: str, days: int) -> list[Decimal]` - Line 39
+- `async get_portfolio_positions(self) -> list[Position]` - Line 44
+- `async save_risk_metrics(self, metrics: RiskMetrics) -> None` - Line 52
+- `async get_correlation_data(self, symbols: list[str], days: int) -> dict[str, list[Decimal]]` - Line 61
+
+### Implementation: `PortfolioRepository` ✅
+
+**Inherits**: DatabaseRepository
+**Purpose**: Repository for portfolio data access
+**Status**: Complete
+
+**Implemented Methods:**
+- `async get_current_positions(self) -> list[Position]` - Line 79
+- `async get_portfolio_value(self) -> Decimal` - Line 87
+- `async get_position_history(self, symbol: str, days: int) -> list[Position]` - Line 95
+- `async update_portfolio_limits(self, limits: dict[str, Any]) -> None` - Line 103
+
+### Implementation: `RiskMetricsRepositoryImpl` ✅
+
+**Inherits**: RiskMetricsRepositoryInterface
+**Purpose**: Implementation of risk metrics repository interface
+**Status**: Complete
+
+**Implemented Methods:**
+- `async get_historical_returns(self, symbol: str, days: int) -> list[Decimal]` - Line 117
+- `async get_price_history(self, symbol: str, days: int) -> list[Decimal]` - Line 121
+- `async get_portfolio_positions(self) -> list[Position]` - Line 125
+- `async save_risk_metrics(self, metrics: RiskMetrics) -> None` - Line 129
+- `async get_correlation_data(self, symbols: list[str], days: int) -> dict[str, list[Decimal]]` - Line 133
+
+### Implementation: `PortfolioRepositoryImpl` ✅
+
+**Inherits**: PortfolioRepositoryInterface
+**Purpose**: Implementation of portfolio repository interface
+**Status**: Complete
+
+**Implemented Methods:**
+- `async get_current_positions(self) -> list[Position]` - Line 145
+- `async get_portfolio_value(self) -> Decimal` - Line 149
+- `async get_position_history(self, symbol: str, days: int) -> list[Position]` - Line 153
+- `async update_portfolio_limits(self, limits: dict[str, Any]) -> None` - Line 157
+
 ### Implementation: `DatabaseServiceRepository` ✅
 
 **Inherits**: BaseRepository[T, K]
@@ -1441,18 +1492,18 @@
 - `async start(self) -> None` - Line 98
 - `async stop(self) -> None` - Line 127
 - `async create_entity(self, entity: T, processing_mode: str = 'stream') -> T` - Line 160
-- `async get_entity_by_id(self, model_class: type[T], entity_id: K) -> T | None` - Line 228
-- `async update_entity(self, entity: T) -> T` - Line 263
-- `async delete_entity(self, model_class: type[T], entity_id: K) -> bool` - Line 292
-- `async list_entities(self, ...) -> list[T]` - Line 325
-- `async count_entities(self, model_class: type[T] | None = None, filters: dict[str, Any] | None = None) -> int` - Line 438
-- `async bulk_create(self, entities: list[T]) -> list[T]` - Line 478
-- `async transaction(self) -> AsyncGenerator[AsyncSession, None]` - Line 512
-- `async get_session(self) -> AsyncGenerator[AsyncSession, None]` - Line 529
-- `async get_health_status(self) -> HealthStatus` - Line 541
-- `get_performance_metrics(self) -> dict[str, Any]` - Line 554
-- `async execute_query(self, query: str, params: dict[str, Any] | None = None) -> Any` - Line 561
-- `async get_connection_pool_status(self) -> dict[str, Any]` - Line 575
+- `async get_entity_by_id(self, model_class: type[T], entity_id: K) -> T | None` - Line 229
+- `async update_entity(self, entity: T) -> T` - Line 264
+- `async delete_entity(self, model_class: type[T], entity_id: K) -> bool` - Line 293
+- `async list_entities(self, ...) -> list[T]` - Line 326
+- `async count_entities(self, model_class: type[T] | None = None, filters: dict[str, Any] | None = None) -> int` - Line 440
+- `async bulk_create(self, entities: list[T]) -> list[T]` - Line 480
+- `async transaction(self) -> AsyncGenerator[AsyncSession, None]` - Line 514
+- `async get_session(self) -> AsyncGenerator[AsyncSession, None]` - Line 531
+- `async get_health_status(self) -> HealthStatus` - Line 543
+- `get_performance_metrics(self) -> dict[str, Any]` - Line 556
+- `async execute_query(self, query: str, params: dict[str, Any] | None = None) -> Any` - Line 563
+- `async get_connection_pool_status(self) -> dict[str, Any]` - Line 577
 
 ### Implementation: `BotService` ✅
 
@@ -1526,11 +1577,11 @@
 
 **Implemented Methods:**
 - `commit(self, processing_mode: str = 'stream')` - Line 241
-- `rollback(self)` - Line 290
-- `close(self)` - Line 299
-- `refresh(self, entity)` - Line 325
-- `flush(self)` - Line 330
-- `savepoint(self)` - Line 336
+- `rollback(self)` - Line 292
+- `close(self)` - Line 301
+- `refresh(self, entity)` - Line 327
+- `flush(self)` - Line 332
+- `savepoint(self)` - Line 338
 
 ### Implementation: `AsyncUnitOfWork` ✅
 
@@ -1538,12 +1589,12 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async commit(self, processing_mode: str = 'stream')` - Line 570
-- `async rollback(self)` - Line 587
-- `async close(self)` - Line 601
-- `async refresh(self, entity)` - Line 616
-- `async flush(self)` - Line 621
-- `async savepoint(self)` - Line 627
+- `async commit(self, processing_mode: str = 'stream')` - Line 572
+- `async rollback(self)` - Line 589
+- `async close(self)` - Line 603
+- `async refresh(self, entity)` - Line 618
+- `async flush(self)` - Line 623
+- `async savepoint(self)` - Line 629
 
 ### Implementation: `UnitOfWorkFactory` ✅
 
@@ -1552,11 +1603,11 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `create(self) -> UnitOfWork` - Line 710
-- `create_async(self) -> AsyncUnitOfWork` - Line 714
-- `transaction(self)` - Line 723
-- `async async_transaction(self)` - Line 730
-- `configure_dependencies(self, dependency_injector) -> None` - Line 736
+- `create(self) -> UnitOfWork` - Line 712
+- `create_async(self) -> AsyncUnitOfWork` - Line 716
+- `transaction(self)` - Line 725
+- `async async_transaction(self)` - Line 732
+- `configure_dependencies(self, dependency_injector) -> None` - Line 738
 
 ### Implementation: `UnitOfWorkExample` ✅
 
@@ -1564,8 +1615,8 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async example_transaction(self, entity_data: dict)` - Line 751
-- `async example_multi_service_operation(self, entity_id: str)` - Line 761
+- `async example_transaction(self, entity_data: dict)` - Line 753
+- `async example_multi_service_operation(self, entity_id: str)` - Line 763
 
 ## COMPLETE API REFERENCE
 
@@ -2135,10 +2186,10 @@ class SoftDeleteMixin:
 
 ```python
 class Bot(Base, AuditMixin, MetadataMixin, SoftDeleteMixin):
-    def __repr__(self)  # Line 117
-    def is_running(self) -> bool  # Line 121
-    def win_rate(self) -> Decimal  # Line 125
-    def average_pnl(self) -> Decimal  # Line 133
+    def __repr__(self)  # Line 120
+    def is_running(self) -> bool  # Line 124
+    def win_rate(self) -> Decimal  # Line 128
+    def average_pnl(self) -> Decimal  # Line 136
 ```
 
 #### Class: `Strategy`
@@ -2148,9 +2199,9 @@ class Bot(Base, AuditMixin, MetadataMixin, SoftDeleteMixin):
 
 ```python
 class Strategy(Base, AuditMixin, MetadataMixin):
-    def __repr__(self)  # Line 225
-    def is_active(self) -> bool  # Line 228
-    def signal_success_rate(self) -> Decimal  # Line 232
+    def __repr__(self)  # Line 236
+    def is_active(self) -> bool  # Line 239
+    def signal_success_rate(self) -> Decimal  # Line 243
 ```
 
 #### Class: `Signal`
@@ -2160,9 +2211,9 @@ class Strategy(Base, AuditMixin, MetadataMixin):
 
 ```python
 class Signal(Base, TimestampMixin, MetadataMixin):
-    def __repr__(self)  # Line 303
-    def is_executed(self) -> bool  # Line 306
-    def is_successful(self) -> bool  # Line 310
+    def __repr__(self)  # Line 317
+    def is_executed(self) -> bool  # Line 320
+    def is_successful(self) -> bool  # Line 324
 ```
 
 #### Class: `BotLog`
@@ -2172,7 +2223,7 @@ class Signal(Base, TimestampMixin, MetadataMixin):
 
 ```python
 class BotLog(Base, TimestampMixin):
-    def __repr__(self)  # Line 381
+    def __repr__(self)  # Line 395
 ```
 
 ### File: bot_instance.py
@@ -2184,9 +2235,9 @@ class BotLog(Base, TimestampMixin):
 
 ```python
 class BotInstance(Base, TimestampMixin, MetadataMixin):
-    def __repr__(self)  # Line 110
-    def is_running(self) -> bool  # Line 113
-    def is_stopped(self) -> bool  # Line 117
+    def __repr__(self)  # Line 126
+    def is_running(self) -> bool  # Line 129
+    def is_stopped(self) -> bool  # Line 133
 ```
 
 ### File: capital.py
@@ -2198,7 +2249,7 @@ class BotInstance(Base, TimestampMixin, MetadataMixin):
 
 ```python
 class CapitalAllocationDB(Base, TimestampMixin):
-    def __repr__(self)  # Line 111
+    def __repr__(self)  # Line 117
 ```
 
 #### Class: `FundFlowDB`
@@ -2208,7 +2259,7 @@ class CapitalAllocationDB(Base, TimestampMixin):
 
 ```python
 class FundFlowDB(Base, TimestampMixin):
-    def __repr__(self)  # Line 183
+    def __repr__(self)  # Line 197
 ```
 
 #### Class: `CurrencyExposureDB`
@@ -2218,7 +2269,7 @@ class FundFlowDB(Base, TimestampMixin):
 
 ```python
 class CurrencyExposureDB(Base, TimestampMixin):
-    def __repr__(self)  # Line 228
+    def __repr__(self)  # Line 250
 ```
 
 #### Class: `ExchangeAllocationDB`
@@ -2228,7 +2279,7 @@ class CurrencyExposureDB(Base, TimestampMixin):
 
 ```python
 class ExchangeAllocationDB(Base, TimestampMixin):
-    def __repr__(self)  # Line 280
+    def __repr__(self)  # Line 306
 ```
 
 ### File: data.py
@@ -2405,6 +2456,12 @@ class OptimizationObjectiveDB(Base):
 
 ### File: risk.py
 
+**Key Imports:**
+- `from src.core.types import AlertSeverity`
+- `from src.core.types import CircuitBreakerStatus`
+- `from src.core.types import CircuitBreakerType`
+- `from src.core.types import PositionSizeMethod`
+
 #### Class: `RiskConfiguration`
 
 **Inherits**: Base, TimestampMixin
@@ -2558,7 +2615,7 @@ class AuditLog(Base, TimestampMixin):
 
 ```python
 class PerformanceMetrics(Base, TimestampMixin):
-    def __repr__(self)  # Line 293
+    def __repr__(self)  # Line 297
 ```
 
 #### Class: `BalanceSnapshot`
@@ -2568,7 +2625,7 @@ class PerformanceMetrics(Base, TimestampMixin):
 
 ```python
 class BalanceSnapshot(Base, TimestampMixin):
-    def __repr__(self)  # Line 361
+    def __repr__(self)  # Line 365
 ```
 
 #### Class: `ResourceAllocation`
@@ -2578,7 +2635,7 @@ class BalanceSnapshot(Base, TimestampMixin):
 
 ```python
 class ResourceAllocation(Base, TimestampMixin):
-    def __repr__(self)  # Line 394
+    def __repr__(self)  # Line 398
 ```
 
 #### Class: `ResourceUsage`
@@ -2588,7 +2645,7 @@ class ResourceAllocation(Base, TimestampMixin):
 
 ```python
 class ResourceUsage(Base, TimestampMixin):
-    def __repr__(self)  # Line 430
+    def __repr__(self)  # Line 434
 ```
 
 ### File: trading.py
@@ -2606,10 +2663,10 @@ class ResourceUsage(Base, TimestampMixin):
 
 ```python
 class Order(Base, AuditMixin, MetadataMixin):
-    def __repr__(self)  # Line 103
-    def is_filled(self) -> bool  # Line 107
-    def is_active(self) -> bool  # Line 114
-    def remaining_quantity(self) -> Decimal  # Line 119
+    def __repr__(self)  # Line 104
+    def is_filled(self) -> bool  # Line 108
+    def is_active(self) -> bool  # Line 115
+    def remaining_quantity(self) -> Decimal  # Line 120
 ```
 
 #### Class: `Position`
@@ -2619,10 +2676,10 @@ class Order(Base, AuditMixin, MetadataMixin):
 
 ```python
 class Position(Base, AuditMixin, MetadataMixin):
-    def __repr__(self)  # Line 204
-    def is_open(self) -> bool  # Line 208
-    def value(self) -> Decimal  # Line 213
-    def calculate_pnl(self, current_price: Decimal | None = None) -> Decimal  # Line 219
+    def __repr__(self)  # Line 209
+    def is_open(self) -> bool  # Line 213
+    def value(self) -> Decimal  # Line 218
+    def calculate_pnl(self, current_price: Decimal | None = None) -> Decimal  # Line 224
 ```
 
 #### Class: `OrderFill`
@@ -2632,9 +2689,9 @@ class Position(Base, AuditMixin, MetadataMixin):
 
 ```python
 class OrderFill(Base, TimestampMixin):
-    def __repr__(self)  # Line 277
-    def value(self) -> Decimal  # Line 281
-    def net_value(self) -> Decimal  # Line 288
+    def __repr__(self)  # Line 282
+    def value(self) -> Decimal  # Line 286
+    def net_value(self) -> Decimal  # Line 293
 ```
 
 #### Class: `Trade`
@@ -2644,9 +2701,9 @@ class OrderFill(Base, TimestampMixin):
 
 ```python
 class Trade(Base, TimestampMixin, MetadataMixin):
-    def __repr__(self)  # Line 365
-    def is_profitable(self) -> bool  # Line 369
-    def return_percentage(self) -> Decimal  # Line 376
+    def __repr__(self)  # Line 370
+    def is_profitable(self) -> bool  # Line 374
+    def return_percentage(self) -> Decimal  # Line 381
 ```
 
 ### File: user.py
@@ -2658,9 +2715,9 @@ class Trade(Base, TimestampMixin, MetadataMixin):
 
 ```python
 class User(Base, TimestampMixin, MetadataMixin):
-    def __repr__(self)  # Line 69
-    def full_name(self) -> str  # Line 73
-    def is_authenticated(self) -> bool  # Line 80
+    def __repr__(self)  # Line 91
+    def full_name(self) -> str  # Line 95
+    def is_authenticated(self) -> bool  # Line 102
 ```
 
 ### File: queries.py
@@ -2758,41 +2815,42 @@ def get_query_config(config: dict[str, Any] | None = None) -> dict[str, int]  # 
 ```python
 class RedisClient(BaseComponent, CacheClientInterface):
     def __init__(self, config_or_url: Any | str) -> None  # Line 66
-    async def connect(self) -> None  # Line 107
-    def _start_heartbeat_monitoring(self) -> None  # Line 150
-    async def _heartbeat_monitor(self) -> None  # Line 155
-    async def _ensure_connected(self) -> None  # Line 170
-    async def _cleanup_connection(self) -> None  # Line 193
-    async def _with_backpressure(self, operation)  # Line 203
-    async def _maybe_autoclose(self) -> None  # Line 220
-    async def disconnect(self) -> None  # Line 237
-    def _get_namespaced_key(self, key: str, namespace: str = 'trading_bot') -> str  # Line 267
-    async def set(self, ...) -> bool  # Line 272
-    async def get(self, key: str, namespace: str = 'trading_bot') -> Any | None  # Line 306
-    async def delete(self, key: str, namespace: str = 'trading_bot') -> bool  # Line 332
-    async def exists(self, key: str, namespace: str = 'trading_bot') -> bool  # Line 346
-    async def expire(self, key: str, ttl: int, namespace: str = 'trading_bot') -> bool  # Line 360
-    async def ttl(self, key: str, namespace: str = 'trading_bot') -> int  # Line 374
-    async def hset(self, key: str, field: str, value: Any, namespace: str = 'trading_bot') -> bool  # Line 389
-    async def hget(self, key: str, field: str, namespace: str = 'trading_bot') -> Any | None  # Line 410
-    async def hgetall(self, key: str, namespace: str = 'trading_bot') -> dict[str, Any]  # Line 432
-    async def hdel(self, key: str, field: str, namespace: str = 'trading_bot') -> bool  # Line 455
-    async def lpush(self, key: str, value: Any, namespace: str = 'trading_bot') -> int  # Line 470
-    async def rpush(self, key: str, value: Any, namespace: str = 'trading_bot') -> int  # Line 491
-    async def lrange(self, key: str, start: int = 0, end: int = Any, namespace: str = 'trading_bot') -> list[Any]  # Line 512
-    async def sadd(self, key: str, value: Any, namespace: str = 'trading_bot') -> bool  # Line 538
-    async def smembers(self, key: str, namespace: str = 'trading_bot') -> list[Any]  # Line 559
-    async def store_market_data(self, symbol: str, data: dict[str, Any], ttl: int = 300) -> bool  # Line 583
-    async def get_market_data(self, symbol: str) -> dict[str, Any] | None  # Line 588
-    async def store_position(self, bot_id: str, position: dict[str, Any]) -> bool  # Line 593
-    async def get_position(self, bot_id: str) -> dict[str, Any] | None  # Line 597
-    async def store_balance(self, user_id: str, exchange: str, balance: dict[str, Any]) -> bool  # Line 601
-    async def get_balance(self, user_id: str, exchange: str) -> dict[str, Any] | None  # Line 606
-    async def store_cache(self, key: str, value: Any, ttl: int = 3600) -> bool  # Line 611
-    async def get_cache(self, key: str) -> Any | None  # Line 615
-    async def ping(self) -> bool  # Line 620
-    async def info(self) -> dict[str, Any]  # Line 632
-    async def health_check(self) -> bool  # Line 644
+    def client(self) -> redis.Redis | None  # Line 105
+    async def connect(self) -> None  # Line 112
+    def _start_heartbeat_monitoring(self) -> None  # Line 155
+    async def _heartbeat_monitor(self) -> None  # Line 160
+    async def _ensure_connected(self) -> None  # Line 175
+    async def _cleanup_connection(self) -> None  # Line 198
+    async def _with_backpressure(self, operation)  # Line 208
+    async def _maybe_autoclose(self) -> None  # Line 225
+    async def disconnect(self) -> None  # Line 242
+    def _get_namespaced_key(self, key: str, namespace: str = 'trading_bot') -> str  # Line 272
+    async def set(self, ...) -> bool  # Line 277
+    async def get(self, key: str, namespace: str = 'trading_bot') -> Any | None  # Line 311
+    async def delete(self, key: str, namespace: str = 'trading_bot') -> bool  # Line 337
+    async def exists(self, key: str, namespace: str = 'trading_bot') -> bool  # Line 351
+    async def expire(self, key: str, ttl: int, namespace: str = 'trading_bot') -> bool  # Line 365
+    async def ttl(self, key: str, namespace: str = 'trading_bot') -> int  # Line 379
+    async def hset(self, key: str, field: str, value: Any, namespace: str = 'trading_bot') -> bool  # Line 394
+    async def hget(self, key: str, field: str, namespace: str = 'trading_bot') -> Any | None  # Line 415
+    async def hgetall(self, key: str, namespace: str = 'trading_bot') -> dict[str, Any]  # Line 437
+    async def hdel(self, key: str, field: str, namespace: str = 'trading_bot') -> bool  # Line 460
+    async def lpush(self, key: str, value: Any, namespace: str = 'trading_bot') -> int  # Line 475
+    async def rpush(self, key: str, value: Any, namespace: str = 'trading_bot') -> int  # Line 496
+    async def lrange(self, key: str, start: int = 0, end: int = Any, namespace: str = 'trading_bot') -> list[Any]  # Line 517
+    async def sadd(self, key: str, value: Any, namespace: str = 'trading_bot') -> bool  # Line 543
+    async def smembers(self, key: str, namespace: str = 'trading_bot') -> list[Any]  # Line 564
+    async def store_market_data(self, symbol: str, data: dict[str, Any], ttl: int = 300) -> bool  # Line 588
+    async def get_market_data(self, symbol: str) -> dict[str, Any] | None  # Line 593
+    async def store_position(self, bot_id: str, position: dict[str, Any]) -> bool  # Line 598
+    async def get_position(self, bot_id: str) -> dict[str, Any] | None  # Line 602
+    async def store_balance(self, user_id: str, exchange: str, balance: dict[str, Any]) -> bool  # Line 606
+    async def get_balance(self, user_id: str, exchange: str) -> dict[str, Any] | None  # Line 611
+    async def store_cache(self, key: str, value: Any, ttl: int = 3600) -> bool  # Line 616
+    async def get_cache(self, key: str) -> Any | None  # Line 620
+    async def ping(self) -> bool  # Line 625
+    async def info(self) -> dict[str, Any]  # Line 637
+    async def health_check(self) -> bool  # Line 649
 ```
 
 #### Functions:
@@ -2883,21 +2941,21 @@ class DatabaseRepository(CoreBaseRepository):
     async def _delete_entity(self, entity_id) -> bool  # Line 91
     async def _list_entities(self, ...) -> list  # Line 104
     async def _count_entities(self, filters: dict[str, Any] | None) -> int  # Line 139
-    async def get_by(self, **kwargs)  # Line 158
-    async def get(self, entity_id: Any)  # Line 170
-    async def get_all(self, ...) -> list  # Line 174
-    async def exists(self, entity_id: Any) -> bool  # Line 196
-    async def soft_delete(self, entity_id: Any, deleted_by: str | None = None) -> bool  # Line 205
-    async def begin(self)  # Line 218
-    async def commit(self)  # Line 222
-    async def rollback(self)  # Line 226
-    async def refresh(self, entity)  # Line 230
-    def _apply_update_transforms(self, entity) -> None  # Line 234
-    def _apply_consistent_filters(self, stmt, filters: dict[str, Any])  # Line 246
-    def _apply_single_filter(self, stmt, column, value)  # Line 254
-    def _apply_complex_filter(self, stmt, column, value_dict: dict[str, Any])  # Line 263
-    def _has_valid_between_filter(self, value_dict: dict[str, Any]) -> bool  # Line 279
-    def _validate_entity_at_boundary(self, entity: Any, operation: str) -> None  # Line 287
+    async def get_by(self, **kwargs)  # Line 160
+    async def get(self, entity_id: Any)  # Line 172
+    async def get_all(self, ...) -> list  # Line 176
+    async def exists(self, entity_id: Any) -> bool  # Line 198
+    async def soft_delete(self, entity_id: Any, deleted_by: str | None = None) -> bool  # Line 207
+    async def begin(self)  # Line 220
+    async def commit(self)  # Line 224
+    async def rollback(self)  # Line 228
+    async def refresh(self, entity)  # Line 232
+    def _apply_update_transforms(self, entity) -> None  # Line 236
+    def _apply_consistent_filters(self, stmt, filters: dict[str, Any])  # Line 248
+    def _apply_single_filter(self, stmt, column, value)  # Line 256
+    def _apply_complex_filter(self, stmt, column, value_dict: dict[str, Any])  # Line 265
+    def _has_valid_between_filter(self, value_dict: dict[str, Any]) -> bool  # Line 281
+    def _validate_entity_at_boundary(self, entity: Any, operation: str) -> None  # Line 289
 ```
 
 #### Class: `RepositoryInterface`
@@ -3292,6 +3350,73 @@ class MLRepository:
     def __init__(self, session: AsyncSession)  # Line 421
 ```
 
+### File: risk.py
+
+**Key Imports:**
+- `from src.core.exceptions import RepositoryError`
+- `from src.core.types import Position`
+- `from src.core.types import RiskMetrics`
+- `from src.database.models.risk import RiskConfiguration`
+- `from src.database.repository.base import DatabaseRepository`
+
+#### Class: `RiskMetricsRepository`
+
+**Inherits**: DatabaseRepository
+**Purpose**: Repository for risk metrics data access
+
+```python
+class RiskMetricsRepository(DatabaseRepository):
+    def __init__(self, session: AsyncSession)  # Line 25
+    async def get_historical_returns(self, symbol: str, days: int) -> list[Decimal]  # Line 34
+    async def get_price_history(self, symbol: str, days: int) -> list[Decimal]  # Line 39
+    async def get_portfolio_positions(self) -> list[Position]  # Line 44
+    async def save_risk_metrics(self, metrics: RiskMetrics) -> None  # Line 52
+    async def get_correlation_data(self, symbols: list[str], days: int) -> dict[str, list[Decimal]]  # Line 61
+```
+
+#### Class: `PortfolioRepository`
+
+**Inherits**: DatabaseRepository
+**Purpose**: Repository for portfolio data access
+
+```python
+class PortfolioRepository(DatabaseRepository):
+    def __init__(self, session: AsyncSession)  # Line 70
+    async def get_current_positions(self) -> list[Position]  # Line 79
+    async def get_portfolio_value(self) -> Decimal  # Line 87
+    async def get_position_history(self, symbol: str, days: int) -> list[Position]  # Line 95
+    async def update_portfolio_limits(self, limits: dict[str, Any]) -> None  # Line 103
+```
+
+#### Class: `RiskMetricsRepositoryImpl`
+
+**Inherits**: RiskMetricsRepositoryInterface
+**Purpose**: Implementation of risk metrics repository interface
+
+```python
+class RiskMetricsRepositoryImpl(RiskMetricsRepositoryInterface):
+    def __init__(self, repository: RiskMetricsRepository)  # Line 113
+    async def get_historical_returns(self, symbol: str, days: int) -> list[Decimal]  # Line 117
+    async def get_price_history(self, symbol: str, days: int) -> list[Decimal]  # Line 121
+    async def get_portfolio_positions(self) -> list[Position]  # Line 125
+    async def save_risk_metrics(self, metrics: RiskMetrics) -> None  # Line 129
+    async def get_correlation_data(self, symbols: list[str], days: int) -> dict[str, list[Decimal]]  # Line 133
+```
+
+#### Class: `PortfolioRepositoryImpl`
+
+**Inherits**: PortfolioRepositoryInterface
+**Purpose**: Implementation of portfolio repository interface
+
+```python
+class PortfolioRepositoryImpl(PortfolioRepositoryInterface):
+    def __init__(self, repository: PortfolioRepository)  # Line 141
+    async def get_current_positions(self) -> list[Position]  # Line 145
+    async def get_portfolio_value(self) -> Decimal  # Line 149
+    async def get_position_history(self, symbol: str, days: int) -> list[Position]  # Line 153
+    async def update_portfolio_limits(self, limits: dict[str, Any]) -> None  # Line 157
+```
+
 ### File: service_repository.py
 
 **Key Imports:**
@@ -3665,23 +3790,23 @@ class DatabaseService(BaseService, DatabaseServiceInterface):
     async def start(self) -> None  # Line 98
     async def stop(self) -> None  # Line 127
     async def create_entity(self, entity: T, processing_mode: str = 'stream') -> T  # Line 160
-    async def get_entity_by_id(self, model_class: type[T], entity_id: K) -> T | None  # Line 228
-    async def update_entity(self, entity: T) -> T  # Line 263
-    async def delete_entity(self, model_class: type[T], entity_id: K) -> bool  # Line 292
-    async def list_entities(self, ...) -> list[T]  # Line 325
-    async def count_entities(self, model_class: type[T] | None = None, filters: dict[str, Any] | None = None) -> int  # Line 438
-    async def bulk_create(self, entities: list[T]) -> list[T]  # Line 478
-    async def transaction(self) -> AsyncGenerator[AsyncSession, None]  # Line 512
-    async def get_session(self) -> AsyncGenerator[AsyncSession, None]  # Line 529
-    async def get_health_status(self) -> HealthStatus  # Line 541
-    def get_performance_metrics(self) -> dict[str, Any]  # Line 554
-    async def execute_query(self, query: str, params: dict[str, Any] | None = None) -> Any  # Line 561
-    async def get_connection_pool_status(self) -> dict[str, Any]  # Line 575
-    async def _invalidate_cache_pattern(self, pattern: str) -> None  # Line 596
-    def _transform_entity_data(self, entity: T, processing_mode: str) -> T  # Line 610
-    def _validate_filter_boundary(self, filters: dict[str, Any], entity_name: str) -> None  # Line 639
-    def _apply_consistent_filters(self, query: Any, model_class: type[T], filters: dict[str, Any]) -> Any  # Line 671
-    def _propagate_database_error(self, error: Exception, operation: str, entity_name: str) -> None  # Line 690
+    async def get_entity_by_id(self, model_class: type[T], entity_id: K) -> T | None  # Line 229
+    async def update_entity(self, entity: T) -> T  # Line 264
+    async def delete_entity(self, model_class: type[T], entity_id: K) -> bool  # Line 293
+    async def list_entities(self, ...) -> list[T]  # Line 326
+    async def count_entities(self, model_class: type[T] | None = None, filters: dict[str, Any] | None = None) -> int  # Line 440
+    async def bulk_create(self, entities: list[T]) -> list[T]  # Line 480
+    async def transaction(self) -> AsyncGenerator[AsyncSession, None]  # Line 514
+    async def get_session(self) -> AsyncGenerator[AsyncSession, None]  # Line 531
+    async def get_health_status(self) -> HealthStatus  # Line 543
+    def get_performance_metrics(self) -> dict[str, Any]  # Line 556
+    async def execute_query(self, query: str, params: dict[str, Any] | None = None) -> Any  # Line 563
+    async def get_connection_pool_status(self) -> dict[str, Any]  # Line 577
+    async def _invalidate_cache_pattern(self, pattern: str) -> None  # Line 598
+    def _transform_entity_data(self, entity: T, processing_mode: str) -> T  # Line 612
+    def _validate_filter_boundary(self, filters: dict[str, Any], entity_name: str) -> None  # Line 632
+    def _apply_consistent_filters(self, query: Any, model_class: type[T], filters: dict[str, Any]) -> Any  # Line 677
+    def _propagate_database_error(self, error: Exception, operation: str, entity_name: str) -> None  # Line 696
 ```
 
 ### File: bot_service.py
@@ -3832,12 +3957,12 @@ class UnitOfWork:
     def __getattr__(self, name)  # Line 181
     def __exit__(self, exc_type, exc_val, exc_tb)  # Line 226
     def commit(self, processing_mode: str = 'stream')  # Line 241
-    def rollback(self)  # Line 290
-    def close(self)  # Line 299
-    def refresh(self, entity)  # Line 325
-    def flush(self)  # Line 330
-    def savepoint(self)  # Line 336
-    def _propagate_uow_error(self, error: Exception, operation: str, processing_mode: str = 'batch') -> None  # Line 367
+    def rollback(self)  # Line 292
+    def close(self)  # Line 301
+    def refresh(self, entity)  # Line 327
+    def flush(self)  # Line 332
+    def savepoint(self)  # Line 338
+    def _propagate_uow_error(self, error: Exception, operation: str, processing_mode: str = 'stream') -> None  # Line 369
 ```
 
 #### Class: `AsyncUnitOfWork`
@@ -3846,22 +3971,22 @@ class UnitOfWork:
 
 ```python
 class AsyncUnitOfWork:
-    def __init__(self, async_session_factory, dependency_injector = None)  # Line 406
-    async def __aenter__(self)  # Line 428
-    async def _create_services_via_di(self)  # Line 442
-    def _create_service(self, service_name: str)  # Line 460
-    async def _create_services_direct(self)  # Line 464
-    async def _create_internal_repositories(self)  # Line 482
-    def _hide_repositories(self) -> None  # Line 496
-    def __getattr__(self, name)  # Line 500
-    async def __aexit__(self, exc_type, exc_val, exc_tb)  # Line 509
-    async def commit(self, processing_mode: str = 'stream')  # Line 570
-    async def rollback(self)  # Line 587
-    async def close(self)  # Line 601
-    async def refresh(self, entity)  # Line 616
-    async def flush(self)  # Line 621
-    async def savepoint(self)  # Line 627
-    async def _propagate_async_uow_error(self, error: Exception, operation: str, processing_mode: str = 'batch') -> None  # Line 657
+    def __init__(self, async_session_factory, dependency_injector = None)  # Line 408
+    async def __aenter__(self)  # Line 430
+    async def _create_services_via_di(self)  # Line 444
+    def _create_service(self, service_name: str)  # Line 462
+    async def _create_services_direct(self)  # Line 466
+    async def _create_internal_repositories(self)  # Line 484
+    def _hide_repositories(self) -> None  # Line 498
+    def __getattr__(self, name)  # Line 502
+    async def __aexit__(self, exc_type, exc_val, exc_tb)  # Line 511
+    async def commit(self, processing_mode: str = 'stream')  # Line 572
+    async def rollback(self)  # Line 589
+    async def close(self)  # Line 603
+    async def refresh(self, entity)  # Line 618
+    async def flush(self)  # Line 623
+    async def savepoint(self)  # Line 629
+    async def _propagate_async_uow_error(self, error: Exception, operation: str, processing_mode: str = 'stream') -> None  # Line 659
 ```
 
 #### Class: `UnitOfWorkFactory`
@@ -3871,12 +3996,12 @@ class AsyncUnitOfWork:
 
 ```python
 class UnitOfWorkFactory(UnitOfWorkFactoryInterface):
-    def __init__(self, ...)  # Line 691
-    def create(self) -> UnitOfWork  # Line 710
-    def create_async(self) -> AsyncUnitOfWork  # Line 714
-    def transaction(self)  # Line 723
-    async def async_transaction(self)  # Line 730
-    def configure_dependencies(self, dependency_injector) -> None  # Line 736
+    def __init__(self, ...)  # Line 693
+    def create(self) -> UnitOfWork  # Line 712
+    def create_async(self) -> AsyncUnitOfWork  # Line 716
+    def transaction(self)  # Line 725
+    async def async_transaction(self)  # Line 732
+    def configure_dependencies(self, dependency_injector) -> None  # Line 738
 ```
 
 #### Class: `UnitOfWorkExample`
@@ -3885,12 +4010,12 @@ class UnitOfWorkFactory(UnitOfWorkFactoryInterface):
 
 ```python
 class UnitOfWorkExample:
-    def __init__(self, uow_factory: UnitOfWorkFactory)  # Line 746
-    async def example_transaction(self, entity_data: dict)  # Line 751
-    async def example_multi_service_operation(self, entity_id: str)  # Line 761
+    def __init__(self, uow_factory: UnitOfWorkFactory)  # Line 748
+    async def example_transaction(self, entity_data: dict)  # Line 753
+    async def example_multi_service_operation(self, entity_id: str)  # Line 763
 ```
 
 ---
 **Generated**: Complete reference for database module
-**Total Classes**: 134
+**Total Classes**: 138
 **Total Functions**: 50

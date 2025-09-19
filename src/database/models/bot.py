@@ -90,7 +90,7 @@ class Bot(Base, AuditMixin, MetadataMixin, SoftDeleteMixin):
 
     # Capital management relationships
     fund_flows = relationship("FundFlowDB", back_populates="bot", cascade="all, delete-orphan")
-    
+
     # State management relationships
     state_snapshots = relationship("StateSnapshot", back_populates="bot")
 
@@ -178,6 +178,7 @@ class Strategy(Base, AuditMixin, MetadataMixin):
         "CapitalAllocationDB", back_populates="strategy", cascade="all, delete-orphan"
     )
     fund_flows = relationship("FundFlowDB", back_populates="strategy", cascade="all, delete-orphan")
+    optimization_runs = relationship("OptimizationRun", back_populates="strategy", cascade="all, delete-orphan")
 
     # Analytics relationships
     strategy_metrics = relationship(
@@ -188,7 +189,7 @@ class Strategy(Base, AuditMixin, MetadataMixin):
     backtest_runs = relationship(
         "BacktestRun", back_populates="strategy", cascade="all, delete-orphan"
     )
-    
+
     # State management relationships
     state_snapshots = relationship("StateSnapshot", back_populates="strategy")
 
@@ -226,6 +227,10 @@ class Strategy(Base, AuditMixin, MetadataMixin):
             "max_position_size <= 10000000",  # Reasonable upper limit
             name="check_max_position_size_reasonable",
         ),
+        CheckConstraint(
+            "type IN ('mean_reversion', 'momentum', 'arbitrage', 'market_making', 'trend_following', 'pairs_trading', 'statistical_arbitrage', 'breakout', 'custom')",
+            name="check_strategy_type",
+        ),
     )
 
     def __repr__(self):
@@ -255,8 +260,9 @@ class Signal(Base, TimestampMixin, MetadataMixin):
     )
 
     symbol = Column(String(50), nullable=False)
-    action = Column(String(20), nullable=False)  # BUY, SELL, HOLD, CLOSE
+    direction = Column(String(20), nullable=False)  # BUY, SELL, HOLD (matches SignalDirection enum)
     strength: Mapped[Decimal | None] = mapped_column(DECIMAL(8, 6))  # Signal strength 0-1
+    source = Column(String(100), nullable=False)  # Signal source (matches core types)
 
     # Signal details
     price: Mapped[Decimal | None] = mapped_column(DECIMAL(20, 8))
@@ -288,6 +294,8 @@ class Signal(Base, TimestampMixin, MetadataMixin):
     __table_args__ = (
         Index("idx_signals_strategy_id", "strategy_id"),
         Index("idx_signals_symbol", "symbol"),
+        Index("idx_signals_direction", "direction"),  # New index for direction field
+        Index("idx_signals_source", "source"),  # New index for source field
         Index("idx_signals_created_at", "created_at"),
         Index("idx_signals_executed", "executed"),
         Index("idx_signals_outcome", "outcome"),
@@ -300,14 +308,14 @@ class Signal(Base, TimestampMixin, MetadataMixin):
             "execution_time IS NULL OR execution_time >= 0",
             name="check_execution_time_non_negative",
         ),
-        CheckConstraint("action IN ('BUY', 'SELL', 'HOLD', 'CLOSE')", name="check_signal_action"),
+        CheckConstraint("direction IN ('BUY', 'SELL', 'HOLD', 'CLOSE')", name="check_signal_direction"),
         CheckConstraint(
             "outcome IN ('SUCCESS', 'FAILURE', 'PARTIAL', 'EXPIRED')", name="check_signal_outcome"
         ),
     )
 
     def __repr__(self):
-        return f"<Signal {self.id}: {self.action} {self.symbol}>"
+        return f"<Signal {self.id}: {self.direction} {self.symbol}>"
 
     def is_executed(self) -> bool:
         """Check if signal was executed."""

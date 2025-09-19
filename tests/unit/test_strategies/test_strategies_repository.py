@@ -39,6 +39,18 @@ class MockStrategyRepository(StrategyRepositoryInterface):
         self._strategies[strategy_id] = record
         return record
 
+    async def create_strategy_from_data(self, strategy_data: dict[str, Any]) -> Any:
+        """Create a new strategy from data dictionary."""
+        # This is a mock implementation for testing
+        from unittest.mock import Mock
+        strategy = Mock()
+        strategy.id = strategy_data.get("strategy_id", strategy_data.get("id"))
+        strategy.name = strategy_data.get("name", "test_strategy")
+        strategy.strategy_type = strategy_data.get("strategy_type", "test")
+        strategy.enabled = strategy_data.get("enabled", True)
+        strategy.config = strategy_data
+        return strategy
+
     async def update_strategy(self, strategy_id: str, updates: dict[str, Any]) -> Any:
         if strategy_id not in self._strategies:
             return None

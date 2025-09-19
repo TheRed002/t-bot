@@ -69,8 +69,15 @@ class DataEventPublisher:
             metadata: Additional metadata
         """
         try:
-            # Apply consistent data transformation matching error_handling module
-            transformed_data = self._apply_consistent_event_transformation(data or {}, source)
+            # Use CoreDataTransformer for consistent data transformation patterns
+            from src.core.data_transformer import CoreDataTransformer
+
+            transformed_data = CoreDataTransformer.transform_event_to_standard_format(
+                event_type=event_type.value,
+                data=data or {},
+                metadata=metadata,
+                source=source or self.__class__.__name__
+            )
 
             # Apply boundary validation for data to error_handling module communication
             from src.utils.messaging_patterns import BoundaryValidator
@@ -78,7 +85,7 @@ class DataEventPublisher:
                 "component": source or self.__class__.__name__,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "processing_mode": "stream",  # Consistent with error_handling
-                "data_format": "event_data_v1",  # Align with error_handling format
+                "data_format": "core_event_data_v1",  # Use consistent format
                 "message_pattern": "pub_sub",  # Consistent messaging pattern
                 "boundary_crossed": True,
                 **transformed_data
@@ -88,8 +95,8 @@ class DataEventPublisher:
             event = DataEvent(
                 event_type=event_type,
                 source=source or self.__class__.__name__,
-                data=transformed_data,
-                metadata=metadata or {},
+                data=transformed_data.get("data", {}),
+                metadata=transformed_data.get("metadata", {}),
                 message_pattern="pub_sub",  # Consistent pub/sub pattern
                 processing_mode="stream",  # Align with error_handling
                 boundary_crossed=True,  # Data events cross boundaries
@@ -118,34 +125,6 @@ class DataEventPublisher:
                 if hasattr(self, "logger"):
                     self.logger.warning(f"Failed to publish event {event_type.value}: {e}")
 
-    def _apply_consistent_event_transformation(self, data: dict[str, Any], source: str) -> dict[str, Any]:
-        """Apply consistent event transformation patterns matching error_handling module."""
-        transformed_data = data.copy()
-
-        # Add consistent transformation metadata matching error_handling patterns
-        transformed_data.update({
-            "transformation_timestamp": datetime.now(timezone.utc).isoformat(),
-            "source_module": "data",
-            "target_module": "error_handling",
-            "processing_stage": "event_transformation",
-            "data_format": "event_data_v1",  # Align with error_handling format
-            "processing_mode": "stream",  # Consistent with error_handling
-            "boundary_crossed": True,
-        })
-
-        # Apply financial data transformation if present
-        financial_fields = ["price", "quantity", "volume", "amount"]
-        for field in financial_fields:
-            if field in transformed_data and transformed_data[field] is not None:
-                try:
-                    from src.utils.decimal_utils import to_decimal
-                    transformed_data[field] = to_decimal(transformed_data[field])
-                except Exception as e:
-                    # Log but don't fail transformation
-                    if hasattr(self, "logger"):
-                        self.logger.warning(f"Failed to convert {field} to Decimal: {e}")
-
-        return transformed_data
 
 
 class DataEventSubscriber:

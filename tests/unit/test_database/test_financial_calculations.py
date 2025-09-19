@@ -472,7 +472,8 @@ class TestSignalFinancialCalculations:
         """Create a signal for testing."""
         return Signal(
             symbol="BTCUSDT",
-            action="BUY",
+            direction="BUY",
+            source="test",
             strength=0.85,
             price=Decimal("50000.0"),
             quantity=Decimal("1.0"),
@@ -482,25 +483,25 @@ class TestSignalFinancialCalculations:
         """Test signal success rate calculation - Signal model doesn't have this method."""
         # Signal model doesn't have success rate calculation methods
         # These are calculated at the Strategy level
-        assert signal.action == "BUY"
+        assert signal.direction == "BUY"
         assert signal.strength == 0.85
 
     def test_signal_success_rate_zero_executed(self, signal):
         """Test signal success rate with zero executed signals - Signal model doesn't have this method."""
         # Signal model doesn't have executed_signals field
-        assert signal.action == "BUY"
+        assert signal.direction == "BUY"
 
     def test_signal_success_rate_perfect(self, signal):
         """Test signal success rate with 100% success - Signal model doesn't have this method."""
         # Signal model doesn't have success rate calculation
-        assert signal.action == "BUY"
+        assert signal.direction == "BUY"
 
     def test_signal_success_rate_precision(self):
         """Test signal success rate precision - Signal model doesn't have this method."""
-        signal = Signal(symbol="BTCUSDT", action="BUY", strength=0.85)
+        signal = Signal(symbol="BTCUSDT", direction="BUY", source="test", strength=0.85)
 
         # Signal model doesn't have success rate calculation
-        assert signal.action == "BUY"
+        assert signal.direction == "BUY"
 
 
 class TestFinancialCalculationEdgeCases:

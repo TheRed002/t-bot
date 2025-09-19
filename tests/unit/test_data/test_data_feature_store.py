@@ -209,24 +209,24 @@ class TestFeatureRequest:
         """Test feature request creation."""
         request = FeatureRequest(
             symbol="BTCUSDT",
-            feature_names=["sma_20", "rsi_14"],
+            feature_types=["sma_20", "rsi_14"],
             lookback_period=100,
         )
 
         assert request.symbol == "BTCUSDT"
-        assert request.feature_names == ["sma_20", "rsi_14"]
+        assert request.feature_types == ["sma_20", "rsi_14"]
         assert request.lookback_period == 100
         assert request.parameters == {}
-        assert request.use_cache is True
+        assert request.cache_result is True
         assert request.force_recalculation is False
         assert request.priority == 5
 
     def test_feature_request_validation_empty_features(self):
-        """Test validation with empty feature names."""
+        """Test validation with empty feature types."""
         with pytest.raises(ValidationError):
             FeatureRequest(
                 symbol="BTCUSDT",
-                feature_names=[],
+                feature_types=[],
                 lookback_period=100,
             )
 
@@ -236,14 +236,14 @@ class TestFeatureRequest:
         with pytest.raises(ValueError):
             FeatureRequest(
                 symbol="",
-                feature_names=["sma_20"],
+                feature_types=["sma_20"],
             )
 
         # Too long
         with pytest.raises(ValueError):
             FeatureRequest(
                 symbol="A" * 25,  # 25 characters
-                feature_names=["sma_20"],
+                feature_types=["sma_20"],
             )
 
     def test_feature_request_validation_lookback_period(self):
@@ -252,7 +252,7 @@ class TestFeatureRequest:
         with pytest.raises(ValueError):
             FeatureRequest(
                 symbol="BTCUSDT",
-                feature_names=["sma_20"],
+                feature_types=["sma_20"],
                 lookback_period=0,
             )
 
@@ -260,7 +260,7 @@ class TestFeatureRequest:
         with pytest.raises(ValueError):
             FeatureRequest(
                 symbol="BTCUSDT",
-                feature_names=["sma_20"],
+                feature_types=["sma_20"],
                 lookback_period=10000,
             )
 
@@ -270,7 +270,7 @@ class TestFeatureRequest:
         with pytest.raises(ValueError):
             FeatureRequest(
                 symbol="BTCUSDT",
-                feature_names=["sma_20"],
+                feature_types=["sma_20"],
                 priority=0,
             )
 
@@ -278,7 +278,7 @@ class TestFeatureRequest:
         with pytest.raises(ValueError):
             FeatureRequest(
                 symbol="BTCUSDT",
-                feature_names=["sma_20"],
+                feature_types=["sma_20"],
                 priority=15,
             )
 
@@ -287,19 +287,19 @@ class TestFeatureRequest:
         custom_params = {"period": 25, "smoothing": 0.1}
         request = FeatureRequest(
             symbol="ETHUSDT",
-            feature_names=["custom_ema"],
+            feature_types=["custom_ema"],
             lookback_period=200,
             parameters=custom_params,
-            use_cache=False,
+            cache_result=False,
             force_recalculation=True,
             priority=8,
         )
 
         assert request.symbol == "ETHUSDT"
-        assert request.feature_names == ["custom_ema"]
+        assert request.feature_types == ["custom_ema"]
         assert request.lookback_period == 200
         assert request.parameters == custom_params
-        assert request.use_cache is False
+        assert request.cache_result is False
         assert request.force_recalculation is True
         assert request.priority == 8
 
@@ -352,7 +352,7 @@ class TestFeatureCalculationPipeline:
             mock_calc.return_value = [mock_feature_value]
 
             requests = [
-                FeatureRequest(symbol="BTCUSDT", feature_names=["sma_20"]),
+                FeatureRequest(symbol="BTCUSDT", feature_types=["sma_20"]),
             ]
 
             result = await pipeline.calculate_batch(requests)
@@ -391,8 +391,8 @@ class TestFeatureCalculationPipeline:
             mock_calc.side_effect = [[btc_value], [eth_value]]
 
             requests = [
-                FeatureRequest(symbol="BTCUSDT", feature_names=["sma_20"]),
-                FeatureRequest(symbol="ETHUSDT", feature_names=["sma_20"]),
+                FeatureRequest(symbol="BTCUSDT", feature_types=["sma_20"]),
+                FeatureRequest(symbol="ETHUSDT", feature_types=["sma_20"]),
             ]
 
             result = await pipeline.calculate_batch(requests)
@@ -417,7 +417,7 @@ class TestFeatureCalculationPipeline:
             mock_calc.side_effect = Exception("Calculation failed")
 
             requests = [
-                FeatureRequest(symbol="BTCUSDT", feature_names=["sma_20"]),
+                FeatureRequest(symbol="BTCUSDT", feature_types=["sma_20"]),
             ]
 
             result = await pipeline.calculate_batch(requests)
@@ -436,7 +436,7 @@ class TestFeatureCalculationPipeline:
         pipeline = FeatureCalculationPipeline(mock_store)
 
         requests = [
-            FeatureRequest(symbol="BTCUSDT", feature_names=["sma_20"], lookback_period=100),
+            FeatureRequest(symbol="BTCUSDT", feature_types=["sma_20"], lookback_period=100),
         ]
 
         result = await pipeline._calculate_symbol_batch("BTCUSDT", requests)
@@ -465,7 +465,7 @@ class TestFeatureCalculationPipeline:
 
         requests = [
             FeatureRequest(
-                symbol="BTCUSDT", feature_names=["sma_20", "rsi_14"], lookback_period=100
+                symbol="BTCUSDT", feature_types=["sma_20", "rsi_14"], lookback_period=100
             ),
         ]
 
@@ -489,7 +489,7 @@ class TestFeatureCalculationPipeline:
         pipeline = FeatureCalculationPipeline(mock_store)
 
         requests = [
-            FeatureRequest(symbol="BTCUSDT", feature_names=["sma_20"], lookback_period=100),
+            FeatureRequest(symbol="BTCUSDT", feature_types=["sma_20"], lookback_period=100),
         ]
 
         result = await pipeline._calculate_symbol_batch("BTCUSDT", requests)
@@ -687,7 +687,7 @@ class TestIntegrationScenarios:
         pipeline = store.calculation_pipeline
 
         requests = [
-            FeatureRequest(symbol="BTCUSDT", feature_names=["test_feature"]),
+            FeatureRequest(symbol="BTCUSDT", feature_types=["test_feature"]),
         ]
 
         result = await pipeline.calculate_batch(requests)
@@ -720,26 +720,26 @@ class TestErrorHandlingAndEdgeCases:
         # Minimum valid values
         request = FeatureRequest(
             symbol="A",  # Minimum length
-            feature_names=["f"],  # Single feature
+            feature_types=["f"],  # Single feature
             lookback_period=1,  # Minimum lookback
             priority=1,  # Minimum priority
         )
 
         assert request.symbol == "A"
-        assert request.feature_names == ["f"]
+        assert request.feature_types == ["f"]
         assert request.lookback_period == 1
         assert request.priority == 1
 
         # Maximum valid values
         request = FeatureRequest(
             symbol="A" * 20,  # Maximum length
-            feature_names=["feature"] * 10,  # Multiple features
+            feature_types=["feature"] * 10,  # Multiple features
             lookback_period=5000,  # Maximum lookback
             priority=10,  # Maximum priority
         )
 
         assert len(request.symbol) == 20
-        assert len(request.feature_names) == 10
+        assert len(request.feature_types) == 10
         assert request.lookback_period == 5000
         assert request.priority == 10
 
@@ -795,7 +795,7 @@ class TestErrorHandlingAndEdgeCases:
         pipeline = FeatureCalculationPipeline(mock_store)
 
         requests = [
-            FeatureRequest(symbol="BTCUSDT", feature_names=["working_feature", "failing_feature"]),
+            FeatureRequest(symbol="BTCUSDT", feature_types=["working_feature", "failing_feature"]),
         ]
 
         result = await pipeline._calculate_symbol_batch("BTCUSDT", requests)

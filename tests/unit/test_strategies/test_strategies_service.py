@@ -137,12 +137,17 @@ def mock_dependencies():
     exchange_factory.is_exchange_supported = Mock(return_value=True)
     data_service = Mock()
     data_service.get_market_data = AsyncMock()
+
+    # Create properly mocked service manager with async get_service method
+    service_manager = Mock()
+    service_manager.get_service = AsyncMock(return_value=Mock())
+
     return {
         "repository": Mock(),
         "risk_manager": AsyncMock(),
         "exchange_factory": exchange_factory,
         "data_service": data_service,
-        "service_manager": Mock(),  # Add service_manager that exists in constructor
+        "service_manager": service_manager,
     }
 
 

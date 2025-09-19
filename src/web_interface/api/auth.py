@@ -87,14 +87,15 @@ async def login(login_request: LoginRequest):
 
         # Convert to public user model
         public_user = User(
-            user_id=user.user_id,
+            id=user.id,
             username=user.username,
             email=user.email,
             is_active=user.is_active,
+            is_verified=user.is_verified,
             scopes=user.scopes,
         )
 
-        logger.info("User logged in successfully", username=user.username, user_id=user.user_id)
+        logger.info("User logged in successfully", username=user.username, user_id=user.id)
 
         return AuthResponse(success=True, message="Login successful", user=public_user, token=token)
 
@@ -167,7 +168,7 @@ async def logout(current_user: User = Depends(get_current_user)):
         # Note: In a full implementation, we would revoke the token
         # by adding it to a blacklist or removing it from a whitelist
 
-        logger.info("User logged out", username=current_user.username, user_id=current_user.user_id)
+        logger.info("User logged out", username=current_user.username, user_id=current_user.id)
 
         return {"success": True, "message": "Logout successful"}
 
@@ -221,7 +222,7 @@ async def change_password(
 
         user_db = await get_user(current_user.username)
         if not user_db or not jwt_handler.verify_password(
-            change_request.current_password, user_db.hashed_password
+            change_request.current_password, user_db.password_hash
         ):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST, detail="Current password is incorrect"
@@ -233,7 +234,7 @@ async def change_password(
         # Update password in database (simplified - in production use proper database)
         from src.web_interface.security.auth import fake_users_db
 
-        fake_users_db[current_user.username].hashed_password = new_hashed_password
+        fake_users_db[current_user.username].password_hash = new_hashed_password
 
         logger.info("Password changed successfully", username=current_user.username)
 
@@ -276,10 +277,11 @@ async def create_new_user(
 
         # Return public user model
         public_user = User(
-            user_id=user_db.user_id,
+            id=user_db.id,
             username=user_db.username,
             email=user_db.email,
             is_active=user_db.is_active,
+            is_verified=user_db.is_verified,
             scopes=user_db.scopes,
         )
 
@@ -318,10 +320,11 @@ async def list_users(admin_user: User = Depends(get_admin_user)):
         for user_db in fake_users_db.values():
             users.append(
                 {
-                    "user_id": user_db.user_id,
+                    "id": user_db.id,
                     "username": user_db.username,
                     "email": user_db.email,
                     "is_active": user_db.is_active,
+                    "is_verified": user_db.is_verified,
                     "scopes": user_db.scopes,
                 }
             )

@@ -53,7 +53,7 @@ class BreakoutStrategy(BaseStrategy):
     - Target calculation based on range
     """
 
-    def __init__(self, config: dict[str, Any], services: StrategyServiceContainer | None = None):
+    def __init__(self, config: dict[str, Any], services: "StrategyServiceContainer | None" = None):
         """Initialize Breakout Strategy.
 
         Args:
@@ -87,12 +87,12 @@ class BreakoutStrategy(BaseStrategy):
         )
 
         # Store current symbol for indicator calculations
-        self._current_symbol: str | None = None
+        self._current_symbol: "str | None" = None
 
         # Support/resistance levels - store as Decimal for precision
         self.support_levels: list[Decimal] = []
         self.resistance_levels: list[Decimal] = []
-        self.last_breakout_time: datetime | None = None
+        self.last_breakout_time: "datetime | None" = None
 
         self.logger.info(
             "Breakout Strategy initialized",
@@ -260,7 +260,7 @@ class BreakoutStrategy(BaseStrategy):
             self.logger.error("Consolidation check failed", strategy=self.name, error=str(e))
             return False
 
-    async def _check_resistance_breakout(self, data: MarketData) -> dict[str, Any] | None:
+    async def _check_resistance_breakout(self, data: MarketData) -> "dict[str, Any] | None":
         """Check for resistance breakout.
 
         Args:
@@ -312,7 +312,7 @@ class BreakoutStrategy(BaseStrategy):
             self.logger.error("Resistance breakout check failed", strategy=self.name, error=str(e))
             return None
 
-    async def _check_support_breakout(self, data: MarketData) -> dict[str, Any] | None:
+    async def _check_support_breakout(self, data: MarketData) -> "dict[str, Any] | None":
         """Check for support breakout.
 
         Args:
@@ -370,7 +370,7 @@ class BreakoutStrategy(BaseStrategy):
             self.logger.error("Volume confirmation check failed", strategy=self.name, error=str(e))
             return True  # Pass on error
 
-    def _check_false_breakout(self, data: MarketData) -> dict[str, Any] | None:
+    def _check_false_breakout(self, data: MarketData) -> "dict[str, Any] | None":
         """Check for false breakout (price returned to level).
 
         Args:
@@ -411,7 +411,7 @@ class BreakoutStrategy(BaseStrategy):
 
     async def _generate_bullish_breakout_signal(
         self, data: MarketData, breakout_info: dict[str, Any]
-    ) -> Signal | None:
+    ) -> "Signal | None":
         """Generate bullish breakout signal.
 
         Args:
@@ -482,7 +482,7 @@ class BreakoutStrategy(BaseStrategy):
 
     async def _generate_bearish_breakout_signal(
         self, data: MarketData, breakout_info: dict[str, Any]
-    ) -> Signal | None:
+    ) -> "Signal | None":
         """Generate bearish breakout signal.
 
         Args:
@@ -555,7 +555,7 @@ class BreakoutStrategy(BaseStrategy):
 
     async def _generate_false_breakout_exit_signal(
         self, data: MarketData, false_breakout_info: dict[str, Any]
-    ) -> Signal | None:
+    ) -> "Signal | None":
         """Generate false breakout exit signal.
 
         Args:

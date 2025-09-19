@@ -142,12 +142,13 @@ class TestSignalValidator:
 
     @pytest.fixture(scope="class")
     def valid_signal(self):
-        """Create a valid signal for testing - cached for class scope with fixed time."""
+        """Create a valid signal for testing - cached for class scope with current time."""
+        from datetime import datetime, timezone
         return Signal(
             symbol="BTC/USD",
             direction=SignalDirection.BUY,
             strength=Decimal("0.8"),
-            timestamp=FIXED_TIME,  # Use fixed time for performance
+            timestamp=datetime.now(timezone.utc),  # Use current time to avoid age issues
             source="test_strategy",
         )
 

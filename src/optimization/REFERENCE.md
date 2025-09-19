@@ -2,8 +2,8 @@
 
 ## INTEGRATION
 **Dependencies**: backtesting, core, database, utils
-**Used By**: None
-**Provides**: AnalysisService, BacktestIntegrationService, IAnalysisService, IBacktestIntegrationService, IOptimizationService, OptimizationController, OptimizationEngine, OptimizationService, ValidationEngine
+**Used By**: strategies
+**Provides**: AnalysisService, BacktestIntegrationService, IAnalysisService, IBacktestIntegrationService, IOptimizationService, OptimizationController, OptimizationEngine, OptimizationService, ParameterSpaceService, ResultTransformationService, ValidationEngine
 **Patterns**: Async Operations, Component Architecture, Service Layer
 
 ## DETECTED PATTERNS
@@ -20,8 +20,8 @@
 - OptimizationController inherits from base architecture
 
 ## MODULE OVERVIEW
-**Files**: 14 Python files
-**Classes**: 58
+**Files**: 17 Python files
+**Classes**: 61
 **Functions**: 15
 
 ## COMPLETE API REFERENCE
@@ -78,8 +78,8 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `get_risk_score(self) -> Decimal` - Line 100
-- `get_quality_score(self) -> Decimal` - Line 109
+- `get_risk_score(self) -> Decimal` - Line 115
+- `get_quality_score(self) -> Decimal` - Line 124
 
 ### Implementation: `SensitivityAnalysis` ✅
 
@@ -94,7 +94,7 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `get_overall_stability_score(self) -> Decimal` - Line 216
+- `get_overall_stability_score(self) -> Decimal` - Line 231
 
 ### Implementation: `ParameterImportanceAnalyzer` ✅
 
@@ -102,7 +102,7 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `analyze_parameter_importance(self, optimization_results: list[dict[str, Any]], parameter_names: list[str]) -> list[SensitivityAnalysis]` - Line 258
+- `analyze_parameter_importance(self, optimization_results: list[dict[str, Any]], parameter_names: list[str]) -> list[SensitivityAnalysis]` - Line 273
 
 ### Implementation: `PerformanceAnalyzer` ✅
 
@@ -110,7 +110,7 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `calculate_performance_metrics(self, ...) -> PerformanceMetrics` - Line 523
+- `calculate_performance_metrics(self, ...) -> PerformanceMetrics` - Line 543
 
 ### Implementation: `ResultsAnalyzer` ✅
 
@@ -118,7 +118,7 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `analyze_optimization_results(self, ...) -> dict[str, Any]` - Line 1032
+- `analyze_optimization_results(self, ...) -> dict[str, Any]` - Line 1113
 
 ### Implementation: `AnalysisService` ✅
 
@@ -127,8 +127,8 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async analyze_optimization_results(self, ...) -> dict[str, Any]` - Line 58
-- `async analyze_parameter_importance(self, optimization_results: list[dict[str, Any]], parameter_names: list[str]) -> list[Any]` - Line 104
+- `async analyze_optimization_results(self, ...) -> dict[str, Any]` - Line 60
+- `async analyze_parameter_importance(self, optimization_results: list[dict[str, Any]], parameter_names: list[str]) -> list[Any]` - Line 105
 
 ### Implementation: `BacktestIntegrationService` ✅
 
@@ -137,8 +137,8 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async evaluate_strategy(self, ...) -> dict[str, Decimal]` - Line 56
-- `create_objective_function(self, ...) -> Callable[[dict[str, Any]], Any]` - Line 103
+- `async evaluate_strategy(self, ...) -> dict[str, Decimal]` - Line 57
+- `create_objective_function(self, ...) -> Callable[[dict[str, Any]], Any]` - Line 119
 
 ### Implementation: `AcquisitionFunction` ✅
 
@@ -156,8 +156,8 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `validate_kernel_type(cls, v)` - Line 140
-- `validate_bounds(cls, v)` - Line 149
+- `validate_kernel_type(cls, v)` - Line 145
+- `validate_bounds(cls, v)` - Line 154
 
 ### Implementation: `BayesianConfig` ✅
 
@@ -166,7 +166,7 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `validate_batch_strategy(cls, v)` - Line 196
+- `validate_batch_strategy(cls, v)` - Line 201
 
 ### Implementation: `BayesianPoint` ✅
 
@@ -175,7 +175,7 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `mark_evaluated(self, objective_value: Decimal, objective_std: Decimal | None = None) -> None` - Line 235
+- `mark_evaluated(self, objective_value: Decimal, objective_std: Decimal | None = None) -> None` - Line 240
 
 ### Implementation: `GaussianProcessModel` ✅
 
@@ -183,9 +183,9 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `fit(self, points: list[BayesianPoint]) -> None` - Line 359
-- `predict(self, parameters_list: list[dict[str, Any]], return_std: bool = True) -> tuple[np.ndarray, np.ndarray | None]` - Line 408
-- `get_model_info(self) -> dict[str, Any]` - Line 448
+- `fit(self, points: list[BayesianPoint]) -> None` - Line 364
+- `predict(self, parameters_list: list[dict[str, Any]], return_std: bool = True) -> tuple[np.ndarray, np.ndarray | None]` - Line 413
+- `get_model_info(self) -> dict[str, Any]` - Line 453
 
 ### Implementation: `AcquisitionOptimizer` ✅
 
@@ -193,7 +193,7 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `optimize_acquisition(self, current_points: list[BayesianPoint], n_points: int = 1) -> list[dict[str, Any]]` - Line 491
+- `optimize_acquisition(self, current_points: list[BayesianPoint], n_points: int = 1) -> list[dict[str, Any]]` - Line 496
 
 ### Implementation: `BayesianOptimizer` ✅
 
@@ -202,10 +202,10 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async optimize(self, ...) -> OptimizationResult` - Line 703
-- `get_next_parameters(self) -> dict[str, Any] | None` - Line 977
-- `get_gp_predictions(self, parameters_list: list[dict[str, Any]]) -> tuple[list[Decimal], list[Decimal]]` - Line 985
-- `get_optimization_summary(self) -> dict[str, Any]` - Line 1001
+- `async optimize(self, ...) -> OptimizationResult` - Line 708
+- `get_next_parameters(self) -> dict[str, Any] | None` - Line 982
+- `get_gp_predictions(self, parameters_list: list[dict[str, Any]]) -> tuple[list[Decimal], list[Decimal]]` - Line 990
+- `get_optimization_summary(self) -> dict[str, Any]` - Line 1006
 
 ### Implementation: `GridSearchConfig` ✅
 
@@ -214,7 +214,7 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `validate_grid_resolution(cls, v)` - Line 125
+- `validate_grid_resolution(cls, v)` - Line 132
 
 ### Implementation: `OptimizationCandidate` ✅
 
@@ -223,9 +223,9 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `mark_started(self) -> None` - Line 169
-- `mark_completed(self, ...) -> None` - Line 174
-- `mark_failed(self, error_message: str) -> None` - Line 191
+- `mark_started(self) -> None` - Line 176
+- `mark_completed(self, ...) -> None` - Line 181
+- `mark_failed(self, error_message: str) -> None` - Line 198
 
 ### Implementation: `GridGenerator` ✅
 
@@ -233,8 +233,8 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `generate_initial_grid(self) -> list[dict[str, Any]]` - Line 229
-- `generate_refined_grid(self, best_candidates: list[OptimizationCandidate], refinement_factor: Decimal) -> list[dict[str, Any]]` - Line 436
+- `generate_initial_grid(self) -> list[dict[str, Any]]` - Line 236
+- `generate_refined_grid(self, best_candidates: list[OptimizationCandidate], refinement_factor: Decimal) -> list[dict[str, Any]]` - Line 443
 
 ### Implementation: `BruteForceOptimizer` ✅
 
@@ -243,8 +243,8 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async optimize(self, ...) -> OptimizationResult` - Line 588
-- `get_next_parameters(self) -> dict[str, Any] | None` - Line 1166
+- `async optimize(self, ...) -> OptimizationResult` - Line 595
+- `get_next_parameters(self) -> dict[str, Any] | None` - Line 1181
 
 ### Implementation: `OptimizationController` ✅
 
@@ -298,7 +298,7 @@
 **Implemented Methods:**
 - `update_progress(self, ...) -> None` - Line 224
 - `add_warning(self, warning: str) -> None` - Line 257
-- `estimate_completion_time(self) -> None` - Line 265
+- `estimate_completion_time(self) -> None` - Line 263
 
 ### Implementation: `OptimizationConfig` ✅
 
@@ -333,6 +333,22 @@
 - `get_result(self) -> OptimizationResult | None` - Line 638
 - `async stop(self) -> None` - Line 642
 
+### Implementation: `OptimizationDataTransformer` ✅
+
+**Purpose**: Handles consistent data transformation for optimization module
+**Status**: Complete
+
+**Implemented Methods:**
+- `transform_optimization_result_to_event_data(result: OptimizationResult, metadata: dict[str, Any] | None = None) -> dict[str, Any]` - Line 23
+- `transform_parameter_set_to_event_data(parameters: dict[str, Any], metadata: dict[str, Any] | None = None) -> dict[str, Any]` - Line 63
+- `transform_objective_values_to_event_data(objective_values: dict[str, Any], metadata: dict[str, Any] | None = None) -> dict[str, Any]` - Line 91
+- `validate_financial_precision(data: dict[str, Any]) -> dict[str, Any]` - Line 114
+- `ensure_boundary_fields(data: dict[str, Any], source: str = 'optimization') -> dict[str, Any]` - Line 154
+- `transform_for_req_reply(cls, request_type: str, data: Any, correlation_id: str | None = None) -> dict[str, Any]` - Line 181
+- `transform_for_batch_processing(cls, ...) -> dict[str, Any]` - Line 236
+- `align_processing_paradigm(cls, data: dict[str, Any], target_mode: str = 'batch') -> dict[str, Any]` - Line 301
+- `apply_cross_module_validation(cls, ...) -> dict[str, Any]` - Line 380
+
 ### Implementation: `OptimizationFactory` ✅
 
 **Inherits**: BaseFactory[Any]
@@ -340,7 +356,7 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `create_complete_optimization_stack(self) -> dict[str, Any]` - Line 298
+- `create_complete_optimization_stack(self) -> dict[str, Any]` - Line 292
 
 ### Implementation: `OptimizationComponentFactory` ✅
 
@@ -348,12 +364,12 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `create_service(self, **kwargs) -> 'IOptimizationService'` - Line 333
-- `create_controller(self, **kwargs) -> 'OptimizationController'` - Line 337
-- `create_repository(self, **kwargs) -> 'OptimizationRepositoryProtocol'` - Line 341
-- `create_backtest_integration(self, **kwargs) -> 'IBacktestIntegrationService'` - Line 345
-- `create_analysis_service(self, **kwargs) -> 'IAnalysisService'` - Line 349
-- `register_factories(self, container: Any) -> None` - Line 353
+- `create_service(self, **kwargs) -> 'IOptimizationService'` - Line 325
+- `create_controller(self, **kwargs) -> 'OptimizationController'` - Line 329
+- `create_repository(self, **kwargs) -> 'OptimizationRepositoryProtocol'` - Line 333
+- `create_backtest_integration(self, **kwargs) -> 'IBacktestIntegrationService'` - Line 337
+- `create_analysis_service(self, **kwargs) -> 'IAnalysisService'` - Line 341
+- `register_factories(self, container: Any) -> None` - Line 345
 
 ### Implementation: `IOptimizationService` 🔧
 
@@ -405,11 +421,11 @@
 **Status**: Abstract Base Class
 
 **Implemented Methods:**
-- `sample(self, strategy: SamplingStrategy = SamplingStrategy.UNIFORM) -> Any` - Line 75
-- `validate_value(self, value: Any) -> bool` - Line 88
-- `clip_value(self, value: Any) -> Any` - Line 101
-- `get_bounds(self) -> tuple[Any, Any]` - Line 114
-- `is_active(self, context: dict[str, Any]) -> bool` - Line 123
+- `sample(self, strategy: SamplingStrategy = SamplingStrategy.UNIFORM) -> Any` - Line 74
+- `validate_value(self, value: Any) -> bool` - Line 87
+- `clip_value(self, value: Any) -> Any` - Line 100
+- `get_bounds(self) -> tuple[Any, Any]` - Line 113
+- `is_active(self, context: dict[str, Any]) -> bool` - Line 122
 
 ### Implementation: `ContinuousParameter` ✅
 
@@ -418,13 +434,13 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `validate_bounds(cls, v, values)` - Line 180
-- `validate_default(cls, v, values)` - Line 188
-- `sample(self, strategy: SamplingStrategy = SamplingStrategy.UNIFORM) -> Decimal` - Line 197
-- `validate_value(self, value: Any) -> bool` - Line 272
-- `clip_value(self, value: Any) -> Decimal` - Line 280
-- `get_bounds(self) -> tuple[Decimal, Decimal]` - Line 288
-- `get_range(self) -> Decimal` - Line 292
+- `validate_bounds(cls, v, values)` - Line 179
+- `validate_default(cls, v, values)` - Line 187
+- `sample(self, strategy: SamplingStrategy = SamplingStrategy.UNIFORM) -> Decimal` - Line 196
+- `validate_value(self, value: Any) -> bool` - Line 271
+- `clip_value(self, value: Any) -> Decimal` - Line 279
+- `get_bounds(self) -> tuple[Decimal, Decimal]` - Line 287
+- `get_range(self) -> Decimal` - Line 291
 
 ### Implementation: `DiscreteParameter` ✅
 
@@ -433,13 +449,13 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `validate_bounds(cls, v, values)` - Line 313
-- `validate_default(cls, v, values)` - Line 321
-- `sample(self, strategy: SamplingStrategy = SamplingStrategy.UNIFORM) -> int` - Line 336
-- `validate_value(self, value: Any) -> bool` - Line 352
-- `clip_value(self, value: Any) -> int` - Line 362
-- `get_bounds(self) -> tuple[int, int]` - Line 381
-- `get_valid_values(self) -> list[int]` - Line 385
+- `validate_bounds(cls, v, values)` - Line 312
+- `validate_default(cls, v, values)` - Line 320
+- `sample(self, strategy: SamplingStrategy = SamplingStrategy.UNIFORM) -> int` - Line 335
+- `validate_value(self, value: Any) -> bool` - Line 351
+- `clip_value(self, value: Any) -> int` - Line 361
+- `get_bounds(self) -> tuple[int, int]` - Line 380
+- `get_valid_values(self) -> list[int]` - Line 384
 
 ### Implementation: `CategoricalParameter` ✅
 
@@ -448,14 +464,14 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `validate_choices(cls, v)` - Line 406
-- `validate_weights(cls, v, values)` - Line 416
-- `validate_default(cls, v, values)` - Line 428
-- `sample(self, strategy: SamplingStrategy = SamplingStrategy.UNIFORM) -> Any` - Line 436
-- `validate_value(self, value: Any) -> bool` - Line 445
-- `clip_value(self, value: Any) -> Any` - Line 449
-- `get_bounds(self) -> tuple[Any, Any]` - Line 455
-- `get_choice_index(self, value: Any) -> int` - Line 459
+- `validate_choices(cls, v)` - Line 405
+- `validate_weights(cls, v, values)` - Line 415
+- `validate_default(cls, v, values)` - Line 427
+- `sample(self, strategy: SamplingStrategy = SamplingStrategy.UNIFORM) -> Any` - Line 435
+- `validate_value(self, value: Any) -> bool` - Line 444
+- `clip_value(self, value: Any) -> Any` - Line 448
+- `get_bounds(self) -> tuple[Any, Any]` - Line 454
+- `get_choice_index(self, value: Any) -> int` - Line 458
 
 ### Implementation: `BooleanParameter` ✅
 
@@ -513,19 +529,43 @@
 - `set_metadata(self, key: str, value: Any) -> 'ParameterSpaceBuilder'` - Line 935
 - `build(self) -> ParameterSpace` - Line 940
 
+### Implementation: `ParameterSpaceService` ✅
+
+**Inherits**: BaseService
+**Purpose**: Service for parameter space operations
+**Status**: Complete
+
+**Implemented Methods:**
+- `build_parameter_space(self, config: dict[str, Any]) -> ParameterSpace` - Line 40
+- `build_parameter_space_from_current(self, current_parameters: dict[str, Any]) -> dict[str, Any]` - Line 89
+- `validate_parameter_space_config(self, config: dict[str, Any]) -> bool` - Line 155
+
 ### Implementation: `OptimizationRepository` ✅
 
-**Inherits**: BaseComponent, OptimizationRepositoryProtocol
+**Inherits**: BaseComponent
 **Purpose**: Repository for optimization result persistence using database models
 **Status**: Complete
 
 **Implemented Methods:**
-- `async save_optimization_result(self, result: OptimizationResult, metadata: dict[str, Any] | None = None) -> str` - Line 63
-- `async get_optimization_result(self, optimization_id: str) -> OptimizationResult | None` - Line 190
-- `async list_optimization_results(self, strategy_name: str | None = None, limit: int = 100, offset: int = 0) -> list[OptimizationResult]` - Line 252
-- `async delete_optimization_result(self, optimization_id: str) -> bool` - Line 327
-- `async save_parameter_set(self, ...) -> str` - Line 368
-- `async get_parameter_sets(self, optimization_id: str, limit: int | None = None) -> list[dict[str, Any]]` - Line 441
+- `async save_optimization_result(self, result: OptimizationResult, metadata: dict[str, Any] | None = None) -> str` - Line 66
+- `async get_optimization_result(self, optimization_id: str) -> OptimizationResult | None` - Line 182
+- `async list_optimization_results(self, strategy_name: str | None = None, limit: int = 100, offset: int = 0) -> list[OptimizationResult]` - Line 249
+- `async delete_optimization_result(self, optimization_id: str) -> bool` - Line 330
+- `async save_parameter_set(self, ...) -> str` - Line 371
+- `async get_parameter_sets(self, optimization_id: str, limit: int | None = None) -> list[dict[str, Any]]` - Line 444
+
+### Implementation: `ResultTransformationService` ✅
+
+**Inherits**: BaseService
+**Purpose**: Service for optimization result transformations
+**Status**: Complete
+
+**Implemented Methods:**
+- `transform_for_strategies_module(self, optimization_result: dict[str, Any], current_parameters: dict[str, Any]) -> dict[str, Any]` - Line 40
+- `transform_for_web_interface(self, optimization_result: OptimizationResult) -> dict[str, Any]` - Line 83
+- `transform_for_analytics(self, optimization_result: OptimizationResult) -> dict[str, Any]` - Line 122
+- `standardize_financial_data(self, data: dict[str, Any]) -> dict[str, Any]` - Line 185
+- `extract_summary_metrics(self, optimization_result: OptimizationResult) -> dict[str, Any]` - Line 216
 
 ### Implementation: `OptimizationService` ✅
 
@@ -534,11 +574,12 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async optimize_strategy(self, ...) -> dict[str, Any]` - Line 86
-- `async optimize_parameters(self, ...) -> OptimizationResult` - Line 273
-- `async optimize_parameters_with_config(self, ...) -> dict[str, Any]` - Line 313
-- `async analyze_optimization_results(self, optimization_result: OptimizationResult, parameter_space: ParameterSpace) -> dict[str, Any]` - Line 354
-- `async shutdown(self) -> None` - Line 704
+- `async optimize_strategy(self, ...) -> dict[str, Any]` - Line 96
+- `async optimize_strategy_parameters(self, strategy_id: str, optimization_request: dict[str, Any]) -> dict[str, Any]` - Line 303
+- `async optimize_parameters(self, ...) -> OptimizationResult` - Line 359
+- `async optimize_parameters_with_config(self, ...) -> dict[str, Any]` - Line 399
+- `async analyze_optimization_results(self, optimization_result: OptimizationResult, parameter_space: ParameterSpace) -> dict[str, Any]` - Line 440
+- `async shutdown(self) -> None` - Line 858
 
 ### Implementation: `ValidationMetrics` ✅
 
@@ -547,7 +588,7 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `get_overall_quality_score(self) -> Decimal` - Line 104
+- `get_overall_quality_score(self) -> Decimal` - Line 103
 
 ### Implementation: `ValidationConfig` ✅
 
@@ -556,9 +597,9 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `validate_cv_method(cls, v)` - Line 218
-- `validate_window_type(cls, v)` - Line 227
-- `validate_correction_method(cls, v)` - Line 236
+- `validate_cv_method(cls, v)` - Line 217
+- `validate_window_type(cls, v)` - Line 226
+- `validate_correction_method(cls, v)` - Line 235
 
 ### Implementation: `TimeSeriesValidator` ✅
 
@@ -566,7 +607,7 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `create_time_series_splits(self, data_length: int, start_date: datetime, end_date: datetime) -> list[tuple[list[int], list[int]]]` - Line 265
+- `create_time_series_splits(self, data_length: int, start_date: datetime, end_date: datetime) -> list[tuple[list[int], list[int]]]` - Line 264
 
 ### Implementation: `WalkForwardValidator` ✅
 
@@ -574,7 +615,7 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async run_walk_forward_analysis(self, ...) -> list[Decimal]` - Line 373
+- `async run_walk_forward_analysis(self, ...) -> list[Decimal]` - Line 372
 
 ### Implementation: `OverfittingDetector` ✅
 
@@ -582,7 +623,7 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `detect_overfitting(self, ...) -> tuple[bool, dict[str, Decimal]]` - Line 526
+- `detect_overfitting(self, ...) -> tuple[bool, dict[str, Decimal]]` - Line 525
 
 ### Implementation: `StatisticalTester` ✅
 
@@ -590,7 +631,7 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async test_significance(self, ...) -> tuple[Decimal, tuple[Decimal, Decimal], bool]` - Line 625
+- `async test_significance(self, ...) -> tuple[Decimal, tuple[Decimal, Decimal], bool]` - Line 623
 
 ### Implementation: `RobustnessAnalyzer` ✅
 
@@ -598,7 +639,7 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async analyze_robustness(self, ...) -> tuple[Decimal, dict[str, Any]]` - Line 756
+- `async analyze_robustness(self, ...) -> tuple[Decimal, dict[str, Any]]` - Line 754
 
 ### Implementation: `ValidationEngine` ✅
 
@@ -606,7 +647,7 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async validate_optimization_result(self, ...) -> ValidationMetrics` - Line 981
+- `async validate_optimization_result(self, ...) -> ValidationMetrics` - Line 979
 
 ## COMPLETE API REFERENCE
 
@@ -616,6 +657,8 @@
 - `from src.core.exceptions import DataProcessingError`
 - `from src.core.logging import get_logger`
 - `from src.utils.decorators import time_execution`
+- `from src.utils.financial_calculations import calculate_var_cvar`
+- `from src.utils.financial_calculations import calculate_volatility`
 
 #### Class: `PerformanceMetrics`
 
@@ -624,8 +667,8 @@
 
 ```python
 class PerformanceMetrics(BaseModel):
-    def get_risk_score(self) -> Decimal  # Line 100
-    def get_quality_score(self) -> Decimal  # Line 109
+    def get_risk_score(self) -> Decimal  # Line 115
+    def get_quality_score(self) -> Decimal  # Line 124
 ```
 
 #### Class: `SensitivityAnalysis`
@@ -644,7 +687,7 @@ class SensitivityAnalysis(BaseModel):
 
 ```python
 class StabilityAnalysis(BaseModel):
-    def get_overall_stability_score(self) -> Decimal  # Line 216
+    def get_overall_stability_score(self) -> Decimal  # Line 231
 ```
 
 #### Class: `ParameterImportanceAnalyzer`
@@ -653,13 +696,13 @@ class StabilityAnalysis(BaseModel):
 
 ```python
 class ParameterImportanceAnalyzer:
-    def __init__(self)  # Line 254
-    def analyze_parameter_importance(self, optimization_results: list[dict[str, Any]], parameter_names: list[str]) -> list[SensitivityAnalysis]  # Line 258
-    def _extract_parameter_data(self, optimization_results: list[dict[str, Any]], parameter_names: list[str]) -> dict[str, list[Decimal]]  # Line 303
-    def _extract_performance_data(self, optimization_results: list[dict[str, Any]]) -> list[Decimal]  # Line 330
-    def _analyze_single_parameter(self, ...) -> SensitivityAnalysis | None  # Line 353
-    def _calculate_parameter_stability(self, param_values: list[Decimal], performance_values: list[Decimal]) -> Decimal  # Line 414
-    def _find_interaction_partners(self, ...) -> tuple[list[str], dict[str, Decimal]]  # Line 458
+    def __init__(self)  # Line 269
+    def analyze_parameter_importance(self, optimization_results: list[dict[str, Any]], parameter_names: list[str]) -> list[SensitivityAnalysis]  # Line 273
+    def _extract_parameter_data(self, optimization_results: list[dict[str, Any]], parameter_names: list[str]) -> dict[str, list[Decimal]]  # Line 318
+    def _extract_performance_data(self, optimization_results: list[dict[str, Any]]) -> list[Decimal]  # Line 345
+    def _analyze_single_parameter(self, ...) -> SensitivityAnalysis | None  # Line 370
+    def _calculate_parameter_stability(self, param_values: list[Decimal], performance_values: list[Decimal]) -> Decimal  # Line 431
+    def _find_interaction_partners(self, ...) -> tuple[list[str], dict[str, Decimal]]  # Line 475
 ```
 
 #### Class: `PerformanceAnalyzer`
@@ -668,27 +711,27 @@ class ParameterImportanceAnalyzer:
 
 ```python
 class PerformanceAnalyzer:
-    def __init__(self, risk_free_rate: Decimal = Any)  # Line 512
-    def calculate_performance_metrics(self, ...) -> PerformanceMetrics  # Line 523
-    def _create_empty_metrics(self, start_date: datetime, end_date: datetime) -> PerformanceMetrics  # Line 614
-    def _calculate_total_return(self, returns: list[Decimal]) -> Decimal  # Line 649
-    def _calculate_annualized_return(self, total_return: Decimal, start_date: datetime, end_date: datetime) -> Decimal  # Line 661
-    def _calculate_volatility(self, returns: list[Decimal]) -> Decimal  # Line 678
-    def _calculate_downside_volatility(self, returns: list[Decimal]) -> Decimal  # Line 695
-    def _calculate_drawdowns(self, returns: list[Decimal]) -> tuple[Decimal, Decimal]  # Line 718
-    def _calculate_sharpe_ratio(self, annualized_return: Decimal, volatility: Decimal) -> Decimal  # Line 745
-    def _calculate_sortino_ratio(self, annualized_return: Decimal, downside_volatility: Decimal) -> Decimal  # Line 753
-    def _calculate_calmar_ratio(self, annualized_return: Decimal, max_drawdown: Decimal) -> Decimal  # Line 763
-    def _calculate_omega_ratio(self, returns: list[Decimal]) -> Decimal  # Line 770
-    def _calculate_trade_metrics(self, trades: list[dict[str, Any]]) -> dict[str, Decimal]  # Line 785
-    def _calculate_var(self, returns: list[Decimal], confidence: Decimal) -> Decimal  # Line 831
-    def _calculate_conditional_var(self, returns: list[Decimal], confidence: Decimal) -> Decimal  # Line 845
-    def _calculate_skewness(self, returns: list[Decimal]) -> Decimal  # Line 860
-    def _calculate_kurtosis(self, returns: list[Decimal]) -> Decimal  # Line 889
-    def _calculate_recovery_factor(self, total_return: Decimal, max_drawdown: Decimal) -> Decimal  # Line 919
-    def _calculate_stability_ratio(self, returns: list[Decimal]) -> Decimal  # Line 926
-    def _calculate_consistency_score(self, returns: list[Decimal]) -> Decimal  # Line 973
-    def _calculate_turnover_ratio(self, trades: list[dict[str, Any]], initial_capital: Decimal) -> Decimal  # Line 991
+    def __init__(self, risk_free_rate: Decimal = DEFAULT_RISK_FREE_RATE)  # Line 532
+    def calculate_performance_metrics(self, ...) -> PerformanceMetrics  # Line 543
+    def _create_empty_metrics(self, start_date: datetime, end_date: datetime) -> PerformanceMetrics  # Line 634
+    def _calculate_total_return(self, returns: list[Decimal]) -> Decimal  # Line 669
+    def _calculate_annualized_return(self, total_return: Decimal, start_date: datetime, end_date: datetime) -> Decimal  # Line 683
+    def _calculate_volatility(self, returns: list[Decimal]) -> Decimal  # Line 705
+    def _calculate_downside_volatility(self, returns: list[Decimal]) -> Decimal  # Line 712
+    def _calculate_drawdowns(self, returns: list[Decimal]) -> tuple[Decimal, Decimal]  # Line 738
+    def _calculate_sharpe_ratio(self, annualized_return: Decimal, volatility: Decimal) -> Decimal  # Line 767
+    def _calculate_sortino_ratio(self, annualized_return: Decimal, downside_volatility: Decimal) -> Decimal  # Line 784
+    def _calculate_calmar_ratio(self, annualized_return: Decimal, max_drawdown: Decimal) -> Decimal  # Line 806
+    def _calculate_omega_ratio(self, returns: list[Decimal]) -> Decimal  # Line 823
+    def _calculate_trade_metrics(self, trades: list[dict[str, Any]]) -> dict[str, Decimal]  # Line 841
+    def _calculate_var(self, returns: list[Decimal], confidence: Decimal) -> Decimal  # Line 887
+    def _calculate_conditional_var(self, returns: list[Decimal], confidence: Decimal) -> Decimal  # Line 895
+    def _calculate_skewness(self, returns: list[Decimal]) -> Decimal  # Line 920
+    def _calculate_kurtosis(self, returns: list[Decimal]) -> Decimal  # Line 949
+    def _calculate_recovery_factor(self, total_return: Decimal, max_drawdown: Decimal) -> Decimal  # Line 984
+    def _calculate_stability_ratio(self, returns: list[Decimal]) -> Decimal  # Line 999
+    def _calculate_consistency_score(self, returns: list[Decimal]) -> Decimal  # Line 1051
+    def _calculate_turnover_ratio(self, trades: list[dict[str, Any]], initial_capital: Decimal) -> Decimal  # Line 1072
 ```
 
 #### Class: `ResultsAnalyzer`
@@ -697,29 +740,30 @@ class PerformanceAnalyzer:
 
 ```python
 class ResultsAnalyzer:
-    def __init__(self, risk_free_rate: Decimal = Any)  # Line 1019
-    def analyze_optimization_results(self, ...) -> dict[str, Any]  # Line 1032
-    def _analyze_performance_distribution(self, optimization_results: list[dict[str, Any]]) -> dict[str, Any]  # Line 1103
-    def _calculate_parameter_correlations(self, optimization_results: list[dict[str, Any]], parameter_names: list[str]) -> dict[str, dict[str, Decimal]]  # Line 1143
-    def _analyze_optimization_landscape(self, optimization_results: list[dict[str, Any]]) -> dict[str, Any]  # Line 1196
-    def _calculate_landscape_ruggedness(self, performance_values: list[float]) -> float  # Line 1230
-    def _detect_multimodality(self, sorted_performance: list[float]) -> dict[str, Any]  # Line 1253
-    def _calculate_convergence_rate(self, sorted_performance: list[float]) -> float  # Line 1281
-    def _detect_performance_plateaus(self, sorted_performance: list[float]) -> dict[str, Any]  # Line 1300
-    def _assess_improvement_potential(self, sorted_performance: list[float]) -> dict[str, Any]  # Line 1331
-    def _analyze_best_result(self, best_result: dict[str, Any]) -> dict[str, Any]  # Line 1374
-    def _categorize_parameter_types(self, parameters: dict[str, Any]) -> dict[str, int]  # Line 1392
-    def _analyze_convergence(self, optimization_results: list[dict[str, Any]]) -> dict[str, Any]  # Line 1410
-    def _create_analysis_summary(self, analysis_results: dict[str, Any], total_evaluations: int) -> dict[str, Any]  # Line 1461
+    def __init__(self, risk_free_rate: Decimal = DEFAULT_RISK_FREE_RATE)  # Line 1100
+    def analyze_optimization_results(self, ...) -> dict[str, Any]  # Line 1113
+    def _analyze_performance_distribution(self, optimization_results: list[dict[str, Any]]) -> dict[str, Any]  # Line 1184
+    def _calculate_parameter_correlations(self, optimization_results: list[dict[str, Any]], parameter_names: list[str]) -> dict[str, dict[str, Decimal]]  # Line 1249
+    def _analyze_optimization_landscape(self, optimization_results: list[dict[str, Any]]) -> dict[str, Any]  # Line 1304
+    def _calculate_landscape_ruggedness(self, performance_values: list[float]) -> float  # Line 1363
+    def _detect_multimodality(self, sorted_performance: list[float]) -> dict[str, Any]  # Line 1386
+    def _calculate_convergence_rate(self, sorted_performance: list[float]) -> float  # Line 1414
+    def _detect_performance_plateaus(self, sorted_performance: list[float]) -> dict[str, Any]  # Line 1433
+    def _assess_improvement_potential(self, sorted_performance: list[float]) -> dict[str, Any]  # Line 1464
+    def _analyze_best_result(self, best_result: dict[str, Any]) -> dict[str, Any]  # Line 1507
+    def _categorize_parameter_types(self, parameters: dict[str, Any]) -> dict[str, int]  # Line 1525
+    def _analyze_convergence(self, optimization_results: list[dict[str, Any]]) -> dict[str, Any]  # Line 1543
+    def _create_analysis_summary(self, analysis_results: dict[str, Any], total_evaluations: int) -> dict[str, Any]  # Line 1619
 ```
 
 ### File: analysis_service.py
 
 **Key Imports:**
 - `from src.core.base import BaseService`
-- `from src.core.exceptions import ValidationError`
+- `from src.core.exceptions import OptimizationError`
 - `from src.optimization.analysis import ResultsAnalyzer`
 - `from src.optimization.interfaces import IAnalysisService`
+- `from src.utils.messaging_patterns import ErrorPropagationMixin`
 
 #### Class: `AnalysisService`
 
@@ -728,9 +772,9 @@ class ResultsAnalyzer:
 
 ```python
 class AnalysisService(BaseService, IAnalysisService):
-    def __init__(self, ...)  # Line 25
-    async def analyze_optimization_results(self, ...) -> dict[str, Any]  # Line 58
-    async def analyze_parameter_importance(self, optimization_results: list[dict[str, Any]], parameter_names: list[str]) -> list[Any]  # Line 104
+    def __init__(self, ...)  # Line 26
+    async def analyze_optimization_results(self, ...) -> dict[str, Any]  # Line 60
+    async def analyze_parameter_importance(self, optimization_results: list[dict[str, Any]], parameter_names: list[str]) -> list[Any]  # Line 105
 ```
 
 ### File: backtesting_integration.py
@@ -749,12 +793,12 @@ class AnalysisService(BaseService, IAnalysisService):
 
 ```python
 class BacktestIntegrationService(BaseService, IBacktestIntegrationService):
-    def __init__(self, ...)  # Line 31
-    async def evaluate_strategy(self, ...) -> dict[str, Decimal]  # Line 56
-    def create_objective_function(self, ...) -> Callable[[dict[str, Any]], Any]  # Line 103
-    async def _run_backtest(self, ...) -> Any  # Line 172
-    def _extract_performance_metrics(self, backtest_result: Any) -> dict[str, Decimal]  # Line 229
-    def _simulate_performance(self, parameters: dict[str, Any]) -> dict[str, Decimal]  # Line 274
+    def __init__(self, ...)  # Line 32
+    async def evaluate_strategy(self, ...) -> dict[str, Decimal]  # Line 57
+    def create_objective_function(self, ...) -> Callable[[dict[str, Any]], Any]  # Line 119
+    async def _run_backtest(self, ...) -> Any  # Line 194
+    def _extract_performance_metrics(self, backtest_result: Any) -> dict[str, Decimal]  # Line 253
+    def _simulate_performance(self, parameters: dict[str, Any]) -> dict[str, Decimal]  # Line 308
 ```
 
 ### File: bayesian.py
@@ -783,8 +827,8 @@ class AcquisitionFunction(BaseModel):
 
 ```python
 class GaussianProcessConfig(BaseModel):
-    def validate_kernel_type(cls, v)  # Line 140
-    def validate_bounds(cls, v)  # Line 149
+    def validate_kernel_type(cls, v)  # Line 145
+    def validate_bounds(cls, v)  # Line 154
 ```
 
 #### Class: `BayesianConfig`
@@ -794,7 +838,7 @@ class GaussianProcessConfig(BaseModel):
 
 ```python
 class BayesianConfig(BaseModel):
-    def validate_batch_strategy(cls, v)  # Line 196
+    def validate_batch_strategy(cls, v)  # Line 201
 ```
 
 #### Class: `BayesianPoint`
@@ -804,7 +848,7 @@ class BayesianConfig(BaseModel):
 
 ```python
 class BayesianPoint(BaseModel):
-    def mark_evaluated(self, objective_value: Decimal, objective_std: Decimal | None = None) -> None  # Line 235
+    def mark_evaluated(self, objective_value: Decimal, objective_std: Decimal | None = None) -> None  # Line 240
 ```
 
 #### Class: `GaussianProcessModel`
@@ -813,12 +857,12 @@ class BayesianPoint(BaseModel):
 
 ```python
 class GaussianProcessModel:
-    def __init__(self, config: GaussianProcessConfig, parameter_space: ParameterSpace)  # Line 253
-    def _create_kernel(self) -> Any  # Line 290
-    def _encode_parameters(self, parameters_list: list[dict[str, Any]]) -> np.ndarray  # Line 323
-    def fit(self, points: list[BayesianPoint]) -> None  # Line 359
-    def predict(self, parameters_list: list[dict[str, Any]], return_std: bool = True) -> tuple[np.ndarray, np.ndarray | None]  # Line 408
-    def get_model_info(self) -> dict[str, Any]  # Line 448
+    def __init__(self, config: GaussianProcessConfig, parameter_space: ParameterSpace)  # Line 258
+    def _create_kernel(self) -> Any  # Line 295
+    def _encode_parameters(self, parameters_list: list[dict[str, Any]]) -> np.ndarray  # Line 328
+    def fit(self, points: list[BayesianPoint]) -> None  # Line 364
+    def predict(self, parameters_list: list[dict[str, Any]], return_std: bool = True) -> tuple[np.ndarray, np.ndarray | None]  # Line 413
+    def get_model_info(self) -> dict[str, Any]  # Line 453
 ```
 
 #### Class: `AcquisitionOptimizer`
@@ -827,16 +871,16 @@ class GaussianProcessModel:
 
 ```python
 class AcquisitionOptimizer:
-    def __init__(self, ...)  # Line 468
-    def optimize_acquisition(self, current_points: list[BayesianPoint], n_points: int = 1) -> list[dict[str, Any]]  # Line 491
-    def _optimize_single_point(self, current_points: list[BayesianPoint]) -> dict[str, Any]  # Line 509
-    def _optimize_batch(self, current_points: list[BayesianPoint], n_points: int) -> list[dict[str, Any]]  # Line 549
-    def _decode_parameters(self, x_encoded: np.ndarray) -> dict[str, Any]  # Line 569
-    def _calculate_acquisition(self, mean: float, std: float, best_value: float) -> float  # Line 599
-    def _expected_improvement(self, mean: float, std: float, best_value: float) -> float  # Line 615
-    def _upper_confidence_bound(self, mean: float, std: float) -> float  # Line 627
-    def _probability_of_improvement(self, mean: float, std: float, best_value: float) -> float  # Line 632
-    def _lower_confidence_bound(self, mean: float, std: float) -> float  # Line 643
+    def __init__(self, ...)  # Line 473
+    def optimize_acquisition(self, current_points: list[BayesianPoint], n_points: int = 1) -> list[dict[str, Any]]  # Line 496
+    def _optimize_single_point(self, current_points: list[BayesianPoint]) -> dict[str, Any]  # Line 514
+    def _optimize_batch(self, current_points: list[BayesianPoint], n_points: int) -> list[dict[str, Any]]  # Line 554
+    def _decode_parameters(self, x_encoded: np.ndarray) -> dict[str, Any]  # Line 574
+    def _calculate_acquisition(self, mean: float, std: float, best_value: float) -> float  # Line 604
+    def _expected_improvement(self, mean: float, std: float, best_value: float) -> float  # Line 620
+    def _upper_confidence_bound(self, mean: float, std: float) -> float  # Line 632
+    def _probability_of_improvement(self, mean: float, std: float, best_value: float) -> float  # Line 637
+    def _lower_confidence_bound(self, mean: float, std: float) -> float  # Line 648
 ```
 
 #### Class: `BayesianOptimizer`
@@ -846,17 +890,17 @@ class AcquisitionOptimizer:
 
 ```python
 class BayesianOptimizer(OptimizationEngine):
-    def __init__(self, ...)  # Line 657
-    async def optimize(self, ...) -> OptimizationResult  # Line 703
-    async def _generate_initial_points(self, ...) -> None  # Line 803
-    async def _optimization_iteration(self, objective_function: Callable) -> None  # Line 831
-    async def _evaluate_point(self, point: BayesianPoint, objective_function: Callable) -> None  # Line 862
-    def _update_best_point(self) -> None  # Line 904
-    def _check_convergence(self) -> bool  # Line 933
-    async def _finalize_optimization(self) -> OptimizationResult  # Line 948
-    def get_next_parameters(self) -> dict[str, Any] | None  # Line 977
-    def get_gp_predictions(self, parameters_list: list[dict[str, Any]]) -> tuple[list[Decimal], list[Decimal]]  # Line 985
-    def get_optimization_summary(self) -> dict[str, Any]  # Line 1001
+    def __init__(self, ...)  # Line 662
+    async def optimize(self, ...) -> OptimizationResult  # Line 708
+    async def _generate_initial_points(self, ...) -> None  # Line 808
+    async def _optimization_iteration(self, objective_function: Callable) -> None  # Line 836
+    async def _evaluate_point(self, point: BayesianPoint, objective_function: Callable) -> None  # Line 867
+    def _update_best_point(self) -> None  # Line 909
+    def _check_convergence(self) -> bool  # Line 938
+    async def _finalize_optimization(self) -> OptimizationResult  # Line 953
+    def get_next_parameters(self) -> dict[str, Any] | None  # Line 982
+    def get_gp_predictions(self, parameters_list: list[dict[str, Any]]) -> tuple[list[Decimal], list[Decimal]]  # Line 990
+    def get_optimization_summary(self) -> dict[str, Any]  # Line 1006
 ```
 
 ### File: brute_force.py
@@ -875,7 +919,7 @@ class BayesianOptimizer(OptimizationEngine):
 
 ```python
 class GridSearchConfig(BaseModel):
-    def validate_grid_resolution(cls, v)  # Line 125
+    def validate_grid_resolution(cls, v)  # Line 132
 ```
 
 #### Class: `OptimizationCandidate`
@@ -885,9 +929,9 @@ class GridSearchConfig(BaseModel):
 
 ```python
 class OptimizationCandidate(BaseModel):
-    def mark_started(self) -> None  # Line 169
-    def mark_completed(self, ...) -> None  # Line 174
-    def mark_failed(self, error_message: str) -> None  # Line 191
+    def mark_started(self) -> None  # Line 176
+    def mark_completed(self, ...) -> None  # Line 181
+    def mark_failed(self, error_message: str) -> None  # Line 198
 ```
 
 #### Class: `GridGenerator`
@@ -896,14 +940,14 @@ class OptimizationCandidate(BaseModel):
 
 ```python
 class GridGenerator:
-    def __init__(self, parameter_space: ParameterSpace, config: GridSearchConfig)  # Line 210
-    def generate_initial_grid(self) -> list[dict[str, Any]]  # Line 229
-    def _generate_uniform_grid(self) -> list[dict[str, Any]]  # Line 249
-    def _generate_random_grid(self) -> list[dict[str, Any]]  # Line 297
-    def _generate_latin_hypercube(self) -> list[dict[str, Any]]  # Line 311
-    def _generate_sobol_sequence(self) -> list[dict[str, Any]]  # Line 356
-    def _generate_halton_sequence(self) -> list[dict[str, Any]]  # Line 396
-    def generate_refined_grid(self, best_candidates: list[OptimizationCandidate], refinement_factor: Decimal) -> list[dict[str, Any]]  # Line 436
+    def __init__(self, parameter_space: ParameterSpace, config: GridSearchConfig)  # Line 217
+    def generate_initial_grid(self) -> list[dict[str, Any]]  # Line 236
+    def _generate_uniform_grid(self) -> list[dict[str, Any]]  # Line 256
+    def _generate_random_grid(self) -> list[dict[str, Any]]  # Line 304
+    def _generate_latin_hypercube(self) -> list[dict[str, Any]]  # Line 318
+    def _generate_sobol_sequence(self) -> list[dict[str, Any]]  # Line 363
+    def _generate_halton_sequence(self) -> list[dict[str, Any]]  # Line 403
+    def generate_refined_grid(self, best_candidates: list[OptimizationCandidate], refinement_factor: Decimal) -> list[dict[str, Any]]  # Line 443
 ```
 
 #### Class: `BruteForceOptimizer`
@@ -913,26 +957,26 @@ class GridGenerator:
 
 ```python
 class BruteForceOptimizer(OptimizationEngine):
-    def __init__(self, ...)  # Line 533
-    async def optimize(self, ...) -> OptimizationResult  # Line 588
-    def _create_candidates(self, parameter_combinations: list[dict[str, Any]]) -> None  # Line 686
-    async def _evaluate_candidates_in_batches(self, objective_function: Callable) -> None  # Line 697
-    async def _evaluate_batch(self, batch: list[OptimizationCandidate], objective_function: Callable) -> None  # Line 725
-    async def _evaluate_candidate_with_semaphore(self, candidate: OptimizationCandidate, objective_function: Callable) -> None  # Line 768
-    async def _evaluate_candidate(self, candidate: OptimizationCandidate, objective_function: Callable) -> None  # Line 775
-    def _is_better_candidate(self, candidate: OptimizationCandidate) -> bool  # Line 843
-    def _is_duplicate(self, ...) -> bool  # Line 856
-    def _parameters_equal(self, params1: dict[str, Any], params2: dict[str, Any]) -> bool  # Line 875
-    def _validate_candidate(self, candidate: OptimizationCandidate) -> bool  # Line 895
-    async def _validate_candidate_performance(self, candidate: OptimizationCandidate, objective_function: Callable) -> Decimal | None  # Line 900
-    def _perturb_parameters(self, parameters: dict[str, Any], noise_factor: float) -> dict[str, Any]  # Line 940
-    def _should_stop_early(self) -> bool  # Line 973
-    async def _run_adaptive_refinement(self, objective_function: Callable) -> None  # Line 994
-    def _get_top_candidates(self, count: int) -> list[OptimizationCandidate]  # Line 1027
-    async def _finalize_optimization(self) -> OptimizationResult  # Line 1040
-    async def _calculate_statistical_significance(self) -> Decimal | None  # Line 1078
-    def _analyze_parameter_stability(self) -> dict[str, Decimal]  # Line 1124
-    def get_next_parameters(self) -> dict[str, Any] | None  # Line 1166
+    def __init__(self, ...)  # Line 540
+    async def optimize(self, ...) -> OptimizationResult  # Line 595
+    def _create_candidates(self, parameter_combinations: list[dict[str, Any]]) -> None  # Line 693
+    async def _evaluate_candidates_in_batches(self, objective_function: Callable) -> None  # Line 704
+    async def _evaluate_batch(self, batch: list[OptimizationCandidate], objective_function: Callable) -> None  # Line 732
+    async def _evaluate_candidate_with_semaphore(self, candidate: OptimizationCandidate, objective_function: Callable) -> None  # Line 779
+    async def _evaluate_candidate(self, candidate: OptimizationCandidate, objective_function: Callable) -> None  # Line 786
+    def _is_better_candidate(self, candidate: OptimizationCandidate) -> bool  # Line 854
+    def _is_duplicate(self, ...) -> bool  # Line 867
+    def _parameters_equal(self, params1: dict[str, Any], params2: dict[str, Any]) -> bool  # Line 886
+    def _validate_candidate(self, candidate: OptimizationCandidate) -> bool  # Line 906
+    async def _validate_candidate_performance(self, candidate: OptimizationCandidate, objective_function: Callable) -> Decimal | None  # Line 911
+    def _perturb_parameters(self, parameters: dict[str, Any], noise_factor: float) -> dict[str, Any]  # Line 955
+    def _should_stop_early(self) -> bool  # Line 988
+    async def _run_adaptive_refinement(self, objective_function: Callable) -> None  # Line 1009
+    def _get_top_candidates(self, count: int) -> list[OptimizationCandidate]  # Line 1042
+    async def _finalize_optimization(self) -> OptimizationResult  # Line 1055
+    async def _calculate_statistical_significance(self) -> Decimal | None  # Line 1093
+    def _analyze_parameter_stability(self) -> dict[str, Decimal]  # Line 1139
+    def get_next_parameters(self) -> dict[str, Any] | None  # Line 1181
 ```
 
 ### File: controller.py
@@ -1014,7 +1058,7 @@ class OptimizationConstraint(BaseModel):
 class OptimizationProgress(BaseModel):
     def update_progress(self, ...) -> None  # Line 224
     def add_warning(self, warning: str) -> None  # Line 257
-    def estimate_completion_time(self) -> None  # Line 265
+    def estimate_completion_time(self) -> None  # Line 263
 ```
 
 #### Class: `OptimizationConfig`
@@ -1062,10 +1106,35 @@ class OptimizationEngine(ABC):
 #### Functions:
 
 ```python
-def create_profit_maximization_objective() -> OptimizationObjective  # Line 717
-def create_risk_minimization_objective() -> OptimizationObjective  # Line 729
-def create_sharpe_ratio_objective() -> OptimizationObjective  # Line 741
-def create_standard_trading_objectives() -> list[OptimizationObjective]  # Line 753
+def create_profit_maximization_objective() -> OptimizationObjective  # Line 716
+def create_risk_minimization_objective() -> OptimizationObjective  # Line 728
+def create_sharpe_ratio_objective() -> OptimizationObjective  # Line 740
+def create_standard_trading_objectives() -> list[OptimizationObjective]  # Line 752
+```
+
+### File: data_transformer.py
+
+**Key Imports:**
+- `from src.optimization.core import OptimizationResult`
+- `from src.utils.decimal_utils import to_decimal`
+- `from src.utils.messaging_patterns import MessagePattern`
+
+#### Class: `OptimizationDataTransformer`
+
+**Purpose**: Handles consistent data transformation for optimization module
+
+```python
+class OptimizationDataTransformer:
+    def transform_optimization_result_to_event_data(result: OptimizationResult, metadata: dict[str, Any] | None = None) -> dict[str, Any]  # Line 23
+    def transform_parameter_set_to_event_data(parameters: dict[str, Any], metadata: dict[str, Any] | None = None) -> dict[str, Any]  # Line 63
+    def transform_objective_values_to_event_data(objective_values: dict[str, Any], metadata: dict[str, Any] | None = None) -> dict[str, Any]  # Line 91
+    def validate_financial_precision(data: dict[str, Any]) -> dict[str, Any]  # Line 114
+    def ensure_boundary_fields(data: dict[str, Any], source: str = 'optimization') -> dict[str, Any]  # Line 154
+    def transform_for_req_reply(cls, request_type: str, data: Any, correlation_id: str | None = None) -> dict[str, Any]  # Line 181
+    def transform_for_batch_processing(cls, ...) -> dict[str, Any]  # Line 236
+    def align_processing_paradigm(cls, data: dict[str, Any], target_mode: str = 'batch') -> dict[str, Any]  # Line 301
+    def apply_cross_module_validation(cls, ...) -> dict[str, Any]  # Line 380
+    def _apply_backtesting_boundary_validation(cls, data: dict[str, Any], source_module: str, target_module: str) -> dict[str, Any]  # Line 469
 ```
 
 ### File: di_registration.py
@@ -1078,10 +1147,10 @@ def create_standard_trading_objectives() -> list[OptimizationObjective]  # Line 
 
 ```python
 def register_optimization_dependencies(injector: DependencyInjector) -> None  # Line 25
-def configure_optimization_module(injector: DependencyInjector, config: dict[str, Any] | None = None) -> None  # Line 134
-def get_optimization_service(injector: DependencyInjector) -> 'IOptimizationService'  # Line 154
-def get_optimization_controller(injector: DependencyInjector)  # Line 159
-def get_optimization_repository(injector: DependencyInjector)  # Line 164
+def configure_optimization_module(injector: DependencyInjector, config: dict[str, Any] | None = None) -> None  # Line 193
+def get_optimization_service(injector: DependencyInjector) -> 'IOptimizationService'  # Line 213
+def get_optimization_controller(injector: DependencyInjector)  # Line 218
+def get_optimization_repository(injector: DependencyInjector)  # Line 223
 ```
 
 ### File: factory.py
@@ -1099,13 +1168,13 @@ def get_optimization_repository(injector: DependencyInjector)  # Line 164
 
 ```python
 class OptimizationFactory(BaseFactory[Any]):
-    def __init__(self, ...)  # Line 36
-    def _create_optimization_repository(self, database_session: Any = None, **kwargs) -> 'OptimizationRepositoryProtocol'  # Line 70
-    def _create_backtest_integration(self, backtest_service: Any = None, **kwargs) -> 'IBacktestIntegrationService'  # Line 112
-    def _create_analysis_service(self, results_analyzer: Any = None, **kwargs) -> 'IAnalysisService'  # Line 150
-    def _create_optimization_service(self, ...) -> 'IOptimizationService'  # Line 188
-    def _create_optimization_controller(self, optimization_service: Any = None, **kwargs) -> 'OptimizationController'  # Line 256
-    def create_complete_optimization_stack(self) -> dict[str, Any]  # Line 298
+    def __init__(self, ...)  # Line 35
+    def _create_optimization_repository(self, database_session: Any = None, **kwargs) -> 'OptimizationRepositoryProtocol'  # Line 68
+    def _create_backtest_integration(self, backtest_service: Any = None, **kwargs) -> 'IBacktestIntegrationService'  # Line 108
+    def _create_analysis_service(self, results_analyzer: Any = None, **kwargs) -> 'IAnalysisService'  # Line 144
+    def _create_optimization_service(self, ...) -> 'IOptimizationService'  # Line 180
+    def _create_optimization_controller(self, optimization_service: Any = None, **kwargs) -> 'OptimizationController'  # Line 254
+    def create_complete_optimization_stack(self) -> dict[str, Any]  # Line 292
 ```
 
 #### Class: `OptimizationComponentFactory`
@@ -1114,21 +1183,21 @@ class OptimizationFactory(BaseFactory[Any]):
 
 ```python
 class OptimizationComponentFactory:
-    def __init__(self, dependency_container: Any = None, correlation_id: str | None = None)  # Line 329
-    def create_service(self, **kwargs) -> 'IOptimizationService'  # Line 333
-    def create_controller(self, **kwargs) -> 'OptimizationController'  # Line 337
-    def create_repository(self, **kwargs) -> 'OptimizationRepositoryProtocol'  # Line 341
-    def create_backtest_integration(self, **kwargs) -> 'IBacktestIntegrationService'  # Line 345
-    def create_analysis_service(self, **kwargs) -> 'IAnalysisService'  # Line 349
-    def register_factories(self, container: Any) -> None  # Line 353
+    def __init__(self, dependency_container: Any = None, correlation_id: str | None = None)  # Line 321
+    def create_service(self, **kwargs) -> 'IOptimizationService'  # Line 325
+    def create_controller(self, **kwargs) -> 'OptimizationController'  # Line 329
+    def create_repository(self, **kwargs) -> 'OptimizationRepositoryProtocol'  # Line 333
+    def create_backtest_integration(self, **kwargs) -> 'IBacktestIntegrationService'  # Line 337
+    def create_analysis_service(self, **kwargs) -> 'IAnalysisService'  # Line 341
+    def register_factories(self, container: Any) -> None  # Line 345
 ```
 
 #### Functions:
 
 ```python
-def create_optimization_service(injector: DependencyInjector | None = None) -> 'IOptimizationService'  # Line 363
-def create_optimization_controller(injector: DependencyInjector | None = None) -> 'OptimizationController'  # Line 371
-def create_optimization_stack(injector: DependencyInjector | None = None) -> dict[str, Any]  # Line 379
+def create_optimization_service(injector: DependencyInjector | None = None) -> 'IOptimizationService'  # Line 351
+def create_optimization_controller(injector: DependencyInjector | None = None) -> 'OptimizationController'  # Line 359
+def create_optimization_stack(injector: DependencyInjector | None = None) -> dict[str, Any]  # Line 367
 ```
 
 ### File: interfaces.py
@@ -1200,11 +1269,11 @@ class SamplingStrategy(Enum):
 
 ```python
 class ParameterDefinition(BaseModel, ABC):
-    def sample(self, strategy: SamplingStrategy = SamplingStrategy.UNIFORM) -> Any  # Line 75
-    def validate_value(self, value: Any) -> bool  # Line 88
-    def clip_value(self, value: Any) -> Any  # Line 101
-    def get_bounds(self) -> tuple[Any, Any]  # Line 114
-    def is_active(self, context: dict[str, Any]) -> bool  # Line 123
+    def sample(self, strategy: SamplingStrategy = SamplingStrategy.UNIFORM) -> Any  # Line 74
+    def validate_value(self, value: Any) -> bool  # Line 87
+    def clip_value(self, value: Any) -> Any  # Line 100
+    def get_bounds(self) -> tuple[Any, Any]  # Line 113
+    def is_active(self, context: dict[str, Any]) -> bool  # Line 122
 ```
 
 #### Class: `ContinuousParameter`
@@ -1214,13 +1283,13 @@ class ParameterDefinition(BaseModel, ABC):
 
 ```python
 class ContinuousParameter(ParameterDefinition):
-    def validate_bounds(cls, v, values)  # Line 180
-    def validate_default(cls, v, values)  # Line 188
-    def sample(self, strategy: SamplingStrategy = SamplingStrategy.UNIFORM) -> Decimal  # Line 197
-    def validate_value(self, value: Any) -> bool  # Line 272
-    def clip_value(self, value: Any) -> Decimal  # Line 280
-    def get_bounds(self) -> tuple[Decimal, Decimal]  # Line 288
-    def get_range(self) -> Decimal  # Line 292
+    def validate_bounds(cls, v, values)  # Line 179
+    def validate_default(cls, v, values)  # Line 187
+    def sample(self, strategy: SamplingStrategy = SamplingStrategy.UNIFORM) -> Decimal  # Line 196
+    def validate_value(self, value: Any) -> bool  # Line 271
+    def clip_value(self, value: Any) -> Decimal  # Line 279
+    def get_bounds(self) -> tuple[Decimal, Decimal]  # Line 287
+    def get_range(self) -> Decimal  # Line 291
 ```
 
 #### Class: `DiscreteParameter`
@@ -1230,13 +1299,13 @@ class ContinuousParameter(ParameterDefinition):
 
 ```python
 class DiscreteParameter(ParameterDefinition):
-    def validate_bounds(cls, v, values)  # Line 313
-    def validate_default(cls, v, values)  # Line 321
-    def sample(self, strategy: SamplingStrategy = SamplingStrategy.UNIFORM) -> int  # Line 336
-    def validate_value(self, value: Any) -> bool  # Line 352
-    def clip_value(self, value: Any) -> int  # Line 362
-    def get_bounds(self) -> tuple[int, int]  # Line 381
-    def get_valid_values(self) -> list[int]  # Line 385
+    def validate_bounds(cls, v, values)  # Line 312
+    def validate_default(cls, v, values)  # Line 320
+    def sample(self, strategy: SamplingStrategy = SamplingStrategy.UNIFORM) -> int  # Line 335
+    def validate_value(self, value: Any) -> bool  # Line 351
+    def clip_value(self, value: Any) -> int  # Line 361
+    def get_bounds(self) -> tuple[int, int]  # Line 380
+    def get_valid_values(self) -> list[int]  # Line 384
 ```
 
 #### Class: `CategoricalParameter`
@@ -1246,14 +1315,14 @@ class DiscreteParameter(ParameterDefinition):
 
 ```python
 class CategoricalParameter(ParameterDefinition):
-    def validate_choices(cls, v)  # Line 406
-    def validate_weights(cls, v, values)  # Line 416
-    def validate_default(cls, v, values)  # Line 428
-    def sample(self, strategy: SamplingStrategy = SamplingStrategy.UNIFORM) -> Any  # Line 436
-    def validate_value(self, value: Any) -> bool  # Line 445
-    def clip_value(self, value: Any) -> Any  # Line 449
-    def get_bounds(self) -> tuple[Any, Any]  # Line 455
-    def get_choice_index(self, value: Any) -> int  # Line 459
+    def validate_choices(cls, v)  # Line 405
+    def validate_weights(cls, v, values)  # Line 415
+    def validate_default(cls, v, values)  # Line 427
+    def sample(self, strategy: SamplingStrategy = SamplingStrategy.UNIFORM) -> Any  # Line 435
+    def validate_value(self, value: Any) -> bool  # Line 444
+    def clip_value(self, value: Any) -> Any  # Line 448
+    def get_bounds(self) -> tuple[Any, Any]  # Line 454
+    def get_choice_index(self, value: Any) -> int  # Line 458
 ```
 
 #### Class: `BooleanParameter`
@@ -1327,6 +1396,77 @@ def create_ml_model_space() -> ParameterSpace  # Line 1012
 def create_risk_management_space() -> ParameterSpace  # Line 1087
 ```
 
+### File: parameter_space_service.py
+
+**Key Imports:**
+- `from src.core.base import BaseService`
+- `from src.core.exceptions import ValidationError`
+- `from src.optimization.parameter_space import ParameterSpace`
+- `from src.optimization.parameter_space import ParameterSpaceBuilder`
+
+#### Class: `ParameterSpaceService`
+
+**Inherits**: BaseService
+**Purpose**: Service for parameter space operations
+
+```python
+class ParameterSpaceService(BaseService):
+    def __init__(self, ...)  # Line 23
+    def build_parameter_space(self, config: dict[str, Any]) -> ParameterSpace  # Line 40
+    def build_parameter_space_from_current(self, current_parameters: dict[str, Any]) -> dict[str, Any]  # Line 89
+    def _get_default_trading_parameter_space(self) -> dict[str, Any]  # Line 132
+    def validate_parameter_space_config(self, config: dict[str, Any]) -> bool  # Line 155
+    def _validate_parameter_type_config(self, param_name: str, param_type: str, param_config: dict[str, Any]) -> None  # Line 202
+```
+
+### File: repository.py
+
+**Key Imports:**
+- `from src.core.base import BaseComponent`
+- `from src.core.event_constants import OptimizationEvents`
+- `from src.core.exceptions import RepositoryError`
+- `from src.database.models.optimization import OptimizationResult`
+- `from src.database.models.optimization import OptimizationRun`
+
+#### Class: `OptimizationRepository`
+
+**Inherits**: BaseComponent
+**Purpose**: Repository for optimization result persistence using database models
+
+```python
+class OptimizationRepository(BaseComponent):
+    def __init__(self, ...)  # Line 41
+    async def save_optimization_result(self, result: OptimizationResult, metadata: dict[str, Any] | None = None) -> str  # Line 66
+    async def get_optimization_result(self, optimization_id: str) -> OptimizationResult | None  # Line 182
+    async def list_optimization_results(self, strategy_name: str | None = None, limit: int = 100, offset: int = 0) -> list[OptimizationResult]  # Line 249
+    async def delete_optimization_result(self, optimization_id: str) -> bool  # Line 330
+    async def save_parameter_set(self, ...) -> str  # Line 371
+    async def get_parameter_sets(self, optimization_id: str, limit: int | None = None) -> list[dict[str, Any]]  # Line 444
+```
+
+### File: result_transformation_service.py
+
+**Key Imports:**
+- `from src.core.base import BaseService`
+- `from src.optimization.core import OptimizationResult`
+
+#### Class: `ResultTransformationService`
+
+**Inherits**: BaseService
+**Purpose**: Service for optimization result transformations
+
+```python
+class ResultTransformationService(BaseService):
+    def __init__(self, ...)  # Line 23
+    def transform_for_strategies_module(self, optimization_result: dict[str, Any], current_parameters: dict[str, Any]) -> dict[str, Any]  # Line 40
+    def transform_for_web_interface(self, optimization_result: OptimizationResult) -> dict[str, Any]  # Line 83
+    def transform_for_analytics(self, optimization_result: OptimizationResult) -> dict[str, Any]  # Line 122
+    def _calculate_performance_improvement(self, optimal_value: Decimal, baseline: Decimal) -> Decimal  # Line 167
+    def standardize_financial_data(self, data: dict[str, Any]) -> dict[str, Any]  # Line 185
+    def extract_summary_metrics(self, optimization_result: OptimizationResult) -> dict[str, Any]  # Line 216
+    def _calculate_quality_score(self, optimization_result: OptimizationResult) -> float  # Line 239
+```
+
 ### File: service.py
 
 **Key Imports:**
@@ -1343,20 +1483,27 @@ def create_risk_management_space() -> ParameterSpace  # Line 1087
 
 ```python
 class OptimizationService(BaseService, IOptimizationService, ErrorPropagationMixin):
-    def __init__(self, ...)  # Line 40
-    async def optimize_strategy(self, ...) -> dict[str, Any]  # Line 86
-    async def optimize_parameters(self, ...) -> OptimizationResult  # Line 273
-    async def optimize_parameters_with_config(self, ...) -> dict[str, Any]  # Line 313
-    async def analyze_optimization_results(self, optimization_result: OptimizationResult, parameter_space: ParameterSpace) -> dict[str, Any]  # Line 354
-    async def _create_objective_function(self, ...) -> Callable[[dict[str, Any]], Any]  # Line 412
-    def _create_simulation_objective_function(self, ...) -> Callable[[dict[str, Any]], Any]  # Line 444
-    def _create_standard_trading_objectives(self) -> list[OptimizationObjective]  # Line 487
-    async def _create_brute_force_optimizer(self, ...) -> Any  # Line 523
-    async def _create_bayesian_optimizer(self, ...) -> Any  # Line 564
-    def _build_parameter_space(self, config: dict[str, Any]) -> ParameterSpace  # Line 606
-    def _build_objectives(self, objectives_config: list[dict[str, Any]]) -> list[OptimizationObjective]  # Line 649
-    def _create_objective_function_by_name(self, function_name: str) -> Callable[[dict[str, Any]], Any]  # Line 689
-    async def shutdown(self) -> None  # Line 704
+    def __init__(self, ...)  # Line 55
+    async def optimize_strategy(self, ...) -> dict[str, Any]  # Line 96
+    async def optimize_strategy_parameters(self, strategy_id: str, optimization_request: dict[str, Any]) -> dict[str, Any]  # Line 303
+    async def optimize_parameters(self, ...) -> OptimizationResult  # Line 359
+    async def optimize_parameters_with_config(self, ...) -> dict[str, Any]  # Line 399
+    async def analyze_optimization_results(self, optimization_result: OptimizationResult, parameter_space: ParameterSpace) -> dict[str, Any]  # Line 440
+    async def _create_objective_function(self, ...) -> Callable[[dict[str, Any]], Any]  # Line 498
+    def _create_simulation_objective_function(self, ...) -> Callable[[dict[str, Any]], Any]  # Line 530
+    def _create_standard_trading_objectives(self) -> list[OptimizationObjective]  # Line 579
+    async def _create_brute_force_optimizer(self, ...) -> Any  # Line 615
+    async def _create_bayesian_optimizer(self, ...) -> Any  # Line 653
+    def _build_objectives(self, objectives_config: list[dict[str, Any]]) -> list[OptimizationObjective]  # Line 694
+    def _create_objective_function_by_name(self, function_name: str) -> Callable[[dict[str, Any]], Any]  # Line 734
+    async def _emit_result_saved_event(self, optimization_result: OptimizationResult, result_id: str) -> None  # Line 749
+    def _determine_target_processing_mode(self, result: OptimizationResult) -> str  # Line 781
+    def _determine_target_processing_mode_for_strategy(self, strategy_name: str) -> str  # Line 802
+    def _apply_cross_module_alignment(self, data: dict[str, Any]) -> None  # Line 827
+    async def shutdown(self) -> None  # Line 858
+    def _transform_event_data(self, data: dict[str, Any]) -> dict[str, Any]  # Line 872
+    def _validate_event_data(self, data: Any) -> None  # Line 952
+    def _propagate_error_with_boundary_validation(self, ...) -> None  # Line 970
 ```
 
 ### File: validation.py
@@ -1374,7 +1521,7 @@ class OptimizationService(BaseService, IOptimizationService, ErrorPropagationMix
 
 ```python
 class ValidationMetrics(BaseModel):
-    def get_overall_quality_score(self) -> Decimal  # Line 104
+    def get_overall_quality_score(self) -> Decimal  # Line 103
 ```
 
 #### Class: `ValidationConfig`
@@ -1384,9 +1531,9 @@ class ValidationMetrics(BaseModel):
 
 ```python
 class ValidationConfig(BaseModel):
-    def validate_cv_method(cls, v)  # Line 218
-    def validate_window_type(cls, v)  # Line 227
-    def validate_correction_method(cls, v)  # Line 236
+    def validate_cv_method(cls, v)  # Line 217
+    def validate_window_type(cls, v)  # Line 226
+    def validate_correction_method(cls, v)  # Line 235
 ```
 
 #### Class: `TimeSeriesValidator`
@@ -1395,11 +1542,11 @@ class ValidationConfig(BaseModel):
 
 ```python
 class TimeSeriesValidator:
-    def __init__(self, config: ValidationConfig)  # Line 252
-    def create_time_series_splits(self, data_length: int, start_date: datetime, end_date: datetime) -> list[tuple[list[int], list[int]]]  # Line 265
-    def _create_expanding_window_splits(self, data_length: int) -> list[tuple[list[int], list[int]]]  # Line 288
-    def _create_blocked_splits(self, data_length: int) -> list[tuple[list[int], list[int]]]  # Line 316
-    def _create_gap_splits(self, data_length: int) -> list[tuple[list[int], list[int]]]  # Line 335
+    def __init__(self, config: ValidationConfig)  # Line 251
+    def create_time_series_splits(self, data_length: int, start_date: datetime, end_date: datetime) -> list[tuple[list[int], list[int]]]  # Line 264
+    def _create_expanding_window_splits(self, data_length: int) -> list[tuple[list[int], list[int]]]  # Line 287
+    def _create_blocked_splits(self, data_length: int) -> list[tuple[list[int], list[int]]]  # Line 315
+    def _create_gap_splits(self, data_length: int) -> list[tuple[list[int], list[int]]]  # Line 334
 ```
 
 #### Class: `WalkForwardValidator`
@@ -1408,9 +1555,9 @@ class TimeSeriesValidator:
 
 ```python
 class WalkForwardValidator:
-    def __init__(self, config: ValidationConfig)  # Line 357
-    async def run_walk_forward_analysis(self, ...) -> list[Decimal]  # Line 373
-    async def _evaluate_period(self, ...) -> Decimal | None  # Line 449
+    def __init__(self, config: ValidationConfig)  # Line 356
+    async def run_walk_forward_analysis(self, ...) -> list[Decimal]  # Line 372
+    async def _evaluate_period(self, ...) -> Decimal | None  # Line 448
 ```
 
 #### Class: `OverfittingDetector`
@@ -1419,8 +1566,8 @@ class WalkForwardValidator:
 
 ```python
 class OverfittingDetector:
-    def __init__(self, config: ValidationConfig)  # Line 515
-    def detect_overfitting(self, ...) -> tuple[bool, dict[str, Decimal]]  # Line 526
+    def __init__(self, config: ValidationConfig)  # Line 514
+    def detect_overfitting(self, ...) -> tuple[bool, dict[str, Decimal]]  # Line 525
 ```
 
 #### Class: `StatisticalTester`
@@ -1429,12 +1576,12 @@ class OverfittingDetector:
 
 ```python
 class StatisticalTester:
-    def __init__(self, config: ValidationConfig)  # Line 605
-    async def test_significance(self, ...) -> tuple[Decimal, tuple[Decimal, Decimal], bool]  # Line 625
-    def _bootstrap_confidence_interval(self, data: list[Decimal]) -> tuple[Decimal, Decimal]  # Line 672
-    def _one_sample_test(self, data: list[Decimal]) -> Decimal  # Line 693
-    def _two_sample_test(self, data1: list[Decimal], data2: list[Decimal]) -> Decimal  # Line 705
-    def _apply_multiple_testing_correction(self, p_value: Decimal) -> Decimal  # Line 718
+    def __init__(self, config: ValidationConfig)  # Line 603
+    async def test_significance(self, ...) -> tuple[Decimal, tuple[Decimal, Decimal], bool]  # Line 623
+    def _bootstrap_confidence_interval(self, data: list[Decimal]) -> tuple[Decimal, Decimal]  # Line 670
+    def _one_sample_test(self, data: list[Decimal]) -> Decimal  # Line 691
+    def _two_sample_test(self, data1: list[Decimal], data2: list[Decimal]) -> Decimal  # Line 703
+    def _apply_multiple_testing_correction(self, p_value: Decimal) -> Decimal  # Line 716
 ```
 
 #### Class: `RobustnessAnalyzer`
@@ -1443,10 +1590,10 @@ class StatisticalTester:
 
 ```python
 class RobustnessAnalyzer:
-    def __init__(self, config: ValidationConfig)  # Line 741
-    async def analyze_robustness(self, ...) -> tuple[Decimal, dict[str, Any]]  # Line 756
-    def _perturb_parameters(self, parameters: dict[str, Any], parameter_space: Any) -> dict[str, Any]  # Line 896
-    def _calculate_parameter_sensitivities(self, parameter_sensitivities: dict[str, list[tuple[Any, Decimal]]]) -> dict[str, Decimal]  # Line 930
+    def __init__(self, config: ValidationConfig)  # Line 739
+    async def analyze_robustness(self, ...) -> tuple[Decimal, dict[str, Any]]  # Line 754
+    def _perturb_parameters(self, parameters: dict[str, Any], parameter_space: Any) -> dict[str, Any]  # Line 894
+    def _calculate_parameter_sensitivities(self, parameter_sensitivities: dict[str, list[tuple[Any, Decimal]]]) -> dict[str, Decimal]  # Line 928
 ```
 
 #### Class: `ValidationEngine`
@@ -1455,14 +1602,14 @@ class RobustnessAnalyzer:
 
 ```python
 class ValidationEngine:
-    def __init__(self, config: ValidationConfig)  # Line 962
-    async def validate_optimization_result(self, ...) -> ValidationMetrics  # Line 981
-    async def _evaluate_in_out_sample(self, ...) -> tuple[Decimal, Decimal]  # Line 1105
-    async def _run_cross_validation(self, ...) -> list[Decimal]  # Line 1221
-    def _calculate_stability_score(self, ...) -> Decimal  # Line 1292
+    def __init__(self, config: ValidationConfig)  # Line 960
+    async def validate_optimization_result(self, ...) -> ValidationMetrics  # Line 979
+    async def _evaluate_in_out_sample(self, ...) -> tuple[Decimal, Decimal]  # Line 1103
+    async def _run_cross_validation(self, ...) -> list[Decimal]  # Line 1216
+    def _calculate_stability_score(self, ...) -> Decimal  # Line 1286
 ```
 
 ---
 **Generated**: Complete reference for optimization module
-**Total Classes**: 58
+**Total Classes**: 61
 **Total Functions**: 15

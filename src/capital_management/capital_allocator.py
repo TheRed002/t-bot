@@ -42,6 +42,7 @@ from src.core.types import (
     CapitalAllocation,
     CapitalMetrics,
 )
+from src.core.types.risk import RiskLevel
 from src.utils.capital_config import (
     extract_decimal_config,
     load_capital_config,
@@ -663,7 +664,7 @@ class CapitalAllocator(BaseComponent):
             # Track trade-capital association if trade lifecycle manager available
             if self.trade_lifecycle_manager:
                 try:
-                    from src.state.trade_lifecycle_manager import TradeEvent
+                    from src.state import TradeEvent
 
                     await self.trade_lifecycle_manager.update_trade_event(
                         trade_id,
@@ -739,7 +740,7 @@ class CapitalAllocator(BaseComponent):
             if success and self.trade_lifecycle_manager:
                 # Update trade metadata to reflect capital release
                 try:
-                    from src.state.trade_lifecycle_manager import TradeEvent
+                    from src.state import TradeEvent
 
                     await self.trade_lifecycle_manager.update_trade_event(
                         trade_id,
@@ -829,7 +830,7 @@ class CapitalAllocator(BaseComponent):
             # Update trade metadata if lifecycle manager available
             if self.trade_lifecycle_manager:
                 try:
-                    from src.state.trade_lifecycle_manager import TradeEvent
+                    from src.state import TradeEvent
 
                     await self.trade_lifecycle_manager.update_trade_event(
                         trade_id,

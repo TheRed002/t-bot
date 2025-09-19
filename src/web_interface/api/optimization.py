@@ -17,6 +17,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, s
 from pydantic import BaseModel, Field, field_validator
 
 from src.core.dependency_injection import DependencyInjector
+from src.core.exceptions import ValidationError
 from src.core.logging import get_logger
 from src.optimization.di_registration import get_optimization_service
 from src.optimization.interfaces import IOptimizationService
@@ -133,16 +134,16 @@ class OptimizationRequest(BaseModel):
     @classmethod
     def validate_parameter_ranges(cls, v):
         if len(v) > 10:
-            raise ValueError("Maximum 10 parameters can be optimized simultaneously")
+            raise ValidationError("Maximum 10 parameters can be optimized simultaneously")
         return v
 
     @field_validator("end_date")
     @classmethod
     def validate_end_date(cls, v, info):
         if info.data.get("start_date") and v <= info.data["start_date"]:
-            raise ValueError("End date must be after start date")
+            raise ValidationError("End date must be after start date")
         if info.data.get("start_date") and (v - info.data["start_date"]).days < 30:
-            raise ValueError("Minimum 30 days of data required")
+            raise ValidationError("Minimum 30 days of data required")
         return v
 
 

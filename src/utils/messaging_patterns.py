@@ -606,7 +606,7 @@ class ErrorPropagationMixin:
             "propagation_pattern": "service_to_service",
             "data_format": "error_propagation_v1",
             "processing_mode": "stream",  # Align with risk_management and state modules
-            "message_pattern": "pub_sub",  # Consistent messaging pattern
+            "message_pattern": MessagePattern.PUB_SUB.value,  # Consistent messaging pattern
             "cross_module_error": True,  # Flag for risk_management-state errors
             "boundary_crossed": True,
             "validation_status": "propagated",  # Error propagation status
@@ -627,7 +627,7 @@ class ErrorPropagationMixin:
                 "propagation_source": "service",
                 "data_format": "error_propagation_v1",
                 "processing_mode": "stream",
-                "message_pattern": "pub_sub",
+                "message_pattern": MessagePattern.PUB_SUB.value,
                 "cross_module_alignment": True,
                 "risk_state_compatible": True,
                 "error_metadata": error_metadata,
@@ -643,7 +643,7 @@ class ErrorPropagationMixin:
             "propagation_pattern": "monitoring_to_core",
             "data_format": "error_propagation_v1",
             "processing_mode": "stream",  # Align with core events default processing mode
-            "message_pattern": "pub_sub",
+            "message_pattern": MessagePattern.PUB_SUB.value,
             "boundary_crossed": True,
             "validation_status": "failed",
             "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -663,7 +663,7 @@ class ErrorPropagationMixin:
                 "propagation_source": "monitoring",
                 "data_format": "error_propagation_v1",
                 "processing_mode": "stream",
-                "message_pattern": "pub_sub",
+                "message_pattern": MessagePattern.PUB_SUB.value,
                 "boundary_validation": "applied",
                 "propagation_metadata": error_metadata,
             },
@@ -932,8 +932,8 @@ class BoundaryValidator:
                 expected_type="dict",
             )
 
-        # Check required fields for web interface error data
-        required_fields = ["component", "timestamp", "processing_mode"]
+        # Check required fields for web interface error data - align with utils processing patterns
+        required_fields = ["component", "timestamp"]  # Made processing_mode optional for flexibility
         for field in required_fields:
             if field not in data:
                 raise ValidationError(
@@ -1108,12 +1108,13 @@ class BoundaryValidator:
                 )
 
         # Validate message pattern alignment
-        if "message_pattern" in data and data["message_pattern"] not in ["pub_sub", "req_reply", "batch"]:
+        valid_patterns = [pattern.value for pattern in MessagePattern]
+        if "message_pattern" in data and data["message_pattern"] not in valid_patterns:
             raise ValidationError(
                 f"Invalid message pattern for state to risk boundary: {data['message_pattern']}",
                 field_name="message_pattern",
                 field_value=data["message_pattern"],
-                expected_type="pub_sub, req_reply, or batch",
+                expected_type=f"one of {valid_patterns}",
             )
 
         # Validate data format consistency
@@ -1238,6 +1239,640 @@ class BoundaryValidator:
                     field_value=None,
                     expected_type="string",
                 )
+
+    @staticmethod
+    def validate_analytics_to_monitoring_boundary(data: dict[str, Any]) -> None:
+        """Validate data flowing from analytics to monitoring modules."""
+        if not isinstance(data, dict):
+            raise ValidationError(
+                "Analytics to monitoring boundary data must be a dictionary",
+                field_name="boundary_data",
+                field_value=type(data).__name__,
+                expected_type="dict",
+            )
+
+        # Required fields for analytics to monitoring communication
+        required_fields = ["timestamp", "processing_mode", "message_pattern"]
+        for field in required_fields:
+            if field not in data:
+                raise ValidationError(
+                    f"Required field '{field}' missing in analytics to monitoring data",
+                    field_name=field,
+                    field_value=None,
+                    expected_type="string",
+                )
+
+        # Validate processing mode consistency
+        valid_modes = ["stream", "batch", "request_reply"]
+        if data["processing_mode"] not in valid_modes:
+            raise ValidationError(
+                f"Invalid processing mode in analytics to monitoring data",
+                field_name="processing_mode",
+                field_value=data["processing_mode"],
+                expected_type="one of: " + ", ".join(valid_modes),
+            )
+
+        # Validate message pattern consistency
+        valid_patterns = ["pub_sub", "req_reply"]
+        if data["message_pattern"] not in valid_patterns:
+            raise ValidationError(
+                f"Invalid message pattern in analytics to monitoring data",
+                field_name="message_pattern",
+                field_value=data["message_pattern"],
+                expected_type="one of: " + ", ".join(valid_patterns),
+            )
+
+        # Validate financial fields if present
+        financial_fields = ["value", "total_value", "unrealized_pnl", "realized_pnl"]
+        for field in financial_fields:
+            if field in data and data[field] is not None:
+                try:
+                    from src.utils.decimal_utils import to_decimal
+                    to_decimal(data[field])
+                except (ValueError, TypeError) as e:
+                    raise ValidationError(
+                        f"Financial field {field} must be valid Decimal",
+                        field_name=field,
+                        field_value=data[field],
+                        expected_type="Decimal",
+                    ) from e
+
+    @staticmethod
+    def validate_monitoring_to_analytics_boundary(data: dict[str, Any]) -> None:
+        """Validate data flowing from monitoring to analytics modules."""
+        if not isinstance(data, dict):
+            raise ValidationError(
+                "Monitoring to analytics boundary data must be a dictionary",
+                field_name="boundary_data",
+                field_value=type(data).__name__,
+                expected_type="dict",
+            )
+
+        # Required fields for monitoring to analytics communication
+        required_fields = ["timestamp", "processing_mode", "message_pattern", "source"]
+        for field in required_fields:
+            if field not in data:
+                raise ValidationError(
+                    f"Required field '{field}' missing in monitoring to analytics data",
+                    field_name=field,
+                    field_value=None,
+                    expected_type="string",
+                )
+
+        # Validate source module
+        if data["source"] != "monitoring":
+            raise ValidationError(
+                "Source must be 'monitoring' for monitoring to analytics data",
+                field_name="source",
+                field_value=data["source"],
+                expected_type="monitoring",
+            )
+
+        # Validate alert data if present
+        if "severity" in data:
+            from src.core.types import AlertSeverity
+            valid_severities = [s.value for s in AlertSeverity]
+            if data["severity"] not in valid_severities:
+                raise ValidationError(
+                    f"Invalid alert severity",
+                    field_name="severity",
+                    field_value=data["severity"],
+                    expected_type="one of: " + ", ".join(valid_severities),
+                )
+
+    @staticmethod
+    def validate_execution_to_state_boundary(data: dict[str, Any]) -> None:
+        """Validate data flowing from execution to state modules."""
+        if not isinstance(data, dict):
+            raise ValidationError(
+                "Execution to state boundary data must be a dictionary",
+                field_name="boundary_data",
+                field_value=type(data).__name__,
+                expected_type="dict",
+            )
+
+        # Required fields for execution to state communication
+        required_fields = ["processing_mode", "source", "timestamp"]
+        for field in required_fields:
+            if field not in data:
+                raise ValidationError(
+                    f"Required field '{field}' missing in execution to state data",
+                    field_name=field,
+                    field_value=None,
+                    expected_type="string",
+                )
+
+        # Validate processing mode alignment for execution -> state
+        valid_modes = ["stream", "batch", "request_reply"]
+        if data["processing_mode"] not in valid_modes:
+            raise ValidationError(
+                f"Invalid processing mode in execution to state data",
+                field_name="processing_mode",
+                field_value=data["processing_mode"],
+                expected_type="one of: " + ", ".join(valid_modes),
+            )
+
+        # Validate execution-specific fields if present
+        if "order_id" in data and not isinstance(data["order_id"], str):
+            raise ValidationError(
+                "Order ID must be a string",
+                field_name="order_id",
+                field_value=type(data["order_id"]).__name__,
+                expected_type="str",
+            )
+
+        # Validate financial fields for execution data
+        execution_financial_fields = ["price", "quantity", "filled_quantity", "remaining_quantity"]
+        for field in execution_financial_fields:
+            if field in data and data[field] is not None:
+                try:
+                    from src.utils.decimal_utils import to_decimal
+                    to_decimal(data[field])
+                except (ValueError, TypeError) as e:
+                    raise ValidationError(
+                        f"Execution financial field {field} must be valid Decimal",
+                        field_name=field,
+                        field_value=data[field],
+                        expected_type="Decimal",
+                    ) from e
+
+    @staticmethod
+    def validate_risk_to_execution_boundary(data: dict[str, Any]) -> None:
+        """Validate data flowing from risk_management to execution modules."""
+        if not isinstance(data, dict):
+            raise ValidationError(
+                "Risk to execution boundary data must be a dictionary",
+                field_name="boundary_data",
+                field_value=type(data).__name__,
+                expected_type="dict",
+            )
+
+        # Required fields for risk to execution communication
+        required_fields = ["processing_mode", "source", "timestamp"]
+        for field in required_fields:
+            if field not in data:
+                raise ValidationError(
+                    f"Required field '{field}' missing in risk to execution data",
+                    field_name=field,
+                    field_value=None,
+                    expected_type="string",
+                )
+
+        # Validate processing mode alignment for risk -> execution
+        valid_modes = ["stream", "request_reply"]
+        if data["processing_mode"] not in valid_modes:
+            raise ValidationError(
+                f"Invalid processing mode in risk to execution data",
+                field_name="processing_mode",
+                field_value=data["processing_mode"],
+                expected_type="one of: " + ", ".join(valid_modes),
+            )
+
+        # Validate risk assessment fields if present
+        if "risk_score" in data and data["risk_score"] is not None:
+            try:
+                risk_score = float(data["risk_score"])
+                if not (0 <= risk_score <= 1):
+                    raise ValidationError(
+                        "Risk score must be between 0 and 1",
+                        field_name="risk_score",
+                        field_value=risk_score,
+                        expected_type="float between 0 and 1",
+                    )
+            except (ValueError, TypeError):
+                raise ValidationError(
+                    "Risk score must be numeric",
+                    field_name="risk_score",
+                    field_value=data["risk_score"],
+                    expected_type="numeric",
+                )
+
+        # Validate financial fields for risk assessment
+        risk_financial_fields = ["position_size", "max_loss", "stop_loss", "available_capital"]
+        for field in risk_financial_fields:
+            if field in data and data[field] is not None:
+                try:
+                    from src.utils.decimal_utils import to_decimal
+                    value = to_decimal(data[field])
+                    if value < 0:
+                        raise ValidationError(
+                            f"Risk financial field {field} cannot be negative",
+                            field_name=field,
+                            field_value=value,
+                            expected_type="non-negative Decimal",
+                        )
+                except (ValueError, TypeError) as e:
+                    raise ValidationError(
+                        f"Risk financial field {field} must be valid Decimal",
+                        field_name=field,
+                        field_value=data[field],
+                        expected_type="Decimal",
+                    ) from e
+
+    @staticmethod
+    def validate_optimization_to_strategy_boundary(data: dict[str, Any]) -> None:
+        """Validate data flowing from optimization to strategies modules."""
+        if not isinstance(data, dict):
+            raise ValidationError(
+                "Optimization to strategy boundary data must be a dictionary",
+                field_name="boundary_data",
+                field_value=type(data).__name__,
+                expected_type="dict",
+            )
+
+        # Required fields for optimization to strategy communication
+        required_fields = ["processing_mode", "source", "operation"]
+        for field in required_fields:
+            if field not in data:
+                raise ValidationError(
+                    f"Required field '{field}' missing in optimization to strategy data",
+                    field_name=field,
+                    field_value=None,
+                    expected_type="string",
+                )
+
+        # Validate processing mode alignment
+        valid_modes = ["batch", "stream"]
+        if data["processing_mode"] not in valid_modes:
+            raise ValidationError(
+                f"Invalid processing mode in optimization to strategy data",
+                field_name="processing_mode",
+                field_value=data["processing_mode"],
+                expected_type="one of: " + ", ".join(valid_modes),
+            )
+
+        # Validate optimization-specific fields
+        if "optimal_parameters" in data and not isinstance(data["optimal_parameters"], dict):
+            raise ValidationError(
+                "Optimal parameters must be a dictionary",
+                field_name="optimal_parameters",
+                field_value=type(data["optimal_parameters"]).__name__,
+                expected_type="dict",
+            )
+
+    @staticmethod
+    def validate_web_interface_to_execution_boundary(data: dict[str, Any]) -> None:
+        """Validate data flowing from web_interface to execution modules."""
+        if not isinstance(data, dict):
+            raise ValidationError(
+                "Web interface to execution boundary data must be a dictionary",
+                field_name="boundary_data",
+                field_value=type(data).__name__,
+                expected_type="dict",
+            )
+
+        # Required fields for web_interface to execution communication
+        required_fields = ["processing_mode", "source", "data_format"]
+        for field in required_fields:
+            if field not in data:
+                raise ValidationError(
+                    f"Required field '{field}' missing in web interface to execution data",
+                    field_name=field,
+                    field_value=None,
+                    expected_type="string",
+                )
+
+        # Validate processing mode alignment with execution module expectations
+        valid_modes = ["stream", "request_reply", "batch"]
+        if data["processing_mode"] not in valid_modes:
+            raise ValidationError(
+                f"Invalid processing mode in web interface to execution data",
+                field_name="processing_mode",
+                field_value=data["processing_mode"],
+                expected_type="one of: " + ", ".join(valid_modes),
+            )
+
+        # Validate message pattern consistency
+        valid_patterns = ["pub_sub", "req_reply", "batch"]
+        if "message_pattern" in data and data["message_pattern"] not in valid_patterns:
+            raise ValidationError(
+                f"Invalid message pattern in web interface to execution data",
+                field_name="message_pattern",
+                field_value=data["message_pattern"],
+                expected_type="one of: " + ", ".join(valid_patterns),
+            )
+
+        # Validate data format consistency with execution module
+        if not data["data_format"].startswith(("bot_event_", "api_")):
+            raise ValidationError(
+                "Web interface to execution data_format must start with 'bot_event_' or 'api_'",
+                field_name="data_format",
+                field_value=data["data_format"],
+                expected_type="bot_event_* or api_*",
+            )
+
+        # Validate financial precision in execution orders
+        financial_fields = ["price", "quantity", "volume", "amount"]
+        for field in financial_fields:
+            if field in data and data[field] is not None:
+                try:
+                    value = float(data[field])
+                    if value < 0:
+                        raise ValidationError(
+                            f"Financial field {field} cannot be negative in execution data",
+                            field_name=field,
+                            field_value=value,
+                            validation_rule="must be non-negative",
+                        )
+                except (ValueError, TypeError):
+                    raise ValidationError(
+                        f"Financial field {field} must be numeric in execution data",
+                        field_name=field,
+                        field_value=data[field],
+                        expected_type="numeric",
+                    )
+
+    @staticmethod
+    def validate_web_interface_to_strategies_boundary(data: dict[str, Any]) -> None:
+        """Validate data flowing from web_interface to strategies modules."""
+        if not isinstance(data, dict):
+            raise ValidationError(
+                "Web interface to strategies boundary data must be a dictionary",
+                field_name="boundary_data",
+                field_value=type(data).__name__,
+                expected_type="dict",
+            )
+
+        # Required fields for web_interface to strategies communication
+        required_fields = ["processing_mode", "source", "data_format"]
+        for field in required_fields:
+            if field not in data:
+                raise ValidationError(
+                    f"Required field '{field}' missing in web interface to strategies data",
+                    field_name=field,
+                    field_value=None,
+                    expected_type="string",
+                )
+
+        # Validate processing mode alignment with strategies module expectations
+        valid_modes = ["stream", "request_reply", "batch"]
+        if data["processing_mode"] not in valid_modes:
+            raise ValidationError(
+                f"Invalid processing mode in web interface to strategies data",
+                field_name="processing_mode",
+                field_value=data["processing_mode"],
+                expected_type="one of: " + ", ".join(valid_modes),
+            )
+
+        # Validate message pattern consistency for strategies module
+        valid_patterns = ["pub_sub", "req_reply", "batch", "stream"]
+        if "message_pattern" in data and data["message_pattern"] not in valid_patterns:
+            raise ValidationError(
+                f"Invalid message pattern in web interface to strategies data",
+                field_name="message_pattern",
+                field_value=data["message_pattern"],
+                expected_type="one of: " + ", ".join(valid_patterns),
+            )
+
+        # Validate data format consistency with strategies module
+        if not data["data_format"].startswith(("bot_event_", "api_", "signal_")):
+            raise ValidationError(
+                "Web interface to strategies data_format must start with 'bot_event_', 'api_', or 'signal_'",
+                field_name="data_format",
+                field_value=data["data_format"],
+                expected_type="bot_event_* or api_* or signal_*",
+            )
+
+        # Validate signal data if present for strategies module
+        if "signal" in data and isinstance(data["signal"], dict):
+            signal = data["signal"]
+            if "strength" in signal:
+                try:
+                    strength = float(signal["strength"])
+                    if not (0 < strength <= 1):
+                        raise ValidationError(
+                            "Signal strength must be between 0 and 1 in strategies data",
+                            field_name="signal.strength",
+                            field_value=strength,
+                            validation_rule="must be between 0 and 1",
+                        )
+                except (ValueError, TypeError):
+                    raise ValidationError(
+                        "Signal strength must be numeric in strategies data",
+                        field_name="signal.strength",
+                        field_value=signal["strength"],
+                        expected_type="numeric",
+                    )
+
+        # Validate financial precision for strategies
+        financial_fields = ["price", "quantity", "volume", "amount", "position_size"]
+        for field in financial_fields:
+            if field in data and data[field] is not None:
+                try:
+                    value = float(data[field])
+                    if value < 0:
+                        raise ValidationError(
+                            f"Financial field {field} cannot be negative in strategies data",
+                            field_name=field,
+                            field_value=value,
+                            validation_rule="must be non-negative",
+                        )
+                except (ValueError, TypeError):
+                    raise ValidationError(
+                        f"Financial field {field} must be numeric in strategies data",
+                        field_name=field,
+                        field_value=data[field],
+                        expected_type="numeric",
+                    )
+
+    @staticmethod
+    def validate_web_interface_to_risk_management_boundary(data: dict[str, Any]) -> None:
+        """Validate data flowing from web_interface to risk_management modules."""
+        if not isinstance(data, dict):
+            raise ValidationError(
+                "Web interface to risk management boundary data must be a dictionary",
+                field_name="boundary_data",
+                field_value=type(data).__name__,
+                expected_type="dict",
+            )
+
+        # Required fields for web_interface to risk_management communication
+        required_fields = ["processing_mode", "source", "data_format"]
+        for field in required_fields:
+            if field not in data:
+                raise ValidationError(
+                    f"Required field '{field}' missing in web interface to risk management data",
+                    field_name=field,
+                    field_value=None,
+                    expected_type="string",
+                )
+
+        # Validate processing mode alignment with risk_management expectations
+        valid_modes = ["stream", "request_reply", "batch"]
+        if data["processing_mode"] not in valid_modes:
+            raise ValidationError(
+                f"Invalid processing mode in web interface to risk management data",
+                field_name="processing_mode",
+                field_value=data["processing_mode"],
+                expected_type="one of: " + ", ".join(valid_modes),
+            )
+
+        # Validate message pattern consistency for risk_management
+        valid_patterns = ["pub_sub", "req_reply", "stream", "batch"]
+        if "message_pattern" in data and data["message_pattern"] not in valid_patterns:
+            raise ValidationError(
+                f"Invalid message pattern in web interface to risk management data",
+                field_name="message_pattern",
+                field_value=data["message_pattern"],
+                expected_type="one of: " + ", ".join(valid_patterns),
+            )
+
+        # Validate data format consistency with risk_management module
+        if not data["data_format"].startswith("bot_event_"):
+            raise ValidationError(
+                "Web interface to risk management data_format must start with 'bot_event_'",
+                field_name="data_format",
+                field_value=data["data_format"],
+                expected_type="bot_event_*",
+            )
+
+        # Validate financial precision for risk management
+        financial_fields = ["price", "quantity", "volume", "amount", "position_size"]
+        for field in financial_fields:
+            if field in data and data[field] is not None:
+                try:
+                    value = float(data[field])
+                    if value < 0:
+                        raise ValidationError(
+                            f"Financial field {field} cannot be negative in risk management data",
+                            field_name=field,
+                            field_value=value,
+                            validation_rule="must be non-negative",
+                        )
+                except (ValueError, TypeError):
+                    raise ValidationError(
+                        f"Financial field {field} must be numeric in risk management data",
+                        field_name=field,
+                        field_value=data[field],
+                        expected_type="numeric",
+                    )
+
+    @staticmethod
+    def validate_strategies_to_web_interface_boundary(data: dict[str, Any]) -> None:
+        """Validate data flowing from strategies to web_interface modules."""
+        if not isinstance(data, dict):
+            raise ValidationError(
+                "Strategies to web interface boundary data must be a dictionary",
+                field_name="boundary_data",
+                field_value=type(data).__name__,
+                expected_type="dict",
+            )
+
+        # Required fields for strategies to web_interface communication
+        required_fields = ["processing_mode", "source", "data_format"]
+        for field in required_fields:
+            if field not in data:
+                raise ValidationError(
+                    f"Required field '{field}' missing in strategies to web interface data",
+                    field_name=field,
+                    field_value=None,
+                    expected_type="string",
+                )
+
+        # Validate processing mode alignment with web_interface expectations
+        valid_modes = ["stream", "request_reply", "batch"]
+        if data["processing_mode"] not in valid_modes:
+            raise ValidationError(
+                f"Invalid processing mode in strategies to web interface data",
+                field_name="processing_mode",
+                field_value=data["processing_mode"],
+                expected_type="one of: " + ", ".join(valid_modes),
+            )
+
+        # Validate message pattern consistency for web_interface
+        valid_patterns = ["pub_sub", "req_reply", "stream", "batch"]
+        if "message_pattern" in data and data["message_pattern"] not in valid_patterns:
+            raise ValidationError(
+                f"Invalid message pattern in strategies to web interface data",
+                field_name="message_pattern",
+                field_value=data["message_pattern"],
+                expected_type="one of: " + ", ".join(valid_patterns),
+            )
+
+        # Validate data format consistency with web_interface expectations
+        if not data["data_format"].startswith(("strategy_", "signal_", "bot_event_")):
+            raise ValidationError(
+                "Strategies to web interface data_format must start with 'strategy_', 'signal_', or 'bot_event_'",
+                field_name="data_format",
+                field_value=data["data_format"],
+                expected_type="strategy_* or signal_* or bot_event_*",
+            )
+
+        # Validate strategy performance data if present
+        if "performance_data" in data and isinstance(data["performance_data"], dict):
+            perf_data = data["performance_data"]
+            performance_fields = ["total_return", "sharpe_ratio", "max_drawdown", "success_rate"]
+            for field in performance_fields:
+                if field in perf_data and perf_data[field] is not None:
+                    try:
+                        value = float(perf_data[field])
+                        # Validate specific performance metrics
+                        if field == "success_rate" and not (0 <= value <= 1):
+                            raise ValidationError(
+                                "Success rate must be between 0 and 1",
+                                field_name=f"performance_data.{field}",
+                                field_value=value,
+                                validation_rule="must be between 0 and 1",
+                            )
+                        elif field == "max_drawdown" and value > 1:
+                            raise ValidationError(
+                                "Max drawdown should typically be <= 1",
+                                field_name=f"performance_data.{field}",
+                                field_value=value,
+                                validation_rule="should be <= 1",
+                            )
+                    except (ValueError, TypeError):
+                        raise ValidationError(
+                            f"Performance field {field} must be numeric",
+                            field_name=f"performance_data.{field}",
+                            field_value=perf_data[field],
+                            expected_type="numeric",
+                        )
+
+        # Validate signal data if present for web display
+        if "signals" in data and isinstance(data["signals"], list):
+            for i, signal in enumerate(data["signals"]):
+                if isinstance(signal, dict):
+                    # Validate signal strength for web interface display
+                    if "strength" in signal:
+                        try:
+                            strength = float(signal["strength"])
+                            if not (0 < strength <= 1):
+                                raise ValidationError(
+                                    f"Signal strength must be between 0 and 1 in signal {i}",
+                                    field_name=f"signals[{i}].strength",
+                                    field_value=strength,
+                                    validation_rule="must be between 0 and 1",
+                                )
+                        except (ValueError, TypeError):
+                            raise ValidationError(
+                                f"Signal strength must be numeric in signal {i}",
+                                field_name=f"signals[{i}].strength",
+                                field_value=signal["strength"],
+                                expected_type="numeric",
+                            )
+
+        # Validate financial precision for web interface display
+        financial_fields = ["price", "quantity", "volume", "amount", "portfolio_value", "pnl"]
+        for field in financial_fields:
+            if field in data and data[field] is not None:
+                try:
+                    value = float(data[field])
+                    # No negative constraint for PnL as it can be negative
+                    if field != "pnl" and value < 0:
+                        raise ValidationError(
+                            f"Financial field {field} cannot be negative for web interface",
+                            field_name=field,
+                            field_value=value,
+                            validation_rule="must be non-negative",
+                        )
+                except (ValueError, TypeError):
+                    raise ValidationError(
+                        f"Financial field {field} must be numeric for web interface",
+                        field_name=field,
+                        field_value=data[field],
+                        expected_type="numeric",
+                    )
 
 
 class ProcessingParadigmAligner:

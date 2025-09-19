@@ -12,6 +12,7 @@ from enum import Enum
 from typing import Any
 
 from src.core.base import BaseComponent
+from src.core.exceptions import ValidationError
 
 
 class VersionStatus(Enum):
@@ -208,20 +209,20 @@ class VersionManager(BaseComponent):
         if requested_version is None:
             default = self.get_default_version()
             if default is None:
-                raise ValueError("No default version configured")
+                raise ValidationError("No default version configured")
             return default
 
         # Check if the exact version exists
         version = self.get_version(requested_version)
         if version:
             if version.is_sunset():
-                raise ValueError(f"API version {requested_version} is no longer supported")
+                raise ValidationError(f"API version {requested_version} is no longer supported")
             return version
 
         # Try to parse and find compatible version
         parsed = self.parse_version(requested_version)
         if not parsed:
-            raise ValueError(f"Invalid version format: {requested_version}")
+            raise ValidationError(f"Invalid version format: {requested_version}")
 
         # Find the best compatible version
         compatible_versions = []
@@ -230,7 +231,7 @@ class VersionManager(BaseComponent):
                 compatible_versions.append(existing_version)
 
         if not compatible_versions:
-            raise ValueError(f"No compatible version found for: {requested_version}")
+            raise ValidationError(f"No compatible version found for: {requested_version}")
 
         # Return the highest compatible version
         return max(compatible_versions)

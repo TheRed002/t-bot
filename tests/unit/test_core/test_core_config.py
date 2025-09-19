@@ -18,7 +18,7 @@ from src.core.config.database import DatabaseConfig
 from src.core.config.exchange import ExchangeConfig
 
 # Import from new refactored structure
-from src.core.config.main import Config, get_config
+from src.core.config import Config, get_config
 from src.core.config.risk import RiskConfig
 from src.core.config.service import ConfigService
 from src.core.config.strategy import StrategyConfig

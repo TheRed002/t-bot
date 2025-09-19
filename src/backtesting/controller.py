@@ -9,17 +9,22 @@ import asyncio
 from typing import TYPE_CHECKING, Any
 
 from src.core.base.interfaces import HealthCheckResult
-from src.core.base.service import BaseService
+from src.core.base.component import BaseComponent
+from src.core.event_constants import BacktestEvents
 from src.core.exceptions import ServiceError, ValidationError
-from src.core.logging import get_logger
+# Robust logger import with fallback for test suite compatibility
+try:
+    from src.core.logging import get_logger
+    logger = get_logger(__name__)
+except ImportError:
+    import logging
+    logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from src.backtesting.interfaces import BacktestServiceInterface
 
-logger = get_logger(__name__)
 
-
-class BacktestController(BaseService):
+class BacktestController(BaseComponent):
     """
     Controller for backtesting operations.
 
@@ -34,9 +39,18 @@ class BacktestController(BaseService):
         Args:
             backtest_service: BacktestService instance for business logic
         """
-        super().__init__(name="BacktestController", config={})
+        super().__init__(name="BacktestController")
         self.backtest_service = backtest_service
-        logger.info("BacktestController initialized")
+        self._get_local_logger().info("BacktestController initialized")
+
+    def _get_local_logger(self):
+        """Get logger with robust fallback for test environments."""
+        try:
+            from src.core.logging import get_logger
+            return get_logger(__name__)
+        except ImportError:
+            import logging
+            return logging.getLogger(__name__)
 
     async def run_backtest(self, request_data: dict[str, Any]) -> dict[str, Any]:
         """
@@ -56,13 +70,13 @@ class BacktestController(BaseService):
             return await self.backtest_service.serialize_result(result)
 
         except ValidationError as e:
-            logger.error(f"Validation error in backtest request: {e}")
+            self._get_local_logger().error(f"Validation error in backtest request: {e}")
             raise
         except ServiceError as e:
-            logger.error(f"Service error running backtest: {e}")
+            self._get_local_logger().error(f"Service error running backtest: {e}")
             raise
         except Exception as e:
-            logger.error(f"Unexpected error in backtest controller: {e}")
+            self._get_local_logger().error(f"Unexpected error in backtest controller: {e}")
             raise ServiceError(
                 f"Backtest controller error: {e}", error_code="CONTROLLER_001"
             ) from e
@@ -72,7 +86,7 @@ class BacktestController(BaseService):
         try:
             return await self.backtest_service.get_active_backtests()
         except Exception as e:
-            logger.error(f"Error getting active backtests: {e}")
+            self._get_local_logger().error(f"Error getting active backtests: {e}")
             raise ServiceError(
                 f"Failed to get active backtests: {e}", error_code="CONTROLLER_002"
             ) from e
@@ -89,12 +103,12 @@ class BacktestController(BaseService):
                 )
 
             success = await self.backtest_service.cancel_backtest(backtest_id)
-            return {"cancelled": success, "backtest_id": backtest_id}
+            return {BacktestEvents.CANCELLED.replace("backtest.", ""): success, "backtest_id": backtest_id}
 
         except ValidationError:
             raise
         except Exception as e:
-            logger.error(f"Error cancelling backtest {backtest_id}: {e}")
+            self._get_local_logger().error(f"Error cancelling backtest {backtest_id}: {e}")
             raise ServiceError(
                 f"Failed to cancel backtest: {e}", error_code="CONTROLLER_004"
             ) from e
@@ -105,7 +119,7 @@ class BacktestController(BaseService):
             cleared_count = await self.backtest_service.clear_cache(pattern)
             return {"cleared_entries": cleared_count, "pattern": pattern}
         except Exception as e:
-            logger.error(f"Error clearing cache: {e}")
+            self._get_local_logger().error(f"Error clearing cache: {e}")
             raise ServiceError(f"Failed to clear cache: {e}", error_code="CONTROLLER_005") from e
 
     async def get_cache_stats(self) -> dict[str, Any]:
@@ -113,7 +127,7 @@ class BacktestController(BaseService):
         try:
             return await self.backtest_service.get_cache_stats()
         except Exception as e:
-            logger.error(f"Error getting cache stats: {e}")
+            self._get_local_logger().error(f"Error getting cache stats: {e}")
             raise ServiceError(
                 f"Failed to get cache stats: {e}", error_code="CONTROLLER_006"
             ) from e
@@ -138,7 +152,7 @@ class BacktestController(BaseService):
                 },
             )
         except Exception as e:
-            logger.error(f"Health check failed: {e}")
+            self._get_local_logger().error(f"Health check failed: {e}")
             return HealthCheckResult(
                 status=HealthStatus.UNHEALTHY,
                 details={
@@ -169,7 +183,7 @@ class BacktestController(BaseService):
         except ValidationError:
             raise
         except Exception as e:
-            logger.error(f"Error getting backtest result {result_id}: {e}")
+            self._get_local_logger().error(f"Error getting backtest result {result_id}: {e}")
             raise ServiceError(
                 f"Failed to get backtest result: {e}", error_code="CONTROLLER_008"
             ) from e
@@ -191,7 +205,7 @@ class BacktestController(BaseService):
             }
 
         except Exception as e:
-            logger.error(f"Error listing backtest results: {e}")
+            self._get_local_logger().error(f"Error listing backtest results: {e}")
             raise ServiceError(
                 f"Failed to list backtest results: {e}", error_code="CONTROLLER_009"
             ) from e
@@ -213,7 +227,7 @@ class BacktestController(BaseService):
         except ValidationError:
             raise
         except Exception as e:
-            logger.error(f"Error deleting backtest result {result_id}: {e}")
+            self._get_local_logger().error(f"Error deleting backtest result {result_id}: {e}")
             raise ServiceError(
                 f"Failed to delete backtest result: {e}", error_code="CONTROLLER_011"
             ) from e
@@ -224,9 +238,9 @@ class BacktestController(BaseService):
             if hasattr(self.backtest_service, "cleanup"):
                 # Use timeout to prevent hanging cleanup
                 await asyncio.wait_for(self.backtest_service.cleanup(), timeout=30.0)
-            logger.info("BacktestController cleanup completed")
+            self._get_local_logger().info("BacktestController cleanup completed")
         except asyncio.TimeoutError:
-            logger.error("BacktestController cleanup timed out")
+            self._get_local_logger().error("BacktestController cleanup timed out")
         except Exception as e:
-            logger.error(f"BacktestController cleanup error: {e}")
+            self._get_local_logger().error(f"BacktestController cleanup error: {e}")
             # Don't re-raise to avoid masking original issues

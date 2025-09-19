@@ -69,7 +69,7 @@ class TestTradingNamespace:
             "scopes": ["read", "write"]
         }
         with patch.object(trading_namespace, "_validate_token", new_callable=AsyncMock, return_value=mock_token_data):
-            with patch.object(trading_namespace, "emit") as mock_emit:
+            with patch.object(trading_namespace, "emit_standardized", new_callable=AsyncMock) as mock_emit_standardized:
                 result = await trading_namespace.on_connect(sid, environ, auth)
 
         assert result is True
@@ -77,8 +77,8 @@ class TestTradingNamespace:
         assert trading_namespace.connected_clients[sid]["authenticated"] is True
         assert sid in trading_namespace.authenticated_sessions
 
-        # Check if authenticated event was emitted
-        mock_emit.assert_any_call("authenticated", {"status": "success"}, room=sid)
+        # Check if authenticated event was emitted via emit_standardized
+        mock_emit_standardized.assert_any_call("authenticated", {"status": "success"}, room=sid, processing_mode="request_reply")
 
     @pytest.mark.asyncio
     async def test_on_connect_with_invalid_token(self, trading_namespace):
@@ -336,8 +336,9 @@ class TestSocketIOManager:
         socketio_mgr.sio.emit.assert_called()
         call_args = socketio_mgr.sio.emit.call_args[0]
         assert call_args[0] == "market_data"
-        assert "type" in call_args[1]
-        assert call_args[1]["type"] == "market_update"
+        assert "data" in call_args[1]
+        assert "type" in call_args[1]["data"]
+        assert call_args[1]["data"]["type"] == "market_update"
 
     @pytest.mark.asyncio
     async def test_broadcast_bot_status(self, socketio_mgr):

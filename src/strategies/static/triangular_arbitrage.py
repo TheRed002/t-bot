@@ -152,7 +152,7 @@ class TriangularArbitrageStrategy(BaseStrategy):
 
         return signals
 
-    async def _check_triangular_path(self, path: list[str]) -> Signal | None:
+    async def _check_triangular_path(self, path: list[str]) -> "Signal | None":
         """
         Check a specific triangular path for arbitrage opportunities.
 

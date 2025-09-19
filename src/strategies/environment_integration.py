@@ -361,7 +361,7 @@ class EnvironmentAwareStrategyManager(EnvironmentAwareServiceMixin):
 
     async def generate_environment_aware_signal(
         self, strategy_name: str, market_data: MarketData, exchange: str
-    ) -> Signal | None:
+    ) -> "Signal | None":
         """Generate trading signal with environment-specific filtering and validation."""
         context = self.get_environment_context(exchange)
         env_config = self.get_environment_strategy_config(exchange)
@@ -393,7 +393,7 @@ class EnvironmentAwareStrategyManager(EnvironmentAwareServiceMixin):
 
     async def _apply_environment_signal_filters(
         self, signal: Signal, exchange: str, env_config: dict[str, Any]
-    ) -> Signal | None:
+    ) -> "Signal | None":
         """Apply environment-specific filters to trading signals."""
         context = self.get_environment_context(exchange)
 
@@ -456,7 +456,7 @@ class EnvironmentAwareStrategyManager(EnvironmentAwareServiceMixin):
 
     async def _generate_base_signal(
         self, strategy_name: str, market_data: MarketData, exchange: str
-    ) -> Signal | None:
+    ) -> "Signal | None":
         """Generate base signal from strategy (mock implementation)."""
         # This would call the actual strategy implementation
         from src.core.types import SignalDirection

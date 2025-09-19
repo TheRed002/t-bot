@@ -51,6 +51,22 @@ def register_optimization_dependencies(injector: DependencyInjector) -> None:
 
     injector.register_factory("ResultsAnalyzer", results_analyzer_factory, singleton=True)
 
+    # Register parameter space service factory
+    def parameter_space_service_factory():
+        """Factory for ParameterSpaceService."""
+        from src.optimization.parameter_space_service import ParameterSpaceService
+        return ParameterSpaceService()
+
+    injector.register_factory("ParameterSpaceService", parameter_space_service_factory, singleton=True)
+
+    # Register result transformation service factory
+    def result_transformation_service_factory():
+        """Factory for ResultTransformationService."""
+        from src.optimization.result_transformation_service import ResultTransformationService
+        return ResultTransformationService()
+
+    injector.register_factory("ResultTransformationService", result_transformation_service_factory, singleton=True)
+
     # WebSocket manager uses global instance from core module
 
     # Register analysis service factory
@@ -105,17 +121,49 @@ def register_optimization_dependencies(injector: DependencyInjector) -> None:
 
     # Register services through factory pattern
     def optimization_service_factory() -> "IOptimizationService":
-        """Factory for OptimizationService using factory pattern."""
-        factory = injector.resolve("OptimizationFactory")
-        return factory.create("service")
+        """Factory for OptimizationService with proper dependency injection."""
+        from src.optimization.service import OptimizationService
+
+        # Resolve dependencies
+        backtest_integration = None
+        try:
+            backtest_integration = injector.resolve("OptimizationBacktestIntegration")
+        except Exception:
+            logger.debug("BacktestIntegration not available")
+
+        optimization_repository = None
+        try:
+            optimization_repository = injector.resolve("OptimizationRepository")
+        except Exception:
+            logger.debug("OptimizationRepository not available")
+
+        analysis_service = None
+        try:
+            analysis_service = injector.resolve("OptimizationAnalysisService")
+        except Exception:
+            logger.debug("AnalysisService not available")
+
+        parameter_space_service = injector.resolve("ParameterSpaceService")
+        result_transformation_service = injector.resolve("ResultTransformationService")
+
+        return OptimizationService(
+            backtest_integration=backtest_integration,
+            optimization_repository=optimization_repository,
+            analysis_service=analysis_service,
+            parameter_space_service=parameter_space_service,
+            result_transformation_service=result_transformation_service,
+        )
 
     injector.register_factory("OptimizationService", optimization_service_factory, singleton=True)
 
     # Register controller using factory pattern
     def optimization_controller_factory():
-        """Factory for OptimizationController using factory pattern."""
-        factory = injector.resolve("OptimizationFactory")
-        return factory.create("controller")
+        """Factory for OptimizationController with proper dependency injection."""
+        from src.optimization.controller import OptimizationController
+
+        # Resolve optimization service dependency
+        optimization_service = injector.resolve("OptimizationService")
+        return OptimizationController(optimization_service=optimization_service)
 
     injector.register_factory(
         "OptimizationController", optimization_controller_factory, singleton=True

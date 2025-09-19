@@ -142,15 +142,15 @@ class WebInterfaceFactory(BaseComponent):
 
     def create_bot_management_service(self) -> WebBotServiceInterface:
         """Create bot management service with dependencies."""
-        bot_facade = None
+        bot_controller = None
         if self._injector:
             try:
-                bot_facade = self._injector.resolve("BotFacade")
+                bot_controller = self._injector.resolve("BotManagementController")
             except Exception:
-                # BotFacade is optional
-                pass
+                # BotManagementController is optional
+                logger.warning("BotManagementController not available - bot operations will use mock data")
 
-        service = WebBotService(bot_facade=bot_facade)
+        service = WebBotService(bot_facade=bot_controller)
 
         # Configure dependencies if service supports it
         if hasattr(service, "configure_dependencies") and self._injector:
@@ -199,16 +199,16 @@ class WebInterfaceFactory(BaseComponent):
 
     def create_strategy_service(self) -> WebStrategyServiceInterface:
         """Create strategy service with dependencies."""
-        strategy_facade = None
+        strategy_service = None
 
         if self._injector:
             try:
-                strategy_facade = self._injector.resolve("StrategyFacade")
+                strategy_service = self._injector.resolve("StrategyService")
             except Exception:
-                # StrategyFacade is optional
+                # StrategyService is optional for mock mode
                 pass
 
-        service = WebStrategyService(strategy_facade=strategy_facade)
+        service = WebStrategyService(strategy_service=strategy_service)
 
         # Configure dependencies if service supports it
         if hasattr(service, "configure_dependencies") and self._injector:
@@ -459,7 +459,8 @@ def create_web_interface_service(
 
         return service
     else:
-        raise ValueError(f"Unknown service type: {service_type}")
+        from src.core.exceptions import ValidationError
+        raise ValidationError(f"Unknown service type: {service_type}", field_name="service_type", field_value=service_type)
 
 
 def create_web_interface_stack(

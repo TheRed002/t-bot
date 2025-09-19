@@ -27,9 +27,10 @@ from src.database.models.optimization import (
 )
 from src.optimization.core import OptimizationResult
 from src.optimization.interfaces import OptimizationRepositoryProtocol
+from src.utils.messaging_patterns import MessagePattern
 
 
-class OptimizationRepository(BaseComponent, OptimizationRepositoryProtocol):
+class OptimizationRepository(BaseComponent):
     """
     Repository for optimization result persistence using database models.
 
@@ -161,26 +162,8 @@ class OptimizationRepository(BaseComponent, OptimizationRepositoryProtocol):
                 result_id=db_result.id,
             )
 
-            # Emit result saved event with proper async context and timeout
-            try:
-                if hasattr(self, "emit_event") and callable(self.emit_event):
-                    event_data = {
-                        "optimization_id": result.optimization_id,
-                        "algorithm_name": result.algorithm_name,
-                        "result_id": db_result.id,
-                        "optimal_objective_value": str(result.optimal_objective_value),
-                        "timestamp": datetime.now().isoformat(),
-                    }
-                    await asyncio.wait_for(
-                        self.emit_event(OptimizationEvents.RESULT_SAVED, event_data),
-                        timeout=5.0,  # 5 second timeout for WebSocket operations
-                    )
-            except (AttributeError, asyncio.TimeoutError) as e:
-                # Graceful fallback if event emission not available or times out
-                self._logger.debug(f"Event emission not available or timed out: {e}")
-            except Exception as e:
-                # Log but don't fail the save operation for WebSocket issues
-                self._logger.warning(f"Failed to emit result saved event: {e}")
+            # Event emission should be handled by service layer
+            # Repository focuses only on data persistence
 
             return result.optimization_id
 
@@ -510,3 +493,6 @@ class OptimizationRepository(BaseComponent, OptimizationRepositoryProtocol):
         except Exception as e:
             self._logger.error(f"Failed to get parameter sets: {e}")
             raise RepositoryError(f"Failed to get parameter sets: {e}") from e
+
+    # Event handling methods removed - should be in service layer
+    # Repository focuses only on data persistence operations

@@ -829,26 +829,29 @@ class TestTrendFollowingStrategy:
     ):
         """Test trend reversal exit for buy position."""
         # Mock conditions for trend reversal (fast MA < slow MA and RSI < 50)
-        # Mock the data service that BaseStrategy.get_sma calls
-        from unittest.mock import Mock, AsyncMock
+        from unittest.mock import AsyncMock, Mock
+
+        # Mock the data service methods that BaseStrategy.get_sma/get_rsi call
         mock_data_service = Mock()
-        
+
         async def sma_side_effect(symbol, period):
-            if period == strategy.fast_ma:  # fast MA (period=10)
+            if period == strategy.fast_ma:  # fast MA
                 return Decimal("49500")
-            elif period == strategy.slow_ma:  # slow MA (period=20)
+            elif period == strategy.slow_ma:  # slow MA
                 return Decimal("50000")
             return Decimal("50000")  # default
-            
+
         mock_data_service.get_sma = AsyncMock(side_effect=sma_side_effect)
         mock_data_service.get_rsi = AsyncMock(return_value=Decimal("40"))
-        
-        # Set up services mock
-        if not strategy.services:
-            from src.strategies.dependencies import StrategyServiceContainer
-            strategy.services = StrategyServiceContainer()
-        strategy.services.data_service = mock_data_service
-        
+
+        # Set up the services properly for BaseStrategy methods
+        mock_services = Mock()
+        mock_services.data_service = mock_data_service
+        strategy.services = mock_services
+
+        # Also set up technical indicators for backwards compatibility
+        strategy.set_technical_indicators(mock_indicators)
+
         result = await strategy.should_exit(mock_position, mock_market_data)
         assert result is True
 
@@ -867,28 +870,31 @@ class TestTrendFollowingStrategy:
             opened_at=FIXED_TIME,
             exchange="binance",
         )
-        
+
         # Mock conditions for trend reversal (fast MA > slow MA and RSI > 50)
-        # Mock the data service that BaseStrategy.get_sma calls
-        from unittest.mock import Mock, AsyncMock
+        from unittest.mock import AsyncMock, Mock
+
+        # Mock the data service methods that BaseStrategy.get_sma/get_rsi call
         mock_data_service = Mock()
-        
+
         async def sma_side_effect(symbol, period):
-            if period == strategy.fast_ma:  # fast MA (period=10)
+            if period == strategy.fast_ma:  # fast MA
                 return Decimal("50500")
-            elif period == strategy.slow_ma:  # slow MA (period=20)
+            elif period == strategy.slow_ma:  # slow MA
                 return Decimal("50000")
             return Decimal("50000")  # default
-            
+
         mock_data_service.get_sma = AsyncMock(side_effect=sma_side_effect)
         mock_data_service.get_rsi = AsyncMock(return_value=Decimal("60"))
-        
-        # Set up services mock
-        if not strategy.services:
-            from src.strategies.dependencies import StrategyServiceContainer
-            strategy.services = StrategyServiceContainer()
-        strategy.services.data_service = mock_data_service
-        
+
+        # Set up the services properly for BaseStrategy methods
+        mock_services = Mock()
+        mock_services.data_service = mock_data_service
+        strategy.services = mock_services
+
+        # Also set up technical indicators for backwards compatibility
+        strategy.set_technical_indicators(mock_indicators)
+
         result = await strategy.should_exit(sell_position, mock_market_data)
         assert result is True
 

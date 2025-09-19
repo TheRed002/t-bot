@@ -269,7 +269,8 @@ class UnitOfWork:
                         component=error_context.component,
                         operation=error_context.operation,
                         processing_mode=processing_mode,
-                        data_format="transaction_error_v1"
+                        data_format="transaction_error_v1",
+                        message_pattern="pub_sub"  # Align with analytics patterns
                     )
                 raise DatabaseQueryError(
                     "Database transaction failed",
@@ -277,6 +278,7 @@ class UnitOfWork:
                     details={
                         "processing_mode": processing_mode,
                         "data_format": "database_error_v1",
+                        "message_pattern": "pub_sub",  # Align with analytics patterns
                         "operation_type": "commit"
                     }
                 ) from e
@@ -364,7 +366,7 @@ class UnitOfWork:
                 suggested_action="Check system state and contact support",
             ) from e
 
-    def _propagate_uow_error(self, error: Exception, operation: str, processing_mode: str = "batch") -> None:
+    def _propagate_uow_error(self, error: Exception, operation: str, processing_mode: str = "stream") -> None:
         """Propagate UnitOfWork errors with consistent patterns aligned with core module."""
         from src.core.exceptions import DatabaseError, ValidationError
 
@@ -654,7 +656,7 @@ class AsyncUnitOfWork:
                     suggested_action="Check system state and contact support",
                 ) from e
 
-    async def _propagate_async_uow_error(self, error: Exception, operation: str, processing_mode: str = "batch") -> None:
+    async def _propagate_async_uow_error(self, error: Exception, operation: str, processing_mode: str = "stream") -> None:
         """Propagate async UnitOfWork errors with consistent patterns aligned with core module."""
         from src.core.exceptions import DatabaseError, ValidationError
 

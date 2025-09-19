@@ -1,13 +1,15 @@
 """
-Monitoring Data Transformation Utilities.
+Monitoring Data Transformation Service.
 
-Provides consistent data transformation patterns aligned with risk_management module
+Provides consistent data transformation patterns aligned with analytics module
 to ensure proper cross-module communication and data flow consistency.
 """
 
 from datetime import datetime, timezone
 from typing import Any
 
+from src.core.base.service import BaseService
+from src.core.exceptions import ValidationError
 from src.core.logging import get_logger
 from src.core.types import AlertSeverity
 from src.utils.decimal_utils import to_decimal
@@ -15,12 +17,12 @@ from src.utils.decimal_utils import to_decimal
 logger = get_logger(__name__)
 
 
-class MonitoringDataTransformer:
-    """Handles consistent data transformation for monitoring module."""
+class MonitoringDataTransformer(BaseService):
+    """Handles consistent data transformation for monitoring module following analytics patterns."""
 
-    @staticmethod
+    @classmethod
     def transform_alert_to_event_data(
-        alert_data: dict[str, Any], metadata: dict[str, Any] | None = None
+        cls, alert_data: dict[str, Any], metadata: dict[str, Any] | None = None
     ) -> dict[str, Any]:
         """
         Transform Alert to consistent event data format aligned with core module patterns.
@@ -32,6 +34,9 @@ class MonitoringDataTransformer:
         Returns:
             Dict with consistent event data format matching core event system
         """
+        if alert_data is None:
+            alert_data = {}
+
         return {
             "rule_name": alert_data.get("rule_name", "unknown"),
             "severity": alert_data.get("severity", AlertSeverity.MEDIUM.value),
@@ -48,9 +53,9 @@ class MonitoringDataTransformer:
             "metadata": {**(alert_data.get("metadata", {})), **(metadata or {})},
         }
 
-    @staticmethod
+    @classmethod
     def transform_metric_to_event_data(
-        metric_data: dict[str, Any], metadata: dict[str, Any] | None = None
+        cls, metric_data: dict[str, Any], metadata: dict[str, Any] | None = None
     ) -> dict[str, Any]:
         """
         Transform Metric to consistent event data format.
@@ -62,6 +67,9 @@ class MonitoringDataTransformer:
         Returns:
             Dict with consistent event data format
         """
+        if metric_data is None:
+            metric_data = {}
+
         return {
             "name": metric_data.get("name", "unknown_metric"),
             "value": str(metric_data.get("value", "0")),
@@ -75,9 +83,9 @@ class MonitoringDataTransformer:
             "metadata": metadata or {},
         }
 
-    @staticmethod
+    @classmethod
     def transform_performance_to_event_data(
-        performance_data: dict[str, Any], metadata: dict[str, Any] | None = None
+        cls, performance_data: dict[str, Any], metadata: dict[str, Any] | None = None
     ) -> dict[str, Any]:
         """
         Transform Performance data to consistent event data format.
@@ -89,6 +97,9 @@ class MonitoringDataTransformer:
         Returns:
             Dict with consistent event data format
         """
+        if performance_data is None:
+            performance_data = {}
+
         return {
             "exchange": performance_data.get("exchange", "unknown"),
             "symbol": performance_data.get("symbol", "unknown"),
@@ -106,8 +117,9 @@ class MonitoringDataTransformer:
             "metadata": metadata or {},
         }
 
-    @staticmethod
+    @classmethod
     def transform_error_to_event_data(
+        cls,
         error: Exception,
         context: dict[str, Any] | None = None,
         metadata: dict[str, Any] | None = None,
@@ -128,10 +140,10 @@ class MonitoringDataTransformer:
 
         return ErrorDataTransformer.transform_error_to_event_data(error, context, metadata)
 
-    @staticmethod
-    def validate_financial_precision(data: dict[str, Any]) -> dict[str, Any]:
+    @classmethod
+    def validate_financial_precision(cls, data: dict[str, Any]) -> dict[str, Any]:
         """
-        Ensure financial data has proper precision using Decimal.
+        Ensure financial data has proper precision using centralized financial utils.
 
         Args:
             data: Data dictionary to validate
@@ -139,36 +151,19 @@ class MonitoringDataTransformer:
         Returns:
             Dict with validated financial precision
         """
-        financial_fields = [
-            "value",
-            "latency_ms",
-            "execution_time",
-            "slippage_bps",
-            "fill_rate",
-            "portfolio_value",
-            "pnl_usd",
-            "volume_usd",
+        from src.utils.financial_utils import validate_financial_precision
+
+        # Define monitoring-specific fields in addition to defaults
+        monitoring_fields = [
+            "value", "latency_ms", "execution_time", "slippage_bps",
+            "fill_rate", "portfolio_value", "pnl_usd", "volume_usd"
         ]
 
-        for field in financial_fields:
-            if field in data and data[field] is not None and data[field] != "":
-                try:
-                    # Convert to Decimal for financial precision
-                    decimal_value = to_decimal(data[field])
-                    # Convert back to string for consistent format
-                    data[field] = str(decimal_value)
-                except (ValueError, TypeError, KeyError) as e:
-                    logger.warning(
-                        f"Failed to convert financial field {field} to Decimal: {e}",
-                        field=field,
-                        value=data[field],
-                    )
+        return validate_financial_precision(data, monitoring_fields)
 
-        return data
-
-    @staticmethod
+    @classmethod
     def ensure_boundary_fields(
-        data: dict[str, Any], source: str = "monitoring"
+        cls, data: dict[str, Any], source: str = "monitoring"
     ) -> dict[str, Any]:
         """
         Ensure data has required boundary fields for cross-module communication.

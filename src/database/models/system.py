@@ -52,8 +52,8 @@ class Alert(Base, TimestampMixin):
     # Relationships
     alert_rule = relationship("AlertRule", back_populates="alerts")
     escalation_policy = relationship("EscalationPolicy", back_populates="alerts")
-    user = relationship("User")
-    bot = relationship("Bot")
+    user = relationship("User", overlaps="audit_logs")
+    bot = relationship("Bot", overlaps="alerts")
 
     # Indexes and constraints
     __table_args__ = (
@@ -282,6 +282,10 @@ class PerformanceMetrics(Base, TimestampMixin):
         Index("idx_performance_bot_type", "bot_id", "metric_type"),
         Index("idx_performance_entity_period", "entity_type", "entity_id", "period_start"),
         CheckConstraint("value >= 0", name="check_performance_value_non_negative"),
+        CheckConstraint(
+            "previous_value IS NULL OR previous_value >= 0",
+            name="check_performance_previous_value_non_negative",
+        ),
         CheckConstraint("period_start < period_end", name="check_performance_period_order"),
         CheckConstraint("LENGTH(metric_type) >= 1", name="check_performance_metric_type_not_empty"),
         CheckConstraint("LENGTH(entity_type) >= 1", name="check_performance_entity_type_not_empty"),

@@ -921,7 +921,9 @@ class BruteForceOptimizer(OptimizationEngine):
 
             for _fold in range(self.validation_config.cv_folds):
                 # Run objective function with slight parameter perturbation
-                perturbed_params = self._perturb_parameters(candidate.parameters, DEFAULT_PARAMETER_PERTURBATION_FACTOR)
+                perturbed_params = self._perturb_parameters(
+                    candidate.parameters, DEFAULT_PARAMETER_PERTURBATION_FACTOR
+                )
                 result = await self._run_objective_function(
                     objective_function, perturbed_params, self.parameter_space
                 )

@@ -58,9 +58,12 @@ def _get_validator(validator: ValidationFramework | None = None) -> ValidationFr
         return validator
 
     # Create default instance but warn about architectural violation
-    from src.core.logging import get_logger
-
-    logger = get_logger(__name__)
+    try:
+        from src.core.logging import get_logger
+        logger = get_logger(__name__)
+    except ImportError:
+        import logging
+        logger = logging.getLogger(__name__)
     logger.warning(
         "ValidationFramework not injected - creating default instance. "
         "Inject via dependency injection for better testability."
@@ -127,6 +130,16 @@ def validate_batch(*args, **kwargs):
     return _get_validator_cached().validate_batch(*args, **kwargs)
 
 
+def validate_positive_amount(*args, **kwargs):
+    """Validate positive amount."""
+    return _get_validator_cached().validate_positive_amount(*args, **kwargs)
+
+
+def validate_non_negative_amount(*args, **kwargs):
+    """Validate non-negative amount."""
+    return _get_validator_cached().validate_non_negative_amount(*args, **kwargs)
+
+
 # Expose cached validator for other uses
 def get_validator() -> ValidationFramework:
     """Get the validation framework instance."""
@@ -163,4 +176,6 @@ __all__ = [
     "validate_strategy_params",
     "validate_symbol",
     "validate_timeframe",
+    "validate_positive_amount",
+    "validate_non_negative_amount",
 ]

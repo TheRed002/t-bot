@@ -85,7 +85,7 @@ class MonteCarloAnalyzer(BaseComponent):
             Analysis results including confidence intervals
         """
         if not trades:
-            raise TradingBotError("No trades to analyze", "BACKTEST_001")
+            raise TradingBotError("No trades to analyze", error_code="BACKTEST_001")
 
         self.logger.info("Starting Monte Carlo analysis", num_trades=len(trades))
 
@@ -95,7 +95,7 @@ class MonteCarloAnalyzer(BaseComponent):
         except (KeyError, ZeroDivisionError, TypeError) as e:
             self.logger.error(f"Failed to extract trade returns: {e}")
             raise TradingBotError(
-                f"Invalid trade data or zero initial capital: {e}", "BACKTEST_002"
+                f"Invalid trade data or zero initial capital: {e}", error_code="BACKTEST_002"
             ) from e
 
         # Run simulations
@@ -129,11 +129,11 @@ class MonteCarloAnalyzer(BaseComponent):
         # Analyze results
         try:
             if not simulation_results:
-                raise TradingBotError("No successful simulations completed", "BACKTEST_003")
+                raise TradingBotError("No successful simulations completed", error_code="BACKTEST_003")
             analysis = self._analyze_simulation_results(simulation_results)
         except Exception as e:
             self.logger.error(f"Failed to analyze simulation results: {e}")
-            raise TradingBotError(f"Simulation analysis failed: {e}", "BACKTEST_004") from e
+            raise TradingBotError(f"Simulation analysis failed: {e}", error_code="BACKTEST_004") from e
 
         self.logger.info("Monte Carlo analysis completed", simulations_run=len(simulation_results))
         return analysis
@@ -208,7 +208,7 @@ class MonteCarloAnalyzer(BaseComponent):
             Simulation results with probable outcomes
         """
         if not daily_returns:
-            raise TradingBotError("No returns to analyze", "BACKTEST_002")
+            raise TradingBotError("No returns to analyze", error_code="BACKTEST_002")
 
         returns_array = np.array(daily_returns)
         mean_return = np.mean(returns_array)
@@ -403,7 +403,7 @@ class WalkForwardAnalyzer(BaseComponent):
         windows = self._generate_windows(market_data)
 
         if not windows:
-            raise TradingBotError("Insufficient data for walk-forward analysis", "BACKTEST_003")
+            raise TradingBotError("Insufficient data for walk-forward analysis", error_code="BACKTEST_003")
 
         # Run analysis for each window
         window_results = []

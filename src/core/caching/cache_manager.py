@@ -32,6 +32,7 @@ class ConnectionManagerMixin:
 
     def __init__(self):
         self._connections = {}
+        self._connection_lock = asyncio.Lock()
 
 
 class ResourceCleanupMixin:
@@ -95,6 +96,7 @@ class CacheManager(
 
         self.lock_timeout = 30
         self.lock_retry_delay = 0.1
+        self._shutdown_requested = False
 
     async def _ensure_client(self):
         """Ensure Redis client is available with proper connection management."""

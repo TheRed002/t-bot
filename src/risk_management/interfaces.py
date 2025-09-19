@@ -82,7 +82,7 @@ class RiskServiceInterface(Protocol):
         ...
 
     async def calculate_risk_metrics(
-        self, positions: list[Position], market_data: list[MarketData]
+        self, positions: list[Position] | None = None, market_data: list[MarketData] | None = None
     ) -> RiskMetrics:
         """Calculate comprehensive risk metrics."""
         ...
@@ -101,6 +101,18 @@ class RiskServiceInterface(Protocol):
 
     async def get_risk_summary(self) -> dict[str, Any]:
         """Get comprehensive risk summary."""
+        ...
+
+    async def get_portfolio_metrics(self) -> Any:
+        """Get current portfolio metrics."""
+        ...
+
+    async def validate_risk_parameters(self, parameters: dict[str, Any]) -> dict[str, Any]:
+        """Validate risk parameters."""
+        ...
+
+    async def get_current_risk_limits(self) -> dict[str, Any]:
+        """Get current risk limits configuration."""
         ...
 
 

@@ -18,7 +18,9 @@ import socketio
 from socketio import AsyncNamespace, AsyncServer
 
 from src.core.base import BaseComponent
-from src.core.exceptions import AuthenticationError
+from src.core.data_transformer import CoreDataTransformer
+from src.core.events import BotEvent, BotEventType
+from src.core.exceptions import AuthenticationError, ExecutionError, ServiceError, ValidationError
 from src.core.logging import correlation_context
 from src.error_handling import (
     ConnectionManager,
@@ -26,6 +28,8 @@ from src.error_handling import (
     with_error_context,
 )
 from src.error_handling.recovery_scenarios import NetworkDisconnectionRecovery
+from src.utils.messaging_patterns import MessagePattern
+from src.web_interface.data_transformer import transform_for_web_response
 
 
 class TradingNamespace(AsyncNamespace):
@@ -59,6 +63,42 @@ class TradingNamespace(AsyncNamespace):
         # Rate limiting: max connections per IP
         self.connection_counts: dict[str, int] = {}
         self.max_connections_per_ip = 10
+
+    async def emit_standardized(
+        self,
+        event_type: str,
+        data: Any,
+        room: str | None = None,
+        processing_mode: str = "stream"
+    ) -> None:
+        """Emit event using standardized core data transformation patterns."""
+        try:
+            # Transform data using core standards
+            transformed_data = transform_for_web_response(
+                data=data,
+                event_type=event_type,
+                processing_mode=processing_mode
+            )
+
+            # Apply pub/sub pattern for Socket.IO emissions
+            standardized_data = CoreDataTransformer.transform_for_pub_sub_pattern(
+                event_type=event_type,
+                data=transformed_data.get("data", data),
+                metadata={
+                    "room": room,
+                    "processing_mode": processing_mode,
+                    "message_pattern": MessagePattern.PUB_SUB.value,
+                    "transport": "socketio"
+                }
+            )
+
+            # Emit the standardized data
+            await self.emit(event_type, standardized_data, room=room)
+
+        except Exception as e:
+            self.logger.error(f"Failed to emit standardized event {event_type}: {e}")
+            # Fallback to simple emit
+            await self.emit(event_type, data, room=room)
 
     async def on_connect(
         self, sid: str, environ: dict[str, Any] | None = None, auth: dict[str, Any] = None
@@ -127,7 +167,12 @@ class TradingNamespace(AsyncNamespace):
                     self.connected_clients[sid]["scopes"] = token_data["scopes"]
                     self.authenticated_sessions.add(sid)
 
-                    await self.emit("authenticated", {"status": "success"}, room=sid)
+                    await self.emit_standardized(
+                        "authenticated",
+                        {"status": "success"},
+                        room=sid,
+                        processing_mode="request_reply"
+                    )
                     self.logger.info(f"Client {sid} authenticated as {token_data['username']}")
 
                     # Update connection state to active after successful auth
@@ -170,11 +215,10 @@ class TradingNamespace(AsyncNamespace):
             )
 
         # Send welcome message with limited info
-        await self.emit(
+        await self.emit_standardized(
             "welcome",
             {
                 "message": "Connected to T-Bot Trading System",
-                "timestamp": datetime.now(timezone.utc).isoformat(),
                 "version": "1.0.0",
                 "authenticated": self.connected_clients[sid]["authenticated"],
             },
@@ -320,19 +364,80 @@ class TradingNamespace(AsyncNamespace):
             await self.emit("order_error", {"error": "Missing required order fields"}, room=sid)
             return
 
-        # Execute order through trading engine
-        # TBD: Integrate with actual trading engine when execution service is available
-        from src.core.event_constants import OrderEvents
+        # Execute order through execution service
+        try:
+            from src.core.dependency_injection import DependencyInjector
+            from src.core.event_constants import OrderEvents
 
-        await self.emit(
-            OrderEvents.CREATED,
-            {
-                "order_id": f"ORD-{sid}-{datetime.now(timezone.utc).timestamp()}",
-                "status": "pending",
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-            },
-            room=sid,
-        )
+            # Get execution orchestration service
+            injector = DependencyInjector.get_instance()
+            if injector and injector.has_service("ExecutionOrchestrationService"):
+                orchestration_service = injector.resolve("ExecutionOrchestrationService")
+
+                # Prepare order data for execution service
+                order_data = {
+                    "symbol": symbol,
+                    "side": side,
+                    "type": order_type,
+                    "amount": Decimal(str(amount)),
+                    "price": Decimal(str(data.get("price", "0"))) if data.get("price") else None,
+                }
+
+                # Basic market data (should come from data service in production)
+                market_data = {
+                    "symbol": symbol,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "last_price": Decimal("0"),  # Placeholder
+                }
+
+                # Execute through orchestration service
+                execution_result = await orchestration_service.execute_order_from_data(
+                    order_data=order_data,
+                    market_data=market_data,
+                )
+
+                # Convert ExecutionResult to dict for JSON serialization
+                result_data = {
+                    "order_id": execution_result.order_id if hasattr(execution_result, 'order_id') else f"ORD-{sid}-{datetime.now(timezone.utc).timestamp()}",
+                    "status": execution_result.status.value if hasattr(execution_result, 'status') else "submitted",
+                    "filled_quantity": str(execution_result.filled_quantity) if hasattr(execution_result, 'filled_quantity') else "0",
+                    "average_price": str(execution_result.average_price) if hasattr(execution_result, 'average_price') else "0",
+                    "total_cost": str(execution_result.total_cost) if hasattr(execution_result, 'total_cost') else "0",
+                }
+
+                await self.emit(
+                    OrderEvents.CREATED,
+                    {
+                        **result_data,
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "message": "Order executed through execution service",
+                    },
+                    room=sid,
+                )
+            else:
+                # Fallback when execution service is not available
+                await self.emit(
+                    OrderEvents.CREATED,
+                    {
+                        "order_id": f"ORD-{sid}-{datetime.now(timezone.utc).timestamp()}",
+                        "status": "pending",
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "message": "Execution service not available - order queued",
+                    },
+                    room=sid,
+                )
+        except ValidationError as e:
+            self.logger.warning(f"Order validation failed via WebSocket: {e}")
+            await self.emit("order_error", {"error": f"Order validation failed: {str(e)}", "type": "validation"}, room=sid)
+        except ExecutionError as e:
+            self.logger.error(f"Order execution failed via WebSocket: {e}")
+            await self.emit("order_error", {"error": f"Execution failed: {str(e)}", "type": "execution"}, room=sid)
+        except ServiceError as e:
+            self.logger.error(f"Service error during order execution via WebSocket: {e}")
+            await self.emit("order_error", {"error": f"Service error: {str(e)}", "type": "service"}, room=sid)
+        except Exception as e:
+            self.logger.error(f"Unexpected error executing order via WebSocket: {e}")
+            await self.emit("order_error", {"error": f"Unexpected error: {str(e)}", "type": "system"}, room=sid)
 
     async def on_get_portfolio(self, sid: str, data: dict[str, Any]):
         """Handle portfolio data requests."""
@@ -558,7 +663,13 @@ class SocketIOManager(BaseComponent):
                     }
 
                     if self.sio:
-                        await self.sio.emit("market_data", market_data, room="market_data")
+                        # Use standardized emit for market data
+                        transformed_data = transform_for_web_response(
+                            data=market_data,
+                            event_type="market_data",
+                            processing_mode="stream"
+                        )
+                        await self.sio.emit("market_data", transformed_data, room="market_data")
                         self.logger.debug('emitting event "market_data" to market_data [/]')
 
                     await asyncio.sleep(5)  # Update every 5 seconds to reduce log volume

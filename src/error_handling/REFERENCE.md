@@ -2,7 +2,7 @@
 
 ## INTEGRATION
 **Dependencies**: core, exchanges, execution, strategies, utils
-**Used By**: None
+**Used By**: strategies
 **Provides**: ConnectionManager, ErrorHandlingService, MockContextManager, SecureErrorContextManager
 **Patterns**: Async Operations, Component Architecture, Service Layer
 
@@ -23,8 +23,8 @@
 - RetryRecovery inherits from base architecture
 
 ## MODULE OVERVIEW
-**Files**: 28 Python files
-**Classes**: 77
+**Files**: 29 Python files
+**Classes**: 78
 **Functions**: 59
 
 ## COMPLETE API REFERENCE
@@ -77,12 +77,12 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async establish_connection(self, ...) -> bool` - Line 62
-- `async close_connection(self, connection_id: str) -> bool` - Line 110
-- `async reconnect_connection(self, connection_id: str) -> bool` - Line 135
-- `get_connection_status(self, connection_id: str) -> dict[str, Any] | None` - Line 156
-- `is_connection_healthy(self, connection_id: str) -> bool` - Line 171
-- `async cleanup_resources(self) -> None` - Line 180
+- `async establish_connection(self, ...) -> bool` - Line 63
+- `async close_connection(self, connection_id: str) -> bool` - Line 111
+- `async reconnect_connection(self, connection_id: str) -> bool` - Line 136
+- `get_connection_status(self, connection_id: str) -> dict[str, Any] | None` - Line 157
+- `is_connection_healthy(self, connection_id: str) -> bool` - Line 172
+- `async cleanup_resources(self) -> None` - Line 181
 
 ### Implementation: `ErrorContext` ✅
 
@@ -93,18 +93,18 @@
 - `error_type(self) -> str` - Line 96
 - `error_message(self) -> str` - Line 101
 - `from_exception(cls, ...) -> 'ErrorContext'` - Line 106
-- `function(self) -> str | None` - Line 158
-- `function(self, value: str | None)` - Line 163
-- `to_dict(self, ...) -> dict[str, Any]` - Line 167
-- `to_legacy_dict(self, ...) -> dict[str, Any]` - Line 250
-- `add_detail(self, key: str, value: Any) -> None` - Line 291
-- `add_metadata(self, key: str, value: Any) -> None` - Line 295
-- `increment_recovery_attempts(self) -> None` - Line 299
-- `can_retry_recovery(self) -> bool` - Line 303
-- `is_critical(self) -> bool` - Line 307
-- `is_high_severity(self) -> bool` - Line 311
-- `requires_escalation(self) -> bool` - Line 315
-- `from_decorator_context(cls, ...) -> 'ErrorContext'` - Line 320
+- `function(self) -> str | None` - Line 169
+- `function(self, value: str | None)` - Line 174
+- `to_dict(self, ...) -> dict[str, Any]` - Line 178
+- `to_legacy_dict(self, ...) -> dict[str, Any]` - Line 261
+- `add_detail(self, key: str, value: Any) -> None` - Line 302
+- `add_metadata(self, key: str, value: Any) -> None` - Line 306
+- `increment_recovery_attempts(self) -> None` - Line 310
+- `can_retry_recovery(self) -> bool` - Line 314
+- `is_critical(self) -> bool` - Line 318
+- `is_high_severity(self) -> bool` - Line 322
+- `requires_escalation(self) -> bool` - Line 326
+- `from_decorator_context(cls, ...) -> 'ErrorContext'` - Line 331
 
 ### Implementation: `ErrorContextFactory` ✅
 
@@ -113,12 +113,27 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `create_context_dict(self, error: Exception, **kwargs) -> dict[str, Any]` - Line 363
-- `create(self, error: Exception, **kwargs) -> dict[str, Any]` - Line 426
-- `create_context(self, context_type: str = 'standard', error: Exception | None = None, **kwargs) -> ErrorContext` - Line 439
-- `create_from_frame(self, error: Exception, frame: Any | None = None, **kwargs) -> dict[str, Any]` - Line 458
-- `create_minimal(self, error: Exception) -> dict[str, Any]` - Line 502
-- `enrich_context(self, base_context: dict[str, Any], **additional) -> dict[str, Any]` - Line 518
+- `create_context_dict(self, error: Exception, **kwargs) -> dict[str, Any]` - Line 374
+- `create(self, error: Exception, **kwargs) -> dict[str, Any]` - Line 437
+- `create_context(self, context_type: str = 'standard', error: Exception | None = None, **kwargs) -> ErrorContext` - Line 450
+- `create_from_frame(self, error: Exception, frame: Any | None = None, **kwargs) -> dict[str, Any]` - Line 469
+- `create_minimal(self, error: Exception) -> dict[str, Any]` - Line 513
+- `enrich_context(self, base_context: dict[str, Any], **additional) -> dict[str, Any]` - Line 529
+
+### Implementation: `ErrorDataTransformer` ✅
+
+**Purpose**: Handles consistent data transformation for error_handling module
+**Status**: Complete
+
+**Implemented Methods:**
+- `transform_error_to_event_data(error, ...) -> dict[str, Any]` - Line 21
+- `transform_context_to_event_data(context: dict[str, Any], metadata: dict[str, Any] | None = None) -> dict[str, Any]` - Line 55
+- `validate_financial_precision(data: dict[str, Any]) -> dict[str, Any]` - Line 89
+- `ensure_boundary_fields(data: dict[str, Any], source: str = 'error_handling') -> dict[str, Any]` - Line 112
+- `transform_for_pub_sub(cls, event_type: str, data: Any, metadata: dict[str, Any] | None = None) -> dict[str, Any]` - Line 148
+- `transform_for_req_reply(cls, request_type: str, data: Any, correlation_id: str | None = None) -> dict[str, Any]` - Line 194
+- `align_processing_paradigm(cls, data: dict[str, Any], target_mode: str = 'stream') -> dict[str, Any]` - Line 240
+- `apply_cross_module_validation(cls, ...) -> dict[str, Any]` - Line 259
 
 ### Implementation: `FallbackStrategy` ✅
 
@@ -406,7 +421,7 @@
 - `get_trend_summary(self) -> dict[str, Any]` - Line 189
 - `get_error_patterns(self) -> list[dict[str, Any]]` - Line 227
 - `async add_batch_error_events(self, error_contexts: list[dict[str, Any]]) -> None` - Line 245
-- `async cleanup(self) -> None` - Line 282
+- `async cleanup(self) -> None` - Line 287
 
 ### Implementation: `PropagationMethod` ✅
 
@@ -547,7 +562,7 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async execute_recovery(self, context: dict[str, Any]) -> bool` - Line 468
+- `async execute_recovery(self, context: dict[str, Any]) -> bool` - Line 474
 
 ### Implementation: `ExchangeMaintenanceRecovery` ✅
 
@@ -556,7 +571,7 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async execute_recovery(self, context: dict[str, Any]) -> bool` - Line 931
+- `async execute_recovery(self, context: dict[str, Any]) -> bool` - Line 937
 
 ### Implementation: `DataFeedInterruptionRecovery` ✅
 
@@ -565,7 +580,7 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async execute_recovery(self, context: dict[str, Any]) -> bool` - Line 1019
+- `async execute_recovery(self, context: dict[str, Any]) -> bool` - Line 1025
 
 ### Implementation: `OrderRejectionRecovery` ✅
 
@@ -574,7 +589,7 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async execute_recovery(self, context: dict[str, Any]) -> bool` - Line 1124
+- `async execute_recovery(self, context: dict[str, Any]) -> bool` - Line 1130
 
 ### Implementation: `APIRateLimitRecovery` ✅
 
@@ -583,7 +598,7 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async execute_recovery(self, context: dict[str, Any]) -> bool` - Line 1243
+- `async execute_recovery(self, context: dict[str, Any]) -> bool` - Line 1249
 
 ### Implementation: `SecureErrorReport` ✅
 
@@ -736,10 +751,10 @@
 **Status**: Abstract Base Class
 
 **Implemented Methods:**
-- `async validate_state_consistency(self, component: str = 'all') -> dict[str, Any]` - Line 32
-- `async reconcile_state(self, component: str, discrepancies: list[dict[str, Any]]) -> bool` - Line 33
-- `async start_monitoring(self) -> None` - Line 36
-- `get_state_summary(self) -> dict[str, Any]` - Line 37
+- `async validate_state_consistency(self, component: str = 'all') -> dict[str, Any]` - Line 33
+- `async reconcile_state(self, component: str, discrepancies: list[dict[str, Any]]) -> bool` - Line 34
+- `async start_monitoring(self) -> None` - Line 37
+- `get_state_summary(self) -> dict[str, Any]` - Line 38
 
 ### Implementation: `ErrorHandlingService` ✅
 
@@ -748,22 +763,22 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async initialize(self) -> None` - Line 88
-- `configure_dependencies(self, injector) -> None` - Line 127
-- `async handle_error(self, ...) -> dict[str, Any]` - Line 149
-- `async handle_global_error(self, ...) -> dict[str, Any]` - Line 268
-- `async validate_state_consistency(self, component: str = 'all') -> dict[str, Any]` - Line 299
-- `async reconcile_state_discrepancies(self, component: str, discrepancies: list[dict[str, Any]]) -> bool` - Line 331
-- `async get_error_patterns(self) -> dict[str, Any]` - Line 364
-- `async get_state_monitoring_status(self) -> dict[str, Any]` - Line 392
-- `async get_error_handler_metrics(self) -> dict[str, Any]` - Line 417
-- `async start_error_monitoring(self) -> None` - Line 501
-- `async stop_error_monitoring(self) -> None` - Line 513
-- `async handle_batch_errors(self, errors: list[tuple[Exception, str, str, dict[str, Any]]] | None) -> list[dict[str, Any]]` - Line 523
-- `async start_monitoring(self) -> None` - Line 591
-- `async cleanup_resources(self) -> None` - Line 615
-- `async shutdown(self) -> None` - Line 658
-- `async health_check(self) -> HealthCheckResult` - Line 684
+- `async initialize(self) -> None` - Line 89
+- `configure_dependencies(self, injector) -> None` - Line 128
+- `async handle_error(self, ...) -> dict[str, Any]` - Line 150
+- `async handle_global_error(self, ...) -> dict[str, Any]` - Line 309
+- `async validate_state_consistency(self, component: str = 'all') -> dict[str, Any]` - Line 340
+- `async reconcile_state_discrepancies(self, component: str, discrepancies: list[dict[str, Any]]) -> bool` - Line 372
+- `async get_error_patterns(self) -> dict[str, Any]` - Line 405
+- `async get_state_monitoring_status(self) -> dict[str, Any]` - Line 433
+- `async get_error_handler_metrics(self) -> dict[str, Any]` - Line 458
+- `async start_error_monitoring(self) -> None` - Line 542
+- `async stop_error_monitoring(self) -> None` - Line 554
+- `async handle_batch_errors(self, errors: list[tuple[Exception, str, str, dict[str, Any]]] | None) -> list[dict[str, Any]]` - Line 564
+- `async start_monitoring(self) -> None` - Line 632
+- `async cleanup_resources(self) -> None` - Line 656
+- `async shutdown(self) -> None` - Line 699
+- `async health_check(self) -> HealthCheckResult` - Line 725
 
 ### Implementation: `StateDataServiceInterface` 🔧
 
@@ -905,15 +920,15 @@ class ConnectionInfo:
 
 ```python
 class ConnectionManager:
-    def __init__(self, config: Config) -> None  # Line 48
-    async def establish_connection(self, ...) -> bool  # Line 62
-    async def close_connection(self, connection_id: str) -> bool  # Line 110
-    async def reconnect_connection(self, connection_id: str) -> bool  # Line 135
-    def get_connection_status(self, connection_id: str) -> dict[str, Any] | None  # Line 156
-    def is_connection_healthy(self, connection_id: str) -> bool  # Line 171
-    async def cleanup_resources(self) -> None  # Line 180
-    async def __aenter__(self)  # Line 198
-    async def __aexit__(self, exc_type, exc_val, exc_tb)  # Line 202
+    def __init__(self, config: Config) -> None  # Line 49
+    async def establish_connection(self, ...) -> bool  # Line 63
+    async def close_connection(self, connection_id: str) -> bool  # Line 111
+    async def reconnect_connection(self, connection_id: str) -> bool  # Line 136
+    def get_connection_status(self, connection_id: str) -> dict[str, Any] | None  # Line 157
+    def is_connection_healthy(self, connection_id: str) -> bool  # Line 172
+    async def cleanup_resources(self) -> None  # Line 181
+    async def __aenter__(self)  # Line 199
+    async def __aexit__(self, exc_type, exc_val, exc_tb)  # Line 203
 ```
 
 ### File: context.py
@@ -935,18 +950,18 @@ class ErrorContext:
     def error_type(self) -> str  # Line 96
     def error_message(self) -> str  # Line 101
     def from_exception(cls, ...) -> 'ErrorContext'  # Line 106
-    def function(self) -> str | None  # Line 158
-    def function(self, value: str | None)  # Line 163
-    def to_dict(self, ...) -> dict[str, Any]  # Line 167
-    def to_legacy_dict(self, ...) -> dict[str, Any]  # Line 250
-    def add_detail(self, key: str, value: Any) -> None  # Line 291
-    def add_metadata(self, key: str, value: Any) -> None  # Line 295
-    def increment_recovery_attempts(self) -> None  # Line 299
-    def can_retry_recovery(self) -> bool  # Line 303
-    def is_critical(self) -> bool  # Line 307
-    def is_high_severity(self) -> bool  # Line 311
-    def requires_escalation(self) -> bool  # Line 315
-    def from_decorator_context(cls, ...) -> 'ErrorContext'  # Line 320
+    def function(self) -> str | None  # Line 169
+    def function(self, value: str | None)  # Line 174
+    def to_dict(self, ...) -> dict[str, Any]  # Line 178
+    def to_legacy_dict(self, ...) -> dict[str, Any]  # Line 261
+    def add_detail(self, key: str, value: Any) -> None  # Line 302
+    def add_metadata(self, key: str, value: Any) -> None  # Line 306
+    def increment_recovery_attempts(self) -> None  # Line 310
+    def can_retry_recovery(self) -> bool  # Line 314
+    def is_critical(self) -> bool  # Line 318
+    def is_high_severity(self) -> bool  # Line 322
+    def requires_escalation(self) -> bool  # Line 326
+    def from_decorator_context(cls, ...) -> 'ErrorContext'  # Line 331
 ```
 
 #### Class: `ErrorContextFactory`
@@ -956,13 +971,35 @@ class ErrorContext:
 
 ```python
 class ErrorContextFactory(BaseFactory[ErrorContext]):
-    def __init__(self, dependency_container: Any | None = None)  # Line 345
-    def create_context_dict(self, error: Exception, **kwargs) -> dict[str, Any]  # Line 363
-    def create(self, error: Exception, **kwargs) -> dict[str, Any]  # Line 426
-    def create_context(self, context_type: str = 'standard', error: Exception | None = None, **kwargs) -> ErrorContext  # Line 439
-    def create_from_frame(self, error: Exception, frame: Any | None = None, **kwargs) -> dict[str, Any]  # Line 458
-    def create_minimal(self, error: Exception) -> dict[str, Any]  # Line 502
-    def enrich_context(self, base_context: dict[str, Any], **additional) -> dict[str, Any]  # Line 518
+    def __init__(self, dependency_container: Any | None = None)  # Line 356
+    def create_context_dict(self, error: Exception, **kwargs) -> dict[str, Any]  # Line 374
+    def create(self, error: Exception, **kwargs) -> dict[str, Any]  # Line 437
+    def create_context(self, context_type: str = 'standard', error: Exception | None = None, **kwargs) -> ErrorContext  # Line 450
+    def create_from_frame(self, error: Exception, frame: Any | None = None, **kwargs) -> dict[str, Any]  # Line 469
+    def create_minimal(self, error: Exception) -> dict[str, Any]  # Line 513
+    def enrich_context(self, base_context: dict[str, Any], **additional) -> dict[str, Any]  # Line 529
+```
+
+### File: data_transformer.py
+
+**Key Imports:**
+- `from src.core.logging import get_logger`
+- `from src.utils.decimal_utils import to_decimal`
+
+#### Class: `ErrorDataTransformer`
+
+**Purpose**: Handles consistent data transformation for error_handling module
+
+```python
+class ErrorDataTransformer:
+    def transform_error_to_event_data(error, ...) -> dict[str, Any]  # Line 21
+    def transform_context_to_event_data(context: dict[str, Any], metadata: dict[str, Any] | None = None) -> dict[str, Any]  # Line 55
+    def validate_financial_precision(data: dict[str, Any]) -> dict[str, Any]  # Line 89
+    def ensure_boundary_fields(data: dict[str, Any], source: str = 'error_handling') -> dict[str, Any]  # Line 112
+    def transform_for_pub_sub(cls, event_type: str, data: Any, metadata: dict[str, Any] | None = None) -> dict[str, Any]  # Line 148
+    def transform_for_req_reply(cls, request_type: str, data: Any, correlation_id: str | None = None) -> dict[str, Any]  # Line 194
+    def align_processing_paradigm(cls, data: dict[str, Any], target_mode: str = 'stream') -> dict[str, Any]  # Line 240
+    def apply_cross_module_validation(cls, ...) -> dict[str, Any]  # Line 259
 ```
 
 ### File: decorators.py
@@ -1009,7 +1046,7 @@ class FallbackConfig:
 #### Functions:
 
 ```python
-def enhanced_error_handler(...)  # Line 70
+def error_handler(...)  # Line 70
 def _should_circuit_break(func_name: str, config: CircuitBreakerConfig) -> bool  # Line 183
 def _should_retry(error: Exception, config: RetryConfig | None, exceptions: tuple | None = None) -> bool  # Line 189
 def _calculate_delay(attempt: int, config: RetryConfig | None) -> float  # Line 204
@@ -1489,8 +1526,8 @@ class ErrorPatternAnalytics(BaseService):
     def get_trend_summary(self) -> dict[str, Any]  # Line 189
     def get_error_patterns(self) -> list[dict[str, Any]]  # Line 227
     async def add_batch_error_events(self, error_contexts: list[dict[str, Any]]) -> None  # Line 245
-    def _transform_error_event_data(self, error_context: dict[str, Any]) -> dict[str, Any]  # Line 257
-    async def cleanup(self) -> None  # Line 282
+    def _transform_error_event_data(self, error_context: dict[str, Any]) -> dict[str, Any]  # Line 262
+    async def cleanup(self) -> None  # Line 287
 ```
 
 ### File: propagation_utils.py
@@ -1523,12 +1560,12 @@ class ProcessingStage(Enum):
 def create_propagation_metadata(...) -> dict[str, Any]  # Line 39
 def validate_propagation_data(data: dict[str, Any], source_module: str, target_module: str) -> dict[str, Any]  # Line 78
 def transform_error_for_module(error_data: dict[str, Any], target_module: str, processing_mode: str = 'stream') -> dict[str, Any]  # Line 152
-def _transform_for_core(data: dict[str, Any]) -> dict[str, Any]  # Line 194
-def _transform_for_database(data: dict[str, Any]) -> dict[str, Any]  # Line 220
-def _transform_for_monitoring(data: dict[str, Any]) -> dict[str, Any]  # Line 241
-def _transform_for_exchanges(data: dict[str, Any]) -> dict[str, Any]  # Line 261
-def get_propagation_chain(error_data: dict[str, Any]) -> list[dict[str, Any]]  # Line 283
-def add_propagation_step(...) -> dict[str, Any]  # Line 296
+def _transform_for_core(data: dict[str, Any]) -> dict[str, Any]  # Line 197
+def _transform_for_database(data: dict[str, Any]) -> dict[str, Any]  # Line 223
+def _transform_for_monitoring(data: dict[str, Any]) -> dict[str, Any]  # Line 244
+def _transform_for_exchanges(data: dict[str, Any]) -> dict[str, Any]  # Line 264
+def get_propagation_chain(error_data: dict[str, Any]) -> list[dict[str, Any]]  # Line 286
+def add_propagation_step(...) -> dict[str, Any]  # Line 299
 ```
 
 ### File: recovery.py
@@ -1685,8 +1722,8 @@ class PartialFillRecovery(RecoveryScenario):
     async def _cancel_order(self, order_id: str) -> None  # Line 233
     async def _log_partial_fill(self, order: dict[str, Any], filled_quantity: Decimal) -> None  # Line 255
     async def _reevaluate_signal(self, signal: dict[str, Any]) -> None  # Line 266
-    async def _update_position(self, order: dict[str, Any], filled_quantity: Decimal) -> None  # Line 314
-    async def _adjust_stop_loss(self, order: dict[str, Any], filled_quantity: Decimal) -> None  # Line 364
+    async def _update_position(self, order: dict[str, Any], filled_quantity: Decimal) -> None  # Line 320
+    async def _adjust_stop_loss(self, order: dict[str, Any], filled_quantity: Decimal) -> None  # Line 370
 ```
 
 #### Class: `NetworkDisconnectionRecovery`
@@ -1696,33 +1733,33 @@ class PartialFillRecovery(RecoveryScenario):
 
 ```python
 class NetworkDisconnectionRecovery(RecoveryScenario):
-    def __init__(self, ...)  # Line 447
-    async def execute_recovery(self, context: dict[str, Any]) -> bool  # Line 468
-    async def _switch_to_offline_mode(self, component: str) -> None  # Line 501
-    async def _persist_pending_operations(self, component: str) -> None  # Line 537
-    async def _try_reconnect(self, component: str) -> bool  # Line 581
-    async def _reconcile_positions(self, component: str) -> None  # Line 630
-    async def _reconcile_orders(self, component: str) -> None  # Line 657
-    async def _verify_balances(self, component: str) -> None  # Line 689
-    async def _switch_to_online_mode(self, component: str) -> None  # Line 728
-    async def _enter_safe_mode(self, component: str) -> None  # Line 775
-    async def _get_cached_positions(self, component: str) -> dict[str, Any]  # Line 814
-    async def _fetch_exchange_positions(self, component: str) -> dict[str, Any]  # Line 819
-    def _compare_positions(self, cached: dict, exchange: dict) -> list[dict]  # Line 824
-    async def _resolve_discrepancies(self, component: str, discrepancies: list) -> None  # Line 840
-    async def _get_cached_orders(self, component: str) -> list[dict]  # Line 846
-    async def _fetch_exchange_orders(self, component: str) -> list[dict]  # Line 850
-    async def _handle_missing_orders(self, component: str, orders: list) -> None  # Line 854
-    async def _handle_unknown_orders(self, component: str, orders: list) -> None  # Line 860
-    async def _get_cached_balances(self, component: str) -> dict[str, Decimal]  # Line 866
-    async def _fetch_exchange_balances(self, component: str) -> dict[str, Decimal]  # Line 870
-    async def _handle_balance_discrepancies(self, component: str, discrepancies: dict) -> None  # Line 874
-    async def _cancel_all_pending_orders(self, component: str) -> None  # Line 880
-    async def _close_all_positions(self, component: str) -> None  # Line 885
-    async def _disable_trading(self, component: str) -> None  # Line 890
-    async def _set_safe_mode_flag(self, component: str, enabled: bool) -> None  # Line 895
-    async def _send_critical_alert(self, component: str, message: str) -> None  # Line 900
-    async def _emergency_shutdown(self, component: str) -> None  # Line 905
+    def __init__(self, ...)  # Line 453
+    async def execute_recovery(self, context: dict[str, Any]) -> bool  # Line 474
+    async def _switch_to_offline_mode(self, component: str) -> None  # Line 507
+    async def _persist_pending_operations(self, component: str) -> None  # Line 543
+    async def _try_reconnect(self, component: str) -> bool  # Line 587
+    async def _reconcile_positions(self, component: str) -> None  # Line 636
+    async def _reconcile_orders(self, component: str) -> None  # Line 663
+    async def _verify_balances(self, component: str) -> None  # Line 695
+    async def _switch_to_online_mode(self, component: str) -> None  # Line 734
+    async def _enter_safe_mode(self, component: str) -> None  # Line 781
+    async def _get_cached_positions(self, component: str) -> dict[str, Any]  # Line 820
+    async def _fetch_exchange_positions(self, component: str) -> dict[str, Any]  # Line 825
+    def _compare_positions(self, cached: dict, exchange: dict) -> list[dict]  # Line 830
+    async def _resolve_discrepancies(self, component: str, discrepancies: list) -> None  # Line 846
+    async def _get_cached_orders(self, component: str) -> list[dict]  # Line 852
+    async def _fetch_exchange_orders(self, component: str) -> list[dict]  # Line 856
+    async def _handle_missing_orders(self, component: str, orders: list) -> None  # Line 860
+    async def _handle_unknown_orders(self, component: str, orders: list) -> None  # Line 866
+    async def _get_cached_balances(self, component: str) -> dict[str, Decimal]  # Line 872
+    async def _fetch_exchange_balances(self, component: str) -> dict[str, Decimal]  # Line 876
+    async def _handle_balance_discrepancies(self, component: str, discrepancies: dict) -> None  # Line 880
+    async def _cancel_all_pending_orders(self, component: str) -> None  # Line 886
+    async def _close_all_positions(self, component: str) -> None  # Line 891
+    async def _disable_trading(self, component: str) -> None  # Line 896
+    async def _set_safe_mode_flag(self, component: str, enabled: bool) -> None  # Line 901
+    async def _send_critical_alert(self, component: str, message: str) -> None  # Line 906
+    async def _emergency_shutdown(self, component: str) -> None  # Line 911
 ```
 
 #### Class: `ExchangeMaintenanceRecovery`
@@ -1732,11 +1769,11 @@ class NetworkDisconnectionRecovery(RecoveryScenario):
 
 ```python
 class ExchangeMaintenanceRecovery(RecoveryScenario):
-    def __init__(self, ...)  # Line 914
-    async def execute_recovery(self, context: dict[str, Any]) -> bool  # Line 931
-    async def _detect_maintenance_schedule(self, exchange: str) -> None  # Line 952
-    async def _redistribute_capital(self, exchange: str) -> None  # Line 963
-    async def _pause_new_orders(self, exchange: str) -> None  # Line 980
+    def __init__(self, ...)  # Line 920
+    async def execute_recovery(self, context: dict[str, Any]) -> bool  # Line 937
+    async def _detect_maintenance_schedule(self, exchange: str) -> None  # Line 958
+    async def _redistribute_capital(self, exchange: str) -> None  # Line 969
+    async def _pause_new_orders(self, exchange: str) -> None  # Line 986
 ```
 
 #### Class: `DataFeedInterruptionRecovery`
@@ -1746,11 +1783,11 @@ class ExchangeMaintenanceRecovery(RecoveryScenario):
 
 ```python
 class DataFeedInterruptionRecovery(RecoveryScenario):
-    def __init__(self, ...)  # Line 1000
-    async def execute_recovery(self, context: dict[str, Any]) -> bool  # Line 1019
-    async def _check_data_staleness(self, data_source: str) -> bool  # Line 1038
-    async def _switch_to_fallback_source(self, data_source: str) -> None  # Line 1052
-    async def _enable_conservative_trading(self, data_source: str) -> None  # Line 1073
+    def __init__(self, ...)  # Line 1006
+    async def execute_recovery(self, context: dict[str, Any]) -> bool  # Line 1025
+    async def _check_data_staleness(self, data_source: str) -> bool  # Line 1044
+    async def _switch_to_fallback_source(self, data_source: str) -> None  # Line 1058
+    async def _enable_conservative_trading(self, data_source: str) -> None  # Line 1079
 ```
 
 #### Class: `OrderRejectionRecovery`
@@ -1760,10 +1797,10 @@ class DataFeedInterruptionRecovery(RecoveryScenario):
 
 ```python
 class OrderRejectionRecovery(RecoveryScenario):
-    def __init__(self, ...)  # Line 1106
-    async def execute_recovery(self, context: dict[str, Any]) -> bool  # Line 1124
-    async def _analyze_rejection_reason(self, order: dict[str, Any], rejection_reason: str) -> None  # Line 1143
-    async def _adjust_order_parameters(self, order: dict[str, Any], rejection_reason: str) -> None  # Line 1185
+    def __init__(self, ...)  # Line 1112
+    async def execute_recovery(self, context: dict[str, Any]) -> bool  # Line 1130
+    async def _analyze_rejection_reason(self, order: dict[str, Any], rejection_reason: str) -> None  # Line 1149
+    async def _adjust_order_parameters(self, order: dict[str, Any], rejection_reason: str) -> None  # Line 1191
 ```
 
 #### Class: `APIRateLimitRecovery`
@@ -1773,15 +1810,15 @@ class OrderRejectionRecovery(RecoveryScenario):
 
 ```python
 class APIRateLimitRecovery(RecoveryScenario):
-    def __init__(self, ...)  # Line 1226
-    async def execute_recovery(self, context: dict[str, Any]) -> bool  # Line 1243
+    def __init__(self, ...)  # Line 1232
+    async def execute_recovery(self, context: dict[str, Any]) -> bool  # Line 1249
 ```
 
 #### Functions:
 
 ```python
-def create_partial_fill_recovery_factory(config: Config | None = None)  # Line 1274
-def create_network_disconnection_recovery_factory(config: Config | None = None)  # Line 1324
+def create_partial_fill_recovery_factory(config: Config | None = None)  # Line 1280
+def create_network_disconnection_recovery_factory(config: Config | None = None)  # Line 1330
 ```
 
 ### File: secure_context_manager.py
@@ -2073,10 +2110,10 @@ def get_security_rate_limiter() -> 'SecurityRateLimiter'  # Line 151
 
 ```python
 class StateMonitorInterface(Protocol):
-    async def validate_state_consistency(self, component: str = 'all') -> dict[str, Any]  # Line 32
-    async def reconcile_state(self, component: str, discrepancies: list[dict[str, Any]]) -> bool  # Line 33
-    async def start_monitoring(self) -> None  # Line 36
-    def get_state_summary(self) -> dict[str, Any]  # Line 37
+    async def validate_state_consistency(self, component: str = 'all') -> dict[str, Any]  # Line 33
+    async def reconcile_state(self, component: str, discrepancies: list[dict[str, Any]]) -> bool  # Line 34
+    async def start_monitoring(self) -> None  # Line 37
+    def get_state_summary(self) -> dict[str, Any]  # Line 38
 ```
 
 #### Class: `ErrorHandlingService`
@@ -2086,35 +2123,36 @@ class StateMonitorInterface(Protocol):
 
 ```python
 class ErrorHandlingService(BaseService, ErrorPropagationMixin):
-    def __init__(self, ...) -> None  # Line 48
-    async def initialize(self) -> None  # Line 88
-    def configure_dependencies(self, injector) -> None  # Line 127
-    async def handle_error(self, ...) -> dict[str, Any]  # Line 149
-    async def _handle_error_impl(self, ...) -> dict[str, Any]  # Line 187
-    async def handle_global_error(self, ...) -> dict[str, Any]  # Line 268
-    async def _handle_global_error_impl(self, ...) -> dict[str, Any]  # Line 286
-    async def validate_state_consistency(self, component: str = 'all') -> dict[str, Any]  # Line 299
-    async def reconcile_state_discrepancies(self, component: str, discrepancies: list[dict[str, Any]]) -> bool  # Line 331
-    async def get_error_patterns(self) -> dict[str, Any]  # Line 364
-    async def get_state_monitoring_status(self) -> dict[str, Any]  # Line 392
-    async def get_error_handler_metrics(self) -> dict[str, Any]  # Line 417
-    def _transform_error_context(self, context: dict[str, Any], component: str) -> dict[str, Any]  # Line 452
-    def _validate_data_module_boundary(self, error: Exception, component: str, operation: str, context: dict[str, Any]) -> None  # Line 482
-    async def start_error_monitoring(self) -> None  # Line 501
-    async def stop_error_monitoring(self) -> None  # Line 513
-    async def handle_batch_errors(self, errors: list[tuple[Exception, str, str, dict[str, Any]]] | None) -> list[dict[str, Any]]  # Line 523
-    async def _handle_batch_errors_impl(self, errors: list[tuple[Exception, str, str, dict[str, Any]]] | None) -> list[dict[str, Any]]  # Line 534
-    async def start_monitoring(self) -> None  # Line 591
-    async def cleanup_resources(self) -> None  # Line 615
-    async def shutdown(self) -> None  # Line 658
-    async def _ensure_initialized(self) -> None  # Line 679
-    async def health_check(self) -> HealthCheckResult  # Line 684
+    def __init__(self, ...) -> None  # Line 49
+    async def initialize(self) -> None  # Line 89
+    def configure_dependencies(self, injector) -> None  # Line 128
+    async def handle_error(self, ...) -> dict[str, Any]  # Line 150
+    async def _handle_error_impl(self, ...) -> dict[str, Any]  # Line 190
+    async def _notify_monitoring_of_error_handling(self, error_response: dict[str, Any]) -> None  # Line 274
+    async def handle_global_error(self, ...) -> dict[str, Any]  # Line 309
+    async def _handle_global_error_impl(self, ...) -> dict[str, Any]  # Line 327
+    async def validate_state_consistency(self, component: str = 'all') -> dict[str, Any]  # Line 340
+    async def reconcile_state_discrepancies(self, component: str, discrepancies: list[dict[str, Any]]) -> bool  # Line 372
+    async def get_error_patterns(self) -> dict[str, Any]  # Line 405
+    async def get_state_monitoring_status(self) -> dict[str, Any]  # Line 433
+    async def get_error_handler_metrics(self) -> dict[str, Any]  # Line 458
+    def _transform_error_context(self, context: dict[str, Any], component: str) -> dict[str, Any]  # Line 493
+    def _validate_data_module_boundary(self, error: Exception, component: str, operation: str, context: dict[str, Any]) -> None  # Line 523
+    async def start_error_monitoring(self) -> None  # Line 542
+    async def stop_error_monitoring(self) -> None  # Line 554
+    async def handle_batch_errors(self, errors: list[tuple[Exception, str, str, dict[str, Any]]] | None) -> list[dict[str, Any]]  # Line 564
+    async def _handle_batch_errors_impl(self, errors: list[tuple[Exception, str, str, dict[str, Any]]] | None) -> list[dict[str, Any]]  # Line 575
+    async def start_monitoring(self) -> None  # Line 632
+    async def cleanup_resources(self) -> None  # Line 656
+    async def shutdown(self) -> None  # Line 699
+    async def _ensure_initialized(self) -> None  # Line 720
+    async def health_check(self) -> HealthCheckResult  # Line 725
 ```
 
 #### Functions:
 
 ```python
-def create_error_handling_service(...) -> 'ErrorHandlingService'  # Line 725
+def create_error_handling_service(...) -> 'ErrorHandlingService'  # Line 766
 ```
 
 ### File: state_monitor.py
@@ -2236,5 +2274,5 @@ def register_state_monitor_with_di(injector, config: Config | None = None) -> No
 
 ---
 **Generated**: Complete reference for error_handling module
-**Total Classes**: 77
+**Total Classes**: 78
 **Total Functions**: 59

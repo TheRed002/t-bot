@@ -87,8 +87,8 @@ class StrategyIntegratedBase(ABC):
         self.validation_service = validation_service  # Injected dependency
 
         # Monitoring and telemetry
-        self._metrics_collector: MetricsCollector | None = None
-        self._alert_manager: AlertManager | None = None
+        self._metrics_collector: "MetricsCollector | None" = None
+        self._alert_manager: "AlertManager | None" = None
         self._performance_monitor = None  # Will be integrated later
         self._telemetry_collector = None  # Will be integrated later
 
@@ -141,8 +141,8 @@ class StrategyIntegratedBase(ABC):
                 self.logger.info("ValidationService not available - strategies will use basic validation")
 
     def set_monitoring_services(self,
-                               metrics_collector: MetricsCollector | None = None,
-                               alert_manager: AlertManager | None = None,
+                               metrics_collector: "MetricsCollector | None" = None,
+                               alert_manager: "AlertManager | None" = None,
                                performance_monitor = None,
                                telemetry_collector = None):
         """Set monitoring services for comprehensive telemetry."""
@@ -238,7 +238,7 @@ class StrategyIntegratedBase(ABC):
     async def calculate_technical_indicators(self,
                                            data: MarketData,
                                            indicators: list[str],
-                                           periods: dict[str, int] = None) -> dict[str, Decimal | None]:
+                                           periods: dict[str, int] = None) -> "dict[str, Decimal | None]":
         """Calculate technical indicators with comprehensive error handling and caching."""
         periods = periods or {}
         results = {}
@@ -562,11 +562,11 @@ class StrategyIntegratedBase(ABC):
 class StrategyDataAccessMixin:
     """Mixin providing data access patterns for strategies."""
 
-    def __init__(self, data_service: DataServiceInterface | None = None):
+    def __init__(self, data_service: "DataServiceInterface | None" = None):
         self.data_service = data_service
         self.logger = get_logger(f"{self.__class__.__name__}")
 
-    async def get_indicator_data(self, symbol: str, indicator: str, period: int) -> Decimal | None:
+    async def get_indicator_data(self, symbol: str, indicator: str, period: int) -> "Decimal | None":
         """Generic method to get indicator data through data service."""
         if not self.data_service:
             self.logger.warning(f"No data service available for {indicator}")
@@ -607,7 +607,7 @@ def create_comprehensive_signal(direction: SignalDirection,
                               symbol: str,
                               source: str,
                               metadata: dict[str, Any],
-                              timestamp: datetime | None = None) -> Signal:
+                              timestamp: "datetime | None" = None) -> Signal:
     """Create a signal with comprehensive metadata formatting."""
 
     # Ensure timezone on timestamp

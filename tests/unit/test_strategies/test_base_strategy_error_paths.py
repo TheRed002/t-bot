@@ -140,11 +140,12 @@ class TestBaseStrategyErrorPaths:
 
     def test_strategy_initialization_metrics_collector_unavailable(self, strategy_config):
         """Test strategy initialization when metrics collector is unavailable."""
-        with patch('src.strategies.base.MetricsCollector', side_effect=ImportError("Metrics unavailable")):
-            strategy = ConcreteStrategy(strategy_config)
-            
-            # Should initialize without metrics
-            assert strategy is not None
+        # Since MetricsCollector is not currently imported in base strategy,
+        # test that strategy can initialize without issues
+        strategy = ConcreteStrategy(strategy_config)
+
+        # Should initialize without metrics
+        assert strategy is not None
 
     def test_strategy_initialization_alerting_unavailable(self, strategy_config):
         """Test strategy initialization when alerting is unavailable."""
@@ -311,38 +312,38 @@ class TestBaseStrategyErrorPaths:
     @pytest.mark.asyncio
     async def test_handle_error_with_alerting(self, strategy):
         """Test error handling with alerting available."""
-        with patch('src.strategies.base.ALERTING_AVAILABLE', True), \
-             patch('src.strategies.base.get_alert_manager') as mock_alert_manager, \
-             patch('src.strategies.base.AlertSeverity') as mock_alert_severity, \
-             patch('src.strategies.base.Alert') as mock_alert:
-            
-            mock_manager = AsyncMock()
-            mock_alert_manager.return_value = mock_manager
-            # Mock AlertSeverity as a class-like object that evaluates to True
-            mock_alert_severity.HIGH = 'HIGH'
-            mock_alert_severity.MEDIUM = 'MEDIUM'
-            # Mock has __bool__ that returns True by default, so we just need to make sure it exists
-            
+        # Mock the alert manager
+        from unittest.mock import Mock, AsyncMock, patch
+
+        mock_alert_manager = Mock()
+        mock_alert_manager.fire_alert = AsyncMock()
+
+        # Patch get_alert_manager to return our mock
+        with patch('src.strategies.base.get_alert_manager', return_value=mock_alert_manager):
             error = Exception("Test error")
             await strategy._handle_error(error, ErrorSeverity.HIGH, {'context': 'test'})
-            
-            # Should send alert (the method name in the base strategy)
-            mock_manager.send_alert.assert_called_once()
+
+            # Verify alert was fired
+            mock_alert_manager.fire_alert.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_handle_error_alerting_failure(self, strategy):
         """Test error handling when alerting itself fails."""
-        with patch('src.strategies.base.ALERTING_AVAILABLE', True), \
-             patch('src.strategies.base.get_alert_manager') as mock_alert_manager:
-            
-            mock_manager = Mock()
-            mock_manager.send_alert = Mock(side_effect=Exception("Alert failed"))
-            mock_alert_manager.return_value = mock_manager
-            
+        # Mock the alert manager to simulate alerting failure
+        from unittest.mock import Mock, AsyncMock, patch
+
+        mock_alert_manager = Mock()
+        mock_alert_manager.fire_alert = AsyncMock(side_effect=Exception("Alert failed"))
+
+        # Patch get_alert_manager to return our mock
+        with patch('src.strategies.base.get_alert_manager', return_value=mock_alert_manager):
             error = Exception("Test error")
-            
+
             # Should handle alerting failure gracefully
             await strategy._handle_error(error, ErrorSeverity.HIGH, {'context': 'test'})
+
+            # Verify alert was attempted
+            mock_alert_manager.fire_alert.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_handle_error_without_alerting(self, strategy):

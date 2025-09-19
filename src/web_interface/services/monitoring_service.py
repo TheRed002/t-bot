@@ -13,7 +13,7 @@ from src.core.exceptions import ServiceError
 from src.web_interface.interfaces import WebMonitoringServiceInterface
 
 
-class WebMonitoringService(BaseComponent, WebMonitoringServiceInterface):
+class WebMonitoringService(BaseComponent):
     """Service handling monitoring business logic for web interface."""
 
     def __init__(self, monitoring_facade=None):

@@ -386,8 +386,9 @@ class RiskMonitoringService(BaseService):
             previous_level = await self._get_previous_risk_level()
 
             if previous_level and previous_level != metrics.risk_level:
+                from src.core.event_constants import RiskEvents
                 await self._create_alert(
-                    "risk_level_change",
+                    RiskEvents.RISK_LEVEL_CHANGE,
                     "MEDIUM",
                     f"Risk level changed from {previous_level.value} to {metrics.risk_level.value}",
                     {"previous_level": previous_level.value, "new_level": metrics.risk_level.value},
@@ -586,11 +587,14 @@ class RiskMonitoringService(BaseService):
                         event_data = message.data
 
                         # Process different risk event types
-                        if event_data.get("event_type") == "threshold_breach":
+                        # Use standardized RiskEvents constants
+                        from src.core.event_constants import RiskEvents
+
+                        if event_data.get("event_type") == RiskEvents.THRESHOLD_BREACH:
                             await self.monitoring_service._handle_threshold_breach(event_data)
-                        elif event_data.get("event_type") == "emergency_condition":
+                        elif event_data.get("event_type") == RiskEvents.EMERGENCY_CONDITION:
                             await self.monitoring_service._handle_emergency_condition(event_data)
-                        elif event_data.get("event_type") == "risk_level_change":
+                        elif event_data.get("event_type") == RiskEvents.RISK_LEVEL_CHANGE:
                             await self.monitoring_service._handle_risk_level_change(event_data)
 
                     return None  # Pub/sub doesn't require response
@@ -614,8 +618,9 @@ class RiskMonitoringService(BaseService):
 
             BoundaryValidator.validate_database_entity(transformed_data, "create")
 
+            from src.core.event_constants import RiskEvents
             await self._create_alert(
-                alert_type=transformed_data.get("alert_type", "threshold_breach"),
+                alert_type=transformed_data.get("alert_type", RiskEvents.THRESHOLD_BREACH),
                 severity=transformed_data.get("severity", "WARNING"),
                 message=transformed_data.get("message", "Threshold breach detected"),
                 details=transformed_data,

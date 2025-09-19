@@ -44,6 +44,7 @@ try:
     from src.monitoring.alerting import (
         Alert,
         AlertSeverity,
+        AlertStatus,
         get_alert_manager,
     )
 
@@ -52,6 +53,7 @@ except ImportError:
     ALERTING_AVAILABLE = False
     Alert = None
     AlertSeverity = None
+    AlertStatus = None
 
 # MANDATORY: Import from P-002A - Error handling integration
 
@@ -303,9 +305,10 @@ class BaseStrategy(BaseComponent, BaseStrategyInterface):
                 if alert_manager:
                     try:
                         alert = Alert(
-                            name=f"strategy_error_{self.name}",
+                            rule_name=f"strategy_error_{self.name}",
                             severity=AlertSeverity.HIGH,
-                            description=f"Strategy {self.name} failed to generate signals: {e!s}",
+                            status=AlertStatus.FIRING,
+                            message=f"Strategy {self.name} failed to generate signals: {e!s}",
                             labels={
                                 "strategy": self.name,
                                 "strategy_type": self.strategy_type.value,
@@ -313,6 +316,8 @@ class BaseStrategy(BaseComponent, BaseStrategyInterface):
                                 "symbol": data.symbol if data else "unknown",
                                 "error_type": type(e).__name__,
                             },
+                            annotations={},
+                            starts_at=datetime.now(timezone.utc),
                         )
                         await alert_manager.fire_alert(alert)
                     except Exception as alert_error:
@@ -624,15 +629,18 @@ class BaseStrategy(BaseComponent, BaseStrategyInterface):
                 if alert_manager:
                     try:
                         alert = Alert(
-                            name=f"strategy_start_failed_{self.name}",
+                            rule_name=f"strategy_start_failed_{self.name}",
                             severity=AlertSeverity.CRITICAL,
-                            description=f"Strategy {self.name} failed to start: {e!s}",
+                            status=AlertStatus.FIRING,
+                            message=f"Strategy {self.name} failed to start: {e!s}",
                             labels={
                                 "strategy": self.name,
                                 "strategy_type": self.strategy_type.value,
                                 "operation": "start",
                                 "error_type": type(e).__name__,
                             },
+                            annotations={},
+                            starts_at=datetime.now(timezone.utc),
                         )
                         await alert_manager.fire_alert(alert)
                     except Exception as alert_error:
@@ -1047,18 +1055,21 @@ class BaseStrategy(BaseComponent, BaseStrategyInterface):
                 if alert_manager:
                     try:
                         alert = Alert(
-                            name=f"strategy_error_{self.name}",
+                            rule_name=f"strategy_error_{self.name}",
                             severity=AlertSeverity.HIGH
                             if severity == ErrorSeverity.HIGH
                             else AlertSeverity.MEDIUM,
-                            description=f"Strategy {self.name} error: {error!s}",
+                            status=AlertStatus.FIRING,
+                            message=f"Strategy {self.name} encountered an error: {error!s}",
                             labels={
                                 "strategy": self.name,
                                 "strategy_type": self.strategy_type.value,
                                 "error_type": type(error).__name__,
                             },
+                            annotations={"error_details": str(context)},
+                            starts_at=datetime.now(timezone.utc),
                         )
-                        await alert_manager.send_alert(alert)
+                        await alert_manager.fire_alert(alert)
                     except Exception as alert_error:
                         self.logger.debug("Failed to send alert", error=str(alert_error))
         except Exception as e:

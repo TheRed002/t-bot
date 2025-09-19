@@ -17,7 +17,7 @@ from src.web_interface.interfaces import WebPortfolioServiceInterface
 logger = get_logger(__name__)
 
 
-class WebPortfolioService(BaseComponent, WebPortfolioServiceInterface):
+class WebPortfolioService(BaseComponent):
     """Service handling portfolio business logic for web interface."""
 
     def __init__(self, portfolio_facade=None):

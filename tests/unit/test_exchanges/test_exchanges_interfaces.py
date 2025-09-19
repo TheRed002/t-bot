@@ -32,9 +32,9 @@ class TestStateType:
     def test_state_type_enumeration(self):
         """Test state type enumeration completeness."""
         expected_types = {
-            "bot_state", "position_state", "order_state", "portfolio_state", 
-            "risk_state", "strategy_state", "market_state", "trade_state", 
-            "execution", "system_state"
+            "bot_state", "position_state", "order_state", "portfolio_state",
+            "risk_state", "strategy_state", "market_state", "trade_state",
+            "execution", "system_state", "capital_state"
         }
 
         actual_types = {state.value for state in StateType}
@@ -53,7 +53,7 @@ class TestStateType:
     def test_state_type_iteration(self):
         """Test state type can be iterated."""
         types = list(StateType)
-        assert len(types) == 10
+        assert len(types) == 11
         assert StateType.ORDER_STATE in types
 
 

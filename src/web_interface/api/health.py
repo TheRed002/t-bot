@@ -16,10 +16,21 @@ from pydantic import BaseModel
 
 from src.core.base import BaseComponent
 from src.core.config import Config
-from src.core.logging import get_logger
 
-# Module level logger
-logger = get_logger(__name__)
+# Robust logger function
+def _get_logger():
+    """Get logger with fallback."""
+    try:
+        from src.core.logging import get_logger
+        return get_logger(__name__)
+    except ImportError:
+        import logging
+        return logging.getLogger(__name__)
+
+# Helper function for getting logger within functions
+def get_local_logger():
+    """Get logger for use within functions to avoid import issues."""
+    return _get_logger()
 
 
 class ConnectionHealthMonitor(BaseComponent):
@@ -115,7 +126,7 @@ async def check_database_health(config: Config) -> ComponentHealth:
 
     except Exception as e:
         response_time = (time.time() - start_time) * 1000
-        logger.error(f"Database health check failed: {e}")
+        get_local_logger().error(f"Database health check failed: {e}")
 
         return ComponentHealth(
             status="unhealthy",
@@ -154,7 +165,7 @@ async def check_redis_health(config: Config) -> ComponentHealth:
 
     except Exception as e:
         response_time = (time.time() - start_time) * 1000
-        logger.error(f"Redis health check failed: {e}")
+        get_local_logger().error(f"Redis health check failed: {e}")
 
         return ComponentHealth(
             status="unhealthy",
@@ -211,7 +222,7 @@ async def check_exchanges_health(config: Config) -> ComponentHealth:
                 )
 
         except Exception as e:
-            logger.error(f"Error getting exchange health through service layer: {e}")
+            get_local_logger().error(f"Error getting exchange health through service layer: {e}")
             return ComponentHealth(
                 status="unknown",
                 message=f"Unable to check exchange health: {e!s}",
@@ -221,7 +232,7 @@ async def check_exchanges_health(config: Config) -> ComponentHealth:
 
     except Exception as e:
         response_time = (time.time() - start_time) * 1000
-        logger.error(f"Exchanges health check failed: {e}")
+        get_local_logger().error(f"Exchanges health check failed: {e}")
 
         return ComponentHealth(
             status="unhealthy",
@@ -258,7 +269,7 @@ async def check_ml_models_health(config: Config) -> ComponentHealth:
 
     except Exception as e:
         response_time = (time.time() - start_time) * 1000
-        logger.error(f"ML models health check failed: {e}")
+        get_local_logger().error(f"ML models health check failed: {e}")
 
         return ComponentHealth(
             status="unhealthy",

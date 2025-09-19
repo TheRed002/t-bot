@@ -282,15 +282,15 @@ class DecimalPrecisionMiddleware(BaseHTTPMiddleware):
             if any(self._is_financial_field(key) for key in converted.keys()):
                 from datetime import datetime, timezone
 
-                # Apply consistent data transformation matching error_handling module patterns
+                # Apply consistent data transformation aligned with utils module patterns
                 if "processing_mode" not in converted:
                     converted["processing_mode"] = (
-                        "stream"  # Align with risk_management stream processing
+                        "stream"  # Align with utils module stream processing
                     )
                 if "data_format" not in converted:
-                    converted["data_format"] = "event_data_v1"
+                    converted["data_format"] = "bot_event_v1"  # Align with risk_management module
                 if "message_pattern" not in converted:
-                    converted["message_pattern"] = "batch"  # Consistent with error_handling module
+                    converted["message_pattern"] = "pub_sub"  # Align with utils module pub/sub patterns
                 if "boundary_crossed" not in converted:
                     converted["boundary_crossed"] = True
                 if "precision_validated" not in converted:
@@ -307,9 +307,9 @@ class DecimalPrecisionMiddleware(BaseHTTPMiddleware):
                         ProcessingParadigmAligner,
                     )
 
-                    # Apply processing paradigm alignment
+                    # Apply processing paradigm alignment - align with utils module patterns
                     aligned_data = ProcessingParadigmAligner.align_processing_modes(
-                        source_mode="async", target_mode="batch", data=converted
+                        source_mode="async", target_mode="stream", data=converted  # Align with utils stream processing
                     )
 
                     # Validate at web_interface boundary - ensure required fields exist

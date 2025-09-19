@@ -90,6 +90,29 @@ class WebTradingServiceInterface(Protocol):
         """Generate order book data with web-specific business logic."""
         ...
 
+    async def place_order_through_service(
+        self,
+        symbol: str,
+        side: str,
+        order_type: str,
+        quantity: Decimal,
+        price: Decimal | None = None,
+    ) -> dict[str, Any]:
+        """Place order through service layer (wraps facade call)."""
+        ...
+
+    async def cancel_order_through_service(self, order_id: str) -> bool:
+        """Cancel order through service layer (wraps facade call)."""
+        ...
+
+    async def get_order_details(self, order_id: str, exchange: str) -> dict[str, Any]:
+        """Get order details through service layer."""
+        ...
+
+    async def get_service_health(self) -> dict[str, Any]:
+        """Get service health status (wraps facade call)."""
+        ...
+
 
 class WebBotServiceInterface(Protocol):
     """Interface for web bot service operations."""
@@ -118,6 +141,56 @@ class WebBotServiceInterface(Protocol):
 
     async def create_bot_configuration(self, request_data: dict[str, Any], user_id: str) -> Any:
         """Create bot configuration object with business logic validation."""
+        ...
+
+    async def pause_bot_through_service(self, bot_id: str) -> bool:
+        """Pause bot through service layer (wraps controller call)."""
+        ...
+
+    async def resume_bot_through_service(self, bot_id: str) -> bool:
+        """Resume bot through service layer (wraps controller call)."""
+        ...
+
+    async def create_bot_through_service(self, bot_config: Any) -> str:
+        """Create bot through service layer (wraps controller call)."""
+        ...
+
+    async def get_bot_status_through_service(self, bot_id: str) -> dict[str, Any]:
+        """Get bot status through service layer (wraps controller call)."""
+        ...
+
+    async def start_bot_through_service(self, bot_id: str) -> bool:
+        """Start bot through service layer (wraps controller call)."""
+        ...
+
+    async def stop_bot_through_service(self, bot_id: str) -> bool:
+        """Stop bot through service layer (wraps controller call)."""
+        ...
+
+    async def delete_bot_through_service(self, bot_id: str, force: bool = False) -> bool:
+        """Delete bot through service layer (wraps controller call)."""
+        ...
+
+    async def list_bots_through_service(self) -> list[dict[str, Any]]:
+        """List bots through service layer (wraps controller call)."""
+        ...
+
+    async def update_bot_configuration(
+        self, bot_id: str, update_data: dict[str, Any], user_id: str
+    ) -> dict[str, Any]:
+        """Update bot configuration with business logic (moved from controller)."""
+        ...
+
+    async def start_bot_with_execution_integration(self, bot_id: str) -> bool:
+        """Start bot with execution service integration."""
+        ...
+
+    async def stop_bot_with_execution_integration(self, bot_id: str) -> bool:
+        """Stop bot with execution service integration."""
+        ...
+
+    def get_controller_health_check(self) -> dict[str, Any]:
+        """Get controller health check through service layer (wraps controller call)."""
         ...
 
 
@@ -160,6 +233,10 @@ class WebRiskServiceInterface(Protocol):
 
     async def get_portfolio_risk_breakdown(self) -> dict[str, Any]:
         """Get portfolio risk breakdown with web-specific analysis."""
+        ...
+
+    async def get_current_risk_limits(self) -> dict[str, Any]:
+        """Get current risk limits with web-specific business logic."""
         ...
 
 
@@ -251,6 +328,65 @@ class WebStrategyServiceExtendedInterface(Protocol):
 
     async def format_backtest_results(self, backtest_data: dict[str, Any]) -> dict[str, Any]:
         """Format backtest results for web display."""
+        ...
+
+    def health_check(self) -> dict[str, Any]:
+        """Perform health check and return status."""
+        ...
+
+    def get_service_info(self) -> dict[str, Any]:
+        """Get service information and capabilities."""
+        ...
+
+
+class WebAuthServiceInterface(Protocol):
+    """Interface for web authentication service operations."""
+
+    async def get_user_by_username(self, username: str) -> Any | None:
+        """Get user by username through service layer."""
+        ...
+
+    async def authenticate_user(self, username: str, password: str) -> Any | None:
+        """Authenticate user through service layer."""
+        ...
+
+    async def create_user(
+        self,
+        username: str,
+        email: str,
+        password: str,
+        scopes: list[str] | None = None,
+        is_admin: bool = False,
+    ) -> Any:
+        """Create new user through service layer."""
+        ...
+
+    async def get_auth_summary(self) -> dict[str, Any]:
+        """Get authentication system summary through service layer."""
+        ...
+
+    def get_user_roles(self, current_user: Any) -> list[str]:
+        """Extract user roles from current_user object."""
+        ...
+
+    def check_permission(self, current_user: Any, required_roles: list[str]) -> bool:
+        """Check if user has required permissions."""
+        ...
+
+    def require_permission(self, current_user: Any, required_roles: list[str]) -> None:
+        """Require user to have specific permissions or raise ServiceError."""
+        ...
+
+    def require_admin(self, current_user: Any) -> None:
+        """Require user to be admin or raise ServiceError."""
+        ...
+
+    def require_trading_permission(self, current_user: Any) -> None:
+        """Require user to have trading permissions or raise ServiceError."""
+        ...
+
+    def require_risk_manager_permission(self, current_user: Any) -> None:
+        """Require user to have risk management permissions or raise ServiceError."""
         ...
 
     def health_check(self) -> dict[str, Any]:

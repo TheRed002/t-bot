@@ -1235,3 +1235,16 @@ class FundFlowManager(AbstractFundFlowManagementService, TransactionalService):
             self.logger.info("Fund flow manager resource cleanup completed")
         except Exception as e:
             self.logger.warning(f"Resource cleanup failed: {e}")
+
+    def set_capital_allocator(self, capital_allocator: Any) -> None:
+        """
+        Set capital allocator for cross-service integration.
+
+        This method allows DI container to establish cross-dependencies after service creation,
+        avoiding circular dependencies during initialization.
+
+        Args:
+            capital_allocator: Capital allocator service instance
+        """
+        self.capital_allocator = capital_allocator
+        self._logger.info("Capital allocator set for fund flow manager")

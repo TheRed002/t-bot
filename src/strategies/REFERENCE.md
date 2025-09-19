@@ -14,7 +14,7 @@
 **Performance**:
 - Parallel execution
 - Caching
-- Caching
+- Parallel execution
 **Architecture**:
 - BaseStrategy inherits from base architecture
 - StrategyController inherits from base architecture
@@ -36,61 +36,61 @@
 **Status**: Abstract Base Class
 
 **Implemented Methods:**
-- `strategy_type(self) -> StrategyType` - Line 157
-- `name(self) -> str` - Line 162
-- `version(self) -> str` - Line 167
-- `status(self) -> StrategyStatus` - Line 172
-- `async generate_signals(self, data: MarketData) -> list[Signal]` - Line 194
-- `async validate_signal(self, signal: Signal) -> bool` - Line 329
-- `get_position_size(self, signal: Signal) -> Decimal` - Line 385
-- `should_exit(self, position: Position, data: MarketData) -> bool` - Line 436
-- `async pre_trade_validation(self, signal: Signal) -> bool` - Line 452
-- `async post_trade_processing(self, trade_result: Any) -> None` - Line 478
-- `set_risk_manager(self, risk_manager: Any) -> None` - Line 524
-- `set_exchange(self, exchange: Any) -> None` - Line 532
-- `set_data_service(self, data_service: Any) -> None` - Line 541
-- `set_validation_framework(self, validation_framework: ValidationFramework) -> None` - Line 549
-- `set_metrics_collector(self, metrics_collector: MetricsCollector) -> None` - Line 558
-- `get_strategy_info(self) -> dict[str, Any]` - Line 567
-- `async initialize(self, config: StrategyConfig) -> None` - Line 582
-- `async start(self) -> bool` - Line 594
-- `async stop(self) -> bool` - Line 644
-- `async pause(self) -> None` - Line 670
-- `async resume(self) -> None` - Line 676
-- `async prepare_for_backtest(self, config: dict[str, Any]) -> None` - Line 683
-- `async process_historical_data(self, data: MarketData) -> list[Signal]` - Line 699
-- `async get_backtest_metrics(self) -> dict[str, Any]` - Line 715
-- `get_real_time_metrics(self) -> dict[str, Any]` - Line 728
-- `update_config(self, new_config: dict[str, Any]) -> None` - Line 774
-- `async get_state(self) -> dict[str, Any]` - Line 789
-- `get_performance_summary(self) -> dict[str, Any]` - Line 806
-- `cleanup(self) -> None` - Line 836
-- `async get_market_data(self, symbol: str) -> MarketData | None` - Line 870
-- `async get_historical_data(self, symbol: str, timeframe: str, limit: int = 100) -> list[MarketData]` - Line 892
-- `async execute_order(self, signal: Signal) -> Any | None` - Line 918
-- `async save_state(self, state_data: dict[str, Any]) -> bool` - Line 964
-- `async load_state(self) -> dict[str, Any] | None` - Line 987
-- `get_metrics(self) -> dict[str, Any]` - Line 1064
-- `is_healthy(self) -> bool` - Line 1080
-- `async reset(self) -> bool` - Line 1104
-- `set_execution_service(self, execution_service: Any) -> None` - Line 1172
-- `get_status(self) -> StrategyStatus` - Line 1178
-- `get_status_string(self) -> str` - Line 1182
-- `async validate_market_data(self, data: MarketData | None) -> None` - Line 1219
-- `async get_sma(self, symbol: str, period: int) -> Decimal | None` - Line 1250
-- `async get_ema(self, symbol: str, period: int) -> Decimal | None` - Line 1271
-- `async get_rsi(self, symbol: str, period: int = 14) -> Decimal | None` - Line 1290
-- `async get_volatility(self, symbol: str, period: int) -> Decimal | None` - Line 1309
-- `async get_atr(self, symbol: str, period: int) -> Decimal | None` - Line 1328
-- `async get_volume_ratio(self, symbol: str, period: int) -> Decimal | None` - Line 1347
-- `async get_bollinger_bands(self, symbol: str, period: int = 20, std_dev: float = 2.0) -> dict[str, Decimal] | None` - Line 1366
-- `async get_macd(self, ...) -> dict[str, Decimal] | None` - Line 1393
-- `async execute_with_algorithm(self, ...) -> dict[str, Any] | None` - Line 1422
-- `async optimize_parameters(self, optimization_config: dict[str, Any] | None) -> dict[str, Any]` - Line 1470
-- `async enhance_signals_with_ml(self, signals: list[Signal]) -> list[Signal]` - Line 1544
-- `async get_allocated_capital(self) -> Decimal` - Line 1650
-- `async execute_large_order(self, order_request: OrderRequest, max_position_size: Decimal | None = None) -> dict[str, Any] | None` - Line 1755
-- `async get_execution_algorithms_status(self) -> dict[str, Any]` - Line 1817
+- `strategy_type(self) -> StrategyType` - Line 160
+- `name(self) -> str` - Line 165
+- `version(self) -> str` - Line 170
+- `status(self) -> StrategyStatus` - Line 175
+- `async generate_signals(self, data: MarketData) -> list[Signal]` - Line 197
+- `async validate_signal(self, signal: Signal) -> bool` - Line 335
+- `get_position_size(self, signal: Signal) -> Decimal` - Line 391
+- `should_exit(self, position: Position, data: MarketData) -> bool` - Line 442
+- `async pre_trade_validation(self, signal: Signal) -> bool` - Line 458
+- `async post_trade_processing(self, trade_result: Any) -> None` - Line 484
+- `set_risk_manager(self, risk_manager: Any) -> None` - Line 530
+- `set_exchange(self, exchange: Any) -> None` - Line 538
+- `set_data_service(self, data_service: Any) -> None` - Line 547
+- `set_validation_framework(self, validation_framework: ValidationFramework) -> None` - Line 555
+- `set_metrics_collector(self, metrics_collector: MetricsCollector) -> None` - Line 564
+- `get_strategy_info(self) -> dict[str, Any]` - Line 573
+- `async initialize(self, config: StrategyConfig) -> None` - Line 588
+- `async start(self) -> bool` - Line 600
+- `async stop(self) -> bool` - Line 653
+- `async pause(self) -> None` - Line 679
+- `async resume(self) -> None` - Line 685
+- `async prepare_for_backtest(self, config: dict[str, Any]) -> None` - Line 692
+- `async process_historical_data(self, data: MarketData) -> list[Signal]` - Line 708
+- `async get_backtest_metrics(self) -> dict[str, Any]` - Line 724
+- `get_real_time_metrics(self) -> dict[str, Any]` - Line 737
+- `update_config(self, new_config: dict[str, Any]) -> None` - Line 783
+- `async get_state(self) -> dict[str, Any]` - Line 798
+- `get_performance_summary(self) -> dict[str, Any]` - Line 815
+- `cleanup(self) -> None` - Line 845
+- `async get_market_data(self, symbol: str) -> MarketData | None` - Line 879
+- `async get_historical_data(self, symbol: str, timeframe: str, limit: int = 100) -> list[MarketData]` - Line 901
+- `async execute_order(self, signal: Signal) -> Any | None` - Line 929
+- `async save_state(self, state_data: dict[str, Any]) -> bool` - Line 975
+- `async load_state(self) -> dict[str, Any] | None` - Line 998
+- `get_metrics(self) -> dict[str, Any]` - Line 1078
+- `is_healthy(self) -> bool` - Line 1094
+- `async reset(self) -> bool` - Line 1119
+- `set_execution_service(self, execution_service: Any) -> None` - Line 1191
+- `get_status(self) -> StrategyStatus` - Line 1197
+- `get_status_string(self) -> str` - Line 1201
+- `async validate_market_data(self, data: MarketData | None) -> None` - Line 1252
+- `async get_sma(self, symbol: str, period: int) -> Decimal | None` - Line 1286
+- `async get_ema(self, symbol: str, period: int) -> Decimal | None` - Line 1307
+- `async get_rsi(self, symbol: str, period: int = 14) -> Decimal | None` - Line 1326
+- `async get_volatility(self, symbol: str, period: int) -> Decimal | None` - Line 1345
+- `async get_atr(self, symbol: str, period: int) -> Decimal | None` - Line 1364
+- `async get_volume_ratio(self, symbol: str, period: int) -> Decimal | None` - Line 1383
+- `async get_bollinger_bands(self, symbol: str, period: int = 20, std_dev: float = 2.0) -> dict[str, Decimal] | None` - Line 1402
+- `async get_macd(self, ...) -> dict[str, Decimal] | None` - Line 1429
+- `async execute_with_algorithm(self, ...) -> dict[str, Any] | None` - Line 1458
+- `async optimize_parameters(self, optimization_config: dict[str, Any] | None) -> dict[str, Any]` - Line 1506
+- `async enhance_signals_with_ml(self, signals: list[Signal]) -> list[Signal]` - Line 1580
+- `async get_allocated_capital(self) -> Decimal` - Line 1686
+- `async execute_large_order(self, order_request: OrderRequest, max_position_size: Decimal | None = None) -> dict[str, Any] | None` - Line 1731
+- `async get_execution_algorithms_status(self) -> dict[str, Any]` - Line 1793
 
 ### Implementation: `StrategyConfigurationManager` ✅
 
@@ -105,8 +105,8 @@
 - `get_config_schema(self) -> dict[str, Any]` - Line 342
 - `update_config_parameter(self, strategy_name: str, parameter: str, value: Any) -> bool` - Line 351
 - `create_strategy_config(self, strategy_name: str, strategy_type: StrategyType, symbol: str, **kwargs) -> StrategyConfig` - Line 415
-- `delete_strategy_config(self, strategy_name: str) -> bool` - Line 486
-- `get_config_summary(self) -> dict[str, Any]` - Line 529
+- `delete_strategy_config(self, strategy_name: str) -> bool` - Line 487
+- `get_config_summary(self) -> dict[str, Any]` - Line 530
 
 ### Implementation: `StrategyConfigTemplates` ✅
 
@@ -116,15 +116,15 @@
 **Implemented Methods:**
 - `get_arbitrage_scanner_config(risk_level, ...) -> dict[str, Any]` - Line 35
 - `get_mean_reversion_config(timeframe: str = '1h', risk_level: str = 'medium') -> dict[str, Any]` - Line 139
-- `get_trend_following_config(timeframe: str = '1h', trend_strength: str = 'medium') -> dict[str, Any]` - Line 263
-- `get_market_making_config(symbol, ...) -> dict[str, Any]` - Line 380
-- `get_volatility_breakout_config(volatility_regime: str = 'medium', breakout_type: str = 'range') -> dict[str, Any]` - Line 496
-- `get_ensemble_config(strategy_types, ...) -> dict[str, Any]` - Line 602
-- `get_all_templates(cls) -> dict[str, dict[str, Any]]` - Line 685
-- `get_template_by_name(cls, template_name: str) -> dict[str, Any]` - Line 730
-- `list_available_templates(cls) -> list[str]` - Line 751
-- `get_templates_by_strategy_type(cls, strategy_type: str) -> dict[str, dict[str, Any]]` - Line 761
-- `validate_template(cls, template: dict[str, Any]) -> tuple[bool, list[str]]` - Line 779
+- `get_trend_following_config(timeframe: str = '1h', trend_strength: str = 'medium') -> dict[str, Any]` - Line 266
+- `get_market_making_config(symbol, ...) -> dict[str, Any]` - Line 383
+- `get_volatility_breakout_config(volatility_regime: str = 'medium', breakout_type: str = 'range') -> dict[str, Any]` - Line 499
+- `get_ensemble_config(strategy_types, ...) -> dict[str, Any]` - Line 605
+- `get_all_templates(cls) -> dict[str, dict[str, Any]]` - Line 688
+- `get_template_by_name(cls, template_name: str) -> dict[str, Any]` - Line 733
+- `list_available_templates(cls) -> list[str]` - Line 754
+- `get_templates_by_strategy_type(cls, strategy_type: str) -> dict[str, dict[str, Any]]` - Line 764
+- `validate_template(cls, template: dict[str, Any]) -> tuple[bool, list[str]]` - Line 782
 
 ### Implementation: `StrategyController` ✅
 
@@ -186,23 +186,23 @@
 - `set_strategy_service(self, strategy_service: 'StrategyService') -> None` - Line 154
 - `set_regime_detector(self, regime_detector: MarketRegimeDetector) -> None` - Line 159
 - `set_adaptive_risk_manager(self, adaptive_risk_manager: AdaptiveRiskManager) -> None` - Line 164
-- `async validate_signal(self, signal: Signal) -> bool` - Line 681
-- `get_position_size(self, signal: Signal) -> Decimal` - Line 762
-- `should_exit(self, position: Position, data: MarketData) -> bool` - Line 855
-- `get_strategy_info(self) -> dict[str, Any]` - Line 936
-- `cleanup(self) -> None` - Line 1074
+- `async validate_signal(self, signal: Signal) -> bool` - Line 657
+- `get_position_size(self, signal: Signal) -> Decimal` - Line 738
+- `should_exit(self, position: Position, data: MarketData) -> bool` - Line 831
+- `get_strategy_info(self) -> dict[str, Any]` - Line 912
+- `cleanup(self) -> None` - Line 996
 
-### Implementation: `EnhancedDynamicStrategyFactory` ✅
+### Implementation: `DynamicStrategyFactory` ✅
 
 **Inherits**: BaseComponent
-**Purpose**: Enhanced factory for creating dynamic strategies with service layer integration
+**Purpose**: Factory for creating dynamic strategies with service layer integration
 **Status**: Complete
 
 **Implemented Methods:**
-- `async create_strategy(self, strategy_name: str, config: dict[str, Any], use_enhanced: bool = True) -> BaseStrategy | None` - Line 94
-- `get_available_strategies(self) -> dict[str, str]` - Line 346
-- `get_strategy_requirements(self, strategy_name: str) -> dict[str, Any]` - Line 355
-- `async create_multiple_strategies(self, strategy_configs: dict[str, dict[str, Any]], use_enhanced: bool = True) -> dict[str, BaseStrategy | None]` - Line 393
+- `async create_strategy(self, strategy_name: str, config: dict[str, Any]) -> BaseStrategy | None` - Line 94
+- `get_available_strategies(self) -> dict[str, str]` - Line 354
+- `get_strategy_requirements(self, strategy_name: str) -> dict[str, Any]` - Line 361
+- `async create_multiple_strategies(self, strategy_configs: dict[str, dict[str, Any]]) -> dict[str, BaseStrategy | None]` - Line 399
 
 ### Implementation: `VolatilityBreakoutStrategy` ✅
 
@@ -211,22 +211,22 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `name(self) -> str` - Line 58
-- `name(self, value: str) -> None` - Line 67
-- `version(self) -> str` - Line 72
-- `version(self, value: str) -> None` - Line 77
-- `status(self) -> str` - Line 82
-- `status(self, value: str) -> None` - Line 87
-- `strategy_type(self) -> StrategyType` - Line 147
-- `set_technical_indicators(self, technical_indicators: TechnicalIndicators) -> None` - Line 151
-- `set_strategy_service(self, strategy_service: StrategyService) -> None` - Line 156
-- `set_regime_detector(self, regime_detector: MarketRegimeDetector) -> None` - Line 161
-- `set_adaptive_risk_manager(self, adaptive_risk_manager: AdaptiveRiskManager) -> None` - Line 166
-- `async validate_signal(self, signal: Signal) -> bool` - Line 1052
-- `get_position_size(self, signal: Signal) -> Decimal` - Line 1167
-- `should_exit(self, position: Position, data: MarketData) -> bool` - Line 1280
-- `get_strategy_info(self) -> dict[str, Any]` - Line 1359
-- `cleanup(self) -> None` - Line 1445
+- `name(self) -> str` - Line 60
+- `name(self, value: str) -> None` - Line 69
+- `version(self) -> str` - Line 74
+- `version(self, value: str) -> None` - Line 79
+- `status(self) -> str` - Line 84
+- `status(self, value: str) -> None` - Line 89
+- `strategy_type(self) -> StrategyType` - Line 149
+- `set_technical_indicators(self, technical_indicators: TechnicalIndicators) -> None` - Line 153
+- `set_strategy_service(self, strategy_service: 'StrategyService') -> None` - Line 158
+- `set_regime_detector(self, regime_detector: MarketRegimeDetector) -> None` - Line 163
+- `set_adaptive_risk_manager(self, adaptive_risk_manager: AdaptiveRiskManager) -> None` - Line 168
+- `async validate_signal(self, signal: Signal) -> bool` - Line 1041
+- `get_position_size(self, signal: Signal) -> Decimal` - Line 1156
+- `should_exit(self, position: Position, data: MarketData) -> bool` - Line 1269
+- `get_strategy_info(self) -> dict[str, Any]` - Line 1348
+- `cleanup(self) -> None` - Line 1436
 
 ### Implementation: `StrategyMode` ✅
 
@@ -253,10 +253,10 @@
 - `get_environment_strategy_config(self, exchange: str) -> dict[str, Any]` - Line 140
 - `async deploy_environment_aware_strategy(self, strategy_config: StrategyConfig, exchange: str, force_deploy: bool = False) -> bool` - Line 153
 - `async validate_strategy_for_environment(self, strategy_config: StrategyConfig, exchange: str) -> bool` - Line 220
-- `async generate_environment_aware_signal(self, strategy_name: str, market_data: MarketData, exchange: str) -> Signal | None` - Line 362
-- `async update_strategy_performance(self, ...) -> None` - Line 535
-- `get_environment_strategy_metrics(self, exchange: str) -> dict[str, Any]` - Line 567
-- `async rebalance_strategies_for_environment(self, exchange: str) -> dict[str, Any]` - Line 601
+- `async generate_environment_aware_signal(self, strategy_name: str, market_data: MarketData, exchange: str) -> 'Signal | None'` - Line 362
+- `async update_strategy_performance(self, ...) -> None` - Line 545
+- `get_environment_strategy_metrics(self, exchange: str) -> dict[str, Any]` - Line 577
+- `async rebalance_strategies_for_environment(self, exchange: str) -> dict[str, Any]` - Line 607
 
 ### Implementation: `FitnessFunction` 🔧
 
@@ -430,10 +430,10 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `add_member(self, genome: NEATGenome) -> None` - Line 914
-- `calculate_average_fitness(self) -> None` - Line 919
-- `select_parents(self, selection_pressure: float = 0.5) -> list[NEATGenome]` - Line 926
-- `remove_worst_genomes(self, keep_ratio: float = 0.5) -> None` - Line 945
+- `add_member(self, genome: NEATGenome) -> None` - Line 917
+- `calculate_average_fitness(self) -> None` - Line 922
+- `select_parents(self, selection_pressure: float = 0.5) -> list[NEATGenome]` - Line 929
+- `remove_worst_genomes(self, keep_ratio: float = 0.5) -> None` - Line 948
 
 ### Implementation: `SpeciationManager` ✅
 
@@ -441,8 +441,8 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `speciate_population(self, population: list[NEATGenome]) -> None` - Line 984
-- `allocate_offspring(self, total_offspring: int) -> dict[int, int]` - Line 1068
+- `speciate_population(self, population: list[NEATGenome]) -> None` - Line 987
+- `allocate_offspring(self, total_offspring: int) -> dict[int, int]` - Line 1071
 
 ### Implementation: `NeuroEvolutionConfig` ✅
 
@@ -456,15 +456,15 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async adapt_networks(self) -> None` - Line 1290
-- `async evolve_population(self, fitness_evaluator: FitnessEvaluator) -> None` - Line 1371
-- `async validate_signal(self, signal: Signal) -> bool` - Line 1523
-- `get_position_size(self, signal: Signal) -> Decimal` - Line 1547
-- `should_exit(self, position: Position, data: MarketData) -> bool` - Line 1571
-- `get_strategy_info(self) -> dict[str, Any]` - Line 1625
-- `get_evolution_summary(self) -> dict[str, Any]` - Line 1655
-- `async save_population(self, filepath: str) -> None` - Line 1684
-- `async load_population(self, filepath: str) -> None` - Line 1715
+- `async adapt_networks(self) -> None` - Line 1293
+- `async evolve_population(self, fitness_evaluator: FitnessEvaluator) -> None` - Line 1374
+- `async validate_signal(self, signal: Signal) -> bool` - Line 1526
+- `get_position_size(self, signal: Signal) -> Decimal` - Line 1550
+- `should_exit(self, position: Position, data: MarketData) -> bool` - Line 1574
+- `get_strategy_info(self) -> dict[str, Any]` - Line 1628
+- `get_evolution_summary(self) -> dict[str, Any]` - Line 1658
+- `async save_population(self, filepath: str) -> None` - Line 1687
+- `async load_population(self, filepath: str) -> None` - Line 1718
 
 ### Implementation: `OptimizationObjective` ✅
 
@@ -486,17 +486,15 @@
 **Purpose**: Represents a solution in the Pareto frontier
 **Status**: Complete
 
-**Implemented Methods:**
-
 ### Implementation: `ConstraintHandler` ✅
 
 **Purpose**: Handles constraints in multi-objective optimization
 **Status**: Complete
 
 **Implemented Methods:**
-- `evaluate_constraints(self, objectives: dict[str, float]) -> dict[str, float]` - Line 139
-- `is_feasible(self, objectives: dict[str, float], tolerance: float = 0.01) -> bool` - Line 172
-- `apply_penalty(self, objectives: dict[str, float], constraint_violations: dict[str, float]) -> dict[str, float]` - Line 187
+- `evaluate_constraints(self, objectives: dict[str, float]) -> dict[str, float]` - Line 135
+- `is_feasible(self, objectives: dict[str, float], tolerance: float = 0.01) -> bool` - Line 168
+- `apply_penalty(self, objectives: dict[str, float], constraint_violations: dict[str, float]) -> dict[str, float]` - Line 183
 
 ### Implementation: `DominanceComparator` ✅
 
@@ -504,8 +502,8 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `dominates(self, solution1: dict[str, float], solution2: dict[str, float]) -> bool` - Line 244
-- `non_dominated_sort(self, solutions: list[dict[str, float]]) -> list[list[int]]` - Line 284
+- `dominates(self, solution1: dict[str, float], solution2: dict[str, float]) -> bool` - Line 240
+- `non_dominated_sort(self, solutions: list[dict[str, float]]) -> list[list[int]]` - Line 280
 
 ### Implementation: `CrowdingDistanceCalculator` ✅
 
@@ -513,7 +511,7 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `calculate_crowding_distance(self, solutions: list[dict[str, float]], front_indices: list[int]) -> list[float]` - Line 357
+- `calculate_crowding_distance(self, solutions: list[dict[str, float]], front_indices: list[int]) -> list[float]` - Line 353
 
 ### Implementation: `ParetoFrontierManager` ✅
 
@@ -521,8 +519,8 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `update_frontier(self, solutions: list[ParetoSolution]) -> None` - Line 439
-- `get_frontier_summary(self) -> dict[str, Any]` - Line 621
+- `update_frontier(self, solutions: list[ParetoSolution]) -> None` - Line 435
+- `get_frontier_summary(self) -> dict[str, Any]` - Line 617
 
 ### Implementation: `NSGAIIOptimizer` ✅
 
@@ -530,8 +528,8 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async optimize(self) -> list[ParetoSolution]` - Line 716
-- `get_optimization_summary(self) -> dict[str, Any]` - Line 1161
+- `async optimize(self) -> list[ParetoSolution]` - Line 712
+- `get_optimization_summary(self) -> dict[str, Any]` - Line 1157
 
 ### Implementation: `MultiObjectiveOptimizer` ✅
 
@@ -539,9 +537,9 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async optimize_strategy(self, ...) -> list[ParetoSolution]` - Line 1222
-- `get_pareto_frontier_data(self) -> dict[str, Any]` - Line 1274
-- `export_results(self, filepath: str) -> None` - Line 1313
+- `async optimize_strategy(self, ...) -> list[ParetoSolution]` - Line 1218
+- `get_pareto_frontier_data(self) -> dict[str, Any]` - Line 1270
+- `export_results(self, filepath: str) -> None` - Line 1309
 
 ### Implementation: `Individual` ✅
 
@@ -576,11 +574,11 @@
 **Implemented Methods:**
 - `register_strategy_type(self, strategy_type: StrategyType, strategy_class: type) -> None` - Line 227
 - `async create_strategy(self, strategy_type: StrategyType, config: StrategyConfig) -> BaseStrategyInterface` - Line 252
-- `get_supported_strategies(self) -> list[StrategyType]` - Line 517
-- `validate_strategy_requirements(self, strategy_type: StrategyType, config: StrategyConfig) -> bool` - Line 541
-- `async create_strategy_with_validation(self, ...) -> BaseStrategyInterface` - Line 724
-- `get_strategy_info(self, strategy_type: StrategyType) -> dict[str, Any]` - Line 842
-- `list_available_strategies(self) -> dict[str, Any]` - Line 867
+- `get_supported_strategies(self) -> list[StrategyType]` - Line 538
+- `validate_strategy_requirements(self, strategy_type: StrategyType, config: StrategyConfig) -> bool` - Line 562
+- `async create_strategy_with_validation(self, ...) -> BaseStrategyInterface` - Line 745
+- `get_strategy_info(self, strategy_type: StrategyType) -> dict[str, Any]` - Line 863
+- `list_available_strategies(self) -> dict[str, Any]` - Line 888
 
 ### Implementation: `StrategyPerformanceTracker` ✅
 
@@ -629,7 +627,7 @@
 - `should_exit(self, position: Position, data: MarketData) -> bool` - Line 793
 - `update_strategy_performance(self, strategy_name: str, return_pct: float, trade_info: dict[str, Any]) -> None` - Line 885
 - `get_ensemble_statistics(self) -> dict[str, Any]` - Line 905
-- `get_strategy_info(self) -> dict[str, Any]` - Line 972
+- `get_strategy_info(self) -> dict[str, Any]` - Line 918
 
 ### Implementation: `FallbackMode` ✅
 
@@ -687,6 +685,7 @@
 - `should_exit(self, position: Position, data: MarketData) -> bool` - Line 900
 - `update_trade_result(self, return_pct: float, trade_info: dict[str, Any]) -> None` - Line 952
 - `get_fallback_statistics(self) -> dict[str, Any]` - Line 968
+- `get_strategy_info(self) -> dict[str, Any]` - Line 981
 
 ### Implementation: `TechnicalRuleEngine` ✅
 
@@ -695,10 +694,10 @@
 
 **Implemented Methods:**
 - `async calculate_rsi(self, symbol: str) -> float` - Line 76
-- `async calculate_moving_averages(self, symbol: str, current_price: float) -> tuple[float, float]` - Line 96
+- `async calculate_moving_averages(self, symbol: str, current_price: Decimal) -> tuple[Decimal, Decimal]` - Line 96
 - `async evaluate_rules(self, ...) -> dict[str, Any]` - Line 117
-- `update_rule_performance(self, rule: str, performance: float) -> None` - Line 202
-- `adjust_rule_weights(self) -> None` - Line 211
+- `update_rule_performance(self, rule: str, performance: float) -> None` - Line 203
+- `adjust_rule_weights(self) -> None` - Line 212
 
 ### Implementation: `AIPredictor` ✅
 
@@ -706,11 +705,11 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `prepare_features(self, price_history: list[float], volume_history: list[float]) -> np.ndarray` - Line 243
-- `async train_model(self, training_data: list[dict[str, Any]]) -> None` - Line 305
-- `async predict(self, price_history: list[float], volume_history: list[float]) -> dict[str, Any]` - Line 353
-- `update_performance(self, prediction: dict[str, Any], actual_outcome: float) -> None` - Line 407
-- `get_performance_metrics(self) -> dict[str, float]` - Line 417
+- `prepare_features(self, price_history: list[float], volume_history: list[float]) -> np.ndarray` - Line 244
+- `async train_model(self, training_data: list[dict[str, Any]]) -> None` - Line 306
+- `async predict(self, price_history: list[float], volume_history: list[float]) -> dict[str, Any]` - Line 354
+- `update_performance(self, prediction: dict[str, Any], actual_outcome: float) -> None` - Line 408
+- `get_performance_metrics(self) -> dict[str, float]` - Line 418
 
 ### Implementation: `RuleBasedAIStrategy` ✅
 
@@ -719,13 +718,13 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `strategy_type(self) -> StrategyType` - Line 493
-- `async validate_signal(self, signal: Signal) -> bool` - Line 721
-- `get_position_size(self, signal: Signal) -> Decimal` - Line 750
-- `async should_exit(self, position: Position, data: MarketData) -> bool` - Line 782
-- `adjust_component_weights(self) -> None` - Line 882
-- `get_strategy_statistics(self) -> dict[str, Any]` - Line 930
-- `get_strategy_stats(self) -> dict[str, Any]` - Line 999
+- `strategy_type(self) -> StrategyType` - Line 494
+- `async validate_signal(self, signal: Signal) -> bool` - Line 722
+- `get_position_size(self, signal: Signal) -> Decimal` - Line 751
+- `async should_exit(self, position: Position, data: MarketData) -> bool` - Line 783
+- `adjust_component_weights(self) -> None` - Line 883
+- `get_strategy_statistics(self) -> dict[str, Any]` - Line 931
+- `get_strategy_stats(self) -> dict[str, Any]` - Line 946
 
 ### Implementation: `BacktestingInterface` ✅
 
@@ -985,8 +984,8 @@
 - `async remove_strategy(self, strategy_name: str) -> None` - Line 219
 - `async start_monitoring(self) -> None` - Line 239
 - `async stop_monitoring(self) -> None` - Line 247
-- `async get_strategy_performance(self, strategy_name: str) -> dict[str, Any]` - Line 766
-- `async get_comparative_analysis(self) -> dict[str, Any]` - Line 858
+- `async get_strategy_performance(self, strategy_name: str) -> dict[str, Any]` - Line 789
+- `async get_comparative_analysis(self) -> dict[str, Any]` - Line 881
 
 ### Implementation: `StrategyAllocation` ✅
 
@@ -1001,12 +1000,15 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async add_strategy(self, strategy: BaseStrategyInterface, initial_weight: float = 0.1) -> bool` - Line 163
-- `async rebalance_portfolio(self) -> dict[str, Any]` - Line 310
-- `async update_market_regime(self, new_regime: MarketRegime) -> None` - Line 738
-- `async remove_strategy(self, strategy_name: str, reason: str = 'manual') -> bool` - Line 760
-- `get_allocation_status(self) -> dict[str, Any]` - Line 804
-- `async should_rebalance(self) -> bool` - Line 859
+- `async add_strategy(self, strategy: BaseStrategyInterface, initial_weight: float = 0.1) -> bool` - Line 165
+- `async rebalance_portfolio(self) -> dict[str, Any]` - Line 324
+- `async update_market_regime(self, new_regime: MarketRegime) -> None` - Line 752
+- `async remove_strategy(self, strategy_name: str, reason: str = 'manual') -> bool` - Line 774
+- `get_strategy_allocation(self, strategy: BaseStrategyInterface) -> StrategyAllocation | None` - Line 818
+- `async calculate_optimal_weights(self) -> dict[str, float]` - Line 832
+- `update_strategy_performance(self, strategy: BaseStrategyInterface, performance_data: dict[str, float]) -> bool` - Line 841
+- `get_allocation_status(self) -> dict[str, Any]` - Line 874
+- `async should_rebalance(self) -> bool` - Line 929
 
 ### Implementation: `StrategyRepositoryInterface` 🔧
 
@@ -1037,18 +1039,18 @@
 **Implemented Methods:**
 - `async create_strategy(self, strategy: Strategy) -> Strategy` - Line 114
 - `async get_strategy(self, strategy_id: str) -> Strategy | None` - Line 126
-- `async update_strategy(self, strategy_id: str, updates: dict[str, Any]) -> Strategy | None` - Line 160
-- `async delete_strategy(self, strategy_id: str) -> bool` - Line 201
-- `async get_strategies_by_bot(self, bot_id: str) -> list[Strategy]` - Line 217
-- `async get_active_strategies(self, bot_id: str | None = None) -> list[Strategy]` - Line 240
-- `async save_strategy_state(self, strategy_id: str, state_data: dict[str, Any]) -> bool` - Line 264
-- `async load_strategy_state(self, strategy_id: str) -> dict[str, Any] | None` - Line 293
-- `async save_strategy_metrics(self, strategy_id: str, metrics: StrategyMetrics) -> bool` - Line 327
-- `async get_strategy_metrics(self, ...) -> list[AnalyticsStrategyMetrics]` - Line 364
-- `async save_strategy_signals(self, signals: list[Signal]) -> list[Signal]` - Line 393
-- `async get_strategy_signals(self, strategy_id: str, limit: int | None = None) -> list[Signal]` - Line 414
-- `async get_strategy_trades(self, ...) -> list[Trade]` - Line 441
-- `async get_strategy_performance_summary(self, strategy_id: str) -> dict[str, Any]` - Line 470
+- `async update_strategy(self, strategy_id: str, updates: dict[str, Any]) -> Strategy | None` - Line 163
+- `async delete_strategy(self, strategy_id: str) -> bool` - Line 204
+- `async get_strategies_by_bot(self, bot_id: str) -> list[Strategy]` - Line 220
+- `async get_active_strategies(self, bot_id: str | None = None) -> list[Strategy]` - Line 246
+- `async save_strategy_state(self, strategy_id: str, state_data: dict[str, Any]) -> bool` - Line 273
+- `async load_strategy_state(self, strategy_id: str) -> dict[str, Any] | None` - Line 305
+- `async save_strategy_metrics(self, strategy_id: str, metrics: StrategyMetrics) -> bool` - Line 342
+- `async get_strategy_metrics(self, ...) -> list[AnalyticsStrategyMetrics]` - Line 382
+- `async save_strategy_signals(self, signals: list[Signal]) -> list[Signal]` - Line 414
+- `async get_strategy_signals(self, strategy_id: str, limit: int | None = None) -> list[Signal]` - Line 435
+- `async get_strategy_trades(self, ...) -> list[Trade]` - Line 465
+- `async get_strategy_performance_summary(self, strategy_id: str) -> dict[str, Any]` - Line 497
 
 ### Implementation: `StrategyService` ✅
 
@@ -1057,19 +1059,19 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async register_strategy(self, strategy_id: str, strategy_instance: Any, config: StrategyConfig) -> None` - Line 230
-- `async start_strategy(self, strategy_id: str) -> None` - Line 327
-- `async stop_strategy(self, strategy_id: str) -> None` - Line 357
-- `async process_market_data(self, market_data: MarketData) -> dict[str, list[Signal]]` - Line 381
-- `async validate_signal(self, strategy_id: str, signal: Signal) -> bool` - Line 442
-- `async validate_strategy_config(self, config: StrategyConfig) -> bool` - Line 484
-- `async get_strategy_performance(self, strategy_id: str) -> dict[str, Any]` - Line 717
-- `async get_cached_strategy_metrics(self, strategy_id: str) -> dict[str, Any] | None` - Line 761
-- `async get_strategy_performance_with_cache(self, strategy_id: str) -> dict[str, Any]` - Line 782
-- `async get_all_strategies(self) -> dict[str, dict[str, Any]]` - Line 827
-- `async cleanup_strategy(self, strategy_id: str) -> None` - Line 842
-- `get_metrics(self) -> dict[str, Any]` - Line 906
-- `resolve_dependency(self, dependency_name: str) -> Any` - Line 936
+- `async register_strategy(self, strategy_id: str, strategy_instance: Any, config: StrategyConfig) -> None` - Line 234
+- `async start_strategy(self, strategy_id: str) -> None` - Line 331
+- `async stop_strategy(self, strategy_id: str) -> None` - Line 361
+- `async process_market_data(self, market_data: MarketData) -> dict[str, list[Signal]]` - Line 385
+- `async validate_signal(self, strategy_id: str, signal: Signal) -> bool` - Line 500
+- `async validate_strategy_config(self, config: StrategyConfig) -> bool` - Line 542
+- `async get_strategy_performance(self, strategy_id: str) -> dict[str, Any]` - Line 782
+- `async get_cached_strategy_metrics(self, strategy_id: str) -> dict[str, Any] | None` - Line 826
+- `async get_strategy_performance_with_cache(self, strategy_id: str) -> dict[str, Any]` - Line 847
+- `async get_all_strategies(self) -> dict[str, dict[str, Any]]` - Line 892
+- `async cleanup_strategy(self, strategy_id: str) -> None` - Line 907
+- `get_metrics(self) -> dict[str, Any]` - Line 978
+- `resolve_dependency(self, dependency_name: str) -> Any` - Line 1008
 
 ### Implementation: `StrategyIntegratedBase` 🔧
 
@@ -1078,15 +1080,15 @@
 **Status**: Abstract Base Class
 
 **Implemented Methods:**
-- `async initialize_validation_service(self) -> None` - Line 122
-- `set_monitoring_services(self, ...)` - Line 154
-- `async validate_market_data_comprehensive(self, data: MarketData) -> tuple[bool, list[str]]` - Line 182
-- `async calculate_technical_indicators(self, data: MarketData, indicators: list[str], periods: dict[str, int] = None) -> dict[str, Decimal | None]` - Line 249
-- `format_signal_metadata(self, signal: Signal, additional_data: dict[str, Any] = None) -> dict[str, Any]` - Line 351
-- `async record_signal_metrics(self, ...)` - Line 392
-- `async safe_execute_with_monitoring(self, operation_name: str, operation_func, *args, **kwargs) -> Any` - Line 438
-- `get_comprehensive_status(self) -> dict[str, Any]` - Line 513
-- `async cleanup_resources(self)` - Line 529
+- `async initialize_validation_service(self) -> None` - Line 112
+- `set_monitoring_services(self, ...)` - Line 143
+- `async validate_market_data_comprehensive(self, data: MarketData) -> tuple[bool, list[str]]` - Line 171
+- `async calculate_technical_indicators(self, data: MarketData, indicators: list[str], periods: dict[str, int] = None) -> 'dict[str, Decimal | None]'` - Line 238
+- `format_signal_metadata(self, signal: Signal, additional_data: dict[str, Any] = None) -> dict[str, Any]` - Line 354
+- `async record_signal_metrics(self, ...)` - Line 395
+- `async safe_execute_with_monitoring(self, operation_name: str, operation_func, *args, **kwargs) -> Any` - Line 441
+- `get_comprehensive_status(self) -> dict[str, Any]` - Line 516
+- `async cleanup_resources(self)` - Line 532
 
 ### Implementation: `StrategyDataAccessMixin` ✅
 
@@ -1094,7 +1096,7 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async get_indicator_data(self, symbol: str, indicator: str, period: int) -> Decimal | None` - Line 566
+- `async get_indicator_data(self, symbol: str, indicator: str, period: int) -> 'Decimal | None'` - Line 569
 
 ### Implementation: `ArbitrageOpportunity` ✅
 
@@ -1120,7 +1122,7 @@
 - `async validate_signal(self, signal: Signal) -> bool` - Line 608
 - `get_position_size(self, signal: Signal) -> Decimal` - Line 671
 - `async should_exit(self, position: Position, data: MarketData) -> bool` - Line 722
-- `get_strategy_info(self) -> dict[str, Any]` - Line 855
+- `get_strategy_info(self) -> dict[str, Any]` - Line 800
 
 ### Implementation: `CrossExchangeArbitrageStrategy` ✅
 
@@ -1147,17 +1149,17 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async update_inventory(self, position: Position) -> None` - Line 85
-- `async should_rebalance(self) -> bool` - Line 113
-- `async calculate_rebalance_orders(self, current_price: Decimal) -> list[OrderRequest]` - Line 160
-- `async should_emergency_liquidate(self) -> bool` - Line 235
-- `async calculate_emergency_orders(self, current_price: Decimal) -> list[OrderRequest]` - Line 267
-- `async calculate_spread_adjustment(self, base_spread: Decimal) -> Decimal` - Line 323
-- `async calculate_size_adjustment(self, base_size: Decimal) -> Decimal` - Line 359
-- `async record_rebalance(self, cost: Decimal) -> None` - Line 395
-- `async record_emergency(self, cost: Decimal) -> None` - Line 418
-- `get_inventory_summary(self) -> dict[str, Any]` - Line 439
-- `async validate_inventory_limits(self, new_position: Position) -> bool` - Line 468
+- `async update_inventory(self, position: Position) -> None` - Line 88
+- `async should_rebalance(self) -> bool` - Line 116
+- `async calculate_rebalance_orders(self, current_price: Decimal) -> list[OrderRequest]` - Line 163
+- `async should_emergency_liquidate(self) -> bool` - Line 238
+- `async calculate_emergency_orders(self, current_price: Decimal) -> list[OrderRequest]` - Line 270
+- `async calculate_spread_adjustment(self, base_spread: Decimal) -> Decimal` - Line 326
+- `async calculate_size_adjustment(self, base_size: Decimal) -> Decimal` - Line 362
+- `async record_rebalance(self, cost: Decimal) -> None` - Line 398
+- `async record_emergency(self, cost: Decimal) -> None` - Line 421
+- `get_inventory_summary(self) -> dict[str, Any]` - Line 442
+- `async validate_inventory_limits(self, new_position: Position) -> bool` - Line 471
 
 ### Implementation: `OrderLevel` ✅
 
@@ -1182,7 +1184,7 @@
 - `async should_exit(self, position: Position, data: MarketData) -> bool` - Line 500
 - `async update_inventory_state(self, new_position: Position) -> None` - Line 603
 - `async update_performance_metrics(self, trade_result: dict[str, Any]) -> None` - Line 632
-- `get_strategy_info(self) -> dict[str, Any]` - Line 731
+- `get_strategy_info(self) -> dict[str, Any]` - Line 677
 
 ### Implementation: `MeanReversionStrategy` ✅
 
@@ -1215,12 +1217,12 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `strategy_type(self) -> StrategyType` - Line 99
-- `async validate_signal(self, signal: Signal) -> bool` - Line 441
-- `get_position_size(self, signal: Signal) -> Decimal` - Line 497
-- `async should_exit(self, position: Position, data: MarketData) -> bool` - Line 553
-- `get_strategy_info(self) -> dict[str, Any]` - Line 677
-- `get_strategy_info(self) -> dict[str, Any]` - Line 746
+- `set_technical_indicators(self, technical_indicators: TechnicalIndicators) -> None` - Line 101
+- `strategy_type(self) -> StrategyType` - Line 107
+- `async validate_signal(self, signal: Signal) -> bool` - Line 449
+- `get_position_size(self, signal: Signal) -> Decimal` - Line 505
+- `async should_exit(self, position: Position, data: MarketData) -> bool` - Line 561
+- `get_strategy_info(self) -> dict[str, Any]` - Line 688
 
 ### Implementation: `TriangularArbitrageStrategy` ✅
 
@@ -1289,7 +1291,7 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async validate(self, target: Any, context: dict[str, Any] | None = None) -> ValidationResult` - Line 441
+- `async validate(self, target: Any, context: dict[str, Any] | None = None) -> ValidationResult` - Line 440
 
 ### Implementation: `ValidationFramework` ✅
 
@@ -1297,13 +1299,13 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async validate_signal(self, signal: Signal, market_data: MarketData | None = None) -> ValidationResult` - Line 498
-- `async validate_strategy_config(self, config: StrategyConfig) -> ValidationResult` - Line 517
-- `async validate_market_conditions(self, market_data: MarketData) -> ValidationResult` - Line 529
-- `async validate_for_trading(self, signal: Signal, market_data: MarketData) -> ValidationResult` - Line 541
-- `async batch_validate_signals(self, signals: list[Signal], market_data: MarketData | None = None) -> list[tuple[Signal, ValidationResult]]` - Line 557
-- `add_custom_validator(self, validator: BaseValidator, validator_type: str = 'custom') -> None` - Line 579
-- `get_validation_stats(self) -> dict[str, Any]` - Line 599
+- `async validate_signal(self, signal: Signal, market_data: MarketData | None = None) -> ValidationResult` - Line 497
+- `async validate_strategy_config(self, config: StrategyConfig) -> ValidationResult` - Line 516
+- `async validate_market_conditions(self, market_data: MarketData) -> ValidationResult` - Line 528
+- `async validate_for_trading(self, signal: Signal, market_data: MarketData) -> ValidationResult` - Line 540
+- `async batch_validate_signals(self, signals: list[Signal], market_data: MarketData | None = None) -> list[tuple[Signal, ValidationResult]]` - Line 556
+- `add_custom_validator(self, validator: BaseValidator, validator_type: str = 'custom') -> None` - Line 578
+- `get_validation_stats(self) -> dict[str, Any]` - Line 598
 
 ## COMPLETE API REFERENCE
 
@@ -1323,81 +1325,82 @@
 
 ```python
 class BaseStrategy(BaseComponent, BaseStrategyInterface):
-    def __init__(self, config: dict[str, Any], services: StrategyServiceContainer | None = None)  # Line 94
-    def strategy_type(self) -> StrategyType  # Line 157
-    def name(self) -> str  # Line 162
-    def version(self) -> str  # Line 167
-    def status(self) -> StrategyStatus  # Line 172
-    async def _generate_signals_impl(self, data: MarketData) -> list[Signal]  # Line 177
-    async def generate_signals(self, data: MarketData) -> list[Signal]  # Line 194
-    async def validate_signal(self, signal: Signal) -> bool  # Line 329
-    async def _validate_and_process_signal(self, signal: Signal, market_data: MarketData) -> bool  # Line 342
-    def get_position_size(self, signal: Signal) -> Decimal  # Line 385
-    def _get_account_balance(self) -> Decimal  # Line 423
-    def should_exit(self, position: Position, data: MarketData) -> bool  # Line 436
-    async def pre_trade_validation(self, signal: Signal) -> bool  # Line 452
-    async def post_trade_processing(self, trade_result: Any) -> None  # Line 478
-    def set_risk_manager(self, risk_manager: Any) -> None  # Line 524
-    def set_exchange(self, exchange: Any) -> None  # Line 532
-    def set_data_service(self, data_service: Any) -> None  # Line 541
-    def set_validation_framework(self, validation_framework: ValidationFramework) -> None  # Line 549
-    def set_metrics_collector(self, metrics_collector: MetricsCollector) -> None  # Line 558
-    def get_strategy_info(self) -> dict[str, Any]  # Line 567
-    async def initialize(self, config: StrategyConfig) -> None  # Line 582
-    async def start(self) -> bool  # Line 594
-    async def stop(self) -> bool  # Line 644
-    async def pause(self) -> None  # Line 670
-    async def resume(self) -> None  # Line 676
-    async def prepare_for_backtest(self, config: dict[str, Any]) -> None  # Line 683
-    async def process_historical_data(self, data: MarketData) -> list[Signal]  # Line 699
-    async def get_backtest_metrics(self) -> dict[str, Any]  # Line 715
-    def get_real_time_metrics(self) -> dict[str, Any]  # Line 728
-    def _add_to_signal_history(self, signals: list[Signal]) -> None  # Line 745
-    async def _on_initialize(self) -> None  # Line 758
-    async def _on_start(self) -> None  # Line 762
-    async def _on_stop(self) -> None  # Line 766
-    async def _on_backtest_prepare(self) -> None  # Line 770
-    def update_config(self, new_config: dict[str, Any]) -> None  # Line 774
-    async def get_state(self) -> dict[str, Any]  # Line 789
-    def get_performance_summary(self) -> dict[str, Any]  # Line 806
-    def cleanup(self) -> None  # Line 836
-    async def get_market_data(self, symbol: str) -> MarketData | None  # Line 870
-    async def get_historical_data(self, symbol: str, timeframe: str, limit: int = 100) -> list[MarketData]  # Line 892
-    async def execute_order(self, signal: Signal) -> Any | None  # Line 918
-    async def save_state(self, state_data: dict[str, Any]) -> bool  # Line 964
-    async def load_state(self) -> dict[str, Any] | None  # Line 987
-    def _update_metrics(self, metrics: dict[str, Any]) -> None  # Line 1010
-    def _log_signal(self, signal: Signal) -> None  # Line 1023
-    async def _handle_error(self, error: Exception, severity: ErrorSeverity, context: dict[str, Any]) -> None  # Line 1033
-    def get_metrics(self) -> dict[str, Any]  # Line 1064
-    def is_healthy(self) -> bool  # Line 1080
-    async def reset(self) -> bool  # Line 1104
-    def _calculate_win_rate(self) -> float  # Line 1113
-    def _calculate_sharpe_ratio(self) -> float  # Line 1127
-    def _calculate_max_drawdown(self) -> float  # Line 1146
-    def set_execution_service(self, execution_service: Any) -> None  # Line 1172
-    def get_status(self) -> StrategyStatus  # Line 1178
-    def get_status_string(self) -> str  # Line 1182
-    async def _cleanup_resources(self) -> None  # Line 1186
-    def _validate_config(config: dict[str, Any]) -> None  # Line 1195
-    async def validate_market_data(self, data: MarketData | None) -> None  # Line 1219
-    def __str__(self) -> str  # Line 1241
-    def __repr__(self) -> str  # Line 1245
-    async def get_sma(self, symbol: str, period: int) -> Decimal | None  # Line 1250
-    async def get_ema(self, symbol: str, period: int) -> Decimal | None  # Line 1271
-    async def get_rsi(self, symbol: str, period: int = 14) -> Decimal | None  # Line 1290
-    async def get_volatility(self, symbol: str, period: int) -> Decimal | None  # Line 1309
-    async def get_atr(self, symbol: str, period: int) -> Decimal | None  # Line 1328
-    async def get_volume_ratio(self, symbol: str, period: int) -> Decimal | None  # Line 1347
-    async def get_bollinger_bands(self, symbol: str, period: int = 20, std_dev: float = 2.0) -> dict[str, Decimal] | None  # Line 1366
-    async def get_macd(self, ...) -> dict[str, Decimal] | None  # Line 1393
-    async def execute_with_algorithm(self, ...) -> dict[str, Any] | None  # Line 1422
-    async def optimize_parameters(self, optimization_config: dict[str, Any] | None) -> dict[str, Any]  # Line 1470
-    async def enhance_signals_with_ml(self, signals: list[Signal]) -> list[Signal]  # Line 1544
-    async def _get_market_context_for_ml(self) -> dict[str, Any]  # Line 1607
-    async def get_allocated_capital(self) -> Decimal  # Line 1650
-    async def execute_large_order(self, order_request: OrderRequest, max_position_size: Decimal | None = None) -> dict[str, Any] | None  # Line 1755
-    async def get_execution_algorithms_status(self) -> dict[str, Any]  # Line 1817
+    def __init__(self, config: dict[str, Any], services: StrategyServiceContainer | None = None)  # Line 96
+    def strategy_type(self) -> StrategyType  # Line 160
+    def name(self) -> str  # Line 165
+    def version(self) -> str  # Line 170
+    def status(self) -> StrategyStatus  # Line 175
+    async def _generate_signals_impl(self, data: MarketData) -> list[Signal]  # Line 180
+    async def generate_signals(self, data: MarketData) -> list[Signal]  # Line 197
+    async def validate_signal(self, signal: Signal) -> bool  # Line 335
+    async def _validate_and_process_signal(self, signal: Signal, market_data: MarketData) -> bool  # Line 348
+    def get_position_size(self, signal: Signal) -> Decimal  # Line 391
+    def _get_account_balance(self) -> Decimal  # Line 429
+    def should_exit(self, position: Position, data: MarketData) -> bool  # Line 442
+    async def pre_trade_validation(self, signal: Signal) -> bool  # Line 458
+    async def post_trade_processing(self, trade_result: Any) -> None  # Line 484
+    def set_risk_manager(self, risk_manager: Any) -> None  # Line 530
+    def set_exchange(self, exchange: Any) -> None  # Line 538
+    def set_data_service(self, data_service: Any) -> None  # Line 547
+    def set_validation_framework(self, validation_framework: ValidationFramework) -> None  # Line 555
+    def set_metrics_collector(self, metrics_collector: MetricsCollector) -> None  # Line 564
+    def get_strategy_info(self) -> dict[str, Any]  # Line 573
+    async def initialize(self, config: StrategyConfig) -> None  # Line 588
+    async def start(self) -> bool  # Line 600
+    async def stop(self) -> bool  # Line 653
+    async def pause(self) -> None  # Line 679
+    async def resume(self) -> None  # Line 685
+    async def prepare_for_backtest(self, config: dict[str, Any]) -> None  # Line 692
+    async def process_historical_data(self, data: MarketData) -> list[Signal]  # Line 708
+    async def get_backtest_metrics(self) -> dict[str, Any]  # Line 724
+    def get_real_time_metrics(self) -> dict[str, Any]  # Line 737
+    def _add_to_signal_history(self, signals: list[Signal]) -> None  # Line 754
+    async def _on_initialize(self) -> None  # Line 767
+    async def _on_start(self) -> None  # Line 771
+    async def _on_stop(self) -> None  # Line 775
+    async def _on_backtest_prepare(self) -> None  # Line 779
+    def update_config(self, new_config: dict[str, Any]) -> None  # Line 783
+    async def get_state(self) -> dict[str, Any]  # Line 798
+    def get_performance_summary(self) -> dict[str, Any]  # Line 815
+    def cleanup(self) -> None  # Line 845
+    async def get_market_data(self, symbol: str) -> MarketData | None  # Line 879
+    async def get_historical_data(self, symbol: str, timeframe: str, limit: int = 100) -> list[MarketData]  # Line 901
+    async def execute_order(self, signal: Signal) -> Any | None  # Line 929
+    async def save_state(self, state_data: dict[str, Any]) -> bool  # Line 975
+    async def load_state(self) -> dict[str, Any] | None  # Line 998
+    def _update_metrics(self, metrics: dict[str, Any]) -> None  # Line 1021
+    def _log_signal(self, signal: Signal) -> None  # Line 1034
+    async def _handle_error(self, error: Exception, severity: ErrorSeverity, context: dict[str, Any]) -> None  # Line 1044
+    def get_metrics(self) -> dict[str, Any]  # Line 1078
+    def is_healthy(self) -> bool  # Line 1094
+    async def reset(self) -> bool  # Line 1119
+    def _calculate_win_rate(self) -> float  # Line 1129
+    def _calculate_sharpe_ratio(self) -> float  # Line 1144
+    def _calculate_max_drawdown(self) -> float  # Line 1164
+    def set_execution_service(self, execution_service: Any) -> None  # Line 1191
+    def get_status(self) -> StrategyStatus  # Line 1197
+    def get_status_string(self) -> str  # Line 1201
+    async def _cleanup_resources(self) -> None  # Line 1205
+    async def _persist_strategy_state(self) -> None  # Line 1213
+    def _validate_config(config: dict[str, Any]) -> None  # Line 1228
+    async def validate_market_data(self, data: MarketData | None) -> None  # Line 1252
+    def __str__(self) -> str  # Line 1274
+    def __repr__(self) -> str  # Line 1278
+    async def get_sma(self, symbol: str, period: int) -> Decimal | None  # Line 1286
+    async def get_ema(self, symbol: str, period: int) -> Decimal | None  # Line 1307
+    async def get_rsi(self, symbol: str, period: int = 14) -> Decimal | None  # Line 1326
+    async def get_volatility(self, symbol: str, period: int) -> Decimal | None  # Line 1345
+    async def get_atr(self, symbol: str, period: int) -> Decimal | None  # Line 1364
+    async def get_volume_ratio(self, symbol: str, period: int) -> Decimal | None  # Line 1383
+    async def get_bollinger_bands(self, symbol: str, period: int = 20, std_dev: float = 2.0) -> dict[str, Decimal] | None  # Line 1402
+    async def get_macd(self, ...) -> dict[str, Decimal] | None  # Line 1429
+    async def execute_with_algorithm(self, ...) -> dict[str, Any] | None  # Line 1458
+    async def optimize_parameters(self, optimization_config: dict[str, Any] | None) -> dict[str, Any]  # Line 1506
+    async def enhance_signals_with_ml(self, signals: list[Signal]) -> list[Signal]  # Line 1580
+    async def _get_market_context_for_ml(self) -> dict[str, Any]  # Line 1643
+    async def get_allocated_capital(self) -> Decimal  # Line 1686
+    async def execute_large_order(self, order_request: OrderRequest, max_position_size: Decimal | None = None) -> dict[str, Any] | None  # Line 1731
+    async def get_execution_algorithms_status(self) -> dict[str, Any]  # Line 1793
 ```
 
 ### File: config.py
@@ -1426,8 +1429,8 @@ class StrategyConfigurationManager:
     def get_config_schema(self) -> dict[str, Any]  # Line 342
     def update_config_parameter(self, strategy_name: str, parameter: str, value: Any) -> bool  # Line 351
     def create_strategy_config(self, strategy_name: str, strategy_type: StrategyType, symbol: str, **kwargs) -> StrategyConfig  # Line 415
-    def delete_strategy_config(self, strategy_name: str) -> bool  # Line 486
-    def get_config_summary(self) -> dict[str, Any]  # Line 529
+    def delete_strategy_config(self, strategy_name: str) -> bool  # Line 487
+    def get_config_summary(self) -> dict[str, Any]  # Line 530
 ```
 
 ### File: config_templates.py
@@ -1443,15 +1446,15 @@ class StrategyConfigurationManager:
 class StrategyConfigTemplates:
     def get_arbitrage_scanner_config(risk_level, ...) -> dict[str, Any]  # Line 35
     def get_mean_reversion_config(timeframe: str = '1h', risk_level: str = 'medium') -> dict[str, Any]  # Line 139
-    def get_trend_following_config(timeframe: str = '1h', trend_strength: str = 'medium') -> dict[str, Any]  # Line 263
-    def get_market_making_config(symbol, ...) -> dict[str, Any]  # Line 380
-    def get_volatility_breakout_config(volatility_regime: str = 'medium', breakout_type: str = 'range') -> dict[str, Any]  # Line 496
-    def get_ensemble_config(strategy_types, ...) -> dict[str, Any]  # Line 602
-    def get_all_templates(cls) -> dict[str, dict[str, Any]]  # Line 685
-    def get_template_by_name(cls, template_name: str) -> dict[str, Any]  # Line 730
-    def list_available_templates(cls) -> list[str]  # Line 751
-    def get_templates_by_strategy_type(cls, strategy_type: str) -> dict[str, dict[str, Any]]  # Line 761
-    def validate_template(cls, template: dict[str, Any]) -> tuple[bool, list[str]]  # Line 779
+    def get_trend_following_config(timeframe: str = '1h', trend_strength: str = 'medium') -> dict[str, Any]  # Line 266
+    def get_market_making_config(symbol, ...) -> dict[str, Any]  # Line 383
+    def get_volatility_breakout_config(volatility_regime: str = 'medium', breakout_type: str = 'range') -> dict[str, Any]  # Line 499
+    def get_ensemble_config(strategy_types, ...) -> dict[str, Any]  # Line 605
+    def get_all_templates(cls) -> dict[str, dict[str, Any]]  # Line 688
+    def get_template_by_name(cls, template_name: str) -> dict[str, Any]  # Line 733
+    def list_available_templates(cls) -> list[str]  # Line 754
+    def get_templates_by_strategy_type(cls, strategy_type: str) -> dict[str, dict[str, Any]]  # Line 764
+    def validate_template(cls, template: dict[str, Any]) -> tuple[bool, list[str]]  # Line 782
 ```
 
 ### File: controller.py
@@ -1528,13 +1531,14 @@ def create_strategy_service_container(...) -> StrategyServiceContainer  # Line 1
 **Key Imports:**
 - `from src.core.dependency_injection import DependencyContainer`
 - `from src.core.logging import get_logger`
+- `from src.strategies.factory import StrategyFactory`
+- `from src.strategies.dynamic.strategy_factory import DynamicStrategyFactory`
 - `from src.strategies.repository import StrategyRepository`
-- `from src.strategies.service import StrategyService`
 
 #### Functions:
 
 ```python
-def register_strategies_dependencies(container: DependencyContainer) -> None  # Line 13
+def register_strategies_dependencies(container: DependencyContainer) -> None  # Line 15
 ```
 
 ### File: adaptive_momentum.py
@@ -1559,7 +1563,7 @@ class AdaptiveMomentumStrategy(BaseStrategy):
     def version(self, value: str) -> None  # Line 80
     def status(self) -> str  # Line 85
     def status(self, value: str) -> None  # Line 90
-    def __init__(self, config: dict[str, Any], services: StrategyServiceContainer | None = None)  # Line 94
+    def __init__(self, config: dict[str, Any], services: 'StrategyServiceContainer | None' = None)  # Line 94
     def strategy_type(self) -> StrategyType  # Line 145
     def set_technical_indicators(self, technical_indicators: TechnicalIndicators) -> None  # Line 149
     def set_strategy_service(self, strategy_service: 'StrategyService') -> None  # Line 154
@@ -1567,27 +1571,21 @@ class AdaptiveMomentumStrategy(BaseStrategy):
     def set_adaptive_risk_manager(self, adaptive_risk_manager: AdaptiveRiskManager) -> None  # Line 164
     async def _generate_signals_impl(self, data: MarketData) -> list[Signal]  # Line 170
     async def _validate_data_availability(self, symbol: str) -> bool  # Line 248
-    async def _get_current_regime_via_service(self, symbol: str) -> MarketRegime | None  # Line 269
-    async def _calculate_momentum_indicators_via_service(self, symbol: str, current_data: MarketData) -> dict[str, Any] | None  # Line 318
+    async def _get_current_regime_via_service(self, symbol: str) -> 'MarketRegime | None'  # Line 269
+    async def _calculate_momentum_indicators_via_service(self, symbol: str, current_data: MarketData) -> 'dict[str, Any] | None'  # Line 318
     def _calculate_rsi_score_from_value(self, rsi: float) -> float  # Line 410
-    async def _generate_momentum_signals_enhanced(self, ...) -> list[Signal]  # Line 419
-    def _calculate_enhanced_confidence(self, ...) -> float  # Line 494
-    async def _apply_enhanced_confidence_adjustments(self, signals: list[Signal], current_regime: MarketRegime | None) -> list[Signal]  # Line 527
-    async def _update_strategy_state(self, ...) -> None  # Line 587
-    async def _persist_strategy_state(self) -> None  # Line 647
-    def _get_regime_confidence_multiplier(self, regime: MarketRegime | None) -> float  # Line 661
-    async def validate_signal(self, signal: Signal) -> bool  # Line 681
-    def get_position_size(self, signal: Signal) -> Decimal  # Line 762
-    def should_exit(self, position: Position, data: MarketData) -> bool  # Line 855
-    def get_strategy_info(self) -> dict[str, Any]  # Line 936
-    async def _on_start(self) -> None  # Line 978
-    async def _on_stop(self) -> None  # Line 1000
-    async def _get_sma(self, symbol: str, period: int) -> Decimal | None  # Line 1019
-    async def _get_rsi(self, symbol: str, period: int) -> Decimal | None  # Line 1030
-    async def _get_volatility(self, symbol: str, period: int) -> Decimal | None  # Line 1041
-    async def _get_atr(self, symbol: str, period: int) -> Decimal | None  # Line 1052
-    async def _get_volume_ratio(self, symbol: str, period: int) -> Decimal | None  # Line 1063
-    def cleanup(self) -> None  # Line 1074
+    async def _generate_momentum_signals(self, ...) -> list[Signal]  # Line 419
+    def _calculate_confidence(self, ...) -> float  # Line 491
+    async def _apply_confidence_adjustments(self, signals: list[Signal], current_regime: 'MarketRegime | None') -> list[Signal]  # Line 524
+    async def _update_strategy_state(self, ...) -> None  # Line 576
+    def _get_regime_confidence_multiplier(self, regime: 'MarketRegime | None') -> float  # Line 637
+    async def validate_signal(self, signal: Signal) -> bool  # Line 657
+    def get_position_size(self, signal: Signal) -> Decimal  # Line 738
+    def should_exit(self, position: Position, data: MarketData) -> bool  # Line 831
+    def get_strategy_info(self) -> dict[str, Any]  # Line 912
+    async def _on_start(self) -> None  # Line 954
+    async def _on_stop(self) -> None  # Line 976
+    def cleanup(self) -> None  # Line 996
 ```
 
 ### File: strategy_factory.py
@@ -1599,22 +1597,22 @@ class AdaptiveMomentumStrategy(BaseStrategy):
 - `from src.risk_management.adaptive_risk import AdaptiveRiskManager`
 - `from src.risk_management.regime_detection import MarketRegimeDetector`
 
-#### Class: `EnhancedDynamicStrategyFactory`
+#### Class: `DynamicStrategyFactory`
 
 **Inherits**: BaseComponent
-**Purpose**: Enhanced factory for creating dynamic strategies with service layer integration
+**Purpose**: Factory for creating dynamic strategies with service layer integration
 
 ```python
-class EnhancedDynamicStrategyFactory(BaseComponent):
+class DynamicStrategyFactory(BaseComponent):
     def __init__(self, ...)  # Line 43
-    async def create_strategy(self, strategy_name: str, config: dict[str, Any], use_enhanced: bool = True) -> BaseStrategy | None  # Line 94
-    def _resolve_strategy_class(self, strategy_name: str, use_enhanced: bool)  # Line 161
+    async def create_strategy(self, strategy_name: str, config: dict[str, Any]) -> BaseStrategy | None  # Line 94
+    def _resolve_strategy_class(self, strategy_name: str)  # Line 163
     async def _enhance_configuration(self, strategy_name: str, config: dict[str, Any]) -> dict[str, Any]  # Line 189
     async def _inject_dependencies(self, strategy: BaseStrategy, strategy_name: str) -> None  # Line 251
-    async def _validate_strategy_setup(self, strategy: BaseStrategy) -> bool  # Line 293
-    def get_available_strategies(self) -> dict[str, str]  # Line 346
-    def get_strategy_requirements(self, strategy_name: str) -> dict[str, Any]  # Line 355
-    async def create_multiple_strategies(self, strategy_configs: dict[str, dict[str, Any]], use_enhanced: bool = True) -> dict[str, BaseStrategy | None]  # Line 393
+    async def _validate_strategy_setup(self, strategy: BaseStrategy) -> bool  # Line 301
+    def get_available_strategies(self) -> dict[str, str]  # Line 354
+    def get_strategy_requirements(self, strategy_name: str) -> dict[str, Any]  # Line 361
+    async def create_multiple_strategies(self, strategy_configs: dict[str, dict[str, Any]]) -> dict[str, BaseStrategy | None]  # Line 399
 ```
 
 ### File: volatility_breakout.py
@@ -1633,49 +1631,43 @@ class EnhancedDynamicStrategyFactory(BaseComponent):
 
 ```python
 class VolatilityBreakoutStrategy(BaseStrategy):
-    def name(self) -> str  # Line 58
-    def name(self, value: str) -> None  # Line 67
-    def version(self) -> str  # Line 72
-    def version(self, value: str) -> None  # Line 77
-    def status(self) -> str  # Line 82
-    def status(self, value: str) -> None  # Line 87
-    def __init__(self, config: dict[str, Any], services: StrategyServiceContainer | None = None)  # Line 91
-    def strategy_type(self) -> StrategyType  # Line 147
-    def set_technical_indicators(self, technical_indicators: TechnicalIndicators) -> None  # Line 151
-    def set_strategy_service(self, strategy_service: StrategyService) -> None  # Line 156
-    def set_regime_detector(self, regime_detector: MarketRegimeDetector) -> None  # Line 161
-    def set_adaptive_risk_manager(self, adaptive_risk_manager: AdaptiveRiskManager) -> None  # Line 166
-    async def _generate_signals_impl(self, data: MarketData) -> list[Signal]  # Line 172
-    async def _validate_data_availability(self, symbol: str) -> bool  # Line 268
-    async def _is_in_breakout_cooldown(self, symbol: str) -> bool  # Line 288
-    async def _get_current_regime_via_service(self, symbol: str) -> MarketRegime | None  # Line 310
-    async def _calculate_volatility_indicators_via_service(self, symbol: str, current_data: MarketData) -> dict[str, Any] | None  # Line 356
-    async def _calculate_consolidation_score_enhanced(self, symbol: str, price_data: list[MarketData]) -> float  # Line 443
-    def _is_bollinger_squeeze(self, bb_data: dict, current_price: Decimal) -> bool  # Line 508
-    def _get_bb_position(self, bb_data: dict, current_price: Decimal) -> str  # Line 527
-    async def _calculate_breakout_levels_enhanced(self, ...) -> dict[str, float]  # Line 551
-    def _get_regime_breakout_adjustment(self, regime: MarketRegime | None) -> float  # Line 612
-    async def _generate_breakout_signals_enhanced(self, ...) -> list[Signal]  # Line 631
-    def _calculate_enhanced_breakout_confidence(self, ...) -> float  # Line 727
-    def _get_regime_confidence_multiplier(self, regime: MarketRegime | None) -> float  # Line 779
-    async def _apply_enhanced_regime_filtering(self, signals: list[Signal], current_regime: MarketRegime | None) -> list[Signal]  # Line 798
-    def _is_signal_valid_for_regime_enhanced(self, signal: Signal, regime: MarketRegime) -> bool  # Line 858
-    async def _apply_enhanced_time_decay(self, signals: list[Signal], symbol: str) -> list[Signal]  # Line 906
-    async def _update_strategy_state(self, ...) -> None  # Line 984
-    async def _persist_strategy_state(self) -> None  # Line 1037
-    async def validate_signal(self, signal: Signal) -> bool  # Line 1052
-    def get_position_size(self, signal: Signal) -> Decimal  # Line 1167
-    def _get_regime_position_adjustment(self, regime: MarketRegime) -> float  # Line 1264
-    def should_exit(self, position: Position, data: MarketData) -> bool  # Line 1280
-    def get_strategy_info(self) -> dict[str, Any]  # Line 1359
-    async def _on_start(self) -> None  # Line 1405
-    async def _on_stop(self) -> None  # Line 1427
-    def cleanup(self) -> None  # Line 1445
-    async def _get_sma(self, symbol: str, period: int) -> Decimal | None  # Line 1450
-    async def _get_rsi(self, symbol: str, period: int) -> Decimal | None  # Line 1461
-    async def _get_volatility(self, symbol: str, period: int) -> Decimal | None  # Line 1472
-    async def _get_atr(self, symbol: str, period: int) -> Decimal | None  # Line 1483
-    async def _get_volume_ratio(self, symbol: str, period: int) -> Decimal | None  # Line 1494
+    def name(self) -> str  # Line 60
+    def name(self, value: str) -> None  # Line 69
+    def version(self) -> str  # Line 74
+    def version(self, value: str) -> None  # Line 79
+    def status(self) -> str  # Line 84
+    def status(self, value: str) -> None  # Line 89
+    def __init__(self, config: dict[str, Any], services: 'StrategyServiceContainer | None' = None)  # Line 93
+    def strategy_type(self) -> StrategyType  # Line 149
+    def set_technical_indicators(self, technical_indicators: TechnicalIndicators) -> None  # Line 153
+    def set_strategy_service(self, strategy_service: 'StrategyService') -> None  # Line 158
+    def set_regime_detector(self, regime_detector: MarketRegimeDetector) -> None  # Line 163
+    def set_adaptive_risk_manager(self, adaptive_risk_manager: AdaptiveRiskManager) -> None  # Line 168
+    async def _generate_signals_impl(self, data: MarketData) -> list[Signal]  # Line 174
+    async def _validate_data_availability(self, symbol: str) -> bool  # Line 270
+    async def _is_in_breakout_cooldown(self, symbol: str) -> bool  # Line 290
+    async def _get_current_regime_via_service(self, symbol: str) -> 'MarketRegime | None'  # Line 312
+    async def _calculate_volatility_indicators_via_service(self, symbol: str, current_data: MarketData) -> 'dict[str, Any] | None'  # Line 358
+    async def _calculate_consolidation_score(self, symbol: str, price_data: list[MarketData]) -> float  # Line 445
+    def _is_bollinger_squeeze(self, bb_data: dict, current_price: Decimal) -> bool  # Line 510
+    def _get_bb_position(self, bb_data: dict, current_price: Decimal) -> str  # Line 529
+    async def _calculate_breakout_levels(self, ...) -> dict[str, float]  # Line 553
+    def _get_regime_breakout_adjustment(self, regime: 'MarketRegime | None') -> float  # Line 614
+    async def _generate_breakout_signals(self, ...) -> list[Signal]  # Line 633
+    def _calculate_breakout_confidence(self, ...) -> float  # Line 729
+    def _get_regime_confidence_multiplier(self, regime: 'MarketRegime | None') -> float  # Line 781
+    async def _apply_regime_filtering(self, signals: list[Signal], current_regime: 'MarketRegime | None') -> list[Signal]  # Line 800
+    def _is_signal_valid_for_regime(self, signal: Signal, regime: MarketRegime) -> bool  # Line 860
+    async def _apply_time_decay(self, signals: list[Signal], symbol: str) -> list[Signal]  # Line 908
+    async def _update_strategy_state(self, ...) -> None  # Line 986
+    async def validate_signal(self, signal: Signal) -> bool  # Line 1041
+    def get_position_size(self, signal: Signal) -> Decimal  # Line 1156
+    def _get_regime_position_adjustment(self, regime: MarketRegime) -> float  # Line 1253
+    def should_exit(self, position: Position, data: MarketData) -> bool  # Line 1269
+    def get_strategy_info(self) -> dict[str, Any]  # Line 1348
+    async def _on_start(self) -> None  # Line 1394
+    async def _on_stop(self) -> None  # Line 1416
+    def cleanup(self) -> None  # Line 1436
 ```
 
 ### File: environment_integration.py
@@ -1713,7 +1705,7 @@ class EnvironmentAwareStrategyConfiguration:
 
 ```python
 class EnvironmentAwareStrategyManager(EnvironmentAwareServiceMixin):
-    def __init__(self, *args, **kwargs)  # Line 98
+    def __init__(self, *args: Any, **kwargs: Any) -> None  # Line 98
     async def _update_service_environment(self, context: EnvironmentContext) -> None  # Line 105
     def get_environment_strategy_config(self, exchange: str) -> dict[str, Any]  # Line 140
     async def deploy_environment_aware_strategy(self, strategy_config: StrategyConfig, exchange: str, force_deploy: bool = False) -> bool  # Line 153
@@ -1722,19 +1714,19 @@ class EnvironmentAwareStrategyManager(EnvironmentAwareServiceMixin):
     async def _validate_sandbox_strategy(self, strategy_config: StrategyConfig, env_config: dict[str, Any]) -> bool  # Line 278
     async def _validate_common_strategy_rules(self, strategy_config: StrategyConfig, exchange: str, env_config: dict[str, Any]) -> bool  # Line 299
     async def _apply_environment_strategy_adjustments(self, strategy_config: StrategyConfig, exchange: str) -> StrategyConfig  # Line 326
-    async def generate_environment_aware_signal(self, strategy_name: str, market_data: MarketData, exchange: str) -> Signal | None  # Line 362
-    async def _apply_environment_signal_filters(self, signal: Signal, exchange: str, env_config: dict[str, Any]) -> Signal | None  # Line 394
-    async def _validate_signal_for_environment(self, signal: Signal, exchange: str) -> bool  # Line 422
-    async def _deploy_strategy_with_config(self, strategy_config: StrategyConfig, exchange: str) -> bool  # Line 446
-    async def _generate_base_signal(self, strategy_name: str, market_data: MarketData, exchange: str) -> Signal | None  # Line 454
-    async def _verify_strategy_backtest(self, strategy_config: StrategyConfig, exchange: str) -> bool  # Line 469
-    async def _initialize_strategy_tracking(self, strategy_name: str, exchange: str) -> None  # Line 499
-    async def _update_signal_tracking(self, strategy_name: str, exchange: str, signal: Signal) -> None  # Line 508
-    async def _disable_experimental_strategies(self, exchange: str) -> None  # Line 519
-    async def _is_high_volatility_period(self, symbol: str, exchange: str) -> bool  # Line 530
-    async def update_strategy_performance(self, ...) -> None  # Line 535
-    def get_environment_strategy_metrics(self, exchange: str) -> dict[str, Any]  # Line 567
-    async def rebalance_strategies_for_environment(self, exchange: str) -> dict[str, Any]  # Line 601
+    async def generate_environment_aware_signal(self, strategy_name: str, market_data: MarketData, exchange: str) -> 'Signal | None'  # Line 362
+    async def _apply_environment_signal_filters(self, signal: Signal, exchange: str, env_config: dict[str, Any]) -> 'Signal | None'  # Line 394
+    async def _validate_signal_for_environment(self, signal: Signal, exchange: str) -> bool  # Line 425
+    async def _deploy_strategy_with_config(self, strategy_config: StrategyConfig, exchange: str) -> bool  # Line 449
+    async def _generate_base_signal(self, strategy_name: str, market_data: MarketData, exchange: str) -> 'Signal | None'  # Line 457
+    async def _verify_strategy_backtest(self, strategy_config: StrategyConfig, exchange: str) -> bool  # Line 479
+    async def _initialize_strategy_tracking(self, strategy_name: str, exchange: str) -> None  # Line 509
+    async def _update_signal_tracking(self, strategy_name: str, exchange: str, signal: Signal) -> None  # Line 518
+    async def _disable_experimental_strategies(self, exchange: str) -> None  # Line 529
+    async def _is_high_volatility_period(self, symbol: str, exchange: str) -> bool  # Line 540
+    async def update_strategy_performance(self, ...) -> None  # Line 545
+    def get_environment_strategy_metrics(self, exchange: str) -> dict[str, Any]  # Line 577
+    async def rebalance_strategies_for_environment(self, exchange: str) -> dict[str, Any]  # Line 607
 ```
 
 ### File: fitness.py
@@ -1997,11 +1989,11 @@ class NeuroNetwork:
 
 ```python
 class Species:
-    def __init__(self, species_id: int, representative: NEATGenome)  # Line 899
-    def add_member(self, genome: NEATGenome) -> None  # Line 914
-    def calculate_average_fitness(self) -> None  # Line 919
-    def select_parents(self, selection_pressure: float = 0.5) -> list[NEATGenome]  # Line 926
-    def remove_worst_genomes(self, keep_ratio: float = 0.5) -> None  # Line 945
+    def __init__(self, species_id: int, representative: NEATGenome)  # Line 902
+    def add_member(self, genome: NEATGenome) -> None  # Line 917
+    def calculate_average_fitness(self) -> None  # Line 922
+    def select_parents(self, selection_pressure: float = 0.5) -> list[NEATGenome]  # Line 929
+    def remove_worst_genomes(self, keep_ratio: float = 0.5) -> None  # Line 948
 ```
 
 #### Class: `SpeciationManager`
@@ -2010,12 +2002,12 @@ class Species:
 
 ```python
 class SpeciationManager:
-    def __init__(self, ...)  # Line 965
-    def speciate_population(self, population: list[NEATGenome]) -> None  # Line 984
-    def _calculate_fitness_sharing(self) -> None  # Line 1029
-    def _remove_stagnant_species(self) -> None  # Line 1036
-    def _adjust_compatibility_threshold(self) -> None  # Line 1054
-    def allocate_offspring(self, total_offspring: int) -> dict[int, int]  # Line 1068
+    def __init__(self, ...)  # Line 968
+    def speciate_population(self, population: list[NEATGenome]) -> None  # Line 987
+    def _calculate_fitness_sharing(self) -> None  # Line 1032
+    def _remove_stagnant_species(self) -> None  # Line 1039
+    def _adjust_compatibility_threshold(self) -> None  # Line 1057
+    def allocate_offspring(self, total_offspring: int) -> dict[int, int]  # Line 1071
 ```
 
 #### Class: `NeuroEvolutionConfig`
@@ -2033,30 +2025,25 @@ class NeuroEvolutionConfig:
 
 ```python
 class NeuroEvolutionStrategy(BaseStrategy):
-    def __init__(self, config: dict[str, Any], services: StrategyServiceContainer | None = None)  # Line 1162
-    def _initialize_population(self) -> None  # Line 1202
-    def _update_best_network(self) -> None  # Line 1229
-    async def _generate_signals_impl(self, data: MarketData) -> list[Signal]  # Line 1237
-    async def _maybe_adapt(self) -> None  # Line 1279
-    async def adapt_networks(self) -> None  # Line 1290
-    async def _micro_evolution(self) -> None  # Line 1338
-    async def evolve_population(self, fitness_evaluator: FitnessEvaluator) -> None  # Line 1371
-    def _create_offspring(self, species: Species, parents: list[NEATGenome]) -> NEATGenome  # Line 1447
-    def _mutate_genome(self, genome: NEATGenome) -> None  # Line 1475
-    def _record_generation_stats(self) -> None  # Line 1502
-    async def validate_signal(self, signal: Signal) -> bool  # Line 1523
-    def get_position_size(self, signal: Signal) -> Decimal  # Line 1547
-    def should_exit(self, position: Position, data: MarketData) -> bool  # Line 1571
-    def _check_standard_exits(self, position: Position, data: MarketData) -> bool  # Line 1601
-    def get_strategy_info(self) -> dict[str, Any]  # Line 1625
-    def get_evolution_summary(self) -> dict[str, Any]  # Line 1655
-    async def save_population(self, filepath: str) -> None  # Line 1684
-    async def load_population(self, filepath: str) -> None  # Line 1715
-    async def _get_sma(self, symbol: str, period: int) -> Decimal | None  # Line 1754
-    async def _get_rsi(self, symbol: str, period: int) -> Decimal | None  # Line 1765
-    async def _get_volatility(self, symbol: str, period: int) -> Decimal | None  # Line 1776
-    async def _get_atr(self, symbol: str, period: int) -> Decimal | None  # Line 1787
-    async def _get_volume_ratio(self, symbol: str, period: int) -> Decimal | None  # Line 1798
+    def __init__(self, config: dict[str, Any], services: StrategyServiceContainer | None = None)  # Line 1165
+    def _initialize_population(self) -> None  # Line 1205
+    def _update_best_network(self) -> None  # Line 1232
+    async def _generate_signals_impl(self, data: MarketData) -> list[Signal]  # Line 1240
+    async def _maybe_adapt(self) -> None  # Line 1282
+    async def adapt_networks(self) -> None  # Line 1293
+    async def _micro_evolution(self) -> None  # Line 1341
+    async def evolve_population(self, fitness_evaluator: FitnessEvaluator) -> None  # Line 1374
+    def _create_offspring(self, species: Species, parents: list[NEATGenome]) -> NEATGenome  # Line 1450
+    def _mutate_genome(self, genome: NEATGenome) -> None  # Line 1478
+    def _record_generation_stats(self) -> None  # Line 1505
+    async def validate_signal(self, signal: Signal) -> bool  # Line 1526
+    def get_position_size(self, signal: Signal) -> Decimal  # Line 1550
+    def should_exit(self, position: Position, data: MarketData) -> bool  # Line 1574
+    def _check_standard_exits(self, position: Position, data: MarketData) -> bool  # Line 1604
+    def get_strategy_info(self) -> dict[str, Any]  # Line 1628
+    def get_evolution_summary(self) -> dict[str, Any]  # Line 1658
+    async def save_population(self, filepath: str) -> None  # Line 1687
+    async def load_population(self, filepath: str) -> None  # Line 1718
 ```
 
 ### File: optimization.py
@@ -2093,7 +2080,6 @@ class MultiObjectiveConfig(BaseModel):
 
 ```python
 class ParetoSolution:
-    def __post_init__(self)  # Line 109
 ```
 
 #### Class: `ConstraintHandler`
@@ -2102,10 +2088,10 @@ class ParetoSolution:
 
 ```python
 class ConstraintHandler:
-    def __init__(self, constraints: list[OptimizationObjective])  # Line 122
-    def evaluate_constraints(self, objectives: dict[str, float]) -> dict[str, float]  # Line 139
-    def is_feasible(self, objectives: dict[str, float], tolerance: float = 0.01) -> bool  # Line 172
-    def apply_penalty(self, objectives: dict[str, float], constraint_violations: dict[str, float]) -> dict[str, float]  # Line 187
+    def __init__(self, constraints: list[OptimizationObjective])  # Line 118
+    def evaluate_constraints(self, objectives: dict[str, float]) -> dict[str, float]  # Line 135
+    def is_feasible(self, objectives: dict[str, float], tolerance: float = 0.01) -> bool  # Line 168
+    def apply_penalty(self, objectives: dict[str, float], constraint_violations: dict[str, float]) -> dict[str, float]  # Line 183
 ```
 
 #### Class: `DominanceComparator`
@@ -2114,9 +2100,9 @@ class ConstraintHandler:
 
 ```python
 class DominanceComparator:
-    def __init__(self, objectives: list[OptimizationObjective])  # Line 232
-    def dominates(self, solution1: dict[str, float], solution2: dict[str, float]) -> bool  # Line 244
-    def non_dominated_sort(self, solutions: list[dict[str, float]]) -> list[list[int]]  # Line 284
+    def __init__(self, objectives: list[OptimizationObjective])  # Line 228
+    def dominates(self, solution1: dict[str, float], solution2: dict[str, float]) -> bool  # Line 240
+    def non_dominated_sort(self, solutions: list[dict[str, float]]) -> list[list[int]]  # Line 280
 ```
 
 #### Class: `CrowdingDistanceCalculator`
@@ -2125,8 +2111,8 @@ class DominanceComparator:
 
 ```python
 class CrowdingDistanceCalculator:
-    def __init__(self, objectives: list[OptimizationObjective])  # Line 345
-    def calculate_crowding_distance(self, solutions: list[dict[str, float]], front_indices: list[int]) -> list[float]  # Line 357
+    def __init__(self, objectives: list[OptimizationObjective])  # Line 341
+    def calculate_crowding_distance(self, solutions: list[dict[str, float]], front_indices: list[int]) -> list[float]  # Line 353
 ```
 
 #### Class: `ParetoFrontierManager`
@@ -2135,14 +2121,14 @@ class CrowdingDistanceCalculator:
 
 ```python
 class ParetoFrontierManager:
-    def __init__(self, config: MultiObjectiveConfig)  # Line 416
-    def update_frontier(self, solutions: list[ParetoSolution]) -> None  # Line 439
-    def _calculate_convergence_metrics(self) -> None  # Line 488
-    def _calculate_hypervolume(self, solutions: list[ParetoSolution]) -> float  # Line 506
-    def _calculate_spread(self, solutions: list[ParetoSolution]) -> float  # Line 543
-    def _calculate_convergence(self, current: list[ParetoSolution], previous: list[ParetoSolution]) -> float  # Line 566
-    def _solution_distance(self, sol1: ParetoSolution, sol2: ParetoSolution) -> float  # Line 599
-    def get_frontier_summary(self) -> dict[str, Any]  # Line 621
+    def __init__(self, config: MultiObjectiveConfig)  # Line 412
+    def update_frontier(self, solutions: list[ParetoSolution]) -> None  # Line 435
+    def _calculate_convergence_metrics(self) -> None  # Line 484
+    def _calculate_hypervolume(self, solutions: list[ParetoSolution]) -> float  # Line 502
+    def _calculate_spread(self, solutions: list[ParetoSolution]) -> float  # Line 539
+    def _calculate_convergence(self, current: list[ParetoSolution], previous: list[ParetoSolution]) -> float  # Line 562
+    def _solution_distance(self, sol1: ParetoSolution, sol2: ParetoSolution) -> float  # Line 595
+    def get_frontier_summary(self) -> dict[str, Any]  # Line 617
 ```
 
 #### Class: `NSGAIIOptimizer`
@@ -2151,21 +2137,21 @@ class ParetoFrontierManager:
 
 ```python
 class NSGAIIOptimizer:
-    def __init__(self, ...)  # Line 676
-    async def optimize(self) -> list[ParetoSolution]  # Line 716
-    async def _initialize_population(self) -> Population  # Line 785
-    async def _evaluate_population(self, population: Population) -> list[ParetoSolution]  # Line 812
-    async def _evaluate_individual(self, individual: Individual) -> ParetoSolution | None  # Line 853
-    async def _simulate_objectives(self, individual: Individual) -> dict[str, float]  # Line 893
-    async def _create_offspring(self) -> Population  # Line 934
-    def _tournament_selection(self) -> ParetoSolution  # Line 970
-    def _create_random_solution(self) -> ParetoSolution  # Line 988
-    def _crossover(self, genes1: dict[str, Any], genes2: dict[str, Any]) -> dict[str, Any]  # Line 1012
-    def _mutate(self, genes: dict[str, Any]) -> dict[str, Any]  # Line 1037
-    def _environmental_selection(self, solutions: list[ParetoSolution]) -> list[ParetoSolution]  # Line 1069
-    def _check_convergence(self) -> bool  # Line 1122
-    def _record_generation_stats(self) -> None  # Line 1146
-    def get_optimization_summary(self) -> dict[str, Any]  # Line 1161
+    def __init__(self, ...)  # Line 672
+    async def optimize(self) -> list[ParetoSolution]  # Line 712
+    async def _initialize_population(self) -> Population  # Line 781
+    async def _evaluate_population(self, population: Population) -> list[ParetoSolution]  # Line 808
+    async def _evaluate_individual(self, individual: Individual) -> ParetoSolution | None  # Line 849
+    async def _simulate_objectives(self, individual: Individual) -> dict[str, float]  # Line 889
+    async def _create_offspring(self) -> Population  # Line 930
+    def _tournament_selection(self) -> ParetoSolution  # Line 966
+    def _create_random_solution(self) -> ParetoSolution  # Line 984
+    def _crossover(self, genes1: dict[str, Any], genes2: dict[str, Any]) -> dict[str, Any]  # Line 1008
+    def _mutate(self, genes: dict[str, Any]) -> dict[str, Any]  # Line 1033
+    def _environmental_selection(self, solutions: list[ParetoSolution]) -> list[ParetoSolution]  # Line 1065
+    def _check_convergence(self) -> bool  # Line 1118
+    def _record_generation_stats(self) -> None  # Line 1142
+    def get_optimization_summary(self) -> dict[str, Any]  # Line 1157
 ```
 
 #### Class: `MultiObjectiveOptimizer`
@@ -2174,17 +2160,17 @@ class NSGAIIOptimizer:
 
 ```python
 class MultiObjectiveOptimizer:
-    def __init__(self, config: MultiObjectiveConfig)  # Line 1198
-    async def optimize_strategy(self, ...) -> list[ParetoSolution]  # Line 1222
-    def get_pareto_frontier_data(self) -> dict[str, Any]  # Line 1274
-    def export_results(self, filepath: str) -> None  # Line 1313
+    def __init__(self, config: MultiObjectiveConfig)  # Line 1194
+    async def optimize_strategy(self, ...) -> list[ParetoSolution]  # Line 1218
+    def get_pareto_frontier_data(self) -> dict[str, Any]  # Line 1270
+    def export_results(self, filepath: str) -> None  # Line 1309
 ```
 
 #### Functions:
 
 ```python
-def create_trading_objectives() -> list[OptimizationObjective]  # Line 1341
-def create_default_config(objectives: list[OptimizationObjective] | None = None) -> MultiObjectiveConfig  # Line 1380
+def create_trading_objectives() -> list[OptimizationObjective]  # Line 1338
+def create_default_config(objectives: list[OptimizationObjective] | None = None) -> MultiObjectiveConfig  # Line 1377
 ```
 
 ### File: population.py
@@ -2237,29 +2223,29 @@ class Population:
 
 ```python
 class StrategyFactory(StrategyFactoryInterface):
-    def __init__(self, ...)  # Line 64
+    def __init__(self, ...)  # Line 63
     def _register_builtin_strategies(self) -> None  # Line 142
     def _lazy_load_strategy_class(self, strategy_type: StrategyType) -> type | None  # Line 148
     def register_strategy_type(self, strategy_type: StrategyType, strategy_class: type) -> None  # Line 227
     async def create_strategy(self, strategy_type: StrategyType, config: StrategyConfig) -> BaseStrategyInterface  # Line 252
-    async def _create_comprehensive_service_container(self, config: StrategyConfig) -> StrategyServiceContainer  # Line 312
-    async def _enhance_strategy_with_integrations(self, strategy, config: StrategyConfig) -> None  # Line 388
-    def _validate_configuration_parameters(self, config: StrategyConfig) -> bool  # Line 412
-    def _get_integration_status(self, strategy) -> dict[str, bool]  # Line 458
-    async def _inject_dependencies(self, strategy: BaseStrategyInterface, config: StrategyConfig) -> None  # Line 469
-    def get_supported_strategies(self) -> list[StrategyType]  # Line 517
-    def validate_strategy_requirements(self, strategy_type: StrategyType, config: StrategyConfig) -> bool  # Line 541
-    def _validate_strategy_specific_requirements(self, strategy_type: StrategyType, config: StrategyConfig) -> bool  # Line 574
-    def _get_required_parameters(self, strategy_type: StrategyType) -> list[str]  # Line 607
-    def _validate_momentum_strategy_config(self, config: StrategyConfig) -> bool  # Line 634
-    def _validate_mean_reversion_strategy_config(self, config: StrategyConfig) -> bool  # Line 658
-    def _validate_arbitrage_strategy_config(self, config: StrategyConfig) -> bool  # Line 682
-    def _validate_volatility_strategy_config(self, config: StrategyConfig) -> bool  # Line 698
-    async def create_strategy_with_validation(self, ...) -> BaseStrategyInterface  # Line 724
-    def _validate_dependency_availability_sync(self, config: StrategyConfig) -> bool  # Line 766
-    async def _validate_created_strategy(self, strategy: BaseStrategyInterface) -> bool  # Line 795
-    def get_strategy_info(self, strategy_type: StrategyType) -> dict[str, Any]  # Line 842
-    def list_available_strategies(self) -> dict[str, Any]  # Line 867
+    async def _create_comprehensive_service_container(self, config: StrategyConfig) -> StrategyServiceContainer  # Line 316
+    async def _enhance_strategy_with_integrations(self, strategy, config: StrategyConfig) -> None  # Line 399
+    def _validate_configuration_parameters(self, config: StrategyConfig) -> bool  # Line 423
+    def _get_integration_status(self, strategy) -> dict[str, bool]  # Line 471
+    async def _inject_dependencies(self, strategy: BaseStrategyInterface, config: StrategyConfig) -> None  # Line 482
+    def get_supported_strategies(self) -> list[StrategyType]  # Line 538
+    def validate_strategy_requirements(self, strategy_type: StrategyType, config: StrategyConfig) -> bool  # Line 562
+    def _validate_strategy_specific_requirements(self, strategy_type: StrategyType, config: StrategyConfig) -> bool  # Line 595
+    def _get_required_parameters(self, strategy_type: StrategyType) -> list[str]  # Line 628
+    def _validate_momentum_strategy_config(self, config: StrategyConfig) -> bool  # Line 655
+    def _validate_mean_reversion_strategy_config(self, config: StrategyConfig) -> bool  # Line 679
+    def _validate_arbitrage_strategy_config(self, config: StrategyConfig) -> bool  # Line 703
+    def _validate_volatility_strategy_config(self, config: StrategyConfig) -> bool  # Line 719
+    async def create_strategy_with_validation(self, ...) -> BaseStrategyInterface  # Line 745
+    def _validate_dependency_availability_sync(self, config: StrategyConfig) -> bool  # Line 787
+    async def _validate_created_strategy(self, strategy: BaseStrategyInterface) -> bool  # Line 816
+    def get_strategy_info(self, strategy_type: StrategyType) -> dict[str, Any]  # Line 863
+    def list_available_strategies(self) -> dict[str, Any]  # Line 888
 ```
 
 ### File: ensemble.py
@@ -2332,12 +2318,7 @@ class EnsembleStrategy(BaseStrategy):
     async def _on_stop(self) -> None  # Line 872
     def update_strategy_performance(self, strategy_name: str, return_pct: float, trade_info: dict[str, Any]) -> None  # Line 885
     def get_ensemble_statistics(self) -> dict[str, Any]  # Line 905
-    async def _get_sma(self, symbol: str, period: int) -> Decimal | None  # Line 917
-    async def _get_rsi(self, symbol: str, period: int) -> Decimal | None  # Line 928
-    async def _get_volatility(self, symbol: str, period: int) -> Decimal | None  # Line 939
-    async def _get_atr(self, symbol: str, period: int) -> Decimal | None  # Line 950
-    async def _get_volume_ratio(self, symbol: str, period: int) -> Decimal | None  # Line 961
-    def get_strategy_info(self) -> dict[str, Any]  # Line 972
+    def get_strategy_info(self) -> dict[str, Any]  # Line 918
 ```
 
 ### File: fallback.py
@@ -2426,11 +2407,7 @@ class FallbackStrategy(BaseStrategy):
     def should_exit(self, position: Position, data: MarketData) -> bool  # Line 900
     def update_trade_result(self, return_pct: float, trade_info: dict[str, Any]) -> None  # Line 952
     def get_fallback_statistics(self) -> dict[str, Any]  # Line 968
-    async def _get_sma(self, symbol: str, period: int) -> Decimal | None  # Line 981
-    async def _get_rsi(self, symbol: str, period: int) -> Decimal | None  # Line 992
-    async def _get_volatility(self, symbol: str, period: int) -> Decimal | None  # Line 1003
-    async def _get_atr(self, symbol: str, period: int) -> Decimal | None  # Line 1014
-    async def _get_volume_ratio(self, symbol: str, period: int) -> Decimal | None  # Line 1025
+    def get_strategy_info(self) -> dict[str, Any]  # Line 981
 ```
 
 ### File: rule_based_ai.py
@@ -2450,10 +2427,10 @@ class FallbackStrategy(BaseStrategy):
 class TechnicalRuleEngine:
     def __init__(self, config: dict[str, Any], strategy_instance: Optional['BaseStrategy'] = None)  # Line 48
     async def calculate_rsi(self, symbol: str) -> float  # Line 76
-    async def calculate_moving_averages(self, symbol: str, current_price: float) -> tuple[float, float]  # Line 96
+    async def calculate_moving_averages(self, symbol: str, current_price: Decimal) -> tuple[Decimal, Decimal]  # Line 96
     async def evaluate_rules(self, ...) -> dict[str, Any]  # Line 117
-    def update_rule_performance(self, rule: str, performance: float) -> None  # Line 202
-    def adjust_rule_weights(self) -> None  # Line 211
+    def update_rule_performance(self, rule: str, performance: float) -> None  # Line 203
+    def adjust_rule_weights(self) -> None  # Line 212
 ```
 
 #### Class: `AIPredictor`
@@ -2462,12 +2439,12 @@ class TechnicalRuleEngine:
 
 ```python
 class AIPredictor:
-    def __init__(self, config: dict[str, Any], services: StrategyServiceContainer | None = None)  # Line 224
-    def prepare_features(self, price_history: list[float], volume_history: list[float]) -> np.ndarray  # Line 243
-    async def train_model(self, training_data: list[dict[str, Any]]) -> None  # Line 305
-    async def predict(self, price_history: list[float], volume_history: list[float]) -> dict[str, Any]  # Line 353
-    def update_performance(self, prediction: dict[str, Any], actual_outcome: float) -> None  # Line 407
-    def get_performance_metrics(self) -> dict[str, float]  # Line 417
+    def __init__(self, config: dict[str, Any], services: StrategyServiceContainer | None = None)  # Line 225
+    def prepare_features(self, price_history: list[float], volume_history: list[float]) -> np.ndarray  # Line 244
+    async def train_model(self, training_data: list[dict[str, Any]]) -> None  # Line 306
+    async def predict(self, price_history: list[float], volume_history: list[float]) -> dict[str, Any]  # Line 354
+    def update_performance(self, prediction: dict[str, Any], actual_outcome: float) -> None  # Line 408
+    def get_performance_metrics(self) -> dict[str, float]  # Line 418
 ```
 
 #### Class: `RuleBasedAIStrategy`
@@ -2477,28 +2454,23 @@ class AIPredictor:
 
 ```python
 class RuleBasedAIStrategy(BaseStrategy):
-    def __init__(self, config: dict[str, Any], services: StrategyServiceContainer | None = None)  # Line 447
-    def strategy_type(self) -> StrategyType  # Line 493
-    async def _generate_signals_impl(self, data: MarketData) -> list[Signal]  # Line 498
-    async def _resolve_conflicts(self, ...) -> Signal | None  # Line 572
-    def _weighted_average_resolution(self, ...) -> dict[str, Any] | None  # Line 658
-    def _highest_confidence_resolution(self, ...) -> dict[str, Any] | None  # Line 692
-    def _consensus_resolution(self, ...) -> dict[str, Any] | None  # Line 705
-    async def validate_signal(self, signal: Signal) -> bool  # Line 721
-    def get_position_size(self, signal: Signal) -> Decimal  # Line 750
-    async def should_exit(self, position: Position, data: MarketData) -> bool  # Line 782
-    async def _on_start(self) -> None  # Line 837
-    async def _retrain_ai_model(self) -> None  # Line 845
-    def adjust_component_weights(self) -> None  # Line 882
-    def get_strategy_statistics(self) -> dict[str, Any]  # Line 930
-    async def _get_sma(self, symbol: str, period: int) -> Decimal | None  # Line 944
-    async def _get_rsi(self, symbol: str, period: int) -> Decimal | None  # Line 955
-    async def _get_volatility(self, symbol: str, period: int) -> Decimal | None  # Line 966
-    async def _get_atr(self, symbol: str, period: int) -> Decimal | None  # Line 977
-    async def _get_volume_ratio(self, symbol: str, period: int) -> Decimal | None  # Line 988
-    def get_strategy_stats(self) -> dict[str, Any]  # Line 999
-    async def _get_ml_service_prediction(self, symbol: str, data: MarketData) -> dict[str, Any] | None  # Line 1014
-    def _combine_predictions(self, local_prediction: dict[str, Any], ml_prediction: dict[str, Any]) -> dict[str, Any]  # Line 1066
+    def __init__(self, config: dict[str, Any], services: StrategyServiceContainer | None = None)  # Line 448
+    def strategy_type(self) -> StrategyType  # Line 494
+    async def _generate_signals_impl(self, data: MarketData) -> list[Signal]  # Line 499
+    async def _resolve_conflicts(self, ...) -> Signal | None  # Line 573
+    def _weighted_average_resolution(self, ...) -> dict[str, Any] | None  # Line 659
+    def _highest_confidence_resolution(self, ...) -> dict[str, Any] | None  # Line 693
+    def _consensus_resolution(self, ...) -> dict[str, Any] | None  # Line 706
+    async def validate_signal(self, signal: Signal) -> bool  # Line 722
+    def get_position_size(self, signal: Signal) -> Decimal  # Line 751
+    async def should_exit(self, position: Position, data: MarketData) -> bool  # Line 783
+    async def _on_start(self) -> None  # Line 838
+    async def _retrain_ai_model(self) -> None  # Line 846
+    def adjust_component_weights(self) -> None  # Line 883
+    def get_strategy_statistics(self) -> dict[str, Any]  # Line 931
+    def get_strategy_stats(self) -> dict[str, Any]  # Line 946
+    async def _get_ml_service_prediction(self, symbol: str, data: MarketData) -> dict[str, Any] | None  # Line 961
+    def _combine_predictions(self, local_prediction: dict[str, Any], ml_prediction: dict[str, Any]) -> dict[str, Any]  # Line 1013
 ```
 
 ### File: interfaces.py
@@ -2809,7 +2781,7 @@ class StrategyComparator:
 
 ```python
 class PerformanceMetrics:
-    def __init__(self, strategy_name: str)  # Line 42
+    def __init__(self, strategy_name: str)  # Line 41
 ```
 
 #### Class: `PerformanceMonitor`
@@ -2818,51 +2790,51 @@ class PerformanceMetrics:
 
 ```python
 class PerformanceMonitor:
-    def __init__(self, ...)  # Line 130
+    def __init__(self, ...)  # Line 129
     async def add_strategy(self, strategy: BaseStrategyInterface) -> None  # Line 177
     async def remove_strategy(self, strategy_name: str) -> None  # Line 219
     async def start_monitoring(self) -> None  # Line 239
     async def stop_monitoring(self) -> None  # Line 247
     async def _monitoring_loop(self) -> None  # Line 263
     async def _update_all_metrics(self) -> None  # Line 322
-    async def _update_strategy_metrics(self, strategy_name: str) -> None  # Line 333
-    def _update_trade_statistics(self, metrics: PerformanceMetrics, trades: list[Trade]) -> None  # Line 380
-    def _calculate_consecutive_trades(self, metrics: PerformanceMetrics, trades: list[Trade]) -> None  # Line 439
-    async def _update_pnl_metrics(self, ...) -> None  # Line 478
-    def _calculate_risk_ratios(self, metrics: PerformanceMetrics) -> None  # Line 536
-    def _update_drawdown_analysis(self, metrics: PerformanceMetrics) -> None  # Line 576
-    def _update_time_metrics(self, metrics: PerformanceMetrics, trades: list[Trade]) -> None  # Line 603
-    def _update_exposure_metrics(self, ...) -> None  # Line 626
-    def _calculate_risk_metrics(self, metrics: PerformanceMetrics) -> None  # Line 659
-    async def _check_performance_alerts(self) -> None  # Line 684
-    def _update_strategy_rankings(self) -> None  # Line 713
-    def _calculate_performance_score(self, metrics: PerformanceMetrics) -> float  # Line 729
-    async def get_strategy_performance(self, strategy_name: str) -> dict[str, Any]  # Line 766
-    async def get_comparative_analysis(self) -> dict[str, Any]  # Line 858
-    async def _calculate_portfolio_metrics(self) -> dict[str, Any]  # Line 898
-    async def _get_current_positions(self, strategy_name: str) -> list[Position]  # Line 973
-    async def _get_recent_trades(self, strategy_name: str, limit: int = 1000, offset: int = 0) -> list[Trade]  # Line 1049
-    def _validate_trade_query_params(self, strategy_name: str, limit: int, offset: int) -> None  # Line 1074
-    async def _fetch_trade_data(self, strategy_name: str) -> list[dict[str, Any]]  # Line 1085
-    def _convert_trade_dicts_to_objects(self, trade_dicts: list[dict[str, Any]]) -> list[Trade]  # Line 1096
-    def _create_trade_from_dict(self, trade_dict: dict[str, Any]) -> Trade | None  # Line 1111
-    def _map_legacy_trade_fields(self, trade_dict: dict[str, Any]) -> dict[str, Any]  # Line 1178
-    async def _get_current_price(self, symbol: str) -> Decimal | None  # Line 1209
-    def _calculate_position_pnl(self, position: Position, current_price: Decimal) -> Decimal  # Line 1229
-    async def _load_historical_performance(self, strategy_name: str) -> None  # Line 1238
-    async def _save_performance_metrics(self, strategy_name: str) -> None  # Line 1260
-    async def _persist_metrics(self) -> None  # Line 1293
-    async def _send_performance_alerts(self, strategy_name: str, alerts: list[str]) -> None  # Line 1311
+    async def _update_strategy_metrics(self, strategy_name: str) -> None  # Line 342
+    def _update_trade_statistics(self, metrics: PerformanceMetrics, trades: list[Trade]) -> None  # Line 387
+    def _calculate_consecutive_trades(self, metrics: PerformanceMetrics, trades: list[Trade]) -> None  # Line 446
+    async def _update_pnl_metrics(self, ...) -> None  # Line 485
+    def _calculate_risk_ratios(self, metrics: PerformanceMetrics) -> None  # Line 559
+    def _update_drawdown_analysis(self, metrics: PerformanceMetrics) -> None  # Line 599
+    def _update_time_metrics(self, metrics: PerformanceMetrics, trades: list[Trade]) -> None  # Line 626
+    def _update_exposure_metrics(self, ...) -> None  # Line 649
+    def _calculate_risk_metrics(self, metrics: PerformanceMetrics) -> None  # Line 682
+    async def _check_performance_alerts(self) -> None  # Line 707
+    def _update_strategy_rankings(self) -> None  # Line 736
+    def _calculate_performance_score(self, metrics: PerformanceMetrics) -> float  # Line 752
+    async def get_strategy_performance(self, strategy_name: str) -> dict[str, Any]  # Line 789
+    async def get_comparative_analysis(self) -> dict[str, Any]  # Line 881
+    async def _calculate_portfolio_metrics(self) -> dict[str, Any]  # Line 921
+    async def _get_current_positions(self, strategy_name: str) -> list[Position]  # Line 996
+    async def _get_recent_trades(self, strategy_name: str, limit: int = 1000, offset: int = 0) -> list[Trade]  # Line 1075
+    def _validate_trade_query_params(self, strategy_name: str, limit: int, offset: int) -> None  # Line 1100
+    async def _fetch_trade_data(self, strategy_name: str) -> list[dict[str, Any]]  # Line 1111
+    def _convert_trade_dicts_to_objects(self, trade_dicts: list[dict[str, Any]]) -> list[Trade]  # Line 1126
+    def _create_trade_from_dict(self, trade_dict: dict[str, Any]) -> 'Trade | None'  # Line 1141
+    def _map_legacy_trade_fields(self, trade_dict: dict[str, Any]) -> dict[str, Any]  # Line 1208
+    async def _get_current_price(self, symbol: str) -> 'Decimal | None'  # Line 1239
+    def _calculate_position_pnl(self, position: Position, current_price: Decimal) -> Decimal  # Line 1259
+    async def _load_historical_performance(self, strategy_name: str) -> None  # Line 1268
+    async def _save_performance_metrics(self, strategy_name: str) -> None  # Line 1293
+    async def _persist_metrics(self) -> None  # Line 1330
+    async def _send_performance_alerts(self, strategy_name: str, alerts: list[str]) -> None  # Line 1368
 ```
 
 ### File: portfolio_allocator.py
 
 **Key Imports:**
 - `from src.core.exceptions import AllocationError`
+- `from src.core.logging import get_logger`
 - `from src.core.types import MarketRegime`
 - `from src.core.types import Signal`
 - `from src.core.types import SignalDirection`
-- `from src.core.types import StrategyStatus`
 
 #### Class: `StrategyAllocation`
 
@@ -2870,7 +2842,7 @@ class PerformanceMonitor:
 
 ```python
 class StrategyAllocation:
-    def __init__(self, ...)  # Line 42
+    def __init__(self, ...)  # Line 43
 ```
 
 #### Class: `PortfolioAllocator`
@@ -2879,24 +2851,27 @@ class StrategyAllocation:
 
 ```python
 class PortfolioAllocator:
-    def __init__(self, ...)  # Line 97
-    async def add_strategy(self, strategy: BaseStrategyInterface, initial_weight: float = 0.1) -> bool  # Line 163
-    async def _validate_strategy(self, strategy: BaseStrategyInterface) -> bool  # Line 217
-    async def _calculate_strategy_correlation(self, new_strategy: BaseStrategyInterface) -> float  # Line 265
-    async def rebalance_portfolio(self) -> dict[str, Any]  # Line 310
-    async def _update_strategy_metrics(self) -> None  # Line 353
-    async def _calculate_optimal_weights(self) -> dict[str, float]  # Line 390
-    def _build_returns_matrix(self, strategies: list[str]) -> ndarray | None  # Line 440
-    def _optimize_sharpe_ratio(self, expected_returns: np.ndarray, cov_matrix: np.ndarray, n_strategies: int) -> np.ndarray  # Line 472
-    def _apply_weight_constraints(self, weights: np.ndarray) -> np.ndarray  # Line 525
-    def _calculate_performance_based_weights(self) -> dict[str, float]  # Line 536
-    def _apply_regime_adjustments(self, weights: dict[str, float]) -> dict[str, float]  # Line 578
-    async def _execute_rebalancing(self, target_weights: dict[str, float]) -> list[dict[str, Any]]  # Line 615
-    async def _calculate_portfolio_metrics(self) -> dict[str, Any]  # Line 666
-    async def update_market_regime(self, new_regime: MarketRegime) -> None  # Line 738
-    async def remove_strategy(self, strategy_name: str, reason: str = 'manual') -> bool  # Line 760
-    def get_allocation_status(self) -> dict[str, Any]  # Line 804
-    async def should_rebalance(self) -> bool  # Line 859
+    def __init__(self, ...)  # Line 98
+    async def add_strategy(self, strategy: BaseStrategyInterface, initial_weight: float = 0.1) -> bool  # Line 165
+    async def _validate_strategy(self, strategy: BaseStrategyInterface) -> bool  # Line 225
+    async def _calculate_strategy_correlation(self, new_strategy: BaseStrategyInterface) -> float  # Line 278
+    async def rebalance_portfolio(self) -> dict[str, Any]  # Line 324
+    async def _update_strategy_metrics(self) -> None  # Line 367
+    async def _calculate_optimal_weights(self) -> dict[str, float]  # Line 404
+    def _build_returns_matrix(self, strategies: list[str]) -> ndarray | None  # Line 454
+    def _optimize_sharpe_ratio(self, expected_returns: np.ndarray, cov_matrix: np.ndarray, n_strategies: int) -> np.ndarray  # Line 486
+    def _apply_weight_constraints(self, weights: np.ndarray) -> np.ndarray  # Line 539
+    def _calculate_performance_based_weights(self) -> dict[str, float]  # Line 550
+    def _apply_regime_adjustments(self, weights: dict[str, float]) -> dict[str, float]  # Line 592
+    async def _execute_rebalancing(self, target_weights: dict[str, float]) -> list[dict[str, Any]]  # Line 629
+    async def _calculate_portfolio_metrics(self) -> dict[str, Any]  # Line 680
+    async def update_market_regime(self, new_regime: MarketRegime) -> None  # Line 752
+    async def remove_strategy(self, strategy_name: str, reason: str = 'manual') -> bool  # Line 774
+    def get_strategy_allocation(self, strategy: BaseStrategyInterface) -> StrategyAllocation | None  # Line 818
+    async def calculate_optimal_weights(self) -> dict[str, float]  # Line 832
+    def update_strategy_performance(self, strategy: BaseStrategyInterface, performance_data: dict[str, float]) -> bool  # Line 841
+    def get_allocation_status(self) -> dict[str, Any]  # Line 874
+    async def should_rebalance(self) -> bool  # Line 929
 ```
 
 ### File: repository.py
@@ -2939,18 +2914,18 @@ class StrategyRepository(DatabaseRepository, StrategyRepositoryInterface):
     def __init__(self, session: AsyncSession)  # Line 104
     async def create_strategy(self, strategy: Strategy) -> Strategy  # Line 114
     async def get_strategy(self, strategy_id: str) -> Strategy | None  # Line 126
-    async def update_strategy(self, strategy_id: str, updates: dict[str, Any]) -> Strategy | None  # Line 160
-    async def delete_strategy(self, strategy_id: str) -> bool  # Line 201
-    async def get_strategies_by_bot(self, bot_id: str) -> list[Strategy]  # Line 217
-    async def get_active_strategies(self, bot_id: str | None = None) -> list[Strategy]  # Line 240
-    async def save_strategy_state(self, strategy_id: str, state_data: dict[str, Any]) -> bool  # Line 264
-    async def load_strategy_state(self, strategy_id: str) -> dict[str, Any] | None  # Line 293
-    async def save_strategy_metrics(self, strategy_id: str, metrics: StrategyMetrics) -> bool  # Line 327
-    async def get_strategy_metrics(self, ...) -> list[AnalyticsStrategyMetrics]  # Line 364
-    async def save_strategy_signals(self, signals: list[Signal]) -> list[Signal]  # Line 393
-    async def get_strategy_signals(self, strategy_id: str, limit: int | None = None) -> list[Signal]  # Line 414
-    async def get_strategy_trades(self, ...) -> list[Trade]  # Line 441
-    async def get_strategy_performance_summary(self, strategy_id: str) -> dict[str, Any]  # Line 470
+    async def update_strategy(self, strategy_id: str, updates: dict[str, Any]) -> Strategy | None  # Line 163
+    async def delete_strategy(self, strategy_id: str) -> bool  # Line 204
+    async def get_strategies_by_bot(self, bot_id: str) -> list[Strategy]  # Line 220
+    async def get_active_strategies(self, bot_id: str | None = None) -> list[Strategy]  # Line 246
+    async def save_strategy_state(self, strategy_id: str, state_data: dict[str, Any]) -> bool  # Line 273
+    async def load_strategy_state(self, strategy_id: str) -> dict[str, Any] | None  # Line 305
+    async def save_strategy_metrics(self, strategy_id: str, metrics: StrategyMetrics) -> bool  # Line 342
+    async def get_strategy_metrics(self, ...) -> list[AnalyticsStrategyMetrics]  # Line 382
+    async def save_strategy_signals(self, signals: list[Signal]) -> list[Signal]  # Line 414
+    async def get_strategy_signals(self, strategy_id: str, limit: int | None = None) -> list[Signal]  # Line 435
+    async def get_strategy_trades(self, ...) -> list[Trade]  # Line 465
+    async def get_strategy_performance_summary(self, strategy_id: str) -> dict[str, Any]  # Line 497
 ```
 
 ### File: service.py
@@ -2969,42 +2944,42 @@ class StrategyRepository(DatabaseRepository, StrategyRepositoryInterface):
 
 ```python
 class StrategyService(BaseService, StrategyServiceInterface):
-    def __init__(self, ...)  # Line 67
-    async def _do_start(self) -> None  # Line 125
-    async def _build_strategy_service_container(self) -> StrategyServiceContainer  # Line 150
-    async def register_strategy(self, strategy_id: str, strategy_instance: Any, config: StrategyConfig) -> None  # Line 230
-    async def _register_strategy_impl(self, strategy_id: str, strategy_instance: Any, config: StrategyConfig) -> None  # Line 252
-    async def start_strategy(self, strategy_id: str) -> None  # Line 327
-    async def _start_strategy_impl(self, strategy_id: str) -> None  # Line 341
-    async def stop_strategy(self, strategy_id: str) -> None  # Line 357
-    async def _stop_strategy_impl(self, strategy_id: str) -> None  # Line 368
-    async def process_market_data(self, market_data: MarketData) -> dict[str, list[Signal]]  # Line 381
-    async def _process_market_data_impl(self, market_data: MarketData) -> dict[str, list[Signal]]  # Line 395
-    async def validate_signal(self, strategy_id: str, signal: Signal) -> bool  # Line 442
-    async def validate_strategy_config(self, config: StrategyConfig) -> bool  # Line 484
-    async def _validate_strategy_specific_config(self, config: StrategyConfig) -> bool  # Line 515
-    async def _validate_start_conditions(self, strategy_id: str) -> bool  # Line 520
-    async def _update_strategy_metrics(self, strategy_id: str, signals: list[Signal]) -> None  # Line 536
-    async def _record_strategy_analytics(self, strategy_id: str, signals: list[Signal]) -> None  # Line 569
-    async def _calculate_win_rate(self, strategy_id: str, signal_history: list[Signal]) -> float  # Line 628
-    async def _calculate_sharpe_ratio(self, strategy_id: str) -> float  # Line 651
-    async def _calculate_max_drawdown(self, strategy_id: str) -> float  # Line 682
-    async def get_strategy_performance(self, strategy_id: str) -> dict[str, Any]  # Line 717
-    async def _get_strategy_performance_impl(self, strategy_id: str) -> dict[str, Any]  # Line 731
-    async def get_cached_strategy_metrics(self, strategy_id: str) -> dict[str, Any] | None  # Line 761
-    async def get_strategy_performance_with_cache(self, strategy_id: str) -> dict[str, Any]  # Line 782
-    async def get_all_strategies(self) -> dict[str, dict[str, Any]]  # Line 827
-    async def cleanup_strategy(self, strategy_id: str) -> None  # Line 842
-    async def _cleanup_strategy_impl(self, strategy_id: str) -> None  # Line 853
-    async def _service_health_check(self) -> Any  # Line 875
-    def get_metrics(self) -> dict[str, Any]  # Line 906
-    def resolve_dependency(self, dependency_name: str) -> Any  # Line 936
+    def __init__(self, ...)  # Line 68
+    async def _do_start(self) -> None  # Line 126
+    async def _build_strategy_service_container(self) -> StrategyServiceContainer  # Line 154
+    async def register_strategy(self, strategy_id: str, strategy_instance: Any, config: StrategyConfig) -> None  # Line 234
+    async def _register_strategy_impl(self, strategy_id: str, strategy_instance: Any, config: StrategyConfig) -> None  # Line 256
+    async def start_strategy(self, strategy_id: str) -> None  # Line 331
+    async def _start_strategy_impl(self, strategy_id: str) -> None  # Line 345
+    async def stop_strategy(self, strategy_id: str) -> None  # Line 361
+    async def _stop_strategy_impl(self, strategy_id: str) -> None  # Line 372
+    async def process_market_data(self, market_data: MarketData) -> dict[str, list[Signal]]  # Line 385
+    async def _process_market_data_impl(self, market_data: MarketData) -> dict[str, list[Signal]]  # Line 399
+    async def validate_signal(self, strategy_id: str, signal: Signal) -> bool  # Line 500
+    async def validate_strategy_config(self, config: StrategyConfig) -> bool  # Line 542
+    async def _validate_strategy_specific_config(self, config: StrategyConfig) -> bool  # Line 573
+    async def _validate_start_conditions(self, strategy_id: str) -> bool  # Line 578
+    async def _update_strategy_metrics(self, strategy_id: str, signals: list[Signal]) -> None  # Line 594
+    async def _record_strategy_analytics(self, strategy_id: str, signals: list[Signal]) -> None  # Line 634
+    async def _calculate_win_rate(self, strategy_id: str, signal_history: list[Signal]) -> float  # Line 693
+    async def _calculate_sharpe_ratio(self, strategy_id: str) -> float  # Line 716
+    async def _calculate_max_drawdown(self, strategy_id: str) -> float  # Line 747
+    async def get_strategy_performance(self, strategy_id: str) -> dict[str, Any]  # Line 782
+    async def _get_strategy_performance_impl(self, strategy_id: str) -> dict[str, Any]  # Line 796
+    async def get_cached_strategy_metrics(self, strategy_id: str) -> dict[str, Any] | None  # Line 826
+    async def get_strategy_performance_with_cache(self, strategy_id: str) -> dict[str, Any]  # Line 847
+    async def get_all_strategies(self) -> dict[str, dict[str, Any]]  # Line 892
+    async def cleanup_strategy(self, strategy_id: str) -> None  # Line 907
+    async def _cleanup_strategy_impl(self, strategy_id: str) -> None  # Line 918
+    async def _service_health_check(self) -> Any  # Line 947
+    def get_metrics(self) -> dict[str, Any]  # Line 978
+    def resolve_dependency(self, dependency_name: str) -> Any  # Line 1008
 ```
 
 #### Functions:
 
 ```python
-def cache_strategy_signals(strategy_id_arg_name: str, ttl: int = DEFAULT_CACHE_TTL) -> Callable  # Line 45
+def cache_strategy_signals(strategy_id_arg_name: str, ttl: int = DEFAULT_CACHE_TTL) -> Callable  # Line 46
 ```
 
 ### File: shared_utilities.py
@@ -3023,17 +2998,17 @@ def cache_strategy_signals(strategy_id_arg_name: str, ttl: int = DEFAULT_CACHE_T
 
 ```python
 class StrategyIntegratedBase(ABC):
-    def __init__(self, ...)  # Line 72
-    async def initialize_validation_service(self) -> None  # Line 122
-    def set_monitoring_services(self, ...)  # Line 154
-    def _get_available_integrations(self) -> dict[str, bool]  # Line 168
-    async def validate_market_data_comprehensive(self, data: MarketData) -> tuple[bool, list[str]]  # Line 182
-    async def calculate_technical_indicators(self, data: MarketData, indicators: list[str], periods: dict[str, int] = None) -> dict[str, Decimal | None]  # Line 249
-    def format_signal_metadata(self, signal: Signal, additional_data: dict[str, Any] = None) -> dict[str, Any]  # Line 351
-    async def record_signal_metrics(self, ...)  # Line 392
-    async def safe_execute_with_monitoring(self, operation_name: str, operation_func, *args, **kwargs) -> Any  # Line 438
-    def get_comprehensive_status(self) -> dict[str, Any]  # Line 513
-    async def cleanup_resources(self)  # Line 529
+    def __init__(self, ...)  # Line 66
+    async def initialize_validation_service(self) -> None  # Line 112
+    def set_monitoring_services(self, ...)  # Line 143
+    def _get_available_integrations(self) -> dict[str, bool]  # Line 157
+    async def validate_market_data_comprehensive(self, data: MarketData) -> tuple[bool, list[str]]  # Line 171
+    async def calculate_technical_indicators(self, data: MarketData, indicators: list[str], periods: dict[str, int] = None) -> 'dict[str, Decimal | None]'  # Line 238
+    def format_signal_metadata(self, signal: Signal, additional_data: dict[str, Any] = None) -> dict[str, Any]  # Line 354
+    async def record_signal_metrics(self, ...)  # Line 395
+    async def safe_execute_with_monitoring(self, operation_name: str, operation_func, *args, **kwargs) -> Any  # Line 441
+    def get_comprehensive_status(self) -> dict[str, Any]  # Line 516
+    async def cleanup_resources(self)  # Line 532
 ```
 
 #### Class: `StrategyDataAccessMixin`
@@ -3042,15 +3017,15 @@ class StrategyIntegratedBase(ABC):
 
 ```python
 class StrategyDataAccessMixin:
-    def __init__(self, data_service: DataServiceInterface | None = None)  # Line 562
-    async def get_indicator_data(self, symbol: str, indicator: str, period: int) -> Decimal | None  # Line 566
+    def __init__(self, data_service: 'DataServiceInterface | None' = None)  # Line 565
+    async def get_indicator_data(self, symbol: str, indicator: str, period: int) -> 'Decimal | None'  # Line 569
 ```
 
 #### Functions:
 
 ```python
-def create_comprehensive_signal(...) -> Signal  # Line 602
-async def calculate_position_size_comprehensive(...) -> Decimal  # Line 642
+def create_comprehensive_signal(...) -> Signal  # Line 605
+async def calculate_position_size_comprehensive(...) -> Decimal  # Line 646
 ```
 
 ### File: arbitrage_scanner.py
@@ -3083,7 +3058,7 @@ class ArbitrageOpportunity(BaseStrategy):
     def _calculate_triangular_fees(self, rate1: Decimal, rate2: Decimal, rate3: Decimal) -> Decimal  # Line 628
     def _calculate_priority(self, profit_percentage: float, arbitrage_type: str) -> float  # Line 667
     def _prioritize_opportunities(self, signals: list[Signal]) -> list[Signal]  # Line 712
-    async def _check_triangular_path(self, path: list[str]) -> Signal | None  # Line 743
+    async def _check_triangular_path(self, path: list[str]) -> 'Signal | None'  # Line 743
     async def post_trade_processing(self, trade_result: dict[str, Any]) -> None  # Line 817
 ```
 
@@ -3103,27 +3078,22 @@ class ArbitrageOpportunity(BaseStrategy):
 
 ```python
 class BreakoutStrategy(BaseStrategy):
-    def __init__(self, config: dict[str, Any], services: StrategyServiceContainer | None = None)  # Line 56
+    def __init__(self, config: dict[str, Any], services: 'StrategyServiceContainer | None' = None)  # Line 56
     def strategy_type(self) -> StrategyType  # Line 106
     async def _generate_signals_impl(self, data: MarketData) -> list[Signal]  # Line 115
     async def _update_support_resistance_levels(self, data: MarketData) -> None  # Line 196
     async def _check_consolidation_period(self, data: MarketData) -> bool  # Line 228
-    async def _check_resistance_breakout(self, data: MarketData) -> dict[str, Any] | None  # Line 263
-    async def _check_support_breakout(self, data: MarketData) -> dict[str, Any] | None  # Line 315
+    async def _check_resistance_breakout(self, data: MarketData) -> 'dict[str, Any] | None'  # Line 263
+    async def _check_support_breakout(self, data: MarketData) -> 'dict[str, Any] | None'  # Line 315
     async def _check_volume_confirmation(self, data: MarketData) -> bool  # Line 347
-    def _check_false_breakout(self, data: MarketData) -> dict[str, Any] | None  # Line 373
-    async def _generate_bullish_breakout_signal(self, data: MarketData, breakout_info: dict[str, Any]) -> Signal | None  # Line 412
-    async def _generate_bearish_breakout_signal(self, data: MarketData, breakout_info: dict[str, Any]) -> Signal | None  # Line 483
-    async def _generate_false_breakout_exit_signal(self, data: MarketData, false_breakout_info: dict[str, Any]) -> Signal | None  # Line 556
+    def _check_false_breakout(self, data: MarketData) -> 'dict[str, Any] | None'  # Line 373
+    async def _generate_bullish_breakout_signal(self, data: MarketData, breakout_info: dict[str, Any]) -> 'Signal | None'  # Line 412
+    async def _generate_bearish_breakout_signal(self, data: MarketData, breakout_info: dict[str, Any]) -> 'Signal | None'  # Line 483
+    async def _generate_false_breakout_exit_signal(self, data: MarketData, false_breakout_info: dict[str, Any]) -> 'Signal | None'  # Line 556
     async def validate_signal(self, signal: Signal) -> bool  # Line 608
     def get_position_size(self, signal: Signal) -> Decimal  # Line 671
     async def should_exit(self, position: Position, data: MarketData) -> bool  # Line 722
-    async def _get_sma(self, symbol: str, period: int) -> Decimal | None  # Line 800
-    async def _get_rsi(self, symbol: str, period: int) -> Decimal | None  # Line 811
-    async def _get_volatility(self, symbol: str, period: int) -> Decimal | None  # Line 822
-    async def _get_atr(self, symbol: str, period: int) -> Decimal | None  # Line 833
-    async def _get_volume_ratio(self, symbol: str, period: int) -> Decimal | None  # Line 844
-    def get_strategy_info(self) -> dict[str, Any]  # Line 855
+    def get_strategy_info(self) -> dict[str, Any]  # Line 800
 ```
 
 ### File: cross_exchange_arbitrage.py
@@ -3159,12 +3129,7 @@ class CrossExchangeArbitrageStrategy(BaseStrategy):
     async def should_exit(self, position: Position, data: MarketData) -> bool  # Line 541
     async def _get_current_spread(self, symbol: str, buy_exchange: str, sell_exchange: str) -> Decimal  # Line 602
     async def post_trade_processing(self, trade_result: dict[str, Any]) -> None  # Line 644
-    async def _get_sma(self, symbol: str, period: int) -> Decimal | None  # Line 662
-    async def _get_rsi(self, symbol: str, period: int) -> Decimal | None  # Line 673
-    async def _get_volatility(self, symbol: str, period: int) -> Decimal | None  # Line 684
-    async def _get_atr(self, symbol: str, period: int) -> Decimal | None  # Line 695
-    async def _get_volume_ratio(self, symbol: str, period: int) -> Decimal | None  # Line 706
-    async def _process_trade_result(self, trade_result: dict[str, Any]) -> None  # Line 717
+    async def _process_trade_result(self, trade_result: dict[str, Any]) -> None  # Line 663
 ```
 
 ### File: inventory_manager.py
@@ -3182,18 +3147,18 @@ class CrossExchangeArbitrageStrategy(BaseStrategy):
 
 ```python
 class InventoryManager:
-    def __init__(self, config: dict[str, Any], services: StrategyServiceContainer | None = None)  # Line 41
-    async def update_inventory(self, position: Position) -> None  # Line 85
-    async def should_rebalance(self) -> bool  # Line 113
-    async def calculate_rebalance_orders(self, current_price: Decimal) -> list[OrderRequest]  # Line 160
-    async def should_emergency_liquidate(self) -> bool  # Line 235
-    async def calculate_emergency_orders(self, current_price: Decimal) -> list[OrderRequest]  # Line 267
-    async def calculate_spread_adjustment(self, base_spread: Decimal) -> Decimal  # Line 323
-    async def calculate_size_adjustment(self, base_size: Decimal) -> Decimal  # Line 359
-    async def record_rebalance(self, cost: Decimal) -> None  # Line 395
-    async def record_emergency(self, cost: Decimal) -> None  # Line 418
-    def get_inventory_summary(self) -> dict[str, Any]  # Line 439
-    async def validate_inventory_limits(self, new_position: Position) -> bool  # Line 468
+    def __init__(self, config: dict[str, Any], services: 'StrategyServiceContainer | None' = None)  # Line 41
+    async def update_inventory(self, position: Position) -> None  # Line 88
+    async def should_rebalance(self) -> bool  # Line 116
+    async def calculate_rebalance_orders(self, current_price: Decimal) -> list[OrderRequest]  # Line 163
+    async def should_emergency_liquidate(self) -> bool  # Line 238
+    async def calculate_emergency_orders(self, current_price: Decimal) -> list[OrderRequest]  # Line 270
+    async def calculate_spread_adjustment(self, base_spread: Decimal) -> Decimal  # Line 326
+    async def calculate_size_adjustment(self, base_size: Decimal) -> Decimal  # Line 362
+    async def record_rebalance(self, cost: Decimal) -> None  # Line 398
+    async def record_emergency(self, cost: Decimal) -> None  # Line 421
+    def get_inventory_summary(self) -> dict[str, Any]  # Line 442
+    async def validate_inventory_limits(self, new_position: Position) -> bool  # Line 471
 ```
 
 ### File: market_making.py
@@ -3228,7 +3193,7 @@ class InventoryState:
 
 ```python
 class MarketMakingStrategy(BaseStrategy):
-    def __init__(self, config: dict[str, Any], services: StrategyServiceContainer | None = None)  # Line 85
+    def __init__(self, config: dict[str, Any], services: 'StrategyServiceContainer | None' = None)  # Line 85
     def strategy_type(self) -> StrategyType  # Line 163
     async def _generate_signals_impl(self, data: MarketData) -> list[Signal]  # Line 171
     def _calculate_level_spread(self, level: int, base_spread: Decimal, volatility: float) -> Decimal  # Line 281
@@ -3241,12 +3206,7 @@ class MarketMakingStrategy(BaseStrategy):
     async def _should_rebalance_inventory(self, position: Position) -> bool  # Line 556
     async def update_inventory_state(self, new_position: Position) -> None  # Line 603
     async def update_performance_metrics(self, trade_result: dict[str, Any]) -> None  # Line 632
-    async def _get_sma(self, symbol: str, period: int) -> Decimal | None  # Line 676
-    async def _get_rsi(self, symbol: str, period: int) -> Decimal | None  # Line 687
-    async def _get_volatility(self, symbol: str, period: int) -> Decimal | None  # Line 698
-    async def _get_atr(self, symbol: str, period: int) -> Decimal | None  # Line 709
-    async def _get_volume_ratio(self, symbol: str, period: int) -> Decimal | None  # Line 720
-    def get_strategy_info(self) -> dict[str, Any]  # Line 731
+    def get_strategy_info(self) -> dict[str, Any]  # Line 677
 ```
 
 ### File: mean_reversion.py
@@ -3265,7 +3225,7 @@ class MarketMakingStrategy(BaseStrategy):
 
 ```python
 class MeanReversionStrategy(BaseStrategy):
-    def __init__(self, config: dict[str, Any], services: StrategyServiceContainer | None = None)  # Line 63
+    def __init__(self, config: dict[str, Any], services: 'StrategyServiceContainer | None' = None)  # Line 63
     def strategy_type(self) -> StrategyType  # Line 117
     async def _generate_signals_impl(self, data: MarketData) -> list[Signal]  # Line 127
     async def validate_signal(self, signal: Signal) -> bool  # Line 333
@@ -3290,11 +3250,11 @@ class MeanReversionStrategy(BaseStrategy):
 
 ```python
 class SpreadOptimizer:
-    def __init__(self, config: dict[str, Any], services: StrategyServiceContainer | None = None)  # Line 40
+    def __init__(self, config: dict[str, Any], services: 'StrategyServiceContainer | None' = None)  # Line 40
     async def optimize_spread(self, ...) -> Decimal  # Line 93
     async def _calculate_volatility_adjustment(self, base_spread: Decimal) -> Decimal  # Line 167
-    async def _calculate_imbalance_adjustment(self, base_spread: Decimal, order_book: OrderBook | None) -> Decimal  # Line 212
-    async def _calculate_competitor_adjustment(self, base_spread: Decimal, competitor_spreads: list[float] | None) -> Decimal  # Line 265
+    async def _calculate_imbalance_adjustment(self, base_spread: Decimal, order_book: 'OrderBook | None') -> Decimal  # Line 212
+    async def _calculate_competitor_adjustment(self, base_spread: Decimal, competitor_spreads: 'list[float] | None') -> Decimal  # Line 265
     async def _calculate_impact_adjustment(self, base_spread: Decimal) -> Decimal  # Line 321
     def _update_history(self, market_data: MarketData) -> None  # Line 359
     async def calculate_optimal_spread(self, ...) -> tuple[Decimal, Decimal]  # Line 398
@@ -3318,25 +3278,20 @@ class SpreadOptimizer:
 
 ```python
 class TrendFollowingStrategy(BaseStrategy):
-    def __init__(self, config: dict[str, Any], services: StrategyServiceContainer | None = None)  # Line 59
-    def strategy_type(self) -> StrategyType  # Line 99
-    async def _generate_signals_impl(self, data: MarketData) -> list[Signal]  # Line 107
-    async def _check_volume_confirmation(self, data: MarketData) -> bool  # Line 224
-    async def _generate_bullish_signal(self, data: MarketData, fast_ma: float, slow_ma: float, rsi: float) -> Signal | None  # Line 254
-    async def _generate_bearish_signal(self, data: MarketData, fast_ma: float, slow_ma: float, rsi: float) -> Signal | None  # Line 325
-    async def _generate_exit_signal(self, data: MarketData, direction: SignalDirection, reason: str) -> Signal | None  # Line 396
-    async def validate_signal(self, signal: Signal) -> bool  # Line 441
-    def get_position_size(self, signal: Signal) -> Decimal  # Line 497
-    async def should_exit(self, position: Position, data: MarketData) -> bool  # Line 553
-    def _should_exit_by_time(self, position: Position) -> bool  # Line 623
-    def _should_exit_by_trailing_stop(self, position: Position, data: MarketData) -> bool  # Line 646
-    def get_strategy_info(self) -> dict[str, Any]  # Line 677
-    async def _get_sma(self, symbol: str, period: int) -> Decimal | None  # Line 691
-    async def _get_rsi(self, symbol: str, period: int) -> Decimal | None  # Line 702
-    async def _get_volatility(self, symbol: str, period: int) -> Decimal | None  # Line 713
-    async def _get_atr(self, symbol: str, period: int) -> Decimal | None  # Line 724
-    async def _get_volume_ratio(self, symbol: str, period: int) -> Decimal | None  # Line 735
-    def get_strategy_info(self) -> dict[str, Any]  # Line 746
+    def __init__(self, config: dict[str, Any], services: 'StrategyServiceContainer | None' = None)  # Line 62
+    def set_technical_indicators(self, technical_indicators: TechnicalIndicators) -> None  # Line 101
+    def strategy_type(self) -> StrategyType  # Line 107
+    async def _generate_signals_impl(self, data: MarketData) -> list[Signal]  # Line 115
+    async def _check_volume_confirmation(self, data: MarketData) -> bool  # Line 232
+    async def _generate_bullish_signal(self, data: MarketData, fast_ma: float, slow_ma: float, rsi: float) -> 'Signal | None'  # Line 262
+    async def _generate_bearish_signal(self, data: MarketData, fast_ma: float, slow_ma: float, rsi: float) -> 'Signal | None'  # Line 333
+    async def _generate_exit_signal(self, data: MarketData, direction: SignalDirection, reason: str) -> 'Signal | None'  # Line 404
+    async def validate_signal(self, signal: Signal) -> bool  # Line 449
+    def get_position_size(self, signal: Signal) -> Decimal  # Line 505
+    async def should_exit(self, position: Position, data: MarketData) -> bool  # Line 561
+    def _should_exit_by_time(self, position: Position) -> bool  # Line 631
+    def _should_exit_by_trailing_stop(self, position: Position, data: MarketData) -> bool  # Line 654
+    def get_strategy_info(self) -> dict[str, Any]  # Line 688
 ```
 
 ### File: triangular_arbitrage.py
@@ -3359,19 +3314,14 @@ class TriangularArbitrageStrategy(BaseStrategy):
     def strategy_type(self) -> StrategyType  # Line 82
     async def _generate_signals_impl(self, data: MarketData) -> list[Signal]  # Line 87
     async def _detect_triangular_opportunities(self, symbol: str) -> list[Signal]  # Line 125
-    async def _check_triangular_path(self, path: list[str]) -> Signal | None  # Line 155
+    async def _check_triangular_path(self, path: list[str]) -> 'Signal | None'  # Line 155
     def _calculate_triangular_fees(self, rate1: Decimal, rate2: Decimal, rate3: Decimal) -> Decimal  # Line 269
     async def _validate_triangular_timing(self, path: list[str]) -> bool  # Line 352
     async def validate_signal(self, signal: Signal) -> bool  # Line 408
     def get_position_size(self, signal: Signal) -> Decimal  # Line 472
     async def should_exit(self, position: Position, data: MarketData) -> bool  # Line 558
     async def post_trade_processing(self, trade_result: dict[str, Any]) -> None  # Line 619
-    async def _get_sma(self, symbol: str, period: int) -> Decimal | None  # Line 631
-    async def _get_rsi(self, symbol: str, period: int) -> Decimal | None  # Line 642
-    async def _get_volatility(self, symbol: str, period: int) -> Decimal | None  # Line 653
-    async def _get_atr(self, symbol: str, period: int) -> Decimal | None  # Line 664
-    async def _get_volume_ratio(self, symbol: str, period: int) -> Decimal | None  # Line 675
-    async def _process_trade_result(self, trade_result: dict[str, Any]) -> None  # Line 686
+    async def _process_trade_result(self, trade_result: dict[str, Any]) -> None  # Line 631
 ```
 
 ### File: validation.py
@@ -3450,8 +3400,8 @@ class MarketConditionValidator(BaseValidator):
     async def validate(self, market_data: MarketData, context: dict[str, Any] | None = None) -> ValidationResult  # Line 355
     async def _validate_volume(self, market_data: MarketData, result: ValidationResult) -> None  # Line 389
     async def _validate_spread(self, market_data: MarketData, result: ValidationResult) -> None  # Line 394
-    async def _validate_price_data(self, market_data: MarketData, result: ValidationResult) -> None  # Line 403
-    async def _validate_market_hours(self, market_data: MarketData, result: ValidationResult) -> None  # Line 415
+    async def _validate_price_data(self, market_data: MarketData, result: ValidationResult) -> None  # Line 402
+    async def _validate_market_hours(self, market_data: MarketData, result: ValidationResult) -> None  # Line 414
 ```
 
 #### Class: `CompositeValidator`
@@ -3461,8 +3411,8 @@ class MarketConditionValidator(BaseValidator):
 
 ```python
 class CompositeValidator(BaseValidator):
-    def __init__(self, validators: list[BaseValidator], name: str = 'CompositeValidator')  # Line 430
-    async def validate(self, target: Any, context: dict[str, Any] | None = None) -> ValidationResult  # Line 441
+    def __init__(self, validators: list[BaseValidator], name: str = 'CompositeValidator')  # Line 429
+    async def validate(self, target: Any, context: dict[str, Any] | None = None) -> ValidationResult  # Line 440
 ```
 
 #### Class: `ValidationFramework`
@@ -3471,14 +3421,14 @@ class CompositeValidator(BaseValidator):
 
 ```python
 class ValidationFramework:
-    def __init__(self, config: dict[str, Any] | None = None)  # Line 477
-    async def validate_signal(self, signal: Signal, market_data: MarketData | None = None) -> ValidationResult  # Line 498
-    async def validate_strategy_config(self, config: StrategyConfig) -> ValidationResult  # Line 517
-    async def validate_market_conditions(self, market_data: MarketData) -> ValidationResult  # Line 529
-    async def validate_for_trading(self, signal: Signal, market_data: MarketData) -> ValidationResult  # Line 541
-    async def batch_validate_signals(self, signals: list[Signal], market_data: MarketData | None = None) -> list[tuple[Signal, ValidationResult]]  # Line 557
-    def add_custom_validator(self, validator: BaseValidator, validator_type: str = 'custom') -> None  # Line 579
-    def get_validation_stats(self) -> dict[str, Any]  # Line 599
+    def __init__(self, config: dict[str, Any] | None = None)  # Line 476
+    async def validate_signal(self, signal: Signal, market_data: MarketData | None = None) -> ValidationResult  # Line 497
+    async def validate_strategy_config(self, config: StrategyConfig) -> ValidationResult  # Line 516
+    async def validate_market_conditions(self, market_data: MarketData) -> ValidationResult  # Line 528
+    async def validate_for_trading(self, signal: Signal, market_data: MarketData) -> ValidationResult  # Line 540
+    async def batch_validate_signals(self, signals: list[Signal], market_data: MarketData | None = None) -> list[tuple[Signal, ValidationResult]]  # Line 556
+    def add_custom_validator(self, validator: BaseValidator, validator_type: str = 'custom') -> None  # Line 578
+    def get_validation_stats(self) -> dict[str, Any]  # Line 598
 ```
 
 ---

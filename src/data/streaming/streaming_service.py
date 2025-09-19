@@ -33,10 +33,10 @@ from src.core import BaseComponent
 from src.core.config import Config
 from src.core.exceptions import (
     ConfigurationError,
+    ConnectionError,
     DataError,
     DataProcessingError,
     DataValidationError,
-    NetworkError,
 )
 from src.core.types import MarketData
 from src.data.interfaces import DataServiceInterface, DataValidatorInterface
@@ -258,7 +258,7 @@ class WebSocketConnection:
                 finally:
                     self.websocket = None
 
-            raise NetworkError(f"WebSocket connection failed: {e}")
+            raise ConnectionError(f"WebSocket connection failed: {e}")
         finally:
             # Clean up any unassigned websocket connection
             if websocket:
@@ -288,7 +288,7 @@ class WebSocketConnection:
     async def listen(self) -> AsyncGenerator[dict[str, Any], None]:
         """Listen for messages from WebSocket."""
         if not self.websocket:
-            raise NetworkError("WebSocket not connected")
+            raise ConnectionError("WebSocket not connected")
 
         try:
             async for message in self.websocket:
@@ -726,21 +726,20 @@ class StreamingDataService(BaseComponent):
 
                 market_data = await handler(message, exchange)
                 if market_data:
-                    # Apply consistent data transformation from messaging coordinator using pub/sub pattern
+                    # Use CoreDataTransformer for consistent data transformation patterns
+                    from src.core.data_transformer import CoreDataTransformer
+
                     market_data_dict = (
                         market_data.model_dump()
                         if hasattr(market_data, "model_dump")
                         else market_data.__dict__
                     )
-                    transformed_data = coordinator._apply_data_transformation(market_data_dict)
 
-                    # Ensure consistent financial data transformation matching utils patterns
-                    if "price" in transformed_data and transformed_data["price"] is not None:
-                        from src.utils.data_utils import normalize_price
-                        if hasattr(market_data, "symbol") and market_data.symbol:
-                            transformed_data["price"] = normalize_price(
-                                transformed_data["price"], market_data.symbol, precision=8
-                            )
+                    transformed_data = CoreDataTransformer.transform_for_pub_sub_pattern(
+                        event_type="market_data",
+                        data=market_data_dict,
+                        metadata={"exchange": exchange}
+                    )
 
                     # Recreate MarketData with consistent transformed data
                     market_data = MarketData(**transformed_data)

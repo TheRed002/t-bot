@@ -27,7 +27,8 @@ from .services import (
 )
 
 if TYPE_CHECKING:
-    from .state_service import StateChange, StatePriority, StateType
+    from .state_service import StateChange
+    from src.core.types import StatePriority, StateType
 
 
 class StateController(BaseService, ErrorPropagationMixin):

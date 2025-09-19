@@ -9,8 +9,10 @@ import asyncio
 from typing import Any
 
 from src.core.base import BaseService
+from src.core.exceptions import OptimizationError
 from src.optimization.analysis import ResultsAnalyzer
 from src.optimization.interfaces import IAnalysisService
+from src.utils.messaging_patterns import ErrorPropagationMixin
 
 
 class AnalysisService(BaseService, IAnalysisService):
@@ -94,8 +96,6 @@ class AnalysisService(BaseService, IAnalysisService):
         except Exception as e:
             self._logger.error(f"Analysis failed: {e}")
             # Re-raise with better context for upstream error handling
-            from src.core.exceptions import OptimizationError
-
             raise OptimizationError(
                 f"Optimization results analysis failed: {e}",
                 error_code="OPT_ANALYSIS_001",
@@ -140,8 +140,6 @@ class AnalysisService(BaseService, IAnalysisService):
         except Exception as e:
             self._logger.error(f"Parameter importance analysis failed: {e}")
             # Re-raise with better context for upstream error handling
-            from src.core.exceptions import OptimizationError
-
             raise OptimizationError(
                 f"Parameter importance analysis failed: {e}",
                 error_code="OPT_ANALYSIS_002",

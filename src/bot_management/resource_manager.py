@@ -20,6 +20,7 @@ if TYPE_CHECKING:
 from src.capital_management.service import CapitalService
 from src.core.base.component import BaseComponent
 from src.core.config import Config
+from src.core.data_transformer import CoreDataTransformer
 from src.core.exceptions import (
     DatabaseConnectionError,
     ExecutionError,
@@ -629,23 +630,63 @@ class ResourceManager(BaseComponent):
         # Update the capital allocation
         old_allocation.allocated_amount = new_amount
 
-        # Update capital service tracking if available
+        # Update capital service tracking if available with boundary validation
         if self.capital_service:
             try:
+                # Apply consistent data transformation for capital service communication
+                release_data = CoreDataTransformer.apply_cross_module_consistency(
+                    CoreDataTransformer.transform_for_request_reply_pattern(
+                        "CAPITAL_RELEASE",
+                        {
+                            "strategy_id": bot_id,
+                            "exchange": "internal",
+                            "release_amount": str(old_amount),
+                            "bot_id": bot_id,
+                        },
+                        metadata={
+                            "target_modules": ["capital_management"],
+                            "processing_priority": "high",
+                            "data_type": "capital_operation"
+                        }
+                    ),
+                    target_module="capital_management",
+                    source_module="bot_management"
+                )
+
                 # Release old allocation
                 await self.capital_service.release_capital(
                     strategy_id=bot_id,
                     exchange="internal",
-                    release_amount=old_amount,
-                    bot_id=bot_id,
+                    amount=old_amount,
+                    authorized_by=bot_id,
+                )
+
+                # Apply consistent data transformation for allocation request
+                allocation_data = CoreDataTransformer.apply_cross_module_consistency(
+                    CoreDataTransformer.transform_for_request_reply_pattern(
+                        "CAPITAL_ALLOCATION",
+                        {
+                            "strategy_id": bot_id,
+                            "exchange": "internal",
+                            "requested_amount": str(new_amount),
+                            "bot_id": bot_id,
+                        },
+                        metadata={
+                            "target_modules": ["capital_management"],
+                            "processing_priority": "high",
+                            "data_type": "capital_operation"
+                        }
+                    ),
+                    target_module="capital_management",
+                    source_module="bot_management"
                 )
 
                 # Allocate new amount
                 new_capital_allocation = await self.capital_service.allocate_capital(
                     strategy_id=bot_id,
                     exchange="internal",
-                    requested_amount=new_amount,
-                    bot_id=bot_id,
+                    amount=new_amount,
+                    authorized_by=bot_id,
                 )
 
                 if new_capital_allocation:
@@ -782,14 +823,35 @@ class ResourceManager(BaseComponent):
                 updated_at=datetime.now(timezone.utc),
             )
 
-            # Special handling for capital allocation through CapitalService
+            # Special handling for capital allocation through CapitalService with boundary validation
             if resource_type == ResourceType.CAPITAL and self.capital_service:
                 try:
+                    # Apply consistent data transformation for capital allocation request
+                    allocation_request_data = CoreDataTransformer.apply_cross_module_consistency(
+                        CoreDataTransformer.transform_for_request_reply_pattern(
+                            "CAPITAL_ALLOCATION_REQUEST",
+                            {
+                                "strategy_id": bot_id,
+                                "exchange": "internal",
+                                "requested_amount": str(amount),
+                                "bot_id": bot_id,
+                                "priority": str(priority),
+                            },
+                            metadata={
+                                "target_modules": ["capital_management"],
+                                "processing_priority": "high",
+                                "data_type": "capital_operation"
+                            }
+                        ),
+                        target_module="capital_management",
+                        source_module="bot_management"
+                    )
+
                     allocation_result = await self.capital_service.allocate_capital(
                         strategy_id=bot_id,
                         exchange="internal",
-                        requested_amount=amount,
-                        bot_id=bot_id,
+                        amount=amount,
+                        authorized_by=bot_id
                     )
                     if not allocation_result:
                         await self.error_handler.handle_error(
@@ -905,14 +967,34 @@ class ResourceManager(BaseComponent):
         """Release specific resource types and return websocket connections for cleanup."""
         websocket_connections: list[Any] = []
 
-        # Special handling for capital release through CapitalService
+        # Special handling for capital release through CapitalService with boundary validation
         if allocation.resource_type == ResourceType.CAPITAL and self.capital_service:
             try:
+                # Apply consistent data transformation for capital release request
+                release_request_data = CoreDataTransformer.apply_cross_module_consistency(
+                    CoreDataTransformer.transform_for_request_reply_pattern(
+                        "CAPITAL_RELEASE_REQUEST",
+                        {
+                            "strategy_id": allocation.bot_id,
+                            "exchange": "internal",
+                            "release_amount": str(allocation.allocated_amount),
+                            "bot_id": allocation.bot_id,
+                        },
+                        metadata={
+                            "target_modules": ["capital_management"],
+                            "processing_priority": "high",
+                            "data_type": "capital_operation"
+                        }
+                    ),
+                    target_module="capital_management",
+                    source_module="bot_management"
+                )
+
                 await self.capital_service.release_capital(
                     strategy_id=allocation.bot_id,
                     exchange="internal",
-                    release_amount=allocation.allocated_amount,
-                    bot_id=allocation.bot_id,
+                    amount=allocation.allocated_amount,
+                    authorized_by=allocation.bot_id,
                 )
             except Exception as e:
                 self._logger.error(f"Failed to release capital through service: {e}")
@@ -1073,8 +1155,16 @@ class ResourceManager(BaseComponent):
             return allocation.allocated_amount <= self.global_resource_limits[ResourceType.CAPITAL]
 
         try:
-            # For CapitalService, we don't have a direct get_available_capital(bot_id) method
-            # Instead, we verify that the allocation is still within bounds
+            # Use CapitalService to verify the allocation exists and is valid
+            allocations = await self.capital_service.get_allocations_by_strategy(allocation.bot_id)
+
+            # Check if there's an active allocation for this bot
+            for capital_alloc in allocations:
+                if (capital_alloc.strategy_id == allocation.bot_id and
+                    capital_alloc.allocated_amount >= allocation.allocated_amount):
+                    return True
+
+            # Fallback: verify allocation amount is positive
             return allocation.allocated_amount > Decimal("0")
         except Exception as e:
             self._logger.warning(f"Failed to verify capital allocation: {e}")

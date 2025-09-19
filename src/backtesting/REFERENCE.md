@@ -1,7 +1,7 @@
 # BACKTESTING Module Reference
 
 ## INTEGRATION
-**Dependencies**: core, data, database, error_handling, execution, risk_management, strategies, utils
+**Dependencies**: core, data, database, execution, risk_management, strategies, utils
 **Used By**: None
 **Provides**: BacktestController, BacktestEngine, BacktestService, DataReplayManager
 **Patterns**: Async Operations, Component Architecture, Service Layer
@@ -63,21 +63,21 @@
 
 ### Implementation: `BacktestController` ✅
 
-**Inherits**: BaseService
+**Inherits**: BaseComponent
 **Purpose**: Controller for backtesting operations
 **Status**: Complete
 
 **Implemented Methods:**
-- `async run_backtest(self, request_data: dict[str, Any]) -> dict[str, Any]` - Line 41
-- `async get_active_backtests(self) -> dict[str, Any]` - Line 70
-- `async cancel_backtest(self, backtest_id: str) -> dict[str, Any]` - Line 80
-- `async clear_cache(self, pattern: str = '*') -> dict[str, Any]` - Line 102
-- `async get_cache_stats(self) -> dict[str, Any]` - Line 111
-- `async health_check(self) -> HealthCheckResult` - Line 121
-- `async get_backtest_result(self, result_id: str) -> dict[str, Any]` - Line 152
-- `async list_backtest_results(self, limit: int = 50, offset: int = 0, strategy_type: str | None = None) -> dict[str, Any]` - Line 177
-- `async delete_backtest_result(self, result_id: str) -> dict[str, Any]` - Line 199
-- `async cleanup(self) -> None` - Line 221
+- `async run_backtest(self, request_data: dict[str, Any]) -> dict[str, Any]` - Line 55
+- `async get_active_backtests(self) -> dict[str, Any]` - Line 84
+- `async cancel_backtest(self, backtest_id: str) -> dict[str, Any]` - Line 94
+- `async clear_cache(self, pattern: str = '*') -> dict[str, Any]` - Line 116
+- `async get_cache_stats(self) -> dict[str, Any]` - Line 125
+- `async health_check(self) -> HealthCheckResult` - Line 135
+- `async get_backtest_result(self, result_id: str) -> dict[str, Any]` - Line 166
+- `async list_backtest_results(self, limit: int = 50, offset: int = 0, strategy_type: str | None = None) -> dict[str, Any]` - Line 191
+- `async delete_backtest_result(self, result_id: str) -> dict[str, Any]` - Line 213
+- `async cleanup(self) -> None` - Line 235
 
 ### Implementation: `ReplayMode` ✅
 
@@ -92,15 +92,15 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async load_data(self, ...) -> None` - Line 122
-- `async start_replay(self, ...) -> None` - Line 267
-- `get_current_data(self, symbol: str) -> pd.Series | None` - Line 499
-- `get_historical_data(self, symbol: str, lookback: int) -> pd.DataFrame | None` - Line 511
-- `subscribe(self, callback: Callable) -> None` - Line 521
-- `unsubscribe(self, callback: Callable) -> None` - Line 525
-- `reset(self) -> None` - Line 530
-- `get_statistics(self) -> dict[str, Any]` - Line 538
-- `async cleanup(self) -> None` - Line 553
+- `async load_data(self, ...) -> None` - Line 123
+- `async start_replay(self, ...) -> None` - Line 268
+- `get_current_data(self, symbol: str) -> pd.Series | None` - Line 502
+- `get_historical_data(self, symbol: str, lookback: int) -> pd.DataFrame | None` - Line 514
+- `subscribe(self, callback: Callable) -> None` - Line 524
+- `unsubscribe(self, callback: Callable) -> None` - Line 528
+- `reset(self) -> None` - Line 533
+- `get_statistics(self) -> dict[str, Any]` - Line 541
+- `async cleanup(self) -> None` - Line 556
 
 ### Implementation: `BacktestDataTransformer` ✅
 
@@ -108,16 +108,16 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `transform_signal_to_event_data(signal: Signal, metadata: dict[str, Any] | None = None) -> dict[str, Any]` - Line 22
-- `transform_backtest_result_to_event_data(result: 'BacktestResult', metadata: dict[str, Any] | None = None) -> dict[str, Any]` - Line 47
-- `transform_market_data_to_event_data(market_data: MarketData, metadata: dict[str, Any] | None = None) -> dict[str, Any]` - Line 80
-- `transform_trade_to_event_data(trade: dict[str, Any], metadata: dict[str, Any] | None = None) -> dict[str, Any]` - Line 113
-- `validate_financial_precision(data: dict[str, Any]) -> dict[str, Any]` - Line 150
-- `ensure_boundary_fields(data: dict[str, Any], source: str = 'backtesting') -> dict[str, Any]` - Line 192
-- `transform_for_req_reply(cls, request_type: str, data: Any, correlation_id: str | None = None) -> dict[str, Any]` - Line 230
-- `transform_for_batch_processing(cls, ...) -> dict[str, Any]` - Line 286
-- `align_processing_paradigm(cls, data: dict[str, Any], target_mode: str = 'batch') -> dict[str, Any]` - Line 350
-- `apply_cross_module_validation(cls, ...) -> dict[str, Any]` - Line 411
+- `transform_signal_to_event_data(signal: Signal, metadata: dict[str, Any] | None = None) -> dict[str, Any]` - Line 23
+- `transform_backtest_result_to_event_data(result: 'BacktestResult', metadata: dict[str, Any] | None = None) -> dict[str, Any]` - Line 56
+- `transform_market_data_to_event_data(market_data: MarketData, metadata: dict[str, Any] | None = None) -> dict[str, Any]` - Line 96
+- `transform_trade_to_event_data(trade: dict[str, Any], metadata: dict[str, Any] | None = None) -> dict[str, Any]` - Line 134
+- `validate_financial_precision(data: dict[str, Any]) -> dict[str, Any]` - Line 171
+- `ensure_boundary_fields(data: dict[str, Any], source: str = 'backtesting') -> dict[str, Any]` - Line 201
+- `transform_for_req_reply(cls, request_type: str, data: Any, correlation_id: str | None = None) -> dict[str, Any]` - Line 228
+- `transform_for_batch_processing(cls, ...) -> dict[str, Any]` - Line 289
+- `align_processing_paradigm(cls, data: dict[str, Any], target_mode: str = 'batch') -> dict[str, Any]` - Line 361
+- `apply_cross_module_validation(cls, ...) -> dict[str, Any]` - Line 440
 
 ### Implementation: `BacktestConfig` ✅
 
@@ -141,7 +141,7 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async run(self) -> BacktestResult` - Line 187
+- `async run(self) -> BacktestResult` - Line 205
 
 ### Implementation: `BacktestFactory` ✅
 
@@ -157,7 +157,7 @@
 - `create_engine(self, config: Any, strategy: Any, **kwargs) -> 'BacktestEngine'` - Line 172
 - `create_simulator(self, config: Any) -> 'TradeSimulator'` - Line 220
 - `create_metrics_calculator(self, risk_free_rate: float | None = None) -> 'MetricsCalculator'` - Line 253
-- `create_analyzer(self, analyzer_type: str, config: dict[str, Any] = None) -> Any` - Line 277
+- `create_analyzer(self, analyzer_type: str, config: dict[str, Any] | None = None) -> Any` - Line 277
 - `wire_dependencies(self) -> None` - Line 338
 - `get_interface(self) -> 'BacktestServiceInterface'` - Line 350
 
@@ -320,13 +320,13 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async save_backtest_result(self, result_data: dict[str, Any], request_data: dict[str, Any]) -> str` - Line 44
-- `async get_backtest_result(self, result_id: str) -> dict[str, Any] | None` - Line 84
-- `async list_backtest_results(self, limit: int = 50, offset: int = 0, strategy_type: str | None = None) -> list[dict[str, Any]]` - Line 121
-- `async delete_backtest_result(self, result_id: str) -> bool` - Line 169
-- `async save_trade_history(self, backtest_id: str, trades: list[dict[str, Any]]) -> None` - Line 197
-- `async get_trade_history(self, backtest_id: str) -> list[dict[str, Any]]` - Line 233
-- `async cleanup_old_results(self, days_old: int = 30) -> int` - Line 272
+- `async save_backtest_result(self, result_data: dict[str, Any], request_data: dict[str, Any]) -> str` - Line 45
+- `async get_backtest_result(self, result_id: str) -> dict[str, Any] | None` - Line 125
+- `async list_backtest_results(self, limit: int = 50, offset: int = 0, strategy_type: str | None = None) -> list[dict[str, Any]]` - Line 184
+- `async delete_backtest_result(self, result_id: str) -> bool` - Line 232
+- `async save_trade_history(self, backtest_id: str, trades: list[dict[str, Any]]) -> None` - Line 260
+- `async get_trade_history(self, backtest_id: str) -> list[dict[str, Any]]` - Line 296
+- `async cleanup_old_results(self, days_old: int = 30) -> int` - Line 335
 
 ### Implementation: `BacktestRequest` ✅
 
@@ -335,8 +335,8 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `validate_dates(cls, v: datetime, info) -> datetime` - Line 94
-- `validate_symbols(cls, v: list[str]) -> list[str]` - Line 100
+- `validate_dates(cls, v: datetime, info) -> datetime` - Line 96
+- `validate_symbols(cls, v: list[str]) -> list[str]` - Line 102
 
 ### Implementation: `BacktestCacheEntry` ✅
 
@@ -345,7 +345,7 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `is_expired(self) -> bool` - Line 114
+- `is_expired(self) -> bool` - Line 116
 
 ### Implementation: `BacktestService` ✅
 
@@ -354,19 +354,19 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async initialize(self) -> None` - Line 247
-- `async run_backtest(self, request: BacktestRequest) -> 'BacktestResult'` - Line 316
-- `async run_backtest_from_dict(self, request_data: dict[str, Any]) -> 'BacktestResult'` - Line 320
-- `async serialize_result(self, result: 'BacktestResult') -> dict[str, Any]` - Line 330
-- `async get_active_backtests(self) -> dict[str, dict[str, Any]]` - Line 851
-- `async cancel_backtest(self, backtest_id: str) -> bool` - Line 861
-- `async clear_cache(self, pattern: str = '*') -> int` - Line 875
-- `async get_cache_stats(self) -> dict[str, Any]` - Line 903
-- `async get_backtest_result(self, result_id: str) -> dict[str, Any] | None` - Line 921
-- `async list_backtest_results(self, limit: int = 50, offset: int = 0, strategy_type: str | None = None) -> list[dict[str, Any]]` - Line 934
-- `async delete_backtest_result(self, result_id: str) -> bool` - Line 949
-- `async health_check(self) -> HealthCheckResult` - Line 962
-- `async cleanup(self) -> None` - Line 1014
+- `async initialize(self) -> None` - Line 249
+- `async run_backtest(self, request: BacktestRequest) -> 'BacktestResult'` - Line 318
+- `async run_backtest_from_dict(self, request_data: dict[str, Any]) -> 'BacktestResult'` - Line 322
+- `async serialize_result(self, result: 'BacktestResult') -> dict[str, Any]` - Line 332
+- `async get_active_backtests(self) -> dict[str, dict[str, Any]]` - Line 871
+- `async cancel_backtest(self, backtest_id: str) -> bool` - Line 881
+- `async clear_cache(self, pattern: str = '*') -> int` - Line 895
+- `async get_cache_stats(self) -> dict[str, Any]` - Line 923
+- `async get_backtest_result(self, result_id: str) -> dict[str, Any] | None` - Line 941
+- `async list_backtest_results(self, limit: int = 50, offset: int = 0, strategy_type: str | None = None) -> list[dict[str, Any]]` - Line 954
+- `async delete_backtest_result(self, result_id: str) -> bool` - Line 969
+- `async health_check(self) -> HealthCheckResult` - Line 982
+- `async cleanup(self) -> None` - Line 1034
 
 ### Implementation: `SimulationConfig` ✅
 
@@ -386,12 +386,12 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async execute_order(self, ...) -> dict[str, Any]` - Line 118
-- `async check_pending_orders(self, market_data: dict[str, pd.Series]) -> list[dict[str, Any]]` - Line 593
-- `calculate_execution_costs(self, trades: list[dict[str, Any]]) -> dict[str, Decimal]` - Line 624
-- `get_execution_statistics(self) -> dict[str, Any]` - Line 660
-- `cleanup(self) -> None` - Line 686
-- `async get_simulation_results(self) -> dict[str, Any]` - Line 699
+- `async execute_order(self, ...) -> dict[str, Any]` - Line 121
+- `async check_pending_orders(self, market_data: dict[str, pd.Series]) -> list[dict[str, Any]]` - Line 594
+- `calculate_execution_costs(self, trades: list[dict[str, Any]]) -> dict[str, Decimal]` - Line 625
+- `get_execution_statistics(self) -> dict[str, Any]` - Line 661
+- `cleanup(self) -> None` - Line 687
+- `async get_simulation_results(self) -> dict[str, Any]` - Line 700
 
 ## COMPLETE API REFERENCE
 
@@ -470,29 +470,30 @@ class PerformanceAttributor(BaseComponent):
 
 **Key Imports:**
 - `from src.core.base.interfaces import HealthCheckResult`
-- `from src.core.base.service import BaseService`
+- `from src.core.base.component import BaseComponent`
+- `from src.core.event_constants import BacktestEvents`
 - `from src.core.exceptions import ServiceError`
 - `from src.core.exceptions import ValidationError`
-- `from src.core.logging import get_logger`
 
 #### Class: `BacktestController`
 
-**Inherits**: BaseService
+**Inherits**: BaseComponent
 **Purpose**: Controller for backtesting operations
 
 ```python
-class BacktestController(BaseService):
-    def __init__(self, backtest_service: 'BacktestServiceInterface')  # Line 30
-    async def run_backtest(self, request_data: dict[str, Any]) -> dict[str, Any]  # Line 41
-    async def get_active_backtests(self) -> dict[str, Any]  # Line 70
-    async def cancel_backtest(self, backtest_id: str) -> dict[str, Any]  # Line 80
-    async def clear_cache(self, pattern: str = '*') -> dict[str, Any]  # Line 102
-    async def get_cache_stats(self) -> dict[str, Any]  # Line 111
-    async def health_check(self) -> HealthCheckResult  # Line 121
-    async def get_backtest_result(self, result_id: str) -> dict[str, Any]  # Line 152
-    async def list_backtest_results(self, limit: int = 50, offset: int = 0, strategy_type: str | None = None) -> dict[str, Any]  # Line 177
-    async def delete_backtest_result(self, result_id: str) -> dict[str, Any]  # Line 199
-    async def cleanup(self) -> None  # Line 221
+class BacktestController(BaseComponent):
+    def __init__(self, backtest_service: 'BacktestServiceInterface')  # Line 35
+    def _get_local_logger(self)  # Line 46
+    async def run_backtest(self, request_data: dict[str, Any]) -> dict[str, Any]  # Line 55
+    async def get_active_backtests(self) -> dict[str, Any]  # Line 84
+    async def cancel_backtest(self, backtest_id: str) -> dict[str, Any]  # Line 94
+    async def clear_cache(self, pattern: str = '*') -> dict[str, Any]  # Line 116
+    async def get_cache_stats(self) -> dict[str, Any]  # Line 125
+    async def health_check(self) -> HealthCheckResult  # Line 135
+    async def get_backtest_result(self, result_id: str) -> dict[str, Any]  # Line 166
+    async def list_backtest_results(self, limit: int = 50, offset: int = 0, strategy_type: str | None = None) -> dict[str, Any]  # Line 191
+    async def delete_backtest_result(self, result_id: str) -> dict[str, Any]  # Line 213
+    async def cleanup(self) -> None  # Line 235
 ```
 
 ### File: data_replay.py
@@ -501,8 +502,8 @@ class BacktestController(BaseService):
 - `from src.core.base.component import BaseComponent`
 - `from src.core.config import Config`
 - `from src.core.exceptions import DataError`
-- `from src.error_handling.decorators import with_circuit_breaker`
-- `from src.error_handling.decorators import with_error_context`
+- `from src.utils.backtesting_decorators import data_loading_operation`
+- `from src.utils.config_conversion import convert_config_to_dict`
 
 #### Class: `ReplayMode`
 
@@ -520,27 +521,27 @@ class ReplayMode(Enum):
 
 ```python
 class DataReplayManager(BaseComponent):
-    def __init__(self, config: Config | None = None, cache_size: int = DEFAULT_CACHE_SIZE) -> None  # Line 58
-    async def __aenter__(self) -> 'DataReplayManager'  # Line 102
-    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None  # Line 108
-    async def load_data(self, ...) -> None  # Line 122
-    async def _load_from_csv(self, symbol: str, start_date: datetime, end_date: datetime) -> pd.DataFrame  # Line 182
-    async def _generate_synthetic_data(self, symbol: str, start_date: datetime, end_date: datetime, timeframe: str) -> pd.DataFrame  # Line 204
-    def _validate_data(self, data: pd.DataFrame) -> pd.DataFrame  # Line 220
-    async def start_replay(self, ...) -> None  # Line 267
-    async def _replay_sequential(self) -> None  # Line 298
-    async def _replay_random_walk(self) -> None  # Line 326
-    async def _replay_bootstrap(self) -> None  # Line 364
-    async def _replay_shuffle(self) -> None  # Line 393
-    async def _notify_subscribers(self, timestamp: datetime, data: dict[str, pd.Series]) -> None  # Line 434
-    async def _execute_callback_with_timeout(self, callback: Callable, timestamp: datetime, data: dict[str, pd.Series]) -> None  # Line 485
-    def get_current_data(self, symbol: str) -> pd.Series | None  # Line 499
-    def get_historical_data(self, symbol: str, lookback: int) -> pd.DataFrame | None  # Line 511
-    def subscribe(self, callback: Callable) -> None  # Line 521
-    def unsubscribe(self, callback: Callable) -> None  # Line 525
-    def reset(self) -> None  # Line 530
-    def get_statistics(self) -> dict[str, Any]  # Line 538
-    async def cleanup(self) -> None  # Line 553
+    def __init__(self, config: Config | None = None, cache_size: int = DEFAULT_CACHE_SIZE) -> None  # Line 56
+    async def __aenter__(self) -> 'DataReplayManager'  # Line 103
+    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None  # Line 109
+    async def load_data(self, ...) -> None  # Line 123
+    async def _load_from_csv(self, symbol: str, start_date: datetime, end_date: datetime) -> pd.DataFrame  # Line 183
+    async def _generate_synthetic_data(self, symbol: str, start_date: datetime, end_date: datetime, timeframe: str) -> pd.DataFrame  # Line 205
+    def _validate_data(self, data: pd.DataFrame) -> pd.DataFrame  # Line 221
+    async def start_replay(self, ...) -> None  # Line 268
+    async def _replay_sequential(self) -> None  # Line 299
+    async def _replay_random_walk(self) -> None  # Line 327
+    async def _replay_bootstrap(self) -> None  # Line 365
+    async def _replay_shuffle(self) -> None  # Line 394
+    async def _notify_subscribers(self, timestamp: datetime, data: dict[str, pd.Series]) -> None  # Line 435
+    async def _execute_callback_with_timeout(self, callback: Callable, timestamp: datetime, data: dict[str, pd.Series]) -> None  # Line 488
+    def get_current_data(self, symbol: str) -> pd.Series | None  # Line 502
+    def get_historical_data(self, symbol: str, lookback: int) -> pd.DataFrame | None  # Line 514
+    def subscribe(self, callback: Callable) -> None  # Line 524
+    def unsubscribe(self, callback: Callable) -> None  # Line 528
+    def reset(self) -> None  # Line 533
+    def get_statistics(self) -> dict[str, Any]  # Line 541
+    async def cleanup(self) -> None  # Line 556
 ```
 
 ### File: data_transformer.py
@@ -549,6 +550,7 @@ class DataReplayManager(BaseComponent):
 - `from src.core.types import MarketData`
 - `from src.core.types import Signal`
 - `from src.utils.decimal_utils import to_decimal`
+- `from src.utils.messaging_patterns import MessagePattern`
 
 #### Class: `BacktestDataTransformer`
 
@@ -556,16 +558,17 @@ class DataReplayManager(BaseComponent):
 
 ```python
 class BacktestDataTransformer:
-    def transform_signal_to_event_data(signal: Signal, metadata: dict[str, Any] | None = None) -> dict[str, Any]  # Line 22
-    def transform_backtest_result_to_event_data(result: 'BacktestResult', metadata: dict[str, Any] | None = None) -> dict[str, Any]  # Line 47
-    def transform_market_data_to_event_data(market_data: MarketData, metadata: dict[str, Any] | None = None) -> dict[str, Any]  # Line 80
-    def transform_trade_to_event_data(trade: dict[str, Any], metadata: dict[str, Any] | None = None) -> dict[str, Any]  # Line 113
-    def validate_financial_precision(data: dict[str, Any]) -> dict[str, Any]  # Line 150
-    def ensure_boundary_fields(data: dict[str, Any], source: str = 'backtesting') -> dict[str, Any]  # Line 192
-    def transform_for_req_reply(cls, request_type: str, data: Any, correlation_id: str | None = None) -> dict[str, Any]  # Line 230
-    def transform_for_batch_processing(cls, ...) -> dict[str, Any]  # Line 286
-    def align_processing_paradigm(cls, data: dict[str, Any], target_mode: str = 'batch') -> dict[str, Any]  # Line 350
-    def apply_cross_module_validation(cls, ...) -> dict[str, Any]  # Line 411
+    def transform_signal_to_event_data(signal: Signal, metadata: dict[str, Any] | None = None) -> dict[str, Any]  # Line 23
+    def transform_backtest_result_to_event_data(result: 'BacktestResult', metadata: dict[str, Any] | None = None) -> dict[str, Any]  # Line 56
+    def transform_market_data_to_event_data(market_data: MarketData, metadata: dict[str, Any] | None = None) -> dict[str, Any]  # Line 96
+    def transform_trade_to_event_data(trade: dict[str, Any], metadata: dict[str, Any] | None = None) -> dict[str, Any]  # Line 134
+    def validate_financial_precision(data: dict[str, Any]) -> dict[str, Any]  # Line 171
+    def ensure_boundary_fields(data: dict[str, Any], source: str = 'backtesting') -> dict[str, Any]  # Line 201
+    def transform_for_req_reply(cls, request_type: str, data: Any, correlation_id: str | None = None) -> dict[str, Any]  # Line 228
+    def transform_for_batch_processing(cls, ...) -> dict[str, Any]  # Line 289
+    def align_processing_paradigm(cls, data: dict[str, Any], target_mode: str = 'batch') -> dict[str, Any]  # Line 361
+    def apply_cross_module_validation(cls, ...) -> dict[str, Any]  # Line 440
+    def _apply_core_boundary_validation(cls, data: dict[str, Any], source_module: str, target_module: str) -> dict[str, Any]  # Line 543
 ```
 
 ### File: di_registration.py
@@ -617,24 +620,24 @@ class BacktestResult(BaseModel):
 
 ```python
 class BacktestEngine:
-    def __init__(self, ...)  # Line 139
-    async def run(self) -> BacktestResult  # Line 187
-    async def _load_historical_data(self) -> None  # Line 212
-    async def _load_from_data_service(self, symbol: str) -> pd.DataFrame  # Line 228
-    async def _load_default_data(self, symbol: str) -> pd.DataFrame  # Line 256
-    async def _initialize_strategy(self) -> None  # Line 271
-    async def _run_simulation(self) -> None  # Line 321
-    def _get_current_market_data(self, timestamp: datetime) -> dict[str, pd.Series]  # Line 355
-    async def _generate_signals(self, market_data: dict[str, pd.Series]) -> dict[str, Signal]  # Line 363
-    async def _execute_trades(self, signals: dict[str, Signal], market_data: dict[str, pd.Series]) -> None  # Line 406
-    async def _execute_with_engine(self, symbol: str, signal: Signal, market_data_row: pd.Series) -> None  # Line 437
-    async def _open_position(self, symbol: str, price: Decimal, signal: SignalDirection) -> None  # Line 614
-    async def _close_position(self, symbol: str, price: Decimal) -> None  # Line 668
-    def _update_positions(self, market_data: dict[str, pd.Series]) -> None  # Line 715
-    def _record_equity(self) -> None  # Line 734
-    async def _check_risk_limits(self) -> None  # Line 744
-    async def _close_all_positions(self) -> None  # Line 761
-    async def _calculate_results(self) -> BacktestResult  # Line 769
+    def __init__(self, ...)  # Line 156
+    async def run(self) -> BacktestResult  # Line 205
+    async def _load_historical_data(self) -> None  # Line 265
+    async def _load_from_data_service(self, symbol: str) -> pd.DataFrame  # Line 281
+    async def _load_default_data(self, symbol: str) -> pd.DataFrame  # Line 309
+    async def _initialize_strategy(self) -> None  # Line 324
+    async def _run_simulation(self) -> None  # Line 374
+    def _get_current_market_data(self, timestamp: datetime) -> dict[str, pd.Series]  # Line 408
+    async def _generate_signals(self, market_data: dict[str, pd.Series]) -> dict[str, Signal]  # Line 416
+    async def _execute_trades(self, signals: dict[str, Signal], market_data: dict[str, pd.Series]) -> None  # Line 459
+    async def _execute_with_engine(self, symbol: str, signal: Signal, market_data_row: pd.Series) -> None  # Line 490
+    async def _open_position(self, symbol: str, price: Decimal, signal: SignalDirection) -> None  # Line 667
+    async def _close_position(self, symbol: str, price: Decimal) -> None  # Line 739
+    def _update_positions(self, market_data: dict[str, pd.Series]) -> None  # Line 786
+    def _record_equity(self) -> None  # Line 805
+    async def _check_risk_limits(self) -> None  # Line 815
+    async def _close_all_positions(self) -> None  # Line 832
+    async def _calculate_results(self) -> BacktestResult  # Line 840
 ```
 
 ### File: factory.py
@@ -661,7 +664,7 @@ class BacktestFactory(BaseComponent):
     def create_engine(self, config: Any, strategy: Any, **kwargs) -> 'BacktestEngine'  # Line 172
     def create_simulator(self, config: Any) -> 'TradeSimulator'  # Line 220
     def create_metrics_calculator(self, risk_free_rate: float | None = None) -> 'MetricsCalculator'  # Line 253
-    def create_analyzer(self, analyzer_type: str, config: dict[str, Any] = None) -> Any  # Line 277
+    def create_analyzer(self, analyzer_type: str, config: dict[str, Any] | None = None) -> Any  # Line 277
     def wire_dependencies(self) -> None  # Line 338
     def get_interface(self) -> 'BacktestServiceInterface'  # Line 350
 ```
@@ -858,6 +861,7 @@ class MetricsCalculator:
 
 **Key Imports:**
 - `from src.core.base.component import BaseComponent`
+- `from src.core.event_constants import BacktestEvents`
 - `from src.core.exceptions import ServiceError`
 - `from src.core.logging import get_logger`
 - `from src.utils.decimal_utils import to_decimal`
@@ -869,14 +873,14 @@ class MetricsCalculator:
 
 ```python
 class BacktestRepository(BaseComponent):
-    def __init__(self, db_manager: DatabaseServiceInterface)  # Line 33
-    async def save_backtest_result(self, result_data: dict[str, Any], request_data: dict[str, Any]) -> str  # Line 44
-    async def get_backtest_result(self, result_id: str) -> dict[str, Any] | None  # Line 84
-    async def list_backtest_results(self, limit: int = 50, offset: int = 0, strategy_type: str | None = None) -> list[dict[str, Any]]  # Line 121
-    async def delete_backtest_result(self, result_id: str) -> bool  # Line 169
-    async def save_trade_history(self, backtest_id: str, trades: list[dict[str, Any]]) -> None  # Line 197
-    async def get_trade_history(self, backtest_id: str) -> list[dict[str, Any]]  # Line 233
-    async def cleanup_old_results(self, days_old: int = 30) -> int  # Line 272
+    def __init__(self, db_manager: DatabaseServiceInterface)  # Line 34
+    async def save_backtest_result(self, result_data: dict[str, Any], request_data: dict[str, Any]) -> str  # Line 45
+    async def get_backtest_result(self, result_id: str) -> dict[str, Any] | None  # Line 125
+    async def list_backtest_results(self, limit: int = 50, offset: int = 0, strategy_type: str | None = None) -> list[dict[str, Any]]  # Line 184
+    async def delete_backtest_result(self, result_id: str) -> bool  # Line 232
+    async def save_trade_history(self, backtest_id: str, trades: list[dict[str, Any]]) -> None  # Line 260
+    async def get_trade_history(self, backtest_id: str) -> list[dict[str, Any]]  # Line 296
+    async def cleanup_old_results(self, days_old: int = 30) -> int  # Line 335
 ```
 
 ### File: service.py
@@ -895,8 +899,8 @@ class BacktestRepository(BaseComponent):
 
 ```python
 class BacktestRequest(BaseModel):
-    def validate_dates(cls, v: datetime, info) -> datetime  # Line 94
-    def validate_symbols(cls, v: list[str]) -> list[str]  # Line 100
+    def validate_dates(cls, v: datetime, info) -> datetime  # Line 96
+    def validate_symbols(cls, v: list[str]) -> list[str]  # Line 102
 ```
 
 #### Class: `BacktestCacheEntry`
@@ -906,7 +910,7 @@ class BacktestRequest(BaseModel):
 
 ```python
 class BacktestCacheEntry(BaseModel):
-    def is_expired(self) -> bool  # Line 114
+    def is_expired(self) -> bool  # Line 116
 ```
 
 #### Class: `BacktestService`
@@ -916,40 +920,41 @@ class BacktestCacheEntry(BaseModel):
 
 ```python
 class BacktestService(BaseService, ErrorPropagationMixin):
-    def __init__(self, config: Config, **services)  # Line 131
-    async def initialize(self) -> None  # Line 247
-    async def _initialize_impl(self) -> None  # Line 251
-    async def _initialize_services(self) -> None  # Line 271
-    async def _initialize_backtesting_components(self) -> None  # Line 294
-    async def run_backtest(self, request: BacktestRequest) -> 'BacktestResult'  # Line 316
-    async def run_backtest_from_dict(self, request_data: dict[str, Any]) -> 'BacktestResult'  # Line 320
-    async def serialize_result(self, result: 'BacktestResult') -> dict[str, Any]  # Line 330
-    async def _run_backtest_impl(self, request: BacktestRequest) -> 'BacktestResult'  # Line 359
-    async def _execute_backtest_pipeline(self, backtest_id: str, request: BacktestRequest) -> 'BacktestResult'  # Line 404
-    async def _prepare_market_data(self, request: BacktestRequest) -> dict[str, pd.DataFrame]  # Line 439
-    async def _initialize_strategy(self, strategy_config: dict[str, Any]) -> Any  # Line 474
-    async def _setup_risk_management(self, risk_config: dict[str, Any]) -> Any  # Line 510
-    async def _run_core_simulation(self, ...) -> dict[str, Any]  # Line 524
-    async def _run_advanced_analysis(self, ...) -> dict[str, Any]  # Line 586
-    async def _consolidate_results(self, ...) -> 'BacktestResult'  # Line 635
-    async def _update_backtest_stage(self, backtest_id: str, stage: str, progress: int) -> None  # Line 744
-    def _generate_request_hash(self, request: BacktestRequest) -> str  # Line 753
-    async def _get_cached_result(self, request: BacktestRequest) -> 'BacktestResult | None'  # Line 781
-    async def _cache_result(self, request: BacktestRequest, result: 'BacktestResult') -> None  # Line 803
-    async def _persist_result(self, request: BacktestRequest, result: 'BacktestResult') -> str | None  # Line 831
-    async def get_active_backtests(self) -> dict[str, dict[str, Any]]  # Line 851
-    async def _get_active_backtests_impl(self) -> dict[str, dict[str, Any]]  # Line 857
-    async def cancel_backtest(self, backtest_id: str) -> bool  # Line 861
-    async def _cancel_backtest_impl(self, backtest_id: str) -> bool  # Line 867
-    async def clear_cache(self, pattern: str = '*') -> int  # Line 875
-    async def _clear_cache_impl(self, pattern: str = '*') -> int  # Line 879
-    async def get_cache_stats(self) -> dict[str, Any]  # Line 903
-    async def get_backtest_result(self, result_id: str) -> dict[str, Any] | None  # Line 921
-    async def list_backtest_results(self, limit: int = 50, offset: int = 0, strategy_type: str | None = None) -> list[dict[str, Any]]  # Line 934
-    async def delete_backtest_result(self, result_id: str) -> bool  # Line 949
-    async def health_check(self) -> HealthCheckResult  # Line 962
-    async def cleanup(self) -> None  # Line 1014
-    async def _safe_async_cleanup(self, service_name: str, cleanup_coro) -> None  # Line 1089
+    def __init__(self, config: Config, **services)  # Line 133
+    async def initialize(self) -> None  # Line 249
+    async def _initialize_impl(self) -> None  # Line 253
+    async def _initialize_services(self) -> None  # Line 273
+    async def _initialize_backtesting_components(self) -> None  # Line 296
+    async def run_backtest(self, request: BacktestRequest) -> 'BacktestResult'  # Line 318
+    async def run_backtest_from_dict(self, request_data: dict[str, Any]) -> 'BacktestResult'  # Line 322
+    async def serialize_result(self, result: 'BacktestResult') -> dict[str, Any]  # Line 332
+    async def _run_backtest_impl(self, request: BacktestRequest) -> 'BacktestResult'  # Line 365
+    async def _execute_backtest_pipeline(self, backtest_id: str, request: BacktestRequest) -> 'BacktestResult'  # Line 410
+    async def _prepare_market_data(self, request: BacktestRequest) -> dict[str, pd.DataFrame]  # Line 445
+    async def _initialize_strategy(self, strategy_config: dict[str, Any]) -> Any  # Line 480
+    async def _setup_risk_management(self, risk_config: dict[str, Any]) -> Any  # Line 517
+    async def _run_core_simulation(self, ...) -> dict[str, Any]  # Line 530
+    async def _run_advanced_analysis(self, ...) -> dict[str, Any]  # Line 593
+    async def _consolidate_results(self, ...) -> 'BacktestResult'  # Line 642
+    async def _update_backtest_stage(self, backtest_id: str, stage: str, progress: int) -> None  # Line 764
+    def _generate_request_hash(self, request: BacktestRequest) -> str  # Line 773
+    async def _get_cached_result(self, request: BacktestRequest) -> 'BacktestResult | None'  # Line 801
+    async def _cache_result(self, request: BacktestRequest, result: 'BacktestResult') -> None  # Line 823
+    async def _persist_result(self, request: BacktestRequest, result: 'BacktestResult') -> str | None  # Line 851
+    async def get_active_backtests(self) -> dict[str, dict[str, Any]]  # Line 871
+    async def _get_active_backtests_impl(self) -> dict[str, dict[str, Any]]  # Line 877
+    async def cancel_backtest(self, backtest_id: str) -> bool  # Line 881
+    async def _cancel_backtest_impl(self, backtest_id: str) -> bool  # Line 887
+    async def clear_cache(self, pattern: str = '*') -> int  # Line 895
+    async def _clear_cache_impl(self, pattern: str = '*') -> int  # Line 899
+    async def get_cache_stats(self) -> dict[str, Any]  # Line 923
+    async def get_backtest_result(self, result_id: str) -> dict[str, Any] | None  # Line 941
+    async def list_backtest_results(self, limit: int = 50, offset: int = 0, strategy_type: str | None = None) -> list[dict[str, Any]]  # Line 954
+    async def delete_backtest_result(self, result_id: str) -> bool  # Line 969
+    async def health_check(self) -> HealthCheckResult  # Line 982
+    async def cleanup(self) -> None  # Line 1034
+    async def _safe_async_cleanup(self, service_name: str, cleanup_coro) -> None  # Line 1109
+    def _propagate_error_with_boundary_validation(self, error: Exception, context: str, source_module: str, target_module: str) -> None  # Line 1117
 ```
 
 ### File: simulator.py
@@ -985,25 +990,25 @@ class SimulatedOrder(BaseModel):
 
 ```python
 class TradeSimulator:
-    def __init__(self, config: SimulationConfig, slippage_model: Any = None)  # Line 101
-    async def execute_order(self, ...) -> dict[str, Any]  # Line 118
-    async def _simulate_latency(self) -> None  # Line 182
-    def _should_reject_order(self) -> bool  # Line 188
-    def _create_rejection_result(self, order: SimulatedOrder, reason: str) -> dict[str, Any]  # Line 192
-    async def _execute_market_order(self, ...) -> dict[str, Any]  # Line 204
-    async def _execute_limit_order(self, ...) -> dict[str, Any]  # Line 253
-    async def _execute_stop_order(self, order: SimulatedOrder, market_data: pd.Series) -> dict[str, Any]  # Line 319
-    async def _execute_with_algorithm(self, ...) -> dict[str, Any]  # Line 380
-    async def _execute_twap(self, order: SimulatedOrder, market_data: pd.Series, params: dict[str, Any]) -> dict[str, Any]  # Line 403
-    async def _execute_vwap(self, order: SimulatedOrder, market_data: pd.Series, params: dict[str, Any]) -> dict[str, Any]  # Line 451
-    async def _execute_iceberg(self, order: SimulatedOrder, market_data: pd.Series, params: dict[str, Any]) -> dict[str, Any]  # Line 487
-    def _calculate_market_impact(self, order_size: Decimal, volume: Decimal) -> Decimal  # Line 558
-    async def check_pending_orders(self, market_data: dict[str, pd.Series]) -> list[dict[str, Any]]  # Line 593
-    def calculate_execution_costs(self, trades: list[dict[str, Any]]) -> dict[str, Decimal]  # Line 624
-    def get_execution_statistics(self) -> dict[str, Any]  # Line 660
-    def cleanup(self) -> None  # Line 686
-    async def get_simulation_results(self) -> dict[str, Any]  # Line 699
-    def _calculate_daily_returns(self, equity_curve: list[dict[str, Any]]) -> list[float]  # Line 706
+    def __init__(self, config: SimulationConfig, slippage_model: Any = None)  # Line 104
+    async def execute_order(self, ...) -> dict[str, Any]  # Line 121
+    async def _simulate_latency(self) -> None  # Line 184
+    def _should_reject_order(self) -> bool  # Line 190
+    def _create_rejection_result(self, order: SimulatedOrder, reason: str) -> dict[str, Any]  # Line 194
+    async def _execute_market_order(self, ...) -> dict[str, Any]  # Line 206
+    async def _execute_limit_order(self, ...) -> dict[str, Any]  # Line 255
+    async def _execute_stop_order(self, order: SimulatedOrder, market_data: pd.Series) -> dict[str, Any]  # Line 321
+    async def _execute_with_algorithm(self, ...) -> dict[str, Any]  # Line 382
+    async def _execute_twap(self, order: SimulatedOrder, market_data: pd.Series, params: dict[str, Any]) -> dict[str, Any]  # Line 405
+    async def _execute_vwap(self, order: SimulatedOrder, market_data: pd.Series, params: dict[str, Any]) -> dict[str, Any]  # Line 453
+    async def _execute_iceberg(self, order: SimulatedOrder, market_data: pd.Series, params: dict[str, Any]) -> dict[str, Any]  # Line 489
+    def _calculate_market_impact(self, order_size: Decimal, volume: Decimal) -> Decimal  # Line 560
+    async def check_pending_orders(self, market_data: dict[str, pd.Series]) -> list[dict[str, Any]]  # Line 594
+    def calculate_execution_costs(self, trades: list[dict[str, Any]]) -> dict[str, Decimal]  # Line 625
+    def get_execution_statistics(self) -> dict[str, Any]  # Line 661
+    def cleanup(self) -> None  # Line 687
+    async def get_simulation_results(self) -> dict[str, Any]  # Line 700
+    def _calculate_daily_returns(self, equity_curve: list[dict[str, Any]]) -> list[float]  # Line 707
 ```
 
 ### File: utils.py

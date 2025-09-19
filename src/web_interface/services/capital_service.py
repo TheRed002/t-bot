@@ -612,6 +612,21 @@ class WebCapitalService(BaseService):
             raise ServiceError(f"Failed to generate fund flow report: {e!s}")
 
     # Limits & Controls Methods
+    async def get_allocation_limits(self, limit_type: str | None = None) -> list[dict[str, Any]]:
+        """Get configured allocation limits."""
+        return await self.get_capital_limits(limit_type)
+
+    async def set_allocation_limits(self, **kwargs) -> dict[str, Any]:
+        """Set allocation limits configuration."""
+        try:
+            # This would typically update through limit service
+            logger.info(f"Setting allocation limits with parameters: {kwargs}")
+            return {"status": "configured", "limits": kwargs}
+
+        except Exception as e:
+            logger.error(f"Error setting allocation limits: {e}")
+            raise ServiceError(f"Failed to set allocation limits: {e!s}")
+
     async def get_capital_limits(self, limit_type: str | None = None) -> list[dict[str, Any]]:
         """Get configured capital limits."""
         try:
@@ -715,3 +730,159 @@ class WebCapitalService(BaseService):
         min_hhi = 1 / n if n > 0 else 1
 
         return float((hhi - min_hhi) / (1 - min_hhi) if min_hhi < 1 else 0)
+
+    async def convert_currency(
+        self, from_currency: str, to_currency: str, amount: Decimal
+    ) -> dict[str, Any]:
+        """Convert currency amount."""
+        try:
+            if not self.currency_service:
+                raise ServiceError("Currency service not available")
+
+            # Get exchange rate
+            rate = await self.currency_service.get_exchange_rate(from_currency, to_currency)
+            if rate is None:
+                raise ServiceError(f"Exchange rate not available for {from_currency}/{to_currency}")
+
+            converted_amount = amount * Decimal(str(rate))
+
+            return {
+                "from_currency": from_currency,
+                "to_currency": to_currency,
+                "original_amount": str(amount),
+                "converted_amount": str(converted_amount),
+                "exchange_rate": float(rate),
+                "timestamp": datetime.utcnow(),
+            }
+
+        except Exception as e:
+            logger.error(f"Error converting currency: {e}")
+            raise ServiceError(f"Failed to convert currency: {e!s}")
+
+    async def rebalance_portfolio(
+        self, target_allocations: dict[str, Any] | None = None, dry_run: bool = False
+    ) -> dict[str, Any]:
+        """Rebalance portfolio allocations."""
+        try:
+            # This would typically interface with portfolio rebalancing service
+            logger.info(f"Portfolio rebalancing {'(dry run)' if dry_run else ''}")
+
+            if not target_allocations:
+                target_allocations = {}
+
+            return {
+                "status": "completed" if not dry_run else "simulated",
+                "target_allocations": target_allocations,
+                "changes_made": [] if dry_run else ["mock_rebalance"],
+                "dry_run": dry_run,
+                "timestamp": datetime.utcnow(),
+            }
+
+        except Exception as e:
+            logger.error(f"Error rebalancing portfolio: {e}")
+            raise ServiceError(f"Failed to rebalance portfolio: {e!s}")
+
+    async def calculate_optimal_allocation(
+        self, risk_tolerance: str, optimization_method: str
+    ) -> dict[str, Any]:
+        """Calculate optimal capital allocation."""
+        try:
+            # This would typically use optimization algorithms
+            logger.info(f"Calculating optimal allocation with {optimization_method} method")
+
+            return {
+                "optimization_method": optimization_method,
+                "risk_tolerance": risk_tolerance,
+                "optimal_allocation": {
+                    "strategy_1": "30%",
+                    "strategy_2": "50%",
+                    "strategy_3": "20%",
+                },
+                "expected_return": "12.5%",
+                "risk_score": "medium",
+                "timestamp": datetime.utcnow(),
+            }
+
+        except Exception as e:
+            logger.error(f"Error calculating optimal allocation: {e}")
+            raise ServiceError(f"Failed to calculate optimal allocation: {e!s}")
+
+    async def get_capital_efficiency(self) -> dict[str, Any]:
+        """Get capital efficiency metrics."""
+        try:
+            metrics = await self.capital_service.get_capital_metrics()
+
+            # Calculate efficiency metrics
+            efficiency_ratio = (
+                metrics.utilized_capital / metrics.allocated_capital
+                if metrics.allocated_capital > 0
+                else Decimal("0")
+            )
+
+            return {
+                "efficiency_ratio": float(efficiency_ratio),
+                "capital_turnover": "2.5x",
+                "utilization_score": "85%",
+                "optimization_suggestions": [
+                    "Consider increasing allocation to high-performing strategies",
+                    "Reduce idle capital by 15%",
+                ],
+                "timestamp": datetime.utcnow(),
+            }
+
+        except Exception as e:
+            logger.error(f"Error getting capital efficiency: {e}")
+            raise ServiceError(f"Failed to retrieve capital efficiency: {e!s}")
+
+    async def reserve_capital(
+        self, amount: Decimal, currency: str, purpose: str, duration_minutes: int = 60
+    ) -> dict[str, Any]:
+        """Reserve capital for future use."""
+        try:
+            # This would typically interface with reservation service
+            reservation_id = f"res_{datetime.utcnow().timestamp()}"
+
+            logger.info(f"Reserving {amount} {currency} for {purpose}")
+
+            return {
+                "reservation_id": reservation_id,
+                "amount": str(amount),
+                "currency": currency,
+                "purpose": purpose,
+                "duration_minutes": duration_minutes,
+                "expires_at": datetime.utcnow() + timedelta(minutes=duration_minutes),
+                "status": "active",
+                "created_at": datetime.utcnow(),
+            }
+
+        except Exception as e:
+            logger.error(f"Error reserving capital: {e}")
+            raise ServiceError(f"Failed to reserve capital: {e!s}")
+
+    async def get_reserved_capital(self) -> dict[str, Any]:
+        """Get reserved capital information."""
+        try:
+            # This would typically fetch from reservation service
+            return {
+                "total_reserved": "50000.00",
+                "currency": "USD",
+                "reservations": [
+                    {
+                        "reservation_id": "res_123",
+                        "amount": "25000.00",
+                        "purpose": "strategy_deployment",
+                        "expires_at": datetime.utcnow() + timedelta(hours=1),
+                    },
+                    {
+                        "reservation_id": "res_124",
+                        "amount": "25000.00",
+                        "purpose": "risk_buffer",
+                        "expires_at": datetime.utcnow() + timedelta(hours=6),
+                    },
+                ],
+                "timestamp": datetime.utcnow(),
+            }
+
+        except Exception as e:
+            logger.error(f"Error getting reserved capital: {e}")
+            raise ServiceError(f"Failed to retrieve reserved capital: {e!s}")

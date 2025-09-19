@@ -1,0 +1,36 @@
+_metadata:
+  last_updated: '2025-09-19T12:47:56.446923+00:00'
+  version: 1.0.0
+acceleration_factor: null
+created_at: 2025-09-19 12:47:56.446789+00:00
+enabled: true
+entry_threshold: null
+exchange_type: null
+exit_threshold: null
+inventory_target: null
+lookback_period: null
+max_position_size: null
+max_positions: 5
+metadata: {}
+min_confidence: 0.6
+momentum_threshold: null
+name: test_momentum
+num_std: null
+parameters:
+  breakout_confirmation_periods: 3
+  consolidation_period: 10
+  support_resistance_period: 20
+  volume_threshold: 1.5
+position_size_pct: 0.02
+requires_exchange: false
+requires_risk_manager: false
+risk_parameters: {}
+spread_pct: null
+stop_loss_pct: 0.02
+strategy_id: test_momentum_105
+strategy_type: momentum
+symbol: BTCUSDT
+take_profit_pct: 0.04
+timeframe: 1h
+updated_at: null
+window_size: null

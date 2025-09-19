@@ -59,7 +59,7 @@ from src.web_interface.websockets import get_unified_websocket_manager
 # Initialize logger
 logger = get_logger(__name__)
 
-app_config: Config | None = None
+app_config: "Config | None" = None
 bot_orchestrator = None
 execution_engine = None
 model_manager = None
@@ -85,6 +85,12 @@ async def _initialize_services():
             injector.register_service("Config", app_config, singleton=True)
         if execution_engine:
             injector.register_service("ExecutionEngine", execution_engine, singleton=True)
+            # If execution_engine provides ExecutionService interface, register it
+            if hasattr(execution_engine, 'record_trade_execution'):
+                injector.register_service("ExecutionService", execution_engine, singleton=True)
+            # If execution_engine provides ExecutionOrchestrationService interface, register it
+            if hasattr(execution_engine, 'execute_order_from_data'):
+                injector.register_service("ExecutionOrchestrationService", execution_engine, singleton=True)
         if bot_orchestrator:
             injector.register_service("BotOrchestrator", bot_orchestrator, singleton=True)
         if model_manager:
@@ -112,7 +118,8 @@ async def _initialize_services():
             }
             initialize_auth_manager(auth_config)
         else:
-            raise RuntimeError("Security configuration is required for authentication")
+            from src.core.exceptions import ConfigurationError
+            raise ConfigurationError("Security configuration is required for authentication", config_section="security")
 
         # Get services from DI container
         registry = injector.resolve("WebServiceRegistry")
@@ -289,9 +296,9 @@ async def lifespan(app: FastAPI):
 
 def create_app(
     config: Config,
-    bot_orchestrator_instance: Any | None = None,
-    execution_engine_instance: Any | None = None,
-    model_manager_instance: Any | None = None,
+    bot_orchestrator_instance: "Any | None" = None,
+    execution_engine_instance: "Any | None" = None,
+    model_manager_instance: "Any | None" = None,
 ) -> Any:
     """
     Create and configure FastAPI application with Socket.IO.

@@ -33,7 +33,6 @@ except ImportError:
     UNIFIED_AVAILABLE = False
 
 
-@pytest.mark.skipif(not BOT_STATUS_AVAILABLE, reason="bot_status module not available")
 class TestBotStatusManager:
     """Test BotStatusManager functionality."""
 
@@ -212,7 +211,6 @@ class TestWebSocketPortfolioMock:
         mock_portfolio_manager.send_trade_notification.assert_called_once_with(user_id, trade_data)
 
 
-@pytest.mark.skipif(not UNIFIED_AVAILABLE, reason="unified_manager module not available")
 class TestUnifiedWebSocketManager:
     """Test UnifiedWebSocketManager functionality."""
 

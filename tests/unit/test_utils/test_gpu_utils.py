@@ -385,45 +385,58 @@ class TestGPUAcceleratedCorrelation:
         assert result.shape == (3, 3)
 
     @patch("src.utils.gpu_utils._get_gpu_manager_service")
-    @patch("src.utils.gpu_utils.CUPY_AVAILABLE", False)  # Force CuPy to be unavailable
-    @patch("src.utils.gpu_utils.TORCH_AVAILABLE", True)
     @patch("src.utils.gpu_utils.torch_module")
-    @patch("src.utils.gpu_utils.TORCH_DEVICE", "cuda:0")  # Mock device
     def test_gpu_accelerated_correlation_with_torch(self, mock_torch, mock_get_service):
         """Test gpu_accelerated_correlation with PyTorch."""
-        mock_gpu_manager = Mock()
-        mock_gpu_manager.is_available.return_value = True
-        mock_get_service.return_value = mock_gpu_manager
+        # Patch the boolean values using context managers
+        with patch("src.utils.gpu_utils.CUPY_AVAILABLE", False):
+            with patch("src.utils.gpu_utils.TORCH_AVAILABLE", True):
+                mock_gpu_manager = Mock()
+                mock_gpu_manager.is_available.return_value = True
+                mock_get_service.return_value = mock_gpu_manager
 
-        # Mock PyTorch operations
-        mock_tensor = Mock()
-        mock_tensor.mean.return_value = Mock()
-        mock_tensor.std.return_value = Mock()
-        mock_tensor.shape = [3, 3]
-        mock_tensor.T = Mock()
+                # Mock TORCH_DEVICE by setting it in the gpu_utils module
+                import src.utils.gpu_utils as gpu_utils_module
+                original_torch_device = getattr(gpu_utils_module, 'TORCH_DEVICE', 'NOT_SET')
+                gpu_utils_module.TORCH_DEVICE = "cuda:0"  # Set mock device
 
-        mock_standardized = Mock()
-        mock_standardized.T = Mock()
+                try:
+                    # Mock PyTorch operations
+                    mock_tensor = Mock()
+                    mock_tensor.mean.return_value = Mock()
+                    mock_tensor.std.return_value = Mock()
+                    mock_tensor.shape = [3, 3]
+                    mock_tensor.T = Mock()
 
-        mock_corr = Mock()
-        mock_corr.cpu.return_value.numpy.return_value = np.eye(3)
+                    mock_standardized = Mock()
+                    mock_standardized.T = Mock()
 
-        # Fix the chained call mocking
-        mock_from_numpy = Mock()
-        mock_from_numpy.to.return_value = mock_tensor
-        mock_torch.from_numpy.return_value = mock_from_numpy
-        mock_torch.mm.return_value = mock_corr
+                    mock_corr = Mock()
+                    mock_corr.cpu.return_value.numpy.return_value = np.eye(3)
 
-        # Mock the standardization process
-        mock_sub_result = Mock()
-        mock_sub_result.__truediv__ = Mock(return_value=mock_standardized)
-        mock_tensor.__sub__ = Mock(return_value=mock_sub_result)
+                    # Fix the chained call mocking
+                    mock_from_numpy = Mock()
+                    mock_from_numpy.to.return_value = mock_tensor
+                    mock_torch.from_numpy.return_value = mock_from_numpy
+                    mock_torch.mm.return_value = mock_corr
 
-        data = np.array([[1, 2, 3], [4, 5, 6], [7, 8, 9]], dtype=np.float64)
-        result = gpu_accelerated_correlation(data)
+                    # Mock the standardization process
+                    mock_sub_result = Mock()
+                    mock_sub_result.__truediv__ = Mock(return_value=mock_standardized)
+                    mock_tensor.__sub__ = Mock(return_value=mock_sub_result)
 
-        mock_torch.from_numpy.assert_called_once_with(data)
-        assert result.shape == (3, 3)
+                    data = np.array([[1, 2, 3], [4, 5, 6], [7, 8, 9]], dtype=np.float64)
+                    result = gpu_accelerated_correlation(data)
+
+                    mock_torch.from_numpy.assert_called_once_with(data)
+                    assert result.shape == (3, 3)
+                finally:
+                    # Restore original TORCH_DEVICE
+                    if original_torch_device != 'NOT_SET':
+                        gpu_utils_module.TORCH_DEVICE = original_torch_device
+                    else:
+                        # Set it back to None as original state
+                        gpu_utils_module.TORCH_DEVICE = None
 
 
 class TestGPUAcceleratedRollingWindow:

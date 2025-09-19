@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
 from src.core.caching import CacheKeys, cached
+from src.core.events import BotEvent, BotEventType, get_event_publisher
 from src.core.exceptions import (
     EntityNotFoundError,
     ExecutionError,
@@ -21,6 +22,7 @@ from src.core.exceptions import (
 )
 from src.core.logging import get_logger
 from src.core.types import BotPriority, BotStatus, BotType
+# Import execution interface for proper type checking
 from src.execution.interfaces import ExecutionServiceInterface
 from src.utils.web_interface_utils import handle_api_error
 from src.web_interface.di_registration import get_web_bot_service
@@ -46,16 +48,17 @@ def get_web_bot_service_instance():
 
 
 def get_execution_service() -> ExecutionServiceInterface | None:
-    """Get execution service for bot lifecycle management."""
+    """Get execution service through dependency injection."""
     try:
-        from src.core.dependency_injection import get_global_injector
+        from src.core.dependency_injection import DependencyInjector
 
-        injector = get_global_injector()
+        injector = DependencyInjector.get_instance()
         if injector and injector.has_service("ExecutionService"):
             return injector.resolve("ExecutionService")
+        return None
     except Exception as e:
         logger.warning(f"Could not get execution service: {e}")
-    return None
+        return None
 
 
 # Deprecated functions for backward compatibility
@@ -179,11 +182,30 @@ async def create_bot(bot_request: CreateBotRequest, current_user: User = Depends
 
         # Create bot configuration through web service (business logic moved to service)
         bot_config = await web_bot_service.create_bot_configuration(
-            config_data, current_user.user_id
+            config_data, current_user.id
         )
 
         # Create bot through service layer - service handles facade calls
         created_bot_id = await web_bot_service.create_bot_through_service(bot_config)
+
+        # Publish BotEvent for system coordination
+        event_publisher = get_event_publisher()
+        await event_publisher.publish(
+            BotEvent(
+                event_type=BotEventType.BOT_CREATED,
+                bot_id=created_bot_id,
+                source="web_interface",
+                priority="high",
+                data={
+                    "created_by": current_user.username,
+                    "bot_name": bot_request.bot_name,
+                    "allocated_capital": str(bot_request.allocated_capital),
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                    "via_api": True,
+                    "auto_start": bot_request.auto_start,
+                },
+            )
+        )
 
         logger.info(
             "Bot created successfully",
@@ -418,47 +440,25 @@ async def update_bot(
                 )
             raise
 
-        # Create updated configuration
-        updated_fields = {}
+        # Business logic moved to service layer
+        update_data = {}
         if update_request.bot_name is not None:
-            current_config.bot_name = update_request.bot_name
-            updated_fields["bot_name"] = update_request.bot_name
-
+            update_data["bot_name"] = update_request.bot_name
         if update_request.allocated_capital is not None:
-            current_config.allocated_capital = update_request.allocated_capital
-            updated_fields["allocated_capital"] = update_request.allocated_capital
-
+            update_data["allocated_capital"] = update_request.allocated_capital
         if update_request.risk_percentage is not None:
-            current_config.risk_percentage = update_request.risk_percentage
-            updated_fields["risk_percentage"] = update_request.risk_percentage
-
+            update_data["risk_percentage"] = update_request.risk_percentage
         if update_request.priority is not None:
-            current_config.priority = update_request.priority
-            updated_fields["priority"] = update_request.priority.value
-
+            update_data["priority"] = update_request.priority
         if update_request.configuration is not None:
-            current_config.configuration.update(update_request.configuration)
-            updated_fields["configuration"] = update_request.configuration
+            update_data["configuration"] = update_request.configuration
 
-        # Apply configuration update through bot service
-        # Note: This implementation is pending the update_bot_configuration method
-        logger.warning(
-            "Bot configuration update requires implementation of update_bot_configuration method"
+        # Update through service layer (business logic moved to service)
+        result = await web_bot_service.update_bot_configuration(
+            bot_id, update_data, current_user.username
         )
 
-        logger.info(
-            "Bot updated successfully",
-            bot_id=bot_id,
-            updated_fields=list(updated_fields.keys()),
-            updated_by=current_user.username,
-        )
-
-        return {
-            "success": True,
-            "message": "Bot updated successfully",
-            "bot_id": bot_id,
-            "updated_fields": updated_fields,
-        }
+        return result
 
     except HTTPException:
         raise
@@ -499,23 +499,27 @@ async def start_bot(bot_id: str, current_user: User = Depends(get_trading_user))
     """
     try:
         web_bot_service = get_web_bot_service_instance()
-        execution_service = get_execution_service()
 
-        # Start bot through service layer - service handles facade calls
-        success = await web_bot_service.start_bot_through_service(bot_id)
+        # Start bot with execution integration through service layer
+        success = await web_bot_service.start_bot_with_execution_integration(bot_id)
 
         if success:
-            # Also notify execution service about bot start if available
-            if execution_service and hasattr(execution_service, "start_bot_execution"):
-                try:
-                    # Get bot configuration for execution context through service
-                    bot_status = await web_bot_service.get_bot_status_through_service(bot_id)
-                    bot_config = bot_status.get("state", {}).get("configuration", {})
-                    await execution_service.start_bot_execution(bot_id, bot_config)
-                except Exception as exec_error:
-                    logger.warning(
-                        f"Failed to start execution engine for bot {bot_id}: {exec_error}"
-                    )
+
+            # Publish BotEvent for system coordination
+            event_publisher = get_event_publisher()
+            await event_publisher.publish(
+                BotEvent(
+                    event_type=BotEventType.BOT_STARTED,
+                    bot_id=bot_id,
+                    source="web_interface",
+                    priority="high",
+                    data={
+                        "started_by": current_user.username,
+                        "started_at": datetime.now(timezone.utc).isoformat(),
+                        "via_api": True,
+                    },
+                )
+            )
 
             logger.info("Bot started successfully", bot_id=bot_id, started_by=current_user.username)
             return {
@@ -577,19 +581,27 @@ async def stop_bot(bot_id: str, current_user: User = Depends(get_trading_user)):
     """
     try:
         web_bot_service = get_web_bot_service_instance()
-        execution_service = get_execution_service()
 
-        # Also notify execution service about bot stop if available
-        if execution_service and hasattr(execution_service, "stop_bot_execution"):
-            try:
-                await execution_service.stop_bot_execution(bot_id)
-            except Exception as exec_error:
-                logger.warning(f"Failed to stop execution engine for bot {bot_id}: {exec_error}")
-
-        # Stop bot through service layer - service handles facade calls
-        success = await web_bot_service.stop_bot_through_service(bot_id)
+        # Stop bot with execution integration through service layer
+        success = await web_bot_service.stop_bot_with_execution_integration(bot_id)
 
         if success:
+            # Publish BotEvent for system coordination
+            event_publisher = get_event_publisher()
+            await event_publisher.publish(
+                BotEvent(
+                    event_type=BotEventType.BOT_STOPPED,
+                    bot_id=bot_id,
+                    source="web_interface",
+                    priority="high",
+                    data={
+                        "stopped_by": current_user.username,
+                        "stopped_at": datetime.now(timezone.utc).isoformat(),
+                        "via_api": True,
+                    },
+                )
+            )
+
             logger.info("Bot stopped successfully", bot_id=bot_id, stopped_by=current_user.username)
             return {
                 "success": True,
@@ -644,14 +656,23 @@ async def pause_bot(bot_id: str, current_user: User = Depends(get_trading_user))
         Dict: Pause operation result
     """
     try:
-        get_web_bot_service_instance()
+        web_bot_service = get_web_bot_service_instance()
 
-        # Pause functionality requires implementation in BotService
-        # This would call: await bot_facade.pause_bot(bot_id)
-        raise HTTPException(
-            status_code=status.HTTP_501_NOT_IMPLEMENTED,
-            detail="Bot pause functionality is not yet implemented",
-        )
+        # Pause bot through service layer
+        success = await web_bot_service.pause_bot_through_service(bot_id)
+
+        if success:
+            logger.info("Bot paused successfully", bot_id=bot_id, paused_by=current_user.username)
+            return {
+                "success": True,
+                "message": f"Bot {bot_id} paused successfully",
+                "bot_id": bot_id,
+            }
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_501_NOT_IMPLEMENTED,
+                detail="Bot pause functionality is not yet implemented",
+            )
 
     except HTTPException:
         raise
@@ -700,14 +721,23 @@ async def resume_bot(bot_id: str, current_user: User = Depends(get_trading_user)
         Dict: Resume operation result
     """
     try:
-        get_web_bot_service_instance()
+        web_bot_service = get_web_bot_service_instance()
 
-        # Resume functionality requires implementation in BotService
-        # This would call: await bot_facade.resume_bot(bot_id)
-        raise HTTPException(
-            status_code=status.HTTP_501_NOT_IMPLEMENTED,
-            detail="Bot resume functionality is not yet implemented",
-        )
+        # Resume bot through service layer
+        success = await web_bot_service.resume_bot_through_service(bot_id)
+
+        if success:
+            logger.info("Bot resumed successfully", bot_id=bot_id, resumed_by=current_user.username)
+            return {
+                "success": True,
+                "message": f"Bot {bot_id} resumed successfully",
+                "bot_id": bot_id,
+            }
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_501_NOT_IMPLEMENTED,
+                detail="Bot resume functionality is not yet implemented",
+            )
 
     except HTTPException:
         raise
@@ -826,8 +856,8 @@ async def get_orchestrator_status(current_user: User = Depends(get_current_user)
     try:
         web_bot_service = get_web_bot_service_instance()
 
-        # Get overall status through service layer - service handles facade calls
-        health_check = web_bot_service.get_facade_health_check()
+        # Get overall status through service layer - service handles controller calls
+        health_check = web_bot_service.get_controller_health_check()
 
         # Get bot list for summary through service layer
         bots = await web_bot_service.list_bots_through_service()

@@ -3,7 +3,7 @@
 ## INTEGRATION
 **Dependencies**: core, data, error_handling, monitoring, state, utils
 **Used By**: None
-**Provides**: BinanceOrderManager, CoinbaseOrderManager, ConnectionManager, ExchangeService, IConnectionManager, ISandboxConnectionManager, IStateService, ITradeLifecycleManager, OKXOrderManager, OKXWebSocketManager
+**Provides**: BinanceOrderManager, CoinbaseOrderManager, ConnectionManager, ExchangeService, IConnectionManager, IExchangeService, ISandboxConnectionManager, IStateService, ITradeLifecycleManager, OKXOrderManager, OKXWebSocketManager
 **Patterns**: Async Operations, Circuit Breaker, Component Architecture, Service Layer
 
 ## DETECTED PATTERNS
@@ -16,16 +16,16 @@
 **Performance**:
 - Parallel execution
 - Retry mechanisms
-- Retry mechanisms
+- Parallel execution
 **Architecture**:
 - BaseExchange inherits from base architecture
 - ConnectionManager inherits from base architecture
 - ExchangeFactory inherits from base architecture
 
 ## MODULE OVERVIEW
-**Files**: 17 Python files
-**Classes**: 49
-**Functions**: 2
+**Files**: 18 Python files
+**Classes**: 56
+**Functions**: 7
 
 ## COMPLETE API REFERENCE
 
@@ -64,25 +64,25 @@
 
 **Implemented Methods:**
 - `connected(self) -> bool` - Line 152
-- `last_heartbeat(self) -> Optional[datetime]` - Line 158
+- `last_heartbeat(self) -> datetime | None` - Line 158
 - `is_connected(self) -> bool` - Line 162
-- `async health_check(self) -> HealthCheckResult` - Line 290
-- `async connect(self) -> None` - Line 326
-- `async disconnect(self) -> None` - Line 331
-- `async ping(self) -> bool` - Line 336
-- `async load_exchange_info(self) -> ExchangeInfo` - Line 341
-- `async get_ticker(self, symbol: str) -> Ticker` - Line 350
-- `async get_order_book(self, symbol: str, limit: int = 100) -> OrderBook` - Line 357
-- `async get_recent_trades(self, symbol: str, limit: int = 100) -> list[Trade]` - Line 364
-- `async place_order(self, order_request: OrderRequest) -> OrderResponse` - Line 373
-- `async cancel_order(self, symbol: str, order_id: str) -> OrderResponse` - Line 393
-- `async get_order_status(self, symbol: str, order_id: str) -> OrderResponse` - Line 400
-- `async get_open_orders(self, symbol: Optional[str] = None) -> list[OrderResponse]` - Line 407
-- `async get_account_balance(self) -> dict[str, Decimal]` - Line 416
-- `async get_positions(self) -> list[Position]` - Line 428
-- `get_exchange_info(self) -> Optional[ExchangeInfo]` - Line 614
-- `get_trading_symbols(self) -> Optional[list[str]]` - Line 618
-- `is_symbol_supported(self, symbol: str) -> bool` - Line 622
+- `async health_check(self) -> HealthCheckResult` - Line 292
+- `async connect(self) -> None` - Line 328
+- `async disconnect(self) -> None` - Line 333
+- `async ping(self) -> bool` - Line 338
+- `async load_exchange_info(self) -> ExchangeInfo` - Line 343
+- `async get_ticker(self, symbol: str) -> Ticker` - Line 352
+- `async get_order_book(self, symbol: str, limit: int = 100) -> OrderBook` - Line 359
+- `async get_recent_trades(self, symbol: str, limit: int = 100) -> list[Trade]` - Line 366
+- `async place_order(self, order_request: OrderRequest) -> OrderResponse` - Line 375
+- `async cancel_order(self, symbol: str, order_id: str) -> OrderResponse` - Line 395
+- `async get_order_status(self, symbol: str, order_id: str) -> OrderResponse` - Line 402
+- `async get_open_orders(self, symbol: str | None = None) -> list[OrderResponse]` - Line 409
+- `async get_account_balance(self) -> dict[str, Decimal]` - Line 418
+- `async get_positions(self) -> list[Position]` - Line 430
+- `get_exchange_info(self) -> ExchangeInfo | None` - Line 693
+- `get_trading_symbols(self) -> list[str] | None` - Line 697
+- `is_symbol_supported(self, symbol: str) -> bool` - Line 701
 
 ### Implementation: `MockExchangeError` ✅
 
@@ -97,19 +97,19 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async connect(self) -> None` - Line 675
-- `async disconnect(self) -> None` - Line 680
-- `async ping(self) -> bool` - Line 684
-- `async load_exchange_info(self) -> ExchangeInfo` - Line 691
-- `async get_ticker(self, symbol: str) -> Ticker` - Line 709
-- `async get_order_book(self, symbol: str, limit: int = 100) -> OrderBook` - Line 730
-- `async get_recent_trades(self, symbol: str, limit: int = 100) -> list[Trade]` - Line 745
-- `async place_order(self, order_request: OrderRequest) -> OrderResponse` - Line 765
-- `async cancel_order(self, symbol: str, order_id: str) -> OrderResponse` - Line 791
-- `async get_order_status(self, symbol: str, order_id: str) -> OrderResponse` - Line 802
-- `async get_open_orders(self, symbol: Optional[str] = None) -> list[OrderResponse]` - Line 810
-- `async get_account_balance(self) -> dict[str, Decimal]` - Line 819
-- `async get_positions(self) -> list[Position]` - Line 825
+- `async connect(self) -> None` - Line 771
+- `async disconnect(self) -> None` - Line 776
+- `async ping(self) -> bool` - Line 780
+- `async load_exchange_info(self) -> ExchangeInfo` - Line 787
+- `async get_ticker(self, symbol: str) -> Ticker` - Line 805
+- `async get_order_book(self, symbol: str, limit: int = 100) -> OrderBook` - Line 826
+- `async get_recent_trades(self, symbol: str, limit: int = 100) -> list[Trade]` - Line 841
+- `async place_order(self, order_request: OrderRequest) -> OrderResponse` - Line 861
+- `async cancel_order(self, symbol: str, order_id: str) -> OrderResponse` - Line 887
+- `async get_order_status(self, symbol: str, order_id: str) -> OrderResponse` - Line 898
+- `async get_open_orders(self, symbol: str | None = None) -> list[OrderResponse]` - Line 906
+- `async get_account_balance(self) -> dict[str, Decimal]` - Line 915
+- `async get_positions(self) -> list[Position]` - Line 921
 
 ### Implementation: `BinanceExchange` ✅
 
@@ -118,19 +118,19 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async connect(self) -> None` - Line 122
-- `async disconnect(self) -> None` - Line 156
-- `async ping(self) -> bool` - Line 198
-- `async load_exchange_info(self) -> ExchangeInfo` - Line 208
-- `async get_ticker(self, symbol: str) -> Ticker` - Line 263
-- `async get_order_book(self, symbol: str, limit: int = 100) -> OrderBook` - Line 308
-- `async get_recent_trades(self, symbol: str, limit: int = 100) -> list[Trade]` - Line 351
-- `async place_order(self, order_request: OrderRequest) -> OrderResponse` - Line 388
-- `async cancel_order(self, symbol: str, order_id: str) -> OrderResponse` - Line 730
-- `async get_order_status(self, symbol: str, order_id: str) -> OrderResponse` - Line 763
-- `async get_open_orders(self, symbol: str | None = None) -> list[OrderResponse]` - Line 806
-- `async get_account_balance(self) -> dict[str, Decimal]` - Line 859
-- `async get_positions(self) -> list[Position]` - Line 888
+- `async connect(self) -> None` - Line 138
+- `async disconnect(self) -> None` - Line 172
+- `async ping(self) -> bool` - Line 214
+- `async load_exchange_info(self) -> ExchangeInfo` - Line 224
+- `async get_ticker(self, symbol: str) -> Ticker` - Line 279
+- `async get_order_book(self, symbol: str, limit: int = 100) -> OrderBook` - Line 343
+- `async get_recent_trades(self, symbol: str, limit: int = 100) -> list[Trade]` - Line 386
+- `async place_order(self, order_request: OrderRequest) -> OrderResponse` - Line 423
+- `async cancel_order(self, symbol: str, order_id: str) -> OrderResponse` - Line 768
+- `async get_order_status(self, symbol: str, order_id: str) -> OrderResponse` - Line 801
+- `async get_open_orders(self, symbol: str | None = None) -> list[OrderResponse]` - Line 844
+- `async get_account_balance(self) -> dict[str, Decimal]` - Line 897
+- `async get_positions(self) -> list[Position]` - Line 926
 
 ### Implementation: `BinanceOrderManager` ✅
 
@@ -142,8 +142,8 @@
 - `async place_limit_order(self, order: OrderRequest) -> OrderResponse` - Line 168
 - `async place_stop_loss_order(self, order: OrderRequest) -> OrderResponse` - Line 223
 - `async place_oco_order(self, order: OrderRequest) -> OrderResponse` - Line 277
-- `async cancel_order(self, order_id: str, symbol: str) -> bool` - Line 335
-- `async get_order_status(self, order_id: str, symbol: str) -> OrderStatus` - Line 367
+- `async cancel_order(self, symbol: str, order_id: str) -> bool` - Line 335
+- `async get_order_status(self, symbol: str, order_id: str) -> OrderStatus` - Line 367
 - `async get_open_orders(self, symbol: str | None = None) -> list[OrderResponse]` - Line 399
 - `async get_order_history(self, symbol: str, limit: int = 500) -> list[OrderResponse]` - Line 431
 - `calculate_fees(self, order: OrderRequest, fill_price: Decimal) -> Decimal` - Line 461
@@ -176,20 +176,20 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async connect(self) -> None` - Line 114
-- `async disconnect(self) -> None` - Line 153
-- `async ping(self) -> bool` - Line 189
-- `async load_exchange_info(self) -> ExchangeInfo` - Line 203
-- `async get_ticker(self, symbol: str) -> Ticker` - Line 233
-- `async get_order_book(self, symbol: str, limit: int = 100) -> OrderBook` - Line 259
-- `async get_recent_trades(self, symbol: str, limit: int = 100) -> list[Trade]` - Line 285
-- `async place_order(self, order_request: OrderRequest) -> OrderResponse` - Line 316
-- `async cancel_order(self, symbol: str, order_id: str) -> OrderResponse` - Line 345
-- `async get_order_status(self, order_id: str) -> OrderResponse` - Line 385
-- `async get_open_orders(self, symbol: str | None = None) -> list[OrderResponse]` - Line 438
-- `async get_account_balance(self) -> dict[str, Decimal]` - Line 476
-- `async get_balance(self, asset: str | None = None) -> dict[str, Any]` - Line 498
-- `async get_positions(self) -> list[Position]` - Line 553
+- `async connect(self) -> None` - Line 113
+- `async disconnect(self) -> None` - Line 152
+- `async ping(self) -> bool` - Line 188
+- `async load_exchange_info(self) -> ExchangeInfo` - Line 202
+- `async get_ticker(self, symbol: str) -> Ticker` - Line 232
+- `async get_order_book(self, symbol: str, limit: int = 100) -> OrderBook` - Line 258
+- `async get_recent_trades(self, symbol: str, limit: int = 100) -> list[Trade]` - Line 284
+- `async place_order(self, order_request: OrderRequest) -> OrderResponse` - Line 315
+- `async cancel_order(self, symbol: str, order_id: str) -> OrderResponse` - Line 342
+- `async get_order_status(self, symbol: str, order_id: str) -> OrderResponse` - Line 382
+- `async get_open_orders(self, symbol: str | None = None) -> list[OrderResponse]` - Line 435
+- `async get_account_balance(self) -> dict[str, Decimal]` - Line 473
+- `async get_balance(self, asset: str | None = None) -> dict[str, Any]` - Line 495
+- `async get_positions(self) -> list[Position]` - Line 550
 
 ### Implementation: `CoinbaseOrderManager` ✅
 
@@ -197,17 +197,17 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async initialize(self) -> bool` - Line 122
-- `async place_order(self, order: OrderRequest) -> OrderResponse` - Line 148
-- `async cancel_order(self, order_id: str, symbol: str) -> bool` - Line 197
-- `async get_order_status(self, order_id: str) -> OrderStatus` - Line 228
-- `async get_order_details(self, order_id: str) -> OrderResponse | None` - Line 257
-- `async get_open_orders(self, symbol: str | None = None) -> list[OrderResponse]` - Line 283
-- `async get_order_history(self, symbol: str | None = None, limit: int = 100) -> list[OrderResponse]` - Line 312
-- `async get_fills(self, order_id: str | None = None, symbol: str | None = None) -> list[dict]` - Line 344
-- `async calculate_fees(self, order: OrderRequest) -> dict[str, Decimal]` - Line 368
-- `get_total_fees(self) -> dict[str, Decimal]` - Line 409
-- `get_order_statistics(self) -> dict[str, Any]` - Line 418
+- `async initialize(self) -> bool` - Line 124
+- `async place_order(self, order: OrderRequest) -> OrderResponse` - Line 150
+- `async cancel_order(self, symbol: str, order_id: str) -> bool` - Line 199
+- `async get_order_status(self, symbol: str, order_id: str) -> OrderStatus` - Line 231
+- `async get_order_details(self, order_id: str) -> OrderResponse | None` - Line 261
+- `async get_open_orders(self, symbol: str | None = None) -> list[OrderResponse]` - Line 287
+- `async get_order_history(self, symbol: str | None = None, limit: int = 100) -> list[OrderResponse]` - Line 316
+- `async get_fills(self, order_id: str | None = None, symbol: str | None = None) -> list[dict]` - Line 348
+- `async calculate_fees(self, order: OrderRequest) -> dict[str, Decimal]` - Line 372
+- `get_total_fees(self) -> dict[str, Decimal]` - Line 413
+- `get_order_statistics(self) -> dict[str, Any]` - Line 422
 
 ### Implementation: `CoinbaseWebSocketHandler` ✅
 
@@ -270,6 +270,82 @@
 - `get_connection_stats(self) -> dict[str, Any]` - Line 736
 - `async disconnect_all(self) -> None` - Line 754
 
+### Implementation: `ExchangeDataTransformer` ✅
+
+**Inherits**: Protocol
+**Purpose**: Protocol for exchange data transformers
+**Status**: Complete
+
+**Implemented Methods:**
+- `transform_symbol_to_exchange(self, symbol: str) -> str` - Line 39
+- `transform_symbol_from_exchange(self, exchange_symbol: str) -> str` - Line 43
+- `transform_order_to_exchange(self, order: OrderRequest) -> dict[str, Any]` - Line 47
+- `transform_order_from_exchange(self, exchange_data: dict[str, Any]) -> OrderResponse` - Line 51
+- `transform_ticker_from_exchange(self, exchange_data: dict[str, Any]) -> Ticker` - Line 55
+
+### Implementation: `BaseExchangeTransformer` 🔧
+
+**Inherits**: ABC
+**Purpose**: Base transformer with common patterns
+**Status**: Abstract Base Class
+
+**Implemented Methods:**
+- `validate_decimal_precision(self, value: Decimal, symbol: str) -> Decimal` - Line 67
+- `validate_symbol_format(self, symbol: str) -> str` - Line 75
+- `apply_messaging_pattern(self, data: dict[str, Any], operation_type: str) -> dict[str, Any]` - Line 132
+- `get_symbol_mappings(self) -> dict[str, str]` - Line 138
+- `get_order_type_mappings(self) -> dict[OrderType, str]` - Line 143
+- `get_order_status_mappings(self) -> dict[str, OrderStatus]` - Line 148
+- `transform_for_batch_processing(cls, ...) -> dict[str, Any]` - Line 153
+
+### Implementation: `BinanceTransformer` ✅
+
+**Inherits**: BaseExchangeTransformer
+**Purpose**: Binance data transformer
+**Status**: Complete
+
+**Implemented Methods:**
+- `get_symbol_mappings(self) -> dict[str, str]` - Line 211
+- `get_order_type_mappings(self) -> dict[OrderType, str]` - Line 221
+- `get_order_status_mappings(self) -> dict[str, OrderStatus]` - Line 230
+- `transform_symbol_to_exchange(self, symbol: str) -> str` - Line 241
+- `transform_symbol_from_exchange(self, exchange_symbol: str) -> str` - Line 256
+
+### Implementation: `CoinbaseTransformer` ✅
+
+**Inherits**: BaseExchangeTransformer
+**Purpose**: Coinbase data transformer
+**Status**: Complete
+
+**Implemented Methods:**
+- `get_symbol_mappings(self) -> dict[str, str]` - Line 289
+- `get_order_type_mappings(self) -> dict[OrderType, str]` - Line 300
+- `get_order_status_mappings(self) -> dict[str, OrderStatus]` - Line 309
+- `transform_symbol_to_exchange(self, symbol: str) -> str` - Line 319
+- `transform_symbol_from_exchange(self, exchange_symbol: str) -> str` - Line 338
+
+### Implementation: `OKXTransformer` ✅
+
+**Inherits**: BaseExchangeTransformer
+**Purpose**: OKX data transformer
+**Status**: Complete
+
+**Implemented Methods:**
+- `get_symbol_mappings(self) -> dict[str, str]` - Line 349
+- `get_order_type_mappings(self) -> dict[OrderType, str]` - Line 360
+- `get_order_status_mappings(self) -> dict[str, OrderStatus]` - Line 369
+- `transform_symbol_to_exchange(self, symbol: str) -> str` - Line 379
+- `transform_symbol_from_exchange(self, exchange_symbol: str) -> str` - Line 398
+
+### Implementation: `TransformerFactory` ✅
+
+**Purpose**: Factory for creating exchange transformers
+**Status**: Complete
+
+**Implemented Methods:**
+- `create_transformer(cls, exchange_name: str) -> BaseExchangeTransformer` - Line 414
+- `get_supported_exchanges(cls) -> list[str]` - Line 423
+
 ### Implementation: `ExchangeFactory` ✅
 
 **Inherits**: BaseService, IExchangeFactory
@@ -277,16 +353,16 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `register_exchange(self, exchange_name: str, exchange_class: type[BaseExchange]) -> None` - Line 51
-- `get_supported_exchanges(self) -> list[str]` - Line 69
-- `is_exchange_supported(self, exchange_name: str) -> bool` - Line 78
-- `async create_exchange(self, exchange_name: str) -> BaseExchange` - Line 90
-- `get_available_exchanges(self) -> list[str]` - Line 126
-- `async get_exchange(self, ...) -> IExchange | None` - Line 136
-- `async remove_exchange(self, exchange_name: str) -> bool` - Line 170
-- `async health_check_all(self) -> dict[str, Any]` - Line 185
-- `async disconnect_all(self) -> None` - Line 200
-- `register_default_exchanges(self) -> None` - Line 209
+- `register_exchange(self, exchange_name: str, exchange_class: type[BaseExchange]) -> None` - Line 54
+- `get_supported_exchanges(self) -> list[str]` - Line 72
+- `is_exchange_supported(self, exchange_name: str) -> bool` - Line 81
+- `async create_exchange(self, exchange_name: str) -> BaseExchange` - Line 94
+- `get_available_exchanges(self) -> list[str]` - Line 128
+- `async get_exchange(self, ...) -> IExchange | None` - Line 138
+- `async remove_exchange(self, exchange_name: str) -> bool` - Line 172
+- `async health_check_all(self) -> dict[str, Any]` - Line 187
+- `async disconnect_all(self) -> None` - Line 202
+- `register_default_exchanges(self) -> None` - Line 211
 
 ### Implementation: `TradeEvent` ✅
 
@@ -301,8 +377,8 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async set_state(self, ...) -> bool` - Line 42
-- `async get_state(self, state_type: StateType, state_id: str) -> dict[str, Any] | None` - Line 54
+- `async set_state(self, ...) -> bool` - Line 47
+- `async get_state(self, state_type: StateType, state_id: str) -> dict[str, Any] | None` - Line 59
 
 ### Implementation: `ITradeLifecycleManager` ✅
 
@@ -311,7 +387,7 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async update_trade_event(self, trade_id: str, event: TradeEvent, event_data: dict[str, Any]) -> None` - Line 62
+- `async update_trade_event(self, trade_id: str, event: TradeEvent, event_data: dict[str, Any]) -> None` - Line 67
 
 ### Implementation: `IExchange` ✅
 
@@ -320,22 +396,22 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async connect(self) -> bool` - Line 78
-- `async disconnect(self) -> None` - Line 82
-- `async health_check(self) -> bool` - Line 86
-- `is_connected(self) -> bool` - Line 90
-- `async place_order(self, order: OrderRequest) -> OrderResponse` - Line 95
-- `async cancel_order(self, symbol: str, order_id: str) -> OrderResponse` - Line 99
-- `async get_order_status(self, symbol: str, order_id: str) -> OrderResponse` - Line 103
-- `async get_market_data(self, symbol: str, timeframe: str = '1m') -> MarketData` - Line 108
-- `async get_order_book(self, symbol: str, depth: int = 10) -> OrderBook` - Line 112
-- `async get_ticker(self, symbol: str) -> Ticker` - Line 116
-- `async get_trade_history(self, symbol: str, limit: int = 100) -> list[Trade]` - Line 120
-- `async get_account_balance(self) -> dict[str, Decimal]` - Line 125
-- `async get_positions(self) -> list[Position]` - Line 129
-- `async get_exchange_info(self) -> ExchangeInfo` - Line 134
-- `async subscribe_to_stream(self, symbol: str, callback: Any) -> None` - Line 139
-- `exchange_name(self) -> str` - Line 145
+- `async connect(self) -> bool` - Line 83
+- `async disconnect(self) -> None` - Line 87
+- `async health_check(self) -> bool` - Line 91
+- `is_connected(self) -> bool` - Line 95
+- `async place_order(self, order: OrderRequest) -> OrderResponse` - Line 100
+- `async cancel_order(self, symbol: str, order_id: str) -> OrderResponse` - Line 104
+- `async get_order_status(self, symbol: str, order_id: str) -> OrderResponse` - Line 108
+- `async get_market_data(self, symbol: str, timeframe: str = '1m') -> MarketData` - Line 113
+- `async get_order_book(self, symbol: str, depth: int = 10) -> OrderBook` - Line 117
+- `async get_ticker(self, symbol: str) -> Ticker` - Line 121
+- `async get_trade_history(self, symbol: str, limit: int = 100) -> list[Trade]` - Line 125
+- `async get_account_balance(self) -> dict[str, Decimal]` - Line 130
+- `async get_positions(self) -> list[Position]` - Line 134
+- `async get_exchange_info(self) -> ExchangeInfo` - Line 139
+- `async subscribe_to_stream(self, symbol: str, callback: Any) -> None` - Line 144
+- `exchange_name(self) -> str` - Line 150
 
 ### Implementation: `IConnectionManager` ✅
 
@@ -344,10 +420,10 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async connect(self) -> bool` - Line 153
-- `async disconnect(self) -> None` - Line 157
-- `is_connected(self) -> bool` - Line 161
-- `async request(self, ...) -> dict[str, Any]` - Line 165
+- `async connect(self) -> bool` - Line 158
+- `async disconnect(self) -> None` - Line 162
+- `is_connected(self) -> bool` - Line 166
+- `async request(self, ...) -> dict[str, Any]` - Line 170
 
 ### Implementation: `IRateLimiter` ✅
 
@@ -356,10 +432,10 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async acquire(self, weight: int = 1) -> bool` - Line 180
-- `async release(self, weight: int = 1) -> None` - Line 184
-- `reset(self) -> None` - Line 188
-- `get_statistics(self) -> dict[str, Any]` - Line 192
+- `async acquire(self, weight: int = 1) -> bool` - Line 185
+- `async release(self, weight: int = 1) -> None` - Line 189
+- `reset(self) -> None` - Line 193
+- `get_statistics(self) -> dict[str, Any]` - Line 197
 
 ### Implementation: `IHealthMonitor` ✅
 
@@ -368,11 +444,11 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `record_success(self) -> None` - Line 200
-- `record_failure(self) -> None` - Line 204
-- `record_latency(self, latency_ms: float) -> None` - Line 208
-- `get_health_status(self) -> dict[str, Any]` - Line 212
-- `async check_health(self) -> bool` - Line 216
+- `record_success(self) -> None` - Line 205
+- `record_failure(self) -> None` - Line 209
+- `record_latency(self, latency_ms: float) -> None` - Line 213
+- `get_health_status(self) -> dict[str, Any]` - Line 217
+- `async check_health(self) -> bool` - Line 221
 
 ### Implementation: `IExchangeAdapter` ✅
 
@@ -381,11 +457,11 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async place_order(self, **kwargs) -> dict[str, Any]` - Line 224
-- `async cancel_order(self, order_id: str, **kwargs) -> dict[str, Any]` - Line 228
-- `async get_order(self, order_id: str, **kwargs) -> dict[str, Any]` - Line 232
-- `async get_balance(self, asset: str | None = None) -> dict[str, Any]` - Line 236
-- `async get_ticker(self, symbol: str) -> dict[str, Any]` - Line 240
+- `async place_order(self, **kwargs) -> dict[str, Any]` - Line 229
+- `async cancel_order(self, order_id: str, **kwargs) -> dict[str, Any]` - Line 233
+- `async get_order(self, order_id: str, **kwargs) -> dict[str, Any]` - Line 237
+- `async get_balance(self, asset: str | None = None) -> dict[str, Any]` - Line 241
+- `async get_ticker(self, symbol: str) -> dict[str, Any]` - Line 245
 
 ### Implementation: `IExchangeFactory` ✅
 
@@ -394,14 +470,14 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `get_supported_exchanges(self) -> list[str]` - Line 253
-- `get_available_exchanges(self) -> list[str]` - Line 257
-- `is_exchange_supported(self, exchange_name: str) -> bool` - Line 261
-- `async get_exchange(self, ...) -> IExchange | None` - Line 265
-- `async create_exchange(self, exchange_name: str) -> IExchange` - Line 271
-- `async remove_exchange(self, exchange_name: str) -> bool` - Line 275
-- `async health_check_all(self) -> dict[str, Any]` - Line 279
-- `async disconnect_all(self) -> None` - Line 283
+- `get_supported_exchanges(self) -> list[str]` - Line 258
+- `get_available_exchanges(self) -> list[str]` - Line 262
+- `is_exchange_supported(self, exchange_name: str) -> bool` - Line 266
+- `async get_exchange(self, ...) -> IExchange | None` - Line 270
+- `async create_exchange(self, exchange_name: str) -> IExchange` - Line 276
+- `async remove_exchange(self, exchange_name: str) -> bool` - Line 280
+- `async health_check_all(self) -> dict[str, Any]` - Line 284
+- `async disconnect_all(self) -> None` - Line 288
 
 ### Implementation: `SandboxMode` ✅
 
@@ -416,11 +492,11 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async connect_to_sandbox(self) -> bool` - Line 310
-- `async connect_to_production(self) -> bool` - Line 314
-- `async switch_environment(self, mode: SandboxMode) -> bool` - Line 318
-- `get_current_endpoints(self) -> dict[str, str]` - Line 322
-- `async validate_environment(self) -> dict[str, Any]` - Line 326
+- `async connect_to_sandbox(self) -> bool` - Line 315
+- `async connect_to_production(self) -> bool` - Line 319
+- `async switch_environment(self, mode: SandboxMode) -> bool` - Line 323
+- `get_current_endpoints(self) -> dict[str, str]` - Line 327
+- `async validate_environment(self) -> dict[str, Any]` - Line 331
 
 ### Implementation: `ISandboxAdapter` ✅
 
@@ -429,14 +505,45 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `sandbox_mode(self) -> SandboxMode` - Line 340
-- `async validate_sandbox_credentials(self) -> bool` - Line 344
-- `async reset_sandbox_account(self) -> bool` - Line 348
-- `async get_sandbox_balance(self, asset: str | None = None) -> dict[str, Any]` - Line 352
-- `async place_sandbox_order(self, order: OrderRequest) -> OrderResponse` - Line 356
-- `async simulate_order_fill(self, order_id: str, fill_percentage: float = 1.0) -> bool` - Line 360
-- `async inject_market_data(self, symbol: str, data: dict[str, Any]) -> bool` - Line 364
-- `async simulate_network_error(self, error_type: str, duration_seconds: int = 5) -> None` - Line 368
+- `sandbox_mode(self) -> SandboxMode` - Line 345
+- `async validate_sandbox_credentials(self) -> bool` - Line 349
+- `async reset_sandbox_account(self) -> bool` - Line 353
+- `async get_sandbox_balance(self, asset: str | None = None) -> dict[str, Any]` - Line 357
+- `async place_sandbox_order(self, order: OrderRequest) -> OrderResponse` - Line 361
+- `async simulate_order_fill(self, order_id: str, fill_percentage: float = 1.0) -> bool` - Line 365
+- `async inject_market_data(self, symbol: str, data: dict[str, Any]) -> bool` - Line 369
+- `async simulate_network_error(self, error_type: str, duration_seconds: int = 5) -> None` - Line 373
+
+### Implementation: `IExchangeService` ✅
+
+**Inherits**: Protocol
+**Purpose**: Interface for exchange service layer implementations
+**Status**: Complete
+
+**Implemented Methods:**
+- `async get_exchange(self, exchange_name: str) -> 'IExchange'` - Line 381
+- `async place_order(self, exchange_name: str, order: OrderRequest) -> OrderResponse` - Line 385
+- `async cancel_order(self, exchange_name: str, order_id: str, symbol: str | None = None) -> bool` - Line 389
+- `async get_order_status(self, exchange_name: str, order_id: str, symbol: str | None = None) -> 'OrderStatus'` - Line 395
+- `async get_market_data(self, exchange_name: str, symbol: str, timeframe: str = '1m') -> MarketData` - Line 401
+- `async get_order_book(self, exchange_name: str, symbol: str, depth: int = 10) -> OrderBook` - Line 407
+- `async get_ticker(self, exchange_name: str, symbol: str) -> Ticker` - Line 413
+- `async get_account_balance(self, exchange_name: str) -> dict[str, Decimal]` - Line 417
+- `async get_positions(self, exchange_name: str, symbol: str | None = None) -> list[Position]` - Line 421
+- `async get_exchange_info(self, exchange_name: str) -> ExchangeInfo` - Line 427
+- `get_supported_exchanges(self) -> list[str]` - Line 431
+- `get_available_exchanges(self) -> list[str]` - Line 435
+- `async get_exchange_status(self, exchange_name: str) -> dict[str, Any]` - Line 439
+- `async get_service_health(self) -> dict[str, Any]` - Line 443
+- `async disconnect_all_exchanges(self) -> None` - Line 447
+- `async get_best_price(self, symbol: str, side: str, exchanges: list[str] | None = None) -> dict[str, Any]` - Line 451
+- `async subscribe_to_stream(self, exchange_name: str, symbol: str, callback: Any) -> None` - Line 457
+- `get_supported_exchanges(self) -> list[str]` - Line 463
+- `get_available_exchanges(self) -> list[str]` - Line 467
+- `async get_exchange_status(self, exchange_name: str) -> dict[str, Any]` - Line 471
+- `async get_service_health(self) -> dict[str, Any]` - Line 475
+- `async disconnect_all_exchanges(self) -> None` - Line 479
+- `async get_best_price(self, symbol: str, side: str, exchanges: list[str] | None = None) -> dict[str, Any]` - Line 483
 
 ### Implementation: `BaseMockExchange` ✅
 
@@ -453,29 +560,29 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `orders(self) -> dict[str, OrderResponse]` - Line 82
-- `async connect(self) -> None` - Line 86
-- `async disconnect(self) -> None` - Line 134
-- `async load_exchange_info(self) -> ExchangeInfo` - Line 141
-- `async get_ticker(self, symbol: str) -> dict[str, Any]` - Line 166
-- `async get_order_book(self, symbol: str, limit: int = 100) -> OrderBook` - Line 180
-- `async get_account_balance(self) -> dict[str, Decimal]` - Line 298
-- `async cancel_order(self, symbol: str, order_id: str) -> OrderResponse` - Line 304
-- `async get_order_status(self, symbol: str, order_id: str) -> OrderResponse` - Line 320
-- `async get_open_orders(self, symbol: str | None = None) -> list[OrderResponse]` - Line 327
-- `async get_positions(self) -> list[Position]` - Line 335
-- `async get_recent_trades(self, symbol: str, limit: int = 100) -> list[Trade]` - Line 340
-- `async ping(self) -> bool` - Line 366
-- `configure(self, ...) -> None` - Line 375
-- `set_balance(self, balances: dict[str, Decimal]) -> None` - Line 382
-- `set_price(self, symbol: str, price: Decimal) -> None` - Line 386
-- `set_order_book(self, symbol: str, order_book: dict) -> None` - Line 390
-- `async get_balance(self) -> dict[str, Decimal]` - Line 395
-- `async get_trades(self, symbol: str, limit: int = 100) -> list[Trade]` - Line 399
-- `async place_order_dict(self, ...) -> dict[str, Any]` - Line 405
-- `async get_ticker_dict(self, symbol: str) -> dict[str, Any]` - Line 446
-- `async place_order(self, *args, **kwargs)` - Line 461
-- `async get_ticker_fallback(self, symbol: str)` - Line 470
+- `orders(self) -> dict[str, OrderResponse]` - Line 85
+- `async connect(self) -> None` - Line 90
+- `async disconnect(self) -> None` - Line 138
+- `async load_exchange_info(self) -> ExchangeInfo` - Line 146
+- `async get_ticker(self, symbol: str) -> dict[str, Any]` - Line 171
+- `async get_order_book(self, symbol: str, limit: int = 100) -> OrderBook` - Line 185
+- `async get_account_balance(self) -> dict[str, Decimal]` - Line 303
+- `async cancel_order(self, symbol: str, order_id: str) -> OrderResponse` - Line 309
+- `async get_order_status(self, symbol: str, order_id: str) -> OrderResponse` - Line 325
+- `async get_open_orders(self, symbol: str | None = None) -> list[OrderResponse]` - Line 332
+- `async get_positions(self) -> list[Position]` - Line 340
+- `async get_recent_trades(self, symbol: str, limit: int = 100) -> list[Trade]` - Line 345
+- `async ping(self) -> bool` - Line 371
+- `configure(self, ...) -> None` - Line 380
+- `set_balance(self, balances: dict[str, Decimal]) -> None` - Line 387
+- `set_price(self, symbol: str, price: Decimal) -> None` - Line 391
+- `set_order_book(self, symbol: str, order_book: dict) -> None` - Line 395
+- `async get_balance(self) -> dict[str, Decimal]` - Line 400
+- `async get_trades(self, symbol: str, limit: int = 100) -> list[Trade]` - Line 404
+- `async place_order_dict(self, ...) -> dict[str, Any]` - Line 410
+- `async get_ticker_dict(self, symbol: str) -> dict[str, Any]` - Line 451
+- `async place_order(self, *args, **kwargs)` - Line 466
+- `async get_ticker_fallback(self, symbol: str)` - Line 475
 
 ### Implementation: `OKXExchange` ✅
 
@@ -492,12 +599,12 @@
 - `async get_order_book(self, symbol: str, limit: int = 100) -> OrderBook` - Line 300
 - `async get_recent_trades(self, symbol: str, limit: int = 100) -> list[Trade]` - Line 347
 - `async place_order(self, order_request: OrderRequest) -> OrderResponse` - Line 409
-- `async cancel_order(self, order_id: str, symbol: str) -> OrderResponse` - Line 477
-- `async get_order_status(self, order_id: str, symbol: str | None = None) -> OrderStatus` - Line 520
-- `async get_open_orders(self, symbol: str | None = None) -> list[OrderResponse]` - Line 554
-- `async get_account_balance(self) -> dict[str, Decimal]` - Line 613
-- `async get_balance(self, asset: str | None = None) -> dict[str, Any]` - Line 648
-- `async get_positions(self) -> list[Position]` - Line 698
+- `async cancel_order(self, symbol: str, order_id: str) -> OrderResponse` - Line 475
+- `async get_order_status(self, symbol: str, order_id: str) -> OrderResponse` - Line 518
+- `async get_open_orders(self, symbol: str | None = None) -> list[OrderResponse]` - Line 551
+- `async get_account_balance(self) -> dict[str, Decimal]` - Line 610
+- `async get_balance(self, asset: str | None = None) -> dict[str, Any]` - Line 645
+- `async get_positions(self) -> list[Position]` - Line 695
 
 ### Implementation: `OKXOrderManager` ✅
 
@@ -505,19 +612,19 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async place_order(self, order: OrderRequest) -> OrderResponse` - Line 94
-- `async cancel_order(self, order_id: str, symbol: str) -> bool` - Line 156
-- `async get_order_status(self, order_id: str) -> OrderStatus` - Line 187
-- `async get_order_fills(self, order_id: str) -> list[OrderResponse]` - Line 217
-- `async place_stop_loss_order(self, order: OrderRequest, stop_price: Decimal) -> OrderResponse` - Line 266
-- `async place_take_profit_order(self, order: OrderRequest, take_profit_price: Decimal) -> OrderResponse` - Line 297
-- `async place_oco_order(self, order: OrderRequest, stop_price: Decimal, take_profit_price: Decimal) -> list[OrderResponse]` - Line 328
-- `calculate_fee(self, order: OrderRequest, is_maker: bool = False) -> Decimal` - Line 361
-- `get_active_orders(self) -> dict[str, dict]` - Line 540
-- `get_order_history(self, symbol: str | None = None) -> list[dict]` - Line 549
-- `clear_order_history(self) -> None` - Line 566
-- `get_fee_rates(self) -> dict[str, Decimal]` - Line 571
-- `update_fee_rates(self, maker_rate: Decimal, taker_rate: Decimal) -> None` - Line 580
+- `async place_order(self, order: OrderRequest) -> OrderResponse` - Line 96
+- `async cancel_order(self, symbol: str, order_id: str) -> bool` - Line 158
+- `async get_order_status(self, order_id: str) -> OrderStatus` - Line 190
+- `async get_order_fills(self, order_id: str) -> list[OrderResponse]` - Line 220
+- `async place_stop_loss_order(self, order: OrderRequest, stop_price: Decimal) -> OrderResponse` - Line 269
+- `async place_take_profit_order(self, order: OrderRequest, take_profit_price: Decimal) -> OrderResponse` - Line 300
+- `async place_oco_order(self, order: OrderRequest, stop_price: Decimal, take_profit_price: Decimal) -> list[OrderResponse]` - Line 331
+- `calculate_fee(self, order: OrderRequest, is_maker: bool = False) -> Decimal` - Line 364
+- `get_active_orders(self) -> dict[str, dict]` - Line 544
+- `get_order_history(self, symbol: str | None = None) -> list[dict]` - Line 553
+- `clear_order_history(self) -> None` - Line 570
+- `get_fee_rates(self) -> dict[str, Decimal]` - Line 575
+- `update_fee_rates(self, maker_rate: Decimal, taker_rate: Decimal) -> None` - Line 584
 
 ### Implementation: `OKXWebSocketManager` ✅
 
@@ -531,35 +638,35 @@
 - `async subscribe_to_orderbook(self, symbol: str, callback: Callable) -> None` - Line 275
 - `async subscribe_to_trades(self, symbol: str, callback: Callable) -> None` - Line 304
 - `async subscribe_to_account(self, callback: Callable) -> None` - Line 333
-- `is_connected(self) -> bool` - Line 1012
-- `async health_check(self) -> bool` - Line 1021
-- `get_connection_metrics(self) -> dict[str, Any]` - Line 1062
-- `get_status(self) -> str` - Line 1103
+- `is_connected(self) -> bool` - Line 1022
+- `async health_check(self) -> bool` - Line 1031
+- `get_connection_metrics(self) -> dict[str, Any]` - Line 1072
+- `get_status(self) -> str` - Line 1113
 
 ### Implementation: `ExchangeService` ✅
 
-**Inherits**: BaseService
+**Inherits**: BaseService, IExchangeService
 **Purpose**: Service layer for exchange operations
 **Status**: Complete
 
 **Implemented Methods:**
 - `async get_exchange(self, exchange_name: str) -> IExchange` - Line 122
 - `async place_order(self, exchange_name: str, order: OrderRequest) -> OrderResponse` - Line 220
-- `async cancel_order(self, exchange_name: str, order_id: str, symbol: str | None = None) -> bool` - Line 293
-- `async get_order_status(self, exchange_name: str, order_id: str, symbol: str | None = None) -> OrderStatus` - Line 357
-- `async get_market_data(self, exchange_name: str, symbol: str, timeframe: str = '1m') -> MarketData` - Line 409
-- `async get_order_book(self, exchange_name: str, symbol: str, depth: int = 10) -> OrderBook` - Line 442
-- `async get_ticker(self, exchange_name: str, symbol: str) -> Ticker` - Line 466
-- `async get_account_balance(self, exchange_name: str) -> dict[str, Decimal]` - Line 489
-- `async get_positions(self, exchange_name: str, symbol: str | None = None) -> list[Position]` - Line 507
-- `async get_exchange_info(self, exchange_name: str) -> ExchangeInfo` - Line 533
-- `get_supported_exchanges(self) -> list[str]` - Line 548
-- `get_available_exchanges(self) -> list[str]` - Line 552
-- `async get_exchange_status(self, exchange_name: str) -> dict[str, Any]` - Line 556
-- `async get_service_health(self) -> dict[str, Any]` - Line 601
-- `async disconnect_all_exchanges(self) -> None` - Line 627
-- `async get_best_price(self, symbol: str, side: str, exchanges: list[str] | None = None) -> dict[str, Any]` - Line 663
-- `async subscribe_to_stream(self, exchange_name: str, symbol: str, callback: Any) -> None` - Line 730
+- `async cancel_order(self, exchange_name: str, order_id: str, symbol: str | None = None) -> bool` - Line 297
+- `async get_order_status(self, exchange_name: str, order_id: str, symbol: str | None = None) -> OrderStatus` - Line 361
+- `async get_market_data(self, exchange_name: str, symbol: str, timeframe: str = '1m') -> MarketData` - Line 413
+- `async get_order_book(self, exchange_name: str, symbol: str, depth: int = 10) -> OrderBook` - Line 446
+- `async get_ticker(self, exchange_name: str, symbol: str) -> Ticker` - Line 470
+- `async get_account_balance(self, exchange_name: str) -> dict[str, Decimal]` - Line 493
+- `async get_positions(self, exchange_name: str, symbol: str | None = None) -> list[Position]` - Line 511
+- `async get_exchange_info(self, exchange_name: str) -> ExchangeInfo` - Line 537
+- `get_supported_exchanges(self) -> list[str]` - Line 552
+- `get_available_exchanges(self) -> list[str]` - Line 556
+- `async get_exchange_status(self, exchange_name: str) -> dict[str, Any]` - Line 560
+- `async get_service_health(self) -> dict[str, Any]` - Line 605
+- `async disconnect_all_exchanges(self) -> None` - Line 631
+- `async get_best_price(self, symbol: str, side: str, exchanges: list[str] | None = None) -> dict[str, Any]` - Line 667
+- `async subscribe_to_stream(self, exchange_name: str, symbol: str, callback: Any) -> None` - Line 734
 
 ### Implementation: `ExchangeTypes` ✅
 
@@ -709,38 +816,41 @@ class OrderCancelledEvent(ExchangeEvent):
 class BaseExchange(BaseService):
     def __init__(self, name: str, config: dict[str, Any])  # Line 91
     def connected(self) -> bool  # Line 152
-    def last_heartbeat(self) -> Optional[datetime]  # Line 158
+    def last_heartbeat(self) -> datetime | None  # Line 158
     def is_connected(self) -> bool  # Line 162
     async def _update_connection_state(self, connected: bool) -> None  # Line 166
     async def _do_start(self) -> None  # Line 185
-    async def _do_stop(self) -> None  # Line 280
-    async def health_check(self) -> HealthCheckResult  # Line 290
-    async def connect(self) -> None  # Line 326
-    async def disconnect(self) -> None  # Line 331
-    async def ping(self) -> bool  # Line 336
-    async def load_exchange_info(self) -> ExchangeInfo  # Line 341
-    async def get_ticker(self, symbol: str) -> Ticker  # Line 350
-    async def get_order_book(self, symbol: str, limit: int = 100) -> OrderBook  # Line 357
-    async def get_recent_trades(self, symbol: str, limit: int = 100) -> list[Trade]  # Line 364
-    async def place_order(self, order_request: OrderRequest) -> OrderResponse  # Line 373
-    async def cancel_order(self, symbol: str, order_id: str) -> OrderResponse  # Line 393
-    async def get_order_status(self, symbol: str, order_id: str) -> OrderResponse  # Line 400
-    async def get_open_orders(self, symbol: Optional[str] = None) -> list[OrderResponse]  # Line 407
-    async def get_account_balance(self) -> dict[str, Decimal]  # Line 416
-    async def get_positions(self) -> list[Position]  # Line 428
-    async def _validate_order(self, order_request: OrderRequest) -> None  # Line 434
-    async def _validate_market_data(self, data: Any) -> bool  # Line 491
-    async def _process_market_data(self, data: Any) -> Any  # Line 495
-    async def _persist_order(self, order_response: OrderResponse) -> None  # Line 516
-    async def _persist_market_data(self, ticker: Ticker) -> None  # Line 541
-    async def _persist_position(self, position: Position) -> None  # Line 556
-    async def _track_analytics(self, event_type: str, data: dict) -> None  # Line 579
-    def get_exchange_info(self) -> Optional[ExchangeInfo]  # Line 614
-    def get_trading_symbols(self) -> Optional[list[str]]  # Line 618
-    def is_symbol_supported(self, symbol: str) -> bool  # Line 622
-    def _validate_symbol(self, symbol: str) -> None  # Line 630
-    def _validate_price(self, price: Decimal) -> None  # Line 637
-    def _validate_quantity(self, quantity: Decimal) -> None  # Line 644
+    async def _do_stop(self) -> None  # Line 282
+    async def health_check(self) -> HealthCheckResult  # Line 292
+    async def connect(self) -> None  # Line 328
+    async def disconnect(self) -> None  # Line 333
+    async def ping(self) -> bool  # Line 338
+    async def load_exchange_info(self) -> ExchangeInfo  # Line 343
+    async def get_ticker(self, symbol: str) -> Ticker  # Line 352
+    async def get_order_book(self, symbol: str, limit: int = 100) -> OrderBook  # Line 359
+    async def get_recent_trades(self, symbol: str, limit: int = 100) -> list[Trade]  # Line 366
+    async def place_order(self, order_request: OrderRequest) -> OrderResponse  # Line 375
+    async def cancel_order(self, symbol: str, order_id: str) -> OrderResponse  # Line 395
+    async def get_order_status(self, symbol: str, order_id: str) -> OrderResponse  # Line 402
+    async def get_open_orders(self, symbol: str | None = None) -> list[OrderResponse]  # Line 409
+    async def get_account_balance(self) -> dict[str, Decimal]  # Line 418
+    async def get_positions(self) -> list[Position]  # Line 430
+    async def _validate_order(self, order_request: OrderRequest) -> None  # Line 436
+    async def _validate_market_data(self, data: Any) -> bool  # Line 500
+    async def _process_market_data(self, data: Any) -> Any  # Line 504
+    async def _persist_order(self, order_response: OrderResponse) -> None  # Line 525
+    async def _persist_market_data(self, ticker: Ticker) -> None  # Line 550
+    async def _persist_position(self, position: Position) -> None  # Line 565
+    def _validate_data_at_boundary(self, data: dict[str, Any], source_operation: str) -> dict[str, Any]  # Line 588
+    def _propagate_error_consistently(self, error: Exception, context: str, operation_type: str = 'exchange') -> None  # Line 609
+    def _apply_messaging_pattern(self, data: dict[str, Any], operation_type: str) -> dict[str, Any]  # Line 628
+    async def _track_analytics(self, event_type: str, data: dict) -> None  # Line 655
+    def get_exchange_info(self) -> ExchangeInfo | None  # Line 693
+    def get_trading_symbols(self) -> list[str] | None  # Line 697
+    def is_symbol_supported(self, symbol: str) -> bool  # Line 701
+    def _validate_symbol(self, symbol: str) -> None  # Line 709
+    def _validate_price(self, price: Decimal, max_price: Decimal | None = None) -> None  # Line 720
+    def _validate_quantity(self, quantity: Decimal) -> None  # Line 736
 ```
 
 #### Class: `MockExchangeError`
@@ -759,20 +869,20 @@ class MockExchangeError(Exception):
 
 ```python
 class BaseMockExchange(BaseExchange):
-    def __init__(self, name: str = 'mock', config: Optional[dict[str, Any]] = None)  # Line 666
-    async def connect(self) -> None  # Line 675
-    async def disconnect(self) -> None  # Line 680
-    async def ping(self) -> bool  # Line 684
-    async def load_exchange_info(self) -> ExchangeInfo  # Line 691
-    async def get_ticker(self, symbol: str) -> Ticker  # Line 709
-    async def get_order_book(self, symbol: str, limit: int = 100) -> OrderBook  # Line 730
-    async def get_recent_trades(self, symbol: str, limit: int = 100) -> list[Trade]  # Line 745
-    async def place_order(self, order_request: OrderRequest) -> OrderResponse  # Line 765
-    async def cancel_order(self, symbol: str, order_id: str) -> OrderResponse  # Line 791
-    async def get_order_status(self, symbol: str, order_id: str) -> OrderResponse  # Line 802
-    async def get_open_orders(self, symbol: Optional[str] = None) -> list[OrderResponse]  # Line 810
-    async def get_account_balance(self) -> dict[str, Decimal]  # Line 819
-    async def get_positions(self) -> list[Position]  # Line 825
+    def __init__(self, name: str = 'mock', config: dict[str, Any] | None = None)  # Line 762
+    async def connect(self) -> None  # Line 771
+    async def disconnect(self) -> None  # Line 776
+    async def ping(self) -> bool  # Line 780
+    async def load_exchange_info(self) -> ExchangeInfo  # Line 787
+    async def get_ticker(self, symbol: str) -> Ticker  # Line 805
+    async def get_order_book(self, symbol: str, limit: int = 100) -> OrderBook  # Line 826
+    async def get_recent_trades(self, symbol: str, limit: int = 100) -> list[Trade]  # Line 841
+    async def place_order(self, order_request: OrderRequest) -> OrderResponse  # Line 861
+    async def cancel_order(self, symbol: str, order_id: str) -> OrderResponse  # Line 887
+    async def get_order_status(self, symbol: str, order_id: str) -> OrderResponse  # Line 898
+    async def get_open_orders(self, symbol: str | None = None) -> list[OrderResponse]  # Line 906
+    async def get_account_balance(self) -> dict[str, Decimal]  # Line 915
+    async def get_positions(self) -> list[Position]  # Line 921
 ```
 
 ### File: binance.py
@@ -791,23 +901,23 @@ class BaseMockExchange(BaseExchange):
 
 ```python
 class BinanceExchange(BaseExchange):
-    def __init__(self, config: dict[str, Any])  # Line 72
-    def _validate_service_config(self, config: dict[str, Any]) -> bool  # Line 103
-    async def connect(self) -> None  # Line 122
-    async def disconnect(self) -> None  # Line 156
-    async def ping(self) -> bool  # Line 198
-    async def load_exchange_info(self) -> ExchangeInfo  # Line 208
-    async def get_ticker(self, symbol: str) -> Ticker  # Line 263
-    async def get_order_book(self, symbol: str, limit: int = 100) -> OrderBook  # Line 308
-    async def get_recent_trades(self, symbol: str, limit: int = 100) -> list[Trade]  # Line 351
-    async def place_order(self, order_request: OrderRequest) -> OrderResponse  # Line 388
-    async def cancel_order(self, symbol: str, order_id: str) -> OrderResponse  # Line 730
-    async def get_order_status(self, symbol: str, order_id: str) -> OrderResponse  # Line 763
-    async def get_open_orders(self, symbol: str | None = None) -> list[OrderResponse]  # Line 806
-    async def get_account_balance(self) -> dict[str, Decimal]  # Line 859
-    async def get_positions(self) -> list[Position]  # Line 888
-    def _map_order_type(self, binance_type: str) -> OrderType  # Line 894
-    def _map_to_binance_order_type(self, order_type: OrderType) -> str  # Line 906
+    def __init__(self, config: dict[str, Any])  # Line 82
+    def _validate_service_config(self, config: dict[str, Any]) -> bool  # Line 119
+    async def connect(self) -> None  # Line 138
+    async def disconnect(self) -> None  # Line 172
+    async def ping(self) -> bool  # Line 214
+    async def load_exchange_info(self) -> ExchangeInfo  # Line 224
+    async def get_ticker(self, symbol: str) -> Ticker  # Line 279
+    async def get_order_book(self, symbol: str, limit: int = 100) -> OrderBook  # Line 343
+    async def get_recent_trades(self, symbol: str, limit: int = 100) -> list[Trade]  # Line 386
+    async def place_order(self, order_request: OrderRequest) -> OrderResponse  # Line 423
+    async def cancel_order(self, symbol: str, order_id: str) -> OrderResponse  # Line 768
+    async def get_order_status(self, symbol: str, order_id: str) -> OrderResponse  # Line 801
+    async def get_open_orders(self, symbol: str | None = None) -> list[OrderResponse]  # Line 844
+    async def get_account_balance(self) -> dict[str, Decimal]  # Line 897
+    async def get_positions(self) -> list[Position]  # Line 926
+    def _map_order_type(self, binance_type: str) -> OrderType  # Line 932
+    def _map_to_binance_order_type(self, order_type: OrderType) -> str  # Line 946
 ```
 
 ### File: binance_orders.py
@@ -832,8 +942,8 @@ class BinanceOrderManager:
     async def place_limit_order(self, order: OrderRequest) -> OrderResponse  # Line 168
     async def place_stop_loss_order(self, order: OrderRequest) -> OrderResponse  # Line 223
     async def place_oco_order(self, order: OrderRequest) -> OrderResponse  # Line 277
-    async def cancel_order(self, order_id: str, symbol: str) -> bool  # Line 335
-    async def get_order_status(self, order_id: str, symbol: str) -> OrderStatus  # Line 367
+    async def cancel_order(self, symbol: str, order_id: str) -> bool  # Line 335
+    async def get_order_status(self, symbol: str, order_id: str) -> OrderStatus  # Line 367
     async def get_open_orders(self, symbol: str | None = None) -> list[OrderResponse]  # Line 399
     async def get_order_history(self, symbol: str, limit: int = 500) -> list[OrderResponse]  # Line 431
     def calculate_fees(self, order: OrderRequest, fill_price: Decimal) -> Decimal  # Line 461
@@ -906,7 +1016,7 @@ class BinanceWebSocketHandler:
 - `from src.core.exceptions import ExecutionError`
 - `from src.core.exceptions import OrderRejectionError`
 - `from src.core.exceptions import ServiceError`
-- `from src.core.exceptions import ValidationError`
+- `from src.core.types import ExchangeInfo`
 
 #### Class: `CoinbaseExchange`
 
@@ -915,29 +1025,29 @@ class BinanceWebSocketHandler:
 
 ```python
 class CoinbaseExchange(BaseExchange):
-    def __init__(self, config: dict[str, Any])  # Line 83
-    async def connect(self) -> None  # Line 114
-    async def disconnect(self) -> None  # Line 153
-    async def ping(self) -> bool  # Line 189
-    async def load_exchange_info(self) -> ExchangeInfo  # Line 203
-    async def get_ticker(self, symbol: str) -> Ticker  # Line 233
-    async def get_order_book(self, symbol: str, limit: int = 100) -> OrderBook  # Line 259
-    async def get_recent_trades(self, symbol: str, limit: int = 100) -> list[Trade]  # Line 285
-    async def place_order(self, order_request: OrderRequest) -> OrderResponse  # Line 316
-    async def cancel_order(self, symbol: str, order_id: str) -> OrderResponse  # Line 345
-    async def get_order_status(self, order_id: str) -> OrderResponse  # Line 385
-    async def get_open_orders(self, symbol: str | None = None) -> list[OrderResponse]  # Line 438
-    async def get_account_balance(self) -> dict[str, Decimal]  # Line 476
-    async def get_balance(self, asset: str | None = None) -> dict[str, Any]  # Line 498
-    async def get_positions(self) -> list[Position]  # Line 553
-    async def _test_coinbase_connection(self) -> None  # Line 565
-    async def _validate_coinbase_order(self, order: OrderRequest) -> None  # Line 594
-    async def _place_order_advanced_api(self, order: OrderRequest) -> OrderResponse  # Line 618
-    async def _place_order_pro_api(self, order: OrderRequest) -> OrderResponse  # Line 676
-    def _extract_quantity_from_response(self, response, order: OrderRequest) -> Decimal  # Line 700
-    def _extract_price_from_response(self, response, order: OrderRequest) -> Decimal | None  # Line 728
-    def _extract_order_type_from_response(self, response, order: OrderRequest) -> OrderType  # Line 750
-    def _convert_to_coinbase_symbol(self, symbol: str) -> str  # Line 774
+    def __init__(self, config: dict[str, Any])  # Line 82
+    async def connect(self) -> None  # Line 113
+    async def disconnect(self) -> None  # Line 152
+    async def ping(self) -> bool  # Line 188
+    async def load_exchange_info(self) -> ExchangeInfo  # Line 202
+    async def get_ticker(self, symbol: str) -> Ticker  # Line 232
+    async def get_order_book(self, symbol: str, limit: int = 100) -> OrderBook  # Line 258
+    async def get_recent_trades(self, symbol: str, limit: int = 100) -> list[Trade]  # Line 284
+    async def place_order(self, order_request: OrderRequest) -> OrderResponse  # Line 315
+    async def cancel_order(self, symbol: str, order_id: str) -> OrderResponse  # Line 342
+    async def get_order_status(self, symbol: str, order_id: str) -> OrderResponse  # Line 382
+    async def get_open_orders(self, symbol: str | None = None) -> list[OrderResponse]  # Line 435
+    async def get_account_balance(self) -> dict[str, Decimal]  # Line 473
+    async def get_balance(self, asset: str | None = None) -> dict[str, Any]  # Line 495
+    async def get_positions(self) -> list[Position]  # Line 550
+    async def _test_coinbase_connection(self) -> None  # Line 562
+    async def _validate_coinbase_order(self, order: OrderRequest) -> None  # Line 591
+    async def _place_order_advanced_api(self, order: OrderRequest) -> OrderResponse  # Line 604
+    async def _place_order_pro_api(self, order: OrderRequest) -> OrderResponse  # Line 662
+    def _extract_quantity_from_response(self, response, order: OrderRequest) -> Decimal  # Line 686
+    def _extract_price_from_response(self, response, order: OrderRequest) -> Decimal | None  # Line 714
+    def _extract_order_type_from_response(self, response, order: OrderRequest) -> OrderType  # Line 736
+    def _convert_to_coinbase_symbol(self, symbol: str) -> str  # Line 760
 ```
 
 ### File: coinbase_orders.py
@@ -955,27 +1065,27 @@ class CoinbaseExchange(BaseExchange):
 
 ```python
 class CoinbaseOrderManager:
-    def __init__(self, ...)  # Line 55
-    def _get_asset_precision(self, symbol: str, precision_type: str = 'quantity') -> int  # Line 96
-    def _create_rate_limiter(self, config: Config) -> Any  # Line 100
-    async def initialize(self) -> bool  # Line 122
-    async def place_order(self, order: OrderRequest) -> OrderResponse  # Line 148
-    async def cancel_order(self, order_id: str, symbol: str) -> bool  # Line 197
-    async def get_order_status(self, order_id: str) -> OrderStatus  # Line 228
-    async def get_order_details(self, order_id: str) -> OrderResponse | None  # Line 257
-    async def get_open_orders(self, symbol: str | None = None) -> list[OrderResponse]  # Line 283
-    async def get_order_history(self, symbol: str | None = None, limit: int = 100) -> list[OrderResponse]  # Line 312
-    async def get_fills(self, order_id: str | None = None, symbol: str | None = None) -> list[dict]  # Line 344
-    async def calculate_fees(self, order: OrderRequest) -> dict[str, Decimal]  # Line 368
-    def get_total_fees(self) -> dict[str, Decimal]  # Line 409
-    def get_order_statistics(self) -> dict[str, Any]  # Line 418
-    async def _test_connection(self) -> None  # Line 439
-    async def _validate_order(self, order: OrderRequest) -> bool  # Line 447
-    def _convert_order_to_coinbase(self, order: OrderRequest) -> dict[str, Any]  # Line 481
-    def _convert_coinbase_order_to_response(self, result: dict) -> OrderResponse  # Line 527
-    def _convert_coinbase_status_to_order_status(self, status: str) -> OrderStatus  # Line 573
-    async def __aenter__(self)  # Line 577
-    async def __aexit__(self, exc_type, exc_val, exc_tb)  # Line 582
+    def __init__(self, ...)  # Line 57
+    def _get_asset_precision(self, symbol: str, precision_type: str = 'quantity') -> int  # Line 98
+    def _create_rate_limiter(self, config: Config) -> Any  # Line 102
+    async def initialize(self) -> bool  # Line 124
+    async def place_order(self, order: OrderRequest) -> OrderResponse  # Line 150
+    async def cancel_order(self, symbol: str, order_id: str) -> bool  # Line 199
+    async def get_order_status(self, symbol: str, order_id: str) -> OrderStatus  # Line 231
+    async def get_order_details(self, order_id: str) -> OrderResponse | None  # Line 261
+    async def get_open_orders(self, symbol: str | None = None) -> list[OrderResponse]  # Line 287
+    async def get_order_history(self, symbol: str | None = None, limit: int = 100) -> list[OrderResponse]  # Line 316
+    async def get_fills(self, order_id: str | None = None, symbol: str | None = None) -> list[dict]  # Line 348
+    async def calculate_fees(self, order: OrderRequest) -> dict[str, Decimal]  # Line 372
+    def get_total_fees(self) -> dict[str, Decimal]  # Line 413
+    def get_order_statistics(self) -> dict[str, Any]  # Line 422
+    async def _test_connection(self) -> None  # Line 443
+    async def _validate_order(self, order: OrderRequest) -> bool  # Line 451
+    def _convert_order_to_coinbase(self, order: OrderRequest) -> dict[str, Any]  # Line 485
+    def _convert_coinbase_order_to_response(self, result: dict) -> OrderResponse  # Line 531
+    def _convert_coinbase_status_to_order_status(self, status: str) -> OrderStatus  # Line 577
+    async def __aenter__(self)  # Line 581
+    async def __aexit__(self, exc_type, exc_val, exc_tb)  # Line 586
 ```
 
 ### File: coinbase_websocket.py
@@ -1083,6 +1193,112 @@ class ConnectionManager(BaseService):
     async def __aexit__(self, exc_type, exc_val, exc_tb)  # Line 788
 ```
 
+### File: data_transformer.py
+
+**Key Imports:**
+- `from src.core.exceptions import ValidationError`
+- `from src.core.logging import get_logger`
+- `from src.core.types import OrderRequest`
+- `from src.core.types import OrderResponse`
+- `from src.core.types import OrderStatus`
+
+#### Class: `ExchangeDataTransformer`
+
+**Inherits**: Protocol
+**Purpose**: Protocol for exchange data transformers
+
+```python
+class ExchangeDataTransformer(Protocol):
+    def transform_symbol_to_exchange(self, symbol: str) -> str  # Line 39
+    def transform_symbol_from_exchange(self, exchange_symbol: str) -> str  # Line 43
+    def transform_order_to_exchange(self, order: OrderRequest) -> dict[str, Any]  # Line 47
+    def transform_order_from_exchange(self, exchange_data: dict[str, Any]) -> OrderResponse  # Line 51
+    def transform_ticker_from_exchange(self, exchange_data: dict[str, Any]) -> Ticker  # Line 55
+```
+
+#### Class: `BaseExchangeTransformer`
+
+**Inherits**: ABC
+**Purpose**: Base transformer with common patterns
+
+```python
+class BaseExchangeTransformer(ABC):
+    def __init__(self, exchange_name: str)  # Line 63
+    def validate_decimal_precision(self, value: Decimal, symbol: str) -> Decimal  # Line 67
+    def validate_symbol_format(self, symbol: str) -> str  # Line 75
+    def _apply_data_transformation(self, data: dict[str, Any], operation_type: str = 'stream') -> dict[str, Any]  # Line 86
+    def apply_messaging_pattern(self, data: dict[str, Any], operation_type: str) -> dict[str, Any]  # Line 132
+    def get_symbol_mappings(self) -> dict[str, str]  # Line 138
+    def get_order_type_mappings(self) -> dict[OrderType, str]  # Line 143
+    def get_order_status_mappings(self) -> dict[str, OrderStatus]  # Line 148
+    def transform_for_batch_processing(cls, ...) -> dict[str, Any]  # Line 153
+```
+
+#### Class: `BinanceTransformer`
+
+**Inherits**: BaseExchangeTransformer
+**Purpose**: Binance data transformer
+
+```python
+class BinanceTransformer(BaseExchangeTransformer):
+    def __init__(self)  # Line 208
+    def get_symbol_mappings(self) -> dict[str, str]  # Line 211
+    def get_order_type_mappings(self) -> dict[OrderType, str]  # Line 221
+    def get_order_status_mappings(self) -> dict[str, OrderStatus]  # Line 230
+    def transform_symbol_to_exchange(self, symbol: str) -> str  # Line 241
+    def transform_symbol_from_exchange(self, exchange_symbol: str) -> str  # Line 256
+```
+
+#### Class: `CoinbaseTransformer`
+
+**Inherits**: BaseExchangeTransformer
+**Purpose**: Coinbase data transformer
+
+```python
+class CoinbaseTransformer(BaseExchangeTransformer):
+    def __init__(self)  # Line 286
+    def get_symbol_mappings(self) -> dict[str, str]  # Line 289
+    def get_order_type_mappings(self) -> dict[OrderType, str]  # Line 300
+    def get_order_status_mappings(self) -> dict[str, OrderStatus]  # Line 309
+    def transform_symbol_to_exchange(self, symbol: str) -> str  # Line 319
+    def transform_symbol_from_exchange(self, exchange_symbol: str) -> str  # Line 338
+```
+
+#### Class: `OKXTransformer`
+
+**Inherits**: BaseExchangeTransformer
+**Purpose**: OKX data transformer
+
+```python
+class OKXTransformer(BaseExchangeTransformer):
+    def __init__(self)  # Line 346
+    def get_symbol_mappings(self) -> dict[str, str]  # Line 349
+    def get_order_type_mappings(self) -> dict[OrderType, str]  # Line 360
+    def get_order_status_mappings(self) -> dict[str, OrderStatus]  # Line 369
+    def transform_symbol_to_exchange(self, symbol: str) -> str  # Line 379
+    def transform_symbol_from_exchange(self, exchange_symbol: str) -> str  # Line 398
+```
+
+#### Class: `TransformerFactory`
+
+**Purpose**: Factory for creating exchange transformers
+
+```python
+class TransformerFactory:
+    def create_transformer(cls, exchange_name: str) -> BaseExchangeTransformer  # Line 414
+    def get_supported_exchanges(cls) -> list[str]  # Line 423
+```
+
+#### Functions:
+
+```python
+def standardize_decimal_precision(value: Any, symbol: str = '') -> Decimal  # Line 429
+def validate_market_data_structure(data: dict[str, Any], exchange: str) -> dict[str, Any]  # Line 448
+def apply_cross_module_validation(...) -> dict[str, Any]  # Line 491
+def ensure_boundary_fields(data: dict[str, Any], source: str = 'exchanges') -> dict[str, Any]  # Line 567
+def transform_error_to_event_data(...) -> dict[str, Any]  # Line 607
+```
+
 ### File: di_registration.py
 
 **Key Imports:**
@@ -1096,7 +1312,7 @@ class ConnectionManager(BaseService):
 
 ```python
 def register_exchange_dependencies(container: DependencyContainer, config: Config) -> None  # Line 27
-def setup_exchange_services(config: Config) -> DependencyContainer  # Line 69
+def setup_exchange_services(config: Config) -> DependencyContainer  # Line 81
 ```
 
 ### File: factory.py
@@ -1115,19 +1331,19 @@ def setup_exchange_services(config: Config) -> DependencyContainer  # Line 69
 
 ```python
 class ExchangeFactory(BaseService, IExchangeFactory):
-    def __init__(self, config: Config, container: DependencyContainer | None = None) -> None  # Line 26
-    async def _do_start(self) -> None  # Line 43
-    async def _do_stop(self) -> None  # Line 47
-    def register_exchange(self, exchange_name: str, exchange_class: type[BaseExchange]) -> None  # Line 51
-    def get_supported_exchanges(self) -> list[str]  # Line 69
-    def is_exchange_supported(self, exchange_name: str) -> bool  # Line 78
-    async def create_exchange(self, exchange_name: str) -> BaseExchange  # Line 90
-    def get_available_exchanges(self) -> list[str]  # Line 126
-    async def get_exchange(self, ...) -> IExchange | None  # Line 136
-    async def remove_exchange(self, exchange_name: str) -> bool  # Line 170
-    async def health_check_all(self) -> dict[str, Any]  # Line 185
-    async def disconnect_all(self) -> None  # Line 200
-    def register_default_exchanges(self) -> None  # Line 209
+    def __init__(self, config: Config, container: DependencyContainer | None = None) -> None  # Line 29
+    async def _do_start(self) -> None  # Line 46
+    async def _do_stop(self) -> None  # Line 50
+    def register_exchange(self, exchange_name: str, exchange_class: type[BaseExchange]) -> None  # Line 54
+    def get_supported_exchanges(self) -> list[str]  # Line 72
+    def is_exchange_supported(self, exchange_name: str) -> bool  # Line 81
+    async def create_exchange(self, exchange_name: str) -> BaseExchange  # Line 94
+    def get_available_exchanges(self) -> list[str]  # Line 128
+    async def get_exchange(self, ...) -> IExchange | None  # Line 138
+    async def remove_exchange(self, exchange_name: str) -> bool  # Line 172
+    async def health_check_all(self) -> dict[str, Any]  # Line 187
+    async def disconnect_all(self) -> None  # Line 202
+    def register_default_exchanges(self) -> None  # Line 211
 ```
 
 ### File: interfaces.py
@@ -1155,8 +1371,8 @@ class TradeEvent(str, Enum):
 
 ```python
 class IStateService(Protocol):
-    async def set_state(self, ...) -> bool  # Line 42
-    async def get_state(self, state_type: StateType, state_id: str) -> dict[str, Any] | None  # Line 54
+    async def set_state(self, ...) -> bool  # Line 47
+    async def get_state(self, state_type: StateType, state_id: str) -> dict[str, Any] | None  # Line 59
 ```
 
 #### Class: `ITradeLifecycleManager`
@@ -1166,7 +1382,7 @@ class IStateService(Protocol):
 
 ```python
 class ITradeLifecycleManager(Protocol):
-    async def update_trade_event(self, trade_id: str, event: TradeEvent, event_data: dict[str, Any]) -> None  # Line 62
+    async def update_trade_event(self, trade_id: str, event: TradeEvent, event_data: dict[str, Any]) -> None  # Line 67
 ```
 
 #### Class: `IExchange`
@@ -1176,22 +1392,22 @@ class ITradeLifecycleManager(Protocol):
 
 ```python
 class IExchange(Protocol):
-    async def connect(self) -> bool  # Line 78
-    async def disconnect(self) -> None  # Line 82
-    async def health_check(self) -> bool  # Line 86
-    def is_connected(self) -> bool  # Line 90
-    async def place_order(self, order: OrderRequest) -> OrderResponse  # Line 95
-    async def cancel_order(self, symbol: str, order_id: str) -> OrderResponse  # Line 99
-    async def get_order_status(self, symbol: str, order_id: str) -> OrderResponse  # Line 103
-    async def get_market_data(self, symbol: str, timeframe: str = '1m') -> MarketData  # Line 108
-    async def get_order_book(self, symbol: str, depth: int = 10) -> OrderBook  # Line 112
-    async def get_ticker(self, symbol: str) -> Ticker  # Line 116
-    async def get_trade_history(self, symbol: str, limit: int = 100) -> list[Trade]  # Line 120
-    async def get_account_balance(self) -> dict[str, Decimal]  # Line 125
-    async def get_positions(self) -> list[Position]  # Line 129
-    async def get_exchange_info(self) -> ExchangeInfo  # Line 134
-    async def subscribe_to_stream(self, symbol: str, callback: Any) -> None  # Line 139
-    def exchange_name(self) -> str  # Line 145
+    async def connect(self) -> bool  # Line 83
+    async def disconnect(self) -> None  # Line 87
+    async def health_check(self) -> bool  # Line 91
+    def is_connected(self) -> bool  # Line 95
+    async def place_order(self, order: OrderRequest) -> OrderResponse  # Line 100
+    async def cancel_order(self, symbol: str, order_id: str) -> OrderResponse  # Line 104
+    async def get_order_status(self, symbol: str, order_id: str) -> OrderResponse  # Line 108
+    async def get_market_data(self, symbol: str, timeframe: str = '1m') -> MarketData  # Line 113
+    async def get_order_book(self, symbol: str, depth: int = 10) -> OrderBook  # Line 117
+    async def get_ticker(self, symbol: str) -> Ticker  # Line 121
+    async def get_trade_history(self, symbol: str, limit: int = 100) -> list[Trade]  # Line 125
+    async def get_account_balance(self) -> dict[str, Decimal]  # Line 130
+    async def get_positions(self) -> list[Position]  # Line 134
+    async def get_exchange_info(self) -> ExchangeInfo  # Line 139
+    async def subscribe_to_stream(self, symbol: str, callback: Any) -> None  # Line 144
+    def exchange_name(self) -> str  # Line 150
 ```
 
 #### Class: `IConnectionManager`
@@ -1201,10 +1417,10 @@ class IExchange(Protocol):
 
 ```python
 class IConnectionManager(Protocol):
-    async def connect(self) -> bool  # Line 153
-    async def disconnect(self) -> None  # Line 157
-    def is_connected(self) -> bool  # Line 161
-    async def request(self, ...) -> dict[str, Any]  # Line 165
+    async def connect(self) -> bool  # Line 158
+    async def disconnect(self) -> None  # Line 162
+    def is_connected(self) -> bool  # Line 166
+    async def request(self, ...) -> dict[str, Any]  # Line 170
 ```
 
 #### Class: `IRateLimiter`
@@ -1214,10 +1430,10 @@ class IConnectionManager(Protocol):
 
 ```python
 class IRateLimiter(Protocol):
-    async def acquire(self, weight: int = 1) -> bool  # Line 180
-    async def release(self, weight: int = 1) -> None  # Line 184
-    def reset(self) -> None  # Line 188
-    def get_statistics(self) -> dict[str, Any]  # Line 192
+    async def acquire(self, weight: int = 1) -> bool  # Line 185
+    async def release(self, weight: int = 1) -> None  # Line 189
+    def reset(self) -> None  # Line 193
+    def get_statistics(self) -> dict[str, Any]  # Line 197
 ```
 
 #### Class: `IHealthMonitor`
@@ -1227,11 +1443,11 @@ class IRateLimiter(Protocol):
 
 ```python
 class IHealthMonitor(Protocol):
-    def record_success(self) -> None  # Line 200
-    def record_failure(self) -> None  # Line 204
-    def record_latency(self, latency_ms: float) -> None  # Line 208
-    def get_health_status(self) -> dict[str, Any]  # Line 212
-    async def check_health(self) -> bool  # Line 216
+    def record_success(self) -> None  # Line 205
+    def record_failure(self) -> None  # Line 209
+    def record_latency(self, latency_ms: float) -> None  # Line 213
+    def get_health_status(self) -> dict[str, Any]  # Line 217
+    async def check_health(self) -> bool  # Line 221
 ```
 
 #### Class: `IExchangeAdapter`
@@ -1241,11 +1457,11 @@ class IHealthMonitor(Protocol):
 
 ```python
 class IExchangeAdapter(Protocol):
-    async def place_order(self, **kwargs) -> dict[str, Any]  # Line 224
-    async def cancel_order(self, order_id: str, **kwargs) -> dict[str, Any]  # Line 228
-    async def get_order(self, order_id: str, **kwargs) -> dict[str, Any]  # Line 232
-    async def get_balance(self, asset: str | None = None) -> dict[str, Any]  # Line 236
-    async def get_ticker(self, symbol: str) -> dict[str, Any]  # Line 240
+    async def place_order(self, **kwargs) -> dict[str, Any]  # Line 229
+    async def cancel_order(self, order_id: str, **kwargs) -> dict[str, Any]  # Line 233
+    async def get_order(self, order_id: str, **kwargs) -> dict[str, Any]  # Line 237
+    async def get_balance(self, asset: str | None = None) -> dict[str, Any]  # Line 241
+    async def get_ticker(self, symbol: str) -> dict[str, Any]  # Line 245
 ```
 
 #### Class: `IExchangeFactory`
@@ -1255,14 +1471,14 @@ class IExchangeAdapter(Protocol):
 
 ```python
 class IExchangeFactory(Protocol):
-    def get_supported_exchanges(self) -> list[str]  # Line 253
-    def get_available_exchanges(self) -> list[str]  # Line 257
-    def is_exchange_supported(self, exchange_name: str) -> bool  # Line 261
-    async def get_exchange(self, ...) -> IExchange | None  # Line 265
-    async def create_exchange(self, exchange_name: str) -> IExchange  # Line 271
-    async def remove_exchange(self, exchange_name: str) -> bool  # Line 275
-    async def health_check_all(self) -> dict[str, Any]  # Line 279
-    async def disconnect_all(self) -> None  # Line 283
+    def get_supported_exchanges(self) -> list[str]  # Line 258
+    def get_available_exchanges(self) -> list[str]  # Line 262
+    def is_exchange_supported(self, exchange_name: str) -> bool  # Line 266
+    async def get_exchange(self, ...) -> IExchange | None  # Line 270
+    async def create_exchange(self, exchange_name: str) -> IExchange  # Line 276
+    async def remove_exchange(self, exchange_name: str) -> bool  # Line 280
+    async def health_check_all(self) -> dict[str, Any]  # Line 284
+    async def disconnect_all(self) -> None  # Line 288
 ```
 
 #### Class: `SandboxMode`
@@ -1281,11 +1497,11 @@ class SandboxMode(str, Enum):
 
 ```python
 class ISandboxConnectionManager(Protocol):
-    async def connect_to_sandbox(self) -> bool  # Line 310
-    async def connect_to_production(self) -> bool  # Line 314
-    async def switch_environment(self, mode: SandboxMode) -> bool  # Line 318
-    def get_current_endpoints(self) -> dict[str, str]  # Line 322
-    async def validate_environment(self) -> dict[str, Any]  # Line 326
+    async def connect_to_sandbox(self) -> bool  # Line 315
+    async def connect_to_production(self) -> bool  # Line 319
+    async def switch_environment(self, mode: SandboxMode) -> bool  # Line 323
+    def get_current_endpoints(self) -> dict[str, str]  # Line 327
+    async def validate_environment(self) -> dict[str, Any]  # Line 331
 ```
 
 #### Class: `ISandboxAdapter`
@@ -1295,14 +1511,46 @@ class ISandboxConnectionManager(Protocol):
 
 ```python
 class ISandboxAdapter(Protocol):
-    def sandbox_mode(self) -> SandboxMode  # Line 340
-    async def validate_sandbox_credentials(self) -> bool  # Line 344
-    async def reset_sandbox_account(self) -> bool  # Line 348
-    async def get_sandbox_balance(self, asset: str | None = None) -> dict[str, Any]  # Line 352
-    async def place_sandbox_order(self, order: OrderRequest) -> OrderResponse  # Line 356
-    async def simulate_order_fill(self, order_id: str, fill_percentage: float = 1.0) -> bool  # Line 360
-    async def inject_market_data(self, symbol: str, data: dict[str, Any]) -> bool  # Line 364
-    async def simulate_network_error(self, error_type: str, duration_seconds: int = 5) -> None  # Line 368
+    def sandbox_mode(self) -> SandboxMode  # Line 345
+    async def validate_sandbox_credentials(self) -> bool  # Line 349
+    async def reset_sandbox_account(self) -> bool  # Line 353
+    async def get_sandbox_balance(self, asset: str | None = None) -> dict[str, Any]  # Line 357
+    async def place_sandbox_order(self, order: OrderRequest) -> OrderResponse  # Line 361
+    async def simulate_order_fill(self, order_id: str, fill_percentage: float = 1.0) -> bool  # Line 365
+    async def inject_market_data(self, symbol: str, data: dict[str, Any]) -> bool  # Line 369
+    async def simulate_network_error(self, error_type: str, duration_seconds: int = 5) -> None  # Line 373
+```
+
+#### Class: `IExchangeService`
+
+**Inherits**: Protocol
+**Purpose**: Interface for exchange service layer implementations
+
+```python
+class IExchangeService(Protocol):
+    async def get_exchange(self, exchange_name: str) -> 'IExchange'  # Line 381
+    async def place_order(self, exchange_name: str, order: OrderRequest) -> OrderResponse  # Line 385
+    async def cancel_order(self, exchange_name: str, order_id: str, symbol: str | None = None) -> bool  # Line 389
+    async def get_order_status(self, exchange_name: str, order_id: str, symbol: str | None = None) -> 'OrderStatus'  # Line 395
+    async def get_market_data(self, exchange_name: str, symbol: str, timeframe: str = '1m') -> MarketData  # Line 401
+    async def get_order_book(self, exchange_name: str, symbol: str, depth: int = 10) -> OrderBook  # Line 407
+    async def get_ticker(self, exchange_name: str, symbol: str) -> Ticker  # Line 413
+    async def get_account_balance(self, exchange_name: str) -> dict[str, Decimal]  # Line 417
+    async def get_positions(self, exchange_name: str, symbol: str | None = None) -> list[Position]  # Line 421
+    async def get_exchange_info(self, exchange_name: str) -> ExchangeInfo  # Line 427
+    def get_supported_exchanges(self) -> list[str]  # Line 431
+    def get_available_exchanges(self) -> list[str]  # Line 435
+    async def get_exchange_status(self, exchange_name: str) -> dict[str, Any]  # Line 439
+    async def get_service_health(self) -> dict[str, Any]  # Line 443
+    async def disconnect_all_exchanges(self) -> None  # Line 447
+    async def get_best_price(self, symbol: str, side: str, exchanges: list[str] | None = None) -> dict[str, Any]  # Line 451
+    async def subscribe_to_stream(self, exchange_name: str, symbol: str, callback: Any) -> None  # Line 457
+    def get_supported_exchanges(self) -> list[str]  # Line 463
+    def get_available_exchanges(self) -> list[str]  # Line 467
+    async def get_exchange_status(self, exchange_name: str) -> dict[str, Any]  # Line 471
+    async def get_service_health(self) -> dict[str, Any]  # Line 475
+    async def disconnect_all_exchanges(self) -> None  # Line 479
+    async def get_best_price(self, symbol: str, side: str, exchanges: list[str] | None = None) -> dict[str, Any]  # Line 483
 ```
 
 ### File: mock_exchange.py
@@ -1321,7 +1569,7 @@ class ISandboxAdapter(Protocol):
 
 ```python
 class BaseMockExchange(BaseExchange):
-    def __init__(self, name: str = 'mock', config: dict[str, Any] | None = None)  # Line 31
+    def __init__(self, name: str = 'mock', config: dict[str, Any] | None = None)  # Line 34
 ```
 
 #### Class: `MockExchange`
@@ -1331,36 +1579,36 @@ class BaseMockExchange(BaseExchange):
 
 ```python
 class MockExchange(BaseMockExchange):
-    def __init__(self, config: dict[str, Any] | None = None)  # Line 50
-    def orders(self) -> dict[str, OrderResponse]  # Line 82
-    async def connect(self) -> None  # Line 86
-    async def _do_start(self) -> None  # Line 102
-    async def disconnect(self) -> None  # Line 134
-    async def load_exchange_info(self) -> ExchangeInfo  # Line 141
-    async def get_ticker(self, symbol: str) -> dict[str, Any]  # Line 166
-    async def get_order_book(self, symbol: str, limit: int = 100) -> OrderBook  # Line 180
-    async def _place_order_impl(self, order_request: OrderRequest) -> OrderResponse  # Line 209
-    async def get_account_balance(self) -> dict[str, Decimal]  # Line 298
-    async def cancel_order(self, symbol: str, order_id: str) -> OrderResponse  # Line 304
-    async def get_order_status(self, symbol: str, order_id: str) -> OrderResponse  # Line 320
-    async def get_open_orders(self, symbol: str | None = None) -> list[OrderResponse]  # Line 327
-    async def get_positions(self) -> list[Position]  # Line 335
-    async def get_recent_trades(self, symbol: str, limit: int = 100) -> list[Trade]  # Line 340
-    async def ping(self) -> bool  # Line 366
-    def configure(self, ...) -> None  # Line 375
-    def set_balance(self, balances: dict[str, Decimal]) -> None  # Line 382
-    def set_price(self, symbol: str, price: Decimal) -> None  # Line 386
-    def set_order_book(self, symbol: str, order_book: dict) -> None  # Line 390
-    async def get_balance(self) -> dict[str, Decimal]  # Line 395
-    async def get_trades(self, symbol: str, limit: int = 100) -> list[Trade]  # Line 399
-    async def place_order_dict(self, ...) -> dict[str, Any]  # Line 405
-    async def get_ticker_dict(self, symbol: str) -> dict[str, Any]  # Line 446
-    async def place_order(self, *args, **kwargs)  # Line 461
-    async def get_ticker_fallback(self, symbol: str)  # Line 470
-    async def _get_ticker_impl(self, symbol: str) -> Ticker  # Line 476
-    def _get_current_time(self)  # Line 509
-    def _update_balances_for_filled_order(self, order: OrderResponse) -> None  # Line 515
-    def _ensure_connected(self) -> None  # Line 546
+    def __init__(self, config: dict[str, Any] | None = None)  # Line 53
+    def orders(self) -> dict[str, OrderResponse]  # Line 85
+    async def connect(self) -> None  # Line 90
+    async def _do_start(self) -> None  # Line 106
+    async def disconnect(self) -> None  # Line 138
+    async def load_exchange_info(self) -> ExchangeInfo  # Line 146
+    async def get_ticker(self, symbol: str) -> dict[str, Any]  # Line 171
+    async def get_order_book(self, symbol: str, limit: int = 100) -> OrderBook  # Line 185
+    async def _place_order_impl(self, order_request: OrderRequest) -> OrderResponse  # Line 214
+    async def get_account_balance(self) -> dict[str, Decimal]  # Line 303
+    async def cancel_order(self, symbol: str, order_id: str) -> OrderResponse  # Line 309
+    async def get_order_status(self, symbol: str, order_id: str) -> OrderResponse  # Line 325
+    async def get_open_orders(self, symbol: str | None = None) -> list[OrderResponse]  # Line 332
+    async def get_positions(self) -> list[Position]  # Line 340
+    async def get_recent_trades(self, symbol: str, limit: int = 100) -> list[Trade]  # Line 345
+    async def ping(self) -> bool  # Line 371
+    def configure(self, ...) -> None  # Line 380
+    def set_balance(self, balances: dict[str, Decimal]) -> None  # Line 387
+    def set_price(self, symbol: str, price: Decimal) -> None  # Line 391
+    def set_order_book(self, symbol: str, order_book: dict) -> None  # Line 395
+    async def get_balance(self) -> dict[str, Decimal]  # Line 400
+    async def get_trades(self, symbol: str, limit: int = 100) -> list[Trade]  # Line 404
+    async def place_order_dict(self, ...) -> dict[str, Any]  # Line 410
+    async def get_ticker_dict(self, symbol: str) -> dict[str, Any]  # Line 451
+    async def place_order(self, *args, **kwargs)  # Line 466
+    async def get_ticker_fallback(self, symbol: str)  # Line 475
+    async def _get_ticker_impl(self, symbol: str) -> Ticker  # Line 481
+    def _get_current_time(self)  # Line 514
+    def _update_balances_for_filled_order(self, order: OrderResponse) -> None  # Line 520
+    def _ensure_connected(self) -> None  # Line 551
 ```
 
 ### File: okx.py
@@ -1388,21 +1636,21 @@ class OKXExchange(BaseExchange):
     async def get_order_book(self, symbol: str, limit: int = 100) -> OrderBook  # Line 300
     async def get_recent_trades(self, symbol: str, limit: int = 100) -> list[Trade]  # Line 347
     async def place_order(self, order_request: OrderRequest) -> OrderResponse  # Line 409
-    async def cancel_order(self, order_id: str, symbol: str) -> OrderResponse  # Line 477
-    async def get_order_status(self, order_id: str, symbol: str | None = None) -> OrderStatus  # Line 520
-    async def get_open_orders(self, symbol: str | None = None) -> list[OrderResponse]  # Line 554
-    async def get_account_balance(self) -> dict[str, Decimal]  # Line 613
-    async def get_balance(self, asset: str | None = None) -> dict[str, Any]  # Line 648
-    async def get_positions(self) -> list[Position]  # Line 698
-    async def _test_okx_connection(self) -> None  # Line 715
-    async def _validate_okx_order(self, order: OrderRequest) -> None  # Line 742
-    def _convert_order_to_okx(self, order: OrderRequest) -> dict[str, Any]  # Line 776
-    def _convert_okx_order_to_response(self, result: dict[str, Any]) -> OrderResponse  # Line 796
-    def _convert_okx_status_to_order_status(self, status: str) -> OrderStatus  # Line 823
-    def _convert_order_type_to_okx(self, order_type: OrderType) -> str  # Line 834
-    def _convert_okx_order_type_to_unified(self, okx_type: str) -> OrderType  # Line 844
-    def _convert_symbol_to_okx_format(self, symbol: str) -> str  # Line 853
-    def _convert_symbol_from_okx_format(self, okx_symbol: str) -> str  # Line 895
+    async def cancel_order(self, symbol: str, order_id: str) -> OrderResponse  # Line 475
+    async def get_order_status(self, symbol: str, order_id: str) -> OrderResponse  # Line 518
+    async def get_open_orders(self, symbol: str | None = None) -> list[OrderResponse]  # Line 551
+    async def get_account_balance(self) -> dict[str, Decimal]  # Line 610
+    async def get_balance(self, asset: str | None = None) -> dict[str, Any]  # Line 645
+    async def get_positions(self) -> list[Position]  # Line 695
+    async def _test_okx_connection(self) -> None  # Line 712
+    async def _validate_okx_order(self, order: OrderRequest) -> None  # Line 739
+    def _convert_order_to_okx(self, order: OrderRequest) -> dict[str, Any]  # Line 764
+    def _convert_okx_order_to_response(self, result: dict[str, Any]) -> OrderResponse  # Line 784
+    def _convert_okx_status_to_order_status(self, status: str) -> OrderStatus  # Line 811
+    def _convert_order_type_to_okx(self, order_type: OrderType) -> str  # Line 822
+    def _convert_okx_order_type_to_unified(self, okx_type: str) -> OrderType  # Line 832
+    def _convert_symbol_to_okx_format(self, symbol: str) -> str  # Line 841
+    def _convert_symbol_from_okx_format(self, okx_symbol: str) -> str  # Line 883
 ```
 
 ### File: okx_orders.py
@@ -1420,27 +1668,27 @@ class OKXExchange(BaseExchange):
 
 ```python
 class OKXOrderManager:
-    def __init__(self, ...)  # Line 60
-    def _get_asset_precision(self, symbol: str, precision_type: str = 'quantity') -> int  # Line 90
-    async def place_order(self, order: OrderRequest) -> OrderResponse  # Line 94
-    async def cancel_order(self, order_id: str, symbol: str) -> bool  # Line 156
-    async def get_order_status(self, order_id: str) -> OrderStatus  # Line 187
-    async def get_order_fills(self, order_id: str) -> list[OrderResponse]  # Line 217
-    async def place_stop_loss_order(self, order: OrderRequest, stop_price: Decimal) -> OrderResponse  # Line 266
-    async def place_take_profit_order(self, order: OrderRequest, take_profit_price: Decimal) -> OrderResponse  # Line 297
-    async def place_oco_order(self, order: OrderRequest, stop_price: Decimal, take_profit_price: Decimal) -> list[OrderResponse]  # Line 328
-    def calculate_fee(self, order: OrderRequest, is_maker: bool = False) -> Decimal  # Line 361
-    def _validate_order_request(self, order: OrderRequest) -> None  # Line 385
-    def _convert_order_to_okx(self, order: OrderRequest) -> dict[str, Any]  # Line 422
-    def _convert_okx_order_to_response(self, result: dict) -> OrderResponse  # Line 461
-    def _convert_okx_status_to_order_status(self, status: str) -> OrderStatus  # Line 496
-    def _convert_order_type_to_okx(self, order_type: OrderType) -> str  # Line 500
-    def _convert_okx_order_type_to_unified(self, okx_type: str) -> OrderType  # Line 519
-    def get_active_orders(self) -> dict[str, dict]  # Line 540
-    def get_order_history(self, symbol: str | None = None) -> list[dict]  # Line 549
-    def clear_order_history(self) -> None  # Line 566
-    def get_fee_rates(self) -> dict[str, Decimal]  # Line 571
-    def update_fee_rates(self, maker_rate: Decimal, taker_rate: Decimal) -> None  # Line 580
+    def __init__(self, ...)  # Line 62
+    def _get_asset_precision(self, symbol: str, precision_type: str = 'quantity') -> int  # Line 92
+    async def place_order(self, order: OrderRequest) -> OrderResponse  # Line 96
+    async def cancel_order(self, symbol: str, order_id: str) -> bool  # Line 158
+    async def get_order_status(self, order_id: str) -> OrderStatus  # Line 190
+    async def get_order_fills(self, order_id: str) -> list[OrderResponse]  # Line 220
+    async def place_stop_loss_order(self, order: OrderRequest, stop_price: Decimal) -> OrderResponse  # Line 269
+    async def place_take_profit_order(self, order: OrderRequest, take_profit_price: Decimal) -> OrderResponse  # Line 300
+    async def place_oco_order(self, order: OrderRequest, stop_price: Decimal, take_profit_price: Decimal) -> list[OrderResponse]  # Line 331
+    def calculate_fee(self, order: OrderRequest, is_maker: bool = False) -> Decimal  # Line 364
+    def _validate_order_request(self, order: OrderRequest) -> None  # Line 388
+    def _convert_order_to_okx(self, order: OrderRequest) -> dict[str, Any]  # Line 426
+    def _convert_okx_order_to_response(self, result: dict) -> OrderResponse  # Line 465
+    def _convert_okx_status_to_order_status(self, status: str) -> OrderStatus  # Line 500
+    def _convert_order_type_to_okx(self, order_type: OrderType) -> str  # Line 504
+    def _convert_okx_order_type_to_unified(self, okx_type: str) -> OrderType  # Line 523
+    def get_active_orders(self) -> dict[str, dict]  # Line 544
+    def get_order_history(self, symbol: str | None = None) -> list[dict]  # Line 553
+    def clear_order_history(self) -> None  # Line 570
+    def get_fee_rates(self) -> dict[str, Decimal]  # Line 575
+    def update_fee_rates(self, maker_rate: Decimal, taker_rate: Decimal) -> None  # Line 584
 ```
 
 ### File: okx_websocket.py
@@ -1477,19 +1725,19 @@ class OKXWebSocketManager:
     async def _handle_data_message(self, data: dict) -> None  # Line 620
     async def _handle_private_data_message(self, data: dict) -> None  # Line 649
     async def _handle_ticker_data(self, symbol: str, data: list[dict]) -> None  # Line 673
-    async def _handle_orderbook_data(self, symbol: str, data: list[dict]) -> None  # Line 723
-    async def _handle_trades_data(self, symbol: str, data: list[dict]) -> None  # Line 777
-    async def _handle_account_data(self, data: list[dict]) -> None  # Line 820
-    async def _send_public_message(self, message: dict) -> None  # Line 844
-    async def _send_private_message(self, message: dict) -> None  # Line 861
-    async def _handle_disconnect(self) -> None  # Line 878
-    async def _schedule_reconnect(self) -> None  # Line 888
-    async def _reconnect_after_delay(self, delay: float) -> None  # Line 917
-    async def _health_monitor(self) -> None  # Line 981
-    def is_connected(self) -> bool  # Line 1012
-    async def health_check(self) -> bool  # Line 1021
-    def get_connection_metrics(self) -> dict[str, Any]  # Line 1062
-    def get_status(self) -> str  # Line 1103
+    async def _handle_orderbook_data(self, symbol: str, data: list[dict]) -> None  # Line 733
+    async def _handle_trades_data(self, symbol: str, data: list[dict]) -> None  # Line 787
+    async def _handle_account_data(self, data: list[dict]) -> None  # Line 830
+    async def _send_public_message(self, message: dict) -> None  # Line 854
+    async def _send_private_message(self, message: dict) -> None  # Line 871
+    async def _handle_disconnect(self) -> None  # Line 888
+    async def _schedule_reconnect(self) -> None  # Line 898
+    async def _reconnect_after_delay(self, delay: float) -> None  # Line 927
+    async def _health_monitor(self) -> None  # Line 991
+    def is_connected(self) -> bool  # Line 1022
+    async def health_check(self) -> bool  # Line 1031
+    def get_connection_metrics(self) -> dict[str, Any]  # Line 1072
+    def get_status(self) -> str  # Line 1113
 ```
 
 ### File: service.py
@@ -1503,11 +1751,11 @@ class OKXWebSocketManager:
 
 #### Class: `ExchangeService`
 
-**Inherits**: BaseService
+**Inherits**: BaseService, IExchangeService
 **Purpose**: Service layer for exchange operations
 
 ```python
-class ExchangeService(BaseService):
+class ExchangeService(BaseService, IExchangeService):
     def __init__(self, ...)  # Line 56
     async def _do_start(self) -> None  # Line 89
     async def _do_stop(self) -> None  # Line 102
@@ -1516,24 +1764,24 @@ class ExchangeService(BaseService):
     async def _remove_exchange(self, exchange_name: str) -> None  # Line 190
     async def place_order(self, exchange_name: str, order: OrderRequest) -> OrderResponse  # Line 220
     async def _validate_order_request(self, order: OrderRequest) -> None  # Line 257
-    async def _process_order_response(self, exchange_name: str, order_response: OrderResponse) -> None  # Line 271
-    async def cancel_order(self, exchange_name: str, order_id: str, symbol: str | None = None) -> bool  # Line 293
-    async def get_order_status(self, exchange_name: str, order_id: str, symbol: str | None = None) -> OrderStatus  # Line 357
-    async def get_market_data(self, exchange_name: str, symbol: str, timeframe: str = '1m') -> MarketData  # Line 409
-    async def get_order_book(self, exchange_name: str, symbol: str, depth: int = 10) -> OrderBook  # Line 442
-    async def get_ticker(self, exchange_name: str, symbol: str) -> Ticker  # Line 466
-    async def get_account_balance(self, exchange_name: str) -> dict[str, Decimal]  # Line 489
-    async def get_positions(self, exchange_name: str, symbol: str | None = None) -> list[Position]  # Line 507
-    async def get_exchange_info(self, exchange_name: str) -> ExchangeInfo  # Line 533
-    def get_supported_exchanges(self) -> list[str]  # Line 548
-    def get_available_exchanges(self) -> list[str]  # Line 552
-    async def get_exchange_status(self, exchange_name: str) -> dict[str, Any]  # Line 556
-    async def get_service_health(self) -> dict[str, Any]  # Line 601
-    async def disconnect_all_exchanges(self) -> None  # Line 627
-    async def get_best_price(self, symbol: str, side: str, exchanges: list[str] | None = None) -> dict[str, Any]  # Line 663
-    async def _get_ticker_safe(self, exchange_name: str, symbol: str) -> Ticker | None  # Line 720
-    async def subscribe_to_stream(self, exchange_name: str, symbol: str, callback: Any) -> None  # Line 730
-    async def _service_health_check(self) -> HealthStatus  # Line 742
+    async def _process_order_response(self, exchange_name: str, order_response: OrderResponse) -> None  # Line 275
+    async def cancel_order(self, exchange_name: str, order_id: str, symbol: str | None = None) -> bool  # Line 297
+    async def get_order_status(self, exchange_name: str, order_id: str, symbol: str | None = None) -> OrderStatus  # Line 361
+    async def get_market_data(self, exchange_name: str, symbol: str, timeframe: str = '1m') -> MarketData  # Line 413
+    async def get_order_book(self, exchange_name: str, symbol: str, depth: int = 10) -> OrderBook  # Line 446
+    async def get_ticker(self, exchange_name: str, symbol: str) -> Ticker  # Line 470
+    async def get_account_balance(self, exchange_name: str) -> dict[str, Decimal]  # Line 493
+    async def get_positions(self, exchange_name: str, symbol: str | None = None) -> list[Position]  # Line 511
+    async def get_exchange_info(self, exchange_name: str) -> ExchangeInfo  # Line 537
+    def get_supported_exchanges(self) -> list[str]  # Line 552
+    def get_available_exchanges(self) -> list[str]  # Line 556
+    async def get_exchange_status(self, exchange_name: str) -> dict[str, Any]  # Line 560
+    async def get_service_health(self) -> dict[str, Any]  # Line 605
+    async def disconnect_all_exchanges(self) -> None  # Line 631
+    async def get_best_price(self, symbol: str, side: str, exchanges: list[str] | None = None) -> dict[str, Any]  # Line 667
+    async def _get_ticker_safe(self, exchange_name: str, symbol: str) -> Ticker | None  # Line 724
+    async def subscribe_to_stream(self, exchange_name: str, symbol: str, callback: Any) -> None  # Line 734
+    async def _service_health_check(self) -> HealthStatus  # Line 746
 ```
 
 ### File: types.py
@@ -1678,5 +1926,5 @@ class ExchangeHealthStatus(BaseModel):
 
 ---
 **Generated**: Complete reference for exchanges module
-**Total Classes**: 49
-**Total Functions**: 2
+**Total Classes**: 56
+**Total Functions**: 7

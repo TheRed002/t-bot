@@ -10,6 +10,7 @@ from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, Any, Optional, Union
 
 if TYPE_CHECKING:
+    from decimal import Decimal
     from src.core.types import MarketData
     from src.data.types import CacheLevel, DataMetrics, DataRequest
     from src.database.models import MarketDataRecord
@@ -148,6 +149,13 @@ class DataServiceInterface(ABC):
         self, symbol: str, limit: int = 100, exchange: str = "binance"
     ) -> "list[MarketData]":
         """Get recent market data for a symbol."""
+        pass
+
+    @abstractmethod
+    async def get_volatility(
+        self, symbol: str, period: int = 20, exchange: str = "binance"
+    ) -> Optional["Decimal"]:
+        """Get volatility for a symbol."""
         pass
 
     @abstractmethod

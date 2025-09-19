@@ -13,36 +13,55 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from src.core.config import Config
-from src.core.exceptions import AuthenticationError
+from src.core.exceptions import AuthenticationError, ServiceError
 from src.core.logging import get_logger
 from src.database.models.user import User as DBUser
-from src.database.service import DatabaseService
+# Removed direct database service import - using service layer instead
 
 from .jwt_handler import JWTHandler
 
 logger = get_logger(__name__)
 
 
+def get_auth_service():
+    """Get auth service through dependency injection."""
+    try:
+        from src.core.dependency_injection import DependencyInjector
+
+        injector = DependencyInjector.get_instance()
+        if injector and injector.has_service("WebAuthService"):
+            return injector.resolve("WebAuthService")
+    except Exception as e:
+        logger.warning(f"Could not get auth service: {e}")
+
+    # Fallback to manual creation for development
+    from src.web_interface.services.auth_service import WebAuthService
+    return WebAuthService()
+
+
 class UserInDB(BaseModel):
     """User model for database storage."""
 
-    user_id: str
+    id: str  # Match database model field name
     username: str
     email: str
-    hashed_password: str
+    password_hash: str  # Match database model field name
     is_active: bool = True
+    is_verified: bool = False  # Add missing field from database model
+    is_admin: bool = False  # Add missing field from database model
     scopes: list[str] = ["read"]
     created_at: str | None = None
-    last_login: str | None = None
+    last_login_at: str | None = None  # Match database model field name
 
 
 class User(BaseModel):
     """User model for API responses."""
 
-    user_id: str
+    id: str  # Match database model field name
     username: str
     email: str
     is_active: bool
+    is_verified: bool  # Add missing field from database model
     scopes: list[str]
 
 
@@ -94,142 +113,56 @@ def init_auth(config: Config) -> None:
 def _convert_db_user_to_user_in_db(db_user: DBUser) -> UserInDB:
     """Convert database User model to UserInDB."""
     return UserInDB(
-        user_id=str(db_user.id),
+        id=str(db_user.id),
         username=db_user.username,
         email=db_user.email,
-        hashed_password=db_user.password_hash,
+        password_hash=db_user.password_hash,
         is_active=db_user.is_active,
+        is_verified=db_user.is_verified,
+        is_admin=db_user.is_admin,
         scopes=db_user.scopes if db_user.scopes else ["read"],
         created_at=db_user.created_at.isoformat() if db_user.created_at else None,
-        last_login=db_user.last_login_at.isoformat() if db_user.last_login_at else None,
+        last_login_at=db_user.last_login_at.isoformat() if db_user.last_login_at else None,
     )
 
 
-async def get_user(username: str, database_service: DatabaseService = None) -> UserInDB | None:
+async def get_user(username: str, database_service=None) -> UserInDB | None:
     """
-    Get user by username from database.
+    Get user by username through service layer.
 
     Args:
         username: Username to lookup
-        database_service: Optional database service (will use DI if not provided)
+        database_service: Deprecated parameter (ignored)
 
     Returns:
         UserInDB: User data or None if not found
     """
     try:
-        # Get database service from DI if not provided
-        if database_service is None:
-            from src.core.dependency_injection import DependencyInjector
-
-            injector = DependencyInjector.get_instance()
-            database_service = injector.resolve("DatabaseService")
-            should_stop_service = False  # Service managed by DI container
-        else:
-            should_stop_service = True  # Service was explicitly passed
-
-        try:
-            # Query users by username filter
-            users = await database_service.list_entities(
-                model_class=DBUser, filters={"username": username}, limit=1
-            )
-
-            if not users:
-                return None
-
-            db_user = users[0]
-            if not db_user.is_active:
-                return None
-
-            return _convert_db_user_to_user_in_db(db_user)
-        finally:
-            if should_stop_service:
-                await database_service.stop()
+        auth_service = get_auth_service()
+        return await auth_service.get_user_by_username(username)
 
     except Exception as e:
-        logger.error(f"Database error getting user {username}: {e}")
+        logger.error(f"Error getting user '{username}': {e}")
         return None
 
 
 async def authenticate_user(
-    username: str, password: str, database_service: DatabaseService = None
-) -> UserInDB | None:
+    username: str, password: str, database_service=None
+) -> User | None:
     """
-    Authenticate user credentials with security measures.
+    Authenticate user credentials through service layer.
 
     Args:
         username: Username
         password: Plain text password
-        database_service: Optional database service (will use DI if not provided)
+        database_service: Deprecated parameter (ignored)
 
     Returns:
-        UserInDB: Authenticated user or None if authentication fails
+        User: Authenticated user or None if authentication fails
     """
     try:
-        # Get database service from DI if not provided
-        if database_service is None:
-            from src.core.dependency_injection import DependencyInjector
-
-            injector = DependencyInjector.get_instance()
-            database_service = injector.resolve("DatabaseService")
-            should_stop_service = False
-        else:
-            should_stop_service = True
-
-        try:
-            # Query users by username filter
-            users = await database_service.list_entities(
-                model_class=DBUser, filters={"username": username}, limit=1
-            )
-
-            if not users:
-                logger.warning("Authentication failed: user not found", username=username)
-                return None
-
-            db_user = users[0]
-
-            # Check if account is locked
-            if db_user.locked_until and datetime.now(timezone.utc) < db_user.locked_until:
-                logger.warning("Authentication failed: account locked", username=username)
-                return None
-
-            # Check if user is active
-            if not db_user.is_active:
-                logger.warning("Authentication failed: user inactive", username=username)
-                return None
-
-            # Verify password
-            if not jwt_handler.verify_password(password, db_user.password_hash):
-                logger.warning("Authentication failed: invalid password", username=username)
-
-                # Increment failed login attempts
-                db_user.failed_login_attempts = (db_user.failed_login_attempts or 0) + 1
-
-                # Lock account after 5 failed attempts for 15 minutes
-                if db_user.failed_login_attempts >= 5:
-                    db_user.locked_until = datetime.now(timezone.utc) + timedelta(minutes=15)
-                    logger.warning(
-                        f"Account locked due to {db_user.failed_login_attempts} failed attempts",
-                        username=username,
-                    )
-
-                # Update user using service
-                await database_service.update_entity(db_user)
-                return None
-
-            # Reset failed attempts on successful login
-            db_user.failed_login_attempts = 0
-            db_user.locked_until = None
-            db_user.last_login_at = datetime.now(timezone.utc)
-
-            # Update user using service
-            await database_service.update_entity(db_user)
-
-            user_in_db = _convert_db_user_to_user_in_db(db_user)
-            logger.info("User authenticated successfully", username=username)
-            return user_in_db
-        finally:
-            if should_stop_service:
-                await database_service.stop()
+        auth_service = get_auth_service()
+        return await auth_service.authenticate_user(username, password)
 
     except Exception as e:
         logger.error(f"Authentication error: {e}", username=username)
@@ -256,7 +189,7 @@ def create_access_token(user: UserInDB, expires_delta: timedelta | None = None) 
 
         # Create access token
         access_token = jwt_handler.create_access_token(
-            user_id=user.user_id,
+            user_id=user.id,
             username=user.username,
             scopes=user.scopes,
             expires_delta=expires_delta,
@@ -264,7 +197,7 @@ def create_access_token(user: UserInDB, expires_delta: timedelta | None = None) 
 
         # Create refresh token
         refresh_token = jwt_handler.create_refresh_token(
-            user_id=user.user_id, username=user.username
+            user_id=user.id, username=user.username
         )
 
         # Calculate expires_in
@@ -310,10 +243,11 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
 
         # Return public user model
         return User(
-            user_id=user.user_id,
+            id=user.id,
             username=user.username,
             email=user.email,
             is_active=user.is_active,
+            is_verified=user.is_verified,
             scopes=user.scopes,
         )
 
@@ -410,118 +344,71 @@ async def create_user(
     email: str,
     password: str,
     scopes: list[str] | None = None,
-    database_service: DatabaseService = None,
-) -> UserInDB:
+    database_service=None,
+) -> User:
     """
-    Create a new user (for admin functionality).
+    Create a new user through service layer.
 
     Args:
         username: Username
         email: Email address
         password: Plain text password
         scopes: User permission scopes
+        database_service: Deprecated parameter (ignored)
 
     Returns:
-        UserInDB: Created user
+        User: Created user
 
     Raises:
         ValueError: If user creation fails
     """
     try:
-        if not jwt_handler:
-            raise ValueError("Authentication system not initialized")
-
-        # Get database service from DI if not provided
-        if database_service is None:
-            from src.core.dependency_injection import DependencyInjector
-
-            injector = DependencyInjector.get_instance()
-            database_service = injector.resolve("DatabaseService")
-            should_stop_service = False
-        else:
-            should_stop_service = True
-
-        try:
-            # Check if user exists
-            existing_users = await database_service.list_entities(
-                model_class=DBUser, filters={"username": username}, limit=1
-            )
-            if existing_users:
-                raise ValueError(f"User {username} already exists")
-
-            # Hash password
-            hashed_password = jwt_handler.hash_password(password)
-
-            # Create user in database
-            new_user = DBUser(
-                username=username,
-                email=email,
-                password_hash=hashed_password,
-                scopes=scopes or ["read"],
-                is_active=True,
-                is_verified=False,
-            )
-
-            created_user = await database_service.create_entity(new_user)
-
-            user_in_db = _convert_db_user_to_user_in_db(created_user)
-            logger.info("User created successfully", username=username, scopes=user_in_db.scopes)
-            return user_in_db
-        finally:
-            if should_stop_service:
-                await database_service.stop()
+        auth_service = get_auth_service()
+        return await auth_service.create_user(username, email, password, scopes)
 
     except Exception as e:
         logger.error(f"User creation failed: {e}", username=username)
-        raise ValueError(f"User creation failed: {e}") from e
+        raise ServiceError(f"User creation failed: {e}") from e
 
 
-async def get_auth_summary(database_service: DatabaseService = None) -> dict:
+async def get_auth_summary(database_service=None) -> dict:
     """
-    Get authentication system summary.
+    Get authentication system summary through service layer.
+
+    Args:
+        database_service: Deprecated parameter (ignored)
 
     Returns:
         dict: Authentication system status
     """
     try:
-        total_users = 0
-        active_users = 0
+        auth_service = get_auth_service()
+        summary = await auth_service.get_auth_summary()
 
-        # Get database service from DI if not provided
-        if database_service is None:
-            from src.core.dependency_injection import DependencyInjector
+        return {
+            "initialized": jwt_handler is not None,
+            **summary,
+            "jwt_handler": jwt_handler.get_security_summary() if jwt_handler else None,
+            "available_scopes": ["read", "write", "trade", "manage", "admin"],
+            "security_features": [
+                "jwt_authentication",
+                "bcrypt_password_hashing",
+                "scope_based_authorization",
+                "token_refresh",
+                "token_revocation",
+                "account_lockout",
+            ],
+        }
 
-            injector = DependencyInjector.get_instance()
-            database_service = injector.resolve("DatabaseService")
-            should_stop_service = False
-        else:
-            should_stop_service = True
-
-        try:
-            all_users = await database_service.list_entities(model_class=DBUser)
-            total_users = len(all_users)
-            active_users = sum(1 for user in all_users if user.is_active)
-        finally:
-            if should_stop_service:
-                await database_service.stop()
     except Exception as e:
-        logger.error(f"Failed to get user stats: {e}")
-
-    return {
-        "initialized": jwt_handler is not None,
-        "total_users": total_users,
-        "active_users": active_users,
-        "jwt_handler": jwt_handler.get_security_summary() if jwt_handler else None,
-        "available_scopes": ["read", "write", "trade", "manage", "admin"],
-        "security_features": [
-            "jwt_authentication",
-            "bcrypt_password_hashing",
-            "scope_based_authorization",
-            "token_refresh",
-            "token_revocation",
-            "account_lockout",
-        ],
-    }
+        logger.error(f"Failed to get auth summary: {e}")
+        return {
+            "initialized": False,
+            "total_users": 0,
+            "active_users": 0,
+            "admin_users": 0,
+            "verified_users": 0,
+        }
 
 
 def require_permissions(required_permissions: list[str]):

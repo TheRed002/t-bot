@@ -501,7 +501,10 @@ class ParameterImportanceAnalyzer:
                 interaction_corr, interaction_p = pearsonr(interaction_values, performance_values)
 
                 # Check if interaction is significant
-                if abs(interaction_corr) > CORRELATION_SIGNIFICANCE_THRESHOLD and interaction_p < P_VALUE_SIGNIFICANCE_THRESHOLD:
+                if (
+                    abs(interaction_corr) > CORRELATION_SIGNIFICANCE_THRESHOLD
+                    and interaction_p < P_VALUE_SIGNIFICANCE_THRESHOLD
+                ):
                     interaction_partners.append(other_param)
                     interaction_strengths[other_param] = Decimal(str(abs(interaction_corr)))
 
@@ -682,7 +685,9 @@ class PerformanceAnalyzer:
     ) -> Decimal:
         """Calculate annualized return."""
         # Ensure total_return is a Decimal
-        total_return_decimal = Decimal(str(total_return)) if not isinstance(total_return, Decimal) else total_return
+        total_return_decimal = (
+            Decimal(str(total_return)) if not isinstance(total_return, Decimal) else total_return
+        )
 
         if total_return_decimal <= Decimal("-1"):
             return Decimal("-1")
@@ -762,8 +767,14 @@ class PerformanceAnalyzer:
     def _calculate_sharpe_ratio(self, annualized_return: Decimal, volatility: Decimal) -> Decimal:
         """Calculate Sharpe ratio using shared utility."""
         # Ensure inputs are Decimal
-        annualized_return_decimal = Decimal(str(annualized_return)) if not isinstance(annualized_return, Decimal) else annualized_return
-        volatility_decimal = Decimal(str(volatility)) if not isinstance(volatility, Decimal) else volatility
+        annualized_return_decimal = (
+            Decimal(str(annualized_return))
+            if not isinstance(annualized_return, Decimal)
+            else annualized_return
+        )
+        volatility_decimal = (
+            Decimal(str(volatility)) if not isinstance(volatility, Decimal) else volatility
+        )
 
         if volatility_decimal == 0:
             return Decimal("0")
@@ -775,8 +786,16 @@ class PerformanceAnalyzer:
     ) -> Decimal:
         """Calculate Sortino ratio."""
         # Ensure inputs are Decimal
-        annualized_return_decimal = Decimal(str(annualized_return)) if not isinstance(annualized_return, Decimal) else annualized_return
-        downside_volatility_decimal = Decimal(str(downside_volatility)) if not isinstance(downside_volatility, Decimal) else downside_volatility
+        annualized_return_decimal = (
+            Decimal(str(annualized_return))
+            if not isinstance(annualized_return, Decimal)
+            else annualized_return
+        )
+        downside_volatility_decimal = (
+            Decimal(str(downside_volatility))
+            if not isinstance(downside_volatility, Decimal)
+            else downside_volatility
+        )
 
         if downside_volatility_decimal == 0:
             return Decimal("0")
@@ -787,8 +806,14 @@ class PerformanceAnalyzer:
     def _calculate_calmar_ratio(self, annualized_return: Decimal, max_drawdown: Decimal) -> Decimal:
         """Calculate Calmar ratio."""
         # Ensure inputs are Decimal
-        annualized_return_decimal = Decimal(str(annualized_return)) if not isinstance(annualized_return, Decimal) else annualized_return
-        max_drawdown_decimal = Decimal(str(max_drawdown)) if not isinstance(max_drawdown, Decimal) else max_drawdown
+        annualized_return_decimal = (
+            Decimal(str(annualized_return))
+            if not isinstance(annualized_return, Decimal)
+            else annualized_return
+        )
+        max_drawdown_decimal = (
+            Decimal(str(max_drawdown)) if not isinstance(max_drawdown, Decimal) else max_drawdown
+        )
 
         if max_drawdown_decimal == 0:
             return Decimal("0")
@@ -874,7 +899,9 @@ class PerformanceAnalyzer:
 
         # Convert to Decimal to handle mixed types
         decimal_returns = [Decimal(str(r)) if not isinstance(r, Decimal) else r for r in returns]
-        confidence_decimal = Decimal(str(confidence)) if not isinstance(confidence, Decimal) else confidence
+        confidence_decimal = (
+            Decimal(str(confidence)) if not isinstance(confidence, Decimal) else confidence
+        )
 
         # Sort returns
         sorted_returns = sorted(decimal_returns)
@@ -957,8 +984,12 @@ class PerformanceAnalyzer:
     def _calculate_recovery_factor(self, total_return: Decimal, max_drawdown: Decimal) -> Decimal:
         """Calculate recovery factor."""
         # Ensure inputs are Decimal
-        total_return_decimal = Decimal(str(total_return)) if not isinstance(total_return, Decimal) else total_return
-        max_drawdown_decimal = Decimal(str(max_drawdown)) if not isinstance(max_drawdown, Decimal) else max_drawdown
+        total_return_decimal = (
+            Decimal(str(total_return)) if not isinstance(total_return, Decimal) else total_return
+        )
+        max_drawdown_decimal = (
+            Decimal(str(max_drawdown)) if not isinstance(max_drawdown, Decimal) else max_drawdown
+        )
 
         if max_drawdown_decimal == 0:
             return Decimal("0")

@@ -8,9 +8,9 @@ following the service layer pattern.
 
 import asyncio
 from collections.abc import Callable
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Any
+from typing import Any, Union
 
 from src.core.base import BaseService
 from src.core.event_constants import OptimizationEvents
@@ -25,8 +25,11 @@ from src.optimization.interfaces import (
     OptimizationRepositoryProtocol,
 )
 from src.optimization.parameter_space import ParameterSpace
+from src.optimization.parameter_space_service import ParameterSpaceService
+from src.optimization.result_transformation_service import ResultTransformationService
 from src.utils.messaging_patterns import (
     ErrorPropagationMixin,
+    MessagePattern,
 )
 
 # Production Configuration Constants
@@ -51,13 +54,14 @@ class OptimizationService(BaseService, IOptimizationService, ErrorPropagationMix
 
     def __init__(
         self,
-        backtest_integration: IBacktestIntegrationService | None = None,
-        optimization_repository: OptimizationRepositoryProtocol | None = None,
-        analysis_service: IAnalysisService | None = None,
-        websocket_manager: Any = None,
-        name: str | None = None,
-        config: dict[str, Any] | None = None,
-        correlation_id: str | None = None,
+        backtest_integration: "Union[IBacktestIntegrationService, None]" = None,
+        optimization_repository: "Union[OptimizationRepositoryProtocol, None]" = None,
+        analysis_service: "Union[IAnalysisService, None]" = None,
+        parameter_space_service: "Union[ParameterSpaceService, None]" = None,
+        result_transformation_service: "Union[ResultTransformationService, None]" = None,
+        name: Union[str, None] = None,
+        config: Union[dict[str, Any], None] = None,
+        correlation_id: Union[str, None] = None,
     ):
         """
         Initialize optimization service.
@@ -66,7 +70,6 @@ class OptimizationService(BaseService, IOptimizationService, ErrorPropagationMix
             backtest_integration: Backtesting integration service
             optimization_repository: Optimization result repository
             analysis_service: Analysis service for result analysis
-            websocket_manager: WebSocket manager for optimization events
             name: Service name for identification
             config: Service configuration
             correlation_id: Request correlation ID
@@ -75,6 +78,8 @@ class OptimizationService(BaseService, IOptimizationService, ErrorPropagationMix
         self._backtest_integration = backtest_integration
         self._optimization_repository = optimization_repository
         self._analysis_service = analysis_service
+        self._parameter_space_service = parameter_space_service or ParameterSpaceService()
+        self._result_transformation_service = result_transformation_service or ResultTransformationService()
 
         # Add dependencies
         if backtest_integration:
@@ -83,15 +88,8 @@ class OptimizationService(BaseService, IOptimizationService, ErrorPropagationMix
             self.add_dependency("OptimizationRepository")
         if analysis_service:
             self.add_dependency("AnalysisService")
-
-        # Initialize WebSocket manager for optimization events with DI support
-        if websocket_manager:
-            self.websocket_manager = websocket_manager
-            self.add_dependency("WebSocketManager")
-        else:
-            # No WebSocket manager - events will be handled by parent service
-            self.websocket_manager = None
-            self._logger.debug("No WebSocket manager configured - using parent event emission")
+        self.add_dependency("ParameterSpaceService")
+        self.add_dependency("ResultTransformationService")
 
         self._logger.info("OptimizationService initialized")
 
@@ -129,27 +127,29 @@ class OptimizationService(BaseService, IOptimizationService, ErrorPropagationMix
             data_period=f"{data_start_date} to {data_end_date}",
         )
 
-        # Emit optimization started event
-        event_data = {
-            "strategy_name": strategy_name,
-            "optimization_method": optimization_method,
-            "data_start_date": data_start_date.isoformat() if data_start_date else None,
-            "data_end_date": data_end_date.isoformat() if data_end_date else None,
-            "initial_capital": str(initial_capital),
-            "processing_mode": "batch",  # Optimization is batch-oriented
-            "message_pattern": "req_reply",  # Consistent with backtesting synchronous pattern
-            "source": "optimization_service",
-            "operation": "strategy_optimization",
-        }
+        # Emit optimization started event with consistent data transformation
+        event_data = self._transform_event_data(
+            {
+                "strategy_name": strategy_name,
+                "optimization_method": optimization_method,
+                "data_start_date": data_start_date.isoformat() if data_start_date else None,
+                "data_end_date": data_end_date.isoformat() if data_end_date else None,
+                "initial_capital": str(initial_capital),
+                "processing_mode": "batch",  # Optimization is batch-oriented
+                "message_pattern": MessagePattern.REQ_REPLY.value,  # Use enum for consistency
+                "target_processing_mode": self._determine_target_processing_mode_for_strategy(strategy_name),
+                "source": "optimization_service",
+                "operation": "strategy_optimization",
+            }
+        )
+
+        # Validate event data
+        self._validate_event_data(event_data)
 
         # Emit optimization started event
         try:
             if hasattr(self, "emit_event") and callable(self.emit_event):
                 await self.emit_event(OptimizationEvents.STARTED, event_data)
-            elif self.websocket_manager and hasattr(self.websocket_manager, "emit_event"):
-                await self.websocket_manager.emit_event(
-                    OptimizationEvents.STARTED.value, event_data
-                )
         except Exception as e:
             # Graceful fallback - log but don't fail optimization
             self._logger.debug(f"Event emission failed: {e}")
@@ -168,7 +168,8 @@ class OptimizationService(BaseService, IOptimizationService, ErrorPropagationMix
                         validation_error, "strategy_optimization_parameter_validation"
                     )
                     raise validation_error
-                parameter_space = self._build_parameter_space(parameter_space_config)
+                # Delegate to specialized service
+                parameter_space = self._parameter_space_service.build_parameter_space(parameter_space_config)
 
             # Create objective function
             objective_function = await self._create_objective_function(
@@ -197,7 +198,7 @@ class OptimizationService(BaseService, IOptimizationService, ErrorPropagationMix
 
             # Save results if repository available
             if self._optimization_repository:
-                await self._optimization_repository.save_optimization_result(
+                result_id = await self._optimization_repository.save_optimization_result(
                     optimization_result,
                     metadata={
                         "strategy_name": strategy_name,
@@ -207,6 +208,8 @@ class OptimizationService(BaseService, IOptimizationService, ErrorPropagationMix
                         "initial_capital": initial_capital,
                     },
                 )
+                # Emit result saved event at service layer
+                await self._emit_result_saved_event(optimization_result, result_id)
 
             self._logger.info(
                 "Strategy optimization completed",
@@ -215,28 +218,32 @@ class OptimizationService(BaseService, IOptimizationService, ErrorPropagationMix
                 iterations=optimization_result.iterations_completed,
             )
 
-            # Emit optimization completed event
-            completion_event_data = {
-                "optimization_id": optimization_result.optimization_id,
-                "algorithm_name": optimization_result.algorithm_name,
-                "optimal_objective_value": str(optimization_result.optimal_objective_value),
-                "convergence_achieved": optimization_result.convergence_achieved,
-                "iterations_completed": optimization_result.iterations_completed,
-                "strategy_name": strategy_name,
-                "optimization_method": optimization_method,
-                "source": "optimization_service",
-                "operation": "strategy_optimization_completed",
-                "cross_module_event": True,  # This event may be consumed by other modules
-            }
+            # Emit optimization completed event with consistent data transformation
+            completion_event_data = self._transform_event_data(
+                {
+                    "optimization_id": optimization_result.optimization_id,
+                    "algorithm_name": optimization_result.algorithm_name,
+                    "optimal_objective_value": str(optimization_result.optimal_objective_value),
+                    "convergence_achieved": optimization_result.convergence_achieved,
+                    "iterations_completed": optimization_result.iterations_completed,
+                    "strategy_name": strategy_name,
+                    "optimization_method": optimization_method,
+                    "processing_mode": "batch",
+                    "target_processing_mode": self._determine_target_processing_mode_for_strategy(strategy_name),
+                    "message_pattern": MessagePattern.PUB_SUB.value,  # Completion events are broadcast
+                    "source": "optimization_service",
+                    "operation": "strategy_optimization_completed",
+                    "cross_module_event": True,  # This event may be consumed by other modules
+                }
+            )
+
+            # Validate completion event data
+            self._validate_event_data(completion_event_data)
 
             # Emit completion event
             try:
                 if hasattr(self, "emit_event") and callable(self.emit_event):
                     await self.emit_event(OptimizationEvents.COMPLETED, completion_event_data)
-                elif self.websocket_manager and hasattr(self.websocket_manager, "emit_event"):
-                    await self.websocket_manager.emit_event(
-                        OptimizationEvents.COMPLETED.value, completion_event_data
-                    )
             except Exception as e:
                 # Log but don't fail the optimization for WebSocket issues
                 self._logger.warning(f"Failed to emit completion event: {e}")
@@ -257,26 +264,29 @@ class OptimizationService(BaseService, IOptimizationService, ErrorPropagationMix
         except Exception as e:
             self._logger.error(f"Strategy optimization failed: {e}")
 
-            # Emit optimization failed event
-            error_event_data = {
-                "error_message": str(e),
-                "error_type": type(e).__name__,
-                "strategy_name": strategy_name,
-                "optimization_method": optimization_method,
-                "source": "optimization_service",
-                "operation": "strategy_optimization",
-                "error_context": "strategy_optimization_execution",
-                "cross_module_event": True,
-            }
+            # Emit optimization failed event with consistent data transformation
+            error_event_data = self._transform_event_data(
+                {
+                    "error_message": str(e),
+                    "error_type": type(e).__name__,
+                    "strategy_name": strategy_name,
+                    "optimization_method": optimization_method,
+                    "processing_mode": "batch",
+                    "message_pattern": MessagePattern.PUB_SUB.value,  # Error events are broadcast
+                    "source": "optimization_service",
+                    "operation": "strategy_optimization",
+                    "error_context": "strategy_optimization_execution",
+                    "cross_module_event": True,
+                }
+            )
+
+            # Validate error event data
+            self._validate_event_data(error_event_data)
 
             # Emit error event
             try:
                 if hasattr(self, "emit_event") and callable(self.emit_event):
                     await self.emit_event(OptimizationEvents.FAILED, error_event_data)
-                elif self.websocket_manager and hasattr(self.websocket_manager, "emit_event"):
-                    await self.websocket_manager.emit_event(
-                        OptimizationEvents.FAILED.value, error_event_data
-                    )
             except Exception as e:
                 # Log but don't fail the optimization for WebSocket issues
                 self._logger.warning(f"Failed to emit error event: {e}")
@@ -289,6 +299,62 @@ class OptimizationService(BaseService, IOptimizationService, ErrorPropagationMix
                 error_code="OPT_002",
                 optimization_stage="strategy_optimization",
             ) from e
+
+    async def optimize_strategy_parameters(
+        self,
+        strategy_id: str,
+        optimization_request: dict[str, Any],
+    ) -> dict[str, Any]:
+        """
+        Optimize strategy parameters based on request from strategies module.
+
+        Args:
+            strategy_id: Strategy identifier
+            optimization_request: Optimization request data
+
+        Returns:
+            Optimization results compatible with strategies module
+        """
+        try:
+            # Extract strategy name from request
+            strategy_name = optimization_request.get("strategy_name") or strategy_id
+            optimization_config = optimization_request.get("optimization_config", {})
+            current_parameters = optimization_request.get("current_parameters", {})
+
+            # Delegate parameter space building to specialized service
+            parameter_space_config = self._parameter_space_service.build_parameter_space_from_current(
+                current_parameters
+            )
+
+            # Extract optimization configuration
+            optimization_method = optimization_config.get("method", "brute_force")
+            initial_capital = Decimal(
+                str(optimization_config.get("initial_capital", DEFAULT_INITIAL_CAPITAL))
+            )
+
+            # Call the main optimization method
+            result = await self.optimize_strategy(
+                strategy_name=strategy_name,
+                parameter_space_config=parameter_space_config,
+                optimization_method=optimization_method,
+                initial_capital=initial_capital,
+                data_start_date=optimization_config.get("data_start_date"),
+                data_end_date=optimization_config.get("data_end_date"),
+                **optimization_config.get("optimizer_kwargs", {}),
+            )
+
+            # Transform result using specialized service
+            return self._result_transformation_service.transform_for_strategies_module(
+                result, optimization_request.get("current_parameters", {})
+            )
+
+        except Exception as e:
+            self._logger.error(f"Strategy parameter optimization failed: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "optimized_parameters": optimization_request.get("current_parameters", {}),
+            }
 
     async def optimize_parameters(
         self,
@@ -351,8 +417,8 @@ class OptimizationService(BaseService, IOptimizationService, ErrorPropagationMix
         Returns:
             Optimization results
         """
-        # Build parameter space from configuration
-        parameter_space = self._build_parameter_space(parameter_space_config)
+        # Build parameter space from configuration using specialized service
+        parameter_space = self._parameter_space_service.build_parameter_space(parameter_space_config)
 
         # Build objectives from configuration
         objectives = self._build_objectives(objectives_config)
@@ -469,35 +535,35 @@ class OptimizationService(BaseService, IOptimizationService, ErrorPropagationMix
         initial_capital: Decimal = DEFAULT_INITIAL_CAPITAL,
     ) -> Callable[[dict[str, Any]], Any]:
         """Create simulation-based objective function delegating to BacktestIntegrationService."""
+        if self._backtest_integration:
+            return self._backtest_integration.create_objective_function(
+                strategy_name=strategy_name,
+                data_start_date=data_start_date,
+                data_end_date=data_end_date,
+                initial_capital=initial_capital,
+            )
 
-        async def simulation_objective(parameters: dict[str, Any]) -> dict[str, Decimal]:
-            """Simulate strategy performance using BacktestIntegrationService logic."""
-            # Yield control to event loop
+        # Fallback simulation when no backtest integration available
+        async def simple_simulation_objective(parameters: dict[str, Any]) -> dict[str, Decimal]:
+            """Simple simulation fallback for testing."""
             await asyncio.sleep(0)
 
-            # Use same simulation logic as BacktestIntegrationService._simulate_performance
             position_size = Decimal(
                 str(parameters.get("position_size_pct", DEFAULT_POSITION_SIZE_PCT))
             )
             stop_loss = Decimal(str(parameters.get("stop_loss_pct", DEFAULT_STOP_LOSS_PCT)))
             take_profit = Decimal(str(parameters.get("take_profit_pct", DEFAULT_TAKE_PROFIT_PCT)))
 
-            # Simulate risk-return tradeoff
+            # Simple risk-return simulation
             risk_factor = position_size * DEFAULT_RISK_MULTIPLIER
             risk_adjusted_return = (
                 DEFAULT_BASE_RETURN
                 * (Decimal("1") + risk_factor)
                 * (Decimal("1") - stop_loss * Decimal("2"))
             )
-
-            # Simulate Sharpe ratio
             volatility = DEFAULT_BASE_VOLATILITY * (Decimal("1") + risk_factor)
             sharpe_ratio = risk_adjusted_return / volatility if volatility > 0 else Decimal("0")
-
-            # Simulate drawdown
             max_drawdown = volatility * DEFAULT_DRAWDOWN_FACTOR
-
-            # Simulate win rate based on stop loss / take profit ratio
             win_rate = DEFAULT_WIN_RATE_BASE * (take_profit / (take_profit + stop_loss))
 
             return {
@@ -508,7 +574,7 @@ class OptimizationService(BaseService, IOptimizationService, ErrorPropagationMix
                 "profit_factor": Decimal("1") + risk_adjusted_return,
             }
 
-        return simulation_objective
+        return simple_simulation_objective
 
     def _create_standard_trading_objectives(self) -> list[OptimizationObjective]:
         """Create standard trading optimization objectives."""
@@ -623,48 +689,7 @@ class OptimizationService(BaseService, IOptimizationService, ErrorPropagationMix
                 optimization_algorithm="bayesian",
             ) from e
 
-    def _build_parameter_space(self, config: dict[str, Any]) -> ParameterSpace:
-        """Build parameter space from configuration."""
-        from src.optimization.parameter_space import ParameterSpaceBuilder
-
-        builder = ParameterSpaceBuilder()
-
-        for param_name, param_config in config.items():
-            param_type = param_config.get("type")
-
-            if param_type == "continuous":
-                builder.add_continuous(
-                    name=param_name,
-                    min_value=param_config["min_value"],
-                    max_value=param_config["max_value"],
-                    precision=param_config.get("precision", 3),
-                )
-            elif param_type == "discrete":
-                builder.add_discrete(
-                    name=param_name,
-                    min_value=param_config["min_value"],
-                    max_value=param_config["max_value"],
-                    step_size=param_config.get("step_size", 1),
-                )
-            elif param_type == "categorical":
-                builder.add_categorical(
-                    name=param_name,
-                    values=param_config["values"],
-                )
-            elif param_type == "boolean":
-                builder.add_boolean(
-                    name=param_name,
-                    true_probability=param_config.get("true_probability", 0.5),
-                )
-            else:
-                raise ValidationError(
-                    f"Invalid parameter type: {param_type}",
-                    error_code="OPT_006",
-                    field_name="parameter_type",
-                    field_value=param_type,
-                )
-
-        return builder.build()
+    # Parameter space and result transformation methods moved to specialized services
 
     def _build_objectives(
         self, objectives_config: list[dict[str, Any]]
@@ -721,6 +746,115 @@ class OptimizationService(BaseService, IOptimizationService, ErrorPropagationMix
         # based on the function_name parameter
         return placeholder_objective
 
+    async def _emit_result_saved_event(
+        self, optimization_result: OptimizationResult, result_id: str
+    ) -> None:
+        """Emit result saved event at service layer."""
+        try:
+            if hasattr(self, "emit_event") and callable(self.emit_event):
+                event_data = self._transform_event_data(
+                    {
+                        "optimization_id": optimization_result.optimization_id,
+                        "algorithm_name": optimization_result.algorithm_name,
+                        "result_id": result_id,
+                        "optimal_objective_value": str(optimization_result.optimal_objective_value),
+                        "processing_mode": "batch",
+                        "target_processing_mode": self._determine_target_processing_mode(
+                            optimization_result
+                        ),
+                        "message_pattern": MessagePattern.PUB_SUB.value,
+                        "source": "optimization_service",
+                        "operation": "result_saved",
+                        "cross_module_event": True,
+                    }
+                )
+
+                await asyncio.wait_for(
+                    self.emit_event(OptimizationEvents.RESULT_SAVED, event_data),
+                    timeout=5.0,
+                )
+        except (AttributeError, asyncio.TimeoutError) as e:
+            self._logger.debug(f"Event emission not available or timed out: {e}")
+        except Exception as e:
+            self._logger.warning(f"Failed to emit result saved event: {e}")
+
+    def _determine_target_processing_mode(self, result: OptimizationResult) -> str:
+        """Determine target processing mode based on optimization result."""
+        # Check if this optimization is for real-time strategies
+        if hasattr(result, "strategy_name") and result.strategy_name:
+            strategy_name = result.strategy_name.lower()
+            real_time_strategies = {
+                "adaptive", "momentum", "volatility", "breakout",
+                "trend", "mean_reversion", "market_making", "arbitrage"
+            }
+            for strategy_type in real_time_strategies:
+                if strategy_type in strategy_name:
+                    return "stream"
+
+        # Check algorithm type
+        if hasattr(result, "algorithm_name") and result.algorithm_name:
+            algorithm_name = result.algorithm_name.lower()
+            if "online" in algorithm_name or "adaptive" in algorithm_name:
+                return "stream"
+
+        return "batch"
+
+    def _determine_target_processing_mode_for_strategy(self, strategy_name: str) -> str:
+        """
+        Determine the target processing mode for strategy communication.
+
+        Args:
+            strategy_name: Name of the strategy to optimize
+
+        Returns:
+            Target processing mode for cross-module alignment
+        """
+        # Most strategies operate in stream mode for real-time processing
+        # but may accept batch mode for optimization operations
+        strategy_stream_types = {
+            "adaptive_momentum", "volatility_breakout", "trend_following",
+            "mean_reversion", "market_making", "arbitrage"
+        }
+
+        # Check if strategy name contains stream-oriented strategy types
+        for stream_type in strategy_stream_types:
+            if stream_type in strategy_name.lower():
+                return "stream"
+
+        # Default to batch mode for optimization compatibility
+        return "batch"
+
+    def _apply_cross_module_alignment(self, data: dict[str, Any]) -> None:
+        """
+        Apply cross-module data alignment for strategies integration.
+
+        Args:
+            data: Event data to align
+        """
+        from src.utils.messaging_patterns import ProcessingParadigmAligner, BoundaryValidator
+
+        # Check if this is cross-module data
+        if data.get("cross_module_event") or data.get("target_processing_mode"):
+            source_mode = data.get("processing_mode", "batch")
+            target_mode = data.get("target_processing_mode", source_mode)
+
+            if source_mode != target_mode:
+                # Apply paradigm alignment
+                aligned_data = ProcessingParadigmAligner.align_processing_modes(
+                    source_mode, target_mode, data
+                )
+                data.update(aligned_data)
+
+        # Apply boundary validation for optimization-to-strategies flow
+        if data.get("operation_category") == "optimization":
+            try:
+                BoundaryValidator.validate_optimization_to_strategy_boundary(data)
+            except Exception as e:
+                self._logger.warning(f"Boundary validation warning: {e}")
+                # Add fallback validation metadata
+                data["boundary_validation_status"] = "warning"
+                data["boundary_validation_message"] = str(e)
+
     async def shutdown(self) -> None:
         """Shutdown the optimization service and cleanup resources."""
         try:
@@ -734,3 +868,150 @@ class OptimizationService(BaseService, IOptimizationService, ErrorPropagationMix
 
         except Exception as e:
             self._logger.error(f"Error during OptimizationService shutdown: {e}")
+
+    def _transform_event_data(self, data: dict[str, Any]) -> dict[str, Any]:
+        """
+        Transform event data to consistent format aligned with core module patterns.
+
+        This method ensures all optimization events have consistent structure,
+        financial data transformations, and required metadata fields.
+
+        Args:
+            data: Raw event data dictionary
+
+        Returns:
+            Transformed event data with consistent structure
+        """
+        from datetime import datetime, timezone
+
+        if not isinstance(data, dict):
+            # Transform non-dict data to standard format
+            transformed = {
+                "payload": data,
+                "type": type(data).__name__,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "processing_mode": "batch",  # Default for optimization
+                "data_format": "event_data_v1",
+                "module": "optimization",
+            }
+            return transformed
+
+        # Ensure required metadata fields for cross-module consistency
+        if "timestamp" not in data:
+            data["timestamp"] = datetime.now(timezone.utc).isoformat()
+
+        if "processing_mode" not in data:
+            data["processing_mode"] = "batch"  # Optimization is typically batch-oriented
+
+        if "data_format" not in data:
+            data["data_format"] = "event_data_v1"
+
+        if "module" not in data:
+            data["module"] = "optimization"
+
+        # Apply consistent financial data transformations for optimization events
+        financial_fields = ["initial_capital", "optimal_objective_value", "capital", "value"]
+        for field in financial_fields:
+            if field in data and data[field] is not None:
+                # Ensure financial values are decimal-formatted strings
+                try:
+                    if isinstance(data[field], (int, float)):
+                        from decimal import Decimal
+
+                        data[field] = str(Decimal(str(data[field])))
+                    elif not isinstance(data[field], str):
+                        data[field] = str(data[field])
+                except (ValueError, TypeError):
+                    # Leave as-is if conversion fails, but log it
+                    self._logger.warning(
+                        f"Could not convert financial field {field}: {data[field]}"
+                    )
+
+        # Add optimization-specific metadata
+        if "operation" in data and not data.get("operation_category"):
+            if "optimization" in data["operation"]:
+                data["operation_category"] = "optimization"
+            elif "analysis" in data["operation"]:
+                data["operation_category"] = "analysis"
+            else:
+                data["operation_category"] = "unknown"
+
+        # Apply cross-module boundary validation and transformation
+        self._apply_cross_module_alignment(data)
+
+        # Ensure message pattern is set for boundary validation
+        if "message_pattern" not in data:
+            # Default to PUB_SUB for events, REQ_REPLY for operations
+            if data.get("cross_module_event", False):
+                data["message_pattern"] = MessagePattern.PUB_SUB.value
+            else:
+                data["message_pattern"] = MessagePattern.REQ_REPLY.value
+
+        return data
+
+    def _validate_event_data(self, data: Any) -> None:
+        """
+        Basic validation for event data.
+
+        Args:
+            data: Event data to validate
+
+        Raises:
+            ValidationError: If data is invalid
+        """
+        if data is not None and not isinstance(data, dict):
+            raise ValidationError(
+                "Event data must be dict or None",
+                field_name="event_data",
+                field_value=type(data).__name__,
+                expected_type="dict or None",
+            )
+
+    def _propagate_error_with_boundary_validation(
+        self,
+        error: Exception,
+        context: str,
+        source_module: str = "optimization",
+        target_module: str = "backtesting",
+    ) -> None:
+        """
+        Enhanced error propagation with boundary validation aligned with backtesting module.
+
+        Args:
+            error: Exception to propagate
+            context: Error context/description
+            source_module: Source module name
+            target_module: Target module name
+        """
+        try:
+            # Apply data transformation for error propagation
+            from src.optimization.data_transformer import OptimizationDataTransformer
+
+            # Create error data with boundary validation
+            error_data = {
+                "error": str(error),
+                "error_type": type(error).__name__,
+                "context": context,
+                "source_module": source_module,
+                "target_module": target_module,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "processing_mode": "stream",  # Align with backtesting error handling
+            }
+
+            # Apply cross-module validation
+            validated_error_data = OptimizationDataTransformer.apply_cross_module_validation(
+                error_data, source_module, target_module
+            )
+
+            # Log enhanced error with validation
+            self._logger.error(
+                f"Enhanced error propagation in {context}: {error}",
+                extra={"validated_error_data": validated_error_data},
+            )
+
+        except Exception:
+            # Fallback to standard error propagation
+            pass
+
+        # Use standard error propagation as fallback
+        self.propagate_service_error(error, context)

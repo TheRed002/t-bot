@@ -227,10 +227,11 @@ async def authenticate_websocket(websocket: WebSocket) -> User | None:
             if token_data:
                 # Create user object
                 user = User(
-                    user_id=token_data.user_id,
+                    id=token_data.user_id,
                     username=token_data.username,
                     email="user@example.com",  # Simplified
                     is_active=True,
+                    is_verified=True,  # Add required field
                     scopes=token_data.scopes,
                 )
                 return user

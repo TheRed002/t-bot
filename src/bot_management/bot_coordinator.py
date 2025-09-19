@@ -16,6 +16,7 @@ from decimal import Decimal
 from typing import Any
 
 from src.core.config import Config
+from src.core.data_transformer import CoreDataTransformer
 from src.core.exceptions import ValidationError
 from src.core.logging import get_logger
 from src.core.types import BotConfiguration, OrderSide
@@ -345,6 +346,21 @@ class BotCoordinator:
             if field not in signal_data:
                 raise ValidationError(f"Signal missing required field: {field}")
 
+        # Apply consistent data transformation for signal data
+        transformed_signal_data = CoreDataTransformer.apply_cross_module_consistency(
+            CoreDataTransformer.transform_for_pub_sub_pattern(
+                "SIGNAL_DISTRIBUTION",
+                signal_data,
+                metadata={
+                    "target_modules": ["execution", "risk_management", "strategies"],
+                    "processing_priority": "high",
+                    "data_type": "trading_signal"
+                }
+            ),
+            target_module="execution",
+            source_module="bot_management"
+        )
+
         # Create signal entry
         if target_bots is None:
             # Filter bots by symbol interest (exclude source bot)
@@ -359,7 +375,7 @@ class BotCoordinator:
         signal_entry = {
             "signal_id": str(uuid.uuid4()),
             "source_bot": bot_id,
-            "signal_data": signal_data,
+            "signal_data": transformed_signal_data,
             "target_bots": target_bots,
             "created_at": datetime.now(timezone.utc),
             "expires_at": datetime.now(timezone.utc)
@@ -468,7 +484,22 @@ class BotCoordinator:
         # Generate recommendations
         self._generate_risk_recommendations(risk_assessment)
 
-        return risk_assessment
+        # Apply consistent data transformation for risk assessment communication
+        transformed_risk_assessment = CoreDataTransformer.apply_cross_module_consistency(
+            CoreDataTransformer.transform_for_request_reply_pattern(
+                "CROSS_BOT_RISK_ASSESSMENT",
+                risk_assessment,
+                metadata={
+                    "target_modules": ["risk_management", "execution"],
+                    "processing_priority": "high",
+                    "data_type": "risk_assessment"
+                }
+            ),
+            target_module="risk_management",
+            source_module="bot_management"
+        )
+
+        return transformed_risk_assessment
 
     def _check_symbol_exposure_limits(
         self, risk_assessment: dict[str, Any], symbol: str, side: OrderSide, quantity: Decimal

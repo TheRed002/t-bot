@@ -11,6 +11,7 @@ from typing import Any
 from src.core.logging import get_logger
 from src.core.types import StateType
 from src.utils.decimal_utils import to_decimal
+from src.utils.messaging_patterns import MessagePattern
 
 logger = get_logger(__name__)
 
@@ -45,7 +46,7 @@ class StateDataTransformer:
             "source": "state_management",
             "processing_mode": "stream",  # Align with core events default
             "data_format": "bot_event_v1",  # Consistent with core events
-            "message_pattern": "pub_sub",  # Consistent with core messaging
+            "message_pattern": MessagePattern.PUB_SUB.value,  # Use enum for consistency
             "boundary_crossed": True,  # Mark cross-module communication
             "metadata": metadata or {},
         }
@@ -71,7 +72,7 @@ class StateDataTransformer:
             "created_at": snapshot_data.get("created_at", datetime.now(timezone.utc).isoformat()),
             "processing_mode": "stream",  # Align with core events default
             "data_format": "bot_event_v1",  # Consistent with core events
-            "message_pattern": "pub_sub",  # Consistent with core messaging
+            "message_pattern": MessagePattern.PUB_SUB.value,  # Use enum for consistency
             "boundary_crossed": True,  # Mark cross-module communication
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "metadata": metadata or {},
@@ -102,7 +103,7 @@ class StateDataTransformer:
     @staticmethod
     def validate_financial_precision(data: dict[str, Any]) -> dict[str, Any]:
         """
-        Ensure financial data has proper precision using Decimal.
+        Ensure financial data has proper precision using centralized financial utils.
 
         Args:
             data: Data dictionary to validate
@@ -110,37 +111,16 @@ class StateDataTransformer:
         Returns:
             Dict with validated financial precision
         """
-        financial_fields = [
-            "price",
-            "quantity",
-            "volume",
-            "entry_price",
-            "current_price",
-            "stop_loss",
-            "take_profit",
-            "value",
-            "amount",
-            "unrealized_pnl",
-            "realized_pnl",
+        from src.utils.financial_utils import validate_financial_precision
+
+        # Define state-specific fields in addition to defaults
+        state_fields = [
+            "price", "quantity", "volume", "entry_price", "current_price",
+            "stop_loss", "take_profit", "value", "amount",
+            "unrealized_pnl", "realized_pnl"
         ]
 
-        for field in financial_fields:
-            if field in data and data[field] is not None and data[field] != "":
-                try:
-                    # Convert to Decimal for financial precision
-                    decimal_value = to_decimal(data[field])
-                    # Convert back to string for consistent format
-                    data[field] = str(decimal_value)
-                except (ValueError, TypeError, KeyError) as e:
-                    logger.warning(
-                        f"Failed to convert financial field {field} to Decimal: {e}",
-                        field=field,
-                        value=data[field],
-                    )
-                    # Keep original value if conversion fails but log the issue
-                    # This is acceptable for data transformation where robustness is prioritized
-
-        return data
+        return validate_financial_precision(data, state_fields)
 
     @staticmethod
     def ensure_boundary_fields(
@@ -220,7 +200,7 @@ class StateDataTransformer:
         transformed.update(
             {
                 "event_type": event_type,
-                "message_pattern": "pub_sub",  # Consistent messaging pattern
+                "message_pattern": MessagePattern.PUB_SUB.value,  # Use enum for consistency
                 "boundary_crossed": True,  # Cross-module event flag
                 "validation_status": "validated",  # Boundary validation status
             }
@@ -249,7 +229,7 @@ class StateDataTransformer:
         # Add request/reply specific fields
         transformed["request_type"] = request_type
         transformed["correlation_id"] = correlation_id or datetime.now(timezone.utc).isoformat()
-        transformed["message_pattern"] = "req_reply"  # Override processing mode
+        transformed["message_pattern"] = MessagePattern.REQ_REPLY.value  # Override processing mode
 
         return transformed
 
@@ -285,7 +265,7 @@ class StateDataTransformer:
                     "stream_position": datetime.now(timezone.utc).timestamp(),
                     "processing_paradigm": "stream",  # Match core events paradigm field
                     "data_format": "bot_event_v1",  # Align with core events
-                    "message_pattern": "pub_sub",  # Consistent messaging pattern
+                    "message_pattern": MessagePattern.PUB_SUB.value,  # Use enum for consistency
                     "boundary_crossed": True,
                 }
             )
@@ -297,7 +277,7 @@ class StateDataTransformer:
                     "batch_processing": True,  # Align with core events batch processing
                     "processing_paradigm": "batch",  # Match core events paradigm field
                     "data_format": "bot_event_v1",  # Align with core events
-                    "message_pattern": "batch",  # Batch messaging pattern
+                    "message_pattern": MessagePattern.BATCH.value,  # Batch messaging pattern
                     "boundary_crossed": True,
                 }
             )
@@ -307,7 +287,7 @@ class StateDataTransformer:
             aligned_data.update(
                 {
                     "data_format": "bot_event_v1",  # Align with core events
-                    "message_pattern": "req_reply",  # Request-reply messaging pattern
+                    "message_pattern": MessagePattern.REQ_REPLY.value,  # Request-reply messaging pattern
                     "boundary_crossed": True,
                 }
             )
@@ -377,7 +357,7 @@ class StateDataTransformer:
                         "data_format", "bot_event_v1"
                     ),  # Align with core
                     "message_pattern": validated_data.get(
-                        "message_pattern", "pub_sub"
+                        "message_pattern", MessagePattern.PUB_SUB.value
                     ),  # Core consistency
                     "boundary_crossed": True,
                     "processing_paradigm": validated_data.get(

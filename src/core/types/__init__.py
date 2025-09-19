@@ -26,7 +26,6 @@ from .base import (
 # Bot management types
 from .bot import (
     BotConfiguration,
-    BotEvent,
     BotMetrics,
     BotPriority,
     BotState,
@@ -84,6 +83,7 @@ from .risk import (
     EmergencyAction,
     ExchangeAllocation,
     FundFlow,
+    PortfolioMetrics,
     PortfolioState,
     PositionLimits,
     PositionSizeMethod,
@@ -105,6 +105,9 @@ from .strategy import (
     StrategyStatus,
     StrategyType,
 )
+
+# Import BotEvent and BotEventType from events module
+from ..events import BotEvent, BotEventType
 
 # Trading types
 from .trading import (
@@ -140,6 +143,16 @@ class StateType(str, Enum):
     TRADE_STATE = "trade_state"
     EXECUTION = "execution"
     SYSTEM_STATE = "system_state"
+    CAPITAL_STATE = "capital_state"
+
+
+class StatePriority(str, Enum):
+    """State operation priority levels."""
+
+    CRITICAL = "critical"  # Trading operations, risk limits
+    HIGH = "high"  # Order management, position updates
+    MEDIUM = "medium"  # Strategy updates, configuration
+    LOW = "low"  # Metrics, historical data
 
 
 # Export all for convenience
@@ -151,6 +164,7 @@ __all__ = [
     "BaseValidatedModel",
     "BotConfiguration",
     "BotEvent",
+    "BotEventType",
     "BotMetrics",
     "BotPriority",
     "BotState",
@@ -198,6 +212,7 @@ __all__ = [
     "OrderStatus",
     "OrderType",
     "PipelineStatus",
+    "PortfolioMetrics",
     "PortfolioState",
     "Position",
     "PositionLimits",
@@ -234,6 +249,7 @@ __all__ = [
     "Trade",
     "TradeState",
     # State types
+    "StatePriority",
     "StateType",
     # Base
     "TradingMode",

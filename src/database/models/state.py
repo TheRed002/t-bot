@@ -395,7 +395,7 @@ class StateHistory(Base, TimestampMixin, MetadataMixin):
             name="ck_state_history_operation_valid",
         ),
         CheckConstraint(
-            "state_type IN ('bot_state', 'position_state', 'order_state', 'portfolio_state', 'risk_state', 'strategy_state', 'market_state', 'trade_state', 'execution', 'system_state')",
+            "state_type IN ('bot_state', 'position_state', 'order_state', 'portfolio_state', 'risk_state', 'strategy_state', 'market_state', 'trade_state', 'execution', 'system_state', 'capital_state')",
             name="ck_state_history_state_type_valid",
         ),
         CheckConstraint(
@@ -511,7 +511,7 @@ class StateMetadata(Base, AuditMixin):
         CheckConstraint("access_count >= 0", name="ck_state_metadata_access_count_positive"),
         CheckConstraint("cache_priority >= 0", name="ck_state_metadata_cache_priority_positive"),
         CheckConstraint(
-            "state_type IN ('bot_state', 'position_state', 'order_state', 'portfolio_state', 'risk_state', 'strategy_state', 'market_state', 'trade_state', 'execution', 'system_state')",
+            "state_type IN ('bot_state', 'position_state', 'order_state', 'portfolio_state', 'risk_state', 'strategy_state', 'market_state', 'trade_state', 'execution', 'system_state', 'capital_state')",
             name="ck_state_metadata_state_type_valid",
         ),
     )

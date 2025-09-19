@@ -277,23 +277,19 @@ def mock_exchange_service():
 def full_bot_service_deps(
     base_config, mock_state_service, mock_risk_service,
     mock_execution_service, mock_strategy_service, mock_capital_service,
-    mock_database_service, mock_bot_repository, mock_bot_instance_repository,
-    mock_bot_metrics_repository, mock_metrics_collector, mock_exchange_service
+    mock_metrics_collector, mock_exchange_service
 ):
     """All dependencies needed for BotService initialization."""
     return {
-        'config_service': base_config,
-        'state_service': mock_state_service,
-        'risk_service': mock_risk_service,
-        'execution_service': mock_execution_service,
-        'strategy_service': mock_strategy_service,
-        'capital_service': mock_capital_service,
-        'database_service': mock_database_service,
-        'bot_repository': mock_bot_repository,
-        'bot_instance_repository': mock_bot_instance_repository,
-        'bot_metrics_repository': mock_bot_metrics_repository,
-        'metrics_collector': mock_metrics_collector,
         'exchange_service': mock_exchange_service,
+        'capital_service': mock_capital_service,
+        'execution_service': mock_execution_service,
+        'risk_service': mock_risk_service,
+        'state_service': mock_state_service,
+        'strategy_service': mock_strategy_service,
+        'metrics_collector': mock_metrics_collector,
+        'config_service': base_config,
+        'analytics_service': None,  # Optional parameter
     }
 
 

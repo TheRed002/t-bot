@@ -205,6 +205,7 @@ def calculate_ema_talib(prices: np.ndarray, period: int) -> Decimal | None:
 
 def calculate_rsi_talib(prices: np.ndarray, period: int = 14) -> Decimal | None:
     """Calculate Relative Strength Index using TALib with Decimal precision."""
+    _check_talib()
     try:
         if len(prices) < period + 1:
             return None
@@ -225,6 +226,7 @@ def calculate_macd_talib(
     prices: np.ndarray, fast: int = 12, slow: int = 26, signal: int = 9
 ) -> dict[str, Decimal] | None:
     """Calculate MACD using TALib with Decimal precision."""
+    _check_talib()
     try:
         if len(prices) < slow + signal:
             return None
@@ -253,6 +255,7 @@ def calculate_bollinger_bands_talib(
     prices: np.ndarray, period: int = 20, std_dev: Decimal = Decimal("2")
 ) -> dict[str, Decimal] | None:
     """Calculate Bollinger Bands using TALib with Decimal precision."""
+    _check_talib()
     try:
         if len(prices) < period:
             return None
@@ -295,6 +298,7 @@ def calculate_atr_talib(
     high: np.ndarray, low: np.ndarray, close: np.ndarray, period: int = 14
 ) -> Decimal | None:
     """Calculate Average True Range using TALib with Decimal precision."""
+    _check_talib()
     try:
         if len(high) < period or len(low) < period or len(close) < period:
             return None

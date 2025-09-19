@@ -13,49 +13,49 @@ logger = get_logger(__name__)
 
 def register_bot_management_services(injector: DependencyInjector) -> None:
     """
-    Register simplified bot management services.
+    Register bot management services with proper service layer architecture.
 
     Args:
         injector: Dependency injector instance
     """
+    try:
+        # Register service interfaces and implementations
+        from .instance_service import BotInstanceService
+        from .lifecycle_service import BotLifecycleService
+        from .coordination_service import BotCoordinationService
+        from .monitoring_service import BotMonitoringService
+        from .resource_service import BotResourceService
+        from .controller import BotManagementController
+        from .interfaces import (
+            IBotInstanceService,
+            IBotLifecycleService,
+            IBotCoordinationService,
+            IBotMonitoringService,
+            IResourceManagementService,
+        )
 
-    # Register repository factories
-    def bot_repository_factory():
-        """Factory for BotRepository with proper session injection."""
-        from src.bot_management.repository import BotRepository
+        # Register service implementations
+        injector.register_singleton(IBotInstanceService, BotInstanceService)
+        injector.register_singleton(IBotLifecycleService, BotLifecycleService)
+        injector.register_singleton(IBotCoordinationService, BotCoordinationService)
+        injector.register_singleton(IBotMonitoringService, BotMonitoringService)
+        injector.register_singleton(IResourceManagementService, BotResourceService)
 
-        session = injector.resolve("AsyncSession")
-        return BotRepository(session)
+        # Register concrete implementations
+        injector.register_singleton("BotInstanceService", BotInstanceService)
+        injector.register_singleton("BotLifecycleService", BotLifecycleService)
+        injector.register_singleton("BotCoordinationService", BotCoordinationService)
+        injector.register_singleton("BotMonitoringService", BotMonitoringService)
+        injector.register_singleton("BotResourceService", BotResourceService)
 
-    def bot_instance_repository_factory():
-        """Factory for BotInstanceRepository with proper session injection."""
-        from src.bot_management.repository import BotInstanceRepository
+        # Register controller
+        injector.register_singleton("BotManagementController", BotManagementController)
 
-        session = injector.resolve("AsyncSession")
-        return BotInstanceRepository(session)
+        logger.info("Bot management services registered successfully")
 
-    def bot_metrics_repository_factory():
-        """Factory for BotMetricsRepository with proper session injection."""
-        from src.bot_management.repository import BotMetricsRepository
-
-        session = injector.resolve("AsyncSession")
-        return BotMetricsRepository(session)
-
-    # Note: Repository singletons should be per session, not global instances
-    injector.register_factory("BotRepository", bot_repository_factory, singleton=False)
-    injector.register_factory(
-        "BotInstanceRepository", bot_instance_repository_factory, singleton=False
-    )
-    injector.register_factory(
-        "BotMetricsRepository", bot_metrics_repository_factory, singleton=False
-    )
-
-    # Register services using simplified factory pattern
-    from .factory import register_bot_management_services as register_factory_services
-
-    register_factory_services(injector)
-
-    logger.info("Bot management services registered successfully with simplified factories")
+    except Exception as e:
+        logger.error(f"Failed to register bot management services: {e}")
+        raise
 
 
 def configure_bot_management_dependencies(
@@ -83,6 +83,42 @@ def configure_bot_management_dependencies(
 def get_bot_service(injector: DependencyInjector) -> "BotService":
     """Get BotService from DI container."""
     return injector.resolve("BotService")
+
+
+def get_bot_instance_service(injector: DependencyInjector) -> 'IBotInstanceService':
+    """Get bot instance service from injector."""
+    from .interfaces import IBotInstanceService
+    return injector.resolve(IBotInstanceService)
+
+
+def get_bot_lifecycle_service(injector: DependencyInjector) -> 'IBotLifecycleService':
+    """Get bot lifecycle service from injector."""
+    from .interfaces import IBotLifecycleService
+    return injector.resolve(IBotLifecycleService)
+
+
+def get_bot_coordination_service(injector: DependencyInjector) -> 'IBotCoordinationService':
+    """Get bot coordination service from injector."""
+    from .interfaces import IBotCoordinationService
+    return injector.resolve(IBotCoordinationService)
+
+
+def get_bot_monitoring_service(injector: DependencyInjector) -> 'IBotMonitoringService':
+    """Get bot monitoring service from injector."""
+    from .interfaces import IBotMonitoringService
+    return injector.resolve(IBotMonitoringService)
+
+
+def get_bot_resource_service(injector: DependencyInjector) -> 'IResourceManagementService':
+    """Get bot resource service from injector."""
+    from .interfaces import IResourceManagementService
+    return injector.resolve(IResourceManagementService)
+
+
+def get_bot_management_controller(injector: DependencyInjector) -> 'BotManagementController':
+    """Get bot management controller from injector."""
+    from .controller import BotManagementController
+    return injector.resolve(BotManagementController)
 
 
 def initialize_bot_management_services(injector: DependencyInjector) -> dict[str, Any]:

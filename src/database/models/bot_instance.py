@@ -11,6 +11,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Index,
+    Integer,
     String,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
@@ -49,6 +50,12 @@ class BotInstance(Base, TimestampMixin, MetadataMixin):
     # Capital tracking
     allocated_capital: Mapped[Decimal] = mapped_column(DECIMAL(20, 8), default=0)
     current_balance: Mapped[Decimal] = mapped_column(DECIMAL(20, 8), default=0)
+
+    # Performance metrics
+    total_trades = Column(Integer, default=0)
+    profitable_trades = Column(Integer, default=0)
+    losing_trades = Column(Integer, default=0)
+    total_pnl: Mapped[Decimal] = mapped_column(DECIMAL(20, 8), default=0)
 
     # Relationships
     bot = relationship("Bot", back_populates="instances")
@@ -104,6 +111,15 @@ class BotInstance(Base, TimestampMixin, MetadataMixin):
         ),
         CheckConstraint(
             "current_balance >= 0", name="check_bot_instance_current_balance_non_negative"
+        ),
+        CheckConstraint(
+            "total_trades >= 0", name="check_bot_instance_total_trades_non_negative"
+        ),
+        CheckConstraint(
+            "profitable_trades >= 0", name="check_bot_instance_profitable_trades_non_negative"
+        ),
+        CheckConstraint(
+            "losing_trades >= 0", name="check_bot_instance_losing_trades_non_negative"
         ),
     )
 

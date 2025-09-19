@@ -45,6 +45,7 @@ class OptimizationRun(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     algorithm_name = Column(String(100), nullable=False, index=True)
     strategy_name = Column(String(100), nullable=True, index=True)
+    strategy_id = Column(UUID(as_uuid=True), ForeignKey("strategies.id"), nullable=True, index=True)
 
     # Configuration
     parameter_space = Column(JSONB, nullable=False)
@@ -73,6 +74,14 @@ class OptimizationRun(Base):
     best_objective_value: Mapped[Decimal | None] = mapped_column(DECIMAL(20, 8), nullable=True)
     convergence_achieved = Column(Boolean, default=False, nullable=False)
 
+    # Foreign key relationships
+    backtest_run_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("backtest_runs.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True
+    )
+
     # Metadata
     trading_mode = Column(String(20), nullable=True)
     data_start_date = Column(DateTime(timezone=True), nullable=True)
@@ -96,6 +105,8 @@ class OptimizationRun(Base):
     created_by = Column(String(100), nullable=True)
 
     # Relationships
+    backtest_run = relationship("BacktestRun", back_populates="optimization_runs", lazy="select")
+
     results = relationship(
         "OptimizationResult",
         back_populates="optimization_run",
@@ -110,6 +121,13 @@ class OptimizationRun(Base):
         lazy="select",
     )
 
+    objectives = relationship(
+        "OptimizationObjectiveDB",
+        back_populates="optimization_run",
+        cascade="all, delete-orphan",
+        lazy="select",
+    )
+
     # Constraints
     __table_args__ = (
         CheckConstraint(
@@ -119,8 +137,8 @@ class OptimizationRun(Base):
         CheckConstraint("current_iteration >= 0", name="check_current_iteration_positive"),
         CheckConstraint("total_iterations >= 0", name="check_total_iterations_positive"),
         CheckConstraint("evaluations_completed >= 0", name="check_evaluations_positive"),
-        CheckConstraint("total_duration_seconds >= 0", name="check_duration_positive"),
-        CheckConstraint("initial_capital > 0", name="check_initial_capital_positive"),
+        CheckConstraint("total_duration_seconds IS NULL OR total_duration_seconds >= 0", name="check_duration_positive"),
+        CheckConstraint("initial_capital IS NULL OR initial_capital > 0", name="check_initial_capital_positive"),
         CheckConstraint(
             "status IN ('pending', 'initializing', 'running', 'paused', 'completed', 'failed', 'cancelled')",
             name="check_valid_status",
@@ -133,7 +151,13 @@ class OptimizationRun(Base):
         Index("idx_optimization_run_strategy_status", "strategy_name", "status"),
         Index("idx_optimization_run_algorithm_created", "algorithm_name", "created_at"),
         Index("idx_optimization_run_status_updated", "status", "updated_at"),
+        Index("idx_optimization_run_backtest", "backtest_run_id"),
+        Index("idx_optimization_run_objective_convergence", "best_objective_value", "convergence_achieved"),
+        Index("idx_optimization_run_strategy_id", "strategy_id"),
     )
+
+    # Relationships
+    strategy = relationship("Strategy", back_populates="optimization_runs")
 
 
 class OptimizationResult(Base):
@@ -216,11 +240,14 @@ class OptimizationResult(Base):
             "confidence_level > 0 AND confidence_level < 1", name="check_confidence_level_range"
         ),
         CheckConstraint(
-            "statistical_significance >= 0 AND statistical_significance <= 1",
+            "statistical_significance IS NULL OR (statistical_significance >= 0 AND statistical_significance <= 1)",
             name="check_statistical_significance_range",
         ),
-        CheckConstraint("volatility >= 0", name="check_volatility_positive"),
-        CheckConstraint("profit_factor >= 0", name="check_profit_factor_positive"),
+        CheckConstraint("volatility IS NULL OR volatility >= 0", name="check_volatility_positive"),
+        CheckConstraint("profit_factor IS NULL OR profit_factor >= 0", name="check_profit_factor_positive"),
+        CheckConstraint("validation_score IS NULL OR validation_score >= 0", name="check_validation_score_positive"),
+        CheckConstraint("overfitting_score IS NULL OR (overfitting_score >= 0 AND overfitting_score <= 1)", name="check_overfitting_score_range"),
+        CheckConstraint("robustness_score IS NULL OR (robustness_score >= 0 AND robustness_score <= 1)", name="check_robustness_score_range"),
         CheckConstraint(
             "confidence_interval_lower IS NULL OR confidence_interval_upper IS NULL OR confidence_interval_lower <= confidence_interval_upper",
             name="check_confidence_interval_order",
@@ -295,16 +322,17 @@ class ParameterSet(Base):
     __table_args__ = (
         UniqueConstraint("optimization_run_id", "parameter_hash", name="uq_parameter_set_run_hash"),
         CheckConstraint("iteration_number >= 0", name="check_iteration_positive"),
-        CheckConstraint("evaluation_time_seconds >= 0", name="check_evaluation_time_positive"),
+        CheckConstraint("evaluation_time_seconds IS NULL OR evaluation_time_seconds >= 0", name="check_evaluation_time_positive"),
         CheckConstraint(
-            "percentile_rank >= 0 AND percentile_rank <= 100", name="check_percentile_range"
+            "percentile_rank IS NULL OR (percentile_rank >= 0 AND percentile_rank <= 100)", name="check_percentile_range"
         ),
-        CheckConstraint("rank_by_objective > 0", name="check_rank_positive"),
+        CheckConstraint("rank_by_objective IS NULL OR rank_by_objective > 0", name="check_rank_positive"),
         CheckConstraint(
             "evaluation_status IN ('pending', 'running', 'completed', 'failed', 'timeout')",
             name="check_valid_evaluation_status",
         ),
-        CheckConstraint("max_drawdown >= 0 AND max_drawdown <= 1", name="check_drawdown_range"),
+        CheckConstraint("max_drawdown IS NULL OR (max_drawdown >= 0 AND max_drawdown <= 1)", name="check_drawdown_range"),
+        CheckConstraint("LENGTH(parameter_hash) = 64", name="check_parameter_hash_length"),
         # Performance indexes
         Index("idx_parameter_set_run_iteration", "optimization_run_id", "iteration_number"),
         Index("idx_parameter_set_objective_rank", "optimization_run_id", "rank_by_objective"),
@@ -368,7 +396,7 @@ class OptimizationObjectiveDB(Base):
     )
 
     # Relationships
-    optimization_run = relationship("OptimizationRun", lazy="select")
+    optimization_run = relationship("OptimizationRun", back_populates="objectives", lazy="select")
 
     # Constraints
     __table_args__ = (
@@ -379,7 +407,7 @@ class OptimizationObjectiveDB(Base):
             "constraint_min IS NULL OR constraint_max IS NULL OR constraint_min <= constraint_max",
             name="check_constraint_order",
         ),
-        CheckConstraint("standard_deviation >= 0", name="check_std_dev_positive"),
+        CheckConstraint("standard_deviation IS NULL OR standard_deviation >= 0", name="check_std_dev_positive"),
         # Performance indexes
         Index("idx_objective_run_primary", "optimization_run_id", "is_primary"),
         Index("idx_objective_category_direction", "category", "direction"),

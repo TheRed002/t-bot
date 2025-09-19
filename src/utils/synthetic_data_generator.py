@@ -67,16 +67,31 @@ def generate_synthetic_ohlcv_data(
     returns = np.random.normal(annual_drift * dt, annual_volatility * np.sqrt(dt), n)
     prices = initial_price * np.exp(np.cumsum(returns))
 
+    # Ensure prices is always an array
+    if np.isscalar(prices):
+        prices = np.array([prices])
+    elif not isinstance(prices, np.ndarray):
+        prices = np.array(prices)
+
     # Generate OHLC from prices with proper relationships
     df = pd.DataFrame(index=dates)
     df["close"] = prices
 
     # Open price: close of previous period plus small noise
-    df["open"] = prices * (1 + np.random.normal(0, 0.001, n))
+    open_noise = np.random.normal(0, 0.001, n)
+    if np.isscalar(open_noise):
+        open_noise = np.array([open_noise])
+    elif not isinstance(open_noise, np.ndarray):
+        open_noise = np.array(open_noise)
+    df["open"] = prices * (1 + open_noise)
 
     # High and low with proper OHLC relationships
     high_offsets = np.abs(np.random.normal(0, 0.005, n))
     low_offsets = np.abs(np.random.normal(0, 0.005, n))
+    if np.isscalar(high_offsets):
+        high_offsets = np.array([high_offsets])
+    if np.isscalar(low_offsets):
+        low_offsets = np.array([low_offsets])
 
     # High is maximum of open, close, and upward price movement
     df["high"] = np.maximum(np.maximum(df["open"], df["close"]), prices * (1 + high_offsets))

@@ -75,7 +75,7 @@ class IdempotencyKey:
                     "id": order_response.id,
                     "status": order_response.status,
                     "filled_quantity": str(order_response.filled_quantity),
-                    "timestamp": order_response.timestamp.isoformat(),
+                    "timestamp": order_response.created_at.isoformat(),
                 }
 
     def mark_failed(self, error_message: str) -> None:
@@ -373,13 +373,25 @@ class OrderIdempotencyManager(BaseComponent):
 
             return client_order_id, False
 
+        except ValidationError as e:
+            # Validation errors should propagate as ExecutionError with original message
+            self.stats["failed_operations"] += 1
+            self._logger.error(f"Failed to get/create idempotency key: {e}")
+            order_id = locals().get('client_order_id') or getattr(order, 'client_order_id', None)
+            raise ExecutionError(
+                str(e.message if hasattr(e, 'message') else e),
+                error_code="EXEC_000",
+                order_id=order_id
+            ) from e
         except Exception as e:
             self.stats["failed_operations"] += 1
             self._logger.error(f"Failed to get/create idempotency key: {e}")
+            # Use provided client_order_id or order.client_order_id if available, otherwise None
+            order_id = locals().get('client_order_id') or getattr(order, 'client_order_id', None)
             raise ExecutionError(
                 f"Idempotency key operation failed: {e}",
                 error_code="EXEC_000",
-                order_id=client_order_id
+                order_id=order_id
             ) from e
 
     @log_calls

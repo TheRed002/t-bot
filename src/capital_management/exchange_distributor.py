@@ -51,13 +51,6 @@ from src.capital_management.interfaces import AbstractExchangeDistributionServic
 from src.core.base.service import TransactionalService
 from src.core.exceptions import ExchangeConnectionError, NetworkError, ServiceError
 from src.core.types.capital import CapitalExchangeAllocation as ExchangeAllocation
-from src.utils.capital_config import (
-    load_capital_config,
-    resolve_config_service,
-)
-from src.utils.capital_validation import (
-    validate_capital_amount,
-)
 from src.utils.decimal_utils import safe_decimal_conversion
 from src.utils.decorators import time_execution
 from src.utils.formatters import format_currency
@@ -79,7 +72,7 @@ class ExchangeDistributor(AbstractExchangeDistributionService, TransactionalServ
     def __init__(
         self,
         exchanges: dict[str, Any] | None = None,
-        validation_service: Any | None = None,
+        validation_service: Any = None,
         exchange_info_service: Any = None,
         correlation_id: str | None = None,
     ) -> None:
@@ -87,17 +80,17 @@ class ExchangeDistributor(AbstractExchangeDistributionService, TransactionalServ
         Initialize the exchange distributor service.
 
         Args:
-            exchanges: Dictionary of exchange instances (injected)
-            validation_service: Validation service instance (injected)
-            exchange_info_service: Exchange info service instance (injected)
+            exchanges: Dictionary of exchange instances
+            validation_service: Service for validation operations
+            exchange_info_service: Service for exchange information
             correlation_id: Request correlation ID for tracing
         """
         super().__init__(
             name="ExchangeDistributorService",
             correlation_id=correlation_id,
         )
-        self.exchanges = exchanges or {}
-        self.validation_service = validation_service
+        self.exchanges: dict[str, Any] = exchanges or {"binance": {}, "okx": {}, "coinbase": {}}
+        self._validation_service = validation_service
         self._exchange_info_service = exchange_info_service
 
         self.capital_config: dict[str, Any] = {}
@@ -147,9 +140,17 @@ class ExchangeDistributor(AbstractExchangeDistributionService, TransactionalServ
         )
 
     async def _load_configuration(self) -> None:
-        """Load configuration from ConfigService."""
-        resolved_config_service = resolve_config_service(self)
-        self.capital_config = load_capital_config(resolved_config_service)
+        """Load default configuration."""
+        self.capital_config = {
+            "max_slippage_history": DEFAULT_MAX_SLIPPAGE_HISTORY,
+            "exchange_allocation_weights": "dynamic",
+            "liquidity_weight": DEFAULT_LIQUIDITY_WEIGHT,
+            "fee_weight": DEFAULT_FEE_WEIGHT,
+            "reliability_weight": DEFAULT_RELIABILITY_WEIGHT,
+            "max_allocation_pct": DEFAULT_MAX_ALLOCATION_PCT,
+            "max_daily_reallocation_pct": MAX_DAILY_REALLOCATION_PCT,
+            "min_deposit_amount": MIN_EXCHANGE_BALANCE,
+        }
 
     def _validate_config(self) -> None:
         """
@@ -160,14 +161,14 @@ class ExchangeDistributor(AbstractExchangeDistributionService, TransactionalServ
 
         # Set default values if not present
         if "max_allocation_pct" not in self.config:
-            self.config["max_allocation_pct"] = float(DEFAULT_MAX_ALLOCATION_PCT)
+            self.config["max_allocation_pct"] = Decimal(str(DEFAULT_MAX_ALLOCATION_PCT))
 
         if "min_rebalance_interval_hours" not in self.config:
             self.config["min_rebalance_interval_hours"] = DEFAULT_MIN_REBALANCE_INTERVAL_HOURS
 
         # Add other default config values
         if "rebalance_threshold" not in self.config:
-            self.config["rebalance_threshold"] = float(DEFAULT_REBALANCE_THRESHOLD)
+            self.config["rebalance_threshold"] = Decimal(str(DEFAULT_REBALANCE_THRESHOLD))
 
     @time_execution
     async def distribute_capital(self, total_amount: Decimal) -> dict[str, ExchangeAllocation]:
@@ -181,9 +182,8 @@ class ExchangeDistributor(AbstractExchangeDistributionService, TransactionalServ
             Dict[str, ExchangeAllocation]: Distribution across exchanges
         """
         try:
-            validate_capital_amount(
-                total_amount, "distribution amount", component="ExchangeDistributor"
-            )
+            if total_amount <= 0:
+                raise ServiceError("Total amount must be positive")
 
             await self._update_exchange_metrics()
 
@@ -664,8 +664,8 @@ class ExchangeDistributor(AbstractExchangeDistributionService, TransactionalServ
             )  # -0.0002 to 0.0002
             slippage_decimal = max(Decimal("0.0"), base_slippage_decimal + variance)
 
-            # Store as float for compatibility with existing code
-            self.historical_slippage[exchange_name].append(float(slippage_decimal))
+            # Store as Decimal for financial precision
+            self.historical_slippage[exchange_name].append(slippage_decimal)
 
             if len(self.historical_slippage[exchange_name]) > self._max_slippage_history:
                 self.historical_slippage[exchange_name] = self.historical_slippage[exchange_name][
@@ -858,13 +858,18 @@ class ExchangeDistributor(AbstractExchangeDistributionService, TransactionalServ
         metrics = {}
 
         for exchange_name in self.supported_exchanges:
+            # Calculate average slippage using Decimal precision
+            slippage_history = self.historical_slippage.get(exchange_name, [Decimal("0.001")])
+            if slippage_history:
+                avg_slippage = sum(slippage_history) / len(slippage_history)
+            else:
+                avg_slippage = Decimal("0.001")
+
             metrics[exchange_name] = {
-                "liquidity_score": float(self.liquidity_scores.get(exchange_name, 0.5)),
-                "fee_efficiency": float(self.fee_efficiencies.get(exchange_name, 0.5)),
-                "reliability_score": float(self.reliability_scores.get(exchange_name, 0.5)),
-                "avg_slippage": float(
-                    str(statistics.mean(self.historical_slippage.get(exchange_name, [0.001])))
-                ),
+                "liquidity_score": Decimal(str(self.liquidity_scores.get(exchange_name, 0.5))),
+                "fee_efficiency": Decimal(str(self.fee_efficiencies.get(exchange_name, 0.5))),
+                "reliability_score": Decimal(str(self.reliability_scores.get(exchange_name, 0.5))),
+                "avg_slippage": avg_slippage,
             }
 
         return metrics
@@ -915,7 +920,7 @@ class ExchangeDistributor(AbstractExchangeDistributionService, TransactionalServ
 
         for allocation in distribution:
             if total_capital > 0:
-                allocation_pct = float(allocation.allocated_amount / total_capital)
+                allocation_pct = allocation.allocated_amount / total_capital
                 if allocation_pct > max_allocation_pct:
                     from src.core.exceptions import ServiceError
 
@@ -962,32 +967,32 @@ class ExchangeDistributor(AbstractExchangeDistributionService, TransactionalServ
             float: Efficiency score between 0 and 1
         """
         if not allocations:
-            return 0.0
+            return Decimal("0.0")
 
         try:
-            total_score = 0.0
-            total_weight = 0.0
+            total_score = Decimal("0")
+            total_weight = Decimal("0")
 
             for allocation in allocations:
                 # Calculate weighted efficiency based on liquidity, fees, and reliability
-                liquidity_score = float(getattr(allocation, "liquidity_score", 0.5))
-                fee_efficiency = float(getattr(allocation, "fee_efficiency", 0.5))
-                reliability_score = float(getattr(allocation, "reliability_score", 0.5))
+                liquidity_score = getattr(allocation, "liquidity_score", Decimal("0.5"))
+                fee_efficiency = getattr(allocation, "fee_efficiency", Decimal("0.5"))
+                reliability_score = getattr(allocation, "reliability_score", Decimal("0.5"))
 
                 # Weight allocation by its amount
-                weight = float(getattr(allocation, "allocated_amount", 0))
+                weight = getattr(allocation, "allocated_amount", Decimal("0"))
 
                 if weight > 0:
                     allocation_efficiency = (
                         liquidity_score + fee_efficiency + reliability_score
-                    ) / 3.0
+                    ) / Decimal("3")
                     total_score += allocation_efficiency * weight
                     total_weight += weight
 
-            return total_score / total_weight if total_weight > 0 else 0.0
+            return total_score / total_weight if total_weight > 0 else Decimal("0.0")
 
         except Exception:
-            return 0.0
+            return Decimal("0.0")
 
     def _apply_exchange_weights(
         self, weights: dict[str, float], total_capital: Decimal
@@ -1122,7 +1127,7 @@ class ExchangeDistributor(AbstractExchangeDistributionService, TransactionalServ
 
             equal_amount = total_capital / len(supported_exchanges)
             return self._apply_exchange_weights(
-                {exchange: float(equal_amount / total_capital) for exchange in supported_exchanges},
+                {exchange: equal_amount / total_capital for exchange in supported_exchanges},
                 total_capital,
             )
         except Exception as e:
@@ -1146,19 +1151,19 @@ class ExchangeDistributor(AbstractExchangeDistributionService, TransactionalServ
 
             # Use existing exchange metrics to determine performance weights
             weights = {}
-            total_weight = 0.0
+            total_weight = Decimal("0.0")
 
             for exchange in supported_exchanges:
                 # Calculate performance score based on existing metrics
                 if exchange in self.exchange_allocations:
                     allocation = self.exchange_allocations[exchange]
                     performance_score = (
-                        float(allocation.liquidity_score)
-                        + float(allocation.fee_efficiency)
-                        + float(allocation.reliability_score)
-                    ) / 3.0
+                        allocation.liquidity_score
+                        + allocation.fee_efficiency
+                        + allocation.reliability_score
+                    ) / Decimal("3")
                 else:
-                    performance_score = 0.5  # Default performance
+                    performance_score = Decimal("0.5")  # Default performance
 
                 weights[exchange] = performance_score
                 total_weight += performance_score
@@ -1169,7 +1174,7 @@ class ExchangeDistributor(AbstractExchangeDistributionService, TransactionalServ
             else:
                 # Fallback to equal weights
                 weights = {
-                    exchange: 1.0 / len(supported_exchanges) for exchange in supported_exchanges
+                    exchange: Decimal("1.0") / Decimal(len(supported_exchanges)) for exchange in supported_exchanges
                 }
 
             return self._apply_exchange_weights(weights, total_capital)

@@ -9,9 +9,7 @@ from datetime import datetime
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.analytics.interfaces import AnalyticsDataRepository
-
-# Removed DataTransformationService import - repositories should not depend on services
+from src.analytics.interfaces import AnalyticsDataRepository, DataTransformationServiceProtocol
 from src.analytics.types import PortfolioMetrics, PositionMetrics, RiskMetrics
 from src.core.base.component import BaseComponent
 from src.core.exceptions import DataError, ValidationError
@@ -34,15 +32,18 @@ class AnalyticsRepository(BaseComponent, AnalyticsDataRepository):
     def __init__(
         self,
         session: AsyncSession | None,
+        transformation_service: DataTransformationServiceProtocol = None,
     ):
         """
         Initialize analytics repository.
 
         Args:
             session: Database session for operations (can be None for testing)
+            transformation_service: Service for data transformation business logic
         """
         super().__init__()
         self.session = session
+        self.transformation_service = transformation_service
 
         # Initialize specific repositories for different metrics only if session is available
         if session is not None:
@@ -86,7 +87,7 @@ class AnalyticsRepository(BaseComponent, AnalyticsDataRepository):
             if self.portfolio_repo is None:
                 raise DataError(
                     "Database session not available for portfolio metrics storage",
-                    error_code="ANL_001"
+                    error_code="ANL_001",
                 )
 
             # Extract bot_id and validate using consistent patterns
@@ -97,22 +98,29 @@ class AnalyticsRepository(BaseComponent, AnalyticsDataRepository):
                     error_code="ANL_002",
                     field_name="bot_id",
                     field_value=bot_id,
-                    expected_type="UUID",
+                    expected_type="str",
                 )
 
-            # Transform portfolio metrics to database model
-            db_metrics = AnalyticsPortfolioMetrics(
-                timestamp=metrics.timestamp,
-                bot_id=bot_id,
-                total_value=metrics.total_value,
-                unrealized_pnl=metrics.unrealized_pnl,
-                realized_pnl=metrics.realized_pnl,
-                daily_pnl=metrics.daily_return or 0,
-                number_of_positions=metrics.positions_count,
-                leverage_ratio=metrics.leverage,
-                margin_usage=getattr(metrics, "margin_usage", None),
-                cash_balance=metrics.cash,
-            )
+            # Use transformation service for business logic
+            if self.transformation_service:
+                transform_data = self.transformation_service.transform_portfolio_to_dict(
+                    metrics, bot_id
+                )
+                db_metrics = AnalyticsPortfolioMetrics(**transform_data)
+            else:
+                # Fallback to simple mapping without business logic
+                db_metrics = AnalyticsPortfolioMetrics(
+                    timestamp=metrics.timestamp,
+                    bot_id=bot_id,
+                    total_value=metrics.total_value,
+                    unrealized_pnl=metrics.unrealized_pnl,
+                    realized_pnl=metrics.realized_pnl,
+                    daily_pnl=metrics.daily_return,
+                    number_of_positions=metrics.positions_count,
+                    leverage_ratio=metrics.leverage,
+                    margin_usage=getattr(metrics, "margin_used", None),
+                    cash_balance=metrics.cash,
+                )
 
             await self.portfolio_repo.create(db_metrics)
             self.logger.debug(f"Stored portfolio metrics for timestamp {metrics.timestamp}")
@@ -123,7 +131,7 @@ class AnalyticsRepository(BaseComponent, AnalyticsDataRepository):
             raise DataError(
                 f"Failed to store portfolio metrics: {e}",
                 error_code="ANL_003",
-                context={"timestamp": metrics.timestamp}
+                context={"timestamp": metrics.timestamp},
             ) from e
 
     async def store_position_metrics(self, metrics: list[PositionMetrics]) -> None:
@@ -144,7 +152,7 @@ class AnalyticsRepository(BaseComponent, AnalyticsDataRepository):
             if self.position_repo is None:
                 raise DataError(
                     "Database session not available for position metrics storage",
-                    error_code="ANL_004"
+                    error_code="ANL_004",
                 )
 
             for metric in metrics:
@@ -156,23 +164,31 @@ class AnalyticsRepository(BaseComponent, AnalyticsDataRepository):
                         error_code="ANL_005",
                         field_name="bot_id",
                         field_value=bot_id,
-                        expected_type="UUID",
+                        expected_type="str",
                     )
 
-                # Transform position metrics to database model
-                db_metric = AnalyticsPositionMetrics(
-                    timestamp=metric.timestamp,
-                    bot_id=bot_id,
-                    symbol=metric.symbol,
-                    exchange=metric.exchange,
-                    quantity=metric.quantity,
-                    market_value=metric.market_value,
-                    unrealized_pnl=metric.unrealized_pnl,
-                    realized_pnl=metric.realized_pnl,
-                    average_price=metric.entry_price,  # Map entry_price to average_price
-                    current_price=metric.current_price,
-                    position_side=metric.side,
-                )
+                # Use transformation service for business logic
+                if self.transformation_service:
+                    transform_data = self.transformation_service.transform_position_to_dict(
+                        metric, bot_id
+                    )
+                    db_metric = AnalyticsPositionMetrics(**transform_data)
+                else:
+                    # Fallback to simple mapping without business logic
+                    db_metric = AnalyticsPositionMetrics(
+                        timestamp=metric.timestamp,
+                        bot_id=bot_id,
+                        position_id=getattr(metric, "position_id", None),
+                        symbol=metric.symbol,
+                        exchange=getattr(metric, "exchange", None),
+                        quantity=getattr(metric, "quantity", 0),
+                        market_value=metric.market_value,
+                        unrealized_pnl=metric.unrealized_pnl,
+                        realized_pnl=metric.realized_pnl,
+                        average_price=metric.entry_price,
+                        current_price=metric.current_price,
+                        position_side=metric.side,
+                    )
 
                 await self.position_repo.create(db_metric)
 
@@ -184,7 +200,7 @@ class AnalyticsRepository(BaseComponent, AnalyticsDataRepository):
             raise DataError(
                 f"Failed to store position metrics: {e}",
                 error_code="ANL_006",
-                context={"count": len(metrics)}
+                context={"count": len(metrics)},
             ) from e
 
     async def store_risk_metrics(self, metrics: RiskMetrics) -> None:
@@ -201,8 +217,7 @@ class AnalyticsRepository(BaseComponent, AnalyticsDataRepository):
         try:
             if self.risk_repo is None:
                 raise DataError(
-                    "Database session not available for risk metrics storage",
-                    error_code="ANL_007"
+                    "Database session not available for risk metrics storage", error_code="ANL_007"
                 )
 
             # Extract and validate bot_id
@@ -213,23 +228,28 @@ class AnalyticsRepository(BaseComponent, AnalyticsDataRepository):
                     error_code="ANL_008",
                     field_name="bot_id",
                     field_value=bot_id,
-                    expected_type="UUID",
+                    expected_type="str",
                 )
 
-            # Transform risk metrics to database model
-            db_metrics = AnalyticsRiskMetrics(
-                timestamp=metrics.timestamp,
-                bot_id=bot_id,
-                portfolio_var_95=metrics.portfolio_var_95,
-                portfolio_var_99=metrics.portfolio_var_99,
-                expected_shortfall_95=metrics.expected_shortfall,
-                maximum_drawdown=metrics.max_drawdown,
-                volatility=metrics.volatility,
-                sharpe_ratio=getattr(metrics, "sharpe_ratio", None),
-                sortino_ratio=getattr(metrics, "sortino_ratio", None),
-                correlation_risk=metrics.correlation_risk,
-                concentration_risk=metrics.concentration_risk,
-            )
+            # Use transformation service for business logic
+            if self.transformation_service:
+                transform_data = self.transformation_service.transform_risk_to_dict(metrics, bot_id)
+                db_metrics = AnalyticsRiskMetrics(**transform_data)
+            else:
+                # Fallback to simple mapping without business logic
+                db_metrics = AnalyticsRiskMetrics(
+                    timestamp=metrics.timestamp,
+                    bot_id=bot_id,
+                    portfolio_var_95=getattr(metrics, "portfolio_var_95", None),
+                    portfolio_var_99=getattr(metrics, "portfolio_var_99", None),
+                    expected_shortfall_95=metrics.expected_shortfall,
+                    maximum_drawdown=metrics.max_drawdown,
+                    volatility=metrics.volatility,
+                    sharpe_ratio=getattr(metrics, "sharpe_ratio", None),
+                    sortino_ratio=getattr(metrics, "sortino_ratio", None),
+                    correlation_risk=getattr(metrics, "correlation_risk", None),
+                    concentration_risk=getattr(metrics, "concentration_risk", None),
+                )
 
             await self.risk_repo.create(db_metrics)
             self.logger.debug(f"Stored risk metrics for timestamp {metrics.timestamp}")
@@ -240,7 +260,7 @@ class AnalyticsRepository(BaseComponent, AnalyticsDataRepository):
             raise DataError(
                 f"Failed to store risk metrics: {e}",
                 error_code="ANL_009",
-                context={"timestamp": metrics.timestamp}
+                context={"timestamp": metrics.timestamp},
             ) from e
 
     async def get_historical_portfolio_metrics(
@@ -272,8 +292,15 @@ class AnalyticsRepository(BaseComponent, AnalyticsDataRepository):
             if self.session is None:
                 raise DataError(
                     "Database session not available for historical metrics retrieval",
-                    error_code="ANL_011"
+                    error_code="ANL_011",
                 )
+
+            # Import select locally to avoid module loading issues during tests
+            try:
+                from sqlalchemy import select
+            except ImportError:
+                # Fallback - this should not happen but ensures robustness
+                from sqlalchemy.sql import select
 
             # Use SQLAlchemy directly for date range query
             stmt = (
@@ -288,23 +315,44 @@ class AnalyticsRepository(BaseComponent, AnalyticsDataRepository):
             result_proxy = await self.session.execute(stmt)
             db_metrics = result_proxy.scalars().all()
 
-            # Transform database models to domain objects
-            result = [
-                PortfolioMetrics(
-                    timestamp=db_metric.timestamp,
-                    bot_id=str(db_metric.bot_id) if db_metric.bot_id else None,
-                    total_value=db_metric.total_value,
-                    cash=db_metric.cash_balance or 0,
-                    invested_capital=db_metric.total_value - (db_metric.cash_balance or 0),
-                    unrealized_pnl=db_metric.unrealized_pnl,
-                    realized_pnl=db_metric.realized_pnl,
-                    total_pnl=db_metric.unrealized_pnl + db_metric.realized_pnl,
-                    daily_return=db_metric.daily_pnl,
-                    positions_count=db_metric.number_of_positions or 0,
-                    leverage=db_metric.leverage_ratio,
-                )
-                for db_metric in db_metrics
-            ]
+            # Transform database models to domain objects using service
+            result = []
+            for db_metric in db_metrics:
+                if self.transformation_service:
+                    # Convert db model to dict for service transformation
+                    db_data = {
+                        "timestamp": db_metric.timestamp,
+                        "total_value": db_metric.total_value,
+                        "cash_balance": db_metric.cash_balance,
+                        "unrealized_pnl": db_metric.unrealized_pnl,
+                        "realized_pnl": db_metric.realized_pnl,
+                        "daily_pnl": db_metric.daily_pnl,
+                        "number_of_positions": db_metric.number_of_positions,
+                        "leverage_ratio": db_metric.leverage_ratio,
+                        "margin_usage": db_metric.margin_usage,
+                    }
+                    portfolio_metric = self.transformation_service.transform_dict_to_portfolio(
+                        db_data
+                    )
+                    portfolio_metric.bot_id = str(db_metric.bot_id) if db_metric.bot_id else None
+                    result.append(portfolio_metric)
+                else:
+                    # Fallback to simple transformation
+                    result.append(
+                        PortfolioMetrics(
+                            timestamp=db_metric.timestamp,
+                            bot_id=str(db_metric.bot_id) if db_metric.bot_id else None,
+                            total_value=db_metric.total_value,
+                            cash=db_metric.cash_balance or 0,
+                            invested_capital=db_metric.total_value - (db_metric.cash_balance or 0),
+                            unrealized_pnl=db_metric.unrealized_pnl,
+                            realized_pnl=db_metric.realized_pnl,
+                            total_pnl=db_metric.unrealized_pnl + db_metric.realized_pnl,
+                            daily_return=db_metric.daily_pnl,
+                            positions_count=db_metric.number_of_positions or 0,
+                            leverage=db_metric.leverage_ratio,
+                        )
+                    )
 
             self.logger.debug(f"Retrieved {len(result)} historical portfolio metrics")
             return result
@@ -325,6 +373,13 @@ class AnalyticsRepository(BaseComponent, AnalyticsDataRepository):
         try:
             if self.session is None:
                 return None
+
+            # Import select locally to avoid module loading issues during tests
+            try:
+                from sqlalchemy import select, desc
+            except ImportError:
+                # Fallback - this should not happen but ensures robustness
+                from sqlalchemy.sql import select, desc
 
             # Use SQLAlchemy directly for latest query
             stmt = (
@@ -356,8 +411,7 @@ class AnalyticsRepository(BaseComponent, AnalyticsDataRepository):
 
         except Exception as e:
             raise DataError(
-                f"Failed to retrieve latest portfolio metrics: {e}",
-                error_code="ANL_012"
+                f"Failed to retrieve latest portfolio metrics: {e}", error_code="ANL_012"
             ) from e
 
     async def get_latest_risk_metrics(self) -> RiskMetrics | None:
@@ -370,6 +424,13 @@ class AnalyticsRepository(BaseComponent, AnalyticsDataRepository):
         try:
             if self.session is None:
                 return None
+
+            # Import select locally to avoid module loading issues during tests
+            try:
+                from sqlalchemy import select, desc
+            except ImportError:
+                # Fallback - this should not happen but ensures robustness
+                from sqlalchemy.sql import select, desc
 
             # Use SQLAlchemy directly for latest query
             stmt = (
@@ -399,6 +460,5 @@ class AnalyticsRepository(BaseComponent, AnalyticsDataRepository):
 
         except Exception as e:
             raise DataError(
-                f"Failed to retrieve latest risk metrics: {e}",
-                error_code="ANL_013"
+                f"Failed to retrieve latest risk metrics: {e}", error_code="ANL_013"
             ) from e

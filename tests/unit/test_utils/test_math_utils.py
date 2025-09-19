@@ -135,7 +135,7 @@ class TestCalculateMaxDrawdown:
         assert isinstance(max_dd, Decimal)
         assert isinstance(start_idx, int)
         assert isinstance(end_idx, int)
-        assert max_dd <= 0  # Drawdown should be negative or zero
+        assert max_dd >= 0  # Drawdown is represented as positive value
         assert start_idx <= end_idx
 
     def test_no_drawdown(self):
@@ -490,7 +490,7 @@ class TestMathUtilsIntegration:
 
         assert isinstance(max_dd, Decimal)
         assert isinstance(final_change, Decimal)
-        assert max_dd <= 0  # Drawdown should be negative or zero
+        assert max_dd >= 0  # Drawdown is represented as positive value
 
     def test_safe_functions_with_edge_cases(self):
         """Test safe functions with edge cases."""

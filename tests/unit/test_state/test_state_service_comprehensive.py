@@ -9,7 +9,7 @@ from uuid import UUID
 
 import pytest
 
-from src.core.config.main import Config
+from src.core.config import Config
 from src.core.exceptions import ServiceError, StateConsistencyError, ValidationError
 from src.core.types import StateType
 

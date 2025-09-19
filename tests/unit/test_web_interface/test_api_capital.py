@@ -48,6 +48,18 @@ def mock_capital_service():
 
 
 @pytest.fixture
+def mock_auth_service():
+    """Create a mock auth service."""
+    service = MagicMock()
+    service.require_permission = MagicMock(return_value=None)
+    service.require_admin = MagicMock(return_value=None)
+    service.require_treasurer_permission = MagicMock(return_value=None)
+    service.require_trading_permission = MagicMock(return_value=None)
+    service.require_manager_permission = MagicMock(return_value=None)
+    return service
+
+
+@pytest.fixture
 def mock_current_user():
     """Create a mock authenticated user with trading permissions."""
     user = MagicMock()
@@ -71,7 +83,7 @@ class TestCapitalAllocationEndpoints:
     """Test capital allocation endpoints."""
 
     @pytest.mark.asyncio
-    async def test_allocate_capital_success(self, mock_capital_service, mock_current_user):
+    async def test_allocate_capital_success(self, mock_capital_service, mock_current_user, mock_auth_service):
         """Test successful capital allocation."""
         # Setup mock response to match CapitalAllocationResponse
         mock_allocation = {
@@ -98,7 +110,8 @@ class TestCapitalAllocationEndpoints:
                 amount="5000.00"
             ),
             current_user=mock_current_user,
-            web_capital_service=mock_capital_service
+            web_capital_service=mock_capital_service,
+            web_auth_service=mock_auth_service
         )
 
         # Assertions
@@ -108,7 +121,7 @@ class TestCapitalAllocationEndpoints:
         assert result.utilization_ratio == 0.0
 
     @pytest.mark.asyncio
-    async def test_allocate_capital_insufficient_funds(self, mock_capital_service, mock_current_user):
+    async def test_allocate_capital_insufficient_funds(self, mock_capital_service, mock_current_user, mock_auth_service):
         """Test capital allocation with insufficient funds."""
         # Setup mock to raise error
         mock_capital_service.allocate_capital.side_effect = CapitalAllocationError(
@@ -126,7 +139,8 @@ class TestCapitalAllocationEndpoints:
                     amount="10000.00"
                 ),
                 current_user=mock_current_user,
-                web_capital_service=mock_capital_service
+                web_capital_service=mock_capital_service,
+                web_auth_service=mock_auth_service
             )
 
         assert exc_info.value.status_code == status.HTTP_400_BAD_REQUEST
@@ -190,7 +204,7 @@ class TestFundFlowEndpoints:
     """Test fund flow management endpoints."""
 
     @pytest.mark.asyncio
-    async def test_record_fund_flow_success(self, mock_capital_service, mock_admin_user):
+    async def test_record_fund_flow_success(self, mock_capital_service, mock_admin_user, mock_auth_service):
         """Test successful fund flow recording."""
         # Setup mock response
         mock_transfer = {
@@ -208,10 +222,10 @@ class TestFundFlowEndpoints:
 
         # Import the correct function
         from src.web_interface.api.capital import record_fund_flow
-        
+
         # Setup mock for fund flow recording
         mock_capital_service.record_fund_flow = AsyncMock(return_value={"id": "flow_001"})
-        
+
         # Call endpoint
         result = await record_fund_flow(
             request=FundFlowRequest(
@@ -222,7 +236,8 @@ class TestFundFlowEndpoints:
                 destination="trading_account"
             ),
             current_user=mock_admin_user,
-            web_capital_service=mock_capital_service
+            web_capital_service=mock_capital_service,
+            web_auth_service=mock_auth_service
         )
 
         # Assertions
@@ -363,7 +378,7 @@ class TestPortfolioRebalancingEndpoints:
     """Test portfolio rebalancing endpoints."""
 
     @pytest.mark.asyncio
-    async def test_rebalance_portfolio_success(self, mock_capital_service, mock_admin_user):
+    async def test_rebalance_portfolio_success(self, mock_capital_service, mock_admin_user, mock_auth_service):
         """Test portfolio rebalancing (admin only)."""
         # Setup mock response
         mock_rebalance = {
@@ -401,7 +416,8 @@ class TestPortfolioRebalancingEndpoints:
                 "dry_run": False
             },
             current_user=mock_admin_user,
-            web_capital_service=mock_capital_service
+            web_capital_service=mock_capital_service,
+            web_auth_service=mock_auth_service
         )
 
         # Assertions
@@ -415,7 +431,7 @@ class TestAllocationLimitsEndpoints:
     """Test allocation limits endpoints."""
 
     @pytest.mark.asyncio
-    async def test_set_allocation_limits_success(self, mock_capital_service, mock_admin_user):
+    async def test_set_allocation_limits_success(self, mock_capital_service, mock_admin_user, mock_auth_service):
         """Test setting allocation limits (admin only)."""
         # Setup mock response
         mock_limits = {
@@ -456,7 +472,8 @@ class TestAllocationLimitsEndpoints:
                 }
             },
             current_user=mock_admin_user,
-            web_capital_service=mock_capital_service
+            web_capital_service=mock_capital_service,
+            web_auth_service=mock_auth_service
         )
 
         # Assertions

@@ -18,6 +18,7 @@ from src.core.base import BaseService
 from src.core.exceptions import OptimizationError, ServiceError, ValidationError
 from src.core.types import StrategyConfig, TradingMode
 from src.optimization.interfaces import IBacktestIntegrationService
+from src.utils.messaging_patterns import ErrorPropagationMixin
 
 
 class BacktestIntegrationService(BaseService, IBacktestIntegrationService):
@@ -90,11 +91,22 @@ class BacktestIntegrationService(BaseService, IBacktestIntegrationService):
             cast(structlog.BoundLogger, self._logger).error(
                 f"Backtesting service error during strategy evaluation: {e}"
             )
+            # Use consistent error propagation pattern
+            self.propagate_service_error(e, "backtesting_strategy_evaluation")
             raise OptimizationError(f"Backtesting failed: {e}") from e
         except Exception as e:
             cast(structlog.BoundLogger, self._logger).warning(
                 f"Strategy evaluation failed with unexpected error: {e}"
             )
+            # Use consistent error propagation pattern
+            error_context = {
+                "operation": "strategy_evaluation",
+                "strategy_name": strategy_config.name if hasattr(strategy_config, 'name') else "unknown",
+                "processing_mode": "batch",
+                "target_processing_mode": "stream",
+                "error_source": "optimization_backtesting_integration"
+            }
+            self.propagate_error(e, error_context)
             # Return poor performance for failed evaluations
             return {
                 "total_return": Decimal("-0.1"),
@@ -136,7 +148,7 @@ class BacktestIntegrationService(BaseService, IBacktestIntegrationService):
             """
             try:
                 # Create strategy configuration with proper required fields
-                from src.core.types.strategy import StrategyType
+                from src.core.types import StrategyType
 
                 strategy_config = StrategyConfig(
                     strategy_id=f"optimization_{strategy_name}",
@@ -161,6 +173,8 @@ class BacktestIntegrationService(BaseService, IBacktestIntegrationService):
                 cast(structlog.BoundLogger, self._logger).error(
                     f"Backtesting error in objective function: {e}"
                 )
+                # Use consistent error propagation pattern
+                self.propagate_service_error(e, "objective_function_evaluation")
                 raise OptimizationError(f"Objective function evaluation failed: {e}") from e
             except Exception as e:
                 cast(structlog.BoundLogger, self._logger).warning(
@@ -203,9 +217,7 @@ class BacktestIntegrationService(BaseService, IBacktestIntegrationService):
             if isinstance(strategy_config, StrategyConfig):
                 strategy_dict = {
                     "strategy_id": strategy_config.strategy_id,
-                    "strategy_type": strategy_config.strategy_type.value
-                    if hasattr(strategy_config.strategy_type, "value")
-                    else str(strategy_config.strategy_type),
+                    "strategy_type": getattr(strategy_config.strategy_type, "value", str(strategy_config.strategy_type)),
                     "name": strategy_config.name,
                     "symbol": strategy_config.symbol,
                     "timeframe": getattr(strategy_config, "timeframe", "1h"),
@@ -229,9 +241,7 @@ class BacktestIntegrationService(BaseService, IBacktestIntegrationService):
                 initial_capital=cast(Decimal, backtest_config["initial_capital"]),
                 max_open_positions=10,
                 exchange="binance",  # Add missing required field
-                timeframe=strategy_config.timeframe
-                if hasattr(strategy_config, "timeframe")
-                else "1h",
+                timeframe=getattr(strategy_config, "timeframe", "1h"),
             )
         except (AttributeError, TypeError) as e:
             raise OptimizationError(f"Invalid strategy configuration for backtesting: {e}") from e
@@ -243,23 +253,30 @@ class BacktestIntegrationService(BaseService, IBacktestIntegrationService):
     def _extract_performance_metrics(self, backtest_result: Any) -> dict[str, Decimal]:
         """Extract performance metrics from backtest result."""
         try:
-            # Extract key metrics from backtest result
-            total_return = Decimal(str(getattr(backtest_result, "total_return", 0)))
+            # Extract key metrics from backtest result using correct field names
+            total_return = Decimal(str(getattr(backtest_result, "total_return_pct", 0)))
             sharpe_ratio = Decimal(str(getattr(backtest_result, "sharpe_ratio", 0)))
-            max_drawdown = Decimal(str(getattr(backtest_result, "max_drawdown", 0)))
+            max_drawdown = Decimal(str(getattr(backtest_result, "max_drawdown_pct", 0)))
 
             # Calculate additional metrics
             trades = getattr(backtest_result, "trades", [])
+            winning_trades = []
+            losing_trades = []
+
             if trades:
                 winning_trades = [t for t in trades if Decimal(str(getattr(t, "pnl", 0))) > 0]
                 losing_trades = [t for t in trades if Decimal(str(getattr(t, "pnl", 0))) < 0]
 
                 win_rate = Decimal(str(len(winning_trades))) / Decimal(str(len(trades)))
 
-                # Profit factor
-                gross_profit = sum(Decimal(str(getattr(t, "pnl", 0))) for t in winning_trades)
-                gross_loss = abs(sum(Decimal(str(getattr(t, "pnl", 0))) for t in losing_trades))
-                profit_factor = gross_profit / gross_loss if gross_loss > 0 else Decimal("1")
+                # Profit factor - use existing value if available, otherwise calculate
+                profit_factor = getattr(backtest_result, "profit_factor", None)
+                if profit_factor is None:
+                    gross_profit = sum(Decimal(str(getattr(t, "pnl", 0))) for t in winning_trades)
+                    gross_loss = abs(sum(Decimal(str(getattr(t, "pnl", 0))) for t in losing_trades))
+                    profit_factor = gross_profit / gross_loss if gross_loss > 0 else Decimal("1")
+                else:
+                    profit_factor = Decimal(str(profit_factor))
             else:
                 win_rate = Decimal("0")
                 profit_factor = Decimal("1")
@@ -270,13 +287,10 @@ class BacktestIntegrationService(BaseService, IBacktestIntegrationService):
                 "max_drawdown": abs(max_drawdown),
                 "win_rate": win_rate,
                 "profit_factor": profit_factor,
-                "total_trades": Decimal(str(len(trades))),
-                "winning_trades": Decimal(
-                    str(len([t for t in trades if Decimal(str(getattr(t, "pnl", 0))) > 0]))
-                ),
-                "losing_trades": Decimal(
-                    str(len([t for t in trades if Decimal(str(getattr(t, "pnl", 0))) <= 0]))
-                ),
+                # Use existing totals if available, otherwise calculate from trades
+                "total_trades": Decimal(str(getattr(backtest_result, "total_trades", len(trades)))),
+                "winning_trades": Decimal(str(getattr(backtest_result, "winning_trades", len(winning_trades) if trades else 0))),
+                "losing_trades": Decimal(str(getattr(backtest_result, "losing_trades", len(losing_trades) if trades else 0))),
             }
 
         except Exception as e:

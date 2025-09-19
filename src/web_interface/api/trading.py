@@ -12,9 +12,11 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
-from src.core.exceptions import ErrorSeverity, NetworkError, TimeoutError
+from src.core.data_transformer import CoreDataTransformer
+from src.core.exceptions import ErrorSeverity, NetworkError, ServiceError, TimeoutError, ValidationError
 from src.core.logging import get_logger
 from src.core.types import OrderSide, OrderType
+from typing import TYPE_CHECKING
 from src.error_handling import (
     get_global_error_handler,
     with_error_context,
@@ -22,6 +24,8 @@ from src.error_handling import (
 )
 from src.error_handling.context import ErrorContext
 from src.utils.web_interface_utils import handle_api_error
+from src.utils.messaging_patterns import BoundaryValidator, ProcessingParadigmAligner
+from src.web_interface.data_transformer import transform_for_api_response
 from src.web_interface.di_registration import get_web_trading_service
 from src.web_interface.security.auth import User, get_current_user, get_trading_user
 
@@ -245,15 +249,24 @@ async def place_order(
             order_result, request_data
         )
 
-        return formatted_response
+        # Apply standardized response transformation with request/reply pattern
+        return transform_for_api_response(formatted_response, "place_order")
 
     except HTTPException:
         # Re-raise FastAPI exceptions
         raise
+    except ValidationError as e:
+        logger.error(f"Order validation failed: {e}", user=current_user.username)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=f"Validation error: {e!s}"
+        )
+    except ServiceError as e:
+        logger.error(f"Trading service error: {e}", user=current_user.username)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=f"Service error: {e!s}"
+        )
     except Exception as e:
         # Create error context with consistent data transformation
-        from src.execution.data_transformer import ExecutionDataTransformer
-
         error_data = {
             "component": "trading_api",
             "operation": "place_order",
@@ -267,11 +280,6 @@ async def place_order(
             "data_format": "event_data_v1",
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
-
-        # Apply consistent cross-module error transformation
-        error_data = ExecutionDataTransformer.apply_cross_module_validation(
-            error_data, source_module="web_interface", target_module="error_handling"
-        )
 
         error_context = ErrorContext.from_exception(
             error=e,
@@ -288,10 +296,10 @@ async def place_order(
         # Try to handle through global error handler
         if global_error_handler:
             try:
-                # Use consistent error data with execution module patterns
+                # Use error data for context
                 result = await global_error_handler.handle_error(
                     error=e,
-                    context=error_data,  # Use transformed error data
+                    context=error_data,
                     severity="high",
                 )
                 if result.get("recovery_attempted"):
@@ -365,11 +373,13 @@ async def cancel_order(
                 exchange=exchange,
                 user=current_user.username,
             )
-            return {
+            cancel_data = {
                 "success": True,
                 "message": f"Order {order_id} cancelled successfully",
                 "order_id": order_id,
             }
+            # Apply standardized response transformation
+            return transform_for_api_response(cancel_data, "cancel_order")
         else:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST, detail=f"Failed to cancel order {order_id}"
@@ -652,22 +662,27 @@ async def get_execution_status(current_user: User = Depends(get_current_user)):
         Dict: Execution engine status
     """
     try:
-        web_trading_service = get_web_trading_service_instance()
+        # Get execution service through dependency injection
+        from src.core.dependency_injection import DependencyInjector
 
-        # Get service health status through service layer
-        health_status = (
-            await web_trading_service.get_service_health()
-            if hasattr(web_trading_service, "get_service_health")
-            else {"status": "unknown"}
-        )
+        injector = DependencyInjector.get_instance()
+        if injector and injector.has_service("ExecutionService"):
+            execution_service = injector.resolve("ExecutionService")
+            if execution_service and hasattr(execution_service, "health_check"):
+                # Use execution service's proper health check method
+                health_status = await execution_service.health_check()
 
+                return {
+                    "success": True,
+                    "execution_engine": health_status,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                }
+
+        # Fallback if execution service is not available
         return {
-            "success": True,
-            "status": {
-                "service_health": health_status,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "message": "Trading service operational",
-            },
+            "success": False,
+            "error": "Execution service not available",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
     except Exception as e:

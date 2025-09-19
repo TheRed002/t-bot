@@ -2,7 +2,7 @@
 
 ## INTEGRATION
 **Dependencies**: core, database, error_handling, monitoring, utils
-**Used By**: analytics
+**Used By**: strategies
 **Provides**: DataController, DataMonitoringService, DataService, DataStorageManager, EnvironmentAwareDataManager, MLDataService, StreamingDataService
 **Patterns**: Async Operations, Circuit Breaker, Component Architecture, Service Layer
 
@@ -175,7 +175,7 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async handle_data_event(self, event: DataEvent) -> None` - Line 160
+- `async handle_data_event(self, event: DataEvent) -> None` - Line 139
 
 ### Implementation: `DataServiceFactory` ✅
 
@@ -223,11 +223,11 @@
 - `set_data_sources(self, news_source = None, social_source = None, alt_data_source = None) -> None` - Line 164
 - `async initialize(self) -> None` - Line 178
 - `async calculate_news_sentiment(self, symbol: str, lookback_hours: int | None = None) -> AlternativeResult` - Line 194
-- `async calculate_social_sentiment(self, symbol: str, lookback_hours: int | None = None) -> AlternativeResult` - Line 315
-- `async calculate_economic_indicators(self, symbol: str, lookback_hours: int | None = None) -> AlternativeResult` - Line 475
-- `async calculate_market_microstructure(self, symbol: str, lookback_hours: int | None = None) -> AlternativeResult` - Line 625
-- `async calculate_batch_features(self, symbol: str, features: list[str]) -> dict[str, AlternativeResult]` - Line 670
-- `async get_calculation_summary(self) -> dict[str, Any]` - Line 716
+- `async calculate_social_sentiment(self, symbol: str, lookback_hours: int | None = None) -> AlternativeResult` - Line 322
+- `async calculate_economic_indicators(self, symbol: str, lookback_hours: int | None = None) -> AlternativeResult` - Line 482
+- `async calculate_market_microstructure(self, symbol: str, lookback_hours: int | None = None) -> AlternativeResult` - Line 632
+- `async calculate_batch_features(self, symbol: str, features: list[str]) -> dict[str, AlternativeResult]` - Line 677
+- `async get_calculation_summary(self) -> dict[str, Any]` - Line 723
 
 ### Implementation: `FeatureType` ✅
 
@@ -258,7 +258,7 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `validate_feature_names(cls, v)` - Line 103
+- `validate_feature_types(cls, v)` - Line 103
 
 ### Implementation: `FeatureCalculationPipeline` ✅
 
@@ -499,8 +499,8 @@
 
 **Implemented Methods:**
 - `async normalize_prices(data: MarketData) -> MarketData` - Line 96
-- `async validate_ohlc_consistency(data: MarketData) -> bool` - Line 173
-- `async detect_outliers(data: list[MarketData], symbol: str) -> list[bool]` - Line 186
+- `async validate_ohlc_consistency(data: MarketData) -> bool` - Line 192
+- `async detect_outliers(data: list[MarketData], symbol: str) -> list[bool]` - Line 205
 
 ### Implementation: `DataQualityChecker` ✅
 
@@ -508,20 +508,20 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async assess_data_quality(self, data: MarketData) -> DataValidationResult` - Line 231
+- `async assess_data_quality(self, data: MarketData) -> DataValidationResult` - Line 250
 
-### Implementation: `EnhancedDataPipeline` ✅
+### Implementation: `DataPipeline` ✅
 
 **Inherits**: BaseComponent
-**Purpose**: Enterprise-grade data pipeline for financial data processing
+**Purpose**: Data pipeline for financial data processing
 **Status**: Complete
 
 **Implemented Methods:**
-- `async initialize(self) -> None` - Line 430
-- `async process_data(self, data: MarketData | list[MarketData], priority: int = 5) -> dict[str, Any]` - Line 470
-- `get_metrics(self) -> dict[str, Any]` - Line 887
-- `async health_check(self) -> dict[str, Any]` - Line 913
-- `async cleanup(self) -> None` - Line 953
+- `async initialize(self) -> None` - Line 449
+- `async process_data(self, data: MarketData | list[MarketData], priority: int = 5) -> dict[str, Any]` - Line 489
+- `get_metrics(self) -> dict[str, Any]` - Line 906
+- `async health_check(self) -> dict[str, Any]` - Line 932
+- `async cleanup(self) -> None` - Line 972
 
 ### Implementation: `IngestionConfig` ✅
 
@@ -703,11 +703,11 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async validate_market_data(self, data: MarketData) -> tuple[bool, list[ValidationIssue]]` - Line 87
-- `async validate_signal(self, signal: Signal) -> tuple[bool, list[ValidationIssue]]` - Line 227
-- `async validate_cross_source_consistency(self, primary_data: MarketData, secondary_data: MarketData) -> tuple[bool, list[ValidationIssue]]` - Line 318
-- `async get_validation_summary(self) -> dict[str, Any]` - Line 493
-- `async cleanup(self) -> None` - Line 541
+- `async validate_market_data(self, data: MarketData) -> tuple[bool, list[ValidationIssue]]` - Line 99
+- `async validate_signal(self, signal: Signal) -> tuple[bool, list[ValidationIssue]]` - Line 239
+- `async validate_cross_source_consistency(self, primary_data: MarketData, secondary_data: MarketData) -> tuple[bool, list[ValidationIssue]]` - Line 330
+- `async get_validation_summary(self) -> dict[str, Any]` - Line 505
+- `async cleanup(self) -> None` - Line 553
 
 ### Implementation: `ServiceRegistry` ✅
 
@@ -735,10 +735,11 @@
 - `async get_market_data(self, request: DataRequest) -> list[MarketDataRecord]` - Line 330
 - `async get_recent_data(self, ...) -> list[MarketData]` - Line 503
 - `async get_data_count(self, symbol: str, exchange: str = DEFAULT_EXCHANGE) -> int` - Line 540
-- `async health_check(self) -> HealthCheckResult` - Line 555
-- `async get_metrics(self)` - Line 644
-- `async reset_metrics(self) -> None` - Line 654
-- `async cleanup(self) -> None` - Line 660
+- `async get_volatility(self, symbol: str, period: int = 20, exchange: str = DEFAULT_EXCHANGE) -> Decimal | None` - Line 555
+- `async health_check(self) -> HealthCheckResult` - Line 596
+- `async get_metrics(self)` - Line 685
+- `async reset_metrics(self) -> None` - Line 695
+- `async cleanup(self) -> None` - Line 701
 
 ### Implementation: `MLDataService` ✅
 
@@ -867,13 +868,13 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async initialize(self) -> None` - Line 129
-- `async subscribe_to_ticker(self, exchange_name: str, symbol: str, callback: Callable[[Ticker], None]) -> str` - Line 203
-- `async get_historical_data(self, ...) -> list[MarketData]` - Line 248
-- `async unsubscribe(self, subscription_id: str) -> bool` - Line 414
-- `async get_market_data_summary(self) -> dict[str, Any]` - Line 454
-- `async cleanup(self) -> None` - Line 468
-- `async get_error_analytics(self) -> dict[str, Any]` - Line 557
+- `async initialize(self) -> None` - Line 132
+- `async subscribe_to_ticker(self, exchange_name: str, symbol: str, callback: Callable[[Ticker], None]) -> str` - Line 214
+- `async get_historical_data(self, ...) -> list[MarketData]` - Line 259
+- `async unsubscribe(self, subscription_id: str) -> bool` - Line 425
+- `async get_market_data_summary(self) -> dict[str, Any]` - Line 465
+- `async cleanup(self) -> None` - Line 479
+- `async get_error_analytics(self) -> dict[str, Any]` - Line 568
 
 ### Implementation: `NewsArticle` ✅
 
@@ -990,10 +991,10 @@
 - `async add_stream(self, exchange: str, config: StreamConfig) -> bool` - Line 497
 - `async start_stream(self, exchange: str) -> bool` - Line 513
 - `async stop_stream(self, exchange: str) -> bool` - Line 551
-- `async get_stream_status(self, exchange: str | None = None) -> dict[str, Any]` - Line 1021
-- `get_metrics(self) -> dict[str, Any]` - Line 1045
-- `async health_check(self) -> dict[str, Any]` - Line 1049
-- `async cleanup(self) -> None` - Line 1070
+- `async get_stream_status(self, exchange: str | None = None) -> dict[str, Any]` - Line 1020
+- `get_metrics(self) -> dict[str, Any]` - Line 1044
+- `async health_check(self) -> dict[str, Any]` - Line 1048
+- `async cleanup(self) -> None` - Line 1069
 
 ### Implementation: `CacheLevel` ✅
 
@@ -1019,7 +1020,7 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `validate_time_range(cls, v: datetime | None, info: Any) -> datetime | None` - Line 82
+- `validate_time_range(cls, v: datetime | None, info: Any) -> datetime | None` - Line 81
 
 ### Implementation: `FeatureRequest` ✅
 
@@ -1136,9 +1137,9 @@
 
 **Implemented Methods:**
 - `async process_market_data_batch(self, market_data: list[dict[str, Any]]) -> dict[str, np.ndarray]` - Line 278
-- `calculate_real_time_indicators(self, current_price: Decimal) -> dict[str, Decimal]` - Line 409
-- `get_performance_metrics(self) -> dict[str, Any]` - Line 480
-- `cleanup(self) -> None` - Line 497
+- `calculate_real_time_indicators(self, current_price: Decimal) -> dict[str, Decimal]` - Line 418
+- `get_performance_metrics(self) -> dict[str, Any]` - Line 489
+- `cleanup(self) -> None` - Line 506
 
 ## COMPLETE API REFERENCE
 
@@ -1408,7 +1409,6 @@ class DataEvent:
 class DataEventPublisher:
     def __init__(self, *args, **kwargs)  # Line 51
     async def _publish_data_event(self, ...) -> None  # Line 55
-    def _apply_consistent_event_transformation(self, data: dict[str, Any], source: str) -> dict[str, Any]  # Line 121
 ```
 
 #### Class: `DataEventSubscriber`
@@ -1417,8 +1417,8 @@ class DataEventPublisher:
 
 ```python
 class DataEventSubscriber:
-    def __init__(self, *args, **kwargs)  # Line 156
-    async def handle_data_event(self, event: DataEvent) -> None  # Line 160
+    def __init__(self, *args, **kwargs)  # Line 135
+    async def handle_data_event(self, event: DataEvent) -> None  # Line 139
 ```
 
 ### File: factory.py
@@ -1503,13 +1503,13 @@ class AlternativeFeatureCalculator:
     def set_data_sources(self, news_source = None, social_source = None, alt_data_source = None) -> None  # Line 164
     async def initialize(self) -> None  # Line 178
     async def calculate_news_sentiment(self, symbol: str, lookback_hours: int | None = None) -> AlternativeResult  # Line 194
-    async def calculate_social_sentiment(self, symbol: str, lookback_hours: int | None = None) -> AlternativeResult  # Line 315
-    async def calculate_economic_indicators(self, symbol: str, lookback_hours: int | None = None) -> AlternativeResult  # Line 475
-    def _calculate_sentiment_trend(self, sentiment_scores: list[float]) -> float  # Line 594
-    def _determine_sentiment_strength(self, avg_sentiment: float, sentiment_std: float) -> SentimentStrength  # Line 606
-    async def calculate_market_microstructure(self, symbol: str, lookback_hours: int | None = None) -> AlternativeResult  # Line 625
-    async def calculate_batch_features(self, symbol: str, features: list[str]) -> dict[str, AlternativeResult]  # Line 670
-    async def get_calculation_summary(self) -> dict[str, Any]  # Line 716
+    async def calculate_social_sentiment(self, symbol: str, lookback_hours: int | None = None) -> AlternativeResult  # Line 322
+    async def calculate_economic_indicators(self, symbol: str, lookback_hours: int | None = None) -> AlternativeResult  # Line 482
+    def _calculate_sentiment_trend(self, sentiment_scores: list[float]) -> float  # Line 601
+    def _determine_sentiment_strength(self, avg_sentiment: float, sentiment_std: float) -> SentimentStrength  # Line 613
+    async def calculate_market_microstructure(self, symbol: str, lookback_hours: int | None = None) -> AlternativeResult  # Line 632
+    async def calculate_batch_features(self, symbol: str, features: list[str]) -> dict[str, AlternativeResult]  # Line 677
+    async def get_calculation_summary(self) -> dict[str, Any]  # Line 723
 ```
 
 ### File: feature_store.py
@@ -1562,7 +1562,7 @@ class FeatureValue:
 
 ```python
 class FeatureRequest(BaseModel):
-    def validate_feature_names(cls, v)  # Line 103
+    def validate_feature_types(cls, v)  # Line 103
 ```
 
 #### Class: `FeatureCalculationPipeline`
@@ -1996,8 +1996,8 @@ class PipelineRecord:
 ```python
 class DataTransformation:
     async def normalize_prices(data: MarketData) -> MarketData  # Line 96
-    async def validate_ohlc_consistency(data: MarketData) -> bool  # Line 173
-    async def detect_outliers(data: list[MarketData], symbol: str) -> list[bool]  # Line 186
+    async def validate_ohlc_consistency(data: MarketData) -> bool  # Line 192
+    async def detect_outliers(data: list[MarketData], symbol: str) -> list[bool]  # Line 205
 ```
 
 #### Class: `DataQualityChecker`
@@ -2006,42 +2006,42 @@ class DataTransformation:
 
 ```python
 class DataQualityChecker:
-    def __init__(self, config: Config)  # Line 222
-    async def assess_data_quality(self, data: MarketData) -> DataValidationResult  # Line 231
+    def __init__(self, config: Config)  # Line 241
+    async def assess_data_quality(self, data: MarketData) -> DataValidationResult  # Line 250
 ```
 
-#### Class: `EnhancedDataPipeline`
+#### Class: `DataPipeline`
 
 **Inherits**: BaseComponent
-**Purpose**: Enterprise-grade data pipeline for financial data processing
+**Purpose**: Data pipeline for financial data processing
 
 ```python
-class EnhancedDataPipeline(BaseComponent):
-    def __init__(self, ...)  # Line 352
-    def _setup_configuration(self) -> None  # Line 401
-    async def initialize(self) -> None  # Line 430
-    async def _start_workers(self) -> None  # Line 457
-    async def process_data(self, data: MarketData | list[MarketData], priority: int = 5) -> dict[str, Any]  # Line 470
-    async def _apply_backpressure(self) -> None  # Line 577
-    async def _stage_worker(self, stage: PipelineStage, worker_id: int) -> None  # Line 593
-    async def _process_stage(self, stage: PipelineStage, record: PipelineRecord) -> None  # Line 631
-    def _get_next_stage(self, current_stage: PipelineStage) -> PipelineStage | None  # Line 692
-    async def _process_ingestion(self, record: PipelineRecord) -> None  # Line 715
-    async def _process_validation(self, record: PipelineRecord) -> None  # Line 721
-    async def _process_cleansing(self, record: PipelineRecord) -> None  # Line 733
-    async def _process_transformation(self, record: PipelineRecord) -> None  # Line 743
-    async def _process_enrichment(self, record: PipelineRecord) -> None  # Line 748
-    async def _process_quality_check(self, record: PipelineRecord) -> None  # Line 754
-    async def _process_storage(self, record: PipelineRecord) -> None  # Line 764
-    async def _process_indexing(self, record: PipelineRecord) -> None  # Line 797
-    async def _process_notification(self, record: PipelineRecord) -> None  # Line 803
-    async def _handle_processing_failure(self, record: PipelineRecord) -> None  # Line 811
-    async def _metrics_monitoring_loop(self) -> None  # Line 843
-    async def _quality_monitoring_loop(self) -> None  # Line 864
-    def get_metrics(self) -> dict[str, Any]  # Line 887
-    async def health_check(self) -> dict[str, Any]  # Line 913
-    async def cleanup(self) -> None  # Line 953
-    def _validate_pipeline_data_boundary(self, record: PipelineRecord) -> None  # Line 1056
+class DataPipeline(BaseComponent):
+    def __init__(self, ...)  # Line 371
+    def _setup_configuration(self) -> None  # Line 420
+    async def initialize(self) -> None  # Line 449
+    async def _start_workers(self) -> None  # Line 476
+    async def process_data(self, data: MarketData | list[MarketData], priority: int = 5) -> dict[str, Any]  # Line 489
+    async def _apply_backpressure(self) -> None  # Line 596
+    async def _stage_worker(self, stage: PipelineStage, worker_id: int) -> None  # Line 612
+    async def _process_stage(self, stage: PipelineStage, record: PipelineRecord) -> None  # Line 650
+    def _get_next_stage(self, current_stage: PipelineStage) -> PipelineStage | None  # Line 711
+    async def _process_ingestion(self, record: PipelineRecord) -> None  # Line 734
+    async def _process_validation(self, record: PipelineRecord) -> None  # Line 740
+    async def _process_cleansing(self, record: PipelineRecord) -> None  # Line 752
+    async def _process_transformation(self, record: PipelineRecord) -> None  # Line 762
+    async def _process_enrichment(self, record: PipelineRecord) -> None  # Line 767
+    async def _process_quality_check(self, record: PipelineRecord) -> None  # Line 773
+    async def _process_storage(self, record: PipelineRecord) -> None  # Line 783
+    async def _process_indexing(self, record: PipelineRecord) -> None  # Line 816
+    async def _process_notification(self, record: PipelineRecord) -> None  # Line 822
+    async def _handle_processing_failure(self, record: PipelineRecord) -> None  # Line 830
+    async def _metrics_monitoring_loop(self) -> None  # Line 862
+    async def _quality_monitoring_loop(self) -> None  # Line 883
+    def get_metrics(self) -> dict[str, Any]  # Line 906
+    async def health_check(self) -> dict[str, Any]  # Line 932
+    async def cleanup(self) -> None  # Line 972
+    def _validate_pipeline_data_boundary(self, record: PipelineRecord) -> None  # Line 1075
 ```
 
 ### File: ingestion.py
@@ -2227,7 +2227,7 @@ class PipelineValidator:
 - `from src.core import BaseComponent`
 - `from src.core.config import Config`
 - `from src.core.types import MarketData`
-- `from src.data.pipeline.data_pipeline import EnhancedDataPipeline`
+- `from src.data.pipeline.data_pipeline import DataPipeline`
 - `from src.data.validation.data_validator import DataValidator`
 
 #### Class: `ValidationStage`
@@ -2412,15 +2412,15 @@ class QualityMonitor(BaseComponent):
 
 ```python
 class DataValidator(BaseComponent):
-    def __init__(self, config: Config)  # Line 44
-    async def validate_market_data(self, data: MarketData) -> tuple[bool, list[ValidationIssue]]  # Line 87
-    async def validate_signal(self, signal: Signal) -> tuple[bool, list[ValidationIssue]]  # Line 227
-    async def validate_cross_source_consistency(self, primary_data: MarketData, secondary_data: MarketData) -> tuple[bool, list[ValidationIssue]]  # Line 318
-    async def _detect_outliers(self, data: MarketData) -> list[ValidationIssue]  # Line 394
-    async def _update_statistics(self, data: MarketData) -> None  # Line 449
-    async def get_validation_summary(self) -> dict[str, Any]  # Line 493
-    def _is_valid_symbol_format(self, symbol: str) -> bool  # Line 526
-    async def cleanup(self) -> None  # Line 541
+    def __init__(self, config)  # Line 42
+    async def validate_market_data(self, data: MarketData) -> tuple[bool, list[ValidationIssue]]  # Line 99
+    async def validate_signal(self, signal: Signal) -> tuple[bool, list[ValidationIssue]]  # Line 239
+    async def validate_cross_source_consistency(self, primary_data: MarketData, secondary_data: MarketData) -> tuple[bool, list[ValidationIssue]]  # Line 330
+    async def _detect_outliers(self, data: MarketData) -> list[ValidationIssue]  # Line 406
+    async def _update_statistics(self, data: MarketData) -> None  # Line 461
+    async def get_validation_summary(self) -> dict[str, Any]  # Line 505
+    def _is_valid_symbol_format(self, symbol: str) -> bool  # Line 538
+    async def cleanup(self) -> None  # Line 553
 ```
 
 ### File: registry.py
@@ -2466,7 +2466,7 @@ class DataService(BaseComponent):
     async def store_market_data(self, ...) -> bool  # Line 109
     def _validate_market_data(self, data_list: list[MarketData], processing_mode: str = 'stream') -> list[MarketData]  # Line 193
     def _transform_to_db_records(self, ...) -> list[MarketDataRecord]  # Line 213
-    def _apply_consistent_data_transformation(self, data: MarketData, processing_mode: str) -> MarketData  # Line 265
+    def _apply_consistent_data_transformation(self, data: MarketData, processing_mode: str) -> MarketData  # Line 261
     def _align_processing_paradigm(self, processing_mode: str, data_count: int) -> str  # Line 292
     async def _store_to_database(self, records: list[MarketDataRecord], processing_mode: str = 'stream') -> None  # Line 305
     async def _update_l1_cache(self, data_list: list[MarketData]) -> None  # Line 319
@@ -2478,11 +2478,12 @@ class DataService(BaseComponent):
     def _build_cache_key(self, request: DataRequest) -> str  # Line 486
     async def get_recent_data(self, ...) -> list[MarketData]  # Line 503
     async def get_data_count(self, symbol: str, exchange: str = DEFAULT_EXCHANGE) -> int  # Line 540
-    async def health_check(self) -> HealthCheckResult  # Line 555
-    def _validate_data_to_database_boundary(self, data_list: list[MarketData], processing_mode: str) -> None  # Line 603
-    async def get_metrics(self)  # Line 644
-    async def reset_metrics(self) -> None  # Line 654
-    async def cleanup(self) -> None  # Line 660
+    async def get_volatility(self, symbol: str, period: int = 20, exchange: str = DEFAULT_EXCHANGE) -> Decimal | None  # Line 555
+    async def health_check(self) -> HealthCheckResult  # Line 596
+    def _validate_data_to_database_boundary(self, data_list: list[MarketData], processing_mode: str) -> None  # Line 644
+    async def get_metrics(self)  # Line 685
+    async def reset_metrics(self) -> None  # Line 695
+    async def cleanup(self) -> None  # Line 701
 ```
 
 ### File: ml_data_service.py
@@ -2702,14 +2703,14 @@ class DataSubscription:
 ```python
 class MarketDataSource(BaseComponent):
     def __init__(self, config: Config, exchange_factory = None)  # Line 87
-    async def initialize(self) -> None  # Line 129
-    async def subscribe_to_ticker(self, exchange_name: str, symbol: str, callback: Callable[[Ticker], None]) -> str  # Line 203
-    async def get_historical_data(self, ...) -> list[MarketData]  # Line 248
-    async def _ticker_stream(self, exchange_name: str) -> None  # Line 310
-    async def unsubscribe(self, subscription_id: str) -> bool  # Line 414
-    async def get_market_data_summary(self) -> dict[str, Any]  # Line 454
-    async def cleanup(self) -> None  # Line 468
-    async def get_error_analytics(self) -> dict[str, Any]  # Line 557
+    async def initialize(self) -> None  # Line 132
+    async def subscribe_to_ticker(self, exchange_name: str, symbol: str, callback: Callable[[Ticker], None]) -> str  # Line 214
+    async def get_historical_data(self, ...) -> list[MarketData]  # Line 259
+    async def _ticker_stream(self, exchange_name: str) -> None  # Line 321
+    async def unsubscribe(self, subscription_id: str) -> bool  # Line 425
+    async def get_market_data_summary(self) -> dict[str, Any]  # Line 465
+    async def cleanup(self) -> None  # Line 479
+    async def get_error_analytics(self) -> dict[str, Any]  # Line 568
 ```
 
 ### File: news_data.py
@@ -2829,8 +2830,8 @@ class DatabaseStorage(BaseComponent, DataStorageInterface):
 - `from src.core import BaseComponent`
 - `from src.core.config import Config`
 - `from src.core.exceptions import ConfigurationError`
+- `from src.core.exceptions import ConnectionError`
 - `from src.core.exceptions import DataError`
-- `from src.core.exceptions import DataProcessingError`
 
 #### Class: `StreamState`
 
@@ -2917,16 +2918,16 @@ class StreamingDataService(BaseComponent):
     async def _listen_with_timeout(self, connection: WebSocketConnection, shutdown_event: asyncio.Event) -> AsyncGenerator[dict[str, Any], None]  # Line 635
     async def _processor_task(self, exchange: str) -> None  # Line 646
     async def _process_message_batch(self, exchange: str, messages: list[dict[str, Any]]) -> None  # Line 688
-    async def _is_duplicate(self, exchange: str, data: MarketData) -> bool  # Line 849
-    async def _reconnect(self, exchange: str) -> None  # Line 873
-    async def _handle_generic_message(self, message: dict[str, Any], exchange: str) -> MarketData | None  # Line 908
-    async def _handle_binance_message(self, message: dict[str, Any], exchange: str) -> MarketData | None  # Line 944
-    async def _handle_coinbase_message(self, message: dict[str, Any], exchange: str) -> MarketData | None  # Line 970
-    async def _handle_okx_message(self, message: dict[str, Any], exchange: str) -> MarketData | None  # Line 995
-    async def get_stream_status(self, exchange: str | None = None) -> dict[str, Any]  # Line 1021
-    def get_metrics(self) -> dict[str, Any]  # Line 1045
-    async def health_check(self) -> dict[str, Any]  # Line 1049
-    async def cleanup(self) -> None  # Line 1070
+    async def _is_duplicate(self, exchange: str, data: MarketData) -> bool  # Line 848
+    async def _reconnect(self, exchange: str) -> None  # Line 872
+    async def _handle_generic_message(self, message: dict[str, Any], exchange: str) -> MarketData | None  # Line 907
+    async def _handle_binance_message(self, message: dict[str, Any], exchange: str) -> MarketData | None  # Line 943
+    async def _handle_coinbase_message(self, message: dict[str, Any], exchange: str) -> MarketData | None  # Line 969
+    async def _handle_okx_message(self, message: dict[str, Any], exchange: str) -> MarketData | None  # Line 994
+    async def get_stream_status(self, exchange: str | None = None) -> dict[str, Any]  # Line 1020
+    def get_metrics(self) -> dict[str, Any]  # Line 1044
+    async def health_check(self) -> dict[str, Any]  # Line 1048
+    async def cleanup(self) -> None  # Line 1069
 ```
 
 ### File: types.py
@@ -2971,7 +2972,7 @@ class DataMetrics:
 
 ```python
 class DataRequest(BaseModel):
-    def validate_time_range(cls, v: datetime | None, info: Any) -> datetime | None  # Line 82
+    def validate_time_range(cls, v: datetime | None, info: Any) -> datetime | None  # Line 81
 ```
 
 #### Class: `FeatureRequest`
@@ -3134,8 +3135,8 @@ class SchemaValidator(BaseRecordValidator):
 - `from src.core.config import Config`
 - `from src.core.exceptions import DataProcessingError`
 - `from src.core.logging import get_logger`
-- `from src.error_handling import with_fallback`
 - `from src.error_handling import FallbackStrategy`
+- `from src.error_handling import with_fallback`
 
 #### Class: `HighPerformanceDataBuffer`
 
@@ -3169,12 +3170,12 @@ class IndicatorCache:
 class VectorizedProcessor:
     def __init__(self, ...) -> None  # Line 215
     async def process_market_data_batch(self, market_data: list[dict[str, Any]]) -> dict[str, np.ndarray]  # Line 278
-    def _convert_to_numpy(self, market_data: list[dict[str, Any]]) -> np.ndarray  # Line 329
-    async def _calculate_indicators_parallel(self, prices: np.ndarray, volumes: np.ndarray) -> dict[str, np.ndarray]  # Line 350
-    def calculate_real_time_indicators(self, current_price: Decimal) -> dict[str, Decimal]  # Line 409
-    def _update_metrics(self, batch_size: int, processing_time_us: float) -> None  # Line 456
-    def get_performance_metrics(self) -> dict[str, Any]  # Line 480
-    def cleanup(self) -> None  # Line 497
+    def _convert_to_numpy(self, market_data: list[dict[str, Any]]) -> np.ndarray  # Line 338
+    async def _calculate_indicators_parallel(self, prices: np.ndarray, volumes: np.ndarray) -> dict[str, np.ndarray]  # Line 359
+    def calculate_real_time_indicators(self, current_price: Decimal) -> dict[str, Decimal]  # Line 418
+    def _update_metrics(self, batch_size: int, processing_time_us: float) -> None  # Line 465
+    def get_performance_metrics(self) -> dict[str, Any]  # Line 489
+    def cleanup(self) -> None  # Line 506
 ```
 
 #### Functions:
@@ -3182,7 +3183,7 @@ class VectorizedProcessor:
 ```python
 def fast_ema_weight(price: float, alpha: float) -> float  # Line 51
 def calculate_volume_profile_vectorized(prices: np.ndarray, volumes: np.ndarray, num_bins: int = 50) -> tuple[np.ndarray, np.ndarray]  # Line 65
-def benchmark_vectorized_vs_sequential(prices: np.ndarray, iterations: int = 1000) -> dict[str, float]  # Line 532
+def benchmark_vectorized_vs_sequential(prices: np.ndarray, iterations: int = 1000) -> dict[str, float]  # Line 541
 ```
 
 ---

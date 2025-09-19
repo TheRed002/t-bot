@@ -33,7 +33,8 @@ TELEMETRY_MOCKS = {
         net_io_counters=Mock(return_value=Mock(bytes_sent=1000, bytes_recv=2000))
     ),
     "prometheus_client": Mock(),
-    "numpy": Mock(percentile=Mock(return_value=2.5)),
+    # Note: numpy removed from global mocks to prevent sklearn import conflicts
+    # Use @patch("numpy.function") in individual tests that need numpy mocking
     "scipy": Mock(),
     "scipy.stats": Mock(),
     "smtplib": Mock(),

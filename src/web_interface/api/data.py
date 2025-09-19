@@ -12,11 +12,11 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from src.core.exceptions import ValidationError
+from src.core.exceptions import ServiceError, ValidationError
 from src.core.logging import get_logger
 from src.utils.decorators import monitored
 from src.web_interface.auth.middleware import get_current_user
-from src.web_interface.dependencies import get_web_data_service
+from src.web_interface.dependencies import get_web_data_service, get_web_auth_service
 
 logger = get_logger(__name__)
 
@@ -123,11 +123,12 @@ async def control_pipeline(
     request: PipelineControlRequest,
     current_user: dict = Depends(get_current_user),
     web_data_service=Depends(get_web_data_service),
+    web_auth_service=Depends(get_web_auth_service),
 ):
     """Control data pipeline operations."""
     try:
-        if current_user.get("role") not in ["admin", "operator"]:
-            raise HTTPException(status_code=403, detail="Insufficient permissions")
+        # Use auth service for authorization
+        web_auth_service.require_operator_permission(current_user)
 
         result = await web_data_service.control_pipeline(
             action=request.action,
@@ -144,6 +145,11 @@ async def control_pipeline(
 
     except HTTPException:
         raise
+    except ServiceError as e:
+        logger.error(f"Service error in pipeline control: {e}")
+        if "Insufficient permissions" in str(e):
+            raise HTTPException(status_code=403, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error(f"Error controlling pipeline: {e}")
         raise HTTPException(status_code=500, detail="Failed to control pipeline")
@@ -378,11 +384,12 @@ async def configure_data_source(
     request: DataSourceConfigRequest,
     current_user: dict = Depends(get_current_user),
     web_data_service=Depends(get_web_data_service),
+    web_auth_service=Depends(get_web_auth_service),
 ):
     """Configure a new data source."""
     try:
-        if current_user.get("role") not in ["admin", "developer"]:
-            raise HTTPException(status_code=403, detail="Insufficient permissions")
+        # Use auth service for authorization
+        web_auth_service.require_admin_or_developer_permission(current_user)
 
         source_id = await web_data_service.configure_data_source(
             source_type=request.source_type,
@@ -401,6 +408,11 @@ async def configure_data_source(
 
     except HTTPException:
         raise
+    except ServiceError as e:
+        logger.error(f"Service error in source configuration: {e}")
+        if "Insufficient permissions" in str(e):
+            raise HTTPException(status_code=403, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e))
     except ValidationError as e:
         logger.error(f"Validation error in source configuration: {e}")
         raise HTTPException(status_code=400, detail=str(e))
@@ -416,11 +428,12 @@ async def update_data_source(
     config: dict[str, Any],
     current_user: dict = Depends(get_current_user),
     web_data_service=Depends(get_web_data_service),
+    web_auth_service=Depends(get_web_auth_service),
 ):
     """Update data source configuration."""
     try:
-        if current_user.get("role") not in ["admin", "developer"]:
-            raise HTTPException(status_code=403, detail="Insufficient permissions")
+        # Use auth service for authorization
+        web_auth_service.require_admin_or_developer_permission(current_user)
 
         success = await web_data_service.update_data_source(
             source_id=source_id, config=config, updated_by=current_user["user_id"]
@@ -433,6 +446,11 @@ async def update_data_source(
 
     except HTTPException:
         raise
+    except ServiceError as e:
+        logger.error(f"Service error in data source update: {e}")
+        if "Insufficient permissions" in str(e):
+            raise HTTPException(status_code=403, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error(f"Error updating data source: {e}")
         raise HTTPException(status_code=500, detail="Failed to update data source")
@@ -444,11 +462,12 @@ async def delete_data_source(
     source_id: str,
     current_user: dict = Depends(get_current_user),
     web_data_service=Depends(get_web_data_service),
+    web_auth_service=Depends(get_web_auth_service),
 ):
     """Delete a data source."""
     try:
-        if current_user.get("role") != "admin":
-            raise HTTPException(status_code=403, detail="Admin access required")
+        # Use auth service for authorization
+        web_auth_service.require_admin(current_user)
 
         success = await web_data_service.delete_data_source(
             source_id=source_id, deleted_by=current_user["user_id"]
@@ -461,6 +480,11 @@ async def delete_data_source(
 
     except HTTPException:
         raise
+    except ServiceError as e:
+        logger.error(f"Service error in data source deletion: {e}")
+        if "Insufficient permissions" in str(e):
+            raise HTTPException(status_code=403, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error(f"Error deleting data source: {e}")
         raise HTTPException(status_code=500, detail="Failed to delete data source")
@@ -543,11 +567,12 @@ async def clear_data_cache(
     cache_type: str | None = Query(default=None, pattern="^(market|feature|validation)$"),
     current_user: dict = Depends(get_current_user),
     web_data_service=Depends(get_web_data_service),
+    web_auth_service=Depends(get_web_auth_service),
 ):
     """Clear data cache."""
     try:
-        if current_user.get("role") not in ["admin", "developer"]:
-            raise HTTPException(status_code=403, detail="Insufficient permissions")
+        # Use auth service for authorization
+        web_auth_service.require_admin_or_developer_permission(current_user)
 
         cleared = await web_data_service.clear_data_cache(cache_type=cache_type)
 
@@ -559,6 +584,11 @@ async def clear_data_cache(
 
     except HTTPException:
         raise
+    except ServiceError as e:
+        logger.error(f"Service error in cache clearing: {e}")
+        if "Insufficient permissions" in str(e):
+            raise HTTPException(status_code=403, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error(f"Error clearing data cache: {e}")
         raise HTTPException(status_code=500, detail="Failed to clear data cache")

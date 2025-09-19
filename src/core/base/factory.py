@@ -102,6 +102,10 @@ class BaseFactory(BaseComponent, FactoryComponent, DependencyInjectionMixin, Gen
         super().__init__(name, config, correlation_id)
         DependencyInjectionMixin.__init__(self)
 
+        # Dependency injection attributes
+        self._dependency_container = None
+        self._auto_inject = True
+
         self._product_type = product_type
         self._creators: dict[str, type[T] | CreatorFunction[T] | Callable[..., T]] = {}
         self._creator_configs: dict[str, dict[str, Any]] = {}
@@ -131,6 +135,138 @@ class BaseFactory(BaseComponent, FactoryComponent, DependencyInjectionMixin, Gen
             factory=self._name,
             product_type=product_type.__name__,
         )
+
+    def configure_dependencies(self, container: Any) -> None:
+        """
+        Configure component dependencies.
+
+        Args:
+            container: Dependency injection container
+        """
+        # Support both DependencyContainer and DependencyInjector
+        if hasattr(container, "get_container"):
+            # This is a DependencyInjector, get the actual container
+            self._dependency_container = container.get_container()
+        else:
+            # This is a DependencyContainer
+            self._dependency_container = container
+
+        self._auto_inject = True  # Enable auto-injection when container is available
+
+        self._logger.debug(
+            "Dependencies configured",
+            factory=self._name,
+            container_type=type(container).__name__,
+        )
+
+    def _inject_dependencies_into_kwargs(
+        self, target_callable: Callable, kwargs: dict[str, Any]
+    ) -> dict[str, Any]:
+        """
+        Inject dependencies into keyword arguments for a callable.
+
+        Args:
+            target_callable: The callable to inject dependencies for
+            kwargs: Current keyword arguments
+
+        Returns:
+            Updated keyword arguments with injected dependencies
+        """
+        if not self._auto_inject or not self._dependency_container:
+            return kwargs
+
+        try:
+            # Get callable signature
+            if inspect.isclass(target_callable):
+                signature = inspect.signature(target_callable.__init__)
+            else:
+                signature = inspect.signature(target_callable)
+
+            # Get type hints
+            try:
+                from typing import get_type_hints
+                type_hints = get_type_hints(target_callable)
+            except (NameError, AttributeError):
+                type_hints = {}
+
+            # Inject dependencies based on parameter types
+            for param_name, param in signature.parameters.items():
+                if param_name not in kwargs and param_name != "self" and param_name in type_hints:
+                    param_type = type_hints[param_name]
+
+                    try:
+                        # Use service locator pattern for dependency resolution
+                        dependency = self._resolve_dependency(param_type.__name__, param_name)
+                        kwargs[param_name] = dependency
+
+                        self._logger.debug(
+                            "Dependency injected",
+                            parameter=param_name,
+                            dependency_type=param_type.__name__,
+                        )
+
+                    except Exception as e:
+                        # Dependency injection is optional, log for debugging
+                        self._logger.debug(
+                            "Failed to inject dependency (optional)",
+                            parameter=param_name,
+                            error=str(e),
+                            error_type=type(e).__name__,
+                        )
+                        continue
+
+            return kwargs
+
+        except Exception as e:
+            self._logger.warning("Dependency injection failed", error=str(e))
+            return kwargs
+
+    def _resolve_dependency(self, type_name: str, param_name: str) -> Any:
+        """
+        Resolve a dependency by type name or parameter name.
+
+        Args:
+            type_name: The type name of the dependency
+            param_name: The parameter name
+
+        Returns:
+            The resolved dependency
+
+        Raises:
+            Exception: If dependency cannot be resolved
+        """
+        if not self._dependency_container:
+            raise Exception("No dependency container configured")
+
+        # Try parameter name first (more specific)
+        try:
+            return self._dependency_container.get(param_name)
+        except:
+            pass
+
+        # Try type name
+        try:
+            return self._dependency_container.get(type_name)
+        except:
+            pass
+
+        # Try common service name patterns
+        service_patterns = [
+            f"{type_name}Service",
+            f"{type_name}Repository", 
+            f"{type_name}Manager",
+            type_name.replace("Service", ""),
+            type_name.replace("Repository", ""),
+            type_name.replace("Manager", "")
+        ]
+
+        for pattern in service_patterns:
+            try:
+                return self._dependency_container.get(pattern)
+            except:
+                continue
+
+        raise Exception(f"Cannot resolve dependency for {type_name}/{param_name}")
 
     @property
     def product_type(self) -> type[T]:

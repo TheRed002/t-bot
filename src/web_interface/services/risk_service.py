@@ -11,11 +11,13 @@ from typing import Any
 
 from src.core.base import BaseComponent
 from src.core.exceptions import RiskManagementError, ServiceError, ValidationError
+from src.risk_management.interfaces import RiskServiceInterface
+from src.utils.decimal_utils import to_decimal
 from src.web_interface.data_transformer import WebInterfaceDataTransformer
 from src.web_interface.interfaces import WebRiskServiceInterface
 
 
-class WebRiskService(BaseComponent, WebRiskServiceInterface):
+class WebRiskService(BaseComponent):
     """
     Service handling risk management business logic for web interface.
 
@@ -28,9 +30,9 @@ class WebRiskService(BaseComponent, WebRiskServiceInterface):
     through the risk_facade.
     """
 
-    def __init__(self, risk_facade=None):
+    def __init__(self, risk_service: RiskServiceInterface = None):
         super().__init__()
-        self.risk_facade = risk_facade
+        self.risk_service = risk_service
 
     async def initialize(self) -> None:
         """Initialize the service."""
@@ -43,28 +45,28 @@ class WebRiskService(BaseComponent, WebRiskServiceInterface):
     async def get_risk_dashboard_data(self) -> dict[str, Any]:
         """Get risk dashboard data with web-specific formatting."""
         try:
-            if self.risk_facade:
-                # Use actual risk management service through facade
-                risk_summary = await self.risk_facade.get_risk_summary()
+            if self.risk_service:
+                # Use actual risk management service
+                risk_metrics = await self.risk_service.calculate_risk_metrics(positions=None, market_data=None)
+                portfolio_metrics = await self.risk_service.get_portfolio_metrics()
 
-                # Extract portfolio metrics from risk summary
-                portfolio_metrics = risk_summary.get("portfolio_metrics", {})
+                # Extract portfolio metrics from risk service
+                portfolio_data = portfolio_metrics.model_dump()
 
                 # Convert risk service data to expected format
                 risk_data = {
-                    "portfolio_value": portfolio_metrics.get("total_value", Decimal("0")),
-                    "total_exposure": portfolio_metrics.get("total_exposure", Decimal("0")),
-                    "leverage": portfolio_metrics.get("leverage", Decimal("1")),
-                    "var_1d": portfolio_metrics.get("var", Decimal("0")),
-                    "var_5d": portfolio_metrics.get("var", Decimal("0"))
-                    * Decimal("2.236"),  # Scale by sqrt(5)
-                    "expected_shortfall": portfolio_metrics.get("expected_shortfall", Decimal("0")),
-                    "max_drawdown": portfolio_metrics.get("max_drawdown", Decimal("0")),
-                    "volatility": portfolio_metrics.get("volatility", Decimal("0")),
-                    "correlation_btc": None,  # Not available in current metrics
-                    "active_positions": portfolio_metrics.get("position_count", 0),
+                    "portfolio_value": portfolio_data.get("total_value", Decimal("0")),
+                    "total_exposure": portfolio_data.get("total_exposure", Decimal("0")),
+                    "leverage": portfolio_data.get("leverage", Decimal("1")),
+                    "var_1d": risk_metrics.var_1d if risk_metrics else Decimal("0"),
+                    "var_5d": risk_metrics.var_5d if risk_metrics else Decimal("0"),
+                    "expected_shortfall": risk_metrics.expected_shortfall if risk_metrics else Decimal("0"),
+                    "max_drawdown": risk_metrics.max_drawdown if risk_metrics else Decimal("0"),
+                    "volatility": portfolio_data.get("volatility", Decimal("0")),
+                    "correlation_btc": risk_metrics.correlation_risk if risk_metrics else None,
+                    "active_positions": portfolio_data.get("position_count", 0),
                     "concentration_risk": {
-                        "largest_position_pct": portfolio_metrics.get("largest_position_weight", 0),
+                        "largest_position_pct": portfolio_data.get("largest_position_weight", 0),
                         "top_3_positions_pct": 0,  # Would need additional calculation
                         "sector_concentration": {
                             "crypto": 1.0,  # Assume all crypto for now
@@ -163,22 +165,22 @@ class WebRiskService(BaseComponent, WebRiskServiceInterface):
             if "max_portfolio_risk" in parameters:
                 max_risk = parameters["max_portfolio_risk"]
                 if isinstance(max_risk, (int, float, Decimal)):
-                    if Decimal(str(max_risk)) < 0 or Decimal(str(max_risk)) > 1:
+                    if to_decimal(max_risk) < 0 or to_decimal(max_risk) > 1:
                         validation_errors.append("Max portfolio risk must be between 0 and 1")
-                    elif Decimal(str(max_risk)) > Decimal("0.25"):
+                    elif to_decimal(max_risk) > Decimal("0.25"):
                         validation_errors.append("Max portfolio risk above 25% is not recommended")
 
             # Business logic: validate position size
             if "max_position_size" in parameters:
                 max_pos = parameters["max_position_size"]
-                if isinstance(max_pos, (int, float, Decimal)) and Decimal(str(max_pos)) <= 0:
+                if isinstance(max_pos, (int, float, Decimal)) and to_decimal(max_pos) <= 0:
                     validation_errors.append("Max position size must be greater than 0")
 
             # Business logic: validate leverage
             if "max_leverage" in parameters:
                 max_lev = parameters["max_leverage"]
                 if isinstance(max_lev, (int, float, Decimal)):
-                    leverage_decimal = Decimal(str(max_lev))
+                    leverage_decimal = to_decimal(max_lev)
                     if leverage_decimal < 1:
                         validation_errors.append("Max leverage cannot be less than 1")
                     elif leverage_decimal > 10:
@@ -187,20 +189,20 @@ class WebRiskService(BaseComponent, WebRiskServiceInterface):
             # Business logic: validate daily loss limit
             if "max_daily_loss" in parameters:
                 daily_loss = parameters["max_daily_loss"]
-                if isinstance(daily_loss, (int, float, Decimal)) and Decimal(str(daily_loss)) <= 0:
+                if isinstance(daily_loss, (int, float, Decimal)) and to_decimal(daily_loss) <= 0:
                     validation_errors.append("Max daily loss must be greater than 0")
 
             # Business logic: validate VaR limit
             if "var_limit" in parameters:
                 var_limit = parameters["var_limit"]
-                if isinstance(var_limit, (int, float, Decimal)) and Decimal(str(var_limit)) <= 0:
+                if isinstance(var_limit, (int, float, Decimal)) and to_decimal(var_limit) <= 0:
                     validation_errors.append("VaR limit must be greater than 0")
 
             # Business logic: validate risk per trade
             if "risk_per_trade" in parameters:
                 risk_per_trade = parameters["risk_per_trade"]
                 if isinstance(risk_per_trade, (int, float, Decimal)):
-                    risk_decimal = Decimal(str(risk_per_trade))
+                    risk_decimal = to_decimal(risk_per_trade)
                     if risk_decimal < 0 or risk_decimal > Decimal("0.1"):
                         validation_errors.append("Risk per trade must be between 0 and 0.1 (10%)")
 
@@ -234,10 +236,10 @@ class WebRiskService(BaseComponent, WebRiskServiceInterface):
             position_value = quantity * price
 
             # Get current portfolio value from risk service if available
-            if self.risk_facade:
-                risk_summary = await self.risk_facade.get_risk_summary()
-                portfolio_metrics = risk_summary.get("portfolio_metrics", {})
-                portfolio_value = portfolio_metrics.get("total_value", Decimal("100000"))
+            if self.risk_service:
+                portfolio_metrics = await self.risk_service.get_portfolio_metrics()
+                portfolio_data = portfolio_metrics.model_dump()
+                portfolio_value = portfolio_data.get("total_value", Decimal("100000"))
             else:
                 portfolio_value = Decimal("100000")  # Mock portfolio value
 
@@ -245,7 +247,7 @@ class WebRiskService(BaseComponent, WebRiskServiceInterface):
             position_percentage = (position_value / portfolio_value) * 100
 
             # Use risk service for position sizing if available
-            if self.risk_facade:
+            if self.risk_service:
                 try:
                     # Create a mock signal for position sizing calculation
                     from src.core.types import Signal, SignalDirection
@@ -269,7 +271,7 @@ class WebRiskService(BaseComponent, WebRiskServiceInterface):
                     )
 
                     # Calculate optimal position size using risk management
-                    optimal_size = await self.risk_facade.calculate_position_size(
+                    optimal_size = await self.risk_service.calculate_position_size(
                         signal=signal, available_capital=portfolio_value, current_price=price
                     )
 
@@ -288,17 +290,18 @@ class WebRiskService(BaseComponent, WebRiskServiceInterface):
                 optimal_percentage = position_percentage
 
             # Get volatility and VaR from risk service if available
-            if self.risk_facade:
+            if self.risk_service:
                 try:
                     # Use risk service to calculate metrics instead of duplicating calculations
-                    risk_summary = await self.risk_facade.get_risk_summary()
-                    portfolio_metrics = risk_summary.get("portfolio_metrics", {})
+                    risk_metrics = await self.risk_service.calculate_risk_metrics(positions=None, market_data=None)
+                    portfolio_metrics = await self.risk_service.get_portfolio_metrics()
+                    portfolio_data = portfolio_metrics.model_dump()
 
                     # Use portfolio volatility as approximation for individual position
-                    volatility = portfolio_metrics.get("volatility", Decimal("0.25"))
+                    volatility = portfolio_data.get("volatility", Decimal("0.25"))
 
                     # Calculate VaR proportionally based on position size
-                    portfolio_var = portfolio_metrics.get("var", Decimal("0"))
+                    portfolio_var = risk_metrics.var_1d if risk_metrics else Decimal("0")
                     var_95 = (
                         portfolio_var * (position_value / portfolio_value)
                         if portfolio_value > 0
@@ -385,10 +388,11 @@ class WebRiskService(BaseComponent, WebRiskServiceInterface):
     async def get_portfolio_risk_breakdown(self) -> dict[str, Any]:
         """Get portfolio risk breakdown with web-specific analysis."""
         try:
-            if self.risk_facade:
-                # Get risk summary from actual risk service
-                risk_summary = await self.risk_facade.get_risk_summary()
-                portfolio_metrics = risk_summary.get("portfolio_metrics", {})
+            if self.risk_service:
+                # Get risk metrics from actual risk service
+                risk_metrics = await self.risk_service.calculate_risk_metrics(positions=None, market_data=None)
+                portfolio_metrics = await self.risk_service.get_portfolio_metrics()
+                portfolio_data = portfolio_metrics.model_dump()
 
                 # Convert risk service data to expected format
                 # Note: Some data may not be available and will use mock values
@@ -404,30 +408,28 @@ class WebRiskService(BaseComponent, WebRiskServiceInterface):
 
                 # If no position data available, provide mock data for UI
                 if not risk_data["positions"]:
-                    total_value = portfolio_metrics.get("total_value", Decimal("150000"))
+                    total_value = portfolio_data.get("total_value", Decimal("150000"))
+                    portfolio_var = risk_metrics.var_1d if risk_metrics else Decimal("0")
                     risk_data["positions"] = [
                         {
                             "symbol": "BTCUSDT",
                             "value": total_value * Decimal("0.4"),  # 40% allocation
                             "weight": 0.4,
-                            "var_contribution": portfolio_metrics.get("var", Decimal("0"))
-                            * Decimal("0.6"),
+                            "var_contribution": portfolio_var * Decimal("0.6"),
                             "volatility": 0.25,
                         },
                         {
                             "symbol": "ETHUSDT",
                             "value": total_value * Decimal("0.3"),  # 30% allocation
                             "weight": 0.3,
-                            "var_contribution": portfolio_metrics.get("var", Decimal("0"))
-                            * Decimal("0.3"),
+                            "var_contribution": portfolio_var * Decimal("0.3"),
                             "volatility": 0.30,
                         },
                         {
                             "symbol": "ADAUSDT",
                             "value": total_value * Decimal("0.15"),  # 15% allocation
                             "weight": 0.15,
-                            "var_contribution": portfolio_metrics.get("var", Decimal("0"))
-                            * Decimal("0.1"),
+                            "var_contribution": portfolio_var * Decimal("0.1"),
                             "volatility": 0.40,
                         },
                     ]
@@ -710,7 +712,7 @@ class WebRiskService(BaseComponent, WebRiskServiceInterface):
         return {
             "service": "WebRiskService",
             "status": "healthy",
-            "risk_facade_available": self.risk_facade is not None,
+            "risk_service_available": self.risk_service is not None,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
@@ -977,9 +979,9 @@ class WebRiskService(BaseComponent, WebRiskServiceInterface):
             "completed_at": datetime.now(timezone.utc),
         }
 
-    async def validate_risk_parameters(self, parameters: dict[str, Any]) -> dict[str, Any]:
+    async def validate_risk_parameters_v2(self, parameters: dict[str, Any]) -> dict[str, Any]:
         """
-        Validate risk management parameters.
+        Validate risk management parameters (second implementation for compatibility).
 
         Args:
             parameters: Risk parameters to validate
@@ -988,6 +990,11 @@ class WebRiskService(BaseComponent, WebRiskServiceInterface):
             Validation result with valid flag and errors
         """
         try:
+            if self.risk_service and hasattr(self.risk_service, "validate_risk_parameters"):
+                # Delegate to actual risk service if available
+                return await self.risk_service.validate_risk_parameters(parameters)
+
+            # Fallback validation if risk service not available
             validation_errors = []
 
             # Validate max_portfolio_risk
@@ -1055,6 +1062,32 @@ class WebRiskService(BaseComponent, WebRiskServiceInterface):
                 "validated_parameters": {},
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             }
+
+    async def get_current_risk_limits(self) -> dict[str, Any]:
+        """Get current risk limits with web-specific business logic."""
+        try:
+            if self.risk_service and hasattr(self.risk_service, "get_current_risk_limits"):
+                # Delegate to risk management service
+                limits = await self.risk_service.get_current_risk_limits()
+                return limits
+            else:
+                # Business logic: provide default risk limits for development
+                return {
+                    "max_portfolio_risk": Decimal("0.20"),  # 20% max portfolio risk
+                    "max_position_size": Decimal("25000.00"),  # $25k max position
+                    "max_leverage": Decimal("3.0"),  # 3x max leverage
+                    "max_daily_loss": Decimal("5000.00"),  # $5k max daily loss
+                    "max_drawdown_limit": Decimal("0.15"),  # 15% max drawdown
+                    "concentration_limit": Decimal("0.30"),  # 30% max in single asset
+                    "correlation_limit": Decimal("0.70"),  # 70% max correlation
+                    "var_limit": Decimal("7500.00"),  # $7.5k VaR limit
+                    "stop_loss_required": True,
+                    "position_sizing_method": "kelly_criterion",
+                    "risk_per_trade": Decimal("0.02"),  # 2% risk per trade
+                }
+        except Exception as e:
+            self.logger.error(f"Error getting current risk limits: {e}")
+            raise ServiceError(f"Failed to get current risk limits: {e}")
 
     def get_service_info(self) -> dict[str, Any]:
         """Get service information and capabilities."""

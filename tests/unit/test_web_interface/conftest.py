@@ -135,28 +135,31 @@ def test_app(test_config, mock_bot_orchestrator, mock_execution_engine, mock_mod
 
     def mock_current_user():
         return User(
-            user_id="test_001",
+            id="test_001",
             username="testuser",
             email="test@example.com",
             is_active=True,
+            is_verified=True,
             scopes=["read", "write"],
         )
 
     def mock_admin_user():
         return User(
-            user_id="admin_001",
+            id="admin_001",
             username="admin",
             email="admin@example.com",
             is_active=True,
+            is_verified=True,
             scopes=["admin", "read", "write", "trade"],
         )
 
     def mock_trading_user():
         return User(
-            user_id="trader_001",
+            id="trader_001",
             username="trader",
             email="trader@example.com",
             is_active=True,
+            is_verified=True,
             scopes=["read", "write", "trade"],
         )
 

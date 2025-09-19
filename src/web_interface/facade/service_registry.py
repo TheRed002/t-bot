@@ -10,6 +10,7 @@ from abc import ABC, abstractmethod
 from typing import Any
 
 from src.core.base import BaseComponent
+from src.core.exceptions import ValidationError
 
 
 class ServiceInterface(ABC):
@@ -46,7 +47,7 @@ class ServiceRegistry(BaseComponent):
         """
         if interface:
             if not self._implements_interface(service, interface):
-                raise ValueError(
+                raise ValidationError(
                     f"Service {name} does not implement interface {interface.__name__}"
                 )
             self._interfaces[name] = interface

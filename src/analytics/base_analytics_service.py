@@ -203,11 +203,18 @@ class BaseAnalyticsService(BaseService, ABC):
 
         # Record to metrics collector
         if self.metrics_collector:
-            self.metrics_collector.observe_histogram(
-                f"analytics_{self._name}_{operation}_duration_seconds",
-                duration,
-                {"service": self._name, "operation": operation},
-            )
+            try:
+                self.metrics_collector.observe_histogram(
+                    f"analytics_{self._name}_{operation}_duration_seconds",
+                    duration,
+                    labels={"service": self._name, "operation": operation},
+                )
+            except Exception as metrics_error:
+                # Log metrics error but don't fail the analytics operation
+                self.logger.warning(
+                    f"Failed to record calculation time metrics: {metrics_error}",
+                    extra={"operation": operation, "duration": duration}
+                )
 
     def record_error(self, operation: str, error: Exception) -> None:
         """
@@ -229,10 +236,17 @@ class BaseAnalyticsService(BaseService, ABC):
 
         # Record to metrics collector
         if self.metrics_collector:
-            self.metrics_collector.increment_counter(
-                f"analytics_{self._name}_errors_total",
-                {"service": self._name, "operation": operation, "error_type": error_type},
-            )
+            try:
+                self.metrics_collector.increment_counter(
+                    f"analytics_{self._name}_errors_total",
+                    labels={"service": self._name, "operation": operation, "error_type": error_type},
+                )
+            except Exception as metrics_error:
+                # Log metrics error but don't fail the error recording
+                self.logger.warning(
+                    f"Failed to record error metrics: {metrics_error}",
+                    extra={"operation": operation, "error_type": error_type}
+                )
 
     # Common data conversion
     def convert_for_export(self, obj: Any) -> Any:

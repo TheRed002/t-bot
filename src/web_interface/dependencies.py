@@ -12,6 +12,7 @@ from src.core.logging import get_logger
 
 if TYPE_CHECKING:
     from src.web_interface.services.analytics_service import WebAnalyticsService
+    from src.web_interface.services.auth_service import WebAuthService
     from src.web_interface.services.bot_service import WebBotService
     from src.web_interface.services.capital_service import WebCapitalService
     from src.web_interface.services.data_service import WebDataService
@@ -22,6 +23,18 @@ if TYPE_CHECKING:
     from src.web_interface.services.trading_service import WebTradingService
 
 logger = get_logger(__name__)
+
+
+def get_web_auth_service() -> "WebAuthService":
+    """Get WebAuthService instance from dependency injection container."""
+    injector = get_global_injector()
+
+    if not injector.has_service("WebAuthService"):
+        from src.web_interface.di_registration import register_web_interface_services
+
+        register_web_interface_services(injector)
+
+    return injector.resolve("WebAuthService")
 
 
 def get_web_analytics_service() -> "WebAnalyticsService":
@@ -200,6 +213,11 @@ def get_auth_manager(injector: DependencyInjector = None) -> Any:
 
 
 # Service Instance Functions (for FastAPI Depends)
+def get_web_auth_service_instance() -> "WebAuthService":
+    """Get WebAuthService instance for FastAPI dependency injection."""
+    return get_web_auth_service()
+
+
 def get_web_analytics_service_instance() -> "WebAnalyticsService":
     """Get WebAnalyticsService instance for FastAPI dependency injection."""
     return get_web_analytics_service()
@@ -257,6 +275,7 @@ def ensure_all_services_registered(injector: DependencyInjector = None) -> None:
 
     # Log registered services
     services = [
+        "WebAuthService",
         "WebAnalyticsService",
         "WebCapitalService",
         "WebDataService",
@@ -281,6 +300,7 @@ def get_all_web_services(injector: DependencyInjector = None) -> dict[str, Any]:
     ensure_all_services_registered(injector)
 
     return {
+        "auth": injector.resolve("WebAuthService"),
         "analytics": injector.resolve("WebAnalyticsService"),
         "capital": injector.resolve("WebCapitalService"),
         "data": injector.resolve("WebDataService"),

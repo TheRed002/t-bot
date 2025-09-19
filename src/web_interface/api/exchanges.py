@@ -12,11 +12,11 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from src.core.exceptions import ValidationError
+from src.core.exceptions import ServiceError, ValidationError
 from src.core.logging import get_logger
 from src.utils.decorators import monitored
 from src.web_interface.auth.middleware import get_current_user
-from src.web_interface.dependencies import get_web_exchange_service
+from src.web_interface.dependencies import get_web_exchange_service, get_web_auth_service
 
 logger = get_logger(__name__)
 
@@ -99,11 +99,12 @@ async def connect_exchange(
     request: ExchangeConnectionRequest,
     current_user: dict = Depends(get_current_user),
     web_exchange_service=Depends(get_web_exchange_service),
+    web_auth_service=Depends(get_web_auth_service),
 ):
     """Connect to an exchange."""
     try:
-        if current_user.get("role") not in ["admin", "trader"]:
-            raise HTTPException(status_code=403, detail="Insufficient permissions")
+        # Use auth service for authorization
+        web_auth_service.require_trading_permission(current_user)
 
         # Validate exchange name using service
         supported_exchanges = web_exchange_service.get_supported_exchanges()
@@ -132,6 +133,11 @@ async def connect_exchange(
 
     except HTTPException:
         raise
+    except ServiceError as e:
+        logger.error(f"Service error in exchange connection: {e}")
+        if "Insufficient permissions" in str(e):
+            raise HTTPException(status_code=403, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e))
     except ValidationError as e:
         logger.error(f"Validation error in exchange connection: {e}")
         raise HTTPException(status_code=400, detail=str(e))
@@ -146,11 +152,12 @@ async def disconnect_exchange(
     exchange: str,
     current_user: dict = Depends(get_current_user),
     web_exchange_service=Depends(get_web_exchange_service),
+    web_auth_service=Depends(get_web_auth_service),
 ):
     """Disconnect from an exchange."""
     try:
-        if current_user.get("role") not in ["admin", "trader"]:
-            raise HTTPException(status_code=403, detail="Insufficient permissions")
+        # Use auth service for authorization
+        web_auth_service.require_trading_permission(current_user)
 
         success = await web_exchange_service.disconnect_exchange(
             exchange=exchange, disconnected_by=current_user["user_id"]
@@ -163,6 +170,11 @@ async def disconnect_exchange(
 
     except HTTPException:
         raise
+    except ServiceError as e:
+        logger.error(f"Service error in exchange disconnection: {e}")
+        if "Insufficient permissions" in str(e):
+            raise HTTPException(status_code=403, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error(f"Error disconnecting from exchange: {e}")
         raise HTTPException(status_code=500, detail="Failed to disconnect from exchange")
@@ -228,11 +240,12 @@ async def update_exchange_config(
     request: ExchangeConfigRequest,
     current_user: dict = Depends(get_current_user),
     web_exchange_service=Depends(get_web_exchange_service),
+    web_auth_service=Depends(get_web_auth_service),
 ):
     """Update exchange configuration."""
     try:
-        if current_user.get("role") not in ["admin", "developer"]:
-            raise HTTPException(status_code=403, detail="Insufficient permissions")
+        # Use auth service for authorization
+        web_auth_service.require_admin_or_developer_permission(current_user)
 
         # Validate configuration if requested
         if request.validate:
@@ -258,6 +271,11 @@ async def update_exchange_config(
 
     except HTTPException:
         raise
+    except ServiceError as e:
+        logger.error(f"Service error in exchange config update: {e}")
+        if "Insufficient permissions" in str(e):
+            raise HTTPException(status_code=403, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error(f"Error updating exchange config: {e}")
         raise HTTPException(status_code=500, detail="Failed to update exchange configuration")
@@ -356,11 +374,12 @@ async def update_rate_config(
     request: RateLimitConfigRequest,
     current_user: dict = Depends(get_current_user),
     web_exchange_service=Depends(get_web_exchange_service),
+    web_auth_service=Depends(get_web_auth_service),
 ):
     """Update rate limit configuration."""
     try:
-        if current_user.get("role") not in ["admin", "developer"]:
-            raise HTTPException(status_code=403, detail="Insufficient permissions")
+        # Use auth service for authorization
+        web_auth_service.require_admin_or_developer_permission(current_user)
 
         success = await web_exchange_service.update_rate_config(
             exchange=exchange,
@@ -378,6 +397,11 @@ async def update_rate_config(
 
     except HTTPException:
         raise
+    except ServiceError as e:
+        logger.error(f"Service error in rate config update: {e}")
+        if "Insufficient permissions" in str(e):
+            raise HTTPException(status_code=403, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error(f"Error updating rate config: {e}")
         raise HTTPException(status_code=500, detail="Failed to update rate configuration")
@@ -551,12 +575,12 @@ async def get_exchange_balance(
     exchange: str,
     current_user: dict = Depends(get_current_user),
     web_exchange_service=Depends(get_web_exchange_service),
+    web_auth_service=Depends(get_web_auth_service),
 ):
     """Get account balance for an exchange."""
     try:
-        # Extra permission check for sensitive data
-        if current_user.get("role") not in ["admin", "trader", "manager"]:
-            raise HTTPException(status_code=403, detail="Insufficient permissions")
+        # Use auth service for authorization
+        web_auth_service.require_management_permission(current_user)
 
         balance = await web_exchange_service.get_exchange_balance(
             exchange=exchange, user_id=current_user["user_id"]
@@ -580,6 +604,11 @@ async def get_exchange_balance(
 
     except HTTPException:
         raise
+    except ServiceError as e:
+        logger.error(f"Service error in exchange balance retrieval: {e}")
+        if "Insufficient permissions" in str(e):
+            raise HTTPException(status_code=403, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error(f"Error getting exchange balance: {e}")
         raise HTTPException(status_code=500, detail="Failed to retrieve exchange balance")

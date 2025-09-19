@@ -260,7 +260,7 @@ class TestWebInterfaceFactory:
             result = factory.create_strategy_service()
 
             assert result == mock_service
-            mock_service_class.assert_called_once_with(strategy_facade=None)
+            mock_service_class.assert_called_once_with(strategy_service=None)
 
     def test_create_api_facade_without_injector(self, factory):
         """Test creating API facade without injector."""
@@ -530,7 +530,8 @@ class TestCreateWebInterfaceService:
 
     def test_create_unknown_service(self):
         """Test creating unknown service type raises error."""
-        with pytest.raises(ValueError, match="Unknown service type: UnknownService"):
+        from src.core.exceptions import ValidationError
+        with pytest.raises(ValidationError, match="Unknown service type: UnknownService"):
             create_web_interface_service("UnknownService")
 
 

@@ -35,7 +35,7 @@ from src.strategies.interfaces import BaseStrategyInterface
 class MockStrategy(BaseStrategy, BaseStrategyInterface):
     """Mock strategy for testing."""
 
-    def __init__(self, config: dict | StrategyConfig):
+    def __init__(self, config: "dict | StrategyConfig"):
         """Initialize mock strategy."""
         super().__init__(config)
 

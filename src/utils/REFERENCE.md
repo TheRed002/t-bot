@@ -1,10 +1,10 @@
 # UTILS Module Reference
 
 ## INTEGRATION
-**Dependencies**: core, error_handling, monitoring, state, web_interface
-**Used By**: analytics
-**Provides**: AsyncTaskManager, AuthenticatedWebSocketManager, BaseUtilityService, BaseWebSocketManager, BotStatusWebSocketManager, CacheManager, ExchangeWebSocketReconnectionManager, GPUManager, HTTPSessionManager, MarketDataWebSocketManager, MultiStreamWebSocketManager, PriceHistoryManager, ResourceManager, ValidationService, WebSocketConnectionManager, WebSocketHeartbeatManager, WebSocketStreamManager, WebSocketSubscriptionManager
-**Patterns**: Async Operations, Service Layer
+**Dependencies**: core, error_handling, ml, monitoring, state, web_interface
+**Used By**: strategies
+**Provides**: AsyncTaskManager, AuthenticatedWebSocketManager, BaseMonitoringService, BaseUtilityService, BaseWebSocketManager, BotStateManager, BotStatusWebSocketManager, CacheManager, DataFlowIntegrityManager, ExchangeWebSocketReconnectionManager, GPUManager, HTTPSessionManager, MarketDataWebSocketManager, MessageQueueManager, MetricsCollectionManager, MonitoringLoopManager, MultiStreamWebSocketManager, PriceHistoryManager, ResourceManager, RetryManager, ValidationService, WebSocketConnectionManager, WebSocketHeartbeatManager, WebSocketStreamManager, WebSocketSubscriptionManager
+**Patterns**: Async Operations, Circuit Breaker, Service Layer
 
 ## DETECTED PATTERNS
 **Financial**:
@@ -18,15 +18,15 @@
 **Performance**:
 - Parallel execution
 - Parallel execution
-- Retry mechanisms
+- Parallel execution
 **Architecture**:
 - BaseUtilityService inherits from base architecture
 - ValidationService inherits from base architecture
 
 ## MODULE OVERVIEW
-**Files**: 69 Python files
-**Classes**: 177
-**Functions**: 358
+**Files**: 82 Python files
+**Classes**: 216
+**Functions**: 414
 
 ## COMPLETE API REFERENCE
 
@@ -76,6 +76,68 @@
 - `validate_price_data(price_data: dict[str, Any]) -> bool` - Line 476
 - `check_arbitrage_thresholds(profit_percentage, ...) -> bool` - Line 519
 
+### Implementation: `BotServiceErrorHandler` ✅
+
+**Purpose**: Standardized error handling for bot services
+**Status**: Complete
+
+**Implemented Methods:**
+- `handle_service_operation(operation_name: str, bot_id: str | None = None, reraise: bool = True)` - Line 30
+- `async error_context(operation_name: str, bot_id: str | None = None)` - Line 98
+- `safe_operation(operation_name: str, default_return: Any = None, log_errors: bool = True)` - Line 114
+
+### Implementation: `RetryManager` ✅
+
+**Purpose**: Manages retry logic for bot operations
+**Status**: Complete
+
+**Implemented Methods:**
+- `with_retry(max_attempts, ...)` - Line 150
+
+### Implementation: `CircuitBreaker` ✅
+
+**Purpose**: Simple circuit breaker implementation for bot operations
+**Status**: Complete
+
+**Implemented Methods:**
+- `async call(self, func: Callable[Ellipsis, Awaitable[T]], *args, **kwargs) -> T` - Line 246
+
+### Implementation: `ErrorAggregator` ✅
+
+**Purpose**: Aggregate and analyze errors across bot operations
+**Status**: Complete
+
+**Implemented Methods:**
+- `record_error(self, ...) -> None` - Line 311
+- `get_error_summary(self, hours: int = 24) -> dict[str, Any]` - Line 344
+- `get_bot_error_history(self, bot_id: str, hours: int = 24) -> list[dict[str, Any]]` - Line 389
+
+### Implementation: `HealthCheckUtils` ✅
+
+**Purpose**: Utilities for bot health checking and scoring
+**Status**: Complete
+
+**Implemented Methods:**
+- `calculate_health_score(bot_status: BotStatus, metrics: BotMetrics | None = None) -> float` - Line 21
+
+### Implementation: `HealthAnalyzer` ✅
+
+**Purpose**: Health analysis utilities extracted from multiple services
+**Status**: Complete
+
+**Implemented Methods:**
+- `analyze_performance_health(metrics_history: list[dict[str, Any]]) -> dict[str, Any]` - Line 116
+- `analyze_resource_health(metrics_history: list[dict[str, Any]]) -> dict[str, Any]` - Line 183
+
+### Implementation: `AlertGenerator` ✅
+
+**Purpose**: Generate standardized alerts from health analysis
+**Status**: Complete
+
+**Implemented Methods:**
+- `generate_health_alerts(bot_id: str, health_results: dict[str, Any]) -> list[dict[str, Any]]` - Line 268
+- `generate_resource_alerts(bot_id: str, resource_analysis: dict[str, Any]) -> list[dict[str, Any]]` - Line 316
+
 ### Implementation: `ServiceHealthChecker` ✅
 
 **Purpose**: Helper for standardized service health checks
@@ -83,6 +145,48 @@
 
 **Implemented Methods:**
 - `async check_service_health(service: Any, service_name: str, default_healthy: bool = True) -> dict[str, Any]` - Line 489
+
+### Implementation: `BotStateTransition` ✅
+
+**Purpose**: Manages valid bot state transitions
+**Status**: Complete
+
+**Implemented Methods:**
+- `is_valid_transition(cls, from_status: BotStatus, to_status: BotStatus) -> bool` - Line 34
+- `get_valid_next_states(cls, current_status: BotStatus) -> list[BotStatus]` - Line 43
+- `validate_transition(cls, bot_id: str, from_status: BotStatus, to_status: BotStatus) -> None` - Line 48
+
+### Implementation: `BotStateManager` ✅
+
+**Purpose**: Centralized bot state management with consistency checks
+**Status**: Complete
+
+**Implemented Methods:**
+- `async get_bot_state(self, bot_id: str) -> Optional[BotState]` - Line 77
+- `async update_bot_state(self, ...) -> BotState` - Line 81
+- `async get_state_history(self, bot_id: str, limit: int = 50) -> list[Dict[str, Any]]` - Line 174
+- `async remove_bot_state(self, bot_id: str) -> bool` - Line 179
+- `get_all_bot_states(self) -> Dict[str, BotState]` - Line 199
+- `get_bots_by_status(self, status: BotStatus) -> list[str]` - Line 203
+- `async cleanup_stale_states(self, max_age_hours: int = 24) -> int` - Line 210
+
+### Implementation: `BotConfigurationValidator` ✅
+
+**Purpose**: Validates bot configurations with common rules
+**Status**: Complete
+
+**Implemented Methods:**
+- `validate_bot_configuration(config: BotConfiguration) -> Dict[str, Any]` - Line 251
+- `validate_configuration_update(current_config: BotConfiguration, update_data: Dict[str, Any]) -> Dict[str, Any]` - Line 347
+
+### Implementation: `BotStateMetrics` ✅
+
+**Purpose**: Collect and analyze bot state metrics
+**Status**: Complete
+
+**Implemented Methods:**
+- `record_state_duration(self, bot_id: str, status: BotStatus, duration_seconds: float) -> None` - Line 438
+- `get_state_statistics(self, bot_id: str) -> Dict[str, Any]` - Line 457
 
 ### Implementation: `CacheLevel` ✅
 
@@ -267,15 +371,82 @@
 **Implemented Methods:**
 - `validate_all(self) -> dict[str, Any]` - Line 28
 
+### Implementation: `ModuleBoundaryValidator` ✅
+
+**Purpose**: Base validator for module boundary validation
+**Status**: Complete
+
+**Implemented Methods:**
+- `validate_data_structure(self, data: dict[str, Any], required_fields: list[str]) -> dict[str, Any]` - Line 36
+- `validate_decimal_fields(self, data: dict[str, Any], decimal_fields: list[str]) -> dict[str, Any]` - Line 46
+- `validate_timestamp_fields(self, data: dict[str, Any], timestamp_fields: list[str]) -> dict[str, Any]` - Line 65
+
+### Implementation: `ExchangeToDataValidator` ✅
+
+**Inherits**: ModuleBoundaryValidator
+**Purpose**: Validator for Exchange → Data module boundary
+**Status**: Complete
+
+**Implemented Methods:**
+- `validate_market_data(self, data: dict[str, Any], exchange: str) -> dict[str, Any]` - Line 83
+- `validate_order_data(self, data: dict[str, Any], exchange: str) -> dict[str, Any]` - Line 118
+
+### Implementation: `DataToCoreValidator` ✅
+
+**Inherits**: ModuleBoundaryValidator
+**Purpose**: Validator for Data → Core module boundary
+**Status**: Complete
+
+**Implemented Methods:**
+- `validate_processed_data(self, data: dict[str, Any], data_type: str) -> dict[str, Any]` - Line 176
+
+### Implementation: `ErrorPropagationValidator` ✅
+
+**Purpose**: Validator for consistent error propagation across modules
+**Status**: Complete
+
+**Implemented Methods:**
+- `validate_error_format(self, error: Exception, source_module: str) -> Exception` - Line 251
+- `validate_error_chain(self, errors: list[Exception]) -> list[Exception]` - Line 302
+
+### Implementation: `DataFlowIntegrityManager` ✅
+
+**Purpose**: Manager for coordinating data flow validation across modules
+**Status**: Complete
+
+**Implemented Methods:**
+- `validate_exchange_data(self, data: dict[str, Any], exchange: str, data_type: str) -> dict[str, Any]` - Line 333
+- `validate_core_data(self, data: dict[str, Any], data_type: str) -> dict[str, Any]` - Line 351
+- `get_validation_stats(self) -> dict[str, Any]` - Line 363
+
+### Implementation: `DataFlowTransformer` ✅
+
+**Purpose**: Standardized data transformation utilities for consistent cross-module data flow
+**Status**: Complete
+
+**Implemented Methods:**
+- `apply_financial_field_transformation(entity: Any) -> Any` - Line 427
+- `apply_standard_metadata(data: dict[str, Any], module_source: str, processing_mode: str = 'stream') -> dict[str, Any]` - Line 456
+- `validate_and_transform_entity(entity: Any, module_source: str, processing_mode: str = 'stream') -> Any` - Line 485
+
+### Implementation: `StandardizedErrorPropagator` ✅
+
+**Purpose**: Standardized error propagation for consistent cross-module error handling
+**Status**: Complete
+
+**Implemented Methods:**
+- `propagate_validation_error(error, ...) -> None` - Line 521
+- `propagate_service_error(error: Exception, context: str, module_source: str, operation: str = None) -> None` - Line 571
+
 ### Implementation: `DataFlowValidator` ✅
 
 **Purpose**: Validates data flow consistency across module boundaries
 **Status**: Complete
 
 **Implemented Methods:**
-- `validate_message_pattern_consistency(data: dict[str, Any]) -> None` - Line 38
-- `validate_boundary_crossing_metadata(data: dict[str, Any]) -> None` - Line 89
-- `validate_complete_data_flow(cls, ...) -> None` - Line 123
+- `validate_message_pattern_consistency(data: dict[str, Any]) -> None` - Line 616
+- `validate_boundary_crossing_metadata(data: dict[str, Any]) -> None` - Line 667
+- `validate_complete_data_flow(cls, ...) -> None` - Line 701
 
 ### Implementation: `DataFlowIntegrityError` ✅
 
@@ -289,10 +460,10 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `track_conversion(self, ...) -> None` - Line 190
-- `get_summary(self) -> dict[str, Any]` - Line 236
-- `track_operation(self, operation: str, input_precision: int, output_precision: int) -> None` - Line 254
-- `get_precision_stats(self) -> dict[str, Any]` - Line 272
+- `track_conversion(self, ...) -> None` - Line 768
+- `get_summary(self) -> dict[str, Any]` - Line 814
+- `track_operation(self, operation: str, input_precision: int, output_precision: int) -> None` - Line 832
+- `get_precision_stats(self) -> dict[str, Any]` - Line 850
 
 ### Implementation: `DataFlowValidator` ✅
 
@@ -300,10 +471,10 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `validate_data_flow(self, data: dict[str, Any], context: str = 'unknown') -> dict[str, Any]` - Line 348
-- `add_validation_rule(self, field_pattern: str, rule: dict[str, Any]) -> None` - Line 618
-- `validate_data_integrity(self, data: Any) -> bool` - Line 623
-- `get_validation_report(self) -> dict[str, Any]` - Line 638
+- `validate_data_flow(self, data: dict[str, Any], context: str = 'unknown') -> dict[str, Any]` - Line 926
+- `add_validation_rule(self, field_pattern: str, rule: dict[str, Any]) -> None` - Line 1190
+- `validate_data_integrity(self, data: Any) -> bool` - Line 1195
+- `get_validation_report(self) -> dict[str, Any]` - Line 1210
 
 ### Implementation: `IntegrityPreservingConverter` ✅
 
@@ -311,8 +482,8 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `safe_convert_for_metrics(self, ...) -> float` - Line 667
-- `batch_convert_with_integrity(self, ...) -> dict[str, float]` - Line 717
+- `safe_convert_for_metrics(self, ...) -> float` - Line 1239
+- `batch_convert_with_integrity(self, ...) -> dict[str, float]` - Line 1289
 
 ### Implementation: `DecimalEncoder` ✅
 
@@ -647,17 +818,118 @@
 - `async initialize(self) -> None` - Line 122
 - `async shutdown(self) -> None` - Line 127
 
-### Implementation: `MessagePattern` ✅
-
-**Inherits**: Enum
-**Purpose**: Standardized message patterns
-**Status**: Complete
-
 ### Implementation: `MessageType` ✅
 
 **Inherits**: Enum
-**Purpose**: Standard message types
+**Purpose**: Message types for the messaging system
 **Status**: Complete
+
+### Implementation: `MessagePattern` ✅
+
+**Inherits**: Enum
+**Purpose**: Message communication patterns aligned with core data transformer standards
+**Status**: Complete
+
+**Implemented Methods:**
+- `from_core_standard(cls, core_pattern: str) -> 'MessagePattern'` - Line 50
+
+### Implementation: `Message` ✅
+
+**Purpose**: Standard message format
+**Status**: Complete
+
+**Implemented Methods:**
+
+### Implementation: `MessageHandler` 🔧
+
+**Inherits**: ABC
+**Purpose**: Abstract message handler
+**Status**: Abstract Base Class
+
+**Implemented Methods:**
+- `async handle(self, message: Message) -> bool` - Line 82
+- `can_handle(self, message_type: MessageType) -> bool` - Line 87
+
+### Implementation: `MessagePublisher` 🔧
+
+**Inherits**: ABC
+**Purpose**: Abstract message publisher
+**Status**: Abstract Base Class
+
+**Implemented Methods:**
+- `async publish(self, message: Message) -> bool` - Line 96
+- `async subscribe(self, message_type: MessageType, handler: MessageHandler) -> bool` - Line 101
+- `async unsubscribe(self, message_type: MessageType, handler: MessageHandler) -> bool` - Line 106
+
+### Implementation: `InMemoryMessageBus` ✅
+
+**Inherits**: MessagePublisher
+**Purpose**: In-memory message bus implementation using pub/sub pattern
+**Status**: Complete
+
+**Implemented Methods:**
+- `async publish(self, message: Message) -> bool` - Line 127
+- `async subscribe(self, message_type: MessageType, handler: MessageHandler) -> bool` - Line 146
+- `async unsubscribe(self, message_type: MessageType, handler: MessageHandler) -> bool` - Line 162
+- `get_stats(self) -> dict[str, Any]` - Line 220
+
+### Implementation: `ExchangeDataHandler` ✅
+
+**Inherits**: MessageHandler
+**Purpose**: Handler for exchange market data messages
+**Status**: Complete
+
+**Implemented Methods:**
+- `async handle(self, message: Message) -> bool` - Line 237
+- `can_handle(self, message_type: MessageType) -> bool` - Line 258
+
+### Implementation: `OrderUpdateHandler` ✅
+
+**Inherits**: MessageHandler
+**Purpose**: Handler for order update messages
+**Status**: Complete
+
+**Implemented Methods:**
+- `async handle(self, message: Message) -> bool` - Line 285
+- `can_handle(self, message_type: MessageType) -> bool` - Line 306
+
+### Implementation: `StreamToQueueBridge` ✅
+
+**Purpose**: Bridge between stream data and message queue system
+**Status**: Complete
+
+**Implemented Methods:**
+- `async handle_stream_data(self, data_type: str, data: dict[str, Any]) -> None` - Line 333
+
+### Implementation: `MessageQueueManager` ✅
+
+**Purpose**: Manager for coordinating messaging patterns across the system
+**Status**: Complete
+
+**Implemented Methods:**
+- `create_bridge(self, source: str) -> StreamToQueueBridge` - Line 374
+- `async register_market_data_handler(self, callback: Callable[[dict[str, Any]], None]) -> None` - Line 380
+- `async register_order_update_handler(self, callback: Callable[[dict[str, Any]], None]) -> None` - Line 386
+- `get_stats(self) -> dict[str, Any]` - Line 392
+
+### Implementation: `RequestReplyPattern` 🔧
+
+**Inherits**: ABC
+**Purpose**: Request-reply pattern for synchronous operations
+**Status**: Abstract Base Class
+
+**Implemented Methods:**
+- `async request(self, data: dict[str, Any], timeout: float = 5.0) -> dict[str, Any]` - Line 440
+- `async reply(self, request_id: str, data: dict[str, Any]) -> bool` - Line 445
+
+### Implementation: `BatchToStreamBridge` ✅
+
+**Purpose**: Bridge between batch processing and stream processing
+**Status**: Complete
+
+**Implemented Methods:**
+- `async add_to_batch(self, data: dict[str, Any]) -> None` - Line 459
+- `async flush(self) -> None` - Line 483
 
 ### Implementation: `StandardMessage` ✅
 
@@ -665,8 +937,8 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `to_dict(self) -> dict[str, Any]` - Line 65
-- `from_dict(cls, data: dict[str, Any]) -> 'StandardMessage'` - Line 79
+- `to_dict(self) -> dict[str, Any]` - Line 509
+- `from_dict(cls, data: dict[str, Any]) -> 'StandardMessage'` - Line 523
 
 ### Implementation: `MessageHandler` 🔧
 
@@ -675,7 +947,7 @@
 **Status**: Abstract Base Class
 
 **Implemented Methods:**
-- `async handle(self, message: StandardMessage) -> StandardMessage | None` - Line 96
+- `async handle(self, message: StandardMessage) -> StandardMessage | None` - Line 540
 
 ### Implementation: `ErrorPropagationMixin` ✅
 
@@ -683,10 +955,10 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `propagate_validation_error(self, error: Exception, context: str) -> None` - Line 104
-- `propagate_database_error(self, error: Exception, context: str) -> None` - Line 133
-- `propagate_service_error(self, error: Exception, context: str) -> None` - Line 156
-- `propagate_monitoring_error(self, error: Exception, context: str) -> None` - Line 193
+- `propagate_validation_error(self, error: Exception, context: str) -> None` - Line 548
+- `propagate_database_error(self, error: Exception, context: str) -> None` - Line 577
+- `propagate_service_error(self, error: Exception, context: str) -> None` - Line 600
+- `propagate_monitoring_error(self, error: Exception, context: str) -> None` - Line 637
 
 ### Implementation: `BoundaryValidator` ✅
 
@@ -694,12 +966,26 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `validate_database_entity(entity_dict: dict[str, Any], operation: str) -> None` - Line 233
-- `validate_database_to_error_boundary(data: dict[str, Any]) -> None` - Line 257
-- `validate_monitoring_to_error_boundary(data: dict[str, Any]) -> None` - Line 299
-- `validate_error_to_monitoring_boundary(data: dict[str, Any]) -> None` - Line 389
-- `validate_web_interface_to_error_boundary(data: dict[str, Any]) -> None` - Line 480
-- `validate_risk_to_state_boundary(data: dict[str, Any]) -> None` - Line 550
+- `validate_database_entity(entity_dict: dict[str, Any], operation: str) -> None` - Line 677
+- `validate_database_to_error_boundary(data: dict[str, Any]) -> None` - Line 701
+- `validate_monitoring_to_error_boundary(data: dict[str, Any]) -> None` - Line 743
+- `validate_error_to_monitoring_boundary(data: dict[str, Any]) -> None` - Line 833
+- `validate_web_interface_to_error_boundary(data: dict[str, Any]) -> None` - Line 924
+- `validate_risk_to_state_boundary(data: dict[str, Any]) -> None` - Line 994
+- `validate_monitoring_to_risk_boundary(data: dict[str, Any]) -> None` - Line 1058
+- `validate_state_to_risk_boundary(data: dict[str, Any]) -> None` - Line 1078
+- `validate_utils_to_ml_boundary(data: dict[str, Any]) -> None` - Line 1130
+- `validate_ml_to_utils_boundary(data: dict[str, Any]) -> None` - Line 1171
+- `validate_monitoring_to_state_boundary(data: dict[str, Any]) -> None` - Line 1224
+- `validate_analytics_to_monitoring_boundary(data: dict[str, Any]) -> None` - Line 1244
+- `validate_monitoring_to_analytics_boundary(data: dict[str, Any]) -> None` - Line 1301
+- `validate_execution_to_state_boundary(data: dict[str, Any]) -> None` - Line 1344
+- `validate_risk_to_execution_boundary(data: dict[str, Any]) -> None` - Line 1400
+- `validate_optimization_to_strategy_boundary(data: dict[str, Any]) -> None` - Line 1473
+- `validate_web_interface_to_execution_boundary(data: dict[str, Any]) -> None` - Line 1514
+- `validate_web_interface_to_strategies_boundary(data: dict[str, Any]) -> None` - Line 1586
+- `validate_web_interface_to_risk_management_boundary(data: dict[str, Any]) -> None` - Line 1679
+- `validate_strategies_to_web_interface_boundary(data: dict[str, Any]) -> None` - Line 1751
 
 ### Implementation: `ProcessingParadigmAligner` ✅
 
@@ -707,9 +993,9 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `create_batch_from_stream(stream_items: list[dict[str, Any]]) -> dict[str, Any]` - Line 618
-- `create_stream_from_batch(batch_data: dict[str, Any]) -> list[dict[str, Any]]` - Line 629
-- `align_processing_modes(source_mode: str, target_mode: str, data: dict[str, Any]) -> dict[str, Any]` - Line 645
+- `create_batch_from_stream(stream_items: list[dict[str, Any]]) -> dict[str, Any]` - Line 1882
+- `create_stream_from_batch(batch_data: dict[str, Any]) -> list[dict[str, Any]]` - Line 1893
+- `align_processing_modes(source_mode: str, target_mode: str, data: dict[str, Any]) -> dict[str, Any]` - Line 1909
 
 ### Implementation: `MessagingCoordinator` ✅
 
@@ -717,12 +1003,12 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `register_handler(self, pattern: MessagePattern, handler: MessageHandler) -> None` - Line 727
-- `async publish(self, ...) -> None` - Line 736
-- `async request(self, ...) -> Any` - Line 769
-- `async reply(self, original_message: StandardMessage, response_data: Any) -> None` - Line 814
-- `async stream_start(self, ...) -> None` - Line 833
-- `async batch_process(self, ...) -> None` - Line 860
+- `register_handler(self, pattern: MessagePattern, handler: MessageHandler) -> None` - Line 1991
+- `async publish(self, ...) -> None` - Line 2000
+- `async request(self, ...) -> Any` - Line 2033
+- `async reply(self, original_message: StandardMessage, response_data: Any) -> None` - Line 2078
+- `async stream_start(self, ...) -> None` - Line 2097
+- `async batch_process(self, ...) -> None` - Line 2124
 
 ### Implementation: `DataTransformationHandler` ✅
 
@@ -731,7 +1017,7 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async handle(self, message: StandardMessage) -> StandardMessage | None` - Line 1012
+- `async handle(self, message: StandardMessage) -> StandardMessage | None` - Line 2276
 
 ### Implementation: `TTLCache` ✅
 
@@ -873,6 +1159,48 @@
 **Implemented Methods:**
 - `async collect_system_metrics() -> dict[str, Any]` - Line 526
 
+### Implementation: `MonitoringLoopManager` ✅
+
+**Purpose**: Manages standardized monitoring loops with consistent patterns
+**Status**: Complete
+
+**Implemented Methods:**
+- `async start_monitoring_loop(self, ...) -> bool` - Line 26
+- `async stop_monitoring_loop(self, loop_name: str) -> bool` - Line 66
+- `async stop_all_loops(self) -> None` - Line 89
+- `get_loop_status(self) -> dict[str, Any]` - Line 180
+
+### Implementation: `BaseMonitoringService` 🔧
+
+**Inherits**: ABC
+**Purpose**: Base class for services that need standardized monitoring loops
+**Status**: Abstract Base Class
+
+**Implemented Methods:**
+- `async start_monitoring(self) -> None` - Line 213
+- `async stop_monitoring(self) -> None` - Line 222
+- `get_monitoring_status(self) -> dict[str, Any]` - Line 235
+
+### Implementation: `PerformanceMonitor` ✅
+
+**Purpose**: Monitor and track performance metrics for functions and operations
+**Status**: Complete
+
+**Implemented Methods:**
+- `async track_operation(self, ...) -> Any` - Line 248
+- `get_performance_summary(self, operation_name: str | None = None) -> dict[str, Any]` - Line 308
+
+### Implementation: `MetricsCollectionManager` ✅
+
+**Purpose**: Manage standardized metrics collection patterns
+**Status**: Complete
+
+**Implemented Methods:**
+- `register_metric_collector(self, ...) -> None` - Line 376
+- `async collect_metric(self, metric_name: str, collector_func: Callable[[], Awaitable[dict[str, Any]]]) -> None` - Line 393
+- `get_metric_data(self, metric_name: str, hours: int = 24) -> list[dict[str, Any]]` - Line 420
+- `cleanup_old_metrics(self, days: int = 7) -> int` - Line 454
+
 ### Implementation: `PipelineStage` ✅
 
 **Inherits**: Enum
@@ -951,6 +1279,15 @@
 - `calculate_size(self, ...) -> Decimal` - Line 26
 - `validate_inputs(self, signal: Signal, portfolio_value: Decimal, risk_per_trade: Decimal) -> bool` - Line 32
 
+### Implementation: `FixedAlgorithm` ✅
+
+**Inherits**: PositionSizingAlgorithm
+**Purpose**: Fixed position sizing algorithm - uses configured position size regardless of portfolio
+**Status**: Complete
+
+**Implemented Methods:**
+- `calculate_size(self, ...) -> Decimal` - Line 54
+
 ### Implementation: `FixedPercentageAlgorithm` ✅
 
 **Inherits**: PositionSizingAlgorithm
@@ -958,7 +1295,7 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `calculate_size(self, ...) -> Decimal` - Line 54
+- `calculate_size(self, ...) -> Decimal` - Line 74
 
 ### Implementation: `KellyCriterionAlgorithm` ✅
 
@@ -967,7 +1304,7 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `calculate_size(self, ...) -> Decimal` - Line 78
+- `calculate_size(self, ...) -> Decimal` - Line 98
 
 ### Implementation: `VolatilityAdjustedAlgorithm` ✅
 
@@ -976,7 +1313,7 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `calculate_size(self, ...) -> Decimal` - Line 131
+- `calculate_size(self, ...) -> Decimal` - Line 159
 
 ### Implementation: `ConfidenceWeightedAlgorithm` ✅
 
@@ -985,7 +1322,7 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `calculate_size(self, ...) -> Decimal` - Line 180
+- `calculate_size(self, ...) -> Decimal` - Line 208
 
 ### Implementation: `ATRBasedAlgorithm` ✅
 
@@ -994,7 +1331,53 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `calculate_size(self, ...) -> Decimal` - Line 213
+- `calculate_size(self, ...) -> Decimal` - Line 241
+
+### Implementation: `PydanticValidators` ✅
+
+**Purpose**: Reusable Pydantic validators to eliminate duplication
+**Status**: Complete
+
+**Implemented Methods:**
+- `amount_validator(field_name: str = 'amount') -> Callable[[Any, Any], str]` - Line 20
+- `non_negative_amount_validator(field_name: str = 'amount') -> Callable[[Any, Any], str]` - Line 42
+- `price_validator(field_name: str = 'price') -> Callable[[Any, Any], str]` - Line 64
+- `quantity_validator(field_name: str = 'quantity') -> Callable[[Any, Any], str]` - Line 89
+- `symbol_validator(field_name: str = 'symbol') -> Callable[[Any, Any], str]` - Line 114
+- `percentage_validator(field_name: str = 'percentage') -> Callable[[Any, Any], str]` - Line 136
+- `exchange_validator(field_name: str = 'exchange') -> Callable[[Any, Any], str]` - Line 160
+
+### Implementation: `ResourceValidationError` ✅
+
+**Inherits**: ValidationError
+**Purpose**: Specific validation error for resource operations
+**Status**: Complete
+
+### Implementation: `ResourceValidator` ✅
+
+**Purpose**: Consolidated resource validation logic
+**Status**: Complete
+
+**Implemented Methods:**
+- `validate_resource_request(bot_id, ...) -> dict[str, Any]` - Line 27
+- `calculate_resource_requirements(bot_id, ...) -> dict[ResourceType, Decimal]` - Line 82
+- `check_resource_availability(requirements, ...) -> dict[str, Any]` - Line 193
+
+### Implementation: `ResourceAllocationTracker` ✅
+
+**Purpose**: Track and validate resource allocations
+**Status**: Complete
+
+**Implemented Methods:**
+- `validate_allocation_state(bot_id: str, allocation_data: dict[str, Any]) -> dict[str, Any]` - Line 262
+
+### Implementation: `ResourceConflictDetector` ✅
+
+**Purpose**: Detect and analyze resource conflicts
+**Status**: Complete
+
+**Implemented Methods:**
+- `detect_allocation_conflicts(all_allocations, ...) -> list[dict[str, Any]]` - Line 355
 
 ### Implementation: `RiskEventType` ✅
 
@@ -1294,6 +1677,8 @@
 - `validate_risk_parameters(params: dict[str, Any]) -> bool` - Line 325
 - `validate_timeframe(timeframe: str) -> str` - Line 370
 - `validate_batch(validations: list[tuple[str, Callable[[Any], Any], Any]]) -> dict[str, Any]` - Line 421
+- `validate_positive_amount(amount_str: str) -> str` - Line 562
+- `validate_non_negative_amount(amount_str: str) -> str` - Line 584
 
 ### Implementation: `MarketDataValidationUtils` ✅
 
@@ -1509,16 +1894,26 @@ to the comprehensive validation
 **Status**: Complete
 
 **Implemented Methods:**
-- `validate_order(order: dict[str, Any]) -> bool` - Line 464
-- `validate_strategy_params(params: dict[str, Any]) -> bool` - Line 489
-- `validate_price(price: Any, max_price: Decimal = Any) -> Decimal` - Line 512
-- `validate_quantity(quantity: Any, min_qty: Decimal = Any) -> Decimal` - Line 534
-- `validate_symbol(symbol: str) -> str` - Line 556
-- `validate_exchange_credentials(credentials: dict[str, Any]) -> bool` - Line 577
-- `validate_risk_params(params: dict[str, Any]) -> bool` - Line 597
-- `validate_risk_parameters(params: dict[str, Any]) -> bool` - Line 618
-- `validate_timeframe(timeframe: str) -> str` - Line 634
-- `validate_batch(validations: list[tuple[str, Callable[[Any], Any], Any]]) -> dict[str, Any]` - Line 654
+- `validate_order(order: dict[str, Any]) -> bool` - Line 460
+- `validate_strategy_params(params: dict[str, Any]) -> bool` - Line 485
+- `validate_price(price: Any, max_price: Decimal = Any) -> Decimal` - Line 508
+- `validate_quantity(quantity: Any, min_qty: Decimal = Any) -> Decimal` - Line 530
+- `validate_symbol(symbol: str) -> str` - Line 552
+- `validate_exchange_credentials(credentials: dict[str, Any]) -> bool` - Line 573
+- `validate_risk_params(params: dict[str, Any]) -> bool` - Line 593
+- `validate_risk_parameters(params: dict[str, Any]) -> bool` - Line 614
+- `validate_timeframe(timeframe: str) -> str` - Line 630
+- `validate_batch(validations: list[tuple[str, Callable[[Any], Any], Any]]) -> dict[str, Any]` - Line 650
+
+### Implementation: `UtilsWebInterfaceDataBridge` ✅
+
+**Purpose**: Bridge for consistent data flow between utils and web_interface modules
+**Status**: Complete
+
+**Implemented Methods:**
+- `transform_utils_to_web(data: dict[str, Any], operation_type: str = 'stream') -> dict[str, Any]` - Line 113
+- `transform_web_to_utils(data: dict[str, Any], operation_type: str = 'stream') -> dict[str, Any]` - Line 124
+- `ensure_financial_precision(data: dict[str, Any]) -> dict[str, Any]` - Line 148
 
 ### Implementation: `WebSocketConnectionManager` ✅
 
@@ -1722,6 +2117,142 @@ def create_symbol_attribution_summary(...) -> dict[str, Any]  # Line 47
 def create_attribution_summary(...) -> dict[str, Any]  # Line 73
 ```
 
+### File: backtesting_decorators.py
+
+**Key Imports:**
+- `from src.error_handling.decorators import with_circuit_breaker`
+- `from src.error_handling.decorators import with_error_context`
+- `from src.error_handling.decorators import with_retry`
+- `from src.utils.decorators import time_execution`
+
+#### Functions:
+
+```python
+def backtesting_operation(...)  # Line 15
+def data_loading_operation(operation: str = 'data_loading', max_retries: int = 3)  # Line 69
+def trading_operation(operation: str = 'trading', max_retries: int = 1)  # Line 94
+def service_operation(service_name: str = 'backtesting', operation: str = '', max_retries: int = 3)  # Line 117
+def analysis_operation(operation: str = 'analysis', max_retries: int = 2)  # Line 144
+```
+
+### File: backtesting_validators.py
+
+**Key Imports:**
+- `from src.utils.validators import ValidationFramework`
+
+#### Functions:
+
+```python
+def validate_date_range(end_date: datetime, info: Any) -> datetime  # Line 15
+def validate_rate(rate: Decimal) -> Decimal  # Line 34
+def validate_symbol_list(symbols: list[str]) -> list[str]  # Line 55
+def validate_is_expired(cache_entry: Dict[str, Any]) -> bool  # Line 76
+```
+
+### File: bot_error_handling_utils.py
+
+**Key Imports:**
+- `from src.core.logging import get_logger`
+- `from src.core.exceptions import ServiceError`
+- `from src.core.exceptions import ValidationError`
+- `from src.core.exceptions import ExecutionError`
+- `from src.core.exceptions import NetworkError`
+
+#### Class: `BotServiceErrorHandler`
+
+**Purpose**: Standardized error handling for bot services
+
+```python
+class BotServiceErrorHandler:
+    def handle_service_operation(operation_name: str, bot_id: str | None = None, reraise: bool = True)  # Line 30
+    async def error_context(operation_name: str, bot_id: str | None = None)  # Line 98
+    def safe_operation(operation_name: str, default_return: Any = None, log_errors: bool = True)  # Line 114
+```
+
+#### Class: `RetryManager`
+
+**Purpose**: Manages retry logic for bot operations
+
+```python
+class RetryManager:
+    def with_retry(max_attempts, ...)  # Line 150
+```
+
+#### Class: `CircuitBreaker`
+
+**Purpose**: Simple circuit breaker implementation for bot operations
+
+```python
+class CircuitBreaker:
+    def __init__(self, ...)  # Line 217
+    def __call__(self, func: Callable[Ellipsis, Awaitable[T]]) -> Callable[Ellipsis, Awaitable[T]]  # Line 239
+    async def call(self, func: Callable[Ellipsis, Awaitable[T]], *args, **kwargs) -> T  # Line 246
+    def _should_attempt_reset(self) -> bool  # Line 274
+    def _on_success(self) -> None  # Line 282
+    def _on_failure(self) -> None  # Line 287
+```
+
+#### Class: `ErrorAggregator`
+
+**Purpose**: Aggregate and analyze errors across bot operations
+
+```python
+class ErrorAggregator:
+    def __init__(self, service_name: str)  # Line 305
+    def record_error(self, ...) -> None  # Line 311
+    def get_error_summary(self, hours: int = 24) -> dict[str, Any]  # Line 344
+    def get_bot_error_history(self, bot_id: str, hours: int = 24) -> list[dict[str, Any]]  # Line 389
+```
+
+#### Functions:
+
+```python
+def get_error_aggregator(service_name: str | None = None) -> ErrorAggregator  # Line 411
+def handle_bot_operation(operation_name: str, bot_id: str | None = None)  # Line 422
+def safe_bot_operation(operation_name: str, default_return: Any = None)  # Line 440
+```
+
+### File: bot_health_utils.py
+
+**Key Imports:**
+- `from src.core.logging import get_logger`
+- `from src.core.types import BotMetrics`
+- `from src.core.types import BotStatus`
+
+#### Class: `HealthCheckUtils`
+
+**Purpose**: Utilities for bot health checking and scoring
+
+```python
+class HealthCheckUtils:
+    def calculate_health_score(bot_status: BotStatus, metrics: BotMetrics | None = None) -> float  # Line 21
+    def _calculate_status_score(bot_status: BotStatus) -> float  # Line 59
+    def _calculate_resource_score(metrics: BotMetrics) -> float  # Line 73
+    def _calculate_error_rate_score(metrics: BotMetrics) -> float  # Line 83
+    def _calculate_performance_score(metrics: BotMetrics) -> float  # Line 95
+```
+
+#### Class: `HealthAnalyzer`
+
+**Purpose**: Health analysis utilities extracted from multiple services
+
+```python
+class HealthAnalyzer:
+    def analyze_performance_health(metrics_history: list[dict[str, Any]]) -> dict[str, Any]  # Line 116
+    def analyze_resource_health(metrics_history: list[dict[str, Any]]) -> dict[str, Any]  # Line 183
+    def _calculate_trend(values: list[float]) -> str  # Line 238
+```
+
+#### Class: `AlertGenerator`
+
+**Purpose**: Generate standardized alerts from health analysis
+
+```python
+class AlertGenerator:
+    def generate_health_alerts(bot_id: str, health_results: dict[str, Any]) -> list[dict[str, Any]]  # Line 268
+    def generate_resource_alerts(bot_id: str, resource_analysis: dict[str, Any]) -> list[dict[str, Any]]  # Line 316
+```
+
 ### File: bot_service_helpers.py
 
 **Key Imports:**
@@ -1752,6 +2283,70 @@ async def execute_with_timeout_and_cleanup(...) -> Any  # Line 361
 def create_bot_state_data(...) -> dict[str, Any]  # Line 404
 def create_bot_metrics_data(bot_id: str, additional_fields: dict[str, Any] | None = None) -> dict[str, Any]  # Line 446
 def batch_process_async(...) -> Callable  # Line 539
+```
+
+### File: bot_state_utils.py
+
+**Key Imports:**
+- `from src.core.logging import get_logger`
+- `from src.core.types import BotState`
+- `from src.core.types import BotStatus`
+- `from src.core.types import BotConfiguration`
+- `from src.core.types import BotMetrics`
+
+#### Class: `BotStateTransition`
+
+**Purpose**: Manages valid bot state transitions
+
+```python
+class BotStateTransition:
+    def is_valid_transition(cls, from_status: BotStatus, to_status: BotStatus) -> bool  # Line 34
+    def get_valid_next_states(cls, current_status: BotStatus) -> list[BotStatus]  # Line 43
+    def validate_transition(cls, bot_id: str, from_status: BotStatus, to_status: BotStatus) -> None  # Line 48
+```
+
+#### Class: `BotStateManager`
+
+**Purpose**: Centralized bot state management with consistency checks
+
+```python
+class BotStateManager:
+    def __init__(self)  # Line 72
+    async def get_bot_state(self, bot_id: str) -> Optional[BotState]  # Line 77
+    async def update_bot_state(self, ...) -> BotState  # Line 81
+    async def _record_state_change(self, bot_id: str, new_state: BotState, context: Optional[Dict[str, Any]] = None) -> None  # Line 143
+    async def get_state_history(self, bot_id: str, limit: int = 50) -> list[Dict[str, Any]]  # Line 174
+    async def remove_bot_state(self, bot_id: str) -> bool  # Line 179
+    def get_all_bot_states(self) -> Dict[str, BotState]  # Line 199
+    def get_bots_by_status(self, status: BotStatus) -> list[str]  # Line 203
+    async def cleanup_stale_states(self, max_age_hours: int = 24) -> int  # Line 210
+```
+
+#### Class: `BotConfigurationValidator`
+
+**Purpose**: Validates bot configurations with common rules
+
+```python
+class BotConfigurationValidator:
+    def validate_bot_configuration(config: BotConfiguration) -> Dict[str, Any]  # Line 251
+    def validate_configuration_update(current_config: BotConfiguration, update_data: Dict[str, Any]) -> Dict[str, Any]  # Line 347
+```
+
+#### Class: `BotStateMetrics`
+
+**Purpose**: Collect and analyze bot state metrics
+
+```python
+class BotStateMetrics:
+    def __init__(self)  # Line 435
+    def record_state_duration(self, bot_id: str, status: BotStatus, duration_seconds: float) -> None  # Line 438
+    def get_state_statistics(self, bot_id: str) -> Dict[str, Any]  # Line 457
+```
+
+#### Functions:
+
+```python
+def get_bot_state_manager() -> BotStateManager  # Line 488
 ```
 
 ### File: cache_utilities.py
@@ -1963,6 +2558,7 @@ class ResourceManager:
 def get_resource_manager() -> ResourceManager  # Line 276
 def cleanup_large_dict(data_dict: dict[Any, Any], max_size: int = 1000, keep_recent_keys: bool = True) -> dict[Any, Any]  # Line 286
 def safe_clear_references(*objects) -> None  # Line 317
+async def async_cleanup_resources(*cleanup_tasks) -> None  # Line 336
 ```
 
 ### File: capital_validation.py
@@ -2116,28 +2712,113 @@ async def operation_logging(logger_mixin: Any, operation: str, **context: Any) -
 class DataFlowConsistencyValidator:
     def __init__(self)  # Line 23
     def validate_all(self) -> dict[str, Any]  # Line 28
-    def _validate_data_transformations(self) -> dict[str, Any]  # Line 71
-    def _validate_message_patterns(self) -> dict[str, Any]  # Line 123
-    def _validate_processing_alignment(self) -> dict[str, Any]  # Line 168
-    def _validate_boundary_consistency(self) -> dict[str, Any]  # Line 206
-    def _validate_error_propagation(self) -> dict[str, Any]  # Line 247
-    def _validate_financial_types(self) -> dict[str, Any]  # Line 297
+    def _validate_data_transformations(self) -> dict[str, Any]  # Line 74
+    def _validate_message_patterns(self) -> dict[str, Any]  # Line 126
+    def _validate_processing_alignment(self) -> dict[str, Any]  # Line 171
+    def _validate_boundary_consistency(self) -> dict[str, Any]  # Line 209
+    def _validate_error_propagation(self) -> dict[str, Any]  # Line 250
+    def _validate_financial_types(self) -> dict[str, Any]  # Line 300
+    def _validate_ml_error_propagation(self) -> dict[str, Any]  # Line 343
 ```
 
 #### Functions:
 
 ```python
-def validate_data_flow_consistency() -> dict[str, Any]  # Line 341
-def log_consistency_results(results: dict[str, Any]) -> None  # Line 352
+def validate_data_flow_consistency() -> dict[str, Any]  # Line 404
+def log_consistency_results(results: dict[str, Any]) -> None  # Line 415
 ```
 
 ### File: data_flow_integrity.py
 
 **Key Imports:**
+- `from src.core.exceptions import DataValidationError`
+- `from src.core.exceptions import ServiceError`
 - `from src.core.exceptions import ValidationError`
 - `from src.core.logging import get_logger`
-- `from src.monitoring.financial_precision import FinancialPrecisionWarning`
-- `from src.monitoring.financial_precision import safe_decimal_to_float`
+- `from src.utils.validators import validate_decimal_precision`
+
+#### Class: `ModuleBoundaryValidator`
+
+**Purpose**: Base validator for module boundary validation
+
+```python
+class ModuleBoundaryValidator:
+    def __init__(self, source_module: str, target_module: str)  # Line 31
+    def validate_data_structure(self, data: dict[str, Any], required_fields: list[str]) -> dict[str, Any]  # Line 36
+    def validate_decimal_fields(self, data: dict[str, Any], decimal_fields: list[str]) -> dict[str, Any]  # Line 46
+    def validate_timestamp_fields(self, data: dict[str, Any], timestamp_fields: list[str]) -> dict[str, Any]  # Line 65
+```
+
+#### Class: `ExchangeToDataValidator`
+
+**Inherits**: ModuleBoundaryValidator
+**Purpose**: Validator for Exchange → Data module boundary
+
+```python
+class ExchangeToDataValidator(ModuleBoundaryValidator):
+    def __init__(self)  # Line 80
+    def validate_market_data(self, data: dict[str, Any], exchange: str) -> dict[str, Any]  # Line 83
+    def validate_order_data(self, data: dict[str, Any], exchange: str) -> dict[str, Any]  # Line 118
+    def _validate_exchange_specific(self, data: dict[str, Any], exchange: str) -> None  # Line 146
+```
+
+#### Class: `DataToCoreValidator`
+
+**Inherits**: ModuleBoundaryValidator
+**Purpose**: Validator for Data → Core module boundary
+
+```python
+class DataToCoreValidator(ModuleBoundaryValidator):
+    def __init__(self)  # Line 173
+    def validate_processed_data(self, data: dict[str, Any], data_type: str) -> dict[str, Any]  # Line 176
+    def _validate_processed_market_data(self, data: dict[str, Any]) -> dict[str, Any]  # Line 191
+    def _validate_processed_order_data(self, data: dict[str, Any]) -> dict[str, Any]  # Line 212
+    def _validate_analytics_data(self, data: dict[str, Any]) -> dict[str, Any]  # Line 228
+```
+
+#### Class: `ErrorPropagationValidator`
+
+**Purpose**: Validator for consistent error propagation across modules
+
+```python
+class ErrorPropagationValidator:
+    def __init__(self)  # Line 248
+    def validate_error_format(self, error: Exception, source_module: str) -> Exception  # Line 251
+    def validate_error_chain(self, errors: list[Exception]) -> list[Exception]  # Line 302
+```
+
+#### Class: `DataFlowIntegrityManager`
+
+**Purpose**: Manager for coordinating data flow validation across modules
+
+```python
+class DataFlowIntegrityManager:
+    def __init__(self)  # Line 319
+    def validate_exchange_data(self, data: dict[str, Any], exchange: str, data_type: str) -> dict[str, Any]  # Line 333
+    def validate_core_data(self, data: dict[str, Any], data_type: str) -> dict[str, Any]  # Line 351
+    def get_validation_stats(self) -> dict[str, Any]  # Line 363
+```
+
+#### Class: `DataFlowTransformer`
+
+**Purpose**: Standardized data transformation utilities for consistent cross-module data flow
+
+```python
+class DataFlowTransformer:
+    def apply_financial_field_transformation(entity: Any) -> Any  # Line 427
+    def apply_standard_metadata(data: dict[str, Any], module_source: str, processing_mode: str = 'stream') -> dict[str, Any]  # Line 456
+    def validate_and_transform_entity(entity: Any, module_source: str, processing_mode: str = 'stream') -> Any  # Line 485
+```
+
+#### Class: `StandardizedErrorPropagator`
+
+**Purpose**: Standardized error propagation for consistent cross-module error handling
+
+```python
+class StandardizedErrorPropagator:
+    def propagate_validation_error(error, ...) -> None  # Line 521
+    def propagate_service_error(error: Exception, context: str, module_source: str, operation: str = None) -> None  # Line 571
+```
 
 #### Class: `DataFlowValidator`
 
@@ -2145,9 +2826,9 @@ def log_consistency_results(results: dict[str, Any]) -> None  # Line 352
 
 ```python
 class DataFlowValidator:
-    def validate_message_pattern_consistency(data: dict[str, Any]) -> None  # Line 38
-    def validate_boundary_crossing_metadata(data: dict[str, Any]) -> None  # Line 89
-    def validate_complete_data_flow(cls, ...) -> None  # Line 123
+    def validate_message_pattern_consistency(data: dict[str, Any]) -> None  # Line 616
+    def validate_boundary_crossing_metadata(data: dict[str, Any]) -> None  # Line 667
+    def validate_complete_data_flow(cls, ...) -> None  # Line 701
 ```
 
 #### Class: `DataFlowIntegrityError`
@@ -2165,13 +2846,13 @@ class DataFlowIntegrityError(Exception):
 
 ```python
 class PrecisionTracker:
-    def __init__(self) -> None  # Line 185
-    def track_conversion(self, ...) -> None  # Line 190
-    def _calculate_relative_error(self, original: Decimal, converted: float) -> float  # Line 223
-    def get_summary(self) -> dict[str, Any]  # Line 236
-    def _get_avg_relative_error(self) -> float  # Line 245
-    def track_operation(self, operation: str, input_precision: int, output_precision: int) -> None  # Line 254
-    def get_precision_stats(self) -> dict[str, Any]  # Line 272
+    def __init__(self) -> None  # Line 763
+    def track_conversion(self, ...) -> None  # Line 768
+    def _calculate_relative_error(self, original: Decimal, converted: float) -> float  # Line 801
+    def get_summary(self) -> dict[str, Any]  # Line 814
+    def _get_avg_relative_error(self) -> float  # Line 823
+    def track_operation(self, operation: str, input_precision: int, output_precision: int) -> None  # Line 832
+    def get_precision_stats(self) -> dict[str, Any]  # Line 850
 ```
 
 #### Class: `DataFlowValidator`
@@ -2180,17 +2861,17 @@ class PrecisionTracker:
 
 ```python
 class DataFlowValidator:
-    def __init__(self) -> None  # Line 310
-    def _setup_default_rules(self) -> None  # Line 314
-    def validate_data_flow(self, data: dict[str, Any], context: str = 'unknown') -> dict[str, Any]  # Line 348
-    def _validate_field(self, field_name: str, value: Any, context: str) -> Any  # Line 375
-    def _validate_null_handling_service(self, value: Any, allow_null: bool = False, field_name: str = 'value') -> Any  # Line 454
-    def _validate_type_conversion_service(self, ...) -> Any  # Line 482
-    def _validate_financial_range_service(self, ...) -> Decimal  # Line 560
-    def _get_rule_for_field(self, field_name: str) -> dict[str, Any] | None  # Line 603
-    def add_validation_rule(self, field_pattern: str, rule: dict[str, Any]) -> None  # Line 618
-    def validate_data_integrity(self, data: Any) -> bool  # Line 623
-    def get_validation_report(self) -> dict[str, Any]  # Line 638
+    def __init__(self) -> None  # Line 888
+    def _setup_default_rules(self) -> None  # Line 892
+    def validate_data_flow(self, data: dict[str, Any], context: str = 'unknown') -> dict[str, Any]  # Line 926
+    def _validate_field(self, field_name: str, value: Any, context: str) -> Any  # Line 953
+    def _validate_null_handling_service(self, value: Any, allow_null: bool = False, field_name: str = 'value') -> Any  # Line 1032
+    def _validate_type_conversion_service(self, ...) -> Any  # Line 1060
+    def _validate_financial_range_service(self, ...) -> Decimal  # Line 1132
+    def _get_rule_for_field(self, field_name: str) -> dict[str, Any] | None  # Line 1175
+    def add_validation_rule(self, field_pattern: str, rule: dict[str, Any]) -> None  # Line 1190
+    def validate_data_integrity(self, data: Any) -> bool  # Line 1195
+    def get_validation_report(self) -> dict[str, Any]  # Line 1210
 ```
 
 #### Class: `IntegrityPreservingConverter`
@@ -2199,19 +2880,24 @@ class DataFlowValidator:
 
 ```python
 class IntegrityPreservingConverter:
-    def __init__(self, ...)  # Line 655
-    def safe_convert_for_metrics(self, ...) -> float  # Line 667
-    def batch_convert_with_integrity(self, ...) -> dict[str, float]  # Line 717
+    def __init__(self, ...)  # Line 1227
+    def safe_convert_for_metrics(self, ...) -> float  # Line 1239
+    def batch_convert_with_integrity(self, ...) -> dict[str, float]  # Line 1289
 ```
 
 #### Functions:
 
 ```python
-def get_precision_tracker(tracker: PrecisionTracker | None = None) -> PrecisionTracker  # Line 277
-def get_data_flow_validator(validator: DataFlowValidator | None = None) -> DataFlowValidator  # Line 746
-def get_integrity_converter(converter: IntegrityPreservingConverter | None = None) -> IntegrityPreservingConverter  # Line 768
-def validate_cross_module_data(...) -> dict[str, Any]  # Line 795
-def fix_precision_cascade(data: dict[str, Any] | None = None, target_formats: dict[str, str] | None = None) -> dict[str, Any]  # Line 852
+def get_integrity_manager() -> DataFlowIntegrityManager  # Line 378
+def validate_exchange_market_data(data: dict[str, Any], exchange: str) -> dict[str, Any]  # Line 387
+def validate_exchange_order_data(data: dict[str, Any], exchange: str) -> dict[str, Any]  # Line 393
+def validate_core_market_data(data: dict[str, Any]) -> dict[str, Any]  # Line 399
+def validate_core_order_data(data: dict[str, Any]) -> dict[str, Any]  # Line 405
+def get_precision_tracker(tracker: PrecisionTracker | None = None) -> PrecisionTracker  # Line 855
+def get_data_flow_validator(validator: DataFlowValidator | None = None) -> DataFlowValidator  # Line 1318
+def get_integrity_converter(converter: IntegrityPreservingConverter | None = None) -> IntegrityPreservingConverter  # Line 1340
+def validate_cross_module_data(...) -> dict[str, Any]  # Line 1367
+def fix_precision_cascade(data: dict[str, Any] | None = None, target_formats: dict[str, str] | None = None) -> dict[str, Any]  # Line 1424
 ```
 
 ### File: data_utils.py
@@ -2347,8 +3033,8 @@ class UnifiedDecorator:
     def _handle_cache_check(cls, ...) -> Any  # Line 555
     def _handle_post_execution(cls, ...) -> None  # Line 573
     def enhance(cls, ...) -> Callable[[F], F]  # Line 599
-    async def _execute_async_enhanced(cls, ...) -> Any  # Line 665
-    def _execute_sync_enhanced(cls, ...) -> Any  # Line 722
+    async def _execute_async(cls, ...) -> Any  # Line 665
+    def _execute_sync(cls, ...) -> Any  # Line 722
     def _execute_sync_with_retry(cls, ...) -> Any  # Line 748
     async def _handle_execution_error_async(cls, ...) -> Any  # Line 822
     def _handle_execution_error_sync(cls, ...) -> Any  # Line 871
@@ -2788,6 +3474,41 @@ def get_file_size(file_path: str) -> int  # Line 197
 def list_files(directory: str, pattern: str = '*') -> list[str]  # Line 221
 ```
 
+### File: financial_calculations.py
+
+**Key Imports:**
+- `from src.utils.decimal_utils import to_decimal`
+- `from src.utils.financial_constants import TRADING_DAYS_PER_YEAR`
+- `from src.utils.financial_constants import DEFAULT_RISK_FREE_RATE`
+
+#### Functions:
+
+```python
+def calculate_daily_returns(equity_curve: List[Dict[str, Any]]) -> List[float]  # Line 19
+def calculate_sharpe_ratio(returns: np.ndarray, risk_free_rate: Decimal = Any) -> Decimal  # Line 43
+def calculate_sortino_ratio(returns: np.ndarray, risk_free_rate: Decimal = Any) -> Decimal  # Line 76
+def calculate_max_drawdown(equity_curve: List[Dict[str, Any]]) -> tuple[Decimal, Dict[str, Any]]  # Line 116
+def calculate_volatility(returns: np.ndarray) -> Decimal  # Line 167
+def calculate_var_cvar(returns: np.ndarray, confidence_level: float = 0.95) -> tuple[Decimal, Decimal]  # Line 191
+def calculate_market_impact(order_size: Decimal, volume: Decimal) -> Decimal  # Line 229
+def calculate_simulation_metrics(returns: List[Decimal], initial_capital: Decimal) -> Dict[str, Any]  # Line 255
+def calculate_max_drawdown_simple(values: List[Decimal]) -> tuple[Decimal, int, int]  # Line 307
+def calculate_std(values: List[Decimal]) -> Decimal  # Line 343
+```
+
+### File: financial_utils.py
+
+**Key Imports:**
+- `from src.utils.decimal_utils import to_decimal`
+
+#### Functions:
+
+```python
+def get_logger_safe(name: str)  # Line 15
+def validate_financial_precision(data: dict[str, Any], financial_fields: list[str] | None = None) -> dict[str, Any]  # Line 28
+def ensure_boundary_fields(...) -> dict[str, Any]  # Line 90
+```
+
 ### File: formatters.py
 
 **Key Imports:**
@@ -2861,6 +3582,21 @@ def parallel_apply(...) -> pd.DataFrame  # Line 419
 def gpu_accelerated_correlation(data: NDArray[np.float64], gpu_manager: 'GPUManager | None' = None) -> NDArray[np.float64]  # Line 444
 def gpu_accelerated_rolling_window(...) -> NDArray[np.float64]  # Line 489
 def setup_gpu_logging(gpu_manager: GPUManager | None = None) -> Callable[[], None] | None  # Line 542
+```
+
+### File: initialization_helpers.py
+
+**Key Imports:**
+- `from src.core.logging import get_logger`
+
+#### Functions:
+
+```python
+def log_component_initialization(...) -> None  # Line 13
+def log_service_initialization(...) -> None  # Line 32
+def log_factory_initialization(...) -> None  # Line 58
+def log_configuration_initialization(...) -> None  # Line 82
+def create_initialization_summary(components: list[str]) -> Dict[str, Any]  # Line 117
 ```
 
 ### File: interfaces.py
@@ -2951,41 +3687,163 @@ class BaseUtilityService(BaseService):
 ```python
 def calculate_percentage_change(old_value: Decimal, new_value: Decimal) -> Decimal  # Line 9
 def calculate_sharpe_ratio(returns: list[Decimal], risk_free_rate: Decimal = Any, frequency: str = 'daily') -> Decimal  # Line 33
-def calculate_max_drawdown(equity_curve: list[Decimal]) -> tuple[Decimal, int, int]  # Line 91
-def calculate_var(returns: list[Decimal], confidence_level: Decimal = Any) -> Decimal  # Line 142
-def calculate_volatility(returns: list[Decimal], window: int | None = None) -> Decimal  # Line 182
-def calculate_correlation(series1: list[Decimal], series2: list[Decimal]) -> Decimal  # Line 227
-def calculate_beta(asset_returns: list[Decimal], market_returns: list[Decimal]) -> Decimal  # Line 288
-def calculate_sortino_ratio(...) -> Decimal  # Line 333
-def safe_min(*args: Decimal) -> Decimal  # Line 388
-def safe_max(*args: Decimal) -> Decimal  # Line 420
-def safe_percentage(value: Decimal, total: Decimal, default: Decimal = ZERO) -> Decimal  # Line 452
+def calculate_max_drawdown(equity_curve: list[Decimal]) -> tuple[Decimal, int, int]  # Line 81
+def calculate_var(returns: list[Decimal], confidence_level: Decimal = Any) -> Decimal  # Line 109
+def calculate_volatility(returns: list[Decimal], window: int | None = None) -> Decimal  # Line 149
+def calculate_correlation(series1: list[Decimal], series2: list[Decimal]) -> Decimal  # Line 194
+def calculate_beta(asset_returns: list[Decimal], market_returns: list[Decimal]) -> Decimal  # Line 255
+def calculate_sortino_ratio(...) -> Decimal  # Line 300
+def safe_min(*args: Decimal) -> Decimal  # Line 335
+def safe_max(*args: Decimal) -> Decimal  # Line 367
+def safe_percentage(value: Decimal, total: Decimal, default: Decimal = ZERO) -> Decimal  # Line 399
 ```
 
 ### File: messaging_patterns.py
 
 **Key Imports:**
-- `from src.core.base.events import BaseEventEmitter`
 - `from src.core.exceptions import ServiceError`
 - `from src.core.exceptions import ValidationError`
 - `from src.core.logging import get_logger`
-
-#### Class: `MessagePattern`
-
-**Inherits**: Enum
-**Purpose**: Standardized message patterns
-
-```python
-class MessagePattern(Enum):
-```
+- `from src.error_handling.decorators import with_circuit_breaker`
+- `from src.error_handling.decorators import with_retry`
 
 #### Class: `MessageType`
 
 **Inherits**: Enum
-**Purpose**: Standard message types
+**Purpose**: Message types for the messaging system
 
 ```python
 class MessageType(Enum):
+```
+
+#### Class: `MessagePattern`
+
+**Inherits**: Enum
+**Purpose**: Message communication patterns aligned with core data transformer standards
+
+```python
+class MessagePattern(Enum):
+    def from_core_standard(cls, core_pattern: str) -> 'MessagePattern'  # Line 50
+```
+
+#### Class: `Message`
+
+**Purpose**: Standard message format
+
+```python
+class Message:
+    def __post_init__(self)  # Line 73
+```
+
+#### Class: `MessageHandler`
+
+**Inherits**: ABC
+**Purpose**: Abstract message handler
+
+```python
+class MessageHandler(ABC):
+    async def handle(self, message: Message) -> bool  # Line 82
+    def can_handle(self, message_type: MessageType) -> bool  # Line 87
+```
+
+#### Class: `MessagePublisher`
+
+**Inherits**: ABC
+**Purpose**: Abstract message publisher
+
+```python
+class MessagePublisher(ABC):
+    async def publish(self, message: Message) -> bool  # Line 96
+    async def subscribe(self, message_type: MessageType, handler: MessageHandler) -> bool  # Line 101
+    async def unsubscribe(self, message_type: MessageType, handler: MessageHandler) -> bool  # Line 106
+```
+
+#### Class: `InMemoryMessageBus`
+
+**Inherits**: MessagePublisher
+**Purpose**: In-memory message bus implementation using pub/sub pattern
+
+```python
+class InMemoryMessageBus(MessagePublisher):
+    def __init__(self, max_queue_size: int = 10000)  # Line 114
+    async def publish(self, message: Message) -> bool  # Line 127
+    async def subscribe(self, message_type: MessageType, handler: MessageHandler) -> bool  # Line 146
+    async def unsubscribe(self, message_type: MessageType, handler: MessageHandler) -> bool  # Line 162
+    async def _process_message(self, message: Message) -> None  # Line 178
+    async def _deliver_to_handler(self, handler: MessageHandler, message: Message) -> bool  # Line 212
+    def get_stats(self) -> dict[str, Any]  # Line 220
+```
+
+#### Class: `ExchangeDataHandler`
+
+**Inherits**: MessageHandler
+**Purpose**: Handler for exchange market data messages
+
+```python
+class ExchangeDataHandler(MessageHandler):
+    def __init__(self, callback: Callable[[dict[str, Any]], None])  # Line 233
+    async def handle(self, message: Message) -> bool  # Line 237
+    def can_handle(self, message_type: MessageType) -> bool  # Line 258
+    def _transform_market_data(self, data: dict[str, Any], source: str) -> dict[str, Any]  # Line 262
+```
+
+#### Class: `OrderUpdateHandler`
+
+**Inherits**: MessageHandler
+**Purpose**: Handler for order update messages
+
+```python
+class OrderUpdateHandler(MessageHandler):
+    def __init__(self, callback: Callable[[dict[str, Any]], None])  # Line 281
+    async def handle(self, message: Message) -> bool  # Line 285
+    def can_handle(self, message_type: MessageType) -> bool  # Line 306
+    def _transform_order_data(self, data: dict[str, Any], source: str) -> dict[str, Any]  # Line 310
+```
+
+#### Class: `StreamToQueueBridge`
+
+**Purpose**: Bridge between stream data and message queue system
+
+```python
+class StreamToQueueBridge:
+    def __init__(self, message_bus: MessagePublisher, source: str)  # Line 327
+    async def handle_stream_data(self, data_type: str, data: dict[str, Any]) -> None  # Line 333
+```
+
+#### Class: `MessageQueueManager`
+
+**Purpose**: Manager for coordinating messaging patterns across the system
+
+```python
+class MessageQueueManager:
+    def __init__(self)  # Line 368
+    def create_bridge(self, source: str) -> StreamToQueueBridge  # Line 374
+    async def register_market_data_handler(self, callback: Callable[[dict[str, Any]], None]) -> None  # Line 380
+    async def register_order_update_handler(self, callback: Callable[[dict[str, Any]], None]) -> None  # Line 386
+    def get_stats(self) -> dict[str, Any]  # Line 392
+```
+
+#### Class: `RequestReplyPattern`
+
+**Inherits**: ABC
+**Purpose**: Request-reply pattern for synchronous operations
+
+```python
+class RequestReplyPattern(ABC):
+    async def request(self, data: dict[str, Any], timeout: float = 5.0) -> dict[str, Any]  # Line 440
+    async def reply(self, request_id: str, data: dict[str, Any]) -> bool  # Line 445
+```
+
+#### Class: `BatchToStreamBridge`
+
+**Purpose**: Bridge between batch processing and stream processing
+
+```python
+class BatchToStreamBridge:
+    def __init__(self, message_manager: MessageQueueManager, batch_size: int = 100)  # Line 453
+    async def add_to_batch(self, data: dict[str, Any]) -> None  # Line 459
+    async def _process_batch(self) -> None  # Line 466
+    async def flush(self) -> None  # Line 483
 ```
 
 #### Class: `StandardMessage`
@@ -2994,9 +3852,9 @@ class MessageType(Enum):
 
 ```python
 class StandardMessage:
-    def __init__(self, ...)  # Line 46
-    def to_dict(self) -> dict[str, Any]  # Line 65
-    def from_dict(cls, data: dict[str, Any]) -> 'StandardMessage'  # Line 79
+    def __init__(self, ...)  # Line 490
+    def to_dict(self) -> dict[str, Any]  # Line 509
+    def from_dict(cls, data: dict[str, Any]) -> 'StandardMessage'  # Line 523
 ```
 
 #### Class: `MessageHandler`
@@ -3006,7 +3864,7 @@ class StandardMessage:
 
 ```python
 class MessageHandler(ABC):
-    async def handle(self, message: StandardMessage) -> StandardMessage | None  # Line 96
+    async def handle(self, message: StandardMessage) -> StandardMessage | None  # Line 540
 ```
 
 #### Class: `ErrorPropagationMixin`
@@ -3015,10 +3873,10 @@ class MessageHandler(ABC):
 
 ```python
 class ErrorPropagationMixin:
-    def propagate_validation_error(self, error: Exception, context: str) -> None  # Line 104
-    def propagate_database_error(self, error: Exception, context: str) -> None  # Line 133
-    def propagate_service_error(self, error: Exception, context: str) -> None  # Line 156
-    def propagate_monitoring_error(self, error: Exception, context: str) -> None  # Line 193
+    def propagate_validation_error(self, error: Exception, context: str) -> None  # Line 548
+    def propagate_database_error(self, error: Exception, context: str) -> None  # Line 577
+    def propagate_service_error(self, error: Exception, context: str) -> None  # Line 600
+    def propagate_monitoring_error(self, error: Exception, context: str) -> None  # Line 637
 ```
 
 #### Class: `BoundaryValidator`
@@ -3027,12 +3885,26 @@ class ErrorPropagationMixin:
 
 ```python
 class BoundaryValidator:
-    def validate_database_entity(entity_dict: dict[str, Any], operation: str) -> None  # Line 233
-    def validate_database_to_error_boundary(data: dict[str, Any]) -> None  # Line 257
-    def validate_monitoring_to_error_boundary(data: dict[str, Any]) -> None  # Line 299
-    def validate_error_to_monitoring_boundary(data: dict[str, Any]) -> None  # Line 389
-    def validate_web_interface_to_error_boundary(data: dict[str, Any]) -> None  # Line 480
-    def validate_risk_to_state_boundary(data: dict[str, Any]) -> None  # Line 550
+    def validate_database_entity(entity_dict: dict[str, Any], operation: str) -> None  # Line 677
+    def validate_database_to_error_boundary(data: dict[str, Any]) -> None  # Line 701
+    def validate_monitoring_to_error_boundary(data: dict[str, Any]) -> None  # Line 743
+    def validate_error_to_monitoring_boundary(data: dict[str, Any]) -> None  # Line 833
+    def validate_web_interface_to_error_boundary(data: dict[str, Any]) -> None  # Line 924
+    def validate_risk_to_state_boundary(data: dict[str, Any]) -> None  # Line 994
+    def validate_monitoring_to_risk_boundary(data: dict[str, Any]) -> None  # Line 1058
+    def validate_state_to_risk_boundary(data: dict[str, Any]) -> None  # Line 1078
+    def validate_utils_to_ml_boundary(data: dict[str, Any]) -> None  # Line 1130
+    def validate_ml_to_utils_boundary(data: dict[str, Any]) -> None  # Line 1171
+    def validate_monitoring_to_state_boundary(data: dict[str, Any]) -> None  # Line 1224
+    def validate_analytics_to_monitoring_boundary(data: dict[str, Any]) -> None  # Line 1244
+    def validate_monitoring_to_analytics_boundary(data: dict[str, Any]) -> None  # Line 1301
+    def validate_execution_to_state_boundary(data: dict[str, Any]) -> None  # Line 1344
+    def validate_risk_to_execution_boundary(data: dict[str, Any]) -> None  # Line 1400
+    def validate_optimization_to_strategy_boundary(data: dict[str, Any]) -> None  # Line 1473
+    def validate_web_interface_to_execution_boundary(data: dict[str, Any]) -> None  # Line 1514
+    def validate_web_interface_to_strategies_boundary(data: dict[str, Any]) -> None  # Line 1586
+    def validate_web_interface_to_risk_management_boundary(data: dict[str, Any]) -> None  # Line 1679
+    def validate_strategies_to_web_interface_boundary(data: dict[str, Any]) -> None  # Line 1751
 ```
 
 #### Class: `ProcessingParadigmAligner`
@@ -3041,9 +3913,9 @@ class BoundaryValidator:
 
 ```python
 class ProcessingParadigmAligner:
-    def create_batch_from_stream(stream_items: list[dict[str, Any]]) -> dict[str, Any]  # Line 618
-    def create_stream_from_batch(batch_data: dict[str, Any]) -> list[dict[str, Any]]  # Line 629
-    def align_processing_modes(source_mode: str, target_mode: str, data: dict[str, Any]) -> dict[str, Any]  # Line 645
+    def create_batch_from_stream(stream_items: list[dict[str, Any]]) -> dict[str, Any]  # Line 1882
+    def create_stream_from_batch(batch_data: dict[str, Any]) -> list[dict[str, Any]]  # Line 1893
+    def align_processing_modes(source_mode: str, target_mode: str, data: dict[str, Any]) -> dict[str, Any]  # Line 1909
 ```
 
 #### Class: `MessagingCoordinator`
@@ -3052,15 +3924,15 @@ class ProcessingParadigmAligner:
 
 ```python
 class MessagingCoordinator:
-    def __init__(self, ...)  # Line 715
-    def register_handler(self, pattern: MessagePattern, handler: MessageHandler) -> None  # Line 727
-    async def publish(self, ...) -> None  # Line 736
-    async def request(self, ...) -> Any  # Line 769
-    async def reply(self, original_message: StandardMessage, response_data: Any) -> None  # Line 814
-    async def stream_start(self, ...) -> None  # Line 833
-    async def batch_process(self, ...) -> None  # Line 860
-    def _apply_data_transformation(self, data: Any) -> Any  # Line 890
-    async def _route_message(self, message: StandardMessage) -> None  # Line 944
+    def __init__(self, name: str = 'MessagingCoordinator', event_emitter: Any = None)  # Line 1979
+    def register_handler(self, pattern: MessagePattern, handler: MessageHandler) -> None  # Line 1991
+    async def publish(self, ...) -> None  # Line 2000
+    async def request(self, ...) -> Any  # Line 2033
+    async def reply(self, original_message: StandardMessage, response_data: Any) -> None  # Line 2078
+    async def stream_start(self, ...) -> None  # Line 2097
+    async def batch_process(self, ...) -> None  # Line 2124
+    def _apply_data_transformation(self, data: Any) -> Any  # Line 2154
+    async def _route_message(self, message: StandardMessage) -> None  # Line 2208
 ```
 
 #### Class: `DataTransformationHandler`
@@ -3070,15 +3942,18 @@ class MessagingCoordinator:
 
 ```python
 class DataTransformationHandler(MessageHandler):
-    def __init__(self, transform_func: Callable[[Any], Any] | None = None)  # Line 1009
-    async def handle(self, message: StandardMessage) -> StandardMessage | None  # Line 1012
-    async def _transform_financial_data(self, data: dict[str, Any]) -> None  # Line 1029
+    def __init__(self, transform_func: Callable[[Any], Any] | None = None)  # Line 2273
+    async def handle(self, message: StandardMessage) -> StandardMessage | None  # Line 2276
+    async def _transform_financial_data(self, data: dict[str, Any]) -> None  # Line 2293
 ```
 
 #### Functions:
 
 ```python
-def get_messaging_coordinator(coordinator: MessagingCoordinator | None = None) -> MessagingCoordinator  # Line 1072
+def get_message_queue_manager() -> MessageQueueManager  # Line 406
+async def publish_market_data(source: str, symbol: str, data: dict[str, Any]) -> None  # Line 415
+async def publish_order_update(source: str, order_data: dict[str, Any]) -> None  # Line 428
+def get_messaging_coordinator(coordinator: MessagingCoordinator | None = None) -> MessagingCoordinator  # Line 2336
 ```
 
 ### File: ml_cache.py
@@ -3245,8 +4120,8 @@ def create_cache_config(config_dict: dict | None = None) -> MLCacheConfig  # Lin
 ### File: ml_data_transforms.py
 
 **Key Imports:**
-- `from src.utils.decimal_utils import to_decimal`
 - `from src.core.logging import get_logger`
+- `from src.utils.decimal_utils import to_decimal`
 
 #### Functions:
 
@@ -3256,7 +4131,10 @@ def convert_pydantic_to_dict_with_decimals(data: Any) -> dict[str, Any]  # Line 
 def prepare_dataframe_from_market_data(market_data: dict[str, Any] | Any, apply_decimal_transform: bool = True) -> pd.DataFrame  # Line 74
 def align_training_data_lengths(X: pd.DataFrame, y: pd.Series, model_name: str = 'Unknown') -> tuple[pd.DataFrame, pd.Series]  # Line 106
 def create_returns_series(prices: pd.Series, horizon: int = 1, return_type: str = 'simple') -> pd.Series  # Line 128
-def batch_transform_requests_to_aligned_format(requests: list[Any]) -> list[dict[str, Any]]  # Line 172
+def batch_transform_requests_to_aligned_format(requests: list[Any]) -> dict[str, Any]  # Line 173
+def stream_transform_request_to_aligned_format(request: Any) -> dict[str, Any]  # Line 223
+def convert_batch_to_stream_ml_data(batch_data: dict[str, Any]) -> list[dict[str, Any]]  # Line 260
+def align_ml_processing_modes(source_mode: str, target_mode: str, data: dict[str, Any]) -> dict[str, Any]  # Line 299
 ```
 
 ### File: ml_metrics.py
@@ -3378,6 +4256,65 @@ def log_unusual_values(value: float, threshold: float, metric_name: str, unit: s
 def safe_decimal_to_float(...) -> float  # Line 657
 def validate_financial_range(...) -> None  # Line 724
 def convert_financial_batch(...) -> dict[str, float]  # Line 763
+```
+
+### File: monitoring_loop_utils.py
+
+**Key Imports:**
+- `from src.core.logging import get_logger`
+
+#### Class: `MonitoringLoopManager`
+
+**Purpose**: Manages standardized monitoring loops with consistent patterns
+
+```python
+class MonitoringLoopManager:
+    def __init__(self, service_name: str)  # Line 20
+    async def start_monitoring_loop(self, ...) -> bool  # Line 26
+    async def stop_monitoring_loop(self, loop_name: str) -> bool  # Line 66
+    async def stop_all_loops(self) -> None  # Line 89
+    async def _monitoring_loop_wrapper(self, ...) -> None  # Line 116
+    def get_loop_status(self) -> dict[str, Any]  # Line 180
+```
+
+#### Class: `BaseMonitoringService`
+
+**Inherits**: ABC
+**Purpose**: Base class for services that need standardized monitoring loops
+
+```python
+class BaseMonitoringService(ABC):
+    def __init__(self, service_name: str)  # Line 202
+    def _get_monitoring_config(self) -> dict[str, Any]  # Line 209
+    async def start_monitoring(self) -> None  # Line 213
+    async def stop_monitoring(self) -> None  # Line 222
+    async def _setup_monitoring_loops(self) -> None  # Line 231
+    def get_monitoring_status(self) -> dict[str, Any]  # Line 235
+```
+
+#### Class: `PerformanceMonitor`
+
+**Purpose**: Monitor and track performance metrics for functions and operations
+
+```python
+class PerformanceMonitor:
+    def __init__(self, service_name: str)  # Line 243
+    async def track_operation(self, ...) -> Any  # Line 248
+    def get_performance_summary(self, operation_name: str | None = None) -> dict[str, Any]  # Line 308
+    def _calculate_operation_summary(self, operation_name: str, records: list[dict[str, Any]]) -> dict[str, Any]  # Line 342
+```
+
+#### Class: `MetricsCollectionManager`
+
+**Purpose**: Manage standardized metrics collection patterns
+
+```python
+class MetricsCollectionManager:
+    def __init__(self, service_name: str)  # Line 370
+    def register_metric_collector(self, ...) -> None  # Line 376
+    async def collect_metric(self, metric_name: str, collector_func: Callable[[], Awaitable[dict[str, Any]]]) -> None  # Line 393
+    def get_metric_data(self, metric_name: str, hours: int = 24) -> list[dict[str, Any]]  # Line 420
+    def cleanup_old_metrics(self, days: int = 7) -> int  # Line 454
 ```
 
 ### File: network_utils.py
@@ -3506,6 +4443,16 @@ class PositionSizingAlgorithm(ABC):
     def validate_inputs(self, signal: Signal, portfolio_value: Decimal, risk_per_trade: Decimal) -> bool  # Line 32
 ```
 
+#### Class: `FixedAlgorithm`
+
+**Inherits**: PositionSizingAlgorithm
+**Purpose**: Fixed position sizing algorithm - uses configured position size regardless of portfolio
+
+```python
+class FixedAlgorithm(PositionSizingAlgorithm):
+    def calculate_size(self, ...) -> Decimal  # Line 54
+```
+
 #### Class: `FixedPercentageAlgorithm`
 
 **Inherits**: PositionSizingAlgorithm
@@ -3513,7 +4460,7 @@ class PositionSizingAlgorithm(ABC):
 
 ```python
 class FixedPercentageAlgorithm(PositionSizingAlgorithm):
-    def calculate_size(self, ...) -> Decimal  # Line 54
+    def calculate_size(self, ...) -> Decimal  # Line 74
 ```
 
 #### Class: `KellyCriterionAlgorithm`
@@ -3523,9 +4470,9 @@ class FixedPercentageAlgorithm(PositionSizingAlgorithm):
 
 ```python
 class KellyCriterionAlgorithm(PositionSizingAlgorithm):
-    def __init__(self, kelly_fraction: Decimal = Any)  # Line 74
-    def calculate_size(self, ...) -> Decimal  # Line 78
-    def _fallback_to_fixed(self, signal: Signal, portfolio_value: Decimal, risk_per_trade: Decimal) -> Decimal  # Line 120
+    def __init__(self, kelly_fraction: Decimal = Any)  # Line 94
+    def calculate_size(self, ...) -> Decimal  # Line 98
+    def _fallback_to_fixed(self, signal: Signal, portfolio_value: Decimal, risk_per_trade: Decimal) -> Decimal  # Line 148
 ```
 
 #### Class: `VolatilityAdjustedAlgorithm`
@@ -3535,8 +4482,8 @@ class KellyCriterionAlgorithm(PositionSizingAlgorithm):
 
 ```python
 class VolatilityAdjustedAlgorithm(PositionSizingAlgorithm):
-    def calculate_size(self, ...) -> Decimal  # Line 131
-    def _fallback_to_fixed(self, signal: Signal, portfolio_value: Decimal, risk_per_trade: Decimal) -> Decimal  # Line 169
+    def calculate_size(self, ...) -> Decimal  # Line 159
+    def _fallback_to_fixed(self, signal: Signal, portfolio_value: Decimal, risk_per_trade: Decimal) -> Decimal  # Line 197
 ```
 
 #### Class: `ConfidenceWeightedAlgorithm`
@@ -3546,7 +4493,7 @@ class VolatilityAdjustedAlgorithm(PositionSizingAlgorithm):
 
 ```python
 class ConfidenceWeightedAlgorithm(PositionSizingAlgorithm):
-    def calculate_size(self, ...) -> Decimal  # Line 180
+    def calculate_size(self, ...) -> Decimal  # Line 208
 ```
 
 #### Class: `ATRBasedAlgorithm`
@@ -3556,18 +4503,85 @@ class ConfidenceWeightedAlgorithm(PositionSizingAlgorithm):
 
 ```python
 class ATRBasedAlgorithm(PositionSizingAlgorithm):
-    def calculate_size(self, ...) -> Decimal  # Line 213
-    def _fallback_to_fixed(self, signal: Signal, portfolio_value: Decimal, risk_per_trade: Decimal) -> Decimal  # Line 251
+    def calculate_size(self, ...) -> Decimal  # Line 241
+    def _fallback_to_fixed(self, signal: Signal, portfolio_value: Decimal, risk_per_trade: Decimal) -> Decimal  # Line 279
 ```
 
 #### Functions:
 
 ```python
-def get_signal_confidence(signal: Signal) -> Decimal  # Line 262
-def validate_position_size(...) -> tuple[bool, Decimal]  # Line 286
-def calculate_position_size(...) -> Decimal  # Line 327
-def update_position_history(...) -> None  # Line 385
-def calculate_position_metrics(symbol: str, position_history: dict[str, list[Decimal]]) -> dict[str, Any]  # Line 413
+def get_signal_confidence(signal: Signal) -> Decimal  # Line 290
+def validate_position_size(...) -> tuple[bool, Decimal]  # Line 314
+def calculate_position_size(...) -> Decimal  # Line 355
+def update_position_history(...) -> None  # Line 414
+def calculate_position_metrics(symbol: str, position_history: dict[str, list[Decimal]]) -> dict[str, Any]  # Line 442
+```
+
+### File: pydantic_validators.py
+
+**Key Imports:**
+- `from src.utils.validation.core import ValidationFramework`
+
+#### Class: `PydanticValidators`
+
+**Purpose**: Reusable Pydantic validators to eliminate duplication
+
+```python
+class PydanticValidators:
+    def amount_validator(field_name: str = 'amount') -> Callable[[Any, Any], str]  # Line 20
+    def non_negative_amount_validator(field_name: str = 'amount') -> Callable[[Any, Any], str]  # Line 42
+    def price_validator(field_name: str = 'price') -> Callable[[Any, Any], str]  # Line 64
+    def quantity_validator(field_name: str = 'quantity') -> Callable[[Any, Any], str]  # Line 89
+    def symbol_validator(field_name: str = 'symbol') -> Callable[[Any, Any], str]  # Line 114
+    def percentage_validator(field_name: str = 'percentage') -> Callable[[Any, Any], str]  # Line 136
+    def exchange_validator(field_name: str = 'exchange') -> Callable[[Any, Any], str]  # Line 160
+```
+
+### File: resource_validation_utils.py
+
+**Key Imports:**
+- `from src.core.logging import get_logger`
+- `from src.core.types import BotPriority`
+- `from src.core.types import ResourceType`
+- `from src.core.exceptions import ValidationError`
+
+#### Class: `ResourceValidationError`
+
+**Inherits**: ValidationError
+**Purpose**: Specific validation error for resource operations
+
+```python
+class ResourceValidationError(ValidationError):
+```
+
+#### Class: `ResourceValidator`
+
+**Purpose**: Consolidated resource validation logic
+
+```python
+class ResourceValidator:
+    def validate_resource_request(bot_id, ...) -> dict[str, Any]  # Line 27
+    def calculate_resource_requirements(bot_id, ...) -> dict[ResourceType, Decimal]  # Line 82
+    def _validate_resource_type(resource_type: ResourceType, amount: Decimal) -> list[str]  # Line 151
+    def check_resource_availability(requirements, ...) -> dict[str, Any]  # Line 193
+```
+
+#### Class: `ResourceAllocationTracker`
+
+**Purpose**: Track and validate resource allocations
+
+```python
+class ResourceAllocationTracker:
+    def validate_allocation_state(bot_id: str, allocation_data: dict[str, Any]) -> dict[str, Any]  # Line 262
+```
+
+#### Class: `ResourceConflictDetector`
+
+**Purpose**: Detect and analyze resource conflicts
+
+```python
+class ResourceConflictDetector:
+    def detect_allocation_conflicts(all_allocations, ...) -> list[dict[str, Any]]  # Line 355
 ```
 
 ### File: risk_calculations.py
@@ -3585,14 +4599,14 @@ def calculate_position_metrics(symbol: str, position_history: dict[str, list[Dec
 def calculate_var(returns: list[Decimal], confidence_level: Decimal = Any, time_horizon: int = 1) -> Decimal  # Line 21
 def calculate_expected_shortfall(returns: list[Decimal], confidence_level: Decimal = Any) -> Decimal  # Line 58
 def calculate_sharpe_ratio(returns: list[Decimal], risk_free_rate: Decimal = Any) -> Decimal | None  # Line 94
-def calculate_max_drawdown(values: list[Decimal]) -> tuple[Decimal, int, int]  # Line 132
-def calculate_current_drawdown(current_value: Decimal, historical_values: list[Decimal]) -> Decimal  # Line 165
-def calculate_portfolio_value(positions, market_data) -> Decimal  # Line 192
-def calculate_sortino_ratio(...) -> Decimal  # Line 222
-def calculate_calmar_ratio(returns: list[Decimal], period_years: Decimal = ONE) -> Decimal  # Line 261
-def determine_risk_level(...) -> RiskLevel  # Line 292
-def update_returns_history(...) -> list[Decimal]  # Line 357
-def validate_risk_inputs(...) -> bool  # Line 399
+def calculate_max_drawdown(values: list[Decimal]) -> tuple[Decimal, int, int]  # Line 120
+def calculate_current_drawdown(current_value: Decimal, historical_values: list[Decimal]) -> Decimal  # Line 142
+def calculate_portfolio_value(positions, market_data) -> Decimal  # Line 169
+def calculate_sortino_ratio(...) -> Decimal  # Line 199
+def calculate_calmar_ratio(returns: list[Decimal], period_years: Decimal = ONE) -> Decimal  # Line 228
+def determine_risk_level(...) -> RiskLevel  # Line 259
+def update_returns_history(...) -> list[Decimal]  # Line 324
+def validate_risk_inputs(...) -> bool  # Line 366
 ```
 
 ### File: risk_monitoring.py
@@ -3924,6 +4938,23 @@ def deserialize_with_metadata(data: bytes, is_compressed: bool = False) -> tuple
 def register_util_services() -> None  # Line 25
 ```
 
+### File: service_utils.py
+
+**Key Imports:**
+- `from src.core.exceptions import ServiceError`
+- `from src.core.exceptions import ValidationError`
+- `from src.core.logging import get_logger`
+
+#### Functions:
+
+```python
+async def safe_service_shutdown(...) -> None  # Line 17
+def validate_positive_amount(amount: Decimal, field_name: str = 'amount', operation: str = 'operation') -> None  # Line 46
+def validate_non_empty_string(value: str, field_name: str, operation: str = 'operation') -> None  # Line 68
+def get_resource_cleanup_manager()  # Line 90
+def safe_cleanup_with_logging(...) -> None  # Line 105
+```
+
 ### File: state_utils.py
 
 **Key Imports:**
@@ -4133,8 +5164,8 @@ def truncate(text: str, max_length: int, suffix: str = '...') -> str  # Line 147
 
 ```python
 def generate_synthetic_ohlcv_data(...) -> pd.DataFrame  # Line 15
-def generate_timeframe_mapping() -> dict[str, str]  # Line 93
-def validate_ohlcv_data(data: pd.DataFrame) -> tuple[bool, list[str]]  # Line 110
+def generate_timeframe_mapping() -> dict[str, str]  # Line 108
+def validate_ohlcv_data(data: pd.DataFrame) -> tuple[bool, list[str]]  # Line 125
 ```
 
 ### File: technical_indicators.py
@@ -4156,9 +5187,9 @@ def calculate_macd_vectorized(...) -> tuple[np.ndarray, np.ndarray, np.ndarray] 
 def calculate_sma_talib(prices: np.ndarray, period: int) -> Decimal | None  # Line 168
 def calculate_ema_talib(prices: np.ndarray, period: int) -> Decimal | None  # Line 187
 def calculate_rsi_talib(prices: np.ndarray, period: int = 14) -> Decimal | None  # Line 206
-def calculate_macd_talib(prices: np.ndarray, fast: int = 12, slow: int = 26, signal: int = 9) -> dict[str, Decimal] | None  # Line 224
-def calculate_bollinger_bands_talib(prices: np.ndarray, period: int = 20, std_dev: Decimal = Any) -> dict[str, Decimal] | None  # Line 252
-def calculate_atr_talib(high: np.ndarray, low: np.ndarray, close: np.ndarray, period: int = 14) -> Decimal | None  # Line 294
+def calculate_macd_talib(prices: np.ndarray, fast: int = 12, slow: int = 26, signal: int = 9) -> dict[str, Decimal] | None  # Line 225
+def calculate_bollinger_bands_talib(prices: np.ndarray, period: int = 20, std_dev: Decimal = Any) -> dict[str, Decimal] | None  # Line 254
+def calculate_atr_talib(high: np.ndarray, low: np.ndarray, close: np.ndarray, period: int = 14) -> Decimal | None  # Line 297
 ```
 
 ### File: timezone_utils.py
@@ -4213,6 +5244,8 @@ class ValidationFramework:
     def validate_risk_parameters(params: dict[str, Any]) -> bool  # Line 325
     def validate_timeframe(timeframe: str) -> str  # Line 370
     def validate_batch(validations: list[tuple[str, Callable[[Any], Any], Any]]) -> dict[str, Any]  # Line 421
+    def validate_positive_amount(amount_str: str) -> str  # Line 562
+    def validate_non_negative_amount(amount_str: str) -> str  # Line 584
 ```
 
 ### File: market_data_validation.py
@@ -4561,16 +5594,16 @@ to the comprehensive validation
 
 ```python
 class ValidationFramework:
-    def validate_order(order: dict[str, Any]) -> bool  # Line 464
-    def validate_strategy_params(params: dict[str, Any]) -> bool  # Line 489
-    def validate_price(price: Any, max_price: Decimal = Any) -> Decimal  # Line 512
-    def validate_quantity(quantity: Any, min_qty: Decimal = Any) -> Decimal  # Line 534
-    def validate_symbol(symbol: str) -> str  # Line 556
-    def validate_exchange_credentials(credentials: dict[str, Any]) -> bool  # Line 577
-    def validate_risk_params(params: dict[str, Any]) -> bool  # Line 597
-    def validate_risk_parameters(params: dict[str, Any]) -> bool  # Line 618
-    def validate_timeframe(timeframe: str) -> str  # Line 634
-    def validate_batch(validations: list[tuple[str, Callable[[Any], Any], Any]]) -> dict[str, Any]  # Line 654
+    def validate_order(order: dict[str, Any]) -> bool  # Line 460
+    def validate_strategy_params(params: dict[str, Any]) -> bool  # Line 485
+    def validate_price(price: Any, max_price: Decimal = Any) -> Decimal  # Line 508
+    def validate_quantity(quantity: Any, min_qty: Decimal = Any) -> Decimal  # Line 530
+    def validate_symbol(symbol: str) -> str  # Line 552
+    def validate_exchange_credentials(credentials: dict[str, Any]) -> bool  # Line 573
+    def validate_risk_params(params: dict[str, Any]) -> bool  # Line 593
+    def validate_risk_parameters(params: dict[str, Any]) -> bool  # Line 614
+    def validate_timeframe(timeframe: str) -> str  # Line 630
+    def validate_batch(validations: list[tuple[str, Callable[[Any], Any], Any]]) -> dict[str, Any]  # Line 650
 ```
 
 #### Functions:
@@ -4582,12 +5615,38 @@ def validate_precision_range(precision: int, min_precision: int = 0, max_precisi
 def validate_financial_range(...) -> Decimal  # Line 139
 def validate_null_handling(value: Any, allow_null: bool = False, field_name: str = 'value') -> Any  # Line 188
 def validate_type_conversion(value: Any, target_type: type, field_name: str = 'value', strict: bool = True) -> Any  # Line 226
-def validate_market_conditions(...) -> dict[str, Decimal]  # Line 346
-def _validate_symbol(data: dict[str, Any]) -> None  # Line 382
-def _validate_numeric_field(data: dict[str, Any], field: str) -> None  # Line 392
-def _validate_bid_ask_relationship(data: dict[str, Any]) -> None  # Line 408
-def _validate_timestamp(data: dict[str, Any]) -> None  # Line 431
-def validate_market_data(data: dict[str, Any]) -> bool  # Line 438
+def validate_market_conditions(...) -> dict[str, Decimal]  # Line 342
+def _validate_symbol(data: dict[str, Any]) -> None  # Line 378
+def _validate_numeric_field(data: dict[str, Any], field: str) -> None  # Line 388
+def _validate_bid_ask_relationship(data: dict[str, Any]) -> None  # Line 404
+def _validate_timestamp(data: dict[str, Any]) -> None  # Line 427
+def validate_market_data(data: dict[str, Any]) -> bool  # Line 434
+```
+
+### File: web_interface_alignment.py
+
+**Key Imports:**
+- `from src.core.exceptions import ValidationError`
+- `from src.core.logging import get_logger`
+
+#### Class: `UtilsWebInterfaceDataBridge`
+
+**Purpose**: Bridge for consistent data flow between utils and web_interface modules
+
+```python
+class UtilsWebInterfaceDataBridge:
+    def transform_utils_to_web(data: dict[str, Any], operation_type: str = 'stream') -> dict[str, Any]  # Line 113
+    def transform_web_to_utils(data: dict[str, Any], operation_type: str = 'stream') -> dict[str, Any]  # Line 124
+    def ensure_financial_precision(data: dict[str, Any]) -> dict[str, Any]  # Line 148
+```
+
+#### Functions:
+
+```python
+def align_utils_to_web_patterns(data: dict[str, Any], operation_type: str) -> dict[str, Any]  # Line 17
+def validate_utils_to_web_boundary(data: dict[str, Any]) -> None  # Line 59
+def validate_web_to_utils_boundary(data: dict[str, Any]) -> None  # Line 82
+def get_aligned_error_context(source_module: str, target_module: str, operation: str) -> dict[str, Any]  # Line 163
 ```
 
 ### File: web_interface_utils.py
@@ -4609,6 +5668,10 @@ def safe_get_api_facade()  # Line 148
 def create_error_response(message: str, status_code: int = 500) -> HTTPException  # Line 167
 def handle_not_found(item_type: str, item_id: str) -> HTTPException  # Line 181
 def extract_error_details(error: Exception) -> dict[str, Any]  # Line 197
+def api_error_handler(operation: str, status_code: int = 500)  # Line 228
+def async_api_error_handler(operation: str, status_code: int = 500)  # Line 252
+def service_error_wrapper(operation: str)  # Line 276
+def handle_service_errors(func)  # Line 304
 ```
 
 ### File: websocket_connection_utils.py
@@ -4793,5 +5856,5 @@ async def handle_websocket_disconnect(websocket: WebSocket, manager: BaseWebSock
 
 ---
 **Generated**: Complete reference for utils module
-**Total Classes**: 177
-**Total Functions**: 358
+**Total Classes**: 216
+**Total Functions**: 414

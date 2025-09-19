@@ -53,7 +53,8 @@ class TestExchangeDistributor:
         mock_validation_service = Mock()
 
         return ExchangeDistributor(
-            exchanges=mock_exchanges, validation_service=mock_validation_service
+            exchanges=mock_exchanges,
+            validation_service=mock_validation_service
         )
 
     @pytest.fixture(scope="session")
@@ -537,7 +538,7 @@ class TestExchangeDistributor:
     async def test_service_dependency_injection(self, exchange_distributor):
         """Test service dependency injection."""
         # Test validation service injection
-        assert exchange_distributor.validation_service is not None
+        assert exchange_distributor._validation_service is not None
 
         # Test exchange injection
         assert len(exchange_distributor.exchanges) > 0

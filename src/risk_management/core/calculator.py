@@ -26,7 +26,7 @@ from src.utils.risk_calculations import (
 )
 
 
-class RiskCalculator(BaseComponent, ErrorPropagationMixin):
+class RiskCalculator(BaseComponent):
     """
     Centralized risk calculator with caching.
 
@@ -92,8 +92,15 @@ class RiskCalculator(BaseComponent, ErrorPropagationMixin):
         Returns:
             Sharpe ratio
         """
-        result = calculate_sharpe_ratio(returns, risk_free_rate)
-        return result if result is not None else Decimal("0")
+        import numpy as np
+        from src.utils.financial_calculations import calculate_sharpe_ratio as calc_sharpe
+
+        if not returns:
+            return Decimal("0")
+
+        # Convert to numpy array for financial calculations utility
+        returns_array = np.array([float(r) for r in returns])
+        return calc_sharpe(returns_array, risk_free_rate)
 
     def calculate_sortino_ratio(
         self,
@@ -107,12 +114,20 @@ class RiskCalculator(BaseComponent, ErrorPropagationMixin):
         Args:
             returns: Historical returns
             risk_free_rate: Risk-free rate
-            target_return: Target return for downside deviation
+            target_return: Target return for downside deviation (currently ignored for compatibility)
 
         Returns:
             Sortino ratio
         """
-        return calculate_sortino_ratio(returns, risk_free_rate, target_return)
+        import numpy as np
+        from src.utils.financial_calculations import calculate_sortino_ratio as calc_sortino
+
+        if not returns:
+            return Decimal("0")
+
+        # Convert to numpy array for financial calculations utility
+        returns_array = np.array([float(r) for r in returns])
+        return calc_sortino(returns_array, risk_free_rate)
 
     def calculate_max_drawdown(self, values: list[Decimal]) -> tuple[Decimal, int, int]:
         """
@@ -124,7 +139,12 @@ class RiskCalculator(BaseComponent, ErrorPropagationMixin):
         Returns:
             Tuple of (max_drawdown, peak_index, trough_index)
         """
-        return calculate_max_drawdown(values)
+        from src.utils.financial_calculations import calculate_max_drawdown_simple
+
+        if not values:
+            return Decimal("0"), 0, 0
+
+        return calculate_max_drawdown_simple(values)
 
     def calculate_calmar_ratio(
         self, returns: list[Decimal], period_years: Decimal = Decimal("1.0")

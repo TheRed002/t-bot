@@ -98,64 +98,9 @@ class OrderTrackingMixin:
         return self._orders.copy()
 
 
-class ErrorHandlingMixin:
-    """Mixin for standardized error handling patterns aligned with core."""
-
-    def handle_operation_error(
-        self, operation_name: str, error: Exception, context: dict[str, Any] | None = None
-    ) -> ComponentError:
-        """Standardize error handling across analytics services aligned with core patterns."""
-        from datetime import datetime, timezone
-
-        self.logger.error(f"Error in {operation_name}: {error}")
-
-        # Apply consistent error metadata aligned with core patterns
-        error_details = {
-            "original_error": str(error),
-            "context": context or {},
-            "processing_mode": "stream",  # Align with core default
-            "message_pattern": "pub_sub",  # Consistent messaging
-            "data_format": "analytics_mixin_error_v1",
-            "boundary_crossed": True,
-            "source_module": "analytics",
-            "error_code": "ANL_020",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        }
-
-        return ComponentError(
-            f"Failed to execute {operation_name}",
-            error_code="ANL_020",
-            component=self.__class__.__name__,
-            operation=operation_name,
-            details=error_details,
-        )
-
-    def safe_execute_operation(self, operation_name: str, operation_func, *args, **kwargs):
-        """Execute operation with standardized error handling aligned with core patterns."""
-        try:
-            return operation_func(*args, **kwargs)
-        except Exception as e:
-            # Apply consistent error propagation before raising
-            try:
-                from src.analytics.common import AnalyticsErrorHandler
-                AnalyticsErrorHandler.propagate_analytics_error(e, operation_name)
-            except Exception:
-                # Don't fail if error propagation fails
-                pass
-            raise self.handle_operation_error(operation_name, e) from e
-
-    async def safe_execute_async_operation(
-        self, operation_name: str, operation_func, *args, **kwargs
-    ):
-        """Execute async operation with standardized error handling aligned with core patterns."""
-        try:
-            return await operation_func(*args, **kwargs)
-        except Exception as e:
-            # Apply consistent error propagation before raising
-            try:
-                from src.analytics.common import AnalyticsErrorHandler
-                AnalyticsErrorHandler.propagate_analytics_error(e, operation_name)
-            except Exception:
-                # Don't fail if error propagation fails
-                pass
-            raise self.handle_operation_error(operation_name, e) from e
+# Use standardized error handling from core and error_handling modules
+# Instead of creating redundant mixins, use existing infrastructure:
+# - Error decorators from src.error_handling.decorators (with_retry, with_circuit_breaker, etc.)
+# - Error handling service from src.error_handling.service
+# - ErrorPropagationMixin from src.utils.messaging_patterns
+from src.utils.messaging_patterns import ErrorPropagationMixin

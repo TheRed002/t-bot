@@ -23,6 +23,31 @@ from src.analytics.types import (
 from src.core.types import Order, Position, Trade
 
 
+@runtime_checkable
+class DataTransformationServiceProtocol(Protocol):
+    """Protocol for data transformation between domain and persistence layers."""
+
+    def transform_portfolio_to_dict(self, metrics: PortfolioMetrics, bot_id: str) -> dict[str, Any]:
+        """Transform portfolio metrics to dictionary for persistence."""
+        ...
+
+    def transform_position_to_dict(self, metric: PositionMetrics, bot_id: str) -> dict[str, Any]:
+        """Transform position metrics to dictionary for persistence."""
+        ...
+
+    def transform_risk_to_dict(self, metrics: RiskMetrics, bot_id: str) -> dict[str, Any]:
+        """Transform risk metrics to dictionary for persistence."""
+        ...
+
+    def transform_dict_to_portfolio(self, data: dict[str, Any]) -> PortfolioMetrics:
+        """Transform dictionary to portfolio metrics domain object."""
+        ...
+
+    def transform_dict_to_risk(self, data: dict[str, Any]) -> RiskMetrics:
+        """Transform dictionary to risk metrics domain object."""
+        ...
+
+
 class AnalyticsServiceProtocol(Protocol):
     """Protocol defining the analytics service interface."""
 

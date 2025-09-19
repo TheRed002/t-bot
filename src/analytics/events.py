@@ -21,7 +21,15 @@ from src.core.event_constants import (
     SystemEvents,
     TradeEvents,
 )
-from src.core.logging import get_logger
+# Robust logger function with fallback for test suite compatibility
+def get_logger_safe(name):
+    """Get logger with robust fallback for test environments."""
+    try:
+        from src.core.logging import get_logger
+        return get_logger(name)
+    except ImportError:
+        import logging
+        return logging.getLogger(name)
 from src.core.types import Order, Position, Trade
 
 
@@ -43,10 +51,10 @@ class AnalyticsEventType(Enum):
     SERVICE_STARTED = SystemEvents.STARTUP
     SERVICE_STOPPED = SystemEvents.SHUTDOWN
     ERROR_OCCURRED = SystemEvents.COMPONENT_ERROR
-    HEALTH_CHECK_COMPLETED = "system.health_check"
+    HEALTH_CHECK_COMPLETED = SystemEvents.HEALTH_CHECK_FAILED  # Reuse closest available constant
     DATA_EXPORTED = MetricEvents.EXPORTED
-    REPORT_GENERATED = "report.generated"
-    RISK_ALERT = "risk.alert"
+    REPORT_GENERATED = MetricEvents.AGGREGATED  # Use available metric event for report generation
+    RISK_ALERT = RiskEvents.THRESHOLD_BREACH  # Use centralized risk event
 
 
 class AnalyticsEvent(BaseModel):
@@ -68,7 +76,7 @@ class EventHandler:
 
     def __init__(self, service):
         self.service = service
-        self.logger = get_logger(self.__class__.__name__)
+        self.logger = get_logger_safe(self.__class__.__name__)
 
     async def handle_event(self, event: AnalyticsEvent) -> None:
         """Handle analytics event."""
@@ -135,7 +143,7 @@ class SimpleEventBus:
 
     def __init__(self):
         self.handlers: dict[AnalyticsEventType, list[EventHandler]] = {}
-        self.logger = get_logger(self.__class__.__name__)
+        self.logger = get_logger_safe(self.__class__.__name__)
 
     def register_handler(self, event_type: AnalyticsEventType, handler: EventHandler) -> None:
         """Register event handler."""
@@ -204,8 +212,15 @@ class SimpleEventBus:
             self.logger.error(f"Handler failed for event {event.event_type.value}: {e}")
 
     def _propagate_event_error_consistently(self, error: Exception, operation: str, event_type: str) -> None:
-        """Propagate event errors consistently with core patterns."""
+        """Propagate event errors consistently with core patterns aligned with database module."""
         from datetime import timezone
+
+        from src.error_handling.propagation_utils import (
+            ProcessingStage,
+            PropagationMethod,
+            add_propagation_step,
+        )
+
         error_metadata = {
             "error_type": type(error).__name__,
             "operation": operation,
@@ -216,7 +231,21 @@ class SimpleEventBus:
             "boundary_crossed": True,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
-        self.logger.error(f"Analytics event error in {operation} for {event_type}: {error}", extra=error_metadata)
+
+        # Add propagation step for consistency with database module patterns
+        try:
+            error_data = add_propagation_step(
+                error_metadata,
+                source_module="analytics",
+                target_module="error_handling",
+                method=PropagationMethod.DIRECT_CALL,
+                stage=ProcessingStage.ERROR_PROPAGATION
+            )
+            self.logger.error(f"Analytics event error in {operation} for {event_type}: {error}", extra=error_data)
+        except Exception as propagation_error:
+            # Fallback if propagation utilities fail
+            self.logger.error(f"Analytics event error in {operation} for {event_type}: {error}", extra=error_metadata)
+            self.logger.warning(f"Error propagation failed: {propagation_error}")
 
 
 # Global event bus instance

@@ -279,7 +279,7 @@ class VectorizedProcessor:
         self, market_data: list[dict[str, Any]]
     ) -> dict[str, np.ndarray]:
         """
-        Process a batch of market data using vectorized operations.
+        Process a batch of market data using vectorized operations with paradigm alignment.
 
         Args:
             market_data: List of market data records
@@ -293,8 +293,17 @@ class VectorizedProcessor:
             if not market_data:
                 return {}
 
+            # Align processing paradigm for batch processing
+            from src.utils.messaging_patterns import ProcessingParadigmAligner
+
+            # Convert stream-like data to batch-compatible format
+            batch_data = ProcessingParadigmAligner.create_batch_from_stream(market_data)
+
+            # Use the aligned batch items for processing
+            aligned_market_data = batch_data["items"]
+
             # Convert to NumPy array for vectorized processing
-            data_array = self._convert_to_numpy(market_data)
+            data_array = self._convert_to_numpy(aligned_market_data)
 
             # Add to buffer
             self.price_buffer.append_batch(data_array)

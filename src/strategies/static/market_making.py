@@ -82,7 +82,7 @@ class MarketMakingStrategy(BaseStrategy):
     - Cross-exchange rate limit synchronization
     """
 
-    def __init__(self, config: dict[str, Any], services: StrategyServiceContainer | None = None):
+    def __init__(self, config: dict[str, Any], services: "StrategyServiceContainer | None" = None):
         """Initialize Market Making Strategy.
 
         Args:
@@ -142,7 +142,7 @@ class MarketMakingStrategy(BaseStrategy):
         self.commons = StrategyCommons(self.name, {"max_history_length": 200})
 
         # Store current symbol for indicator calculations
-        self._current_symbol: str | None = None
+        self._current_symbol: "str | None" = None
 
         # Performance tracking
         self.total_trades = 0

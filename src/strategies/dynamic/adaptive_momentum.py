@@ -91,7 +91,7 @@ class AdaptiveMomentumStrategy(BaseStrategy):
         """Set the strategy status."""
         self._status = value
 
-    def __init__(self, config: dict[str, Any], services: StrategyServiceContainer | None = None):
+    def __init__(self, config: dict[str, Any], services: "StrategyServiceContainer | None" = None):
         """Initialize adaptive momentum strategy with enhanced architecture."""
         super().__init__(config, services)
 
@@ -112,10 +112,10 @@ class AdaptiveMomentumStrategy(BaseStrategy):
         self.min_data_points = self.config.parameters.get("min_data_points", 50)
 
         # Service layer integrations (injected via BaseStrategy)
-        self._technical_indicators: TechnicalIndicators | None = None
-        self._strategy_service: StrategyService | None = None
-        self.regime_detector: MarketRegimeDetector | None = None
-        self.adaptive_risk_manager: AdaptiveRiskManager | None = None
+        self._technical_indicators: "TechnicalIndicators | None" = None
+        self._strategy_service: "StrategyService | None" = None
+        self.regime_detector: "MarketRegimeDetector | None" = None
+        self.adaptive_risk_manager: "AdaptiveRiskManager | None" = None
 
         # Strategy state (now managed through service layer)
         self._strategy_state: dict[str, Any] = {
@@ -266,7 +266,7 @@ class AdaptiveMomentumStrategy(BaseStrategy):
             return False
 
     @retry(max_attempts=2, base_delay=1)
-    async def _get_current_regime_via_service(self, symbol: str) -> MarketRegime | None:
+    async def _get_current_regime_via_service(self, symbol: str) -> "MarketRegime | None":
         """Get current market regime using service layer."""
         try:
             if not self.regime_detector:
@@ -317,7 +317,7 @@ class AdaptiveMomentumStrategy(BaseStrategy):
 
     async def _calculate_momentum_indicators_via_service(
         self, symbol: str, current_data: MarketData
-    ) -> dict[str, Any] | None:
+    ) -> "dict[str, Any] | None":
         """Calculate momentum indicators using centralized service."""
         try:
             if not self._technical_indicators:
@@ -417,7 +417,7 @@ class AdaptiveMomentumStrategy(BaseStrategy):
             return (rsi - 50) / 50  # Normal range conversion
 
     async def _generate_momentum_signals(
-        self, data: MarketData, indicators: dict[str, Any], current_regime: MarketRegime | None
+        self, data: MarketData, indicators: dict[str, Any], current_regime: "MarketRegime | None"
     ) -> list[Signal]:
         """Generate momentum signals based on indicators."""
         signals = []
@@ -493,7 +493,7 @@ class AdaptiveMomentumStrategy(BaseStrategy):
         momentum_score: float,
         volume_score: float,
         volatility: float,
-        regime: MarketRegime | None,
+        regime: "MarketRegime | None",
         direction: str,
     ) -> float:
         """Calculate confidence score with multiple factors."""
@@ -522,7 +522,7 @@ class AdaptiveMomentumStrategy(BaseStrategy):
             return 0.1
 
     async def _apply_confidence_adjustments(
-        self, signals: list[Signal], current_regime: MarketRegime | None
+        self, signals: list[Signal], current_regime: "MarketRegime | None"
     ) -> list[Signal]:
         """Apply confidence adjustments based on regime."""
         try:
@@ -578,7 +578,7 @@ class AdaptiveMomentumStrategy(BaseStrategy):
         symbol: str,
         signals: list[Signal],
         indicators: dict[str, Any],
-        current_regime: MarketRegime | None,
+        current_regime: "MarketRegime | None",
     ) -> None:
         """Update strategy state with current analysis results."""
         try:
@@ -634,7 +634,7 @@ class AdaptiveMomentumStrategy(BaseStrategy):
             )
 
 
-    def _get_regime_confidence_multiplier(self, regime: MarketRegime | None) -> float:
+    def _get_regime_confidence_multiplier(self, regime: "MarketRegime | None") -> float:
         """Get regime-specific confidence multiplier."""
         if not regime:
             return 1.0

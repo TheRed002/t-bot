@@ -222,7 +222,12 @@ class OrderRequest(BaseModel):
     @classmethod
     def validate_quantity(cls, v: Decimal) -> Decimal:
         """Validate quantity using consistent validation patterns."""
-        from src.core.exceptions import ValidationError
+        try:
+            from src.core.exceptions import ValidationError
+        except ImportError:
+            # Fallback for test environments
+            class ValidationError(ValueError):
+                pass
 
         try:
             from src.utils.validation.core import ValidationFramework

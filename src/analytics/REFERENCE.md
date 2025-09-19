@@ -1,9 +1,9 @@
 # ANALYTICS Module Reference
 
 ## INTEGRATION
-**Dependencies**: core, database, monitoring, utils
-**Used By**: None
-**Provides**: AlertService, AnalyticsService, BaseAnalyticsService, DataTransformationService, EnvironmentAwareAnalyticsManager, ExportService, MetricsCalculationService, OperationalService, PortfolioAnalyticsService, RealtimeAnalyticsService, ReportingService, RiskCalculationService, RiskService
+**Dependencies**: core, database, error_handling, monitoring, utils
+**Used By**: strategies
+**Provides**: AlertService, AnalyticsService, BaseAnalyticsService, DashboardService, DataTransformationService, EnvironmentAwareAnalyticsManager, ExportService, MetricsCalculationService, OperationalService, PortfolioAnalyticsService, RealtimeAnalyticsService, ReportingService, RiskCalculationService, RiskService
 **Patterns**: Async Operations, Component Architecture, Service Layer
 
 ## DETECTED PATTERNS
@@ -11,19 +11,32 @@
 - Decimal precision arithmetic
 - Database decimal columns
 - Decimal precision arithmetic
+**Performance**:
+- Parallel execution
 **Architecture**:
 - BaseAnalyticsService inherits from base architecture
 - AnalyticsRepository inherits from base architecture
 - DataTransformationService inherits from base architecture
 
 ## MODULE OVERVIEW
-**Files**: 21 Python files
-**Classes**: 62
-**Functions**: 11
+**Files**: 22 Python files
+**Classes**: 63
+**Functions**: 12
 
 ## COMPLETE API REFERENCE
 
 ## PROTOCOLS & INTERFACES
+
+### Protocol: `DataTransformationServiceProtocol`
+
+**Purpose**: Protocol for data transformation between domain and persistence layers
+
+**Required Methods:**
+- `transform_portfolio_to_dict(self, metrics: PortfolioMetrics, bot_id: str) -> dict[str, Any]`
+- `transform_position_to_dict(self, metric: PositionMetrics, bot_id: str) -> dict[str, Any]`
+- `transform_risk_to_dict(self, metrics: RiskMetrics, bot_id: str) -> dict[str, Any]`
+- `transform_dict_to_portfolio(self, data: dict[str, Any]) -> PortfolioMetrics`
+- `transform_dict_to_risk(self, data: dict[str, Any]) -> RiskMetrics`
 
 ### Protocol: `AnalyticsServiceProtocol`
 
@@ -83,6 +96,7 @@
 **Required Methods:**
 - `async export_portfolio_data(self, format: str = 'json', include_metadata: bool = True) -> str`
 - `async export_risk_data(self, format: str = 'json', include_metadata: bool = True) -> str`
+- `async export_metrics(self, format: str = 'json') -> dict[str, Any]`
 
 ### Protocol: `OperationalServiceProtocol`
 
@@ -91,7 +105,7 @@
 **Required Methods:**
 - `async get_operational_metrics(self) -> OperationalMetrics`
 - `record_strategy_event(self, strategy_name: str, event_type: str, success: bool = True, **kwargs) -> None`
-- `record_system_error(self, component: str, error_type: str, error_message: str, **kwargs) -> None`
+- `record_system_error(self, ...) -> None`
 
 ### Protocol: `RealtimeAnalyticsServiceProtocol`
 
@@ -137,20 +151,21 @@
 - `set_cache(self, key: str, value: Any) -> None` - Line 171
 - `clear_cache(self) -> None` - Line 181
 - `record_calculation_time(self, operation: str, duration: float) -> None` - Line 187
-- `record_error(self, operation: str, error: Exception) -> None` - Line 212
-- `convert_for_export(self, obj: Any) -> Any` - Line 238
-- `async execute_monitored(self, operation_name: str, operation_func: Callable, *args, **kwargs) -> Any` - Line 265
-- `async calculate_metrics(self, *args, **kwargs) -> dict[str, Any]` - Line 326
-- `async validate_data(self, data: Any) -> bool` - Line 335
-- `async cleanup(self) -> None` - Line 386
+- `record_error(self, operation: str, error: Exception) -> None` - Line 219
+- `convert_for_export(self, obj: Any) -> Any` - Line 252
+- `async execute_monitored(self, operation_name: str, operation_func: Callable, *args, **kwargs) -> Any` - Line 279
+- `async calculate_metrics(self, *args, **kwargs) -> dict[str, Any]` - Line 340
+- `async validate_data(self, data: Any) -> bool` - Line 349
+- `async cleanup(self) -> None` - Line 400
 
 ### Implementation: `AnalyticsErrorHandler` ✅
 
-**Purpose**: Centralized error handling for analytics operations
+**Purpose**: Centralized error handling for analytics operations aligned with core patterns
 **Status**: Complete
 
 **Implemented Methods:**
 - `create_operation_error(component_name, ...) -> ComponentError` - Line 19
+- `propagate_analytics_error(error: Exception, context: str, target_module: str = 'core') -> None` - Line 54
 
 ### Implementation: `AnalyticsCalculations` ✅
 
@@ -158,9 +173,9 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `calculate_percentage_change(old_value: Decimal, new_value: Decimal) -> Decimal` - Line 41
-- `calculate_simple_var(total_exposure: Decimal, confidence_level: Decimal) -> Decimal` - Line 48
-- `calculate_position_weight(position_value: Decimal, total_portfolio_value: Decimal) -> Decimal` - Line 53
+- `calculate_percentage_change(old_value: Decimal, new_value: Decimal) -> Decimal` - Line 118
+- `calculate_simple_var(total_exposure: Decimal, confidence_level: Decimal) -> Decimal` - Line 125
+- `calculate_position_weight(position_value: Decimal, total_portfolio_value: Decimal) -> Decimal` - Line 130
 
 ### Implementation: `ConfigurationDefaults` ✅
 
@@ -168,8 +183,8 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `get_default_config() -> AnalyticsConfiguration` - Line 66
-- `merge_config(config: AnalyticsConfiguration | None) -> AnalyticsConfiguration` - Line 71
+- `get_default_config() -> AnalyticsConfiguration` - Line 143
+- `merge_config(config: AnalyticsConfiguration | None) -> AnalyticsConfiguration` - Line 148
 
 ### Implementation: `ServiceInitializationHelper` ✅
 
@@ -177,8 +192,8 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `prepare_service_config(config: AnalyticsConfiguration | None) -> dict[str, Any]` - Line 82
-- `initialize_common_state() -> dict[str, Any]` - Line 88
+- `prepare_service_config(config: AnalyticsConfiguration | dict | None) -> dict[str, Any]` - Line 159
+- `initialize_common_state() -> dict[str, Any]` - Line 172
 
 ### Implementation: `MetricsDefaults` ✅
 
@@ -186,9 +201,9 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `empty_portfolio_metrics() -> dict[str, Any]` - Line 101
-- `empty_risk_metrics() -> dict[str, Any]` - Line 111
-- `empty_operational_metrics() -> dict[str, Any]` - Line 121
+- `empty_portfolio_metrics() -> dict[str, Any]` - Line 185
+- `empty_risk_metrics() -> dict[str, Any]` - Line 195
+- `empty_operational_metrics() -> dict[str, Any]` - Line 205
 
 ### Implementation: `AnalyticsMode` ✅
 
@@ -208,8 +223,8 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `get_sandbox_analytics_config() -> dict[str, Any]` - Line 46
-- `get_live_analytics_config() -> dict[str, Any]` - Line 75
+- `get_sandbox_analytics_config() -> dict[str, Any]` - Line 50
+- `get_live_analytics_config() -> dict[str, Any]` - Line 79
 
 ### Implementation: `EnvironmentAwareAnalyticsManager` ✅
 
@@ -218,21 +233,21 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `get_environment_analytics_config(self, exchange: str) -> dict[str, Any]` - Line 160
-- `async generate_environment_aware_report(self, ...) -> dict[str, Any]` - Line 173
-- `async track_environment_performance(self, ...) -> None` - Line 381
-- `get_environment_analytics_metrics(self, exchange: str) -> dict[str, Any]` - Line 654
+- `get_environment_analytics_config(self, exchange: str) -> dict[str, Any]` - Line 180
+- `async generate_environment_aware_report(self, ...) -> dict[str, Any]` - Line 193
+- `async track_environment_performance(self, ...) -> None` - Line 407
+- `get_environment_analytics_metrics(self, exchange: str) -> dict[str, Any]` - Line 715
 
 ### Implementation: `AnalyticsEventType` ✅
 
 **Inherits**: Enum
-**Purpose**: Simple analytics event types
+**Purpose**: Simple analytics event types using core event constants
 **Status**: Complete
 
 ### Implementation: `AnalyticsEvent` ✅
 
 **Inherits**: BaseModel
-**Purpose**: Simple analytics event
+**Purpose**: Analytics event aligned with core event patterns
 **Status**: Complete
 
 ### Implementation: `EventHandler` ✅
@@ -241,7 +256,7 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async handle_event(self, event: AnalyticsEvent) -> None` - Line 59
+- `async handle_event(self, event: AnalyticsEvent) -> None` - Line 81
 
 ### Implementation: `PortfolioEventHandler` ✅
 
@@ -250,7 +265,7 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async handle_event(self, event: AnalyticsEvent) -> None` - Line 67
+- `async handle_event(self, event: AnalyticsEvent) -> None` - Line 89
 
 ### Implementation: `RiskEventHandler` ✅
 
@@ -259,7 +274,7 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async handle_event(self, event: AnalyticsEvent) -> None` - Line 86
+- `async handle_event(self, event: AnalyticsEvent) -> None` - Line 108
 
 ### Implementation: `AlertEventHandler` ✅
 
@@ -268,7 +283,7 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async handle_event(self, event: AnalyticsEvent) -> None` - Line 104
+- `async handle_event(self, event: AnalyticsEvent) -> None` - Line 126
 
 ### Implementation: `SimpleEventBus` ✅
 
@@ -276,10 +291,10 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `register_handler(self, event_type: AnalyticsEventType, handler: EventHandler) -> None` - Line 126
-- `async publish(self, event: AnalyticsEvent) -> None` - Line 132
-- `async start(self) -> None` - Line 141
-- `async stop(self) -> None` - Line 145
+- `register_handler(self, event_type: AnalyticsEventType, handler: EventHandler) -> None` - Line 148
+- `async publish(self, event: AnalyticsEvent) -> None` - Line 154
+- `async start(self) -> None` - Line 172
+- `async stop(self) -> None` - Line 176
 
 ### Implementation: `AnalyticsServiceFactory` ✅
 
@@ -289,13 +304,14 @@
 
 **Implemented Methods:**
 - `create_analytics_service(self, config: AnalyticsConfiguration | None = None, **kwargs) -> 'AnalyticsService'` - Line 23
-- `create_realtime_analytics_service(self, config: AnalyticsConfiguration | None = None)` - Line 55
-- `create_portfolio_service(self, config: AnalyticsConfiguration | None = None)` - Line 61
-- `create_risk_service(self, config: AnalyticsConfiguration | None = None)` - Line 67
-- `create_reporting_service(self, config: AnalyticsConfiguration | None = None)` - Line 73
-- `create_operational_service(self, config: AnalyticsConfiguration | None = None)` - Line 79
-- `create_alert_service(self, config: AnalyticsConfiguration | None = None)` - Line 85
-- `create_export_service(self, config: AnalyticsConfiguration | None = None)` - Line 91
+- `create_realtime_analytics_service(self, config: AnalyticsConfiguration | None = None)` - Line 56
+- `create_portfolio_service(self, config: AnalyticsConfiguration | None = None)` - Line 62
+- `create_risk_service(self, config: AnalyticsConfiguration | None = None)` - Line 68
+- `create_reporting_service(self, config: AnalyticsConfiguration | None = None)` - Line 74
+- `create_operational_service(self, config: AnalyticsConfiguration | None = None)` - Line 80
+- `create_alert_service(self, config: AnalyticsConfiguration | None = None)` - Line 86
+- `create_export_service(self, config: AnalyticsConfiguration | None = None)` - Line 92
+- `create_dashboard_service(self, config: AnalyticsConfiguration | None = None)` - Line 98
 
 ### Implementation: `AnalyticsDataRepository` 🔧
 
@@ -304,10 +320,10 @@
 **Status**: Abstract Base Class
 
 **Implemented Methods:**
-- `async store_portfolio_metrics(self, metrics: PortfolioMetrics) -> None` - Line 225
-- `async store_position_metrics(self, metrics: list[PositionMetrics]) -> None` - Line 230
-- `async store_risk_metrics(self, metrics: RiskMetrics) -> None` - Line 235
-- `async get_historical_portfolio_metrics(self, start_date: datetime, end_date: datetime) -> list[PortfolioMetrics]` - Line 240
+- `async store_portfolio_metrics(self, metrics: PortfolioMetrics) -> None` - Line 254
+- `async store_position_metrics(self, metrics: list[PositionMetrics]) -> None` - Line 259
+- `async store_risk_metrics(self, metrics: RiskMetrics) -> None` - Line 264
+- `async get_historical_portfolio_metrics(self, start_date: datetime, end_date: datetime) -> list[PortfolioMetrics]` - Line 269
 
 ### Implementation: `MetricsCalculationService` 🔧
 
@@ -316,9 +332,9 @@
 **Status**: Abstract Base Class
 
 **Implemented Methods:**
-- `async calculate_portfolio_metrics(self, positions: dict[str, Position], prices: dict[str, Decimal]) -> PortfolioMetrics` - Line 251
-- `async calculate_position_metrics(self, position: Position, current_price: Decimal) -> PositionMetrics` - Line 258
-- `async calculate_strategy_metrics(self, strategy_name: str, positions: list[Position], trades: list[Trade]) -> StrategyMetrics` - Line 265
+- `async calculate_portfolio_metrics(self, positions: dict[str, Position], prices: dict[str, Decimal]) -> PortfolioMetrics` - Line 280
+- `async calculate_position_metrics(self, position: Position, current_price: Decimal) -> PositionMetrics` - Line 287
+- `async calculate_strategy_metrics(self, strategy_name: str, positions: list[Position], trades: list[Trade]) -> StrategyMetrics` - Line 294
 
 ### Implementation: `RiskCalculationService` 🔧
 
@@ -327,8 +343,8 @@
 **Status**: Abstract Base Class
 
 **Implemented Methods:**
-- `async calculate_portfolio_var(self, ...) -> dict[str, Decimal]` - Line 276
-- `async calculate_risk_metrics(self, positions: dict[str, Position], price_history: dict[str, list[Decimal]]) -> RiskMetrics` - Line 287
+- `async calculate_portfolio_var(self, ...) -> dict[str, Decimal]` - Line 305
+- `async calculate_risk_metrics(self, positions: dict[str, Position], price_history: dict[str, list[Decimal]]) -> RiskMetrics` - Line 316
 
 ### Implementation: `PositionTrackingMixin` ✅
 
@@ -337,10 +353,10 @@
 
 **Implemented Methods:**
 - `update_position(self, position: Position) -> None` - Line 25
-- `update_trade(self, trade: Trade) -> None` - Line 38
-- `get_position(self, symbol: str) -> Position | None` - Line 54
-- `get_all_positions(self) -> dict[str, Position]` - Line 58
-- `get_recent_trades(self, limit: int | None = None) -> list[Trade]` - Line 62
+- `update_trade(self, trade: Trade) -> None` - Line 39
+- `get_position(self, symbol: str) -> Position | None` - Line 56
+- `get_all_positions(self) -> dict[str, Position]` - Line 60
+- `get_recent_trades(self, limit: int | None = None) -> list[Trade]` - Line 64
 
 ### Implementation: `OrderTrackingMixin` ✅
 
@@ -348,19 +364,9 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `update_order(self, order: Order) -> None` - Line 76
-- `get_order(self, order_id: str) -> Order | None` - Line 89
-- `get_all_orders(self) -> dict[str, Order]` - Line 93
-
-### Implementation: `ErrorHandlingMixin` ✅
-
-**Purpose**: Mixin for standardized error handling patterns
-**Status**: Complete
-
-**Implemented Methods:**
-- `handle_operation_error(self, ...) -> ComponentError` - Line 101
-- `safe_execute_operation(self, operation_name: str, operation_func, *args, **kwargs)` - Line 114
-- `async safe_execute_async_operation(self, operation_name: str, operation_func, *args, **kwargs)` - Line 121
+- `update_order(self, order: Order) -> None` - Line 78
+- `get_order(self, order_id: str) -> Order | None` - Line 92
+- `get_all_orders(self) -> dict[str, Order]` - Line 96
 
 ### Implementation: `AnalyticsRepository` ✅
 
@@ -369,12 +375,12 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async store_portfolio_metrics(self, metrics: PortfolioMetrics) -> None` - Line 87
-- `async store_position_metrics(self, metrics: list[PositionMetrics]) -> None` - Line 127
-- `async store_risk_metrics(self, metrics: RiskMetrics) -> None` - Line 172
-- `async get_historical_portfolio_metrics(self, start_date: datetime, end_date: datetime) -> list[PortfolioMetrics]` - Line 210
-- `async get_latest_portfolio_metrics(self) -> PortfolioMetrics | None` - Line 266
-- `async get_latest_risk_metrics(self) -> RiskMetrics | None` - Line 296
+- `async store_portfolio_metrics(self, metrics: PortfolioMetrics) -> None` - Line 75
+- `async store_position_metrics(self, metrics: list[PositionMetrics]) -> None` - Line 137
+- `async store_risk_metrics(self, metrics: RiskMetrics) -> None` - Line 206
+- `async get_historical_portfolio_metrics(self, start_date: datetime, end_date: datetime) -> list[PortfolioMetrics]` - Line 266
+- `async get_latest_portfolio_metrics(self) -> PortfolioMetrics | None` - Line 366
+- `async get_latest_risk_metrics(self) -> RiskMetrics | None` - Line 417
 
 ### Implementation: `AnalyticsService` ✅
 
@@ -383,39 +389,39 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `update_position(self, position: Position) -> None` - Line 80
-- `update_trade(self, trade: Trade) -> None` - Line 93
-- `update_order(self, order: Order) -> None` - Line 106
-- `update_price(self, symbol: str, price: Decimal, timestamp: datetime | None = None) -> None` - Line 117
-- `async get_portfolio_metrics(self) -> PortfolioMetrics | None` - Line 131
-- `async get_position_metrics(self, symbol: str | None = None) -> list[PositionMetrics]` - Line 141
-- `async get_strategy_metrics(self, strategy: str | None = None) -> list[StrategyMetrics]` - Line 151
-- `async get_risk_metrics(self) -> RiskMetrics` - Line 161
-- `async get_operational_metrics(self) -> OperationalMetrics` - Line 172
-- `async generate_performance_report(self, ...) -> AnalyticsReport` - Line 237
-- `async generate_health_report(self) -> dict[str, Any]` - Line 265
-- `async export_metrics(self, format: str = 'json') -> dict[str, Any]` - Line 321
-- `async export_portfolio_data(self, format: str = 'csv', include_metadata: bool = False) -> str` - Line 344
-- `async export_risk_data(self, format: str = 'json', include_metadata: bool = False) -> str` - Line 356
-- `get_export_statistics(self) -> dict[str, Any]` - Line 368
-- `get_active_alerts(self) -> list[dict[str, Any]]` - Line 379
-- `add_alert_rule(self, rule: dict[str, Any]) -> None` - Line 389
-- `remove_alert_rule(self, rule_id: str) -> None` - Line 397
-- `async acknowledge_alert(self, alert_id: str, acknowledged_by: str) -> bool` - Line 405
-- `async resolve_alert(self, alert_id: str, resolved_by: str, resolution_note: str) -> bool` - Line 415
-- `get_alert_statistics(self, period_hours: int | None = None) -> dict[str, Any]` - Line 425
-- `record_strategy_event(self, ...) -> None` - Line 439
-- `record_market_data_event(self, ...) -> None` - Line 455
-- `record_system_error(self, component: str, error_type: str, error_message: str, severity: str) -> None` - Line 476
-- `async record_api_call(self, ...) -> None` - Line 492
-- `async generate_comprehensive_analytics_dashboard(self) -> dict[str, Any]` - Line 513
-- `async run_comprehensive_analytics_cycle(self) -> dict[str, Any]` - Line 572
-- `async start_continuous_analytics(self, cycle_interval_seconds: int = 60) -> None` - Line 616
-- `async generate_executive_summary(self) -> dict[str, Any]` - Line 649
-- `async create_client_report_package(self, client_id: str, report_type: str) -> dict[str, Any]` - Line 674
-- `get_service_status(self) -> dict[str, Any]` - Line 737
-- `async calculate_metrics(self, *args, **kwargs) -> dict[str, Any]` - Line 780
-- `async validate_data(self, data: Any) -> bool` - Line 788
+- `update_position(self, position: Position) -> None` - Line 82
+- `update_trade(self, trade: Trade) -> None` - Line 95
+- `update_order(self, order: Order) -> None` - Line 108
+- `update_price(self, symbol: str, price: Decimal, timestamp: datetime | None = None) -> None` - Line 119
+- `async get_portfolio_metrics(self) -> PortfolioMetrics | None` - Line 133
+- `async get_position_metrics(self, symbol: str | None = None) -> list[PositionMetrics]` - Line 143
+- `async get_strategy_metrics(self, strategy: str | None = None) -> list[StrategyMetrics]` - Line 153
+- `async get_risk_metrics(self) -> RiskMetrics` - Line 163
+- `async get_operational_metrics(self) -> OperationalMetrics` - Line 174
+- `async generate_performance_report(self, ...) -> AnalyticsReport` - Line 239
+- `async generate_health_report(self) -> dict[str, Any]` - Line 267
+- `async export_metrics(self, format: str = 'json') -> dict[str, Any]` - Line 323
+- `async export_portfolio_data(self, format: str = 'csv', include_metadata: bool = False) -> str` - Line 346
+- `async export_risk_data(self, format: str = 'json', include_metadata: bool = False) -> str` - Line 358
+- `get_export_statistics(self) -> dict[str, Any]` - Line 370
+- `get_active_alerts(self) -> list[dict[str, Any]]` - Line 381
+- `add_alert_rule(self, rule: dict[str, Any]) -> None` - Line 391
+- `remove_alert_rule(self, rule_id: str) -> None` - Line 399
+- `async acknowledge_alert(self, alert_id: str, acknowledged_by: str) -> bool` - Line 407
+- `async resolve_alert(self, alert_id: str, resolved_by: str, resolution_note: str) -> bool` - Line 417
+- `get_alert_statistics(self, period_hours: int | None = None) -> dict[str, Any]` - Line 427
+- `record_strategy_event(self, ...) -> None` - Line 441
+- `record_market_data_event(self, ...) -> None` - Line 457
+- `record_system_error(self, component: str, error_type: str, error_message: str, severity: str) -> None` - Line 478
+- `async record_api_call(self, ...) -> None` - Line 494
+- `async generate_comprehensive_analytics_dashboard(self) -> dict[str, Any]` - Line 515
+- `async run_comprehensive_analytics_cycle(self) -> dict[str, Any]` - Line 550
+- `async start_continuous_analytics(self, cycle_interval_seconds: int = 60) -> None` - Line 594
+- `async generate_executive_summary(self) -> dict[str, Any]` - Line 627
+- `async create_client_report_package(self, client_id: str, report_type: str) -> dict[str, Any]` - Line 652
+- `get_service_status(self) -> dict[str, Any]` - Line 716
+- `async calculate_metrics(self, *args, **kwargs) -> dict[str, Any]` - Line 759
+- `async validate_data(self, data: Any) -> bool` - Line 767
 
 ### Implementation: `AlertService` ✅
 
@@ -430,18 +436,37 @@
 - `async calculate_metrics(self, *args, **kwargs) -> dict[str, Any]` - Line 71
 - `async validate_data(self, data: Any) -> bool` - Line 75
 
+### Implementation: `DashboardService` ✅
+
+**Inherits**: BaseAnalyticsService
+**Purpose**: Service for generating analytics dashboards
+**Status**: Complete
+
+**Implemented Methods:**
+- `async generate_comprehensive_dashboard(self, ...) -> dict[str, Any]` - Line 42
+- `async generate_quick_dashboard(self) -> dict[str, Any]` - Line 116
+- `async generate_risk_dashboard(self, risk_metrics = None) -> dict[str, Any]` - Line 160
+- `async generate_performance_dashboard(self, portfolio_metrics = None, strategy_metrics = None) -> dict[str, Any]` - Line 193
+- `async calculate_metrics(self, *args, **kwargs) -> dict[str, Any]` - Line 387
+- `async validate_data(self, data: Any) -> bool` - Line 398
+
 ### Implementation: `DataTransformationService` ✅
 
-**Inherits**: BaseService
+**Inherits**: BaseService, DataTransformationServiceProtocol
 **Purpose**: Service for transforming analytics data between domain and persistence layers
 **Status**: Complete
 
 **Implemented Methods:**
-- `transform_portfolio_metrics_to_db(self, metrics: PortfolioMetrics, bot_id: str) -> AnalyticsPortfolioMetrics` - Line 28
-- `transform_position_metrics_to_db(self, metric: PositionMetrics, bot_id: str) -> AnalyticsPositionMetrics` - Line 65
-- `transform_risk_metrics_to_db(self, metrics: RiskMetrics, bot_id: str) -> AnalyticsRiskMetrics` - Line 104
-- `transform_db_to_portfolio_metrics(self, db_metric: AnalyticsPortfolioMetrics) -> PortfolioMetrics` - Line 142
-- `transform_db_to_risk_metrics(self, db_metric: AnalyticsRiskMetrics) -> RiskMetrics` - Line 164
+- `transform_portfolio_to_dict(self, metrics: PortfolioMetrics, bot_id: str) -> dict[str, Any]` - Line 31
+- `transform_position_to_dict(self, metric: PositionMetrics, bot_id: str) -> dict[str, Any]` - Line 83
+- `transform_risk_to_dict(self, metrics: RiskMetrics, bot_id: str) -> dict[str, Any]` - Line 135
+- `transform_dict_to_portfolio(self, data: dict[str, Any]) -> PortfolioMetrics` - Line 195
+- `transform_dict_to_risk(self, data: dict[str, Any]) -> RiskMetrics` - Line 224
+- `transform_portfolio_metrics_to_db(self, metrics: PortfolioMetrics, bot_id: str) -> AnalyticsPortfolioMetrics` - Line 247
+- `transform_position_metrics_to_db(self, metrics: PositionMetrics, bot_id: str) -> AnalyticsPositionMetrics` - Line 287
+- `transform_risk_metrics_to_db(self, metrics: RiskMetrics, bot_id: str) -> AnalyticsRiskMetrics` - Line 330
+- `transform_db_to_portfolio_metrics(self, db_metrics: AnalyticsPortfolioMetrics) -> PortfolioMetrics` - Line 371
+- `transform_db_to_risk_metrics(self, db_metrics: AnalyticsRiskMetrics) -> RiskMetrics` - Line 413
 
 ### Implementation: `ExportService` ✅
 
@@ -453,8 +478,9 @@
 - `async export_data(self, data: dict[str, Any], format: str = 'json') -> str` - Line 32
 - `async export_portfolio_data(self, format: str = 'json', include_metadata: bool = True) -> str` - Line 43
 - `async export_risk_data(self, format: str = 'json', include_metadata: bool = True) -> str` - Line 65
-- `async calculate_metrics(self, *args, **kwargs) -> dict[str, Any]` - Line 88
-- `async validate_data(self, data: Any) -> bool` - Line 92
+- `async export_metrics(self, format: str = 'json') -> dict[str, Any]` - Line 87
+- `async calculate_metrics(self, *args, **kwargs) -> dict[str, Any]` - Line 104
+- `async validate_data(self, data: Any) -> bool` - Line 108
 
 ### Implementation: `OperationalService` ✅
 
@@ -465,7 +491,7 @@
 **Implemented Methods:**
 - `async get_operational_metrics(self) -> OperationalMetrics` - Line 32
 - `record_strategy_event(self, strategy_name: str, event_type: str, success: bool = True, **kwargs) -> None` - Line 36
-- `record_system_error(self, component: str, error_type: str, error_message: str, **kwargs) -> None` - Line 46
+- `record_system_error(self, ...) -> None` - Line 46
 - `async calculate_metrics(self, *args, **kwargs) -> dict[str, Any]` - Line 56
 - `async validate_data(self, data: Any) -> bool` - Line 60
 
@@ -645,9 +671,9 @@
 **Implemented Methods:**
 - `convert_decimals_to_float(self, data: dict[str, Any], exclude_keys: set[str] | None = None) -> dict[str, Any]` - Line 21
 - `prepare_for_json_export(self, data: Any, remove_metadata: bool = False) -> dict[str, Any]` - Line 35
-- `json_serializer(self, obj: Any) -> Any` - Line 91
-- `safe_json_dumps(self, data: Any, **kwargs) -> str` - Line 104
-- `convert_decimals_for_json(self, ...) -> dict[str, Any]` - Line 108
+- `json_serializer(self, obj: Any) -> Any` - Line 97
+- `safe_json_dumps(self, data: Any, **kwargs) -> str` - Line 110
+- `convert_decimals_for_json(self, ...) -> dict[str, Any]` - Line 114
 
 ### Implementation: `ValidationHelper` ✅
 
@@ -666,6 +692,8 @@
 - `validate_data_structure(self, ...) -> None` - Line 222
 - `validate_alert_severity(self, severity: str) -> str` - Line 252
 - `validate_time_window(self, window_str: str) -> int` - Line 267
+- `validate_analytics_boundary(self, data: dict[str, Any], target_module: str) -> None` - Line 294
+- `validate_cross_module_data(self, data: dict[str, Any], source_module: str, target_module: str) -> None` - Line 374
 
 ## COMPLETE API REFERENCE
 
@@ -691,13 +719,13 @@ class BaseAnalyticsService(BaseService, ABC):
     def set_cache(self, key: str, value: Any) -> None  # Line 171
     def clear_cache(self) -> None  # Line 181
     def record_calculation_time(self, operation: str, duration: float) -> None  # Line 187
-    def record_error(self, operation: str, error: Exception) -> None  # Line 212
-    def convert_for_export(self, obj: Any) -> Any  # Line 238
-    async def execute_monitored(self, operation_name: str, operation_func: Callable, *args, **kwargs) -> Any  # Line 265
-    async def calculate_metrics(self, *args, **kwargs) -> dict[str, Any]  # Line 326
-    async def validate_data(self, data: Any) -> bool  # Line 335
-    async def _service_health_check(self) -> Any  # Line 344
-    async def cleanup(self) -> None  # Line 386
+    def record_error(self, operation: str, error: Exception) -> None  # Line 219
+    def convert_for_export(self, obj: Any) -> Any  # Line 252
+    async def execute_monitored(self, operation_name: str, operation_func: Callable, *args, **kwargs) -> Any  # Line 279
+    async def calculate_metrics(self, *args, **kwargs) -> dict[str, Any]  # Line 340
+    async def validate_data(self, data: Any) -> bool  # Line 349
+    async def _service_health_check(self) -> Any  # Line 358
+    async def cleanup(self) -> None  # Line 400
 ```
 
 ### File: common.py
@@ -709,11 +737,12 @@ class BaseAnalyticsService(BaseService, ABC):
 
 #### Class: `AnalyticsErrorHandler`
 
-**Purpose**: Centralized error handling for analytics operations
+**Purpose**: Centralized error handling for analytics operations aligned with core patterns
 
 ```python
 class AnalyticsErrorHandler:
     def create_operation_error(component_name, ...) -> ComponentError  # Line 19
+    def propagate_analytics_error(error: Exception, context: str, target_module: str = 'core') -> None  # Line 54
 ```
 
 #### Class: `AnalyticsCalculations`
@@ -722,9 +751,9 @@ class AnalyticsErrorHandler:
 
 ```python
 class AnalyticsCalculations:
-    def calculate_percentage_change(old_value: Decimal, new_value: Decimal) -> Decimal  # Line 41
-    def calculate_simple_var(total_exposure: Decimal, confidence_level: Decimal) -> Decimal  # Line 48
-    def calculate_position_weight(position_value: Decimal, total_portfolio_value: Decimal) -> Decimal  # Line 53
+    def calculate_percentage_change(old_value: Decimal, new_value: Decimal) -> Decimal  # Line 118
+    def calculate_simple_var(total_exposure: Decimal, confidence_level: Decimal) -> Decimal  # Line 125
+    def calculate_position_weight(position_value: Decimal, total_portfolio_value: Decimal) -> Decimal  # Line 130
 ```
 
 #### Class: `ConfigurationDefaults`
@@ -733,8 +762,8 @@ class AnalyticsCalculations:
 
 ```python
 class ConfigurationDefaults:
-    def get_default_config() -> AnalyticsConfiguration  # Line 66
-    def merge_config(config: AnalyticsConfiguration | None) -> AnalyticsConfiguration  # Line 71
+    def get_default_config() -> AnalyticsConfiguration  # Line 143
+    def merge_config(config: AnalyticsConfiguration | None) -> AnalyticsConfiguration  # Line 148
 ```
 
 #### Class: `ServiceInitializationHelper`
@@ -743,8 +772,8 @@ class ConfigurationDefaults:
 
 ```python
 class ServiceInitializationHelper:
-    def prepare_service_config(config: AnalyticsConfiguration | None) -> dict[str, Any]  # Line 82
-    def initialize_common_state() -> dict[str, Any]  # Line 88
+    def prepare_service_config(config: AnalyticsConfiguration | dict | None) -> dict[str, Any]  # Line 159
+    def initialize_common_state() -> dict[str, Any]  # Line 172
 ```
 
 #### Class: `MetricsDefaults`
@@ -753,9 +782,9 @@ class ServiceInitializationHelper:
 
 ```python
 class MetricsDefaults:
-    def empty_portfolio_metrics() -> dict[str, Any]  # Line 101
-    def empty_risk_metrics() -> dict[str, Any]  # Line 111
-    def empty_operational_metrics() -> dict[str, Any]  # Line 121
+    def empty_portfolio_metrics() -> dict[str, Any]  # Line 185
+    def empty_risk_metrics() -> dict[str, Any]  # Line 195
+    def empty_operational_metrics() -> dict[str, Any]  # Line 205
 ```
 
 ### File: di_registration.py
@@ -768,9 +797,9 @@ class MetricsDefaults:
 
 ```python
 def register_analytics_services(injector: DependencyInjector) -> None  # Line 25
-def configure_analytics_dependencies(injector: DependencyInjector | None = None) -> DependencyInjector  # Line 249
-def get_analytics_service(injector: DependencyInjector) -> 'AnalyticsService'  # Line 270
-def get_analytics_factory(injector: DependencyInjector) -> 'AnalyticsServiceFactory'  # Line 275
+def configure_analytics_dependencies(injector: DependencyInjector | None = None) -> DependencyInjector  # Line 277
+def get_analytics_service(injector: DependencyInjector) -> 'AnalyticsService'  # Line 298
+def get_analytics_factory(injector: DependencyInjector) -> 'AnalyticsServiceFactory'  # Line 303
 ```
 
 ### File: environment_integration.py
@@ -779,7 +808,6 @@ def get_analytics_factory(injector: DependencyInjector) -> 'AnalyticsServiceFact
 - `from src.core.exceptions import AnalyticsError`
 - `from src.core.integration.environment_aware_service import EnvironmentAwareServiceMixin`
 - `from src.core.integration.environment_aware_service import EnvironmentContext`
-- `from src.core.logging import get_logger`
 
 #### Class: `AnalyticsMode`
 
@@ -805,8 +833,8 @@ class ReportingLevel(Enum):
 
 ```python
 class EnvironmentAwareAnalyticsConfiguration:
-    def get_sandbox_analytics_config() -> dict[str, Any]  # Line 46
-    def get_live_analytics_config() -> dict[str, Any]  # Line 75
+    def get_sandbox_analytics_config() -> dict[str, Any]  # Line 50
+    def get_live_analytics_config() -> dict[str, Any]  # Line 79
 ```
 
 #### Class: `EnvironmentAwareAnalyticsManager`
@@ -816,48 +844,50 @@ class EnvironmentAwareAnalyticsConfiguration:
 
 ```python
 class EnvironmentAwareAnalyticsManager(EnvironmentAwareServiceMixin):
-    def __init__(self, *args, **kwargs) -> None  # Line 112
-    async def _update_service_environment(self, context: EnvironmentContext) -> None  # Line 119
-    def get_environment_analytics_config(self, exchange: str) -> dict[str, Any]  # Line 160
-    async def generate_environment_aware_report(self, ...) -> dict[str, Any]  # Line 173
-    async def _generate_performance_report(self, ...) -> dict[str, Any]  # Line 246
-    async def _generate_risk_report(self, ...) -> dict[str, Any]  # Line 291
-    async def _generate_execution_report(self, ...) -> dict[str, Any]  # Line 323
-    async def _generate_portfolio_report(self, ...) -> dict[str, Any]  # Line 352
-    async def track_environment_performance(self, ...) -> None  # Line 381
-    async def _calculate_performance_summary(self, exchange: str) -> dict[str, Any]  # Line 439
-    async def _calculate_detailed_performance_metrics(self, exchange: str) -> dict[str, Any]  # Line 465
-    async def _calculate_production_performance_metrics(self, exchange: str) -> dict[str, Any]  # Line 477
-    async def _calculate_sandbox_performance_metrics(self, exchange: str) -> dict[str, Any]  # Line 486
-    async def _calculate_advanced_performance_analytics(self, exchange: str) -> dict[str, Any]  # Line 495
-    async def _calculate_risk_summary(self, exchange: str) -> dict[str, Any]  # Line 503
-    async def _calculate_production_risk_metrics(self, exchange: str) -> dict[str, Any]  # Line 511
-    async def _calculate_sandbox_risk_metrics(self, exchange: str) -> dict[str, Any]  # Line 519
-    async def _calculate_detailed_risk_analysis(self, exchange: str) -> dict[str, Any]  # Line 527
-    async def _calculate_execution_summary(self, exchange: str) -> dict[str, Any]  # Line 535
-    async def _calculate_slippage_analysis(self, exchange: str) -> dict[str, Any]  # Line 543
-    async def _calculate_market_impact_analysis(self, exchange: str) -> dict[str, Any]  # Line 551
-    async def _calculate_portfolio_summary(self, exchange: str) -> dict[str, Any]  # Line 559
-    async def _calculate_performance_attribution(self, exchange: str) -> dict[str, Any]  # Line 567
-    async def _calculate_benchmark_comparison(self, exchange: str) -> dict[str, Any]  # Line 575
-    async def _get_cached_report(self, report_type: str, exchange: str, time_period: str | None) -> dict[str, Any] | None  # Line 583
-    async def _cache_report(self, ...) -> None  # Line 602
-    async def _update_analytics_metrics(self, exchange: str, start_time: datetime, success: bool, was_cached: bool) -> None  # Line 614
-    def get_environment_analytics_metrics(self, exchange: str) -> dict[str, Any]  # Line 654
+    def __init__(self, *args, **kwargs) -> None  # Line 116
+    def _get_local_logger(self)  # Line 123
+    async def _update_service_environment(self, context: EnvironmentContext) -> None  # Line 132
+    def get_environment_analytics_config(self, exchange: str) -> dict[str, Any]  # Line 180
+    async def generate_environment_aware_report(self, ...) -> dict[str, Any]  # Line 193
+    async def _generate_performance_report(self, ...) -> dict[str, Any]  # Line 272
+    async def _generate_risk_report(self, ...) -> dict[str, Any]  # Line 317
+    async def _generate_execution_report(self, ...) -> dict[str, Any]  # Line 349
+    async def _generate_portfolio_report(self, ...) -> dict[str, Any]  # Line 378
+    async def track_environment_performance(self, ...) -> None  # Line 407
+    async def _calculate_performance_summary(self, exchange: str) -> dict[str, Any]  # Line 478
+    async def _calculate_detailed_performance_metrics(self, exchange: str) -> dict[str, Any]  # Line 504
+    async def _calculate_production_performance_metrics(self, exchange: str) -> dict[str, Any]  # Line 516
+    async def _calculate_sandbox_performance_metrics(self, exchange: str) -> dict[str, Any]  # Line 525
+    async def _calculate_advanced_performance_analytics(self, exchange: str) -> dict[str, Any]  # Line 534
+    async def _calculate_risk_summary(self, exchange: str) -> dict[str, Any]  # Line 542
+    async def _calculate_production_risk_metrics(self, exchange: str) -> dict[str, Any]  # Line 550
+    async def _calculate_sandbox_risk_metrics(self, exchange: str) -> dict[str, Any]  # Line 558
+    async def _calculate_detailed_risk_analysis(self, exchange: str) -> dict[str, Any]  # Line 566
+    async def _calculate_execution_summary(self, exchange: str) -> dict[str, Any]  # Line 574
+    async def _calculate_slippage_analysis(self, exchange: str) -> dict[str, Any]  # Line 582
+    async def _calculate_market_impact_analysis(self, exchange: str) -> dict[str, Any]  # Line 590
+    async def _calculate_portfolio_summary(self, exchange: str) -> dict[str, Any]  # Line 598
+    async def _calculate_performance_attribution(self, exchange: str) -> dict[str, Any]  # Line 606
+    async def _calculate_benchmark_comparison(self, exchange: str) -> dict[str, Any]  # Line 614
+    async def _get_cached_report(self, report_type: str, exchange: str, time_period: str | None) -> dict[str, Any] | None  # Line 622
+    async def _cache_report(self, ...) -> None  # Line 641
+    async def _update_analytics_metrics(self, exchange: str, start_time: datetime, success: bool, was_cached: bool) -> None  # Line 653
+    def get_environment_analytics_metrics(self, exchange: str) -> dict[str, Any]  # Line 715
 ```
 
 ### File: events.py
 
 **Key Imports:**
-- `from src.core.logging import get_logger`
-- `from src.core.types import Order`
-- `from src.core.types import Position`
-- `from src.core.types import Trade`
+- `from src.core.event_constants import AlertEvents`
+- `from src.core.event_constants import MarketDataEvents`
+- `from src.core.event_constants import MetricEvents`
+- `from src.core.event_constants import OrderEvents`
+- `from src.core.event_constants import PositionEvents`
 
 #### Class: `AnalyticsEventType`
 
 **Inherits**: Enum
-**Purpose**: Simple analytics event types
+**Purpose**: Simple analytics event types using core event constants
 
 ```python
 class AnalyticsEventType(Enum):
@@ -866,7 +896,7 @@ class AnalyticsEventType(Enum):
 #### Class: `AnalyticsEvent`
 
 **Inherits**: BaseModel
-**Purpose**: Simple analytics event
+**Purpose**: Analytics event aligned with core event patterns
 
 ```python
 class AnalyticsEvent(BaseModel):
@@ -878,8 +908,8 @@ class AnalyticsEvent(BaseModel):
 
 ```python
 class EventHandler:
-    def __init__(self, service)  # Line 55
-    async def handle_event(self, event: AnalyticsEvent) -> None  # Line 59
+    def __init__(self, service)  # Line 77
+    async def handle_event(self, event: AnalyticsEvent) -> None  # Line 81
 ```
 
 #### Class: `PortfolioEventHandler`
@@ -889,7 +919,7 @@ class EventHandler:
 
 ```python
 class PortfolioEventHandler(EventHandler):
-    async def handle_event(self, event: AnalyticsEvent) -> None  # Line 67
+    async def handle_event(self, event: AnalyticsEvent) -> None  # Line 89
 ```
 
 #### Class: `RiskEventHandler`
@@ -899,7 +929,7 @@ class PortfolioEventHandler(EventHandler):
 
 ```python
 class RiskEventHandler(EventHandler):
-    async def handle_event(self, event: AnalyticsEvent) -> None  # Line 86
+    async def handle_event(self, event: AnalyticsEvent) -> None  # Line 108
 ```
 
 #### Class: `AlertEventHandler`
@@ -909,7 +939,7 @@ class RiskEventHandler(EventHandler):
 
 ```python
 class AlertEventHandler(EventHandler):
-    async def handle_event(self, event: AnalyticsEvent) -> None  # Line 104
+    async def handle_event(self, event: AnalyticsEvent) -> None  # Line 126
 ```
 
 #### Class: `SimpleEventBus`
@@ -918,22 +948,28 @@ class AlertEventHandler(EventHandler):
 
 ```python
 class SimpleEventBus:
-    def __init__(self)  # Line 122
-    def register_handler(self, event_type: AnalyticsEventType, handler: EventHandler) -> None  # Line 126
-    async def publish(self, event: AnalyticsEvent) -> None  # Line 132
-    async def start(self) -> None  # Line 141
-    async def stop(self) -> None  # Line 145
+    def __init__(self)  # Line 144
+    def register_handler(self, event_type: AnalyticsEventType, handler: EventHandler) -> None  # Line 148
+    async def publish(self, event: AnalyticsEvent) -> None  # Line 154
+    async def start(self) -> None  # Line 172
+    async def stop(self) -> None  # Line 176
+    def _apply_core_alignment(self, event: AnalyticsEvent) -> None  # Line 180
+    async def _process_handlers_stream(self, handlers: list, event: AnalyticsEvent) -> None  # Line 192
+    async def _process_handlers_batch(self, handlers: list, event: AnalyticsEvent) -> None  # Line 202
+    async def _safe_handle(self, handler, event: AnalyticsEvent) -> None  # Line 207
+    def _propagate_event_error_consistently(self, error: Exception, operation: str, event_type: str) -> None  # Line 214
 ```
 
 #### Functions:
 
 ```python
-def get_event_bus() -> SimpleEventBus  # Line 167
-async def publish_position_updated(position: Position, source: str) -> None  # Line 173
-async def publish_trade_executed(trade: Trade, source: str) -> None  # Line 186
-async def publish_order_updated(order: Order, source: str) -> None  # Line 199
-async def publish_price_updated(symbol: str, price: Decimal, timestamp: datetime, source: str) -> None  # Line 212
-async def publish_risk_limit_breached(...) -> None  # Line 225
+def get_logger_safe(name)  # Line 25
+def get_event_bus() -> SimpleEventBus  # Line 268
+async def publish_position_updated(position: Position, source: str) -> None  # Line 274
+async def publish_trade_executed(trade: Trade, source: str) -> None  # Line 291
+async def publish_order_updated(order: Order, source: str) -> None  # Line 308
+async def publish_price_updated(symbol: str, price: Decimal, timestamp: datetime, source: str) -> None  # Line 325
+async def publish_risk_limit_breached(...) -> None  # Line 338
 ```
 
 ### File: factory.py
@@ -945,7 +981,7 @@ async def publish_risk_limit_breached(...) -> None  # Line 225
 #### Functions:
 
 ```python
-def create_default_analytics_service(config: AnalyticsConfiguration | None = None, injector = None) -> 'AnalyticsService'  # Line 98
+def create_default_analytics_service(config: AnalyticsConfiguration | None = None, injector = None) -> 'AnalyticsService'  # Line 105
 ```
 
 ### File: interfaces.py
@@ -964,10 +1000,10 @@ def create_default_analytics_service(config: AnalyticsConfiguration | None = Non
 
 ```python
 class AnalyticsDataRepository(ABC):
-    async def store_portfolio_metrics(self, metrics: PortfolioMetrics) -> None  # Line 225
-    async def store_position_metrics(self, metrics: list[PositionMetrics]) -> None  # Line 230
-    async def store_risk_metrics(self, metrics: RiskMetrics) -> None  # Line 235
-    async def get_historical_portfolio_metrics(self, start_date: datetime, end_date: datetime) -> list[PortfolioMetrics]  # Line 240
+    async def store_portfolio_metrics(self, metrics: PortfolioMetrics) -> None  # Line 254
+    async def store_position_metrics(self, metrics: list[PositionMetrics]) -> None  # Line 259
+    async def store_risk_metrics(self, metrics: RiskMetrics) -> None  # Line 264
+    async def get_historical_portfolio_metrics(self, start_date: datetime, end_date: datetime) -> list[PortfolioMetrics]  # Line 269
 ```
 
 #### Class: `MetricsCalculationService`
@@ -977,9 +1013,9 @@ class AnalyticsDataRepository(ABC):
 
 ```python
 class MetricsCalculationService(ABC):
-    async def calculate_portfolio_metrics(self, positions: dict[str, Position], prices: dict[str, Decimal]) -> PortfolioMetrics  # Line 251
-    async def calculate_position_metrics(self, position: Position, current_price: Decimal) -> PositionMetrics  # Line 258
-    async def calculate_strategy_metrics(self, strategy_name: str, positions: list[Position], trades: list[Trade]) -> StrategyMetrics  # Line 265
+    async def calculate_portfolio_metrics(self, positions: dict[str, Position], prices: dict[str, Decimal]) -> PortfolioMetrics  # Line 280
+    async def calculate_position_metrics(self, position: Position, current_price: Decimal) -> PositionMetrics  # Line 287
+    async def calculate_strategy_metrics(self, strategy_name: str, positions: list[Position], trades: list[Trade]) -> StrategyMetrics  # Line 294
 ```
 
 #### Class: `RiskCalculationService`
@@ -989,8 +1025,8 @@ class MetricsCalculationService(ABC):
 
 ```python
 class RiskCalculationService(ABC):
-    async def calculate_portfolio_var(self, ...) -> dict[str, Decimal]  # Line 276
-    async def calculate_risk_metrics(self, positions: dict[str, Position], price_history: dict[str, list[Decimal]]) -> RiskMetrics  # Line 287
+    async def calculate_portfolio_var(self, ...) -> dict[str, Decimal]  # Line 305
+    async def calculate_risk_metrics(self, positions: dict[str, Position], price_history: dict[str, list[Decimal]]) -> RiskMetrics  # Line 316
 ```
 
 ### File: mixins.py
@@ -1000,6 +1036,7 @@ class RiskCalculationService(ABC):
 - `from src.core.types import Order`
 - `from src.core.types import Position`
 - `from src.core.types import Trade`
+- `from src.utils.messaging_patterns import ErrorPropagationMixin`
 
 #### Class: `PositionTrackingMixin`
 
@@ -1009,10 +1046,10 @@ class RiskCalculationService(ABC):
 class PositionTrackingMixin:
     def __init__(self, *args, **kwargs)  # Line 19
     def update_position(self, position: Position) -> None  # Line 25
-    def update_trade(self, trade: Trade) -> None  # Line 38
-    def get_position(self, symbol: str) -> Position | None  # Line 54
-    def get_all_positions(self) -> dict[str, Position]  # Line 58
-    def get_recent_trades(self, limit: int | None = None) -> list[Trade]  # Line 62
+    def update_trade(self, trade: Trade) -> None  # Line 39
+    def get_position(self, symbol: str) -> Position | None  # Line 56
+    def get_all_positions(self) -> dict[str, Position]  # Line 60
+    def get_recent_trades(self, limit: int | None = None) -> list[Trade]  # Line 64
 ```
 
 #### Class: `OrderTrackingMixin`
@@ -1021,28 +1058,17 @@ class PositionTrackingMixin:
 
 ```python
 class OrderTrackingMixin:
-    def __init__(self, *args, **kwargs)  # Line 72
-    def update_order(self, order: Order) -> None  # Line 76
-    def get_order(self, order_id: str) -> Order | None  # Line 89
-    def get_all_orders(self) -> dict[str, Order]  # Line 93
-```
-
-#### Class: `ErrorHandlingMixin`
-
-**Purpose**: Mixin for standardized error handling patterns
-
-```python
-class ErrorHandlingMixin:
-    def handle_operation_error(self, ...) -> ComponentError  # Line 101
-    def safe_execute_operation(self, operation_name: str, operation_func, *args, **kwargs)  # Line 114
-    async def safe_execute_async_operation(self, operation_name: str, operation_func, *args, **kwargs)  # Line 121
+    def __init__(self, *args, **kwargs)  # Line 74
+    def update_order(self, order: Order) -> None  # Line 78
+    def get_order(self, order_id: str) -> Order | None  # Line 92
+    def get_all_orders(self) -> dict[str, Order]  # Line 96
 ```
 
 ### File: repository.py
 
 **Key Imports:**
 - `from src.analytics.interfaces import AnalyticsDataRepository`
-- `from src.analytics.services.data_transformation_service import DataTransformationService`
+- `from src.analytics.interfaces import DataTransformationServiceProtocol`
 - `from src.analytics.types import PortfolioMetrics`
 - `from src.analytics.types import PositionMetrics`
 - `from src.analytics.types import RiskMetrics`
@@ -1054,13 +1080,13 @@ class ErrorHandlingMixin:
 
 ```python
 class AnalyticsRepository(BaseComponent, AnalyticsDataRepository):
-    def __init__(self, ...)  # Line 33
-    async def store_portfolio_metrics(self, metrics: PortfolioMetrics) -> None  # Line 87
-    async def store_position_metrics(self, metrics: list[PositionMetrics]) -> None  # Line 127
-    async def store_risk_metrics(self, metrics: RiskMetrics) -> None  # Line 172
-    async def get_historical_portfolio_metrics(self, start_date: datetime, end_date: datetime) -> list[PortfolioMetrics]  # Line 210
-    async def get_latest_portfolio_metrics(self) -> PortfolioMetrics | None  # Line 266
-    async def get_latest_risk_metrics(self) -> RiskMetrics | None  # Line 296
+    def __init__(self, ...)  # Line 32
+    async def store_portfolio_metrics(self, metrics: PortfolioMetrics) -> None  # Line 75
+    async def store_position_metrics(self, metrics: list[PositionMetrics]) -> None  # Line 137
+    async def store_risk_metrics(self, metrics: RiskMetrics) -> None  # Line 206
+    async def get_historical_portfolio_metrics(self, start_date: datetime, end_date: datetime) -> list[PortfolioMetrics]  # Line 266
+    async def get_latest_portfolio_metrics(self) -> PortfolioMetrics | None  # Line 366
+    async def get_latest_risk_metrics(self) -> RiskMetrics | None  # Line 417
 ```
 
 ### File: service.py
@@ -1080,66 +1106,78 @@ class AnalyticsRepository(BaseComponent, AnalyticsDataRepository):
 ```python
 class AnalyticsService(BaseAnalyticsService):
     def __init__(self, ...)  # Line 44
-    def update_position(self, position: Position) -> None  # Line 80
-    def update_trade(self, trade: Trade) -> None  # Line 93
-    def update_order(self, order: Order) -> None  # Line 106
-    def update_price(self, symbol: str, price: Decimal, timestamp: datetime | None = None) -> None  # Line 117
-    async def get_portfolio_metrics(self) -> PortfolioMetrics | None  # Line 131
-    async def get_position_metrics(self, symbol: str | None = None) -> list[PositionMetrics]  # Line 141
-    async def get_strategy_metrics(self, strategy: str | None = None) -> list[StrategyMetrics]  # Line 151
-    async def get_risk_metrics(self) -> RiskMetrics  # Line 161
-    async def get_operational_metrics(self) -> OperationalMetrics  # Line 172
-    async def generate_performance_report(self, ...) -> AnalyticsReport  # Line 237
-    async def generate_health_report(self) -> dict[str, Any]  # Line 265
-    async def export_metrics(self, format: str = 'json') -> dict[str, Any]  # Line 321
-    async def export_portfolio_data(self, format: str = 'csv', include_metadata: bool = False) -> str  # Line 344
-    async def export_risk_data(self, format: str = 'json', include_metadata: bool = False) -> str  # Line 356
-    def get_export_statistics(self) -> dict[str, Any]  # Line 368
-    def get_active_alerts(self) -> list[dict[str, Any]]  # Line 379
-    def add_alert_rule(self, rule: dict[str, Any]) -> None  # Line 389
-    def remove_alert_rule(self, rule_id: str) -> None  # Line 397
-    async def acknowledge_alert(self, alert_id: str, acknowledged_by: str) -> bool  # Line 405
-    async def resolve_alert(self, alert_id: str, resolved_by: str, resolution_note: str) -> bool  # Line 415
-    def get_alert_statistics(self, period_hours: int | None = None) -> dict[str, Any]  # Line 425
-    def record_strategy_event(self, ...) -> None  # Line 439
-    def record_market_data_event(self, ...) -> None  # Line 455
-    def record_system_error(self, component: str, error_type: str, error_message: str, severity: str) -> None  # Line 476
-    async def record_api_call(self, ...) -> None  # Line 492
-    async def generate_comprehensive_analytics_dashboard(self) -> dict[str, Any]  # Line 513
-    async def run_comprehensive_analytics_cycle(self) -> dict[str, Any]  # Line 572
-    async def start_continuous_analytics(self, cycle_interval_seconds: int = 60) -> None  # Line 616
-    async def _continuous_analytics_loop(self, interval_seconds: int) -> None  # Line 638
-    async def generate_executive_summary(self) -> dict[str, Any]  # Line 649
-    async def create_client_report_package(self, client_id: str, report_type: str) -> dict[str, Any]  # Line 674
-    def _cache_result(self, key: str, value: Any) -> None  # Line 704
-    def _get_cached_result(self, key: str) -> Any | None  # Line 714
-    def get_service_status(self) -> dict[str, Any]  # Line 737
-    def _default_operational_metrics(self) -> OperationalMetrics  # Line 747
-    async def calculate_metrics(self, *args, **kwargs) -> dict[str, Any]  # Line 780
-    async def validate_data(self, data: Any) -> bool  # Line 788
+    def update_position(self, position: Position) -> None  # Line 82
+    def update_trade(self, trade: Trade) -> None  # Line 95
+    def update_order(self, order: Order) -> None  # Line 108
+    def update_price(self, symbol: str, price: Decimal, timestamp: datetime | None = None) -> None  # Line 119
+    async def get_portfolio_metrics(self) -> PortfolioMetrics | None  # Line 133
+    async def get_position_metrics(self, symbol: str | None = None) -> list[PositionMetrics]  # Line 143
+    async def get_strategy_metrics(self, strategy: str | None = None) -> list[StrategyMetrics]  # Line 153
+    async def get_risk_metrics(self) -> RiskMetrics  # Line 163
+    async def get_operational_metrics(self) -> OperationalMetrics  # Line 174
+    async def generate_performance_report(self, ...) -> AnalyticsReport  # Line 239
+    async def generate_health_report(self) -> dict[str, Any]  # Line 267
+    async def export_metrics(self, format: str = 'json') -> dict[str, Any]  # Line 323
+    async def export_portfolio_data(self, format: str = 'csv', include_metadata: bool = False) -> str  # Line 346
+    async def export_risk_data(self, format: str = 'json', include_metadata: bool = False) -> str  # Line 358
+    def get_export_statistics(self) -> dict[str, Any]  # Line 370
+    def get_active_alerts(self) -> list[dict[str, Any]]  # Line 381
+    def add_alert_rule(self, rule: dict[str, Any]) -> None  # Line 391
+    def remove_alert_rule(self, rule_id: str) -> None  # Line 399
+    async def acknowledge_alert(self, alert_id: str, acknowledged_by: str) -> bool  # Line 407
+    async def resolve_alert(self, alert_id: str, resolved_by: str, resolution_note: str) -> bool  # Line 417
+    def get_alert_statistics(self, period_hours: int | None = None) -> dict[str, Any]  # Line 427
+    def record_strategy_event(self, ...) -> None  # Line 441
+    def record_market_data_event(self, ...) -> None  # Line 457
+    def record_system_error(self, component: str, error_type: str, error_message: str, severity: str) -> None  # Line 478
+    async def record_api_call(self, ...) -> None  # Line 494
+    async def generate_comprehensive_analytics_dashboard(self) -> dict[str, Any]  # Line 515
+    async def run_comprehensive_analytics_cycle(self) -> dict[str, Any]  # Line 550
+    async def start_continuous_analytics(self, cycle_interval_seconds: int = 60) -> None  # Line 594
+    async def _continuous_analytics_loop(self, interval_seconds: int) -> None  # Line 616
+    async def generate_executive_summary(self) -> dict[str, Any]  # Line 627
+    async def create_client_report_package(self, client_id: str, report_type: str) -> dict[str, Any]  # Line 652
+    def _cache_result(self, key: str, value: Any) -> None  # Line 682
+    def _get_cached_result(self, key: str) -> Any | None  # Line 692
+    def get_service_status(self) -> dict[str, Any]  # Line 716
+    def _default_operational_metrics(self) -> OperationalMetrics  # Line 726
+    async def calculate_metrics(self, *args, **kwargs) -> dict[str, Any]  # Line 759
+    async def validate_data(self, data: Any) -> bool  # Line 767
 ```
 
-### File: data_transformation_service.py
+### File: dashboard_service.py
 
 **Key Imports:**
-- `from src.analytics.types import PortfolioMetrics`
-- `from src.analytics.types import PositionMetrics`
-- `from src.analytics.types import RiskMetrics`
-- `from src.core.base.service import BaseService`
-- `from src.core.exceptions import ValidationError`
+- `from src.analytics.base_analytics_service import BaseAnalyticsService`
+- `from src.analytics.interfaces import OperationalServiceProtocol`
+- `from src.analytics.interfaces import PortfolioServiceProtocol`
+- `from src.analytics.interfaces import RiskServiceProtocol`
+- `from src.analytics.types import AnalyticsConfiguration`
 
-#### Class: `DataTransformationService`
+#### Class: `DashboardService`
 
-**Inherits**: BaseService
-**Purpose**: Service for transforming analytics data between domain and persistence layers
+**Inherits**: BaseAnalyticsService
+**Purpose**: Service for generating analytics dashboards
 
 ```python
-class DataTransformationService(BaseService):
-    def transform_portfolio_metrics_to_db(self, metrics: PortfolioMetrics, bot_id: str) -> AnalyticsPortfolioMetrics  # Line 28
-    def transform_position_metrics_to_db(self, metric: PositionMetrics, bot_id: str) -> AnalyticsPositionMetrics  # Line 65
-    def transform_risk_metrics_to_db(self, metrics: RiskMetrics, bot_id: str) -> AnalyticsRiskMetrics  # Line 104
-    def transform_db_to_portfolio_metrics(self, db_metric: AnalyticsPortfolioMetrics) -> PortfolioMetrics  # Line 142
-    def transform_db_to_risk_metrics(self, db_metric: AnalyticsRiskMetrics) -> RiskMetrics  # Line 164
+class DashboardService(BaseAnalyticsService):
+    def __init__(self, ...)  # Line 24
+    async def generate_comprehensive_dashboard(self, ...) -> dict[str, Any]  # Line 42
+    async def generate_quick_dashboard(self) -> dict[str, Any]  # Line 116
+    async def generate_risk_dashboard(self, risk_metrics = None) -> dict[str, Any]  # Line 160
+    async def generate_performance_dashboard(self, portfolio_metrics = None, strategy_metrics = None) -> dict[str, Any]  # Line 193
+    def _build_system_health_section(self, operational_metrics) -> dict[str, Any]  # Line 228
+    def _build_realtime_section(self, portfolio_metrics, position_metrics, strategy_metrics) -> dict[str, Any]  # Line 245
+    def _build_portfolio_section(self, portfolio_metrics) -> dict[str, Any]  # Line 256
+    def _build_risk_section(self, risk_metrics) -> dict[str, Any]  # Line 273
+    def _build_operational_section(self, operational_metrics) -> dict[str, Any]  # Line 286
+    def _build_alerts_section(self, active_alerts) -> dict[str, Any]  # Line 303
+    def _build_performance_indicators(self, portfolio_metrics, risk_metrics, operational_metrics) -> dict[str, Any]  # Line 310
+    def _format_portfolio_summary(self, portfolio_metrics) -> dict[str, Any]  # Line 335
+    def _format_risk_summary(self, risk_metrics) -> dict[str, Any]  # Line 352
+    def _format_operational_summary(self, operational_metrics) -> dict[str, Any]  # Line 367
+    async def calculate_metrics(self, *args, **kwargs) -> dict[str, Any]  # Line 387
+    async def validate_data(self, data: Any) -> bool  # Line 398
 ```
 
 ### File: types.py
@@ -1306,7 +1344,7 @@ class AnalyticsConfiguration(BaseModel):
 ### File: data_conversion.py
 
 **Key Imports:**
-- `from src.core.base import BaseComponent`
+- `from src.core.base.component import BaseComponent`
 
 #### Class: `DataConverter`
 
@@ -1318,17 +1356,17 @@ class DataConverter(BaseComponent):
     def __init__(self)  # Line 14
     def convert_decimals_to_float(self, data: dict[str, Any], exclude_keys: set[str] | None = None) -> dict[str, Any]  # Line 21
     def prepare_for_json_export(self, data: Any, remove_metadata: bool = False) -> dict[str, Any]  # Line 35
-    def json_serializer(self, obj: Any) -> Any  # Line 91
-    def safe_json_dumps(self, data: Any, **kwargs) -> str  # Line 104
-    def convert_decimals_for_json(self, ...) -> dict[str, Any]  # Line 108
-    def _convert_decimals(self, data: dict[str, Any], conversion_type: str = 'string') -> dict[str, Any]  # Line 135
-    def _convert_list_decimals_unified(self, data_list: list[Any], conversion_type: str) -> list[Any]  # Line 162
+    def json_serializer(self, obj: Any) -> Any  # Line 97
+    def safe_json_dumps(self, data: Any, **kwargs) -> str  # Line 110
+    def convert_decimals_for_json(self, ...) -> dict[str, Any]  # Line 114
+    def _convert_decimals(self, data: dict[str, Any], conversion_type: str = 'string') -> dict[str, Any]  # Line 141
+    def _convert_list_decimals_unified(self, data_list: list[Any], conversion_type: str) -> list[Any]  # Line 168
 ```
 
 ### File: validation.py
 
 **Key Imports:**
-- `from src.core.base import BaseComponent`
+- `from src.core.base.component import BaseComponent`
 - `from src.core.exceptions import ValidationError`
 
 #### Class: `ValidationHelper`
@@ -1349,9 +1387,11 @@ class ValidationHelper(BaseComponent):
     def validate_data_structure(self, ...) -> None  # Line 222
     def validate_alert_severity(self, severity: str) -> str  # Line 252
     def validate_time_window(self, window_str: str) -> int  # Line 267
+    def validate_analytics_boundary(self, data: dict[str, Any], target_module: str) -> None  # Line 294
+    def validate_cross_module_data(self, data: dict[str, Any], source_module: str, target_module: str) -> None  # Line 374
 ```
 
 ---
 **Generated**: Complete reference for analytics module
-**Total Classes**: 62
-**Total Functions**: 11
+**Total Classes**: 63
+**Total Functions**: 12

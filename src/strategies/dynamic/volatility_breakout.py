@@ -90,7 +90,7 @@ class VolatilityBreakoutStrategy(BaseStrategy):
         """Set the strategy status."""
         self._status = value
 
-    def __init__(self, config: dict[str, Any], services: StrategyServiceContainer | None = None):
+    def __init__(self, config: dict[str, Any], services: "StrategyServiceContainer | None" = None):
         """Initialize volatility breakout strategy with enhanced architecture."""
         super().__init__(config, services)
 
@@ -112,10 +112,10 @@ class VolatilityBreakoutStrategy(BaseStrategy):
         self.breakout_cooldown_minutes = self.config.parameters.get("breakout_cooldown_minutes", 30)
 
         # Service layer integrations (injected via BaseStrategy)
-        self._technical_indicators: TechnicalIndicators | None = None
+        self._technical_indicators: "TechnicalIndicators | None" = None
         self._strategy_service: "StrategyService | None" = None
-        self.regime_detector: MarketRegimeDetector | None = None
-        self.adaptive_risk_manager: AdaptiveRiskManager | None = None
+        self.regime_detector: "MarketRegimeDetector | None" = None
+        self.adaptive_risk_manager: "AdaptiveRiskManager | None" = None
 
         # Strategy state (now managed through service layer)
         self._strategy_state: dict[str, Any] = {
@@ -309,7 +309,7 @@ class VolatilityBreakoutStrategy(BaseStrategy):
             return False
 
     @retry(max_attempts=2, base_delay=1)
-    async def _get_current_regime_via_service(self, symbol: str) -> MarketRegime | None:
+    async def _get_current_regime_via_service(self, symbol: str) -> "MarketRegime | None":
         """Get current market regime using service layer."""
         try:
             if not self.regime_detector:
@@ -357,7 +357,7 @@ class VolatilityBreakoutStrategy(BaseStrategy):
 
     async def _calculate_volatility_indicators_via_service(
         self, symbol: str, current_data: MarketData
-    ) -> dict[str, Any] | None:
+    ) -> "dict[str, Any] | None":
         """Calculate volatility indicators using centralized service."""
         try:
             if not self._technical_indicators:
@@ -551,7 +551,7 @@ class VolatilityBreakoutStrategy(BaseStrategy):
             return "unknown"
 
     async def _calculate_breakout_levels(
-        self, symbol: str, indicators: dict[str, Any], current_regime: MarketRegime | None
+        self, symbol: str, indicators: dict[str, Any], current_regime: "MarketRegime | None"
     ) -> dict[str, float]:
         """Calculate breakout levels using ATR and regime adjustments."""
         try:
@@ -611,7 +611,7 @@ class VolatilityBreakoutStrategy(BaseStrategy):
             )
             return {}
 
-    def _get_regime_breakout_adjustment(self, regime: MarketRegime | None) -> float:
+    def _get_regime_breakout_adjustment(self, regime: "MarketRegime | None") -> float:
         """Get enhanced regime-specific breakout threshold adjustment."""
         if not regime:
             return 1.0
@@ -635,7 +635,7 @@ class VolatilityBreakoutStrategy(BaseStrategy):
         data: MarketData,
         indicators: dict[str, Any],
         breakout_levels: dict[str, float],
-        current_regime: MarketRegime | None,
+        current_regime: "MarketRegime | None",
     ) -> list[Signal]:
         """Generate breakout signals with validation."""
         signals: list[Any] = []
@@ -732,7 +732,7 @@ class VolatilityBreakoutStrategy(BaseStrategy):
         current_price: float,
         breakout_levels: dict[str, float],
         indicators: dict[str, Any],
-        regime: MarketRegime | None,
+        regime: "MarketRegime | None",
     ) -> float:
         """Calculate confidence for breakout signals."""
         try:
@@ -778,7 +778,7 @@ class VolatilityBreakoutStrategy(BaseStrategy):
             self.logger.error("Breakout confidence calculation failed", error=str(e))
             return 0.1
 
-    def _get_regime_confidence_multiplier(self, regime: MarketRegime | None) -> float:
+    def _get_regime_confidence_multiplier(self, regime: "MarketRegime | None") -> float:
         """Get regime-specific confidence multiplier for breakout strategies."""
         if not regime:
             return 1.0
@@ -798,7 +798,7 @@ class VolatilityBreakoutStrategy(BaseStrategy):
         return confidence_multipliers.get(regime, 1.0)
 
     async def _apply_regime_filtering(
-        self, signals: list[Signal], current_regime: MarketRegime | None
+        self, signals: list[Signal], current_regime: "MarketRegime | None"
     ) -> list[Signal]:
         """Apply regime-specific filtering for breakout signals."""
         try:
@@ -988,7 +988,7 @@ class VolatilityBreakoutStrategy(BaseStrategy):
         symbol: str,
         signals: list[Signal],
         indicators: dict[str, Any],
-        current_regime: MarketRegime | None,
+        current_regime: "MarketRegime | None",
     ) -> None:
         """Update strategy state with current analysis results."""
         try:

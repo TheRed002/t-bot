@@ -150,7 +150,7 @@ class TestRepositoryEdgeCases:
 
         # Test mark_signal_executed with already executed signal
         executed_signal = Signal(
-            id=uuid.uuid4(), strategy_id=uuid.uuid4(), symbol="BTCUSD", action="BUY", executed=True
+            id=uuid.uuid4(), strategy_id=uuid.uuid4(), symbol="BTCUSD", direction="BUY", source="test", executed=True
         )
 
         with (
@@ -170,7 +170,7 @@ class TestRepositoryEdgeCases:
 
         # Test update_signal_outcome without PnL
         pending_signal = Signal(
-            id=uuid.uuid4(), strategy_id=uuid.uuid4(), symbol="BTCUSD", action="BUY", executed=True
+            id=uuid.uuid4(), strategy_id=uuid.uuid4(), symbol="BTCUSD", direction="BUY", source="test", executed=True
         )
 
         with (

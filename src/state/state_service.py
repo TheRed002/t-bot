@@ -33,7 +33,7 @@ from src.core.exceptions import (
     StateConsistencyError,
     ValidationError,
 )
-from src.core.types import StateType
+from src.core.types import StatePriority, StateType
 
 # Import simple consistency utilities
 # Database model imports
@@ -108,15 +108,6 @@ class StateOperation(Enum):
     DELETE = "delete"
     RESTORE = "restore"
     SYNC = "sync"
-
-
-class StatePriority(str, Enum):
-    """State operation priority levels."""
-
-    CRITICAL = "critical"  # Trading operations, risk limits
-    HIGH = "high"  # Order management, position updates
-    MEDIUM = "medium"  # Strategy updates, configuration
-    LOW = "low"  # Metrics, historical data
 
 
 # StateMetadata is now imported from database.models.state

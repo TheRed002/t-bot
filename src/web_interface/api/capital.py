@@ -19,20 +19,13 @@ from src.utils.decorators import monitored
 from src.utils.pydantic_validators import validate_amount, validate_utilized_amount
 from src.utils.web_interface_utils import async_api_error_handler
 from src.web_interface.auth.middleware import get_current_user
-from src.web_interface.dependencies import get_web_capital_service
+from src.web_interface.dependencies import get_web_capital_service, get_web_auth_service
 
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="/api/capital", tags=["capital"])
 
 
-def _get_user_roles(current_user) -> list[str]:
-    """Extract user roles from current_user object."""
-    return (
-        getattr(current_user, "roles", None)
-        or current_user.get("roles", [])
-        or [current_user.get("role", "")]
-    )
 
 
 # Request/Response Models
@@ -147,6 +140,7 @@ async def allocate_capital(
     request: CapitalAllocationRequest,
     current_user: dict = Depends(get_current_user),
     web_capital_service=Depends(get_web_capital_service),
+    web_auth_service=Depends(get_web_auth_service),
 ):
     """Allocate capital to a strategy."""
     try:
@@ -155,10 +149,8 @@ async def allocate_capital(
             f"strategy {request.strategy_id} on {request.exchange}"
         )
 
-        # Check permissions
-        user_roles = _get_user_roles(current_user)
-        if not any(role in user_roles for role in ["admin", "trader", "manager", "trading"]):
-            raise HTTPException(status_code=403, detail="Insufficient permissions")
+        # Use auth service for authorization
+        web_auth_service.require_permission(current_user, ["admin", "trader", "manager", "trading"])
 
         allocation = await web_capital_service.allocate_capital(
             strategy_id=request.strategy_id,
@@ -179,6 +171,8 @@ async def allocate_capital(
         raise HTTPException(status_code=400, detail=str(e))
     except ServiceError as e:
         logger.error(f"Service error in capital allocation: {e}")
+        if "Insufficient permissions" in str(e):
+            raise HTTPException(status_code=403, detail=str(e))
         raise HTTPException(status_code=500, detail="Failed to allocate capital")
 
 
@@ -375,12 +369,12 @@ async def create_currency_hedge(
     request: CurrencyHedgeRequest,
     current_user: dict = Depends(get_current_user),
     web_capital_service=Depends(get_web_capital_service),
+    web_auth_service=Depends(get_web_auth_service),
 ):
     """Create a currency hedge."""
     try:
-        user_roles = _get_user_roles(current_user)
-        if "admin" not in user_roles and "risk_manager" not in user_roles:
-            raise HTTPException(status_code=403, detail="Insufficient permissions")
+        # Use auth service for authorization
+        web_auth_service.require_risk_manager_permission(current_user)
 
         hedge = await web_capital_service.create_currency_hedge(
             base_currency=request.base_currency,
@@ -469,12 +463,12 @@ async def record_fund_flow(
     request: FundFlowRequest,
     current_user: dict = Depends(get_current_user),
     web_capital_service=Depends(get_web_capital_service),
+    web_auth_service=Depends(get_web_auth_service),
 ):
     """Record a fund flow transaction."""
     try:
-        user_roles = _get_user_roles(current_user)
-        if "admin" not in user_roles and "treasurer" not in user_roles:
-            raise HTTPException(status_code=403, detail="Insufficient permissions")
+        # Use auth service for authorization
+        web_auth_service.require_treasurer_permission(current_user)
 
         flow = await web_capital_service.record_fund_flow(
             flow_type=request.flow_type,
@@ -541,13 +535,12 @@ async def set_allocation_limits(
     request: dict,
     current_user: dict = Depends(get_current_user),
     web_capital_service=Depends(get_web_capital_service),
+    web_auth_service=Depends(get_web_auth_service),
 ):
     """Set allocation limits."""
     try:
-        # Check permissions
-        user_roles = _get_user_roles(current_user)
-        if "admin" not in user_roles:
-            raise HTTPException(status_code=403, detail="Insufficient permissions")
+        # Use auth service for authorization
+        web_auth_service.require_admin(current_user)
 
         limits = await web_capital_service.set_allocation_limits(**request)
         return limits
@@ -565,12 +558,12 @@ async def update_capital_limits(
     request: CapitalLimitsUpdate,
     current_user: dict = Depends(get_current_user),
     web_capital_service=Depends(get_web_capital_service),
+    web_auth_service=Depends(get_web_auth_service),
 ):
     """Update capital limits configuration."""
     try:
-        user_roles = _get_user_roles(current_user)
-        if "admin" not in user_roles and "risk_manager" not in user_roles:
-            raise HTTPException(status_code=403, detail="Insufficient permissions")
+        # Use auth service for authorization
+        web_auth_service.require_risk_manager_permission(current_user)
 
         updated = await web_capital_service.update_capital_limits(
             limit_type=request.limit_type,
@@ -625,13 +618,12 @@ async def rebalance_portfolio(
     request: dict,
     current_user: dict = Depends(get_current_user),
     web_capital_service=Depends(get_web_capital_service),
+    web_auth_service=Depends(get_web_auth_service),
 ):
     """Rebalance portfolio allocations."""
     try:
-        # Check permissions
-        user_roles = _get_user_roles(current_user)
-        if "admin" not in user_roles:
-            raise HTTPException(status_code=403, detail="Insufficient permissions")
+        # Use auth service for authorization
+        web_auth_service.require_admin(current_user)
 
         result = await web_capital_service.rebalance_portfolio(
             target_allocations=request.get("target_allocations"),

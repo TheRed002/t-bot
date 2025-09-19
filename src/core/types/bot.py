@@ -260,29 +260,3 @@ class ResourceAllocation(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
-class BotEvent(BaseModel):
-    """Bot lifecycle and operational events."""
-
-    event_id: str
-    bot_id: str
-    event_type: str  # "started", "stopped", "error", "trade", etc.
-    event_severity: str  # "info", "warning", "error", "critical"
-
-    # Event details
-    message: str
-    details: dict[str, Any] = Field(default_factory=dict)
-
-    # Context
-    triggered_by: str | None = None  # user, system, scheduler
-    related_order: str | None = None
-    related_position: str | None = None
-
-    # Timing
-    occurred_at: datetime
-    processed_at: datetime | None = None
-
-    # Response
-    action_taken: str | None = None
-    action_result: str | None = None
-
-    metadata: dict[str, Any] = Field(default_factory=dict)

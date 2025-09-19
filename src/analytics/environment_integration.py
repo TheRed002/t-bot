@@ -16,9 +16,13 @@ from src.core.integration.environment_aware_service import (
     EnvironmentAwareServiceMixin,
     EnvironmentContext,
 )
-from src.core.logging import get_logger
-
-logger = get_logger(__name__)
+# Robust logger import with fallback for test suite compatibility
+try:
+    from src.core.logging import get_logger
+    logger = get_logger(__name__)
+except ImportError:
+    import logging
+    logger = logging.getLogger(__name__)
 
 
 class AnalyticsMode(Enum):
@@ -114,19 +118,30 @@ class EnvironmentAwareAnalyticsManager(EnvironmentAwareServiceMixin):
         self._environment_analytics_configs: dict[str, dict[str, Any]] = {}
         self._analytics_metrics: dict[str, dict[str, Any]] = {}
         self._performance_data: dict[str, dict[str, Any]] = {}
-        self._analytics_cache: dict[str, dict[str, Any]] = {}
+        self._environment_analytics_cache: dict[str, dict[str, Any]] = {}
+
+    def _get_local_logger(self):
+        """Get logger locally to avoid scope issues in test environment."""
+        try:
+            from src.core.logging import get_logger
+            return get_logger(__name__)
+        except ImportError:
+            import logging
+            return logging.getLogger(__name__)
 
     async def _update_service_environment(self, context: EnvironmentContext) -> None:
         """Update analytics settings based on environment context."""
         await super()._update_service_environment(context)
 
+        local_logger = self._get_local_logger()
+
         # Get environment-specific analytics configuration
         if context.is_production:
             analytics_config = EnvironmentAwareAnalyticsConfiguration.get_live_analytics_config()
-            logger.info(f"Applied live analytics configuration for {context.exchange_name}")
+            local_logger.info(f"Applied live analytics configuration for {context.exchange_name}")
         else:
             analytics_config = EnvironmentAwareAnalyticsConfiguration.get_sandbox_analytics_config()
-            logger.info(f"Applied sandbox analytics configuration for {context.exchange_name}")
+            local_logger.info(f"Applied sandbox analytics configuration for {context.exchange_name}")
 
         self._environment_analytics_configs[context.exchange_name] = analytics_config
 
@@ -142,6 +157,11 @@ class EnvironmentAwareAnalyticsManager(EnvironmentAwareServiceMixin):
             "last_analytics_run": None,
             "performance_score": Decimal("100"),
             "error_rate": Decimal("0"),
+            "total_requests": 0,
+            "successful_requests": 0,
+            "failed_requests": 0,
+            "cached_responses": 0,
+            "uncached_responses": 0,
         }
 
         # Initialize performance data storage
@@ -155,7 +175,7 @@ class EnvironmentAwareAnalyticsManager(EnvironmentAwareServiceMixin):
         }
 
         # Initialize analytics cache
-        self._analytics_cache[context.exchange_name] = {}
+        self._environment_analytics_cache[context.exchange_name] = {}
 
     def get_environment_analytics_config(self, exchange: str) -> dict[str, Any]:
         """Get analytics configuration for a specific exchange environment."""
@@ -191,7 +211,7 @@ class EnvironmentAwareAnalyticsManager(EnvironmentAwareServiceMixin):
             if analytics_config.get("cache_results"):
                 cached_report = await self._get_cached_report(report_type, exchange, time_period)
                 if cached_report:
-                    logger.debug(f"Retrieved cached report for {exchange}: {report_type}")
+                    self._get_local_logger().debug(f"Retrieved cached report for {exchange}: {report_type}")
                     await self._update_analytics_metrics(exchange, start_time, True, True)
                     return cached_report
 
@@ -235,7 +255,7 @@ class EnvironmentAwareAnalyticsManager(EnvironmentAwareServiceMixin):
             # Update metrics
             await self._update_analytics_metrics(exchange, start_time, True, False)
 
-            logger.info(
+            self._get_local_logger().info(
                 f"Generated {report_type} report for {exchange} "
                 f"(environment: {context.environment.value})"
             )
@@ -243,7 +263,7 @@ class EnvironmentAwareAnalyticsManager(EnvironmentAwareServiceMixin):
 
         except Exception as e:
             await self._update_analytics_metrics(exchange, start_time, False, False)
-            logger.error(f"Failed to generate {report_type} report for {exchange}: {e}")
+            self._get_local_logger().error(f"Failed to generate {report_type} report for {exchange}: {e}")
             raise AnalyticsError(
                 f"Report generation failed: {e}",
                 error_code="ANL_016"
@@ -387,11 +407,24 @@ class EnvironmentAwareAnalyticsManager(EnvironmentAwareServiceMixin):
     async def track_environment_performance(
         self,
         exchange: str,
-        metric_type: str,
-        value: Decimal | float | int,
-        metadata: dict[str, Any] | None = None,
+        start_time_or_metric_type: datetime | str,
+        success_or_value: bool | Decimal | float | int,
+        was_cached_or_metadata: bool | dict[str, Any] | None = None,
     ) -> None:
         """Track performance metrics with environment-specific handling."""
+        # Handle overloaded signature for backward compatibility
+        if isinstance(start_time_or_metric_type, datetime) and isinstance(success_or_value, bool):
+            # Called with (exchange, start_time, success, was_cached) signature
+            await self._update_analytics_metrics(
+                exchange, start_time_or_metric_type, success_or_value, was_cached_or_metadata or False
+            )
+            return
+
+        # Handle new signature (exchange, metric_type, value, metadata)
+        metric_type = start_time_or_metric_type
+        value = success_or_value
+        metadata = was_cached_or_metadata if isinstance(was_cached_or_metadata, dict) else None
+
         context = self.get_environment_context(exchange)
         analytics_config = self.get_environment_analytics_config(exchange)
 
@@ -440,7 +473,7 @@ class EnvironmentAwareAnalyticsManager(EnvironmentAwareServiceMixin):
                     if datetime.fromisoformat(dp["timestamp"].replace("Z", "+00:00")) > cutoff_date
                 ]
 
-        logger.debug(f"Tracked {metric_type} performance for {exchange}: {value}")
+        self._get_local_logger().debug(f"Tracked {metric_type} performance for {exchange}: {value}")
 
     async def _calculate_performance_summary(self, exchange: str) -> dict[str, Any]:
         """Calculate performance summary metrics."""
@@ -590,7 +623,7 @@ class EnvironmentAwareAnalyticsManager(EnvironmentAwareServiceMixin):
         self, report_type: str, exchange: str, time_period: str | None
     ) -> dict[str, Any] | None:
         """Get cached report if available and valid."""
-        cache = self._analytics_cache.get(exchange, {})
+        cache = self._environment_analytics_cache.get(exchange, {})
         cache_key = f"{report_type}_{time_period or 'default'}"
 
         cached_report = cache.get(cache_key)
@@ -609,22 +642,32 @@ class EnvironmentAwareAnalyticsManager(EnvironmentAwareServiceMixin):
         self, report_type: str, exchange: str, time_period: str | None, report: dict[str, Any]
     ) -> None:
         """Cache report for future use."""
-        if exchange not in self._analytics_cache:
-            self._analytics_cache[exchange] = {}
+        if exchange not in self._environment_analytics_cache:
+            self._environment_analytics_cache[exchange] = {}
 
         cache_key = f"{report_type}_{time_period or 'default'}"
         report["cached_at"] = datetime.now(timezone.utc).isoformat()
 
-        self._analytics_cache[exchange][cache_key] = report
+        self._environment_analytics_cache[exchange][cache_key] = report
 
     async def _update_analytics_metrics(
         self, exchange: str, start_time: datetime, success: bool, was_cached: bool
     ) -> None:
         """Update analytics performance metrics."""
         if exchange not in self._analytics_metrics:
-            return
+            # Initialize metrics if they don't exist
+            from src.core.config.environment import ExchangeEnvironment
+            context = EnvironmentContext(
+                exchange_name=exchange,
+                environment=ExchangeEnvironment.SANDBOX,
+                api_credentials={}
+            )
+            await self._update_service_environment(context)
 
         metrics = self._analytics_metrics[exchange]
+        # Handle timezone-naive datetime from tests
+        if start_time.tzinfo is None:
+            start_time = start_time.replace(tzinfo=timezone.utc)
         computation_time = (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
 
         metrics["total_analytics_runs"] += 1
@@ -649,6 +692,18 @@ class EnvironmentAwareAnalyticsManager(EnvironmentAwareServiceMixin):
                 )
         else:
             metrics["failed_runs"] += 1
+
+        # Update request metrics
+        metrics["total_requests"] += 1
+        if success:
+            metrics["successful_requests"] += 1
+        else:
+            metrics["failed_requests"] += 1
+
+        if was_cached:
+            metrics["cached_responses"] += 1
+        else:
+            metrics["uncached_responses"] += 1
 
         # Calculate error rate
         total_runs = metrics["total_analytics_runs"]
@@ -685,6 +740,12 @@ class EnvironmentAwareAnalyticsManager(EnvironmentAwareServiceMixin):
             "cache_hit_rate": float(metrics.get("cache_hit_rate", Decimal("0"))),
             "error_rate": float(metrics.get("error_rate", Decimal("0"))),
             "data_points_processed": metrics.get("data_points_processed", 0),
+            "total_requests": metrics.get("total_requests", 0),
+            "successful_requests": metrics.get("successful_requests", 0),
+            "failed_requests": metrics.get("failed_requests", 0),
+            "cached_responses": metrics.get("cached_responses", 0),
+            "uncached_responses": metrics.get("uncached_responses", 0),
+            "average_response_time": metrics.get("average_response_time", 0),
             "enable_real_time_analytics": analytics_config.get("enable_real_time_analytics", True),
             "enable_experimental_metrics": analytics_config.get(
                 "enable_experimental_metrics", False

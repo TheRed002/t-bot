@@ -18,6 +18,7 @@ class StrategyType(Enum):
     TREND_FOLLOWING = "trend_following"
     PAIRS_TRADING = "pairs_trading"
     STATISTICAL_ARBITRAGE = "statistical_arbitrage"
+    BREAKOUT = "breakout"
     CUSTOM = "custom"
 
 

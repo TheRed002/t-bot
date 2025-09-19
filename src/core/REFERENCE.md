@@ -1,27 +1,8 @@
 # CORE Module Reference
 
-## BUSINESS CONTEXT
-**Role**: Foundation classes, types, dependency injection, and configuration management
-**Layer**: Foundation
-**Responsibilities**: Base component and service architectures, Type definitions for trading domain, Dependency injection container, Configuration management, Event system foundation, Exception hierarchy, Performance monitoring framework
-
-**Critical Notes:**
-- **Financial**: Uses Decimal(20,8) precision for all monetary values - NEVER use float
-- **Performance**: Lazy loading for heavy components, caching for frequently accessed data
-- **Security**: No sensitive data logging, all credentials must be injected via DI
-- **Architecture**: All services must inherit from BaseService, all components from BaseComponent
-
-**Usage Patterns:**
-- Inherit from BaseService for business logic services
-- Inherit from BaseComponent for lifecycle-managed components
-- Use @inject decorator for dependency injection
-- Use get_logger(__name__) for consistent logging
-- Raise specific exceptions (ValidationError, ServiceError) not generic Exception
-- All async operations must use proper context managers and cleanup
-
 ## INTEGRATION
 **Dependencies**: backtesting, data, database, error_handling, state, utils
-**Used By**: analytics
+**Used By**: strategies
 **Provides**: AsyncContextManager, BaseService, CacheManager, ConfigService, EnvironmentAwareService, HealthCheckManager, HighPerformanceMemoryManager, ResourceManager, ServiceManager, TaskManager, TransactionalService, WebSocketManager
 **Patterns**: Async Operations, Component Architecture, Dependency Injection, Service Layer
 
@@ -39,13 +20,13 @@
 - Parallel execution
 - Parallel execution
 **Architecture**:
-- EnhancedBaseComponent inherits from base architecture
 - BaseEventEmitter inherits from base architecture
 - BaseFactory inherits from base architecture
+- HealthCheckManager inherits from base architecture
 
 ## MODULE OVERVIEW
 **Files**: 58 Python files
-**Classes**: 389
+**Classes**: 391
 **Functions**: 92
 
 ## COMPLETE API REFERENCE
@@ -85,17 +66,6 @@
 - `get_metrics(self) -> dict[str, Any]` - Line 487
 - `reset_metrics(self) -> None` - Line 501
 - `async lifecycle_context(self)` - Line 515
-
-### Implementation: `EnhancedBaseComponent` ✅
-
-**Inherits**: BaseComponent
-**Purpose**: Enhanced version of the original BaseComponent with backward compatibility
-**Status**: Complete
-
-**Implemented Methods:**
-- `initialized(self) -> bool` - Line 572
-- `async initialize(self) -> None` - Line 576
-- `async cleanup(self) -> None` - Line 581
 
 ### Implementation: `EventPriority` ✅
 
@@ -166,24 +136,25 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `product_type(self) -> type[T]` - Line 136
-- `creation_metrics(self) -> dict[str, Any]` - Line 141
-- `register(self, ...) -> None` - Line 146
-- `register_interface(self, ...) -> None` - Line 199
-- `unregister(self, name: str) -> None` - Line 250
-- `update_creator_config(self, name: str, config: dict[str, Any]) -> None` - Line 289
-- `create(self, name: str, *args: Any, **kwargs: Any) -> T` - Line 314
-- `create_batch(self, requests: list[dict[str, Any]]) -> list[T]` - Line 421
-- `list_registered(self) -> list[str]` - Line 589
-- `is_registered(self, name: str) -> bool` - Line 598
-- `get_creator_info(self, name: str) -> dict[str, Any] | None` - Line 610
-- `get_all_creator_info(self) -> dict[str, dict[str, Any]]` - Line 635
-- `get_singleton(self, name: str) -> T | None` - Line 644
-- `clear_singletons(self) -> None` - Line 656
-- `reset_singleton(self, name: str) -> None` - Line 678
-- `get_metrics(self) -> dict[str, Any]` - Line 775
-- `reset_metrics(self) -> None` - Line 787
-- `configure_validation(self, validate_creators: bool = True, validate_products: bool = True) -> None` - Line 800
+- `configure_dependencies(self, container: Any) -> None` - Line 139
+- `product_type(self) -> type[T]` - Line 272
+- `creation_metrics(self) -> dict[str, Any]` - Line 277
+- `register(self, ...) -> None` - Line 282
+- `register_interface(self, ...) -> None` - Line 335
+- `unregister(self, name: str) -> None` - Line 386
+- `update_creator_config(self, name: str, config: dict[str, Any]) -> None` - Line 425
+- `create(self, name: str, *args: Any, **kwargs: Any) -> T` - Line 450
+- `create_batch(self, requests: list[dict[str, Any]]) -> list[T]` - Line 557
+- `list_registered(self) -> list[str]` - Line 725
+- `is_registered(self, name: str) -> bool` - Line 734
+- `get_creator_info(self, name: str) -> dict[str, Any] | None` - Line 746
+- `get_all_creator_info(self) -> dict[str, dict[str, Any]]` - Line 771
+- `get_singleton(self, name: str) -> T | None` - Line 780
+- `clear_singletons(self) -> None` - Line 792
+- `reset_singleton(self, name: str) -> None` - Line 814
+- `get_metrics(self) -> dict[str, Any]` - Line 911
+- `reset_metrics(self) -> None` - Line 923
+- `configure_validation(self, validate_creators: bool = True, validate_products: bool = True) -> None` - Line 936
 
 ### Implementation: `HealthCheckType` ✅
 
@@ -588,8 +559,8 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `set_transaction_manager(self, transaction_manager: Any) -> None` - Line 682
-- `async execute_in_transaction(self, operation_name: str, operation_func: Any, *args, **kwargs) -> Any` - Line 690
+- `set_transaction_manager(self, transaction_manager: Any) -> None` - Line 715
+- `async execute_in_transaction(self, operation_name: str, operation_func: Any, *args, **kwargs) -> Any` - Line 723
 
 ### Implementation: `CacheKeys` ✅
 
@@ -650,7 +621,7 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async cleanup_resources(self)` - Line 43
+- `async cleanup_resources(self)` - Line 44
 
 ### Implementation: `LoggingHelperMixin` ✅
 
@@ -668,22 +639,22 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async get(self, ...) -> Any` - Line 195
-- `async set(self, ...) -> bool` - Line 253
-- `async delete(self, key: str, namespace: str = 'cache') -> bool` - Line 285
-- `async exists(self, key: str, namespace: str = 'cache') -> bool` - Line 306
-- `async expire(self, key: str, ttl: int, namespace: str = 'cache') -> bool` - Line 322
-- `async get_many(self, keys: list[str], namespace: str = 'cache') -> dict[str, Any]` - Line 340
-- `async set_many(self, ...) -> bool` - Line 384
-- `async acquire_lock(self, resource: str, timeout: int | None = None, namespace: str = 'locks') -> str | None` - Line 433
-- `async release_lock(self, resource: str, lock_value: str, namespace: str = 'locks') -> bool` - Line 461
-- `async with_lock(self, resource: str, func: Callable, *args, **kwargs)` - Line 490
-- `async warm_cache(self, ...)` - Line 519
-- `async invalidate_pattern(self, pattern: str, namespace: str = 'cache')` - Line 571
-- `async health_check(self) -> Any` - Line 593
-- `async cleanup(self) -> None` - Line 631
-- `async shutdown(self) -> None` - Line 675
-- `get_dependencies(self) -> list[str]` - Line 704
+- `async get(self, ...) -> Any` - Line 197
+- `async set(self, ...) -> bool` - Line 255
+- `async delete(self, key: str, namespace: str = 'cache') -> bool` - Line 287
+- `async exists(self, key: str, namespace: str = 'cache') -> bool` - Line 308
+- `async expire(self, key: str, ttl: int, namespace: str = 'cache') -> bool` - Line 324
+- `async get_many(self, keys: list[str], namespace: str = 'cache') -> dict[str, Any]` - Line 342
+- `async set_many(self, ...) -> bool` - Line 386
+- `async acquire_lock(self, resource: str, timeout: int | None = None, namespace: str = 'locks') -> str | None` - Line 435
+- `async release_lock(self, resource: str, lock_value: str, namespace: str = 'locks') -> bool` - Line 463
+- `async with_lock(self, resource: str, func: Callable, *args, **kwargs)` - Line 492
+- `async warm_cache(self, ...)` - Line 521
+- `async invalidate_pattern(self, pattern: str, namespace: str = 'cache')` - Line 573
+- `async health_check(self) -> Any` - Line 595
+- `async cleanup(self) -> None` - Line 633
+- `async shutdown(self) -> None` - Line 677
+- `get_dependencies(self) -> list[str]` - Line 706
 
 ### Implementation: `CacheStats` ✅
 
@@ -1268,6 +1239,12 @@
 - `validate_positive_integers(cls, v)` - Line 931
 - `validate_positive_float(cls, v)` - Line 939
 
+### Implementation: `ExecutionConfig` ✅
+
+**Inherits**: BaseConfig
+**Purpose**: Execution engine configuration for order processing and algorithms
+**Status**: Complete
+
 ### Implementation: `Config` ✅
 
 **Inherits**: BaseConfig
@@ -1275,17 +1252,30 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `validate_environment(cls, v: str) -> str` - Line 987
-- `generate_schema(self) -> None` - Line 994
-- `from_yaml(cls, yaml_path: str | Path) -> 'Config'` - Line 1003
-- `from_yaml_with_env_override(cls, yaml_path: str | Path) -> 'Config'` - Line 1032
-- `to_yaml(self, yaml_path: str | Path) -> None` - Line 1067
-- `get_database_url(self) -> str` - Line 1082
-- `get_async_database_url(self) -> str` - Line 1096
-- `get_redis_url(self) -> str` - Line 1110
-- `is_production(self) -> bool` - Line 1127
-- `is_development(self) -> bool` - Line 1131
-- `validate_yaml_config(self, yaml_path: str | Path) -> bool` - Line 1135
+- `validate_environment(cls, v: str) -> str` - Line 1028
+- `generate_schema(self) -> None` - Line 1035
+- `from_yaml(cls, yaml_path: str | Path) -> 'Config'` - Line 1044
+- `from_yaml_with_env_override(cls, yaml_path: str | Path) -> 'Config'` - Line 1073
+- `to_yaml(self, yaml_path: str | Path) -> None` - Line 1108
+- `get_database_url(self) -> str` - Line 1123
+- `get_async_database_url(self) -> str` - Line 1137
+- `get_redis_url(self) -> str` - Line 1151
+- `is_production(self) -> bool` - Line 1168
+- `is_development(self) -> bool` - Line 1172
+- `validate_yaml_config(self, yaml_path: str | Path) -> bool` - Line 1176
+
+### Implementation: `CoreDataTransformer` ✅
+
+**Purpose**: Handles consistent data transformation for core module events and messaging
+**Status**: Complete
+
+**Implemented Methods:**
+- `transform_event_to_standard_format(event_type, ...) -> dict[str, Any]` - Line 29
+- `transform_for_pub_sub_pattern(event_type: str, data: Any, metadata: dict[str, Any] | None = None) -> dict[str, Any]` - Line 79
+- `transform_for_request_reply_pattern(request_type, ...) -> dict[str, Any]` - Line 109
+- `align_processing_paradigm(data: dict[str, Any], target_mode: str = 'stream') -> dict[str, Any]` - Line 143
+- `validate_boundary_fields(data: dict[str, Any]) -> dict[str, Any]` - Line 188
+- `apply_cross_module_consistency(cls, data: dict[str, Any], target_module: str, source_module: str = 'core') -> dict[str, Any]` - Line 287
 
 ### Implementation: `DependencyContainer` ✅
 
@@ -1428,6 +1418,11 @@
 **Purpose**: Optimization-related event names
 **Status**: Complete
 
+### Implementation: `BotEvents` ✅
+
+**Purpose**: Bot management event names
+**Status**: Complete
+
 ### Implementation: `BotEventType` ✅
 
 **Inherits**: Enum
@@ -1459,7 +1454,7 @@
 - `subscribe_all(self, handler: EventHandler) -> None` - Line 106
 - `unsubscribe(self, event_type: BotEventType, handler: EventHandler) -> None` - Line 111
 - `async publish(self, event: BotEvent, processing_mode: str = 'stream') -> None` - Line 118
-- `get_recent_events(self, ...) -> list[BotEvent]` - Line 180
+- `get_recent_events(self, ...) -> list[BotEvent]` - Line 196
 
 ### Implementation: `AnalyticsEventHandler` ✅
 
@@ -1468,7 +1463,7 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async handle(self, event: BotEvent) -> None` - Line 363
+- `async handle(self, event: BotEvent) -> None` - Line 401
 
 ### Implementation: `RiskMonitoringEventHandler` ✅
 
@@ -1477,7 +1472,7 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async handle(self, event: BotEvent) -> None` - Line 443
+- `async handle(self, event: BotEvent) -> None` - Line 502
 
 ### Implementation: `ErrorCategory` ✅
 
@@ -2386,13 +2381,22 @@
 
 **Implemented Methods:**
 
+### Implementation: `CacheOptimizedList` ✅
+
+**Purpose**: Cache-optimized list implementation
+**Status**: Complete
+
+**Implemented Methods:**
+- `clear(self)` - Line 49
+- `append(self, item)` - Line 53
+
 ### Implementation: `DependencyInjectionMixin` ✅
 
 **Purpose**: Simple mixin for dependency injection to avoid circular imports
 **Status**: Complete
 
 **Implemented Methods:**
-- `get_injector(self)` - Line 49
+- `get_injector(self)` - Line 77
 
 ### Implementation: `MemoryStats` ✅
 
@@ -2400,7 +2404,7 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `memory_pressure(self) -> float` - Line 71
+- `memory_pressure(self) -> float` - Line 99
 
 ### Implementation: `ObjectPool` ✅
 
@@ -2409,10 +2413,10 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `borrow(self) -> T` - Line 130
-- `return_object(self, obj: T)` - Line 146
-- `get_stats(self) -> dict[str, Any]` - Line 172
-- `clear(self)` - Line 188
+- `borrow(self) -> T` - Line 158
+- `return_object(self, obj: T)` - Line 174
+- `get_stats(self) -> dict[str, Any]` - Line 200
+- `clear(self)` - Line 216
 
 ### Implementation: `MemoryLeakDetector` ✅
 
@@ -2420,19 +2424,9 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async start(self)` - Line 208
-- `stop(self)` - Line 294
-- `get_leak_report(self) -> dict[str, Any]` - Line 298
-
-### Implementation: `CacheOptimizedList` ✅
-
-**Purpose**: Cache-friendly list implementation for better performance
-**Status**: Complete
-
-**Implemented Methods:**
-- `append(self, item)` - Line 329
-- `get(self, index: int)` - Line 349
-- `clear(self)` - Line 355
+- `async start(self)` - Line 236
+- `stop(self)` - Line 322
+- `get_leak_report(self) -> dict[str, Any]` - Line 326
 
 ### Implementation: `MemoryMappedCache` ✅
 
@@ -2440,9 +2434,9 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `write_data(self, offset: int, data: bytes) -> bool` - Line 407
-- `read_data(self, offset: int, length: int) -> bytes | None` - Line 423
-- `close(self)` - Line 437
+- `write_data(self, offset: int, data: bytes) -> bool` - Line 390
+- `read_data(self, offset: int, length: int) -> bytes | None` - Line 406
+- `close(self)` - Line 420
 
 ### Implementation: `HighPerformanceMemoryManager` ✅
 
@@ -2451,16 +2445,16 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async start_monitoring(self)` - Line 573
-- `get_pool(self, pool_name: str) -> ObjectPool | None` - Line 679
-- `borrow_object(self, pool_name: str)` - Line 683
-- `return_object(self, pool_name: str, obj)` - Line 690
-- `track_object(self, obj)` - Line 696
-- `get_memory_stats(self) -> MemoryStats` - Line 700
-- `get_performance_report(self) -> dict[str, Any]` - Line 704
-- `async stop_monitoring(self)` - Line 767
-- `cleanup(self)` - Line 792
-- `get_dependencies(self) -> list[str]` - Line 809
+- `async start_monitoring(self)` - Line 556
+- `get_pool(self, pool_name: str) -> ObjectPool | None` - Line 662
+- `borrow_object(self, pool_name: str)` - Line 666
+- `return_object(self, pool_name: str, obj)` - Line 673
+- `track_object(self, obj)` - Line 679
+- `get_memory_stats(self) -> MemoryStats` - Line 683
+- `get_performance_report(self) -> dict[str, Any]` - Line 687
+- `async stop_monitoring(self)` - Line 750
+- `cleanup(self)` - Line 775
+- `get_dependencies(self) -> list[str]` - Line 792
 
 ### Implementation: `MemoryCategory` ✅
 
@@ -2970,12 +2964,6 @@ to achieve optimal tra
 **Purpose**: Resource allocation for bots
 **Status**: Complete
 
-### Implementation: `BotEvent` ✅
-
-**Inherits**: BaseModel
-**Purpose**: Bot lifecycle and operational events
-**Status**: Complete
-
 ### Implementation: `CapitalFundFlow` ✅
 
 **Inherits**: BaseModel
@@ -3290,6 +3278,12 @@ to achieve optimal tra
 **Purpose**: Complete portfolio state representation
 **Status**: Complete
 
+### Implementation: `PortfolioMetrics` ✅
+
+**Inherits**: BaseModel
+**Purpose**: Unified portfolio metrics model for cross-module consistency
+**Status**: Complete
+
 ### Implementation: `StrategyType` ✅
 
 **Inherits**: Enum
@@ -3333,8 +3327,8 @@ to achieve optimal tra
 **Status**: Complete
 
 **Implemented Methods:**
-- `update_win_rate(self) -> None` - Line 143
-- `calculate_profit_factor(self) -> Decimal` - Line 148
+- `update_win_rate(self) -> None` - Line 144
+- `calculate_profit_factor(self) -> Decimal` - Line 149
 
 ### Implementation: `RegimeChangeEvent` ✅
 
@@ -3410,8 +3404,8 @@ to achieve optimal tra
 **Implemented Methods:**
 - `validate_symbol(cls, v: str) -> str` - Line 215
 - `validate_quantity(cls, v: Decimal) -> Decimal` - Line 223
-- `validate_price(cls, v: Decimal | None) -> Decimal | None` - Line 247
-- `validate_quote_quantity(cls, v: Decimal | None) -> Decimal | None` - Line 274
+- `validate_price(cls, v: Decimal | None) -> Decimal | None` - Line 252
+- `validate_quote_quantity(cls, v: Decimal | None) -> Decimal | None` - Line 279
 
 ### Implementation: `OrderResponse` ✅
 
@@ -3420,8 +3414,8 @@ to achieve optimal tra
 **Status**: Complete
 
 **Implemented Methods:**
-- `id(self) -> str` - Line 319
-- `remaining_quantity(self) -> Decimal` - Line 324
+- `id(self) -> str` - Line 324
+- `remaining_quantity(self) -> Decimal` - Line 329
 
 ### Implementation: `Order` ✅
 
@@ -3430,8 +3424,8 @@ to achieve optimal tra
 **Status**: Complete
 
 **Implemented Methods:**
-- `is_filled(self) -> bool` - Line 356
-- `is_active(self) -> bool` - Line 360
+- `is_filled(self) -> bool` - Line 361
+- `is_active(self) -> bool` - Line 365
 
 ### Implementation: `Position` ✅
 
@@ -3440,8 +3434,8 @@ to achieve optimal tra
 **Status**: Complete
 
 **Implemented Methods:**
-- `is_open(self) -> bool` - Line 382
-- `calculate_pnl(self, current_price: Decimal) -> Decimal` - Line 386
+- `is_open(self) -> bool` - Line 387
+- `calculate_pnl(self, current_price: Decimal) -> Decimal` - Line 391
 
 ### Implementation: `Trade` ✅
 
@@ -3456,7 +3450,7 @@ to achieve optimal tra
 **Status**: Complete
 
 **Implemented Methods:**
-- `free(self) -> Decimal` - Line 422
+- `free(self) -> Decimal` - Line 427
 
 ### Implementation: `ArbitrageOpportunity` ✅
 
@@ -3465,10 +3459,10 @@ to achieve optimal tra
 **Status**: Complete
 
 **Implemented Methods:**
-- `validate_prices(cls, v: Decimal) -> Decimal` - Line 444
-- `validate_quantity(cls, v: Decimal) -> Decimal` - Line 468
-- `is_expired(self) -> bool` - Line 491
-- `calculate_profit(self) -> Decimal` - Line 497
+- `validate_prices(cls, v: Decimal) -> Decimal` - Line 449
+- `validate_quantity(cls, v: Decimal) -> Decimal` - Line 473
+- `is_expired(self) -> bool` - Line 496
+- `calculate_profit(self) -> Decimal` - Line 502
 
 ### Implementation: `ValidatorInterface` 🔧
 
@@ -3612,19 +3606,6 @@ class BaseComponent(Lifecycle, HealthCheckable, Injectable, Loggable, Monitorabl
     def __repr__(self) -> str  # Line 548
 ```
 
-#### Class: `EnhancedBaseComponent`
-
-**Inherits**: BaseComponent
-**Purpose**: Enhanced version of the original BaseComponent with backward compatibility
-
-```python
-class EnhancedBaseComponent(BaseComponent):
-    def __init__(self, *args, **kwargs)  # Line 566
-    def initialized(self) -> bool  # Line 572
-    async def initialize(self) -> None  # Line 576
-    async def cleanup(self) -> None  # Line 581
-```
-
 ### File: events.py
 
 **Key Imports:**
@@ -3741,32 +3722,35 @@ class CreatorFunction(Protocol, Generic[T]):
 ```python
 class BaseFactory(BaseComponent, FactoryComponent, DependencyInjectionMixin, Generic[T]):
     def __init__(self, ...)  # Line 86
-    def product_type(self) -> type[T]  # Line 136
-    def creation_metrics(self) -> dict[str, Any]  # Line 141
-    def register(self, ...) -> None  # Line 146
-    def register_interface(self, ...) -> None  # Line 199
-    def unregister(self, name: str) -> None  # Line 250
-    def update_creator_config(self, name: str, config: dict[str, Any]) -> None  # Line 289
-    def create(self, name: str, *args: Any, **kwargs: Any) -> T  # Line 314
-    def create_batch(self, requests: list[dict[str, Any]]) -> list[T]  # Line 421
-    def _execute_creator(self, ...) -> T  # Line 475
-    def _inject_dependencies(self, creator_name: str, kwargs: dict[str, Any]) -> dict[str, Any]  # Line 505
-    def _validate_creator(self, name: str, creator: type[T] | CreatorFunction[T] | Callable[Ellipsis, T]) -> None  # Line 521
-    def _validate_product(self, creator_name: str, instance: Any) -> None  # Line 571
-    def list_registered(self) -> list[str]  # Line 589
-    def is_registered(self, name: str) -> bool  # Line 598
-    def get_creator_info(self, name: str) -> dict[str, Any] | None  # Line 610
-    def get_all_creator_info(self) -> dict[str, dict[str, Any]]  # Line 635
-    def get_singleton(self, name: str) -> T | None  # Line 644
-    def clear_singletons(self) -> None  # Line 656
-    def reset_singleton(self, name: str) -> None  # Line 678
-    async def _health_check_internal(self) -> HealthStatus  # Line 708
-    def _record_creation_success(self, creator_name: str, execution_time: float) -> None  # Line 749
-    def _record_creation_failure(self, creator_name: str, execution_time: float, error: Exception) -> None  # Line 767
-    def get_metrics(self) -> dict[str, Any]  # Line 775
-    def reset_metrics(self) -> None  # Line 787
-    def configure_validation(self, validate_creators: bool = True, validate_products: bool = True) -> None  # Line 800
-    async def _do_stop(self) -> None  # Line 823
+    def configure_dependencies(self, container: Any) -> None  # Line 139
+    def _inject_dependencies_into_kwargs(self, target_callable: Callable, kwargs: dict[str, Any]) -> dict[str, Any]  # Line 162
+    def _resolve_dependency(self, type_name: str, param_name: str) -> Any  # Line 224
+    def product_type(self) -> type[T]  # Line 272
+    def creation_metrics(self) -> dict[str, Any]  # Line 277
+    def register(self, ...) -> None  # Line 282
+    def register_interface(self, ...) -> None  # Line 335
+    def unregister(self, name: str) -> None  # Line 386
+    def update_creator_config(self, name: str, config: dict[str, Any]) -> None  # Line 425
+    def create(self, name: str, *args: Any, **kwargs: Any) -> T  # Line 450
+    def create_batch(self, requests: list[dict[str, Any]]) -> list[T]  # Line 557
+    def _execute_creator(self, ...) -> T  # Line 611
+    def _inject_dependencies(self, creator_name: str, kwargs: dict[str, Any]) -> dict[str, Any]  # Line 641
+    def _validate_creator(self, name: str, creator: type[T] | CreatorFunction[T] | Callable[Ellipsis, T]) -> None  # Line 657
+    def _validate_product(self, creator_name: str, instance: Any) -> None  # Line 707
+    def list_registered(self) -> list[str]  # Line 725
+    def is_registered(self, name: str) -> bool  # Line 734
+    def get_creator_info(self, name: str) -> dict[str, Any] | None  # Line 746
+    def get_all_creator_info(self) -> dict[str, dict[str, Any]]  # Line 771
+    def get_singleton(self, name: str) -> T | None  # Line 780
+    def clear_singletons(self) -> None  # Line 792
+    def reset_singleton(self, name: str) -> None  # Line 814
+    async def _health_check_internal(self) -> HealthStatus  # Line 844
+    def _record_creation_success(self, creator_name: str, execution_time: float) -> None  # Line 885
+    def _record_creation_failure(self, creator_name: str, execution_time: float, error: Exception) -> None  # Line 903
+    def get_metrics(self) -> dict[str, Any]  # Line 911
+    def reset_metrics(self) -> None  # Line 923
+    def configure_validation(self, validate_creators: bool = True, validate_products: bool = True) -> None  # Line 936
+    async def _do_stop(self) -> None  # Line 959
 ```
 
 ### File: health.py
@@ -4282,9 +4266,9 @@ class BaseService(BaseComponent, ServiceComponent):
 
 ```python
 class TransactionalService(BaseService):
-    def __init__(self, *args: Any, **kwargs: Any) -> None  # Line 677
-    def set_transaction_manager(self, transaction_manager: Any) -> None  # Line 682
-    async def execute_in_transaction(self, operation_name: str, operation_func: Any, *args, **kwargs) -> Any  # Line 690
+    def __init__(self, *args: Any, **kwargs: Any) -> None  # Line 710
+    def set_transaction_manager(self, transaction_manager: Any) -> None  # Line 715
+    async def execute_in_transaction(self, operation_name: str, operation_func: Any, *args, **kwargs) -> Any  # Line 723
 ```
 
 ### File: cache_decorators.py
@@ -4395,8 +4379,8 @@ class ConnectionManagerMixin:
 
 ```python
 class ResourceCleanupMixin:
-    def __init__(self)  # Line 40
-    async def cleanup_resources(self)  # Line 43
+    def __init__(self)  # Line 41
+    async def cleanup_resources(self)  # Line 44
 ```
 
 #### Class: `LoggingHelperMixin`
@@ -4405,7 +4389,7 @@ class ResourceCleanupMixin:
 
 ```python
 class LoggingHelperMixin:
-    def __init__(self)  # Line 51
+    def __init__(self)  # Line 52
 ```
 
 #### Class: `CacheManager`
@@ -4417,38 +4401,38 @@ class LoggingHelperMixin:
 
 ```python
 class CacheManager(BaseComponent, DependencyInjectionMixin, ConnectionManagerMixin, ResourceCleanupMixin, LoggingHelperMixin):
-    def __init__(self, ...)  # Line 74
-    async def _ensure_client(self)  # Line 99
-    async def _is_client_healthy(self) -> bool  # Line 123
-    async def _reconnect_with_retries(self)  # Line 135
-    def _get_ttl(self, data_type: str = 'default') -> int  # Line 187
-    def _hash_key(self, key: str) -> str  # Line 191
-    async def get(self, ...) -> Any  # Line 195
-    async def set(self, ...) -> bool  # Line 253
-    async def delete(self, key: str, namespace: str = 'cache') -> bool  # Line 285
-    async def exists(self, key: str, namespace: str = 'cache') -> bool  # Line 306
-    async def expire(self, key: str, ttl: int, namespace: str = 'cache') -> bool  # Line 322
-    async def get_many(self, keys: list[str], namespace: str = 'cache') -> dict[str, Any]  # Line 340
-    async def set_many(self, ...) -> bool  # Line 384
-    async def acquire_lock(self, resource: str, timeout: int | None = None, namespace: str = 'locks') -> str | None  # Line 433
-    async def release_lock(self, resource: str, lock_value: str, namespace: str = 'locks') -> bool  # Line 461
-    async def with_lock(self, resource: str, func: Callable, *args, **kwargs)  # Line 490
-    async def warm_cache(self, ...)  # Line 519
-    async def _warm_single_async(self, key: str, func: Callable)  # Line 550
-    async def _warm_single_sync(self, key: str, func: Callable)  # Line 560
-    async def invalidate_pattern(self, pattern: str, namespace: str = 'cache')  # Line 571
-    async def health_check(self) -> Any  # Line 593
-    async def cleanup(self) -> None  # Line 631
-    async def shutdown(self) -> None  # Line 675
-    def get_dependencies(self) -> list[str]  # Line 704
-    def __del__(self)  # Line 708
+    def __init__(self, ...)  # Line 75
+    async def _ensure_client(self)  # Line 101
+    async def _is_client_healthy(self) -> bool  # Line 125
+    async def _reconnect_with_retries(self)  # Line 137
+    def _get_ttl(self, data_type: str = 'default') -> int  # Line 189
+    def _hash_key(self, key: str) -> str  # Line 193
+    async def get(self, ...) -> Any  # Line 197
+    async def set(self, ...) -> bool  # Line 255
+    async def delete(self, key: str, namespace: str = 'cache') -> bool  # Line 287
+    async def exists(self, key: str, namespace: str = 'cache') -> bool  # Line 308
+    async def expire(self, key: str, ttl: int, namespace: str = 'cache') -> bool  # Line 324
+    async def get_many(self, keys: list[str], namespace: str = 'cache') -> dict[str, Any]  # Line 342
+    async def set_many(self, ...) -> bool  # Line 386
+    async def acquire_lock(self, resource: str, timeout: int | None = None, namespace: str = 'locks') -> str | None  # Line 435
+    async def release_lock(self, resource: str, lock_value: str, namespace: str = 'locks') -> bool  # Line 463
+    async def with_lock(self, resource: str, func: Callable, *args, **kwargs)  # Line 492
+    async def warm_cache(self, ...)  # Line 521
+    async def _warm_single_async(self, key: str, func: Callable)  # Line 552
+    async def _warm_single_sync(self, key: str, func: Callable)  # Line 562
+    async def invalidate_pattern(self, pattern: str, namespace: str = 'cache')  # Line 573
+    async def health_check(self) -> Any  # Line 595
+    async def cleanup(self) -> None  # Line 633
+    async def shutdown(self) -> None  # Line 677
+    def get_dependencies(self) -> list[str]  # Line 706
+    def __del__(self)  # Line 710
 ```
 
 #### Functions:
 
 ```python
-def get_cache_manager(redis_client: CacheClientInterface | None = None, config: Any | None = None) -> CacheManager  # Line 718
-def create_cache_manager_factory(config: Any | None = None) -> Callable[[], CacheManager]  # Line 728
+def get_cache_manager(redis_client: CacheClientInterface | None = None, config: Any | None = None) -> CacheManager  # Line 720
+def create_cache_manager_factory(config: Any | None = None) -> Callable[[], CacheManager]  # Line 730
 ```
 
 ### File: cache_metrics.py
@@ -5327,6 +5311,15 @@ class MLConfig(BaseConfig):
     def validate_positive_float(cls, v)  # Line 939
 ```
 
+#### Class: `ExecutionConfig`
+
+**Inherits**: BaseConfig
+**Purpose**: Execution engine configuration for order processing and algorithms
+
+```python
+class ExecutionConfig(BaseConfig):
+```
+
 #### Class: `Config`
 
 **Inherits**: BaseConfig
@@ -5334,17 +5327,40 @@ class MLConfig(BaseConfig):
 
 ```python
 class Config(BaseConfig):
-    def validate_environment(cls, v: str) -> str  # Line 987
-    def generate_schema(self) -> None  # Line 994
-    def from_yaml(cls, yaml_path: str | Path) -> 'Config'  # Line 1003
-    def from_yaml_with_env_override(cls, yaml_path: str | Path) -> 'Config'  # Line 1032
-    def to_yaml(self, yaml_path: str | Path) -> None  # Line 1067
-    def get_database_url(self) -> str  # Line 1082
-    def get_async_database_url(self) -> str  # Line 1096
-    def get_redis_url(self) -> str  # Line 1110
-    def is_production(self) -> bool  # Line 1127
-    def is_development(self) -> bool  # Line 1131
-    def validate_yaml_config(self, yaml_path: str | Path) -> bool  # Line 1135
+    def validate_environment(cls, v: str) -> str  # Line 1028
+    def generate_schema(self) -> None  # Line 1035
+    def from_yaml(cls, yaml_path: str | Path) -> 'Config'  # Line 1044
+    def from_yaml_with_env_override(cls, yaml_path: str | Path) -> 'Config'  # Line 1073
+    def to_yaml(self, yaml_path: str | Path) -> None  # Line 1108
+    def get_database_url(self) -> str  # Line 1123
+    def get_async_database_url(self) -> str  # Line 1137
+    def get_redis_url(self) -> str  # Line 1151
+    def is_production(self) -> bool  # Line 1168
+    def is_development(self) -> bool  # Line 1172
+    def validate_yaml_config(self, yaml_path: str | Path) -> bool  # Line 1176
+```
+
+### File: data_transformer.py
+
+**Key Imports:**
+- `from src.core.exceptions import ValidationError`
+- `from src.core.logging import get_logger`
+- `from src.utils.decimal_utils import to_decimal`
+
+#### Class: `CoreDataTransformer`
+
+**Purpose**: Handles consistent data transformation for core module events and messaging
+
+```python
+class CoreDataTransformer:
+    def transform_event_to_standard_format(event_type, ...) -> dict[str, Any]  # Line 29
+    def transform_for_pub_sub_pattern(event_type: str, data: Any, metadata: dict[str, Any] | None = None) -> dict[str, Any]  # Line 79
+    def transform_for_request_reply_pattern(request_type, ...) -> dict[str, Any]  # Line 109
+    def align_processing_paradigm(data: dict[str, Any], target_mode: str = 'stream') -> dict[str, Any]  # Line 143
+    def validate_boundary_fields(data: dict[str, Any]) -> dict[str, Any]  # Line 188
+    def _apply_financial_precision(data: dict[str, Any]) -> dict[str, Any]  # Line 245
+    def apply_cross_module_consistency(cls, data: dict[str, Any], target_module: str, source_module: str = 'core') -> dict[str, Any]  # Line 287
+    def _apply_boundary_validation(data: dict[str, Any], source_module: str, target_module: str) -> None  # Line 337
 ```
 
 ### File: dependency_injection.py
@@ -5575,6 +5591,14 @@ class DataEvents:
 class OptimizationEvents:
 ```
 
+#### Class: `BotEvents`
+
+**Purpose**: Bot management event names
+
+```python
+class BotEvents:
+```
+
 ### File: events.py
 
 **Key Imports:**
@@ -5619,13 +5643,13 @@ class EventPublisher:
     def subscribe_all(self, handler: EventHandler) -> None  # Line 106
     def unsubscribe(self, event_type: BotEventType, handler: EventHandler) -> None  # Line 111
     async def publish(self, event: BotEvent, processing_mode: str = 'stream') -> None  # Line 118
-    async def _safe_handle(self, handler: EventHandler, event: BotEvent) -> None  # Line 169
-    def get_recent_events(self, ...) -> list[BotEvent]  # Line 180
-    def _transform_event_data_consistent(self, event: BotEvent, processing_mode: str) -> BotEvent  # Line 202
-    def _collect_handlers_by_priority(self, event_type: BotEventType) -> list[EventHandler]  # Line 225
-    async def _process_handlers_batch(self, handlers: list[EventHandler], event: BotEvent) -> None  # Line 241
-    async def _process_handlers_stream(self, handlers: list[EventHandler], event: BotEvent) -> None  # Line 274
-    def _propagate_event_error_consistently(self, error: Exception, operation: str, event_type: str) -> None  # Line 300
+    async def _safe_handle(self, handler: EventHandler, event: BotEvent) -> None  # Line 185
+    def get_recent_events(self, ...) -> list[BotEvent]  # Line 196
+    def _transform_event_data_consistent(self, event: BotEvent, processing_mode: str) -> BotEvent  # Line 218
+    def _collect_handlers_by_priority(self, event_type: BotEventType) -> list[EventHandler]  # Line 241
+    async def _process_handlers_batch(self, handlers: list[EventHandler], event: BotEvent) -> None  # Line 257
+    async def _process_handlers_stream(self, handlers: list[EventHandler], event: BotEvent) -> None  # Line 301
+    def _propagate_event_error_consistently(self, error: Exception, operation: str, event_type: str) -> None  # Line 338
 ```
 
 #### Class: `AnalyticsEventHandler`
@@ -5635,8 +5659,8 @@ class EventPublisher:
 
 ```python
 class AnalyticsEventHandler(EventHandler):
-    def __init__(self, analytics_service = None)  # Line 359
-    async def handle(self, event: BotEvent) -> None  # Line 363
+    def __init__(self, analytics_service = None)  # Line 397
+    async def handle(self, event: BotEvent) -> None  # Line 401
 ```
 
 #### Class: `RiskMonitoringEventHandler`
@@ -5646,15 +5670,15 @@ class AnalyticsEventHandler(EventHandler):
 
 ```python
 class RiskMonitoringEventHandler(EventHandler):
-    def __init__(self, risk_service = None)  # Line 439
-    async def handle(self, event: BotEvent) -> None  # Line 443
+    def __init__(self, risk_service = None)  # Line 498
+    async def handle(self, event: BotEvent) -> None  # Line 502
 ```
 
 #### Functions:
 
 ```python
-def get_event_publisher() -> EventPublisher  # Line 506
-def setup_bot_management_events(analytics_service = None, risk_service = None) -> EventPublisher  # Line 514
+def get_event_publisher() -> EventPublisher  # Line 590
+def setup_bot_management_events(analytics_service = None, risk_service = None) -> EventPublisher  # Line 598
 ```
 
 ### File: exceptions.py
@@ -6862,14 +6886,28 @@ def setup_development_logging() -> None  # Line 499
 **Key Imports:**
 - `from src.core.logging import get_logger`
 
+#### Class: `CacheOptimizedList`
+
+**Purpose**: Cache-optimized list implementation
+
+```python
+class CacheOptimizedList:
+    def __init__(self)  # Line 45
+    def clear(self)  # Line 49
+    def append(self, item)  # Line 53
+    def __len__(self)  # Line 57
+    def __getitem__(self, key)  # Line 61
+    def __setitem__(self, key, value)  # Line 65
+```
+
 #### Class: `DependencyInjectionMixin`
 
 **Purpose**: Simple mixin for dependency injection to avoid circular imports
 
 ```python
 class DependencyInjectionMixin:
-    def __init__(self)  # Line 45
-    def get_injector(self)  # Line 49
+    def __init__(self)  # Line 73
+    def get_injector(self)  # Line 77
 ```
 
 #### Class: `MemoryStats`
@@ -6878,7 +6916,7 @@ class DependencyInjectionMixin:
 
 ```python
 class MemoryStats:
-    def memory_pressure(self) -> float  # Line 71
+    def memory_pressure(self) -> float  # Line 99
 ```
 
 #### Class: `ObjectPool`
@@ -6888,12 +6926,12 @@ class MemoryStats:
 
 ```python
 class ObjectPool(Generic[T]):
-    def __init__(self, ...)  # Line 81
-    def _populate_pool(self, initial_size: int | None = None)  # Line 119
-    def borrow(self) -> T  # Line 130
-    def return_object(self, obj: T)  # Line 146
-    def get_stats(self) -> dict[str, Any]  # Line 172
-    def clear(self)  # Line 188
+    def __init__(self, ...)  # Line 109
+    def _populate_pool(self, initial_size: int | None = None)  # Line 147
+    def borrow(self) -> T  # Line 158
+    def return_object(self, obj: T)  # Line 174
+    def get_stats(self) -> dict[str, Any]  # Line 200
+    def clear(self)  # Line 216
 ```
 
 #### Class: `MemoryLeakDetector`
@@ -6902,27 +6940,13 @@ class ObjectPool(Generic[T]):
 
 ```python
 class MemoryLeakDetector:
-    def __init__(self, check_interval: int = 300)  # Line 198
-    async def start(self)  # Line 208
-    async def _take_snapshot(self)  # Line 220
-    async def _analyze_leaks(self)  # Line 248
-    async def _log_top_growers(self, current: dict, previous: dict)  # Line 273
-    def stop(self)  # Line 294
-    def get_leak_report(self) -> dict[str, Any]  # Line 298
-```
-
-#### Class: `CacheOptimizedList`
-
-**Purpose**: Cache-friendly list implementation for better performance
-
-```python
-class CacheOptimizedList:
-    def __init__(self, initial_capacity: int = 1000, growth_factor: float = 1.5)  # Line 323
-    def append(self, item)  # Line 329
-    def _grow(self)  # Line 337
-    def get(self, index: int)  # Line 349
-    def clear(self)  # Line 355
-    def __len__(self)  # Line 362
+    def __init__(self, check_interval: int = 300)  # Line 226
+    async def start(self)  # Line 236
+    async def _take_snapshot(self)  # Line 248
+    async def _analyze_leaks(self)  # Line 276
+    async def _log_top_growers(self, current: dict, previous: dict)  # Line 301
+    def stop(self)  # Line 322
+    def get_leak_report(self) -> dict[str, Any]  # Line 326
 ```
 
 #### Class: `MemoryMappedCache`
@@ -6931,11 +6955,11 @@ class CacheOptimizedList:
 
 ```python
 class MemoryMappedCache:
-    def __init__(self, file_path: str, max_size: int = Any)  # Line 369
-    def _open_mmap(self)  # Line 384
-    def write_data(self, offset: int, data: bytes) -> bool  # Line 407
-    def read_data(self, offset: int, length: int) -> bytes | None  # Line 423
-    def close(self)  # Line 437
+    def __init__(self, file_path: str, max_size: int = Any)  # Line 352
+    def _open_mmap(self)  # Line 367
+    def write_data(self, offset: int, data: bytes) -> bool  # Line 390
+    def read_data(self, offset: int, length: int) -> bytes | None  # Line 406
+    def close(self)  # Line 420
 ```
 
 #### Class: `HighPerformanceMemoryManager`
@@ -6945,37 +6969,37 @@ class MemoryMappedCache:
 
 ```python
 class HighPerformanceMemoryManager(DependencyInjectionMixin):
-    def __init__(self, config: 'Config | None' = None)  # Line 459
-    def _resolve_config(self, config: 'Config | None') -> 'Config | None'  # Line 494
-    def _initialize_pools(self)  # Line 525
-    def _optimize_gc(self)  # Line 551
-    async def start_monitoring(self)  # Line 573
-    async def _monitoring_loop(self)  # Line 585
-    def _get_memory_usage(self) -> MemoryStats  # Line 615
-    async def _emergency_cleanup(self)  # Line 644
-    async def _perform_gc(self)  # Line 667
-    def get_pool(self, pool_name: str) -> ObjectPool | None  # Line 679
-    def borrow_object(self, pool_name: str)  # Line 683
-    def return_object(self, pool_name: str, obj)  # Line 690
-    def track_object(self, obj)  # Line 696
-    def get_memory_stats(self) -> MemoryStats  # Line 700
-    def get_performance_report(self) -> dict[str, Any]  # Line 704
-    def _generate_recommendations(self, stats: MemoryStats) -> list[str]  # Line 743
-    async def stop_monitoring(self)  # Line 767
-    def cleanup(self)  # Line 792
-    def get_dependencies(self) -> list[str]  # Line 809
+    def __init__(self, config: 'Config | None' = None)  # Line 442
+    def _resolve_config(self, config: 'Config | None') -> 'Config | None'  # Line 477
+    def _initialize_pools(self)  # Line 508
+    def _optimize_gc(self)  # Line 534
+    async def start_monitoring(self)  # Line 556
+    async def _monitoring_loop(self)  # Line 568
+    def _get_memory_usage(self) -> MemoryStats  # Line 598
+    async def _emergency_cleanup(self)  # Line 627
+    async def _perform_gc(self)  # Line 650
+    def get_pool(self, pool_name: str) -> ObjectPool | None  # Line 662
+    def borrow_object(self, pool_name: str)  # Line 666
+    def return_object(self, pool_name: str, obj)  # Line 673
+    def track_object(self, obj)  # Line 679
+    def get_memory_stats(self) -> MemoryStats  # Line 683
+    def get_performance_report(self) -> dict[str, Any]  # Line 687
+    def _generate_recommendations(self, stats: MemoryStats) -> list[str]  # Line 726
+    async def stop_monitoring(self)  # Line 750
+    def cleanup(self)  # Line 775
+    def get_dependencies(self) -> list[str]  # Line 792
 ```
 
 #### Functions:
 
 ```python
-def initialize_memory_manager(config: 'Config') -> HighPerformanceMemoryManager  # Line 818
-def get_memory_manager() -> HighPerformanceMemoryManager | None  # Line 825
-def create_memory_manager_factory(config: 'Config | None' = None) -> Callable[[], HighPerformanceMemoryManager]  # Line 830
-def borrow_dict() -> dict  # Line 842
-def return_dict(obj: dict)  # Line 849
-def borrow_list() -> list  # Line 855
-def return_list(obj: list)  # Line 862
+def initialize_memory_manager(config: 'Config') -> HighPerformanceMemoryManager  # Line 801
+def get_memory_manager() -> HighPerformanceMemoryManager | None  # Line 808
+def create_memory_manager_factory(config: 'Config | None' = None) -> Callable[[], HighPerformanceMemoryManager]  # Line 813
+def borrow_dict() -> dict  # Line 825
+def return_dict(obj: dict)  # Line 832
+def borrow_list() -> list  # Line 838
+def return_list(obj: list)  # Line 845
 ```
 
 ### File: memory_optimizer.py
@@ -7807,15 +7831,6 @@ class BotState(BaseModel):
 class ResourceAllocation(BaseModel):
 ```
 
-#### Class: `BotEvent`
-
-**Inherits**: BaseModel
-**Purpose**: Bot lifecycle and operational events
-
-```python
-class BotEvent(BaseModel):
-```
-
 ### File: capital.py
 
 #### Class: `CapitalFundFlow`
@@ -8274,6 +8289,15 @@ class CapitalProtection(BaseModel):
 class PortfolioState(BaseModel):
 ```
 
+#### Class: `PortfolioMetrics`
+
+**Inherits**: BaseModel
+**Purpose**: Unified portfolio metrics model for cross-module consistency
+
+```python
+class PortfolioMetrics(BaseModel):
+```
+
 ### File: strategy.py
 
 #### Class: `StrategyType`
@@ -8337,8 +8361,8 @@ class StrategyConfig(BaseModel):
 
 ```python
 class StrategyMetrics(BaseModel):
-    def update_win_rate(self) -> None  # Line 143
-    def calculate_profit_factor(self) -> Decimal  # Line 148
+    def update_win_rate(self) -> None  # Line 144
+    def calculate_profit_factor(self) -> Decimal  # Line 149
 ```
 
 #### Class: `RegimeChangeEvent`
@@ -8445,8 +8469,8 @@ class Signal(BaseModel):
 class OrderRequest(BaseModel):
     def validate_symbol(cls, v: str) -> str  # Line 215
     def validate_quantity(cls, v: Decimal) -> Decimal  # Line 223
-    def validate_price(cls, v: Decimal | None) -> Decimal | None  # Line 247
-    def validate_quote_quantity(cls, v: Decimal | None) -> Decimal | None  # Line 274
+    def validate_price(cls, v: Decimal | None) -> Decimal | None  # Line 252
+    def validate_quote_quantity(cls, v: Decimal | None) -> Decimal | None  # Line 279
 ```
 
 #### Class: `OrderResponse`
@@ -8456,8 +8480,8 @@ class OrderRequest(BaseModel):
 
 ```python
 class OrderResponse(BaseModel):
-    def id(self) -> str  # Line 319
-    def remaining_quantity(self) -> Decimal  # Line 324
+    def id(self) -> str  # Line 324
+    def remaining_quantity(self) -> Decimal  # Line 329
 ```
 
 #### Class: `Order`
@@ -8467,8 +8491,8 @@ class OrderResponse(BaseModel):
 
 ```python
 class Order(BaseModel):
-    def is_filled(self) -> bool  # Line 356
-    def is_active(self) -> bool  # Line 360
+    def is_filled(self) -> bool  # Line 361
+    def is_active(self) -> bool  # Line 365
 ```
 
 #### Class: `Position`
@@ -8478,8 +8502,8 @@ class Order(BaseModel):
 
 ```python
 class Position(BaseModel):
-    def is_open(self) -> bool  # Line 382
-    def calculate_pnl(self, current_price: Decimal) -> Decimal  # Line 386
+    def is_open(self) -> bool  # Line 387
+    def calculate_pnl(self, current_price: Decimal) -> Decimal  # Line 391
 ```
 
 #### Class: `Trade`
@@ -8498,7 +8522,7 @@ class Trade(BaseModel):
 
 ```python
 class Balance(BaseModel):
-    def free(self) -> Decimal  # Line 422
+    def free(self) -> Decimal  # Line 427
 ```
 
 #### Class: `ArbitrageOpportunity`
@@ -8508,10 +8532,10 @@ class Balance(BaseModel):
 
 ```python
 class ArbitrageOpportunity(BaseModel):
-    def validate_prices(cls, v: Decimal) -> Decimal  # Line 444
-    def validate_quantity(cls, v: Decimal) -> Decimal  # Line 468
-    def is_expired(self) -> bool  # Line 491
-    def calculate_profit(self) -> Decimal  # Line 497
+    def validate_prices(cls, v: Decimal) -> Decimal  # Line 449
+    def validate_quantity(cls, v: Decimal) -> Decimal  # Line 473
+    def is_expired(self) -> bool  # Line 496
+    def calculate_profit(self) -> Decimal  # Line 502
 ```
 
 ### File: validator_registry.py
@@ -8658,5 +8682,5 @@ def create_websocket_manager(url: str, resource_manager: ResourceManager | None 
 
 ---
 **Generated**: Complete reference for core module
-**Total Classes**: 389
+**Total Classes**: 391
 **Total Functions**: 92

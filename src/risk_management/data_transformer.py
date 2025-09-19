@@ -154,7 +154,7 @@ class RiskDataTransformer:
     @staticmethod
     def validate_financial_precision(data: dict[str, Any]) -> dict[str, Any]:
         """
-        Ensure financial data has proper precision using Decimal.
+        Ensure financial data has proper precision using centralized financial utils.
 
         Args:
             data: Data dictionary to validate
@@ -162,47 +162,24 @@ class RiskDataTransformer:
         Returns:
             Dict with validated financial precision
         """
-        financial_fields = [
-            "quantity",
-            "entry_price",
-            "current_price",
-            "unrealized_pnl",
-            "realized_pnl",
-            "var_1d",
-            "var_5d",
-            "expected_shortfall",
-            "max_drawdown",
-            "sharpe_ratio",
-            "volatility",
-            "beta",
-            "correlation",
-            "strength",
+        from src.utils.financial_utils import validate_financial_precision
+
+        # Define risk management-specific fields in addition to defaults
+        risk_fields = [
+            "quantity", "entry_price", "current_price", "unrealized_pnl",
+            "realized_pnl", "var_1d", "var_5d", "expected_shortfall",
+            "max_drawdown", "sharpe_ratio", "volatility", "beta",
+            "correlation", "strength"
         ]
 
-        for field in financial_fields:
-            if field in data and data[field] is not None and data[field] != "":
-                try:
-                    # Convert to Decimal for financial precision
-                    decimal_value = to_decimal(data[field])
-                    # Convert back to string for consistent format
-                    data[field] = str(decimal_value)
-                except (ValueError, TypeError, KeyError) as e:
-                    logger.warning(
-                        f"Failed to convert financial field {field} to Decimal: {e}",
-                        field=field,
-                        value=data[field],
-                    )
-                    # Keep original value if conversion fails but log the issue
-                    # This is acceptable for data transformation where robustness is prioritized
-
-        return data
+        return validate_financial_precision(data, risk_fields)
 
     @staticmethod
     def ensure_boundary_fields(
         data: dict[str, Any], source: str = "risk_management"
     ) -> dict[str, Any]:
         """
-        Ensure data has required boundary fields for cross-module communication.
+        Ensure data has required boundary fields using centralized financial utils.
 
         Args:
             data: Data dictionary to enhance
@@ -211,27 +188,16 @@ class RiskDataTransformer:
         Returns:
             Dict with required boundary fields
         """
-        # Ensure processing mode is set
-        if "processing_mode" not in data:
-            data["processing_mode"] = "stream"
+        from src.utils.financial_utils import ensure_boundary_fields
 
-        # Ensure data format is set (aligned with core events)
-        if "data_format" not in data:
-            data["data_format"] = "bot_event_v1"
+        # Use centralized boundary fields function
+        enhanced_data = ensure_boundary_fields(data, source)
 
-        # Ensure timestamp is set
-        if "timestamp" not in data:
-            data["timestamp"] = datetime.now(timezone.utc).isoformat()
+        # Ensure metadata exists (risk management-specific)
+        if "metadata" not in enhanced_data:
+            enhanced_data["metadata"] = {}
 
-        # Add source information
-        if "source" not in data:
-            data["source"] = source
-
-        # Ensure metadata exists
-        if "metadata" not in data:
-            data["metadata"] = {}
-
-        return data
+        return enhanced_data
 
     @classmethod
     def transform_for_pub_sub(

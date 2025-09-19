@@ -2,7 +2,7 @@
 
 ## INTEGRATION
 **Dependencies**: core, error_handling, utils
-**Used By**: analytics
+**Used By**: strategies
 **Provides**: AlertManager, DefaultAlertService, DefaultDashboardService, DefaultMetricsService, DefaultPerformanceService, GrafanaDashboardManager, MonitoringService, WebSocketManager
 **Patterns**: Async Operations, Component Architecture, Service Layer
 
@@ -20,12 +20,12 @@
 - Caching
 **Architecture**:
 - AlertManager inherits from base architecture
+- MonitoringDataTransformer inherits from base architecture
 - MetricsCollector inherits from base architecture
-- TradingMetrics inherits from base architecture
 
 ## MODULE OVERVIEW
-**Files**: 15 Python files
-**Classes**: 59
+**Files**: 16 Python files
+**Classes**: 60
 **Functions**: 65
 
 ## COMPLETE API REFERENCE
@@ -166,6 +166,24 @@
 - `async deploy_dashboard(self, dashboard: Dashboard) -> bool` - Line 763
 - `export_dashboards_to_files(self, output_dir: str) -> None` - Line 844
 
+### Implementation: `MonitoringDataTransformer` ✅
+
+**Inherits**: BaseService
+**Purpose**: Handles consistent data transformation for monitoring module following analytics patterns
+**Status**: Complete
+
+**Implemented Methods:**
+- `transform_alert_to_event_data(cls, alert_data: dict[str, Any], metadata: dict[str, Any] | None = None) -> dict[str, Any]` - Line 24
+- `transform_metric_to_event_data(cls, metric_data: dict[str, Any], metadata: dict[str, Any] | None = None) -> dict[str, Any]` - Line 57
+- `transform_performance_to_event_data(cls, performance_data: dict[str, Any], metadata: dict[str, Any] | None = None) -> dict[str, Any]` - Line 87
+- `transform_error_to_event_data(cls, ...) -> dict[str, Any]` - Line 121
+- `validate_financial_precision(cls, data: dict[str, Any]) -> dict[str, Any]` - Line 144
+- `ensure_boundary_fields(cls, data: dict[str, Any], source: str = 'monitoring') -> dict[str, Any]` - Line 165
+- `transform_for_pub_sub(cls, event_type: str, data: Any, metadata: dict[str, Any] | None = None) -> dict[str, Any]` - Line 201
+- `transform_for_req_reply(cls, request_type: str, data: Any, correlation_id: str | None = None) -> dict[str, Any]` - Line 249
+- `align_processing_paradigm(cls, data: dict[str, Any], target_mode: str = 'stream') -> dict[str, Any]` - Line 275
+- `apply_cross_module_validation(cls, ...) -> dict[str, Any]` - Line 339
+
 ### Implementation: `ServiceBinding` ✅
 
 **Purpose**: Represents a service binding in the DI container
@@ -220,7 +238,7 @@
 - `async create_alert(self, request: 'AlertRequest') -> str` - Line 44
 - `async resolve_alert(self, fingerprint: str) -> bool` - Line 49
 - `async acknowledge_alert(self, fingerprint: str, acknowledged_by: str) -> bool` - Line 54
-- `get_active_alerts(self, severity: Optional[AlertSeverity] = None) -> list['Alert']` - Line 59
+- `get_active_alerts(self, severity: AlertSeverity | None = None) -> list['Alert']` - Line 59
 - `get_alert_stats(self) -> dict[str, Any]` - Line 64
 - `add_rule(self, rule: 'AlertRule') -> None` - Line 69
 - `add_escalation_policy(self, policy: 'EscalationPolicy') -> None` - Line 74
@@ -405,18 +423,18 @@
 - `profile_function(self, ...)` - Line 724
 - `async profile_async_function(self, ...)` - Line 768
 - `record_order_execution(self, ...) -> None` - Line 811
-- `record_market_data_processing(self, ...) -> None` - Line 933
-- `async record_websocket_latency(self, exchange: str, message_type: str, latency_ms: Decimal) -> None` - Line 978
-- `record_database_query(self, database: str, operation: str, table: str, query_time_ms: Decimal) -> None` - Line 1035
-- `record_strategy_performance(self, ...) -> None` - Line 1084
-- `get_latency_stats(self, metric_name: str) -> LatencyStats | None` - Line 1135
-- `get_throughput_stats(self, metric_name: str) -> ThroughputStats | None` - Line 1157
-- `get_system_resource_stats(self) -> SystemResourceStats | None` - Line 1197
-- `get_gc_stats(self) -> GCStats | None` - Line 1218
-- `get_performance_summary(self) -> dict[str, Any]` - Line 1237
-- `get_metrics(self) -> dict[str, Any]` - Line 1287
-- `reset_metrics(self) -> None` - Line 1291
-- `clear_metrics(self) -> None` - Line 1302
+- `record_market_data_processing(self, ...) -> None` - Line 932
+- `async record_websocket_latency(self, exchange: str, message_type: str, latency_ms: Decimal) -> None` - Line 976
+- `record_database_query(self, database: str, operation: str, table: str, query_time_ms: Decimal) -> None` - Line 1032
+- `record_strategy_performance(self, ...) -> None` - Line 1080
+- `get_latency_stats(self, metric_name: str) -> LatencyStats | None` - Line 1130
+- `get_throughput_stats(self, metric_name: str) -> ThroughputStats | None` - Line 1152
+- `get_system_resource_stats(self) -> SystemResourceStats | None` - Line 1192
+- `get_gc_stats(self) -> GCStats | None` - Line 1213
+- `get_performance_summary(self) -> dict[str, Any]` - Line 1232
+- `get_metrics(self) -> dict[str, Any]` - Line 1282
+- `reset_metrics(self) -> None` - Line 1286
+- `clear_metrics(self) -> None` - Line 1297
 
 ### Implementation: `PerformanceMetrics` ✅
 
@@ -424,8 +442,8 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `add_metric(self, metric: PerformanceMetric) -> None` - Line 1904
-- `get_metrics_by_category(self, category: PerformanceCategory) -> list[PerformanceMetric]` - Line 1908
+- `add_metric(self, metric: PerformanceMetric) -> None` - Line 1899
+- `get_metrics_by_category(self, category: PerformanceCategory) -> list[PerformanceMetric]` - Line 1903
 
 ### Implementation: `QueryMetrics` ✅
 
@@ -433,8 +451,8 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `record_query(self, query: str, execution_time: float) -> None` - Line 1928
-- `get_average_query_time(self) -> float` - Line 1932
+- `record_query(self, query: str, execution_time: float) -> None` - Line 1923
+- `get_average_query_time(self) -> float` - Line 1927
 
 ### Implementation: `CacheMetrics` ✅
 
@@ -442,9 +460,9 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `record_hit(self) -> None` - Line 1953
-- `record_miss(self) -> None` - Line 1957
-- `get_hit_rate(self) -> float` - Line 1961
+- `record_hit(self) -> None` - Line 1948
+- `record_miss(self) -> None` - Line 1952
+- `get_hit_rate(self) -> float` - Line 1956
 
 ### Implementation: `QueryOptimizer` ✅
 
@@ -452,10 +470,10 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `analyze_query(self, query: str) -> dict[str, Any]` - Line 1976
-- `optimize_query(self, query: str) -> str` - Line 1980
-- `cache_query_plan(self, query: str, plan: dict[str, Any]) -> None` - Line 1984
-- `get_cached_plan(self, query: str) -> dict[str, Any] | None` - Line 1988
+- `analyze_query(self, query: str) -> dict[str, Any]` - Line 1971
+- `optimize_query(self, query: str) -> str` - Line 1975
+- `cache_query_plan(self, query: str, plan: dict[str, Any]) -> None` - Line 1979
+- `get_cached_plan(self, query: str) -> dict[str, Any] | None` - Line 1983
 
 ### Implementation: `CacheOptimizer` ✅
 
@@ -463,8 +481,8 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `analyze_cache_performance(self) -> dict[str, Any]` - Line 1999
-- `optimize_ttl(self, key: str) -> int` - Line 2003
+- `analyze_cache_performance(self) -> dict[str, Any]` - Line 1994
+- `optimize_ttl(self, key: str) -> int` - Line 1998
 
 ### Implementation: `AlertRequest` ✅
 
@@ -483,15 +501,15 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async create_alert(self, request: AlertRequest) -> str` - Line 86
-- `async resolve_alert(self, fingerprint: str) -> bool` - Line 150
-- `async acknowledge_alert(self, fingerprint: str, acknowledged_by: str) -> bool` - Line 155
-- `get_active_alerts(self, severity: Union[AlertSeverity, None] = None) -> list['Alert']` - Line 159
-- `get_alert_stats(self) -> dict[str, Any]` - Line 163
-- `add_rule(self, rule) -> None` - Line 167
-- `add_escalation_policy(self, policy) -> None` - Line 171
-- `async handle_error_event_from_error_handling(self, error_data: dict[str, Any]) -> str` - Line 175
-- `async handle_batch_error_events_from_error_handling(self, error_events: list[dict[str, Any]]) -> list[str]` - Line 218
+- `async create_alert(self, request: AlertRequest) -> str` - Line 88
+- `async resolve_alert(self, fingerprint: str) -> bool` - Line 166
+- `async acknowledge_alert(self, fingerprint: str, acknowledged_by: str) -> bool` - Line 171
+- `get_active_alerts(self, severity: AlertSeverity | None = None) -> list['Alert']` - Line 175
+- `get_alert_stats(self) -> dict[str, Any]` - Line 179
+- `add_rule(self, rule) -> None` - Line 183
+- `add_escalation_policy(self, policy) -> None` - Line 187
+- `async handle_error_event_from_error_handling(self, error_data: dict[str, Any]) -> str` - Line 191
+- `async handle_batch_error_events_from_error_handling(self, error_events: list[dict[str, Any]]) -> list[str]` - Line 236
 
 ### Implementation: `DefaultMetricsService` ✅
 
@@ -500,11 +518,11 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `record_counter(self, request: MetricRequest) -> None` - Line 303
-- `record_gauge(self, request: MetricRequest) -> None` - Line 377
-- `record_histogram(self, request: MetricRequest) -> None` - Line 414
-- `export_metrics(self) -> str` - Line 451
-- `record_error_pattern_metric(self, error_data: dict[str, Any]) -> None` - Line 455
+- `record_counter(self, request: MetricRequest) -> None` - Line 321
+- `record_gauge(self, request: MetricRequest) -> None` - Line 416
+- `record_histogram(self, request: MetricRequest) -> None` - Line 465
+- `export_metrics(self) -> str` - Line 514
+- `record_error_pattern_metric(self, error_data: dict[str, Any]) -> None` - Line 518
 
 ### Implementation: `DefaultPerformanceService` ✅
 
@@ -513,11 +531,11 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `get_performance_summary(self) -> dict[str, Any]` - Line 505
-- `record_order_execution(self, ...) -> None` - Line 509
-- `record_market_data_processing(self, ...) -> None` - Line 616
-- `get_latency_stats(self, metric_name: str)` - Line 628
-- `get_system_resource_stats(self)` - Line 632
+- `get_performance_summary(self) -> dict[str, Any]` - Line 550
+- `record_order_execution(self, ...) -> None` - Line 554
+- `record_market_data_processing(self, ...) -> None` - Line 679
+- `get_latency_stats(self, metric_name: str)` - Line 691
+- `get_system_resource_stats(self)` - Line 695
 
 ### Implementation: `DefaultDashboardService` ✅
 
@@ -526,11 +544,11 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async deploy_dashboard(self, dashboard: 'Dashboard') -> bool` - Line 677
-- `async deploy_all_dashboards(self) -> dict[str, bool]` - Line 681
-- `export_dashboards_to_files(self, output_dir: str) -> None` - Line 685
-- `create_trading_overview_dashboard(self) -> Dashboard` - Line 689
-- `create_system_performance_dashboard(self) -> Dashboard` - Line 693
+- `async deploy_dashboard(self, dashboard: 'Dashboard') -> bool` - Line 711
+- `async deploy_all_dashboards(self) -> dict[str, bool]` - Line 715
+- `export_dashboards_to_files(self, output_dir: str) -> None` - Line 719
+- `create_trading_overview_dashboard(self) -> Dashboard` - Line 723
+- `create_system_performance_dashboard(self) -> Dashboard` - Line 727
 
 ### Implementation: `MonitoringService` ✅
 
@@ -539,10 +557,10 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async start_monitoring(self) -> None` - Line 739
-- `async stop_monitoring(self) -> None` - Line 755
-- `async get_health_status(self) -> dict[str, Any]` - Line 771
-- `async health_check(self) -> dict[str, Any]` - Line 775
+- `async start_monitoring(self) -> None` - Line 773
+- `async stop_monitoring(self) -> None` - Line 789
+- `async get_health_status(self) -> dict[str, Any]` - Line 805
+- `async health_check(self) -> dict[str, Any]` - Line 809
 
 ### Implementation: `OpenTelemetryConfig` ✅
 
@@ -797,6 +815,34 @@ async def safe_session_close(session)  # Line 79
 def create_default_dashboards() -> list[Dashboard]  # Line 874
 ```
 
+### File: data_transformer.py
+
+**Key Imports:**
+- `from src.core.base.service import BaseService`
+- `from src.core.exceptions import ValidationError`
+- `from src.core.logging import get_logger`
+- `from src.core.types import AlertSeverity`
+- `from src.utils.decimal_utils import to_decimal`
+
+#### Class: `MonitoringDataTransformer`
+
+**Inherits**: BaseService
+**Purpose**: Handles consistent data transformation for monitoring module following analytics patterns
+
+```python
+class MonitoringDataTransformer(BaseService):
+    def transform_alert_to_event_data(cls, alert_data: dict[str, Any], metadata: dict[str, Any] | None = None) -> dict[str, Any]  # Line 24
+    def transform_metric_to_event_data(cls, metric_data: dict[str, Any], metadata: dict[str, Any] | None = None) -> dict[str, Any]  # Line 57
+    def transform_performance_to_event_data(cls, performance_data: dict[str, Any], metadata: dict[str, Any] | None = None) -> dict[str, Any]  # Line 87
+    def transform_error_to_event_data(cls, ...) -> dict[str, Any]  # Line 121
+    def validate_financial_precision(cls, data: dict[str, Any]) -> dict[str, Any]  # Line 144
+    def ensure_boundary_fields(cls, data: dict[str, Any], source: str = 'monitoring') -> dict[str, Any]  # Line 165
+    def transform_for_pub_sub(cls, event_type: str, data: Any, metadata: dict[str, Any] | None = None) -> dict[str, Any]  # Line 201
+    def transform_for_req_reply(cls, request_type: str, data: Any, correlation_id: str | None = None) -> dict[str, Any]  # Line 249
+    def align_processing_paradigm(cls, data: dict[str, Any], target_mode: str = 'stream') -> dict[str, Any]  # Line 275
+    def apply_cross_module_validation(cls, ...) -> dict[str, Any]  # Line 339
+```
+
 ### File: dependency_injection.py
 
 **Key Imports:**
@@ -960,7 +1006,7 @@ class AlertServiceInterface(ABC):
     async def create_alert(self, request: 'AlertRequest') -> str  # Line 44
     async def resolve_alert(self, fingerprint: str) -> bool  # Line 49
     async def acknowledge_alert(self, fingerprint: str, acknowledged_by: str) -> bool  # Line 54
-    def get_active_alerts(self, severity: Optional[AlertSeverity] = None) -> list['Alert']  # Line 59
+    def get_active_alerts(self, severity: AlertSeverity | None = None) -> list['Alert']  # Line 59
     def get_alert_stats(self) -> dict[str, Any]  # Line 64
     def add_rule(self, rule: 'AlertRule') -> None  # Line 69
     def add_escalation_policy(self, policy: 'EscalationPolicy') -> None  # Line 74
@@ -1229,30 +1275,30 @@ class PerformanceProfiler(BaseComponent):
     def profile_function(self, ...)  # Line 724
     async def profile_async_function(self, ...)  # Line 768
     def record_order_execution(self, ...) -> None  # Line 811
-    def record_market_data_processing(self, ...) -> None  # Line 933
-    async def record_websocket_latency(self, exchange: str, message_type: str, latency_ms: Decimal) -> None  # Line 978
-    def record_database_query(self, database: str, operation: str, table: str, query_time_ms: Decimal) -> None  # Line 1035
-    def record_strategy_performance(self, ...) -> None  # Line 1084
-    def get_latency_stats(self, metric_name: str) -> LatencyStats | None  # Line 1135
-    def get_throughput_stats(self, metric_name: str) -> ThroughputStats | None  # Line 1157
-    def get_system_resource_stats(self) -> SystemResourceStats | None  # Line 1197
-    def get_gc_stats(self) -> GCStats | None  # Line 1218
-    def get_performance_summary(self) -> dict[str, Any]  # Line 1237
-    def get_metrics(self) -> dict[str, Any]  # Line 1287
-    def reset_metrics(self) -> None  # Line 1291
-    def clear_metrics(self) -> None  # Line 1302
-    def _get_memory_usage(self) -> int  # Line 1306
-    def _calculate_throughput(self, metric_name: str) -> float  # Line 1316
-    def _calculate_websocket_health(self, exchange: str) -> float  # Line 1355
-    async def _collect_system_resources(self) -> None  # Line 1395
-    async def _collect_gc_stats(self) -> None  # Line 1494
-    async def _check_performance_thresholds(self) -> None  # Line 1549
-    async def _detect_anomalies(self) -> None  # Line 1578
-    async def _update_performance_baselines(self) -> None  # Line 1615
-    async def _send_performance_alert(self, title: str, message: str, severity: AlertSeverity, labels: dict[str, str]) -> None  # Line 1675
-    def _create_managed_alert_task(self, title: str, message: str, severity, labels: dict[str, str]) -> None  # Line 1698
-    def _handle_managed_alert_task_completion(self, task: asyncio.Task) -> None  # Line 1719
-    def _handle_alert_task_completion(self, task: asyncio.Task) -> None  # Line 1732
+    def record_market_data_processing(self, ...) -> None  # Line 932
+    async def record_websocket_latency(self, exchange: str, message_type: str, latency_ms: Decimal) -> None  # Line 976
+    def record_database_query(self, database: str, operation: str, table: str, query_time_ms: Decimal) -> None  # Line 1032
+    def record_strategy_performance(self, ...) -> None  # Line 1080
+    def get_latency_stats(self, metric_name: str) -> LatencyStats | None  # Line 1130
+    def get_throughput_stats(self, metric_name: str) -> ThroughputStats | None  # Line 1152
+    def get_system_resource_stats(self) -> SystemResourceStats | None  # Line 1192
+    def get_gc_stats(self) -> GCStats | None  # Line 1213
+    def get_performance_summary(self) -> dict[str, Any]  # Line 1232
+    def get_metrics(self) -> dict[str, Any]  # Line 1282
+    def reset_metrics(self) -> None  # Line 1286
+    def clear_metrics(self) -> None  # Line 1297
+    def _get_memory_usage(self) -> int  # Line 1301
+    def _calculate_throughput(self, metric_name: str) -> float  # Line 1311
+    def _calculate_websocket_health(self, exchange: str) -> float  # Line 1350
+    async def _collect_system_resources(self) -> None  # Line 1390
+    async def _collect_gc_stats(self) -> None  # Line 1489
+    async def _check_performance_thresholds(self) -> None  # Line 1544
+    async def _detect_anomalies(self) -> None  # Line 1573
+    async def _update_performance_baselines(self) -> None  # Line 1610
+    async def _send_performance_alert(self, title: str, message: str, severity: AlertSeverity, labels: dict[str, str]) -> None  # Line 1670
+    def _create_managed_alert_task(self, title: str, message: str, severity, labels: dict[str, str]) -> None  # Line 1693
+    def _handle_managed_alert_task_completion(self, task: asyncio.Task) -> None  # Line 1714
+    def _handle_alert_task_completion(self, task: asyncio.Task) -> None  # Line 1727
 ```
 
 #### Class: `PerformanceMetrics`
@@ -1261,9 +1307,9 @@ class PerformanceProfiler(BaseComponent):
 
 ```python
 class PerformanceMetrics:
-    def __post_init__(self)  # Line 1900
-    def add_metric(self, metric: PerformanceMetric) -> None  # Line 1904
-    def get_metrics_by_category(self, category: PerformanceCategory) -> list[PerformanceMetric]  # Line 1908
+    def __post_init__(self)  # Line 1895
+    def add_metric(self, metric: PerformanceMetric) -> None  # Line 1899
+    def get_metrics_by_category(self, category: PerformanceCategory) -> list[PerformanceMetric]  # Line 1903
 ```
 
 #### Class: `QueryMetrics`
@@ -1272,9 +1318,9 @@ class PerformanceMetrics:
 
 ```python
 class QueryMetrics:
-    def __post_init__(self)  # Line 1924
-    def record_query(self, query: str, execution_time: float) -> None  # Line 1928
-    def get_average_query_time(self) -> float  # Line 1932
+    def __post_init__(self)  # Line 1919
+    def record_query(self, query: str, execution_time: float) -> None  # Line 1923
+    def get_average_query_time(self) -> float  # Line 1927
 ```
 
 #### Class: `CacheMetrics`
@@ -1283,10 +1329,10 @@ class QueryMetrics:
 
 ```python
 class CacheMetrics:
-    def __post_init__(self)  # Line 1948
-    def record_hit(self) -> None  # Line 1953
-    def record_miss(self) -> None  # Line 1957
-    def get_hit_rate(self) -> float  # Line 1961
+    def __post_init__(self)  # Line 1943
+    def record_hit(self) -> None  # Line 1948
+    def record_miss(self) -> None  # Line 1952
+    def get_hit_rate(self) -> float  # Line 1956
 ```
 
 #### Class: `QueryOptimizer`
@@ -1295,11 +1341,11 @@ class CacheMetrics:
 
 ```python
 class QueryOptimizer:
-    def __init__(self)  # Line 1972
-    def analyze_query(self, query: str) -> dict[str, Any]  # Line 1976
-    def optimize_query(self, query: str) -> str  # Line 1980
-    def cache_query_plan(self, query: str, plan: dict[str, Any]) -> None  # Line 1984
-    def get_cached_plan(self, query: str) -> dict[str, Any] | None  # Line 1988
+    def __init__(self)  # Line 1967
+    def analyze_query(self, query: str) -> dict[str, Any]  # Line 1971
+    def optimize_query(self, query: str) -> str  # Line 1975
+    def cache_query_plan(self, query: str, plan: dict[str, Any]) -> None  # Line 1979
+    def get_cached_plan(self, query: str) -> dict[str, Any] | None  # Line 1983
 ```
 
 #### Class: `CacheOptimizer`
@@ -1308,20 +1354,20 @@ class QueryOptimizer:
 
 ```python
 class CacheOptimizer:
-    def __init__(self)  # Line 1996
-    def analyze_cache_performance(self) -> dict[str, Any]  # Line 1999
-    def optimize_ttl(self, key: str) -> int  # Line 2003
+    def __init__(self)  # Line 1991
+    def analyze_cache_performance(self) -> dict[str, Any]  # Line 1994
+    def optimize_ttl(self, key: str) -> int  # Line 1998
 ```
 
 #### Functions:
 
 ```python
 def format_timestamp(dt: datetime | None) -> str  # Line 104
-def profile_async(...)  # Line 1743
-def profile_sync(...)  # Line 1764
-def get_performance_profiler() -> PerformanceProfiler | None  # Line 1789
-def set_global_profiler(profiler: PerformanceProfiler) -> None  # Line 1805
-def initialize_performance_monitoring(config: dict[str, Any] | None = None, **kwargs) -> PerformanceProfiler  # Line 1815
+def profile_async(...)  # Line 1738
+def profile_sync(...)  # Line 1759
+def get_performance_profiler() -> PerformanceProfiler | None  # Line 1784
+def set_global_profiler(profiler: PerformanceProfiler) -> None  # Line 1800
+def initialize_performance_monitoring(config: dict[str, Any] | None = None, **kwargs) -> PerformanceProfiler  # Line 1810
 ```
 
 ### File: services.py
@@ -1356,18 +1402,18 @@ class MetricRequest:
 
 ```python
 class DefaultAlertService(BaseService, AlertServiceInterface, ErrorPropagationMixin):
-    def __init__(self, alert_manager: 'AlertManager')  # Line 80
-    async def create_alert(self, request: AlertRequest) -> str  # Line 86
-    async def resolve_alert(self, fingerprint: str) -> bool  # Line 150
-    async def acknowledge_alert(self, fingerprint: str, acknowledged_by: str) -> bool  # Line 155
-    def get_active_alerts(self, severity: Union[AlertSeverity, None] = None) -> list['Alert']  # Line 159
-    def get_alert_stats(self) -> dict[str, Any]  # Line 163
-    def add_rule(self, rule) -> None  # Line 167
-    def add_escalation_policy(self, policy) -> None  # Line 171
-    async def handle_error_event_from_error_handling(self, error_data: dict[str, Any]) -> str  # Line 175
-    async def handle_batch_error_events_from_error_handling(self, error_events: list[dict[str, Any]]) -> list[str]  # Line 218
-    def _transform_error_event_data(self, error_data: dict[str, Any]) -> dict[str, Any]  # Line 245
-    def _transform_alert_request_data(self, request: AlertRequest) -> AlertRequest  # Line 264
+    def __init__(self, alert_manager: 'AlertManager')  # Line 81
+    async def create_alert(self, request: AlertRequest) -> str  # Line 88
+    async def resolve_alert(self, fingerprint: str) -> bool  # Line 166
+    async def acknowledge_alert(self, fingerprint: str, acknowledged_by: str) -> bool  # Line 171
+    def get_active_alerts(self, severity: AlertSeverity | None = None) -> list['Alert']  # Line 175
+    def get_alert_stats(self) -> dict[str, Any]  # Line 179
+    def add_rule(self, rule) -> None  # Line 183
+    def add_escalation_policy(self, policy) -> None  # Line 187
+    async def handle_error_event_from_error_handling(self, error_data: dict[str, Any]) -> str  # Line 191
+    async def handle_batch_error_events_from_error_handling(self, error_events: list[dict[str, Any]]) -> list[str]  # Line 236
+    def _transform_error_event_data(self, error_data: dict[str, Any]) -> dict[str, Any]  # Line 263
+    def _transform_alert_request_data(self, request: AlertRequest) -> AlertRequest  # Line 282
 ```
 
 #### Class: `DefaultMetricsService`
@@ -1377,13 +1423,12 @@ class DefaultAlertService(BaseService, AlertServiceInterface, ErrorPropagationMi
 
 ```python
 class DefaultMetricsService(BaseService, MetricsServiceInterface, ErrorPropagationMixin):
-    def __init__(self, metrics_collector: 'MetricsCollector')  # Line 297
-    def record_counter(self, request: MetricRequest) -> None  # Line 303
-    def record_gauge(self, request: MetricRequest) -> None  # Line 377
-    def record_histogram(self, request: MetricRequest) -> None  # Line 414
-    def export_metrics(self) -> str  # Line 451
-    def record_error_pattern_metric(self, error_data: dict[str, Any]) -> None  # Line 455
-    def _transform_metric_request_data(self, request: MetricRequest) -> MetricRequest  # Line 476
+    def __init__(self, metrics_collector: 'MetricsCollector')  # Line 315
+    def record_counter(self, request: MetricRequest) -> None  # Line 321
+    def record_gauge(self, request: MetricRequest) -> None  # Line 416
+    def record_histogram(self, request: MetricRequest) -> None  # Line 465
+    def export_metrics(self) -> str  # Line 514
+    def record_error_pattern_metric(self, error_data: dict[str, Any]) -> None  # Line 518
 ```
 
 #### Class: `DefaultPerformanceService`
@@ -1393,13 +1438,12 @@ class DefaultMetricsService(BaseService, MetricsServiceInterface, ErrorPropagati
 
 ```python
 class DefaultPerformanceService(BaseService, PerformanceServiceInterface, ErrorPropagationMixin):
-    def __init__(self, performance_profiler: 'PerformanceProfiler')  # Line 499
-    def get_performance_summary(self) -> dict[str, Any]  # Line 505
-    def record_order_execution(self, ...) -> None  # Line 509
-    def record_market_data_processing(self, ...) -> None  # Line 616
-    def get_latency_stats(self, metric_name: str)  # Line 628
-    def get_system_resource_stats(self)  # Line 632
-    def _transform_order_execution_data(self, ...) -> dict[str, Any]  # Line 636
+    def __init__(self, performance_profiler: 'PerformanceProfiler')  # Line 544
+    def get_performance_summary(self) -> dict[str, Any]  # Line 550
+    def record_order_execution(self, ...) -> None  # Line 554
+    def record_market_data_processing(self, ...) -> None  # Line 679
+    def get_latency_stats(self, metric_name: str)  # Line 691
+    def get_system_resource_stats(self)  # Line 695
 ```
 
 #### Class: `DefaultDashboardService`
@@ -1409,12 +1453,12 @@ class DefaultPerformanceService(BaseService, PerformanceServiceInterface, ErrorP
 
 ```python
 class DefaultDashboardService(BaseService, DashboardServiceInterface):
-    def __init__(self, dashboard_manager: 'GrafanaDashboardManager')  # Line 670
-    async def deploy_dashboard(self, dashboard: 'Dashboard') -> bool  # Line 677
-    async def deploy_all_dashboards(self) -> dict[str, bool]  # Line 681
-    def export_dashboards_to_files(self, output_dir: str) -> None  # Line 685
-    def create_trading_overview_dashboard(self) -> Dashboard  # Line 689
-    def create_system_performance_dashboard(self) -> Dashboard  # Line 693
+    def __init__(self, dashboard_manager: 'GrafanaDashboardManager')  # Line 704
+    async def deploy_dashboard(self, dashboard: 'Dashboard') -> bool  # Line 711
+    async def deploy_all_dashboards(self) -> dict[str, bool]  # Line 715
+    def export_dashboards_to_files(self, output_dir: str) -> None  # Line 719
+    def create_trading_overview_dashboard(self) -> Dashboard  # Line 723
+    def create_system_performance_dashboard(self) -> Dashboard  # Line 727
 ```
 
 #### Class: `MonitoringService`
@@ -1424,11 +1468,11 @@ class DefaultDashboardService(BaseService, DashboardServiceInterface):
 
 ```python
 class MonitoringService(BaseService):
-    def __init__(self, ...)  # Line 701
-    async def start_monitoring(self) -> None  # Line 739
-    async def stop_monitoring(self) -> None  # Line 755
-    async def get_health_status(self) -> dict[str, Any]  # Line 771
-    async def health_check(self) -> dict[str, Any]  # Line 775
+    def __init__(self, ...)  # Line 735
+    async def start_monitoring(self) -> None  # Line 773
+    async def stop_monitoring(self) -> None  # Line 789
+    async def get_health_status(self) -> dict[str, Any]  # Line 805
+    async def health_check(self) -> dict[str, Any]  # Line 809
 ```
 
 ### File: telemetry.py
@@ -1469,13 +1513,13 @@ def get_error_handler_fallback()  # Line 128
 def get_monitoring_logger(name: str)  # Line 190
 def setup_telemetry(config: OpenTelemetryConfig) -> TradingTracer  # Line 546
 def _setup_auto_instrumentation(config: OpenTelemetryConfig) -> None  # Line 692
-def get_tracer(name: str = 'tbot-trading') -> trace.Tracer  # Line 770
-def instrument_fastapi(app: Any, config: OpenTelemetryConfig) -> None  # Line 783
-def trace_async_function(operation_name: str, attributes: dict[str, Any] | None = None) -> Callable  # Line 830
-def trace_function(operation_name: str, attributes: dict[str, Any] | None = None) -> Callable  # Line 871
-async def trace_async_context(operation_name: str, attributes: dict[str, Any] | None = None) -> Any  # Line 913
-def get_trading_tracer() -> TradingTracer | None  # Line 939
-def set_global_trading_tracer(tracer: TradingTracer) -> None  # Line 949
+def get_tracer(name: str = 'tbot-trading')  # Line 770
+def instrument_fastapi(app: Any, config: OpenTelemetryConfig) -> None  # Line 792
+def trace_async_function(operation_name: str, attributes: dict[str, Any] | None = None) -> Callable  # Line 839
+def trace_function(operation_name: str, attributes: dict[str, Any] | None = None) -> Callable  # Line 880
+async def trace_async_context(operation_name: str, attributes: dict[str, Any] | None = None) -> Any  # Line 922
+def get_trading_tracer() -> TradingTracer | None  # Line 948
+def set_global_trading_tracer(tracer: TradingTracer) -> None  # Line 958
 ```
 
 ### File: trace_wrapper.py
@@ -1574,5 +1618,5 @@ def create_websocket_config(url: str, **kwargs) -> WebSocketConfig  # Line 470
 
 ---
 **Generated**: Complete reference for monitoring module
-**Total Classes**: 59
+**Total Classes**: 60
 **Total Functions**: 65

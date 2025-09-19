@@ -177,20 +177,20 @@ class TestCapitalRepository:
             available_amount=Decimal("500.00"),
             allocation_percentage=0.1,
         )
-        mock_capital_allocation_repo.find_by_strategy_exchange.return_value = expected_allocation
+        mock_capital_allocation_repo.get_by_strategy_exchange.return_value = expected_allocation
 
         # Act
         result = await capital_repository.get_by_strategy_exchange("momentum-strategy", "binance")
 
         # Assert
         assert result == expected_allocation
-        mock_capital_allocation_repo.find_by_strategy_exchange.assert_called_once_with("momentum-strategy", "binance")
+        mock_capital_allocation_repo.get_by_strategy_exchange.assert_called_once_with("momentum-strategy", "binance")
 
     @pytest.mark.asyncio
     async def test_get_by_strategy_exchange_not_found(self, capital_repository, mock_capital_allocation_repo):
         """Test get by strategy and exchange when not found."""
         # Arrange
-        mock_capital_allocation_repo.find_by_strategy_exchange.return_value = None
+        mock_capital_allocation_repo.get_by_strategy_exchange.return_value = None
 
         # Act
         result = await capital_repository.get_by_strategy_exchange("momentum-strategy", "binance")
@@ -202,10 +202,10 @@ class TestCapitalRepository:
     async def test_get_by_strategy_exchange_handles_error(self, capital_repository, mock_capital_allocation_repo):
         """Test that get_by_strategy_exchange properly handles repository errors."""
         # Arrange
-        mock_capital_allocation_repo.find_by_strategy_exchange.side_effect = Exception("Query failed")
+        mock_capital_allocation_repo.get_by_strategy_exchange.side_effect = Exception("Query failed")
 
         # Act & Assert
-        with pytest.raises(ServiceError, match="Repository query failed: Query failed"):
+        with pytest.raises(ServiceError, match="Repository operation failed: Query failed"):
             await capital_repository.get_by_strategy_exchange("momentum-strategy", "binance")
 
     @pytest.mark.asyncio
@@ -232,7 +232,7 @@ class TestCapitalRepository:
         mock_capital_allocation_repo.get_by_strategy.side_effect = Exception("Query failed")
 
         # Act & Assert
-        with pytest.raises(ServiceError, match="Repository query failed: Query failed"):
+        with pytest.raises(ServiceError, match="Repository operation failed: Query failed"):
             await capital_repository.get_by_strategy("momentum-strategy")
 
     @pytest.mark.asyncio
@@ -273,7 +273,7 @@ class TestCapitalRepository:
         mock_capital_allocation_repo.get_all.side_effect = Exception("Query failed")
 
         # Act & Assert
-        with pytest.raises(ServiceError, match="Repository query failed: Query failed"):
+        with pytest.raises(ServiceError, match="Repository operation failed: Query failed"):
             await capital_repository.get_all()
 
 
@@ -451,7 +451,7 @@ class TestAuditRepository:
         mock_audit_repo.create.side_effect = Exception("Database write failed")
 
         # Act & Assert
-        with pytest.raises(ServiceError, match="Audit repository operation failed: Database write failed"):
+        with pytest.raises(ServiceError, match="Repository operation failed: Database write failed"):
             await audit_repository.create(sample_audit_data)
 
     @pytest.mark.asyncio

@@ -27,7 +27,8 @@ from src.core.base.service import BaseService
 from src.core.events import BotEvent, BotEventType, get_event_publisher
 
 # Caching will be implemented in a future module
-from src.core.exceptions import ServiceError, ValidationError
+from .data_transformer import BotManagementDataTransformer
+from src.core.exceptions import ServiceError, StateConsistencyError, ValidationError
 from src.core.types import (
     BotConfiguration,
     BotMetrics,
@@ -38,7 +39,7 @@ from src.core.types import (
 )
 
 # Import state types for StateService integration
-from src.state import StatePriority
+from src.core.types import StatePriority
 
 # Import common utilities
 from src.utils.bot_service_helpers import (
@@ -90,11 +91,7 @@ class BotService(BaseService):
         strategy_service=None,  # StrategyServiceInterface
         metrics_collector=None,  # MetricsCollector
         config_service=None,  # Config service for bot configuration
-        database_service=None,  # DatabaseService for direct DB operations
-        # Repository support for compatibility
-        bot_repository=None,
-        bot_instance_repository=None,
-        bot_metrics_repository=None,
+        analytics_service=None,  # Analytics service for metrics and monitoring
     ):
         """
         Initialize bot service with essential dependencies.
@@ -108,10 +105,7 @@ class BotService(BaseService):
             strategy_service: StrategyServiceInterface
             metrics_collector: MetricsCollector instance
             config_service: Configuration service for bot settings
-            database_service: DatabaseService for direct DB operations (DEPRECATED)
-            bot_repository: Repository for bot entities (DEPRECATED)
-            bot_instance_repository: Repository for bot instances (DEPRECATED)
-            bot_metrics_repository: Repository for bot metrics data (DEPRECATED)
+            analytics_service: Analytics service for metrics and monitoring
         """
         super().__init__(name="BotService")
 
@@ -121,11 +115,9 @@ class BotService(BaseService):
         if not capital_service:
             raise ServiceError("CapitalService is required for bot management")
 
-        # Repository layer for compatibility
-        if bot_repository and bot_instance_repository and bot_metrics_repository:
-            self._logger.info(
-                "Using repository pattern for data access."
-            )
+        # Ensure analytics service is available for metrics operations
+        if not analytics_service:
+            self._logger.warning("Analytics service not provided - some metrics operations may not work")
 
         # MetricsCollector is optional - will use None if not available
 
@@ -138,13 +130,9 @@ class BotService(BaseService):
         self._strategy_service = strategy_service
         self._metrics_collector = metrics_collector
         self._config_service = config_service
-        self._database_service = database_service  # Deprecated but maintained for compatibility
-        self._analytics_service = None  # Analytics service is optional
+        self._analytics_service = analytics_service
 
-        # Repository layer (deprecated but maintained for compatibility)
-        self._bot_repository = bot_repository
-        self._bot_instance_repository = bot_instance_repository
-        self._bot_metrics_repository = bot_metrics_repository
+        # Repository layer deprecated - no longer storing repository references
 
         # Initialize OpenTelemetry tracer with error handling
         try:
@@ -303,6 +291,16 @@ class BotService(BaseService):
                 return result
 
             except Exception as e:
+                # Transform error using consistent data transformation for cross-module communication
+                error_data = BotManagementDataTransformer.transform_error_to_event_data(
+                    e,
+                    context={
+                        "operation": operation_name,
+                        "component": "BotService",
+                        "module": "bot_management"
+                    }
+                )
+
                 # Record error metric with error handling
                 if self._metrics_collector:
                     try:
@@ -376,6 +374,17 @@ class BotService(BaseService):
                 ):
                     current_portfolio = await self._analytics_service.get_portfolio_summary()
 
+                # Apply boundary validation for cross-module communication
+                risk_data = BotManagementDataTransformer.apply_cross_module_validation(
+                    {
+                        "bot_config": getattr(bot_config, '__dict__', {}),
+                        "current_portfolio": current_portfolio,
+                        "operation": "validate_bot_configuration"
+                    },
+                    source_module="bot_management",
+                    target_module="risk_management"
+                )
+
                 risk_validation = await self._risk_service.validate_bot_configuration(
                     bot_config=bot_config, current_portfolio=current_portfolio
                 )
@@ -407,8 +416,8 @@ class BotService(BaseService):
         capital_allocated = await self._capital_service.allocate_capital(
             strategy_id=bot_config.strategy_name,
             exchange=exchange,
-            requested_amount=bot_config.allocated_capital,
-            bot_id=bot_config.bot_id,
+            amount=bot_config.allocated_capital,
+            authorized_by=bot_config.bot_id,
         )
 
         if not capital_allocated:
@@ -422,7 +431,18 @@ class BotService(BaseService):
             str(bot_config.allocated_capital),
         )
 
-        # Store state through StateService with proper state type
+        # Store state through StateService with proper state type - apply boundary validation
+        state_data = BotManagementDataTransformer.apply_cross_module_validation(
+            {
+                "state_type": StateType.BOT_STATE.value,
+                "state_id": bot_config.bot_id,
+                "state_data": bot_state_data,
+                "operation": "set_state"
+            },
+            source_module="bot_management",
+            target_module="state"
+        )
+
         state_persisted = False
         state_connection = None
         try:
@@ -515,20 +535,33 @@ class BotService(BaseService):
             except Exception as e:
                 self._logger.warning(f"Failed to record bot creation in analytics: {e}")
 
-        # Publish bot creation event for coordination
+        # Publish bot creation event for coordination with standardized data transformation
         try:
+            # Apply consistent data transformation for cross-module communication
+            raw_event_data = {
+                "bot_id": bot_config.bot_id,
+                "strategy": bot_config.strategy_name,
+                "capital": str(bot_config.allocated_capital),
+                "exchanges": bot_config.exchanges,
+                "symbols": bot_config.symbols,
+                "auto_start": getattr(bot_config, "auto_start", False),
+            }
+
+            event_data = BotManagementDataTransformer.transform_for_pub_sub(
+                "BOT_CREATED",
+                raw_event_data,
+                metadata={
+                    "target_modules": ["coordination", "monitoring", "analytics"],
+                    "processing_priority": "high"
+                }
+            )
+
             await self._event_publisher.publish(
                 BotEvent(
                     event_type=BotEventType.BOT_CREATED,
                     bot_id=bot_config.bot_id,
-                    data={
-                        "strategy": bot_config.strategy_name,
-                        "capital": str(bot_config.allocated_capital),
-                        "exchanges": bot_config.exchanges,
-                        "symbols": bot_config.symbols,
-                        "auto_start": getattr(bot_config, "auto_start", False),
-                    },
-                    source="BotService",
+                    data=event_data,
+                    source="bot_management",
                     priority="high",
                 )
             )
@@ -600,7 +633,7 @@ class BotService(BaseService):
                 # Check risk level with proper enum comparison
                 risk_level = risk_check.get("risk_level", "LOW")
                 if isinstance(risk_level, str):
-                    from src.core.types import RiskLevel
+                    from src.core.types.risk import RiskLevel
 
                     try:
                         risk_level_enum = RiskLevel(risk_level)
@@ -660,14 +693,30 @@ class BotService(BaseService):
                 f"{strategy_validation.get('error', 'Unknown strategy issue')}"
             )
 
-        # Publish bot starting event
+        # Publish bot starting event with standardized data transformation
         try:
+            # Apply consistent data transformation for cross-module communication
+            raw_event_data = {
+                "strategy": getattr(bot_config, "strategy_name", "unknown"),
+                "bot_id": bot_id,
+                "status": "starting"
+            }
+
+            event_data = BotManagementDataTransformer.transform_for_pub_sub(
+                "BOT_STARTING",
+                raw_event_data,
+                metadata={
+                    "target_modules": ["monitoring", "execution", "risk_management"],
+                    "processing_priority": "high"
+                }
+            )
+
             await self._event_publisher.publish(
                 BotEvent(
                     event_type=BotEventType.BOT_STARTING,
                     bot_id=bot_id,
-                    data={"strategy": getattr(bot_config, "strategy_name", "unknown")},
-                    source="BotService",
+                    data=event_data,
+                    source="bot_management",
                 )
             )
         except Exception as e:
@@ -997,24 +1046,26 @@ class BotService(BaseService):
         # Archive bot data using service layer pattern
         try:
             # Archive metrics data through monitoring service
-            # Bot metrics will be handled by repositories if available
-            if self._bot_metrics_repository:
-                latest_metrics = await self._bot_metrics_repository.get_latest_metrics(bot_id)
-                if latest_metrics:
-                    await self._bot_metrics_repository.save_metrics(latest_metrics)
-            elif self._bot_metrics_repository:
-                # Fallback to repository for legacy support
-                latest_metrics = await self._bot_metrics_repository.get_latest_metrics(bot_id)
-                if latest_metrics:
-                    await self._bot_metrics_repository.save_metrics(latest_metrics)
+            # Handle metrics archival through monitoring service
+            if self._analytics_service:
+                try:
+                    await self._analytics_service.archive_bot_metrics(bot_id)
+                except Exception as e:
+                    self._logger.warning(f"Failed to archive metrics for bot {bot_id}: {e}")
 
-            # Mark bot as stopped through instance service
-            # Bot status will be handled by repositories if available
-            if self._bot_repository:
-                await self._bot_repository.update_status(bot_id, BotStatus.STOPPED)
-            elif self._bot_repository:
-                # Fallback to repository for legacy support
-                await self._bot_repository.update_status(bot_id, BotStatus.STOPPED)
+            # Update bot status through state service
+            try:
+                await self._state_service.set_state(
+                    StateType.BOT_STATE,
+                    bot_id,
+                    {"status": BotStatus.STOPPED.value, "archived": True},
+                    source_component="BotService"
+                )
+            except StateConsistencyError as e:
+                self._logger.error(f"State consistency error updating bot status for {bot_id}: {e}")
+                raise ServiceError(f"Failed to update bot state: {e}") from e
+            except Exception as e:
+                self._logger.warning(f"Failed to update bot status for {bot_id}: {e}")
 
             self._logger.info(f"Bot {bot_id} archived successfully via service layer")
 
@@ -1068,20 +1119,15 @@ class BotService(BaseService):
         # Get current state from state service
         current_state = await self._state_service.get_state(StateType.BOT_STATE, bot_id)
 
-        # Get latest metrics using service layer
+        # Get latest metrics through analytics service
         try:
-            # Bot metrics will be handled by repositories if available
-            if self._bot_metrics_repository:
-                latest_metrics = await self._bot_metrics_repository.get_latest_metrics(bot_id)
-                latest_metrics = [latest_metrics] if latest_metrics else []
-            elif self._bot_metrics_repository:
-                # Fallback to repository for legacy support
-                latest_metrics = await self._bot_metrics_repository.get_latest_metrics(bot_id)
+            if self._analytics_service:
+                latest_metrics = await self._analytics_service.get_bot_metrics(bot_id)
                 latest_metrics = [latest_metrics] if latest_metrics else []
             else:
                 latest_metrics = []
         except Exception as e:
-            self._logger.error(f"Failed to get metrics via service layer: {e}")
+            self._logger.error(f"Failed to get metrics via analytics service: {e}")
             raise ServiceError(f"Failed to retrieve bot metrics: {e}") from e
 
         # Enhanced risk assessment with analytics
@@ -1208,13 +1254,11 @@ class BotService(BaseService):
                 profitable_trades=metrics.get("profitable_trades", 0),
                 losing_trades=metrics.get("losing_trades", 0),
             )
-            # Save metrics through service layer
-            # Bot metrics will be handled by repositories if available
-            if self._bot_metrics_repository:
-                await self._bot_metrics_repository.save_metrics(bot_metrics)
-            elif self._bot_metrics_repository:
-                # Fallback to repository for legacy support
-                await self._bot_metrics_repository.save_metrics(bot_metrics)
+            # Save metrics through analytics service
+            if self._analytics_service:
+                await self._analytics_service.store_bot_metrics(bot_metrics)
+            else:
+                self._logger.warning("Analytics service not available - metrics not persisted")
 
             self._logger.debug(f"Metrics stored successfully for bot {bot_id}")
 
@@ -1226,14 +1270,29 @@ class BotService(BaseService):
         if bot_id in self._bot_metrics:
             self._bot_metrics[bot_id] = BotMetrics(**metrics_record)
 
-        # Publish metrics update event
+        # Publish metrics update event with standardized data transformation
         try:
+            # Apply consistent data transformation for analytics and monitoring modules
+            event_data = BotManagementDataTransformer.apply_cross_module_validation(
+                BotManagementDataTransformer.transform_for_pub_sub(
+                    "BOT_METRICS_UPDATE",
+                    metrics,
+                    metadata={
+                        "target_modules": ["analytics", "monitoring", "risk_management"],
+                        "processing_priority": "normal",
+                        "data_type": "financial_metrics"
+                    }
+                ),
+                target_module="analytics",
+                source_module="bot_management"
+            )
+
             await self._event_publisher.publish(
                 BotEvent(
                     event_type=BotEventType.BOT_METRICS_UPDATE,
                     bot_id=bot_id,
-                    data=metrics,
-                    source="BotService",
+                    data=event_data,
+                    source="bot_management",
                 )
             )
         except Exception as e:
@@ -1399,12 +1458,12 @@ class BotService(BaseService):
     def _setup_event_handlers(self) -> None:
         """Setup event handlers for analytics and risk monitoring integration."""
         try:
-            from src.core.events import setup_bot_management_events
+            # Event management setup will be added when events module is complete
 
-            # Setup event handlers with available services
-            setup_bot_management_events(
-                analytics_service=self._analytics_service, risk_service=self._risk_service
-            )
+            # TODO: Setup event handlers with available services when function is implemented
+            # setup_bot_management_events(
+            #     analytics_service=self._analytics_service, risk_service=self._risk_service
+            # )
 
             self._logger.info("Event handlers configured for bot management")
 
@@ -1563,8 +1622,8 @@ class BotService(BaseService):
         try:
             state_health = await self._state_service.health_check()
             health_results["checks"]["state_service"] = {
-                "healthy": state_health.get("status") == "healthy",
-                "details": state_health,
+                "healthy": state_health.healthy,
+                "details": state_health.to_dict(),
             }
         except Exception as e:
             health_results["checks"]["state_service"] = {"healthy": False, "error": str(e)}
@@ -1575,8 +1634,8 @@ class BotService(BaseService):
             if hasattr(self._risk_service, "health_check"):
                 risk_health = await self._risk_service.health_check()
                 health_results["checks"]["risk_service"] = {
-                    "healthy": risk_health.get("status") == "healthy",
-                    "details": risk_health,
+                    "healthy": risk_health.healthy,
+                    "details": risk_health.to_dict(),
                 }
             else:
                 # Basic health check - just verify service exists
@@ -1596,8 +1655,8 @@ class BotService(BaseService):
         try:
             execution_health = await self._execution_service.health_check()
             health_results["checks"]["execution_service"] = {
-                "healthy": execution_health.get("status") == "healthy",
-                "details": execution_health,
+                "healthy": execution_health.healthy,
+                "details": execution_health.to_dict(),
             }
         except Exception as e:
             health_results["checks"]["execution_service"] = {"healthy": False, "error": str(e)}
@@ -1911,7 +1970,7 @@ class BotService(BaseService):
     # Service-specific health check
     async def _service_health_check(self) -> Any:
         """Service-specific health check."""
-        from src.core.base.interfaces import HealthStatus
+        from src.core.base import HealthStatus
 
         try:
             # Check if all required services are available
@@ -1932,7 +1991,13 @@ class BotService(BaseService):
                     # Try to call health check if available
                     if hasattr(service, "health_check"):
                         health_result = await service.health_check()
-                        if health_result.get("status") != "healthy":
+                        # Handle both HealthCheckResult objects and dict responses
+                        is_healthy = (
+                            health_result.healthy if hasattr(health_result, 'healthy')
+                            else health_result.get("status") == "healthy" if isinstance(health_result, dict)
+                            else False
+                        )
+                        if not is_healthy:
                             return HealthStatus.DEGRADED
 
                 except Exception as e:

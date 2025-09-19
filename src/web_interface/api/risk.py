@@ -208,20 +208,12 @@ async def get_risk_limits(current_user: User = Depends(get_current_user)):
         HTTPException: If retrieval fails
     """
     try:
-        # Business logic moved to service layer - mock data for development
-        return RiskLimitsResponse(
-            max_portfolio_risk=Decimal("0.20"),  # 20% max portfolio risk
-            max_position_size=Decimal("25000.00"),  # $25k max position
-            max_leverage=Decimal("3.0"),  # 3x max leverage
-            max_daily_loss=Decimal("5000.00"),  # $5k max daily loss
-            max_drawdown_limit=Decimal("0.15"),  # 15% max drawdown
-            concentration_limit=Decimal("0.30"),  # 30% max in single asset
-            correlation_limit=Decimal("0.70"),  # 70% max correlation
-            var_limit=Decimal("7500.00"),  # $7.5k VaR limit
-            stop_loss_required=True,
-            position_sizing_method="kelly_criterion",
-            risk_per_trade=Decimal("0.02"),  # 2% risk per trade
-        )
+        risk_service = get_web_risk_service_instance()
+
+        # Get risk limits through service layer
+        limits_data = await risk_service.get_current_risk_limits()
+
+        return RiskLimitsResponse(**limits_data)
 
     except Exception as e:
         logger.error(f"Risk limits retrieval failed: {e}", user=current_user.username)

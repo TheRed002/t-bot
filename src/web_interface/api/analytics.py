@@ -17,20 +17,11 @@ from src.core.exceptions import ServiceError, ValidationError
 from src.core.logging import get_logger
 from src.utils.decorators import monitored
 from src.web_interface.auth.middleware import get_current_user
-from src.web_interface.dependencies import get_web_analytics_service
+from src.web_interface.dependencies import get_web_analytics_service, get_web_auth_service
 
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="/api/analytics", tags=["analytics"])
-
-
-def _get_user_roles(current_user) -> list[str]:
-    """Extract user roles from current_user object."""
-    return (
-        getattr(current_user, "roles", None)
-        or current_user.get("roles", [])
-        or [current_user.get("role", "")]
-    )
 
 
 # Request/Response Models
@@ -381,17 +372,23 @@ async def get_system_errors(
     hours: int = Query(default=24, ge=1, le=168),
     current_user: dict = Depends(get_current_user),
     web_analytics_service=Depends(get_web_analytics_service),
+    web_auth_service=Depends(get_web_auth_service),
 ):
     """Get recent system errors."""
     try:
-        user_roles = _get_user_roles(current_user)
-        if "admin" not in user_roles and "developer" not in user_roles:
-            raise HTTPException(status_code=403, detail="Insufficient permissions")
+        # Check permissions through service layer
+        web_auth_service.require_permission(current_user, ["admin", "developer"])
 
         errors = await web_analytics_service.get_system_errors(hours=hours)
         return {"errors": errors, "count": len(errors), "time_window_hours": hours}
     except HTTPException:
         raise
+    except ServiceError as e:
+        # Auth service permissions errors
+        if "permissions" in str(e).lower():
+            raise HTTPException(status_code=403, detail=str(e))
+        logger.error(f"Analytics service error: {e}")
+        raise HTTPException(status_code=503, detail="Service error")
     except Exception as e:
         logger.error(f"Error getting system errors: {e}")
         raise HTTPException(status_code=500, detail="Failed to retrieve system errors")
@@ -485,12 +482,12 @@ async def schedule_report(
     recipients: list[str] | None = None,
     current_user: dict = Depends(get_current_user),
     web_analytics_service=Depends(get_web_analytics_service),
+    web_auth_service=Depends(get_web_auth_service),
 ):
     """Schedule a recurring report."""
     try:
-        user_roles = _get_user_roles(current_user)
-        if "admin" not in user_roles and "manager" not in user_roles:
-            raise HTTPException(status_code=403, detail="Insufficient permissions")
+        # Check permissions through service layer
+        web_auth_service.require_permission(current_user, ["admin", "manager"])
 
         scheduled = await web_analytics_service.schedule_report(
             report_type=report_type,
@@ -501,6 +498,12 @@ async def schedule_report(
         return {"status": "scheduled", "schedule_id": scheduled["id"]}
     except HTTPException:
         raise
+    except ServiceError as e:
+        # Auth service permissions errors
+        if "permissions" in str(e).lower():
+            raise HTTPException(status_code=403, detail=str(e))
+        logger.error(f"Analytics service error: {e}")
+        raise HTTPException(status_code=503, detail="Service error")
     except Exception as e:
         logger.error(f"Error scheduling report: {e}")
         raise HTTPException(status_code=500, detail="Failed to schedule report")
@@ -590,12 +593,12 @@ async def configure_alerts(
     alert_config: dict[str, Any],
     current_user: dict = Depends(get_current_user),
     web_analytics_service=Depends(get_web_analytics_service),
+    web_auth_service=Depends(get_web_auth_service),
 ):
     """Configure alert thresholds and rules."""
     try:
-        user_roles = _get_user_roles(current_user)
-        if "admin" not in user_roles and "risk_manager" not in user_roles:
-            raise HTTPException(status_code=403, detail="Insufficient permissions")
+        # Check permissions through service layer
+        web_auth_service.require_risk_manager_permission(current_user)
 
         configured = await web_analytics_service.configure_alerts(
             config=alert_config, configured_by=current_user["user_id"]
@@ -603,6 +606,12 @@ async def configure_alerts(
         return {"status": "configured", "configuration": configured}
     except HTTPException:
         raise
+    except ServiceError as e:
+        # Auth service permissions errors
+        if "permissions" in str(e).lower():
+            raise HTTPException(status_code=403, detail=str(e))
+        logger.error(f"Analytics service error: {e}")
+        raise HTTPException(status_code=503, detail="Service error")
     except Exception as e:
         logger.error(f"Error configuring alerts: {e}")
         raise HTTPException(status_code=500, detail="Failed to configure alerts")

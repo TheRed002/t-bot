@@ -20,25 +20,25 @@ from src.capital_management.constants import (
 )
 from src.capital_management.interfaces import (
     AbstractCapitalService,
-    AuditRepositoryProtocol,
-    CapitalRepositoryProtocol,
 )
 from src.core.base.service import TransactionalService
 from src.core.exceptions import (
-    AllocationError,
+    CapitalAllocationError,
     ServiceError,
     ValidationError,
 )
+from src.capital_management.data_transformer import CapitalDataTransformer
 from src.core.logging import get_logger
 from src.core.types import CapitalAllocation, CapitalMetrics
 from src.error_handling.decorators import with_circuit_breaker, with_retry
+from src.utils.messaging_patterns import ErrorPropagationMixin
 
 # Set decimal context for financial precision
 getcontext().prec = FINANCIAL_DECIMAL_PRECISION
 getcontext().rounding = ROUND_HALF_UP
 
 
-class CapitalService(AbstractCapitalService, TransactionalService):
+class CapitalService(AbstractCapitalService, TransactionalService, ErrorPropagationMixin):
     """
     Simple capital management service.
 
@@ -47,23 +47,24 @@ class CapitalService(AbstractCapitalService, TransactionalService):
 
     def __init__(
         self,
-        capital_repository: CapitalRepositoryProtocol | None = None,
-        audit_repository: AuditRepositoryProtocol | None = None,
+        capital_repository: Any = None,
+        audit_repository: Any = None,
         correlation_id: str | None = None,
     ) -> None:
         """
         Initialize capital service.
 
         Args:
-            capital_repository: Capital repository implementation
-            audit_repository: Audit repository implementation
+            capital_repository: Repository for capital allocation operations
+            audit_repository: Repository for audit logging
             correlation_id: Request correlation ID for tracing
         """
         super().__init__(name="CapitalService", correlation_id=correlation_id)
+        self._logger: structlog.BoundLogger = get_logger(self.__class__.__name__)
 
+        # Repository dependencies
         self._capital_repository = capital_repository
         self._audit_repository = audit_repository
-        self._logger: structlog.BoundLogger = get_logger(self.__class__.__name__)
 
         # Basic configuration
         self.total_capital = DEFAULT_TOTAL_CAPITAL
@@ -78,18 +79,7 @@ class CapitalService(AbstractCapitalService, TransactionalService):
 
     async def _do_start(self) -> None:
         """Start the capital service."""
-        if self._capital_repository:
-            try:
-                allocations = await self._capital_repository.get_all()
-                self._allocations_count = len(allocations)
-                self._logger.info(
-                    f"CapitalService started with {self._allocations_count} existing allocations"
-                )
-            except Exception as e:
-                self._logger.error(f"Failed to load existing allocations: {e}")
-                raise ServiceError(f"Capital service startup failed: {e}") from e
-        else:
-            self._logger.warning("No capital repository available")
+        self._logger.info("CapitalService started")
 
     async def _do_stop(self) -> None:
         """Stop the capital service."""
@@ -128,7 +118,7 @@ class CapitalService(AbstractCapitalService, TransactionalService):
 
         Raises:
             ValidationError: If allocation parameters are invalid
-            AllocationError: If allocation fails
+            CapitalAllocationError: If allocation fails
         """
         # Basic validation
         if requested_amount <= 0:
@@ -140,62 +130,95 @@ class CapitalService(AbstractCapitalService, TransactionalService):
         # Check allocation limits
         available_capital = await self._get_available_capital()
         if requested_amount > available_capital:
-            raise AllocationError(
+            raise CapitalAllocationError(
                 f"Insufficient capital: requested {requested_amount}, available {available_capital}"
             )
 
         max_allowed = self.total_capital * self.max_allocation_pct
         if requested_amount > max_allowed:
-            raise AllocationError(f"Amount exceeds maximum allocation limit: {max_allowed}")
+            raise CapitalAllocationError(f"Amount exceeds maximum allocation limit: {max_allowed}")
 
         try:
-            # Check for existing allocation
-            existing = await self._get_existing_allocation(strategy_id, exchange)
+            # Create capital allocation object
+            allocation = CapitalAllocation(
+                allocation_id=str(uuid.uuid4()),
+                strategy_id=strategy_id,
+                exchange=exchange,
+                symbol="",
+                allocated_amount=requested_amount,
+                utilized_amount=Decimal("0"),
+                available_amount=requested_amount,
+                allocation_percentage=(requested_amount / self.total_capital) * PERCENTAGE_MULTIPLIER,
+                target_allocation_pct=target_allocation_pct or Decimal("0"),
+                min_allocation=min_allocation or Decimal("0"),
+                max_allocation=max_allocation or requested_amount,
+                last_rebalance=datetime.now(timezone.utc),
+                created_at=datetime.now(timezone.utc),
+                updated_at=datetime.now(timezone.utc),
+            )
 
-            allocation_data = {
-                "allocation_id": str(uuid.uuid4()),
-                "strategy_id": strategy_id,
-                "exchange": exchange,
-                "allocated_amount": requested_amount,
-                "utilized_amount": Decimal("0"),
-                "available_amount": requested_amount,
-                "allocation_percentage": (requested_amount / self.total_capital)
-                * PERCENTAGE_MULTIPLIER,
-                "target_allocation_pct": target_allocation_pct or Decimal("0"),
-                "min_allocation": min_allocation or Decimal("0"),
-                "max_allocation": max_allocation or requested_amount,
-                "last_rebalance": datetime.now(timezone.utc),
-                "created_at": datetime.now(timezone.utc),
-                "updated_at": datetime.now(timezone.utc),
-            }
+            # Persist allocation if repository is available
+            if self._capital_repository:
+                allocation_data = {
+                    "id": allocation.allocation_id,
+                    "strategy_id": allocation.strategy_id,
+                    "exchange": allocation.exchange,
+                    "symbol": allocation.symbol,
+                    "allocated_amount": allocation.allocated_amount,
+                    "utilized_amount": allocation.utilized_amount,
+                    "available_amount": allocation.available_amount,
+                    "allocation_percentage": allocation.allocation_percentage,
+                    "target_allocation_pct": allocation.target_allocation_pct,
+                    "min_allocation": allocation.min_allocation,
+                    "max_allocation": allocation.max_allocation,
+                    "last_rebalance": allocation.last_rebalance,
+                    "created_at": allocation.created_at,
+                    "updated_at": allocation.updated_at,
+                }
+                await self._capital_repository.create(allocation_data)
 
-            if not self._capital_repository:
-                raise ServiceError("Capital repository not available")
-
-            if existing:
-                # Update existing allocation
-                allocation_data["allocation_id"] = existing.allocation_id
-                allocation_data["allocated_amount"] = existing.allocated_amount + requested_amount
-                allocation_data["available_amount"] = existing.available_amount + requested_amount
-                result = await self._capital_repository.update(allocation_data)
-            else:
-                # Create new allocation
-                result = await self._capital_repository.create(allocation_data)
-
-            # Create audit log
+            # Create audit log if repository is available
             if self._audit_repository:
-                await self._create_audit_log("allocation_created", allocation_data, authorized_by)
+                audit_data = {
+                    "allocation_id": allocation.allocation_id,
+                    "operation": "allocate_capital",
+                    "strategy_id": strategy_id,
+                    "exchange": exchange,
+                    "amount": requested_amount,
+                    "authorized_by": authorized_by,
+                    "bot_id": bot_id,
+                    "timestamp": datetime.now(timezone.utc),
+                }
+                await self._audit_repository.create(audit_data)
 
             self._allocations_count += 1
             self._logger.info(
                 f"Capital allocated: {requested_amount} to {strategy_id} on {exchange}"
             )
 
-            return result
+            return allocation
 
         except Exception as e:
-            self._logger.error(f"Capital allocation failed: {e}")
-            raise AllocationError(f"Failed to allocate capital: {e}") from e
+            # Use consistent error propagation aligned with risk_management module
+
+            # Check if it's a validation error and propagate accordingly like risk_management
+            if hasattr(e, "__class__") and (
+                "ValidationError" in e.__class__.__name__
+                or "DataValidationError" in e.__class__.__name__
+            ):
+                self.propagate_validation_error(e, "capital_allocation_validation")
+            else:
+                self.propagate_service_error(e, "capital_allocation")
+
+            # Still transform for local logging but with aligned format
+            error_data = CapitalDataTransformer.transform_error_to_event_data(
+                error=e,
+                operation="allocate_capital",
+                strategy_id=strategy_id,
+                metadata={"exchange": exchange, "requested_amount": str(requested_amount)}
+            )
+            self._logger.error(f"Capital allocation failed: {error_data}")
+            raise CapitalAllocationError(f"Failed to allocate capital: {e}") from e
 
     @with_circuit_breaker
     @with_retry(max_attempts=3)
@@ -222,47 +245,38 @@ class CapitalService(AbstractCapitalService, TransactionalService):
 
         Raises:
             ValidationError: If release parameters are invalid
-            AllocationError: If release fails
+            CapitalAllocationError: If release fails
         """
         if release_amount <= 0:
             raise ValidationError("Release amount must be positive")
 
         try:
-            existing = await self._get_existing_allocation(strategy_id, exchange)
-            if not existing:
-                raise AllocationError(f"No allocation found for {strategy_id} on {exchange}")
-
-            if release_amount > existing.available_amount:
-                raise AllocationError(
-                    f"Cannot release {release_amount}, only {existing.available_amount} available"
+            # Service logic - validate release amount
+            if release_amount > self.total_capital:
+                raise CapitalAllocationError(
+                    f"Cannot release {release_amount}, exceeds total capital {self.total_capital}"
                 )
 
-            # Update allocation
-            allocation_data = {
-                "allocation_id": existing.allocation_id,
-                "strategy_id": strategy_id,
-                "exchange": exchange,
-                "allocated_amount": existing.allocated_amount - release_amount,
-                "utilized_amount": existing.utilized_amount,
-                "available_amount": existing.available_amount - release_amount,
-                "allocation_percentage": (
-                    (existing.allocated_amount - release_amount) / self.total_capital
-                )
-                * PERCENTAGE_MULTIPLIER,
-                "target_allocation_pct": existing.target_allocation_pct,
-                "min_allocation": existing.min_allocation,
-                "max_allocation": existing.max_allocation,
-                "last_rebalance": existing.last_rebalance,
-                "updated_at": datetime.now(timezone.utc),
-            }
+            # Find and release allocation if repository is available
+            if self._capital_repository:
+                existing_allocation = await self._capital_repository.get_by_strategy_exchange(strategy_id, exchange)
+                if existing_allocation:
+                    allocation_id = existing_allocation.get("id") if isinstance(existing_allocation, dict) else getattr(existing_allocation, "allocation_id", None)
+                    if allocation_id:
+                        await self._capital_repository.delete(allocation_id)
 
-            if not self._capital_repository:
-                raise ServiceError("Capital repository not available")
-            await self._capital_repository.update(allocation_data)
-
-            # Create audit log
+            # Create audit log if repository is available
             if self._audit_repository:
-                await self._create_audit_log("capital_released", allocation_data, authorized_by)
+                audit_data = {
+                    "operation": "release_capital",
+                    "strategy_id": strategy_id,
+                    "exchange": exchange,
+                    "amount": release_amount,
+                    "authorized_by": authorized_by,
+                    "bot_id": bot_id,
+                    "timestamp": datetime.now(timezone.utc),
+                }
+                await self._audit_repository.create(audit_data)
 
             self._releases_count += 1
             self._logger.info(
@@ -272,8 +286,26 @@ class CapitalService(AbstractCapitalService, TransactionalService):
             return True
 
         except Exception as e:
-            self._logger.error(f"Capital release failed: {e}")
-            raise AllocationError(f"Failed to release capital: {e}") from e
+            # Use consistent error propagation aligned with risk_management module
+
+            # Check if it's a validation error and propagate accordingly like risk_management
+            if hasattr(e, "__class__") and (
+                "ValidationError" in e.__class__.__name__
+                or "DataValidationError" in e.__class__.__name__
+            ):
+                self.propagate_validation_error(e, "capital_release_validation")
+            else:
+                self.propagate_service_error(e, "capital_release")
+
+            # Still transform for local logging but with aligned format
+            error_data = CapitalDataTransformer.transform_error_to_event_data(
+                error=e,
+                operation="release_capital",
+                strategy_id=strategy_id,
+                metadata={"exchange": exchange, "requested_amount": str(release_amount)}
+            )
+            self._logger.error(f"Capital release failed: {error_data}")
+            raise CapitalAllocationError(f"Failed to release capital: {e}") from e
 
     async def update_utilization(
         self,
@@ -295,41 +327,60 @@ class CapitalService(AbstractCapitalService, TransactionalService):
             True if successful
         """
         try:
-            existing = await self._get_existing_allocation(strategy_id, exchange)
-            if not existing:
-                raise AllocationError(f"No allocation found for {strategy_id} on {exchange}")
+            if utilized_amount > self.total_capital:
+                raise ValidationError("Utilized amount cannot exceed total capital")
 
-            if utilized_amount > existing.allocated_amount:
-                raise ValidationError("Utilized amount cannot exceed allocated amount")
+            # Update allocation if repository is available
+            if self._capital_repository:
+                existing_allocation = await self._capital_repository.get_by_strategy_exchange(strategy_id, exchange)
+                if existing_allocation:
+                    allocation_data = existing_allocation.copy() if isinstance(existing_allocation, dict) else {
+                        "id": getattr(existing_allocation, "allocation_id", None),
+                        "strategy_id": strategy_id,
+                        "exchange": exchange,
+                        "utilized_amount": utilized_amount,
+                        "updated_at": datetime.now(timezone.utc),
+                    }
+                    allocation_data["utilized_amount"] = utilized_amount
+                    allocation_data["updated_at"] = datetime.now(timezone.utc)
+                    await self._capital_repository.update(allocation_data)
 
-            allocation_data = {
-                "allocation_id": existing.allocation_id,
-                "strategy_id": strategy_id,
-                "exchange": exchange,
-                "allocated_amount": existing.allocated_amount,
-                "utilized_amount": utilized_amount,
-                "available_amount": existing.allocated_amount - utilized_amount,
-                "allocation_percentage": existing.allocation_percentage,
-                "target_allocation_pct": existing.target_allocation_pct,
-                "min_allocation": existing.min_allocation,
-                "max_allocation": existing.max_allocation,
-                "last_rebalance": existing.last_rebalance,
-                "updated_at": datetime.now(timezone.utc),
-            }
-
-            if not self._capital_repository:
-                raise ServiceError("Capital repository not available")
-            await self._capital_repository.update(allocation_data)
-
-            # Create audit log
+            # Create audit log if repository is available
             if self._audit_repository:
-                await self._create_audit_log("utilization_updated", allocation_data, authorized_by)
+                audit_data = {
+                    "operation": "update_utilization",
+                    "strategy_id": strategy_id,
+                    "exchange": exchange,
+                    "amount": utilized_amount,
+                    "authorized_by": authorized_by,
+                    "timestamp": datetime.now(timezone.utc),
+                }
+                await self._audit_repository.create(audit_data)
 
+            self._logger.info(f"Utilization updated for {strategy_id} on {exchange}: {utilized_amount}")
             return True
 
         except Exception as e:
-            self._logger.error(f"Utilization update failed: {e}")
-            raise AllocationError(f"Failed to update utilization: {e}") from e
+            # Use consistent error propagation aligned with risk_management module
+
+            # Check if it's a validation error and propagate accordingly like risk_management
+            if hasattr(e, "__class__") and (
+                "ValidationError" in e.__class__.__name__
+                or "DataValidationError" in e.__class__.__name__
+            ):
+                self.propagate_validation_error(e, "capital_utilization_validation")
+            else:
+                self.propagate_service_error(e, "capital_utilization")
+
+            # Still transform for local logging but with aligned format
+            error_data = CapitalDataTransformer.transform_error_to_event_data(
+                error=e,
+                operation="update_utilization",
+                strategy_id=strategy_id,
+                metadata={"exchange": exchange, "utilized_amount": str(utilized_amount)}
+            )
+            self._logger.error(f"Utilization update failed: {error_data}")
+            raise CapitalAllocationError(f"Failed to update utilization: {e}") from e
 
     async def get_capital_metrics(self) -> CapitalMetrics:
         """
@@ -339,17 +390,30 @@ class CapitalService(AbstractCapitalService, TransactionalService):
             CapitalMetrics object
         """
         try:
-            allocations = (
-                await self._capital_repository.get_all() if self._capital_repository else []
-            )
+            # Calculate metrics from actual allocations if repository is available
+            allocated_amount = Decimal("0")
+            strategies_active = 0
 
-            total_allocated = sum(alloc.allocated_amount for alloc in allocations)
-            available_capital = self.total_capital - total_allocated
+            if self._capital_repository:
+                allocations = await self._capital_repository.get_all()
+                if allocations:
+                    for allocation in allocations:
+                        if isinstance(allocation, dict):
+                            allocated_amount += allocation.get("allocated_amount", Decimal("0"))
+                        else:
+                            allocated_amount += getattr(allocation, "allocated_amount", Decimal("0"))
+                    strategies_active = len(set(
+                        allocation.get("strategy_id") if isinstance(allocation, dict)
+                        else getattr(allocation, "strategy_id", "")
+                        for allocation in allocations
+                    ))
+
+            available_amount = self.total_capital - allocated_amount
 
             return CapitalMetrics(
                 total_capital=self.total_capital,
-                allocated_amount=total_allocated,
-                available_amount=available_capital,
+                allocated_amount=allocated_amount,
+                available_amount=available_amount,
                 total_pnl=Decimal("0"),
                 realized_pnl=Decimal("0"),
                 unrealized_pnl=Decimal("0"),
@@ -365,60 +429,75 @@ class CapitalService(AbstractCapitalService, TransactionalService):
                 max_drawdown=Decimal("0"),
                 var_95=Decimal("0"),
                 expected_shortfall=Decimal("0"),
-                strategies_active=len(set(alloc.strategy_id for alloc in allocations)),
-                positions_open=len([alloc for alloc in allocations if alloc.utilized_amount > 0]),
+                strategies_active=strategies_active,
+                positions_open=0,
                 leverage_used=Decimal("0"),
                 timestamp=datetime.now(timezone.utc),
             )
 
         except Exception as e:
-            self._logger.error(f"Failed to get capital metrics: {e}")
+            # Use consistent error propagation aligned with risk_management module
+
+            # Check if it's a validation error and propagate accordingly like risk_management
+            if hasattr(e, "__class__") and (
+                "ValidationError" in e.__class__.__name__
+                or "DataValidationError" in e.__class__.__name__
+            ):
+                self.propagate_validation_error(e, "capital_metrics_validation")
+            else:
+                self.propagate_service_error(e, "capital_metrics")
+
+            # Still transform for local logging but with aligned format
+            error_data = CapitalDataTransformer.transform_error_to_event_data(
+                error=e,
+                operation="get_capital_metrics",
+                metadata={"operation_context": "metrics_retrieval"}
+            )
+            self._logger.error(f"Failed to get capital metrics: {error_data}")
             raise ServiceError(f"Failed to get capital metrics: {e}") from e
 
     async def get_allocations_by_strategy(self, strategy_id: str) -> list[CapitalAllocation]:
         """Get all allocations for a strategy."""
-        if not self._capital_repository:
-            return []
-        return await self._capital_repository.get_by_strategy(strategy_id)
+        try:
+            if not self._capital_repository:
+                self._logger.warning("No capital repository available, returning empty list")
+                return []
+
+            allocations_data = await self._capital_repository.get_by_strategy(strategy_id)
+            return [CapitalAllocation(**data) if isinstance(data, dict) else data for data in allocations_data]
+        except Exception as e:
+            self._logger.error(f"Failed to get allocations for strategy {strategy_id}: {e}")
+            raise ServiceError(f"Failed to get allocations for strategy: {e}") from e
 
     async def get_all_allocations(self, limit: int | None = None) -> list[CapitalAllocation]:
         """Get all allocations."""
-        if not self._capital_repository:
-            return []
-        return await self._capital_repository.get_all(limit)
+        try:
+            if not self._capital_repository:
+                self._logger.warning("No capital repository available, returning empty list")
+                return []
+
+            allocations_data = await self._capital_repository.get_all(limit)
+            return [CapitalAllocation(**data) if isinstance(data, dict) else data for data in allocations_data]
+        except Exception as e:
+            self._logger.error(f"Failed to get all allocations: {e}")
+            raise ServiceError(f"Failed to get all allocations: {e}") from e
 
     # Private helper methods
     async def _get_available_capital(self) -> Decimal:
         """Get available capital for allocation."""
-        if not self._capital_repository:
-            return self.total_capital * (Decimal("1") - self.emergency_reserve_pct)
-
-        allocations = await self._capital_repository.get_all()
-        total_allocated = sum(alloc.allocated_amount for alloc in allocations)
         emergency_reserve = self.total_capital * self.emergency_reserve_pct
-        return self.total_capital - total_allocated - emergency_reserve
+        allocated_amount = Decimal("0")
 
-    async def _get_existing_allocation(
-        self, strategy_id: str, exchange: str
-    ) -> CapitalAllocation | None:
-        """Get existing allocation for strategy and exchange."""
-        if not self._capital_repository:
-            return None
-        return await self._capital_repository.get_by_strategy_exchange(strategy_id, exchange)
+        # Calculate currently allocated amount from repository
+        if self._capital_repository:
+            try:
+                allocations = await self._capital_repository.get_all()
+                for allocation in allocations:
+                    if isinstance(allocation, dict):
+                        allocated_amount += allocation.get("allocated_amount", Decimal("0"))
+                    else:
+                        allocated_amount += getattr(allocation, "allocated_amount", Decimal("0"))
+            except Exception as e:
+                self._logger.warning(f"Failed to get allocations for available capital calculation: {e}")
 
-    async def _create_audit_log(
-        self, operation: str, data: dict[str, Any], authorized_by: str | None = None
-    ) -> None:
-        """Create audit log entry."""
-        if not self._audit_repository:
-            return
-
-        audit_data = {
-            "audit_id": str(uuid.uuid4()),
-            "operation": operation,
-            "data": data,
-            "authorized_by": authorized_by or "system",
-            "timestamp": datetime.now(timezone.utc),
-        }
-
-        await self._audit_repository.create(audit_data)
+        return self.total_capital - emergency_reserve - allocated_amount

@@ -70,7 +70,7 @@ class StateManager(BaseComponent):
             raise RuntimeError("StateManager not initialized. Call initialize() first.")
 
         # Save the state - late import to avoid circular dependency
-        from .state_service import StatePriority, StateType
+        from src.core.types import StatePriority, StateType
 
         success = await self.state_service.set_state(
             StateType.BOT_STATE, bot_id, state, priority=StatePriority.HIGH

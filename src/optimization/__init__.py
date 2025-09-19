@@ -86,6 +86,8 @@ from .parameter_space import (
 )
 from .repository import OptimizationRepository
 from .service import OptimizationService
+from .parameter_space_service import ParameterSpaceService
+from .result_transformation_service import ResultTransformationService
 from .validation import (
     OverfittingDetector,
     RobustnessAnalyzer,
@@ -126,6 +128,8 @@ __all__ = [
     "OptimizationService",
     "OptimizationServiceProtocol",
     "OptimizationStatus",
+    "ParameterSpaceService",
+    "ResultTransformationService",
     "OptimizationValidationConfig",
     "OverfittingDetector",
     "ParameterDefinition",

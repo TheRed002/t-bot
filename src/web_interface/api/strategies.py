@@ -32,10 +32,24 @@ def get_strategy_service():
 def get_web_strategy_service_instance() -> "WebStrategyService":
     """Get web strategy service for business logic through DI."""
     try:
-        # Create service instance - in production this would be through DI
-        from src.web_interface.services.strategy_service import WebStrategyService
+        # Use proper dependency injection
+        from src.web_interface.di_registration import get_web_interface_factory
+        from src.core.dependency_injection import get_global_injector
 
-        return WebStrategyService()
+        injector = get_global_injector()
+
+        # Check if service is already registered
+        if injector.has_service("WebStrategyService"):
+            return injector.resolve("WebStrategyService")
+
+        # If not registered, get it through factory
+        factory = get_web_interface_factory(injector)
+        strategy_service = factory.create_strategy_service()
+
+        # Register for future use
+        injector.register_service("WebStrategyService", strategy_service, singleton=True)
+
+        return strategy_service
     except Exception as e:
         logger.error(f"Error getting web strategy service: {e}")
         raise ServiceError(f"Web strategy service not available: {e}")
@@ -202,119 +216,6 @@ async def list_strategies(
     except Exception as e:
         logger.error(f"Strategy listing failed: {e}", user=current_user.username)
         # Service layer already handles fallbacks, so just re-raise
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to list strategies: {e!s}",
-        )
-        mock_strategies = [
-            {
-                "strategy_name": "trend_following",
-                "strategy_type": "momentum",
-                "description": "Follows market trends using moving averages and momentum indicators",
-                "category": "trend",
-                "supported_exchanges": ["binance", "coinbase", "okx"],
-                "supported_symbols": ["BTCUSDT", "ETHUSDT", "ADAUSDT"],
-                "risk_level": "medium",
-                "minimum_capital": Decimal("10000"),
-                "recommended_timeframes": ["15m", "1h", "4h"],
-                "parameters": {
-                    "fast_ma_period": 12,
-                    "slow_ma_period": 26,
-                    "signal_period": 9,
-                    "risk_per_trade": 0.02,
-                },
-                "performance_metrics": {"30d_return": 15.2, "win_rate": 0.65, "sharpe_ratio": 1.45},
-                "is_active": True,
-                "created_at": datetime.now(timezone.utc) - timedelta(days=30),
-                "updated_at": datetime.now(timezone.utc) - timedelta(days=1),
-            },
-            {
-                "strategy_name": "mean_reversion",
-                "strategy_type": "contrarian",
-                "description": "Identifies overbought/oversold conditions for contrarian trades",
-                "category": "reversion",
-                "supported_exchanges": ["binance", "coinbase"],
-                "supported_symbols": ["BTCUSDT", "ETHUSDT"],
-                "risk_level": "high",
-                "minimum_capital": Decimal("25000"),
-                "recommended_timeframes": ["5m", "15m", "1h"],
-                "parameters": {
-                    "rsi_period": 14,
-                    "rsi_oversold": 30,
-                    "rsi_overbought": 70,
-                    "bollinger_period": 20,
-                    "bollinger_std": 2,
-                },
-                "performance_metrics": {"30d_return": 22.8, "win_rate": 0.58, "sharpe_ratio": 1.72},
-                "is_active": True,
-                "created_at": datetime.now(timezone.utc) - timedelta(days=45),
-                "updated_at": datetime.now(timezone.utc) - timedelta(days=2),
-            },
-            {
-                "strategy_name": "arbitrage_scanner",
-                "strategy_type": "arbitrage",
-                "description": "Scans for price differences across exchanges",
-                "category": "arbitrage",
-                "supported_exchanges": ["binance", "coinbase", "okx"],
-                "supported_symbols": ["BTCUSDT", "ETHUSDT", "LTCUSDT"],
-                "risk_level": "low",
-                "minimum_capital": Decimal("50000"),
-                "recommended_timeframes": ["1m", "5m"],
-                "parameters": {
-                    "min_profit_threshold": 0.005,
-                    "max_position_size": 0.1,
-                    "execution_timeout": 30,
-                },
-                "performance_metrics": {"30d_return": 8.5, "win_rate": 0.89, "sharpe_ratio": 2.15},
-                "is_active": True,
-                "created_at": datetime.now(timezone.utc) - timedelta(days=60),
-                "updated_at": datetime.now(timezone.utc) - timedelta(hours=6),
-            },
-            {
-                "strategy_name": "market_making",
-                "strategy_type": "market_making",
-                "description": "Provides liquidity by placing buy and sell orders around market price",
-                "category": "liquidity",
-                "supported_exchanges": ["binance", "okx"],
-                "supported_symbols": ["BTCUSDT", "ETHUSDT", "BNBUSDT"],
-                "risk_level": "medium",
-                "minimum_capital": Decimal("100000"),
-                "recommended_timeframes": ["1m", "5m"],
-                "parameters": {
-                    "spread_percentage": 0.002,
-                    "order_size": 0.01,
-                    "max_inventory": 0.1,
-                    "skew_factor": 0.5,
-                },
-                "performance_metrics": {"30d_return": 12.3, "win_rate": 0.72, "sharpe_ratio": 1.89},
-                "is_active": False,
-                "created_at": datetime.now(timezone.utc) - timedelta(days=20),
-                "updated_at": datetime.now(timezone.utc) - timedelta(days=5),
-            },
-        ]
-
-        # Apply filters
-        filtered_strategies = []
-        for strategy_data in mock_strategies:
-            # Apply category filter
-            if category and strategy_data["category"] != category:
-                continue
-
-            # Apply risk level filter
-            if risk_level and strategy_data["risk_level"] != risk_level:
-                continue
-
-            # Apply exchange filter
-            if exchange and exchange not in strategy_data["supported_exchanges"]:
-                continue
-
-            strategy = StrategyResponse(**strategy_data)
-            filtered_strategies.append(strategy)
-
-        return filtered_strategies
-
-    except Exception as e:
-        logger.error(f"Strategy listing failed: {e}", user=current_user.username)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to list strategies: {e!s}",

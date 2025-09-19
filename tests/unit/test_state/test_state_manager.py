@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
 
-from src.core.config.main import Config
+from src.core.config import Config
 from src.core.exceptions import DependencyError, ServiceError
 from src.core.types import BotState
 from src.state.state_manager import StateManager, get_cache_manager

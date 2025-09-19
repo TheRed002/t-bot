@@ -53,9 +53,7 @@ class BotManagementFactory:
             ("StateService", "state_service"),
             ("StrategyServiceInterface", "strategy_service"),
             ("ConfigService", "config_service"),
-            ("BotRepository", "bot_repository"),
-            ("BotInstanceRepository", "bot_instance_repository"),
-            ("BotMetricsRepository", "bot_metrics_repository"),
+            ("AnalyticsService", "analytics_service"),
         ]:
             try:
                 kwargs[param_name] = self._injector.resolve(service_name)

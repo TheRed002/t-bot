@@ -48,16 +48,16 @@ except ImportError:
         metrics: dict
 
 try:
-    from src.web_interface.api.trading import OrderRequest, OrderResponse
+    from src.web_interface.api.trading import PlaceOrderRequest as OrderRequest, OrderResponse
     TRADING_AVAILABLE = True
-except ImportError:
+except (ImportError, Exception):
     TRADING_AVAILABLE = False
     class OrderRequest(BaseModel):
         symbol: str
         side: str
         quantity: Decimal
         order_type: str
-    
+
     class OrderResponse(BaseModel):
         order_id: str
         status: str
@@ -142,23 +142,45 @@ class TestTradingModels:
             symbol="BTCUSDT",
             side="buy",
             quantity=Decimal("0.1"),
-            order_type="market"
+            order_type="market",
+            exchange="binance"
         )
         
         assert order_request.symbol == "BTCUSDT"
-        assert order_request.side == "buy"
+        assert order_request.side.value == "buy"
         assert order_request.quantity == Decimal("0.1")
-        assert order_request.order_type == "market"
+        assert order_request.order_type.value == "market"
+        assert order_request.exchange == "binance"
 
     def test_order_response_model(self):
         """Test OrderResponse model creation."""
         order_response = OrderResponse(
             order_id="12345",
-            status="filled"
+            client_order_id="client123",
+            symbol="BTCUSDT",
+            side="buy",
+            order_type="market",
+            quantity=Decimal("0.1"),
+            price=Decimal("50000.00"),
+            stop_price=None,
+            status="filled",
+            filled_quantity=Decimal("0.1"),
+            remaining_quantity=Decimal("0.0"),
+            average_fill_price=Decimal("50000.00"),
+            commission=Decimal("0.001"),
+            commission_asset="BTC",
+            exchange="binance",
+            bot_id="bot123",
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+            fills=None
         )
-        
+
         assert order_response.order_id == "12345"
         assert order_response.status == "filled"
+        assert order_response.symbol == "BTCUSDT"
+        assert order_response.side == "buy"
+        assert order_response.quantity == Decimal("0.1")
 
 
 class TestAPIEndpointPatterns:
@@ -214,9 +236,10 @@ class TestAPIEndpointPatterns:
         # Test valid request
         valid_data = {
             "symbol": "BTCUSDT",
-            "side": "buy", 
+            "side": "buy",
             "quantity": "0.1",
-            "order_type": "market"
+            "order_type": "market",
+            "exchange": "binance"
         }
         
         # Simulate pydantic validation

@@ -111,11 +111,11 @@ class AlternativeFeatureCalculator:
             self.sentiment_weights = alt_config.get(
                 "sentiment_weights",
                 {
-                    "very_positive": 1.0,
-                    "positive": 0.5,
+                    "very_bullish": 1.0,
+                    "bullish": 0.5,
                     "neutral": 0.0,
-                    "negative": -0.5,
-                    "very_negative": -1.0,
+                    "bearish": -0.5,
+                    "very_bearish": -1.0,
                 },
             )
             self.update_interval = alt_config.get("update_interval", 300)  # 5 minutes
@@ -127,11 +127,11 @@ class AlternativeFeatureCalculator:
                 "microstructure": 6,
             }
             self.sentiment_weights = {
-                "very_positive": 1.0,
-                "positive": 0.5,
+                "very_bullish": 1.0,
+                "bullish": 0.5,
                 "neutral": 0.0,
-                "negative": -0.5,
-                "very_negative": -1.0,
+                "bearish": -0.5,
+                "very_bearish": -1.0,
             }
             self.update_interval = 300
 
@@ -248,13 +248,20 @@ class AlternativeFeatureCalculator:
                     if isinstance(sentiment_enum, NewsSentiment):
                         sentiment_str = sentiment_enum.value
                     else:
+                        # Handle various string formats
                         sentiment_str = str(sentiment_enum).lower()
+                        # Remove any prefixes like "NewsSentiment."
+                        if "." in sentiment_str:
+                            sentiment_str = sentiment_str.split(".")[-1]
 
                     # Map sentiment to numerical score
                     if sentiment_str in self.sentiment_weights:
                         sentiment_scores.append(self.sentiment_weights[sentiment_str])
                         sentiment_counts[sentiment_str] += 1
                         article_count += 1
+                    else:
+                        # Log which sentiment values are not being mapped for debugging
+                        self.logger.warning(f"Unmapped sentiment: {sentiment_str}, available: {list(self.sentiment_weights.keys())}")
 
             if not sentiment_scores:
                 return AlternativeResult(

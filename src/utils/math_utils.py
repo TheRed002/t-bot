@@ -34,7 +34,7 @@ def calculate_sharpe_ratio(
     returns: list[Decimal], risk_free_rate: Decimal = Decimal("0.02"), frequency: str = "daily"
 ) -> Decimal:
     """
-    Calculate the Sharpe ratio for a series of returns.
+    Calculate the Sharpe ratio for a series of returns with frequency adjustment.
 
     Args:
         returns: List of return values as Decimal (e.g., 0.05 for 5%)
@@ -47,6 +47,9 @@ def calculate_sharpe_ratio(
     Raises:
         ValidationError: If returns list is empty or contains invalid values
     """
+    import numpy as np
+    from src.utils.financial_calculations import calculate_sharpe_ratio as calc_sharpe
+
     if not returns:
         raise ValidationError("Returns list cannot be empty")
 
@@ -60,32 +63,19 @@ def calculate_sharpe_ratio(
             f"Invalid frequency: {frequency}. Must be one of {list(valid_frequencies.keys())}"
         )
 
-    # Convert to Decimal for precise calculations
-    decimal_returns = [to_decimal(r) if not isinstance(r, Decimal) else r for r in returns]
+    # For non-daily frequencies, we need to adjust the underlying calculation
+    # The centralized function assumes daily returns (252 trading days)
+    frequency_factor = Decimal(str(valid_frequencies[frequency])) / Decimal("252")
 
-    # Calculate annualization factor
-    periods_per_year = Decimal(str(valid_frequencies[frequency]))
+    # Convert to numpy array and calculate using centralized function
+    returns_array = np.array([float(r) for r in returns])
+    base_sharpe = calc_sharpe(returns_array, risk_free_rate)
 
-    # Calculate mean return (annualized)
-    mean_return = (sum(decimal_returns) / Decimal(len(decimal_returns))) * periods_per_year
+    # Adjust for frequency if not daily
+    if frequency != "daily":
+        return base_sharpe * frequency_factor.sqrt()
 
-    # Calculate variance manually for precision
-    variance = sum((r - mean_return / periods_per_year) ** 2 for r in decimal_returns) / Decimal(
-        len(decimal_returns) - 1
-    )
-    std_return = variance.sqrt() * periods_per_year.sqrt()
-
-    # Avoid division by zero
-    if std_return == ZERO:
-        return ZERO
-
-    # Calculate Sharpe ratio
-    rf_rate = (
-        to_decimal(risk_free_rate) if not isinstance(risk_free_rate, Decimal) else risk_free_rate
-    )
-    sharpe_ratio = (mean_return - rf_rate) / std_return
-
-    return sharpe_ratio
+    return base_sharpe
 
 
 def calculate_max_drawdown(equity_curve: list[Decimal]) -> tuple[Decimal, int, int]:
@@ -101,6 +91,8 @@ def calculate_max_drawdown(equity_curve: list[Decimal]) -> tuple[Decimal, int, i
     Raises:
         ValidationError: If equity curve is empty or contains invalid values
     """
+    from src.utils.financial_calculations import calculate_max_drawdown_simple
+
     if not equity_curve:
         raise ValidationError("Equity curve cannot be empty")
 
@@ -111,32 +103,7 @@ def calculate_max_drawdown(equity_curve: list[Decimal]) -> tuple[Decimal, int, i
     # Convert to Decimal for precise calculations
     decimal_equity = [to_decimal(e) if not isinstance(e, Decimal) else e for e in equity_curve]
 
-    # Calculate running maximum using Decimal precision
-    running_max = []
-    current_max = decimal_equity[0]
-    for value in decimal_equity:
-        if value > current_max:
-            current_max = value
-        running_max.append(current_max)
-
-    # Calculate drawdown
-    drawdown = []
-    for _i, (equity_val, max_val) in enumerate(zip(decimal_equity, running_max, strict=False)):
-        if max_val == ZERO:
-            drawdown.append(ZERO)
-        else:
-            dd = (equity_val - max_val) / max_val
-            drawdown.append(dd)
-
-    # Find maximum drawdown
-    max_drawdown = min(drawdown)
-    max_drawdown_idx = drawdown.index(max_drawdown)
-
-    # Find the peak before the maximum drawdown
-    peak_value = max(decimal_equity[: max_drawdown_idx + 1])
-    peak_idx = decimal_equity.index(peak_value)
-
-    return max_drawdown, int(peak_idx), int(max_drawdown_idx)
+    return calculate_max_drawdown_simple(decimal_equity)
 
 
 def calculate_var(returns: list[Decimal], confidence_level: Decimal = Decimal("0.95")) -> Decimal:
@@ -334,7 +301,7 @@ def calculate_sortino_ratio(
     returns: list[Decimal], risk_free_rate: Decimal = Decimal("0.02"), periods_per_year: int = 252
 ) -> Decimal:
     """
-    Calculate Sortino ratio (uses downside deviation).
+    Calculate Sortino ratio with period adjustment.
 
     Args:
         returns: List of Decimal returns
@@ -344,45 +311,25 @@ def calculate_sortino_ratio(
     Returns:
         Sortino ratio as Decimal
     """
+    import numpy as np
+    from src.utils.financial_calculations import calculate_sortino_ratio as calc_sortino
+
     if len(returns) < 2:
         return ZERO
 
-    # Convert to Decimal for precise calculations
-    returns_decimal = [to_decimal(r) if not isinstance(r, Decimal) else r for r in returns]
-    rf_rate = to_decimal(risk_free_rate)
-    periods_decimal = to_decimal(periods_per_year)
+    # The centralized function assumes 252 periods per year
+    # If different periods are requested, adjust the calculation
+    periods_factor = Decimal(str(periods_per_year)) / Decimal("252")
 
-    period_rf_rate = rf_rate / periods_decimal
-    excess_returns = [r - period_rf_rate for r in returns_decimal]
+    # Convert to numpy array and calculate using centralized function
+    returns_array = np.array([float(r) for r in returns])
+    base_sortino = calc_sortino(returns_array, risk_free_rate)
 
-    # Calculate downside deviation (only negative returns)
-    downside_returns = [r for r in excess_returns if r < ZERO]
+    # Adjust for periods if not 252
+    if periods_per_year != 252:
+        return base_sortino * periods_factor.sqrt()
 
-    if len(downside_returns) == 0:
-        return Decimal("inf")  # No downside risk
-
-    # Calculate downside standard deviation
-    n_downside = Decimal(len(downside_returns))
-    if n_downside <= Decimal("1"):
-        return ZERO
-
-    mean_downside = sum(downside_returns) / n_downside
-    downside_variance = sum((r - mean_downside) ** 2 for r in downside_returns) / (
-        n_downside - Decimal("1")
-    )
-
-    if downside_variance <= ZERO:
-        return ZERO
-
-    downside_std = downside_variance.sqrt()
-
-    n_returns = Decimal(len(excess_returns))
-    mean_excess = sum(excess_returns) / n_returns
-
-    if downside_std <= ZERO:
-        return ZERO
-
-    return (mean_excess / downside_std) * periods_decimal.sqrt()
+    return base_sortino
 
 
 def safe_min(*args: Decimal, default: Decimal | None = None) -> Decimal:

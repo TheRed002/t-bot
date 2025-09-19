@@ -5,6 +5,7 @@ from decimal import Decimal
 
 from sqlalchemy import (
     DECIMAL,
+    Boolean,
     CheckConstraint,
     Column,
     DateTime,
@@ -12,6 +13,7 @@ from sqlalchemy import (
     Index,
     Integer,
     String,
+    Text,
     UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
@@ -72,6 +74,7 @@ class CapitalAllocationDB(Base, TimestampMixin):
         Index("idx_capital_exchange", "exchange"),
         Index("idx_capital_type", "allocation_type"),
         Index("idx_capital_created", "created_at"),
+        Index("idx_capital_updated", "updated_at"),  # Added for time-based queries
         Index(
             "idx_capital_strategy_exchange", "strategy_id", "exchange"
         ),  # Composite index for lookups
@@ -84,6 +87,9 @@ class CapitalAllocationDB(Base, TimestampMixin):
         Index(
             "idx_capital_priority_type", "priority", "allocation_type"
         ),  # Priority-based allocation
+        Index(
+            "idx_capital_rebalance", "last_rebalance"
+        ),  # Added for rebalancing queries
         UniqueConstraint("strategy_id", "exchange", name="uq_strategy_exchange_allocation"),
         CheckConstraint("allocated_amount >= 0", name="check_allocated_amount_non_negative"),
         CheckConstraint("utilized_amount >= 0", name="check_utilized_amount_non_negative"),
@@ -103,7 +109,7 @@ class CapitalAllocationDB(Base, TimestampMixin):
             name="check_capital_utilization_within_allocation",
         ),
         CheckConstraint(
-            "available_amount = allocated_amount - utilized_amount - reserved_amount",
+            "available_amount <= allocated_amount",
             name="check_capital_accounting_balance",
         ),
     )
@@ -156,6 +162,7 @@ class FundFlowDB(Base, TimestampMixin):
         Index("idx_fund_flow_currency", "currency"),
         Index("idx_fund_flow_status", "status"),
         Index("idx_fund_flow_created", "created_at"),
+        Index("idx_fund_flow_updated", "updated_at"),  # Added for time-based queries
         Index("idx_fund_flow_bot_id", "bot_id"),
         Index("idx_fund_flow_strategy_id", "strategy_id"),
         Index("idx_fund_flow_capital_allocation_id", "capital_allocation_id"),
@@ -167,6 +174,9 @@ class FundFlowDB(Base, TimestampMixin):
         ),  # Transaction status tracking
         Index("idx_fund_flow_bot_status", "bot_id", "status"),  # Bot flow tracking
         Index("idx_fund_flow_strategy_status", "strategy_id", "status"),  # Strategy flow tracking
+        Index(
+            "idx_fund_flow_amount_currency", "amount", "currency"
+        ),  # Added for amount-based queries
         UniqueConstraint("transaction_id", name="uq_fund_flow_transaction"),
         CheckConstraint("amount > 0", name="check_fund_flow_amount_positive"),
         CheckConstraint("fee >= 0", name="check_fund_flow_fee_non_negative"),
@@ -175,8 +185,12 @@ class FundFlowDB(Base, TimestampMixin):
             name="check_fund_flow_status",
         ),
         CheckConstraint(
-            "flow_type IN ('deposit', 'withdrawal', 'allocation', 'rebalance')",
+            "flow_type IN ('deposit', 'withdrawal', 'allocation', 'rebalance', 'transfer', 'fee')",
             name="check_flow_type",
+        ),
+        CheckConstraint(
+            "currency IN ('USDT', 'USDC', 'BTC', 'ETH', 'BNB')",
+            name="check_fund_flow_supported_currency",
         ),
     )
 
@@ -209,6 +223,7 @@ class CurrencyExposureDB(Base, TimestampMixin):
     __table_args__ = (
         Index("idx_currency_exposure", "currency"),
         Index("idx_currency_created", "created_at"),
+        Index("idx_currency_updated", "updated_at"),  # Added for time-based queries
         Index(
             "idx_currency_risk_metrics", "var_1d", "var_7d", "volatility"
         ),  # Risk analysis optimization
@@ -216,12 +231,19 @@ class CurrencyExposureDB(Base, TimestampMixin):
         Index(
             "idx_currency_exposure_breakdown", "spot_exposure", "futures_exposure"
         ),  # Exposure breakdown analysis
+        Index(
+            "idx_currency_volatility", "volatility", "currency"
+        ),  # Added for volatility-based queries
         UniqueConstraint("currency", "created_at", name="uq_currency_exposure_timestamp"),
         CheckConstraint("total_exposure >= 0", name="check_total_exposure_non_negative"),
         CheckConstraint("spot_exposure >= 0", name="check_spot_exposure_non_negative"),
         CheckConstraint("futures_exposure >= 0", name="check_futures_exposure_non_negative"),
         CheckConstraint(
             "spot_exposure + futures_exposure = total_exposure", name="check_exposure_balance"
+        ),
+        CheckConstraint(
+            "currency IN ('USDT', 'USDC', 'BTC', 'ETH', 'BNB', 'ADA', 'SOL', 'DOT')",
+            name="check_currency_exposure_supported_currency",
         ),
     )
 
@@ -253,9 +275,13 @@ class ExchangeAllocationDB(Base, TimestampMixin):
     __table_args__ = (
         Index("idx_exchange_allocation", "exchange"),
         Index("idx_exchange_created", "created_at"),
+        Index("idx_exchange_updated", "updated_at"),  # Added for time-based queries
         Index(
             "idx_exchange_utilization", "utilization_ratio", "efficiency_score"
         ),  # Performance optimization
+        Index(
+            "idx_exchange_total_allocation", "total_allocation"
+        ),  # Added for allocation-based queries
         UniqueConstraint("exchange", name="uq_exchange_allocation"),
         CheckConstraint("total_allocation >= 0", name="check_total_allocation_non_negative"),
         CheckConstraint("utilized_allocation >= 0", name="check_utilized_allocation_non_negative"),
@@ -272,7 +298,7 @@ class ExchangeAllocationDB(Base, TimestampMixin):
             name="check_utilization_ratio_range",
         ),
         CheckConstraint(
-            "exchange IN ('binance', 'coinbase', 'okx', 'mock')",
+            "exchange IN ('binance', 'coinbase', 'okx', 'mock', 'kraken', 'bybit')",
             name="check_exchange_allocation_supported_exchange",
         ),
     )

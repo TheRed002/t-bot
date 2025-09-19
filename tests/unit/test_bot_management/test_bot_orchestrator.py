@@ -119,18 +119,15 @@ def orchestrator(config):
     })
     
     return BotService(
-        config_service=config_service,
-        state_service=AsyncMock(),
-        risk_service=AsyncMock(),
-        execution_service=AsyncMock(),
-        strategy_service=AsyncMock(),
-        capital_service=AsyncMock(),
         exchange_service=AsyncMock(),  # Required dependency
-        bot_repository=AsyncMock(),  # Required dependency
-        bot_instance_repository=AsyncMock(),  # Required dependency
-        bot_metrics_repository=AsyncMock(),  # Required dependency
+        capital_service=AsyncMock(),  # Required dependency
+        execution_service=AsyncMock(),
+        risk_service=AsyncMock(),
+        state_service=AsyncMock(),
+        strategy_service=AsyncMock(),
         metrics_collector=AsyncMock(),
-        database_service=AsyncMock(),
+        config_service=config_service,
+        analytics_service=AsyncMock(),
     )
 
 

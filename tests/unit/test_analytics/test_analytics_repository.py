@@ -20,6 +20,7 @@ import pytest
 
 from src.analytics.repository import AnalyticsRepository
 from src.analytics.types import PortfolioMetrics, PositionMetrics, RiskMetrics
+from src.core.base.component import BaseComponent
 from src.core.exceptions import DataError, ValidationError
 from src.database.models.analytics import (
     AnalyticsPortfolioMetrics,
@@ -157,7 +158,6 @@ class TestAnalyticsRepositoryInitialization:
     def test_inheritance_from_base_component(self, repository):
         """Test that repository inherits from BaseComponent."""
         from src.analytics.interfaces import AnalyticsDataRepository
-        from src.core.base.component import BaseComponent
 
         assert isinstance(repository, BaseComponent)
         assert isinstance(repository, AnalyticsDataRepository)
@@ -212,7 +212,7 @@ class TestPortfolioMetricsOperations:
         repository.portfolio_repo.create.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_store_portfolio_metrics_decimal_precision(self, repository, mock_uow):
+    async def test_store_portfolio_metrics_decimal_precision(self, repository):
         """Test that decimal precision is preserved during storage."""
         metrics = PortfolioMetrics(
             timestamp=datetime.utcnow(),
@@ -242,7 +242,7 @@ class TestPortfolioMetricsOperations:
         assert isinstance(metrics.realized_pnl, Decimal)
 
     @pytest.mark.asyncio
-    async def test_get_historical_portfolio_metrics_success(self, repository, mock_uow):
+    async def test_get_historical_portfolio_metrics_success(self, repository):
         """Test successful historical portfolio metrics retrieval."""
         start_date = datetime(2024, 1, 1)
         end_date = datetime(2024, 1, 31)
@@ -297,7 +297,7 @@ class TestPortfolioMetricsOperations:
             await repository.get_historical_portfolio_metrics(date, date)
 
     @pytest.mark.asyncio
-    async def test_get_historical_portfolio_metrics_database_error(self, repository, mock_uow):
+    async def test_get_historical_portfolio_metrics_database_error(self, repository):
         """Test historical portfolio metrics retrieval database error handling."""
         start_date = datetime(2024, 1, 1)
         end_date = datetime(2024, 1, 31)
@@ -313,7 +313,7 @@ class TestPortfolioMetricsOperations:
         assert exc_info.value.context["end_date"] == end_date
 
     @pytest.mark.asyncio
-    async def test_get_historical_portfolio_metrics_empty_result(self, repository, mock_uow):
+    async def test_get_historical_portfolio_metrics_empty_result(self, repository):
         """Test historical portfolio metrics retrieval with empty result."""
         start_date = datetime(2024, 1, 1)
         end_date = datetime(2024, 1, 31)
@@ -328,7 +328,7 @@ class TestPortfolioMetricsOperations:
         assert result == []
 
     @pytest.mark.asyncio
-    async def test_get_historical_portfolio_metrics_null_cash_balance(self, repository, mock_uow):
+    async def test_get_historical_portfolio_metrics_null_cash_balance(self, repository):
         """Test historical portfolio metrics retrieval with null cash balance."""
         start_date = datetime(2024, 1, 1)
         end_date = datetime(2024, 1, 31)
@@ -360,7 +360,7 @@ class TestPortfolioMetricsOperations:
         assert portfolio_metrics.invested_capital == Decimal("100000.00")  # total_value - cash (0)
 
     @pytest.mark.asyncio
-    async def test_get_latest_portfolio_metrics_success(self, repository, mock_uow):
+    async def test_get_latest_portfolio_metrics_success(self, repository):
         """Test successful latest portfolio metrics retrieval."""
         db_metric = AnalyticsPortfolioMetrics(
             timestamp=datetime.utcnow(),
@@ -389,7 +389,7 @@ class TestPortfolioMetricsOperations:
         repository.session.execute.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_get_latest_portfolio_metrics_not_found(self, repository, mock_uow):
+    async def test_get_latest_portfolio_metrics_not_found(self, repository):
         """Test latest portfolio metrics retrieval when none exist."""
         # Mock session execute for scalar_one_or_none returning None
         mock_result = Mock()
@@ -401,7 +401,7 @@ class TestPortfolioMetricsOperations:
         assert result is None
 
     @pytest.mark.asyncio
-    async def test_get_latest_portfolio_metrics_database_error(self, repository, mock_uow):
+    async def test_get_latest_portfolio_metrics_database_error(self, repository):
         """Test latest portfolio metrics retrieval database error handling."""
         # Mock session execute to raise an exception
         repository.session.execute.side_effect = Exception("Query failed")
@@ -417,7 +417,7 @@ class TestPositionMetricsOperations:
 
     @pytest.mark.asyncio
     async def test_store_position_metrics_success(
-        self, repository, mock_uow, sample_position_metrics
+        self, repository, sample_position_metrics
     ):
         """Test successful position metrics storage."""
         await repository.store_position_metrics(sample_position_metrics)
@@ -435,18 +435,16 @@ class TestPositionMetricsOperations:
         assert sample_position_metrics[0].quantity == Decimal("1.5")
 
     @pytest.mark.asyncio
-    async def test_store_position_metrics_empty_list(self, repository, mock_uow):
+    async def test_store_position_metrics_empty_list(self, repository):
         """Test position metrics storage with empty list."""
         await repository.store_position_metrics([])
 
         # Should not perform any database operations
-        mock_uow.__aenter__.assert_not_called()
-        mock_uow.analytics_repository.create.assert_not_called()
-        mock_uow.commit.assert_not_called()
+        repository.position_repo.create.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_store_position_metrics_database_error(
-        self, repository, mock_uow, sample_position_metrics
+        self, repository, sample_position_metrics
     ):
         """Test position metrics storage database error handling."""
         repository.position_repo.create.side_effect = Exception("Database error")
@@ -458,7 +456,7 @@ class TestPositionMetricsOperations:
         assert exc_info.value.context["count"] == 2
 
     @pytest.mark.asyncio
-    async def test_store_position_metrics_decimal_precision(self, repository, mock_uow):
+    async def test_store_position_metrics_decimal_precision(self, repository):
         """Test that decimal precision is preserved in position metrics."""
         fixed_timestamp = datetime(2024, 1, 15, 12, 0, 0)
         position_metrics = [
@@ -497,7 +495,7 @@ class TestPositionMetricsOperations:
         assert position_metrics[0].unrealized_pnl == Decimal("543.21098765")
 
     @pytest.mark.asyncio
-    async def test_store_position_metrics_batch_processing(self, repository, mock_uow):
+    async def test_store_position_metrics_batch_processing(self, repository):
         """Test position metrics batch processing with many positions."""
         # Reduce size for performance - 10 positions is sufficient
         fixed_timestamp = datetime(2024, 1, 15, 12, 0, 0)
@@ -532,7 +530,7 @@ class TestRiskMetricsOperations:
     """Test risk metrics storage and retrieval."""
 
     @pytest.mark.asyncio
-    async def test_store_risk_metrics_success(self, repository, mock_uow, sample_risk_metrics):
+    async def test_store_risk_metrics_success(self, repository, sample_risk_metrics):
         """Test successful risk metrics storage."""
         await repository.store_risk_metrics(sample_risk_metrics)
 
@@ -550,7 +548,7 @@ class TestRiskMetricsOperations:
 
     @pytest.mark.asyncio
     async def test_store_risk_metrics_database_error(
-        self, repository, mock_uow, sample_risk_metrics
+        self, repository, sample_risk_metrics
     ):
         """Test risk metrics storage database error handling."""
         repository.risk_repo.create.side_effect = Exception("Database error")
@@ -562,7 +560,7 @@ class TestRiskMetricsOperations:
         assert exc_info.value.context["timestamp"] == sample_risk_metrics.timestamp
 
     @pytest.mark.asyncio
-    async def test_store_risk_metrics_decimal_precision(self, repository, mock_uow):
+    async def test_store_risk_metrics_decimal_precision(self, repository):
         """Test that decimal precision is preserved in risk metrics."""
         risk_metrics = RiskMetrics(
             timestamp=datetime.utcnow(),
@@ -593,7 +591,7 @@ class TestRiskMetricsOperations:
         assert risk_metrics.max_drawdown == Decimal("0.123456789")
 
     @pytest.mark.asyncio
-    async def test_get_latest_risk_metrics_success(self, repository, mock_uow):
+    async def test_get_latest_risk_metrics_success(self, repository):
         """Test successful latest risk metrics retrieval."""
         db_metric = AnalyticsRiskMetrics(
             timestamp=datetime.utcnow(),
@@ -624,16 +622,19 @@ class TestRiskMetricsOperations:
         repository.session.execute.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_get_latest_risk_metrics_not_found(self, repository, mock_uow):
+    async def test_get_latest_risk_metrics_not_found(self, repository):
         """Test latest risk metrics retrieval when none exist."""
-        mock_uow.analytics_repository.find_latest.return_value = None
+        # Mock session execute for scalar_one_or_none returning None
+        mock_result = Mock()
+        mock_result.scalar_one_or_none.return_value = None
+        repository.session.execute.return_value = mock_result
 
         result = await repository.get_latest_risk_metrics()
 
         assert result is None
 
     @pytest.mark.asyncio
-    async def test_get_latest_risk_metrics_database_error(self, repository, mock_uow):
+    async def test_get_latest_risk_metrics_database_error(self, repository):
         """Test latest risk metrics retrieval database error handling."""
         # Mock session execute to raise an exception
         repository.session.execute.side_effect = Exception("Query failed")
@@ -649,7 +650,7 @@ class TestErrorHandlingAndEdgeCases:
 
     @pytest.mark.asyncio
     async def test_context_manager_error_handling(
-        self, repository, mock_uow, sample_portfolio_metrics
+        self, repository, sample_portfolio_metrics
     ):
         """Test repository error handling during storage operations."""
         # Mock the portfolio repository to raise an exception  
@@ -660,7 +661,7 @@ class TestErrorHandlingAndEdgeCases:
 
     @pytest.mark.asyncio
     async def test_concurrent_operations_isolation(
-        self, repository, mock_uow, sample_portfolio_metrics
+        self, repository, sample_portfolio_metrics
     ):
         """Test that concurrent operations don't interfere with each other."""
         import asyncio
@@ -682,7 +683,7 @@ class TestErrorHandlingAndEdgeCases:
 
     @pytest.mark.asyncio
     async def test_transaction_rollback_on_commit_failure(
-        self, repository, mock_uow, sample_risk_metrics
+        self, repository, sample_risk_metrics
     ):
         """Test repository error handling during risk metrics storage."""
         # Mock the risk repository to raise an exception
@@ -692,7 +693,7 @@ class TestErrorHandlingAndEdgeCases:
             await repository.store_risk_metrics(sample_risk_metrics)
 
     @pytest.mark.asyncio
-    async def test_data_conversion_edge_cases(self, repository, mock_uow):
+    async def test_data_conversion_edge_cases(self, repository):
         """Test data conversion with edge case values."""
         # Test with zero and negative values
         metrics = PortfolioMetrics(
@@ -721,7 +722,7 @@ class TestErrorHandlingAndEdgeCases:
         assert metrics.realized_pnl == Decimal("0.00")
 
     @pytest.mark.asyncio
-    async def test_large_dataset_handling(self, repository, mock_uow):
+    async def test_large_dataset_handling(self, repository):
         """Test handling of large datasets without memory issues."""
         # Reduce size for performance - 25 positions is sufficient for testing
         fixed_timestamp = datetime(2024, 1, 15, 12, 0, 0)
@@ -753,7 +754,7 @@ class TestErrorHandlingAndEdgeCases:
         assert repository.position_repo.create.call_count == 25
 
     @pytest.mark.asyncio
-    async def test_historical_metrics_boundary_dates(self, repository, mock_uow):
+    async def test_historical_metrics_boundary_dates(self, repository):
         """Test historical metrics with boundary date conditions."""
         # Test with microsecond precision
         start_date = datetime(2024, 1, 1, 0, 0, 0, 1)  # 1 microsecond after midnight

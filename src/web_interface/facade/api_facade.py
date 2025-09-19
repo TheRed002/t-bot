@@ -9,6 +9,8 @@ from decimal import Decimal
 from typing import Any
 
 from src.core.base import BaseComponent
+from src.core.exceptions import ServiceError
+from src.utils.decimal_utils import to_decimal
 from src.core.types import (
     BotConfiguration,
     OrderSide,
@@ -124,7 +126,8 @@ class APIFacade(BaseComponent):
     ) -> str:
         """Place a trading order through the trading service."""
         if not self._trading_service:
-            raise ValueError("Trading service not available")
+            from src.core.exceptions import ServiceError
+            raise ServiceError("Trading service not available", component="api_facade")
 
         result = await self._trading_service.place_order_through_service(
             symbol=symbol,
@@ -138,14 +141,16 @@ class APIFacade(BaseComponent):
     async def cancel_order(self, order_id: str) -> bool:
         """Cancel an order through the trading service."""
         if not self._trading_service:
-            raise ValueError("Trading service not available")
+            from src.core.exceptions import ServiceError
+            raise ServiceError("Trading service not available", component="api_facade")
 
         return await self._trading_service.cancel_order_through_service(order_id)
 
     async def get_positions(self) -> list[Position]:
         """Get current positions through the trading service."""
         if not self._trading_service:
-            raise ValueError("Trading service not available")
+            from src.core.exceptions import ServiceError
+            raise ServiceError("Trading service not available", component="api_facade")
 
         # Trading service returns dict, need to convert to Position objects
         positions_data = await self._trading_service.get_positions_through_service()
@@ -155,51 +160,51 @@ class APIFacade(BaseComponent):
     async def create_bot(self, config: BotConfiguration) -> str:
         """Create a new trading bot."""
         if not self._bot_service:
-            raise ValueError("Bot service not available")
+            raise ServiceError("Bot service not available")
         return await self._bot_service.create_bot_through_service(config)
 
     async def start_bot(self, bot_id: str) -> bool:
         """Start a bot."""
         if not self._bot_service:
-            raise ValueError("Bot service not available")
+            raise ServiceError("Bot service not available")
         return await self._bot_service.start_bot_through_service(bot_id)
 
     async def stop_bot(self, bot_id: str) -> bool:
         """Stop a bot."""
         if not self._bot_service:
-            raise ValueError("Bot service not available")
+            raise ServiceError("Bot service not available")
         return await self._bot_service.stop_bot_through_service(bot_id)
 
     async def get_bot_status(self, bot_id: str) -> dict[str, Any]:
         """Get bot status."""
         if not self._bot_service:
-            raise ValueError("Bot service not available")
+            raise ServiceError("Bot service not available")
         return await self._bot_service.get_bot_status_through_service(bot_id)
 
     async def list_bots(self) -> list[dict[str, Any]]:
         """List all bots."""
         if not self._bot_service:
-            raise ValueError("Bot service not available")
+            raise ServiceError("Bot service not available")
         return await self._bot_service.list_bots_through_service()
 
     # Portfolio Operations
     async def get_balance(self) -> dict[str, Decimal]:
         """Get account balances."""
         if not self._portfolio_service:
-            raise ValueError("Portfolio service not available")
+            raise ServiceError("Portfolio service not available")
         balances = self._portfolio_service.generate_mock_balances()
-        return {item["asset"]: Decimal(str(item["balance"])) for item in balances}
+        return {item["asset"]: to_decimal(item["balance"]) for item in balances}
 
     async def get_portfolio_summary(self) -> dict[str, Any]:
         """Get portfolio summary."""
         if not self._portfolio_service:
-            raise ValueError("Portfolio service not available")
+            raise ServiceError("Portfolio service not available")
         return await self._portfolio_service.get_portfolio_summary_data()
 
     async def get_pnl_report(self, start_date: datetime, end_date: datetime) -> dict[str, Any]:
         """Get P&L report for date range."""
         if not self._portfolio_service:
-            raise ValueError("Portfolio service not available")
+            raise ServiceError("Portfolio service not available")
         period = f"{(end_date - start_date).days}d"
         return await self._portfolio_service.calculate_pnl_metrics(period)
 
@@ -209,7 +214,7 @@ class APIFacade(BaseComponent):
     ) -> bool:
         """Validate an order against risk rules."""
         if not self._risk_service:
-            raise ValueError("Risk service not available")
+            raise ServiceError("Risk service not available")
 
         return await self._risk_service.validate_order_through_service(
             symbol=symbol, side=side.value, amount=amount, price=price
@@ -218,7 +223,7 @@ class APIFacade(BaseComponent):
     async def get_risk_summary(self) -> dict[str, Any]:
         """Get comprehensive risk summary."""
         if not self._risk_service:
-            raise ValueError("Risk service not available")
+            raise ServiceError("Risk service not available")
         return await self._risk_service.get_risk_summary_data()
 
     async def get_risk_metrics(self) -> dict[str, Any]:
@@ -234,7 +239,7 @@ class APIFacade(BaseComponent):
     ) -> Decimal:
         """Calculate optimal position size."""
         if not self._risk_service:
-            raise ValueError("Risk service not available")
+            raise ServiceError("Risk service not available")
         return await self._risk_service.calculate_position_size_through_service(
             signal=signal,
             available_capital=available_capital,
@@ -246,19 +251,19 @@ class APIFacade(BaseComponent):
     async def list_strategies(self) -> list[dict[str, Any]]:
         """List available strategies."""
         if not self._strategy_service:
-            raise ValueError("Strategy service not available")
+            raise ServiceError("Strategy service not available")
         return await self._strategy_service.get_formatted_strategies()
 
     async def get_strategy_config(self, strategy_name: str) -> dict[str, Any]:
         """Get strategy configuration."""
         if not self._strategy_service:
-            raise ValueError("Strategy service not available")
+            raise ServiceError("Strategy service not available")
         return await self._strategy_service.get_strategy_config_through_service(strategy_name)
 
     async def validate_strategy_config(self, strategy_name: str, config: dict[str, Any]) -> bool:
         """Validate strategy configuration."""
         if not self._strategy_service:
-            raise ValueError("Strategy service not available")
+            raise ServiceError("Strategy service not available")
         return await self._strategy_service.validate_strategy_config_through_service(
             strategy_name, config
         )
@@ -304,7 +309,7 @@ class APIFacade(BaseComponent):
     async def delete_bot(self, bot_id: str, force: bool = False) -> bool:
         """Delete a bot through the bot management service."""
         if not self._bot_service:
-            raise ValueError("Bot service not available")
+            raise ServiceError("Bot service not available")
         return await self._bot_service.delete_bot_through_service(bot_id, force)
 
 

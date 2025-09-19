@@ -9,7 +9,6 @@ pattern detection.
 REFACTORED: Now uses service layer pattern with proper dependency injection:
 - BotService: Bot management operations and status
 - StateService: Bot state monitoring and persistence
-- DatabaseService: Metrics storage and retrieval (via other services)
 - RiskService: Risk assessment and monitoring integration
 """
 
@@ -21,6 +20,7 @@ from typing import TYPE_CHECKING, Any
 import psutil
 
 from src.core.base.service import BaseService
+from src.core.data_transformer import CoreDataTransformer
 from src.core.exceptions import (
     NetworkError,
     ServiceError,
@@ -91,7 +91,6 @@ log_calls = _decorators["log_calls"]
 
 # Forward references for service dependencies - use interfaces to avoid circular imports
 if TYPE_CHECKING:
-    from src.database.service import DatabaseService
     from src.risk_management.service import RiskService
     from src.state import StateService
 
@@ -108,7 +107,7 @@ class BotMonitor(BaseService):
     - Alert generation for anomalies and issues
     - Resource usage tracking per bot through service layer
     - Error pattern detection and reporting
-    - Historical performance analysis via DatabaseService
+    - Historical performance analysis via service layer
 
     The monitor coordinates with other services rather than accessing data directly.
     """
@@ -120,14 +119,12 @@ class BotMonitor(BaseService):
         Dependencies resolved via DI:
         - BotService: Bot management operations and status queries
         - StateService: Bot state monitoring and persistence
-        - DatabaseService: Metrics storage and retrieval
         - RiskService: Risk assessment and alert integration
         """
         super().__init__(name="BotMonitor")
 
         # Declare service dependencies for DI resolution - avoid circular dependency with BotService
         self.add_dependency("StateService")
-        self.add_dependency("DatabaseService")
         self.add_dependency("RiskServiceInterface")
         self.add_dependency("MetricsCollector")  # Add monitoring dependency
         self.add_dependency("ConfigService")
@@ -138,7 +135,6 @@ class BotMonitor(BaseService):
         # Service instances (resolved during startup)
         self._bot_service: BotService | None = None
         self._state_service: StateService | None = None
-        self._database_service: DatabaseService | None = None
         self._risk_service: RiskService | None = None
         self._metrics_collector: MetricsCollector | None = None
         self._config_service = None
@@ -289,7 +285,6 @@ class BotMonitor(BaseService):
         # Resolve service dependencies
         self._bot_service = self.resolve_dependency("BotService")
         self._state_service = self.resolve_dependency("StateService")
-        self._database_service = self.resolve_dependency("DatabaseService")
 
         # Risk service is optional - handle gracefully if not available
         try:
@@ -304,7 +299,7 @@ class BotMonitor(BaseService):
         self._config_service = self.resolve_dependency("ConfigService")
 
         # Verify core dependencies are resolved (risk service is optional)
-        if not all([self._bot_service, self._state_service, self._database_service]):
+        if not all([self._bot_service, self._state_service]):
             raise ServiceError("Failed to resolve all required service dependencies")
 
         # Validate MetricsCollector is available
@@ -320,7 +315,7 @@ class BotMonitor(BaseService):
 
         self._logger.info(
             "Bot monitor started successfully with service dependencies",
-            dependencies=["BotService", "StateService", "DatabaseService", "RiskService"],
+            dependencies=["BotService", "StateService", "RiskService"],
         )
 
     @with_error_context(component="BotMonitor", operation="shutdown")
@@ -702,7 +697,7 @@ class BotMonitor(BaseService):
             if alert.get("severity") == "critical"
         )
 
-        return {
+        monitoring_data = {
             "monitoring_overview": {
                 "monitored_bots": self.monitoring_stats["bots_monitored"],
                 "is_running": self.is_running,
@@ -728,6 +723,21 @@ class BotMonitor(BaseService):
             },
             "bot_summaries": bot_summaries,
         }
+
+        # Apply consistent data transformation for monitoring data communication
+        return CoreDataTransformer.apply_cross_module_consistency(
+            CoreDataTransformer.transform_for_request_reply_pattern(
+                "MONITORING_SUMMARY",
+                monitoring_data,
+                metadata={
+                    "target_modules": ["analytics", "web_interface", "risk_management"],
+                    "processing_priority": "normal",
+                    "data_type": "monitoring_summary"
+                }
+            ),
+            target_module="analytics",
+            source_module="bot_management"
+        )
 
     async def get_bot_health_details(self, bot_id: str) -> dict[str, Any] | None:
         """
@@ -953,14 +963,13 @@ class BotMonitor(BaseService):
     @with_circuit_breaker(failure_threshold=3, recovery_timeout=60)
     @with_error_context(component="BotMonitor", operation="store_metrics")
     async def _store_metrics(self, bot_id: str, metrics: BotMetrics) -> None:
-        """Store metrics using database service - NO MORE DIRECT INFLUXDB ACCESS."""
-        db_connection = None
+        """Store metrics using state service - proper service layer abstraction."""
         try:
-            if not self._database_service:
-                self._logger.warning("DatabaseService not available for metrics storage")
+            if not self._state_service:
+                self._logger.warning("StateService not available for metrics storage")
                 return
 
-            # Create metrics record for storage through database service
+            # Create metrics record for storage through state service
             metrics_record = {
                 "bot_id": bot_id,
                 "total_trades": metrics.total_trades,
@@ -979,11 +988,11 @@ class BotMonitor(BaseService):
                 "timestamp": datetime.now(timezone.utc),
             }
 
-            # Store through database service layer using the store_bot_metrics method
-            await self._database_service.store_bot_metrics(metrics_record)
+            # Store through state service layer using proper service abstraction
+            await self._state_service.store_metrics(bot_id, metrics_record)
 
             self._logger.debug(
-                "Stored metrics through database service",
+                "Stored metrics through state service",
                 bot_id=bot_id,
                 metrics_count=len(metrics_record),
             )
@@ -994,14 +1003,6 @@ class BotMonitor(BaseService):
                 context={"operation": "store_metrics", "bot_id": bot_id},
                 severity=ErrorSeverity.MEDIUM.value,
             )
-        finally:
-            if db_connection:
-                try:
-                    await db_connection.close()
-                except Exception as e:
-                    self._logger.debug(
-                        f"Failed to close database connection during store_metrics: {e}"
-                    )
 
     async def _check_performance_anomalies(self, bot_id: str, metrics: BotMetrics) -> None:
         """Check for performance anomalies against baseline."""
@@ -1396,18 +1397,13 @@ class BotMonitor(BaseService):
     @with_circuit_breaker(failure_threshold=5, recovery_timeout=30)
     @with_error_context(component="BotMonitor", operation="collect_system_metrics")
     async def _collect_system_metrics(self) -> None:
-        """Collect system-wide metrics using database service - NO MORE DIRECT INFLUXDB ACCESS."""
-        db_connection = None
+        """Collect system-wide metrics using service layer abstraction."""
         try:
-            if not self._database_service:
-                self._logger.warning("DatabaseService not available for system metrics collection")
-                return
-
             # Collect system resource usage
             cpu_percent = psutil.cpu_percent(interval=1)
             memory = psutil.virtual_memory()
 
-            # Create system metrics record for database service
+            # Create system metrics record for state service
             system_metrics = {
                 "component": "bot_monitor",
                 "cpu_usage_percent": cpu_percent,
@@ -1444,14 +1440,15 @@ class BotMonitor(BaseService):
                 except Exception as e:
                     self._logger.debug(f"Failed to push system metrics: {e}")
 
-            # Store through database service layer using the store_bot_metrics method
+            # Store through state service layer using proper service abstraction
             # We'll use bot_id="system" to indicate system-wide metrics
-            await self._database_service.store_bot_metrics(
-                {"bot_id": "system_monitor", **system_metrics}
-            )
+            if self._state_service:
+                await self._state_service.store_metrics(
+                    "system_monitor", system_metrics
+                )
 
             self._logger.debug(
-                "Collected and stored system metrics through database service",
+                "Collected and stored system metrics through state service",
                 cpu_percent=cpu_percent,
                 memory_percent=memory.percent,
                 monitored_bots=len(self.monitored_bots),
@@ -1469,14 +1466,6 @@ class BotMonitor(BaseService):
                 context={"operation": "collect_system_metrics"},
                 severity=ErrorSeverity.MEDIUM.value,
             )
-        finally:
-            if db_connection:
-                try:
-                    await db_connection.close()
-                except Exception as e:
-                    self._logger.debug(
-                        f"Failed to close database connection during collect_system_metrics: {e}"
-                    )
 
     async def _update_all_baselines(self) -> None:
         """Update performance baselines for all bots."""

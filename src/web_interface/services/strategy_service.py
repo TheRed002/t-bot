@@ -17,12 +17,12 @@ from src.core.exceptions import ServiceError
 from src.web_interface.interfaces import WebStrategyServiceInterface
 
 
-class WebStrategyService(BaseComponent, WebStrategyServiceInterface):
+class WebStrategyService(BaseComponent):
     """Service handling strategy business logic for web interface."""
 
-    def __init__(self, strategy_facade=None):
+    def __init__(self, strategy_service=None):
         super().__init__()
-        self.strategy_facade = strategy_facade
+        self.strategy_service = strategy_service
 
     async def initialize(self) -> None:
         """Initialize the service."""
@@ -35,13 +35,13 @@ class WebStrategyService(BaseComponent, WebStrategyServiceInterface):
     async def get_formatted_strategies(self) -> list[dict[str, Any]]:
         """Get strategies with web-specific formatting."""
         try:
-            if self.strategy_facade:
+            if self.strategy_service:
                 # Get strategies from actual service
-                raw_strategies = await self.strategy_facade.list_strategies()
+                raw_strategies = await self.strategy_service.get_all_strategies()
 
-                # Format for web interface
+                # Format for web interface - get_all_strategies returns dict[str, dict[str, Any]]
                 formatted_strategies = []
-                for strategy in raw_strategies:
+                for strategy_id, strategy in raw_strategies.items():
                     formatted_strategy = {
                         "strategy_name": strategy.get("name", "unknown"),
                         "strategy_type": strategy.get("type", "unknown"),
@@ -203,9 +203,9 @@ class WebStrategyService(BaseComponent, WebStrategyServiceInterface):
     async def get_strategy_performance_data(self, strategy_name: str) -> dict[str, Any]:
         """Get strategy performance data with web-specific metrics."""
         try:
-            if self.strategy_facade:
+            if self.strategy_service:
                 # Get performance from actual service
-                raw_performance = await self.strategy_facade.get_strategy_performance(strategy_name)
+                raw_performance = await self.strategy_service.get_strategy_performance(strategy_name)
 
                 # Format for web interface
                 formatted_performance = {
@@ -345,7 +345,7 @@ class WebStrategyService(BaseComponent, WebStrategyServiceInterface):
         return {
             "service": "WebStrategyService",
             "status": "healthy",
-            "strategy_facade_available": self.strategy_facade is not None,
+            "strategy_service_available": self.strategy_service is not None,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
@@ -364,10 +364,16 @@ class WebStrategyService(BaseComponent, WebStrategyServiceInterface):
         }
 
     async def get_strategy_config_through_service(self, strategy_name: str) -> dict[str, Any]:
-        """Get strategy configuration through service layer (wraps facade call)."""
+        """Get strategy configuration through service layer (wraps service call)."""
         try:
-            if self.strategy_facade:
-                return await self.strategy_facade.get_strategy_config(strategy_name)
+            if self.strategy_service:
+                # Get strategy from service - get_all_strategies returns dict[str, dict[str, Any]] by strategy_id
+                strategies = await self.strategy_service.get_all_strategies()
+                # Search by name since get_all_strategies returns by strategy_id
+                for strategy_id, strategy_data in strategies.items():
+                    if strategy_data.get("name") == strategy_name:
+                        return strategy_data
+                return None
             else:
                 # Mock implementation for development
                 return {
@@ -398,12 +404,34 @@ class WebStrategyService(BaseComponent, WebStrategyServiceInterface):
     async def validate_strategy_config_through_service(
         self, strategy_name: str, parameters: dict[str, Any]
     ) -> bool:
-        """Validate strategy configuration through service layer (wraps facade call)."""
+        """Validate strategy configuration through service layer (wraps service call)."""
         try:
-            if self.strategy_facade:
-                return await self.strategy_facade.validate_strategy_config(
-                    strategy_name, parameters
+            if self.strategy_service:
+                # Create a StrategyConfig object for validation
+                from src.core.types import StrategyConfig, StrategyType
+
+                # Map strategy name to type
+                strategy_type_map = {
+                    "trend_following": StrategyType.TREND_FOLLOWING,
+                    "mean_reversion": StrategyType.MEAN_REVERSION,
+                    "breakout": StrategyType.BREAKOUT,
+                    "arbitrage_scanner": StrategyType.ARBITRAGE,
+                    "market_making": StrategyType.MARKET_MAKING,
+                }
+
+                strategy_type = strategy_type_map.get(strategy_name, StrategyType.TREND_FOLLOWING)
+
+                # Create config object with required fields
+                config = StrategyConfig(
+                    strategy_id=f"web_{strategy_name}",
+                    strategy_type=strategy_type,
+                    name=strategy_name,
+                    symbol="BTCUSDT",  # Default symbol for validation
+                    timeframe="1h",  # Default timeframe for validation
+                    parameters=parameters
                 )
+
+                return await self.strategy_service.validate_strategy_config(config)
             else:
                 # Mock implementation for development - basic validation
                 required_params = ["lookback_period", "threshold", "stop_loss"]

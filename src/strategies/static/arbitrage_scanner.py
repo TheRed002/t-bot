@@ -740,7 +740,7 @@ class ArbitrageOpportunity(BaseStrategy):
             )
             return signals[: self.max_opportunities] if signals else []
 
-    async def _check_triangular_path(self, path: list[str]) -> Signal | None:
+    async def _check_triangular_path(self, path: list[str]) -> "Signal | None":
         """
         Check if triangular arbitrage opportunity still exists.
 

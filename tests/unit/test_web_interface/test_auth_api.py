@@ -25,10 +25,12 @@ class TestAuthAPI:
 
                 # Mock successful authentication
                 mock_user = UserInDB(
-                    user_id="admin_001",
+                    id="admin_001",
                     username="admin",
                     email="admin@test.com",
-                    hashed_password="hashed",
+                    password_hash="hashed_password",
+                    is_active=True,
+                    is_verified=True,
                     scopes=["admin", "read", "write", "trade"],
                 )
                 mock_auth.return_value = mock_user
@@ -93,10 +95,11 @@ class TestAuthAPI:
             from src.web_interface.security.auth import User
 
             mock_user = User(
-                user_id="test_001",
+                id="test_001",
                 username="testuser",
                 email="test@example.com",
                 is_active=True,
+                is_verified=True,
                 scopes=["read", "write"],
             )
             mock_get_user.return_value = mock_user
@@ -106,7 +109,7 @@ class TestAuthAPI:
             assert response.status_code == status.HTTP_200_OK
             data = response.json()
             assert data["username"] == "testuser"
-            assert data["user_id"] == "test_001"
+            assert data["id"] == "test_001"
 
     def test_logout(self, test_client, auth_headers):
         """Test user logout."""
@@ -114,10 +117,11 @@ class TestAuthAPI:
             from src.web_interface.security.auth import User
 
             mock_user = User(
-                user_id="test_001",
+                id="test_001",
                 username="testuser",
                 email="test@example.com",
                 is_active=True,
+                is_verified=True,
                 scopes=["read"],
             )
             mock_get_user.return_value = mock_user
@@ -148,20 +152,23 @@ class TestAuthAPI:
 
                         # Mock current user
                         mock_user = User(
-                            user_id="test_001",
+                            id="test_001",
                             username="testuser",
                             email="test@example.com",
                             is_active=True,
+                            is_verified=True,
                             scopes=["read"],
                         )
                         mock_get_user.return_value = mock_user
 
                         # Mock database user (get_user is async)
                         mock_db_user = UserInDB(
-                            user_id="test_001",
+                            id="test_001",
                             username="testuser",
                             email="test@example.com",
-                            hashed_password="old_hashed_password",
+                            password_hash="old_hashed_password",
+                            is_active=True,
+                            is_verified=True,
                             scopes=["read"],
                         )
                         mock_get_db_user.return_value = mock_db_user
@@ -202,20 +209,23 @@ class TestAuthAPI:
 
                         # Mock current user
                         mock_user = User(
-                            user_id="test_001",
+                            id="test_001",
                             username="testuser",
                             email="test@example.com",
                             is_active=True,
+                            is_verified=True,
                             scopes=["read"],
                         )
                         mock_get_user.return_value = mock_user
 
                         # Mock database user (get_user is async)
                         mock_db_user = UserInDB(
-                            user_id="test_001",
+                            id="test_001",
                             username="testuser",
                             email="test@example.com",
-                            hashed_password="old_hashed_password",
+                            password_hash="old_hashed_password",
+                            is_active=True,
+                            is_verified=True,
                             scopes=["read"],
                         )
                         mock_get_db_user.return_value = mock_db_user
@@ -249,20 +259,23 @@ class TestAuthAPI:
 
                 # Mock admin user
                 mock_admin = User(
-                    user_id="admin_001",
+                    id="admin_001",
                     username="admin",
                     email="admin@example.com",
                     is_active=True,
+                    is_verified=True,
                     scopes=["admin"],
                 )
                 mock_get_admin.return_value = mock_admin
 
                 # Mock user creation
                 mock_created_user = UserInDB(
-                    user_id="new_001",
+                    id="new_001",
                     username="newuser",
                     email="newuser@example.com",
-                    hashed_password="hashed",
+                    password_hash="hashed",
+                    is_active=True,
+                    is_verified=True,
                     scopes=["read", "write"],
                 )
                 mock_create.return_value = mock_created_user
@@ -291,10 +304,11 @@ class TestAuthAPI:
 
                 # Mock admin user
                 mock_admin = User(
-                    user_id="admin_001",
+                    id="admin_001",
                     username="admin",
                     email="admin@example.com",
                     is_active=True,
+                    is_verified=True,
                     scopes=["admin"],
                 )
                 mock_get_admin.return_value = mock_admin
@@ -302,17 +316,17 @@ class TestAuthAPI:
                 # Mock user database
                 mock_db.values.return_value = [
                     UserInDB(
-                        user_id="user_001",
+                        id="user_001",
                         username="user1",
                         email="user1@example.com",
-                        hashed_password="hashed",
+                        password_hash="hashed",
                         scopes=["read"],
                     ),
                     UserInDB(
-                        user_id="user_002",
+                        id="user_002",
                         username="user2",
                         email="user2@example.com",
-                        hashed_password="hashed",
+                        password_hash="hashed",
                         scopes=["read", "write"],
                     ),
                 ]

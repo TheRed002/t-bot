@@ -20,8 +20,9 @@ import pytest
 
 # Create a functional BaseComponent mock
 class MockBaseComponent:
-    def __init__(self, name="test"):
+    def __init__(self, name="test", correlation_id=None):
         self.name = name
+        self.correlation_id = correlation_id
         self.logger = Mock()
 
 

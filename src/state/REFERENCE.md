@@ -2,7 +2,7 @@
 
 ## INTEGRATION
 **Dependencies**: core, database, error_handling, monitoring, utils
-**Used By**: None
+**Used By**: strategies
 **Provides**: CheckpointManager, EnvironmentAwareStateManager, MockDatabaseService, QualityController, QualityService, StateBusinessService, StateController, StateManager, StateMonitoringService, StatePersistenceService, StateRecoveryManager, StateService, StateSyncManager, StateSynchronizationService, StateValidationService, TradeLifecycleManager, TradeLifecycleService
 **Patterns**: Async Operations, Circuit Breaker, Component Architecture, Service Layer
 
@@ -10,7 +10,7 @@
 **Financial**:
 - Decimal precision arithmetic
 - Database decimal columns
-- Decimal precision arithmetic
+- Financial data handling
 **Performance**:
 - Parallel execution
 - Parallel execution
@@ -21,8 +21,8 @@
 - StateMonitoringService inherits from base architecture
 
 ## MODULE OVERVIEW
-**Files**: 27 Python files
-**Classes**: 98
+**Files**: 29 Python files
+**Classes**: 96
 **Functions**: 12
 
 ## COMPLETE API REFERENCE
@@ -37,7 +37,7 @@
 - `async start(self) -> None`
 - `async stop(self) -> None`
 - `async create_entity(self, entity: Any) -> Any`
-- `async get_entity_by_id(self, model_class: type, entity_id: Any) -> Union[Any, None]`
+- `async get_entity_by_id(self, model_class: type, entity_id: Any) -> Any | None`
 - `async health_check(self) -> Any`
 - `get_metrics(self) -> dict[str, Any]`
 
@@ -80,8 +80,8 @@
 - `async load_state(self, state_type: 'StateType', state_id: str) -> dict[str, Any] | None`
 - `async delete_state(self, state_type: 'StateType', state_id: str) -> bool`
 - `async list_states(self, state_type: 'StateType', limit: int | None = None, offset: int = 0) -> list[dict[str, Any]]`
-- `async save_snapshot(self, snapshot: 'StateSnapshot') -> bool`
-- `async load_snapshot(self, snapshot_id: str) -> 'StateSnapshot | None'`
+- `async save_snapshot(self, snapshot: 'RuntimeStateSnapshot') -> bool`
+- `async load_snapshot(self, snapshot_id: str) -> 'RuntimeStateSnapshot | None'`
 
 ### Protocol: `StateSynchronizationServiceProtocol`
 
@@ -99,7 +99,8 @@
 **Required Methods:**
 - `async validate_state_data(self, ...) -> dict[str, Any]`
 - `async validate_state_transition(self, ...) -> bool`
-- `async validate_business_rules(self, state_type: 'StateType', state_data: dict[str, Any]) -> list[str]`
+- `async validate_business_rules(self, ...) -> list[str]`
+- `matches_criteria(self, state: dict[str, Any], criteria: dict[str, Any]) -> bool`
 
 ### Protocol: `TradeLifecycleServiceProtocol`
 
@@ -180,15 +181,31 @@
 
 ### Implementation: `StateController` ✅
 
-**Inherits**: BaseService
+**Inherits**: BaseService, ErrorPropagationMixin
 **Purpose**: State controller that coordinates state management operations
 **Status**: Complete
 
 **Implemented Methods:**
-- `async get_state(self, state_type: 'StateType', state_id: str, include_metadata: bool = False) -> dict[str, Any] | None` - Line 87
-- `async set_state(self, ...) -> bool` - Line 129
-- `async delete_state(self, ...) -> bool` - Line 215
-- `async cleanup(self) -> None` - Line 352
+- `async get_state(self, state_type: 'StateType', state_id: str, include_metadata: bool = False) -> dict[str, Any] | None` - Line 89
+- `async set_state(self, ...) -> bool` - Line 131
+- `async delete_state(self, ...) -> bool` - Line 217
+- `async cleanup(self) -> None` - Line 354
+
+### Implementation: `StateDataTransformer` ✅
+
+**Purpose**: Handles consistent data transformation for state module
+**Status**: Complete
+
+**Implemented Methods:**
+- `transform_state_change_to_event_data(state_type, ...) -> dict[str, Any]` - Line 23
+- `transform_state_snapshot_to_event_data(snapshot_data: dict[str, Any], metadata: dict[str, Any] | None = None) -> dict[str, Any]` - Line 55
+- `transform_error_to_event_data(error, ...) -> dict[str, Any]` - Line 82
+- `validate_financial_precision(data: dict[str, Any]) -> dict[str, Any]` - Line 104
+- `ensure_boundary_fields(data: dict[str, Any], source: str = 'state_management') -> dict[str, Any]` - Line 126
+- `transform_for_pub_sub(cls, event_type: str, data: Any, metadata: dict[str, Any] | None = None) -> dict[str, Any]` - Line 162
+- `transform_for_req_reply(cls, request_type: str, data: Any, correlation_id: str | None = None) -> dict[str, Any]` - Line 212
+- `align_processing_paradigm(cls, data: dict[str, Any], target_mode: str = 'stream') -> dict[str, Any]` - Line 237
+- `apply_cross_module_validation(cls, ...) -> dict[str, Any]` - Line 301
 
 ### Implementation: `StateIsolationLevel` ✅
 
@@ -267,7 +284,7 @@
 - `async start(self) -> None` - Line 97
 - `async stop(self) -> None` - Line 102
 - `async create_entity(self, entity: Any) -> Any` - Line 108
-- `async get_entity_by_id(self, model_class: type, entity_id: Any) -> Union[Any, None]` - Line 116
+- `async get_entity_by_id(self, model_class: type, entity_id: Any) -> Any | None` - Line 116
 - `async health_check(self) -> dict[str, Any]` - Line 126
 - `get_metrics(self) -> dict[str, Any]` - Line 134
 
@@ -279,7 +296,7 @@
 
 **Implemented Methods:**
 - `async create_state_service(self, ...) -> 'StateService'` - Line 167
-- `async create_state_service_for_testing(self, config: Union[Config, None] = None, mock_database: bool = False) -> 'StateService'` - Line 220
+- `async create_state_service_for_testing(self, config: Config | None = None, mock_database: bool = False) -> 'StateService'` - Line 220
 
 ### Implementation: `StateServiceRegistry` ✅
 
@@ -301,9 +318,9 @@
 **Status**: Abstract Base Class
 
 **Implemented Methods:**
-- `async validate_state_change(self, ...) -> dict[str, Any]` - Line 43
-- `async process_state_update(self, ...) -> 'StateChange'` - Line 55
-- `async calculate_state_metadata(self, ...) -> 'StateMetadata'` - Line 67
+- `async validate_state_change(self, ...) -> dict[str, Any]` - Line 44
+- `async process_state_update(self, ...) -> 'StateChange'` - Line 56
+- `async calculate_state_metadata(self, ...) -> 'StateMetadata'` - Line 68
 
 ### Implementation: `StatePersistenceServiceInterface` 🔧
 
@@ -312,11 +329,11 @@
 **Status**: Abstract Base Class
 
 **Implemented Methods:**
-- `async save_state(self, ...) -> bool` - Line 82
-- `async load_state(self, state_type: 'StateType', state_id: str) -> dict[str, Any] | None` - Line 93
-- `async delete_state(self, state_type: 'StateType', state_id: str) -> bool` - Line 98
-- `async save_snapshot(self, snapshot: 'StateSnapshot') -> bool` - Line 103
-- `async load_snapshot(self, snapshot_id: str) -> 'StateSnapshot | None'` - Line 108
+- `async save_state(self, ...) -> bool` - Line 83
+- `async load_state(self, state_type: 'StateType', state_id: str) -> dict[str, Any] | None` - Line 94
+- `async delete_state(self, state_type: 'StateType', state_id: str) -> bool` - Line 99
+- `async save_snapshot(self, snapshot: 'RuntimeStateSnapshot') -> bool` - Line 104
+- `async load_snapshot(self, snapshot_id: str) -> 'RuntimeStateSnapshot | None'` - Line 109
 
 ### Implementation: `StateValidationServiceInterface` 🔧
 
@@ -325,9 +342,10 @@
 **Status**: Abstract Base Class
 
 **Implemented Methods:**
-- `async validate_state_data(self, ...) -> dict[str, Any]` - Line 117
-- `async validate_state_transition(self, ...) -> bool` - Line 127
-- `async validate_business_rules(self, state_type: 'StateType', state_data: dict[str, Any]) -> list[str]` - Line 137
+- `async validate_state_data(self, ...) -> dict[str, Any]` - Line 118
+- `async validate_state_transition(self, ...) -> bool` - Line 128
+- `async validate_business_rules(self, ...) -> list[str]` - Line 138
+- `matches_criteria(self, state: dict[str, Any], criteria: dict[str, Any]) -> bool` - Line 148
 
 ### Implementation: `StateSynchronizationServiceInterface` 🔧
 
@@ -336,9 +354,9 @@
 **Status**: Abstract Base Class
 
 **Implemented Methods:**
-- `async synchronize_state_change(self, state_change: 'StateChange') -> bool` - Line 150
-- `async broadcast_state_change(self, ...) -> None` - Line 155
-- `async resolve_conflicts(self, ...) -> 'StateChange'` - Line 166
+- `async synchronize_state_change(self, state_change: 'StateChange') -> bool` - Line 161
+- `async broadcast_state_change(self, ...) -> None` - Line 166
+- `async resolve_conflicts(self, ...) -> 'StateChange'` - Line 177
 
 ### Implementation: `CheckpointServiceInterface` 🔧
 
@@ -347,10 +365,10 @@
 **Status**: Abstract Base Class
 
 **Implemented Methods:**
-- `async create_checkpoint(self, bot_id: str, state_data: dict[str, Any], checkpoint_type: str = 'manual') -> str` - Line 180
-- `async restore_checkpoint(self, checkpoint_id: str) -> tuple[str, dict[str, Any]] | None` - Line 190
-- `async list_checkpoints(self, bot_id: str | None = None, limit: int = 20) -> list[dict[str, Any]]` - Line 195
-- `async delete_checkpoint(self, checkpoint_id: str) -> bool` - Line 202
+- `async create_checkpoint(self, bot_id: str, state_data: dict[str, Any], checkpoint_type: str = 'manual') -> str` - Line 191
+- `async restore_checkpoint(self, checkpoint_id: str) -> tuple[str, dict[str, Any]] | None` - Line 201
+- `async list_checkpoints(self, bot_id: str | None = None, limit: int = 20) -> list[dict[str, Any]]` - Line 206
+- `async delete_checkpoint(self, checkpoint_id: str) -> bool` - Line 213
 
 ### Implementation: `StateEventServiceInterface` 🔧
 
@@ -359,9 +377,9 @@
 **Status**: Abstract Base Class
 
 **Implemented Methods:**
-- `async emit_state_event(self, event_type: str, event_data: dict[str, Any]) -> None` - Line 211
-- `subscribe_to_events(self, event_type: str, callback: Any) -> None` - Line 216
-- `unsubscribe_from_events(self, event_type: str, callback: Any) -> None` - Line 221
+- `async emit_state_event(self, event_type: str, event_data: dict[str, Any]) -> None` - Line 222
+- `subscribe_to_events(self, event_type: str, callback: Any) -> None` - Line 227
+- `unsubscribe_from_events(self, event_type: str, callback: Any) -> None` - Line 232
 
 ### Implementation: `StateServiceFactoryInterface` 🔧
 
@@ -370,8 +388,19 @@
 **Status**: Abstract Base Class
 
 **Implemented Methods:**
-- `async create_state_service(self, ...) -> 'StateService'` - Line 230
-- `async create_state_service_for_testing(self, config: Union['Config', None] = None, mock_database: bool = False) -> 'StateService'` - Line 240
+- `async create_state_service(self, ...) -> 'StateService'` - Line 241
+- `async create_state_service_for_testing(self, config: Union['Config', None] = None, mock_database: bool = False) -> 'StateService'` - Line 251
+
+### Implementation: `MetricsStorageInterface` 🔧
+
+**Inherits**: ABC
+**Purpose**: Abstract interface for metrics storage operations
+**Status**: Abstract Base Class
+
+**Implemented Methods:**
+- `async store_validation_metrics(self, validation_data: dict[str, Any]) -> bool` - Line 264
+- `async store_analysis_metrics(self, analysis_data: dict[str, Any]) -> bool` - Line 269
+- `async get_historical_metrics(self, metric_type: str, start_time: Any, end_time: Any) -> list[dict[str, Any]]` - Line 274
 
 ### Implementation: `MetricType` ✅
 
@@ -406,19 +435,19 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async initialize(self) -> None` - Line 252
-- `async cleanup(self) -> None` - Line 273
-- `register_health_check(self, ...) -> str` - Line 340
-- `async get_health_status(self) -> dict[str, Any]` - Line 377
-- `record_metric(self, ...) -> None` - Line 444
-- `record_operation_time(self, operation_name: str, duration_ms: float) -> None` - Line 494
-- `get_metrics(self) -> dict[str, Any]` - Line 514
-- `async get_filtered_metrics(self, ...) -> dict[str, list[Metric]]` - Line 518
-- `set_alert_threshold(self, ...) -> None` - Line 567
-- `register_alert_handler(self, handler: Callable[[Alert], None]) -> None` - Line 597
-- `async get_active_alerts(self) -> list[Alert]` - Line 601
-- `async acknowledge_alert(self, alert_id: str, acknowledged_by: str = '') -> bool` - Line 605
-- `async generate_performance_report(self, start_time: datetime | None = None, end_time: datetime | None = None) -> PerformanceReport` - Line 622
+- `async initialize(self) -> None` - Line 251
+- `async cleanup(self) -> None` - Line 272
+- `register_health_check(self, ...) -> str` - Line 339
+- `async get_health_status(self) -> dict[str, Any]` - Line 376
+- `record_metric(self, ...) -> None` - Line 443
+- `record_operation_time(self, operation_name: str, duration_ms: float) -> None` - Line 493
+- `get_metrics(self) -> dict[str, Any]` - Line 513
+- `async get_filtered_metrics(self, ...) -> dict[str, list[Metric]]` - Line 517
+- `set_alert_threshold(self, ...) -> None` - Line 566
+- `register_alert_handler(self, handler: Callable[[Alert], None]) -> None` - Line 596
+- `async get_active_alerts(self) -> list[Alert]` - Line 600
+- `async acknowledge_alert(self, alert_id: str, acknowledged_by: str = '') -> bool` - Line 604
+- `async generate_performance_report(self, start_time: datetime | None = None, end_time: datetime | None = None) -> PerformanceReport` - Line 621
 
 ### Implementation: `StateMetricsAdapter` ✅
 
@@ -447,65 +476,33 @@
 **Purpose**: Quality assessment levels
 **Status**: Complete
 
-### Implementation: `ValidationResult` ✅
-
-**Inherits**: Enum
-**Purpose**: Validation result enumeration
-**Status**: Complete
-
-### Implementation: `ValidationCheck` ✅
-
-**Purpose**: Individual validation check result
-**Status**: Complete
-
-### Implementation: `PreTradeValidation` ✅
-
-**Purpose**: Pre-trade validation results
-**Status**: Complete
-
-### Implementation: `PostTradeAnalysis` ✅
-
-**Purpose**: Post-trade analysis results
-**Status**: Complete
-
 ### Implementation: `QualityTrend` ✅
 
 **Purpose**: Quality trend analysis
 **Status**: Complete
 
-### Implementation: `MetricsStorage` 🔧
-
-**Inherits**: ABC
-**Purpose**: Abstract interface for metrics storage operations
-**Status**: Abstract Base Class
-
-**Implemented Methods:**
-- `async store_validation_metrics(self, validation_data: dict[str, Any]) -> bool` - Line 166
-- `async store_analysis_metrics(self, analysis_data: dict[str, Any]) -> bool` - Line 171
-- `async get_historical_metrics(self, metric_type: str, start_time: datetime, end_time: datetime) -> list[dict[str, Any]]` - Line 176
-
 ### Implementation: `InfluxDBMetricsStorage` ✅
 
-**Inherits**: MetricsStorage
+**Inherits**: MetricsStorageInterface
 **Purpose**: InfluxDB implementation of MetricsStorage interface
 **Status**: Complete
 
 **Implemented Methods:**
-- `async close(self) -> None` - Line 209
-- `async store_validation_metrics(self, validation_data: dict[str, Any]) -> bool` - Line 245
-- `async store_analysis_metrics(self, analysis_data: dict[str, Any]) -> bool` - Line 280
-- `async get_historical_metrics(self, metric_type: str, start_time: datetime, end_time: datetime) -> list[dict[str, Any]]` - Line 326
+- `async close(self) -> None` - Line 123
+- `async store_validation_metrics(self, validation_data: dict[str, Any]) -> bool` - Line 159
+- `async store_analysis_metrics(self, analysis_data: dict[str, Any]) -> bool` - Line 195
+- `async get_historical_metrics(self, metric_type: str, start_time: datetime, end_time: datetime) -> list[dict[str, Any]]` - Line 242
 
 ### Implementation: `NullMetricsStorage` ✅
 
-**Inherits**: MetricsStorage
+**Inherits**: MetricsStorageInterface
 **Purpose**: Null implementation of MetricsStorage for testing or when metrics storage is disabled
 **Status**: Complete
 
 **Implemented Methods:**
-- `async store_validation_metrics(self, validation_data: dict[str, Any]) -> bool` - Line 347
-- `async store_analysis_metrics(self, analysis_data: dict[str, Any]) -> bool` - Line 351
-- `async get_historical_metrics(self, metric_type: str, start_time: datetime, end_time: datetime) -> list[dict[str, Any]]` - Line 355
+- `async store_validation_metrics(self, validation_data: dict[str, Any]) -> bool` - Line 263
+- `async store_analysis_metrics(self, analysis_data: dict[str, Any]) -> bool` - Line 267
+- `async get_historical_metrics(self, metric_type: str, start_time: datetime, end_time: datetime) -> list[dict[str, Any]]` - Line 271
 
 ### Implementation: `QualityController` ✅
 
@@ -514,26 +511,20 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async initialize(self) -> None` - Line 485
-- `async validate_pre_trade(self, ...) -> PreTradeValidation` - Line 506
-- `async analyze_post_trade(self, ...) -> PostTradeAnalysis` - Line 570
-- `async get_quality_summary(self, bot_id: str | None = None, hours: int = 24) -> dict[str, Any]` - Line 630
-- `async get_quality_trend_analysis(self, metric: str, days: int = 7) -> QualityTrend` - Line 668
-- `get_quality_metrics(self) -> dict[str, Any]` - Line 1031
-- `async get_summary_statistics(self, hours: int = 24, bot_id: str | None = None) -> dict[str, Any]` - Line 1052
-- `async validate_state_consistency(self, state: Any) -> bool` - Line 1126
-- `async validate_portfolio_balance(self, portfolio_state: Any) -> bool` - Line 1142
-- `async validate_position_consistency(self, position: Any, related_orders: list) -> bool` - Line 1158
-- `async run_integrity_checks(self, state: Any) -> dict[str, Any]` - Line 1175
-- `async suggest_corrections(self, state: Any) -> list[dict[str, Any]]` - Line 1212
-- `async cleanup(self) -> None` - Line 1265
-- `add_validation_rule(self, name: str, rule: Callable[Ellipsis, Any]) -> None` - Line 1278
-
-### Implementation: `AuditEventType` ✅
-
-**Inherits**: Enum
-**Purpose**: Audit event type enumeration
-**Status**: Complete
+- `async initialize(self) -> None` - Line 401
+- `async validate_pre_trade(self, ...) -> PreTradeValidation` - Line 422
+- `async analyze_post_trade(self, ...) -> PostTradeAnalysis` - Line 486
+- `async get_quality_summary(self, bot_id: str | None = None, hours: int = 24) -> dict[str, Any]` - Line 546
+- `async get_quality_trend_analysis(self, metric: str, days: int = 7) -> QualityTrend` - Line 584
+- `get_quality_metrics(self) -> dict[str, Any]` - Line 947
+- `async get_summary_statistics(self, hours: int = 24, bot_id: str | None = None) -> dict[str, Any]` - Line 968
+- `async validate_state_consistency(self, state: Any) -> bool` - Line 1042
+- `async validate_portfolio_balance(self, portfolio_state: Any) -> bool` - Line 1058
+- `async validate_position_consistency(self, position: Any, related_orders: list) -> bool` - Line 1074
+- `async run_integrity_checks(self, state: Any) -> dict[str, Any]` - Line 1091
+- `async suggest_corrections(self, state: Any) -> list[dict[str, Any]]` - Line 1128
+- `async cleanup(self) -> None` - Line 1181
+- `add_validation_rule(self, name: str, rule: Callable[Ellipsis, Any]) -> None` - Line 1194
 
 ### Implementation: `RecoveryStatus` ✅
 
@@ -568,16 +559,16 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async initialize(self) -> None` - Line 230
-- `async cleanup(self) -> None` - Line 257
-- `async record_state_change(self, ...) -> str` - Line 324
-- `async get_audit_trail(self, ...) -> list[AuditEntry]` - Line 388
-- `async create_recovery_point(self, description: str = '') -> str` - Line 447
-- `async list_recovery_points(self, ...) -> list[RecoveryPoint]` - Line 495
-- `async recover_to_point(self, ...) -> str` - Line 536
-- `async get_recovery_status(self, operation_id: str) -> RecoveryOperation | None` - Line 600
-- `async detect_corruption(self, state_type: str | None = None, state_id: str | None = None) -> list[CorruptionReport]` - Line 606
-- `async repair_corruption(self, report_id: str, repair_method: str = 'auto') -> bool` - Line 659
+- `async initialize(self) -> None` - Line 215
+- `async cleanup(self) -> None` - Line 242
+- `async record_state_change(self, ...) -> str` - Line 309
+- `async get_audit_trail(self, ...) -> list[AuditEntry]` - Line 373
+- `async create_recovery_point(self, description: str = '') -> str` - Line 432
+- `async list_recovery_points(self, ...) -> list[RecoveryPoint]` - Line 480
+- `async recover_to_point(self, ...) -> str` - Line 521
+- `async get_recovery_status(self, operation_id: str) -> RecoveryOperation | None` - Line 585
+- `async detect_corruption(self, state_type: str | None = None, state_id: str | None = None) -> list[CorruptionReport]` - Line 591
+- `async repair_corruption(self, report_id: str, repair_method: str = 'auto') -> bool` - Line 644
 
 ### Implementation: `QualityService` ✅
 
@@ -599,10 +590,10 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async validate_state_change(self, ...) -> dict[str, Any]` - Line 87
-- `async process_state_update(self, ...) -> 'StateChange'` - Line 154
-- `async calculate_state_metadata(self, ...) -> 'StateMetadata'` - Line 229
-- `async validate_business_rules(self, state_type: 'StateType', state_data: dict[str, Any], operation: str) -> list[str]` - Line 267
+- `async validate_state_change(self, ...) -> dict[str, Any]` - Line 89
+- `async process_state_update(self, ...) -> 'StateChange'` - Line 156
+- `async calculate_state_metadata(self, ...) -> 'StateMetadata'` - Line 231
+- `async validate_business_rules(self, state_type: 'StateType', state_data: dict[str, Any], operation: str) -> list[str]` - Line 269
 
 ### Implementation: `StatePersistenceService` ✅
 
@@ -611,45 +602,46 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `database_service(self)` - Line 105
-- `async start(self) -> None` - Line 109
-- `async stop(self) -> None` - Line 124
-- `async save_state(self, ...) -> bool` - Line 157
-- `async load_state(self, state_type: 'StateType', state_id: str) -> dict[str, Any] | None` - Line 233
-- `async delete_state(self, state_type: 'StateType', state_id: str) -> bool` - Line 279
-- `async list_states(self, state_type: 'StateType', limit: int | None = None, offset: int = 0) -> list[dict[str, Any]]` - Line 320
-- `async save_snapshot(self, snapshot: 'StateSnapshot') -> bool` - Line 387
-- `async load_snapshot(self, snapshot_id: str) -> 'StateSnapshot | None'` - Line 433
+- `database_service(self)` - Line 106
+- `async start(self) -> None` - Line 110
+- `async stop(self) -> None` - Line 125
+- `async save_state(self, ...) -> bool` - Line 158
+- `async load_state(self, state_type: 'StateType', state_id: str) -> dict[str, Any] | None` - Line 234
+- `async delete_state(self, state_type: 'StateType', state_id: str) -> bool` - Line 280
+- `async list_states(self, state_type: 'StateType', limit: int | None = None, offset: int = 0) -> list[dict[str, Any]]` - Line 321
+- `async save_snapshot(self, snapshot: 'RuntimeStateSnapshot') -> bool` - Line 388
+- `async load_snapshot(self, snapshot_id: str) -> 'RuntimeStateSnapshot | None'` - Line 433
 - `async queue_save_operation(self, ...) -> None` - Line 470
 - `async queue_delete_operation(self, state_type: 'StateType', state_id: str) -> None` - Line 490
 - `is_available(self) -> bool` - Line 569
 
 ### Implementation: `StateSynchronizationService` ✅
 
-**Inherits**: BaseService
+**Inherits**: BaseService, ErrorPropagationMixin
 **Purpose**: State synchronization service providing distributed state consistency
 **Status**: Complete
 
 **Implemented Methods:**
-- `async synchronize_state_change(self, state_change: 'StateChange') -> bool` - Line 94
-- `async broadcast_state_change(self, ...) -> None` - Line 182
-- `async resolve_conflicts(self, ...) -> 'StateChange'` - Line 220
-- `subscribe_to_state_changes(self, state_type: StateType, callback: Callable) -> None` - Line 261
-- `unsubscribe_from_state_changes(self, state_type: StateType, callback: Callable) -> None` - Line 275
-- `get_synchronization_metrics(self) -> dict[str, Any]` - Line 287
-- `async cleanup_expired_locks(self) -> None` - Line 523
+- `async synchronize_state_change(self, state_change: 'StateChange') -> bool` - Line 95
+- `async broadcast_state_change(self, ...) -> None` - Line 202
+- `async resolve_conflicts(self, ...) -> 'StateChange'` - Line 260
+- `subscribe_to_state_changes(self, state_type: StateType, callback: Callable) -> None` - Line 301
+- `unsubscribe_from_state_changes(self, state_type: StateType, callback: Callable) -> None` - Line 315
+- `get_synchronization_metrics(self) -> dict[str, Any]` - Line 327
+- `async cleanup_expired_locks(self) -> None` - Line 563
 
 ### Implementation: `StateValidationService` ✅
 
-**Inherits**: BaseService
+**Inherits**: BaseService, ErrorPropagationMixin
 **Purpose**: State validation service providing comprehensive validation capabilities
 **Status**: Complete
 
 **Implemented Methods:**
-- `async validate_state_data(self, ...) -> dict[str, Any]` - Line 85
-- `async validate_state_transition(self, ...) -> bool` - Line 177
-- `async validate_business_rules(self, state_type: 'StateType', state_data: dict[str, Any]) -> list[str]` - Line 225
-- `get_validation_metrics(self) -> dict[str, Any]` - Line 270
+- `async validate_state_data(self, ...) -> dict[str, Any]` - Line 103
+- `async validate_state_transition(self, ...) -> bool` - Line 200
+- `async validate_business_rules(self, ...) -> list[str]` - Line 248
+- `matches_criteria(self, state: dict[str, Any], criteria: dict[str, Any]) -> bool` - Line 294
+- `get_validation_metrics(self) -> dict[str, Any]` - Line 335
 
 ### Implementation: `TradeLifecycleState` ✅
 
@@ -702,19 +694,19 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `database_service(self)` - Line 53
-- `async initialize(self) -> None` - Line 57
-- `async cleanup(self) -> None` - Line 84
-- `async load_state(self, state_type: 'StateType', state_id: str) -> dict[str, Any] | None` - Line 117
-- `async save_state(self, ...) -> bool` - Line 140
-- `async delete_state(self, state_type: 'StateType', state_id: str) -> bool` - Line 173
-- `async queue_state_save(self, ...) -> None` - Line 196
-- `async queue_state_delete(self, state_type: 'StateType', state_id: str) -> None` - Line 213
-- `async get_states_by_type(self, ...) -> list[dict[str, Any]]` - Line 222
-- `async search_states(self, ...) -> list[dict[str, Any]]` - Line 255
-- `async save_snapshot(self, snapshot: 'StateSnapshot') -> bool` - Line 303
-- `async load_snapshot(self, snapshot_id: str) -> 'StateSnapshot | None'` - Line 325
-- `async load_all_states_to_cache(self) -> None` - Line 347
+- `database_service(self)` - Line 55
+- `async initialize(self) -> None` - Line 59
+- `async cleanup(self) -> None` - Line 86
+- `async load_state(self, state_type: 'StateType', state_id: str) -> dict[str, Any] | None` - Line 119
+- `async save_state(self, ...) -> bool` - Line 142
+- `async delete_state(self, state_type: 'StateType', state_id: str) -> bool` - Line 175
+- `async queue_state_save(self, ...) -> None` - Line 198
+- `async queue_state_delete(self, state_type: 'StateType', state_id: str) -> None` - Line 215
+- `async get_states_by_type(self, ...) -> list[dict[str, Any]]` - Line 224
+- `async search_states(self, ...) -> list[dict[str, Any]]` - Line 257
+- `async save_snapshot(self, snapshot: 'RuntimeStateSnapshot') -> bool` - Line 305
+- `async load_snapshot(self, snapshot_id: str) -> 'RuntimeStateSnapshot | None'` - Line 327
+- `async load_all_states_to_cache(self) -> None` - Line 349
 
 ### Implementation: `StateOperation` ✅
 
@@ -722,25 +714,14 @@
 **Purpose**: State operation enumeration
 **Status**: Complete
 
-### Implementation: `StatePriority` ✅
-
-**Inherits**: str, Enum
-**Purpose**: State operation priority levels
-**Status**: Complete
-
-### Implementation: `StateMetadata` ✅
-
-**Purpose**: Metadata for state tracking and versioning
-**Status**: Complete
-
 ### Implementation: `StateChange` ✅
 
 **Purpose**: Represents a state change for audit and synchronization
 **Status**: Complete
 
-### Implementation: `StateSnapshot` ✅
+### Implementation: `RuntimeStateSnapshot` ✅
 
-**Purpose**: Complete state snapshot for recovery and backup
+**Purpose**: Runtime state snapshot data structure for in-memory operations
 **Status**: Complete
 
 ### Implementation: `StateValidationResult` ✅
@@ -754,7 +735,7 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `to_dict(self) -> dict[str, int | float | str | None]` - Line 215
+- `to_dict(self) -> dict[str, int | float | str | None]` - Line 199
 
 ### Implementation: `StateService` ✅
 
@@ -764,21 +745,21 @@ state handling with synchronizatio
 **Status**: Complete
 
 **Implemented Methods:**
-- `async initialize(self) -> None` - Line 415
-- `async cleanup(self) -> None` - Line 465
-- `async get_state(self, state_type: StateType, state_id: str, include_metadata: bool = False) -> dict[str, Any] | None` - Line 546
-- `async set_state(self, ...) -> bool` - Line 705
-- `async delete_state(self, ...) -> bool` - Line 819
-- `async get_states_by_type(self, ...) -> list[dict[str, Any]]` - Line 893
-- `async search_states(self, ...) -> list[dict[str, Any]]` - Line 937
-- `async create_snapshot(self, description: str = '', state_types: list[StateType] | None = None) -> str` - Line 975
-- `async restore_snapshot(self, snapshot_id: str) -> bool` - Line 1020
-- `subscribe(self, ...) -> None` - Line 1063
-- `unsubscribe(self, state_type: StateType, callback: Callable) -> None` - Line 1081
-- `get_metrics(self) -> dict[str, int | float | str]` - Line 1096
-- `async get_state_metrics(self) -> StateMetrics` - Line 1114
-- `async get_health_status(self) -> dict[str, Any]` - Line 1122
-- `error_handler(self) -> ErrorHandler` - Line 1626
+- `async initialize(self) -> None` - Line 399
+- `async cleanup(self) -> None` - Line 449
+- `async get_state(self, state_type: StateType, state_id: str, include_metadata: bool = False) -> dict[str, Any] | None` - Line 530
+- `async set_state(self, ...) -> bool` - Line 689
+- `async delete_state(self, ...) -> bool` - Line 813
+- `async get_states_by_type(self, ...) -> list[dict[str, Any]]` - Line 887
+- `async search_states(self, ...) -> list[dict[str, Any]]` - Line 931
+- `async create_snapshot(self, description: str = '', state_types: list[StateType] | None = None) -> str` - Line 969
+- `async restore_snapshot(self, snapshot_id: str) -> bool` - Line 1014
+- `subscribe(self, ...) -> None` - Line 1057
+- `unsubscribe(self, state_type: StateType, callback: Callable) -> None` - Line 1075
+- `get_metrics(self) -> dict[str, int | float | str]` - Line 1090
+- `async get_state_metrics(self) -> StateMetrics` - Line 1108
+- `async get_health_status(self) -> dict[str, Any]` - Line 1116
+- `error_handler(self) -> ErrorHandler` - Line 1686
 
 ### Implementation: `SyncEventType` ✅
 
@@ -906,12 +887,33 @@ state handling with synchronizatio
 - `async calculate_trade_performance(self, trade_id: str) -> dict[str, Any]` - Line 523
 - `async get_trade_history(self, ...) -> list[dict[str, Any]]` - Line 605
 - `async get_performance_attribution(self, bot_id: str, period_days: int = 30) -> dict[str, Any]` - Line 673
-- `async create_trade_state(self, trade: Any) -> None` - Line 1047
-- `async validate_trade_state(self, trade: Any) -> bool` - Line 1083
-- `async calculate_trade_pnl(self, trade: Any) -> Decimal` - Line 1116
-- `async assess_trade_risk(self, trade: Any) -> str` - Line 1145
-- `async close_trade(self, trade_id: str, final_pnl: Decimal) -> None` - Line 1174
-- `async update_trade_state(self, trade_id: str, trade_data: Any) -> None` - Line 1199
+- `async create_trade_state(self, trade: Any) -> None` - Line 1046
+- `async validate_trade_state(self, trade: Any) -> bool` - Line 1082
+- `async calculate_trade_pnl(self, trade: Any) -> Decimal` - Line 1115
+- `async assess_trade_risk(self, trade: Any) -> str` - Line 1144
+- `async close_trade(self, trade_id: str, final_pnl: Decimal) -> None` - Line 1173
+- `async update_trade_state(self, trade_id: str, trade_data: Any) -> None` - Line 1198
+
+### Implementation: `ValidationResult` ✅
+
+**Inherits**: Enum
+**Purpose**: Validation result enumeration
+**Status**: Complete
+
+### Implementation: `ValidationCheck` ✅
+
+**Purpose**: Individual validation check result
+**Status**: Complete
+
+### Implementation: `PreTradeValidation` ✅
+
+**Purpose**: Pre-trade validation results
+**Status**: Complete
+
+### Implementation: `PostTradeAnalysis` ✅
+
+**Purpose**: Post-trade analysis results
+**Status**: Complete
 
 ### Implementation: `MigrationType` ✅
 
@@ -1090,22 +1092,47 @@ async def emit_state_event(event_type: str, event_data: dict[str, Any]) -> None 
 
 #### Class: `StateController`
 
-**Inherits**: BaseService
+**Inherits**: BaseService, ErrorPropagationMixin
 **Purpose**: State controller that coordinates state management operations
 
 ```python
-class StateController(BaseService):
-    def __init__(self, ...)  # Line 43
-    def _resolve_service(self, service_name: str, factory_func = None)  # Line 77
-    async def get_state(self, state_type: 'StateType', state_id: str, include_metadata: bool = False) -> dict[str, Any] | None  # Line 87
-    async def set_state(self, ...) -> bool  # Line 129
-    async def delete_state(self, ...) -> bool  # Line 215
-    async def _coordinate_validation(self, ...) -> None  # Line 281
-    async def _coordinate_persistence(self, ...) -> None  # Line 317
-    async def _coordinate_synchronization(self, state_change: 'StateChange') -> None  # Line 334
-    def _get_transaction_lock(self, transaction_key: str) -> asyncio.Lock  # Line 346
-    async def cleanup(self) -> None  # Line 352
-    def _extract_config_dict(self, config: Config) -> dict[str, Any]  # Line 361
+class StateController(BaseService, ErrorPropagationMixin):
+    def __init__(self, ...)  # Line 45
+    def _resolve_service(self, service_name: str, factory_func = None)  # Line 79
+    async def get_state(self, state_type: 'StateType', state_id: str, include_metadata: bool = False) -> dict[str, Any] | None  # Line 89
+    async def set_state(self, ...) -> bool  # Line 131
+    async def delete_state(self, ...) -> bool  # Line 217
+    async def _coordinate_validation(self, ...) -> None  # Line 283
+    async def _coordinate_persistence(self, ...) -> None  # Line 319
+    async def _coordinate_synchronization(self, state_change: 'StateChange') -> None  # Line 336
+    def _get_transaction_lock(self, transaction_key: str) -> asyncio.Lock  # Line 348
+    async def cleanup(self) -> None  # Line 354
+    def _extract_config_dict(self, config: Config) -> dict[str, Any]  # Line 363
+```
+
+### File: data_transformer.py
+
+**Key Imports:**
+- `from src.core.logging import get_logger`
+- `from src.core.types import StateType`
+- `from src.utils.decimal_utils import to_decimal`
+- `from src.utils.messaging_patterns import MessagePattern`
+
+#### Class: `StateDataTransformer`
+
+**Purpose**: Handles consistent data transformation for state module
+
+```python
+class StateDataTransformer:
+    def transform_state_change_to_event_data(state_type, ...) -> dict[str, Any]  # Line 23
+    def transform_state_snapshot_to_event_data(snapshot_data: dict[str, Any], metadata: dict[str, Any] | None = None) -> dict[str, Any]  # Line 55
+    def transform_error_to_event_data(error, ...) -> dict[str, Any]  # Line 82
+    def validate_financial_precision(data: dict[str, Any]) -> dict[str, Any]  # Line 104
+    def ensure_boundary_fields(data: dict[str, Any], source: str = 'state_management') -> dict[str, Any]  # Line 126
+    def transform_for_pub_sub(cls, event_type: str, data: Any, metadata: dict[str, Any] | None = None) -> dict[str, Any]  # Line 162
+    def transform_for_req_reply(cls, request_type: str, data: Any, correlation_id: str | None = None) -> dict[str, Any]  # Line 212
+    def align_processing_paradigm(cls, data: dict[str, Any], target_mode: str = 'stream') -> dict[str, Any]  # Line 237
+    def apply_cross_module_validation(cls, ...) -> dict[str, Any]  # Line 301
 ```
 
 ### File: di_registration.py
@@ -1115,13 +1142,12 @@ class StateController(BaseService):
 - `from src.core.dependency_injection import DependencyInjector`
 - `from src.core.exceptions import DependencyError`
 - `from src.core.exceptions import ServiceError`
-- `from src.core.logging import get_logger`
 
 #### Functions:
 
 ```python
-def register_state_services(container: DependencyContainer) -> None  # Line 23
-async def create_state_service_with_dependencies(...) -> 'StateService'  # Line 184
+def register_state_services(container: DependencyContainer) -> None  # Line 40
+async def create_state_service_with_dependencies(...) -> 'StateService'  # Line 202
 ```
 
 ### File: environment_integration.py
@@ -1292,7 +1318,7 @@ class MockDatabaseService:
     async def start(self) -> None  # Line 97
     async def stop(self) -> None  # Line 102
     async def create_entity(self, entity: Any) -> Any  # Line 108
-    async def get_entity_by_id(self, model_class: type, entity_id: Any) -> Union[Any, None]  # Line 116
+    async def get_entity_by_id(self, model_class: type, entity_id: Any) -> Any | None  # Line 116
     async def health_check(self) -> dict[str, Any]  # Line 126
     def get_metrics(self) -> dict[str, Any]  # Line 134
 ```
@@ -1304,9 +1330,9 @@ class MockDatabaseService:
 
 ```python
 class StateServiceFactory(StateServiceFactoryInterface):
-    def __init__(self, injector: Union[DependencyInjector, None] = None)  # Line 147
+    def __init__(self, injector: DependencyInjector | None = None)  # Line 147
     async def create_state_service(self, ...) -> 'StateService'  # Line 167
-    async def create_state_service_for_testing(self, config: Union[Config, None] = None, mock_database: bool = False) -> 'StateService'  # Line 220
+    async def create_state_service_for_testing(self, config: Config | None = None, mock_database: bool = False) -> 'StateService'  # Line 220
     def _create_test_config(self) -> Config  # Line 247
     def _create_mock_database_service(self) -> DatabaseServiceInterface  # Line 253
 ```
@@ -1328,9 +1354,9 @@ class StateServiceRegistry:
 #### Functions:
 
 ```python
-async def create_default_state_service(config: Config, injector: Union[DependencyInjector, None] = None) -> 'StateService'  # Line 364
-async def get_state_service(name: str = 'default', injector: Union[DependencyInjector, None] = None) -> 'StateService'  # Line 378
-async def create_test_state_service(injector: Union[DependencyInjector, None] = None) -> 'StateService'  # Line 391
+async def create_default_state_service(config: Config, injector: DependencyInjector | None = None) -> 'StateService'  # Line 364
+async def get_state_service(name: str = 'default', injector: DependencyInjector | None = None) -> 'StateService'  # Line 378
+async def create_test_state_service(injector: DependencyInjector | None = None) -> 'StateService'  # Line 391
 ```
 
 ### File: interfaces.py
@@ -1342,9 +1368,9 @@ async def create_test_state_service(injector: Union[DependencyInjector, None] = 
 
 ```python
 class StateBusinessServiceInterface(ABC):
-    async def validate_state_change(self, ...) -> dict[str, Any]  # Line 43
-    async def process_state_update(self, ...) -> 'StateChange'  # Line 55
-    async def calculate_state_metadata(self, ...) -> 'StateMetadata'  # Line 67
+    async def validate_state_change(self, ...) -> dict[str, Any]  # Line 44
+    async def process_state_update(self, ...) -> 'StateChange'  # Line 56
+    async def calculate_state_metadata(self, ...) -> 'StateMetadata'  # Line 68
 ```
 
 #### Class: `StatePersistenceServiceInterface`
@@ -1354,11 +1380,11 @@ class StateBusinessServiceInterface(ABC):
 
 ```python
 class StatePersistenceServiceInterface(ABC):
-    async def save_state(self, ...) -> bool  # Line 82
-    async def load_state(self, state_type: 'StateType', state_id: str) -> dict[str, Any] | None  # Line 93
-    async def delete_state(self, state_type: 'StateType', state_id: str) -> bool  # Line 98
-    async def save_snapshot(self, snapshot: 'StateSnapshot') -> bool  # Line 103
-    async def load_snapshot(self, snapshot_id: str) -> 'StateSnapshot | None'  # Line 108
+    async def save_state(self, ...) -> bool  # Line 83
+    async def load_state(self, state_type: 'StateType', state_id: str) -> dict[str, Any] | None  # Line 94
+    async def delete_state(self, state_type: 'StateType', state_id: str) -> bool  # Line 99
+    async def save_snapshot(self, snapshot: 'RuntimeStateSnapshot') -> bool  # Line 104
+    async def load_snapshot(self, snapshot_id: str) -> 'RuntimeStateSnapshot | None'  # Line 109
 ```
 
 #### Class: `StateValidationServiceInterface`
@@ -1368,9 +1394,10 @@ class StatePersistenceServiceInterface(ABC):
 
 ```python
 class StateValidationServiceInterface(ABC):
-    async def validate_state_data(self, ...) -> dict[str, Any]  # Line 117
-    async def validate_state_transition(self, ...) -> bool  # Line 127
-    async def validate_business_rules(self, state_type: 'StateType', state_data: dict[str, Any]) -> list[str]  # Line 137
+    async def validate_state_data(self, ...) -> dict[str, Any]  # Line 118
+    async def validate_state_transition(self, ...) -> bool  # Line 128
+    async def validate_business_rules(self, ...) -> list[str]  # Line 138
+    def matches_criteria(self, state: dict[str, Any], criteria: dict[str, Any]) -> bool  # Line 148
 ```
 
 #### Class: `StateSynchronizationServiceInterface`
@@ -1380,9 +1407,9 @@ class StateValidationServiceInterface(ABC):
 
 ```python
 class StateSynchronizationServiceInterface(ABC):
-    async def synchronize_state_change(self, state_change: 'StateChange') -> bool  # Line 150
-    async def broadcast_state_change(self, ...) -> None  # Line 155
-    async def resolve_conflicts(self, ...) -> 'StateChange'  # Line 166
+    async def synchronize_state_change(self, state_change: 'StateChange') -> bool  # Line 161
+    async def broadcast_state_change(self, ...) -> None  # Line 166
+    async def resolve_conflicts(self, ...) -> 'StateChange'  # Line 177
 ```
 
 #### Class: `CheckpointServiceInterface`
@@ -1392,10 +1419,10 @@ class StateSynchronizationServiceInterface(ABC):
 
 ```python
 class CheckpointServiceInterface(ABC):
-    async def create_checkpoint(self, bot_id: str, state_data: dict[str, Any], checkpoint_type: str = 'manual') -> str  # Line 180
-    async def restore_checkpoint(self, checkpoint_id: str) -> tuple[str, dict[str, Any]] | None  # Line 190
-    async def list_checkpoints(self, bot_id: str | None = None, limit: int = 20) -> list[dict[str, Any]]  # Line 195
-    async def delete_checkpoint(self, checkpoint_id: str) -> bool  # Line 202
+    async def create_checkpoint(self, bot_id: str, state_data: dict[str, Any], checkpoint_type: str = 'manual') -> str  # Line 191
+    async def restore_checkpoint(self, checkpoint_id: str) -> tuple[str, dict[str, Any]] | None  # Line 201
+    async def list_checkpoints(self, bot_id: str | None = None, limit: int = 20) -> list[dict[str, Any]]  # Line 206
+    async def delete_checkpoint(self, checkpoint_id: str) -> bool  # Line 213
 ```
 
 #### Class: `StateEventServiceInterface`
@@ -1405,9 +1432,9 @@ class CheckpointServiceInterface(ABC):
 
 ```python
 class StateEventServiceInterface(ABC):
-    async def emit_state_event(self, event_type: str, event_data: dict[str, Any]) -> None  # Line 211
-    def subscribe_to_events(self, event_type: str, callback: Any) -> None  # Line 216
-    def unsubscribe_from_events(self, event_type: str, callback: Any) -> None  # Line 221
+    async def emit_state_event(self, event_type: str, event_data: dict[str, Any]) -> None  # Line 222
+    def subscribe_to_events(self, event_type: str, callback: Any) -> None  # Line 227
+    def unsubscribe_from_events(self, event_type: str, callback: Any) -> None  # Line 232
 ```
 
 #### Class: `StateServiceFactoryInterface`
@@ -1417,8 +1444,20 @@ class StateEventServiceInterface(ABC):
 
 ```python
 class StateServiceFactoryInterface(ABC):
-    async def create_state_service(self, ...) -> 'StateService'  # Line 230
-    async def create_state_service_for_testing(self, config: Union['Config', None] = None, mock_database: bool = False) -> 'StateService'  # Line 240
+    async def create_state_service(self, ...) -> 'StateService'  # Line 241
+    async def create_state_service_for_testing(self, config: Union['Config', None] = None, mock_database: bool = False) -> 'StateService'  # Line 251
+```
+
+#### Class: `MetricsStorageInterface`
+
+**Inherits**: ABC
+**Purpose**: Abstract interface for metrics storage operations
+
+```python
+class MetricsStorageInterface(ABC):
+    async def store_validation_metrics(self, validation_data: dict[str, Any]) -> bool  # Line 264
+    async def store_analysis_metrics(self, analysis_data: dict[str, Any]) -> bool  # Line 269
+    async def get_historical_metrics(self, metric_type: str, start_time: Any, end_time: Any) -> list[dict[str, Any]]  # Line 274
 ```
 
 ### File: monitoring.py
@@ -1477,55 +1516,55 @@ class PerformanceReport:
 
 ```python
 class StateMonitoringService(BaseComponent):
-    def __init__(self, state_service: Any, metrics_collector: Any = None)  # Line 188
-    async def initialize(self) -> None  # Line 252
-    async def cleanup(self) -> None  # Line 273
-    def register_health_check(self, ...) -> str  # Line 340
-    async def get_health_status(self) -> dict[str, Any]  # Line 377
-    def record_metric(self, ...) -> None  # Line 444
-    def record_operation_time(self, operation_name: str, duration_ms: float) -> None  # Line 494
-    def get_metrics(self) -> dict[str, Any]  # Line 514
-    async def get_filtered_metrics(self, ...) -> dict[str, list[Metric]]  # Line 518
-    def set_alert_threshold(self, ...) -> None  # Line 567
-    def register_alert_handler(self, handler: Callable[[Alert], None]) -> None  # Line 597
-    async def get_active_alerts(self) -> list[Alert]  # Line 601
-    async def acknowledge_alert(self, alert_id: str, acknowledged_by: str = '') -> bool  # Line 605
-    async def generate_performance_report(self, start_time: datetime | None = None, end_time: datetime | None = None) -> PerformanceReport  # Line 622
-    def _initialize_builtin_health_checks(self) -> None  # Line 672
-    def _initialize_builtin_metrics(self) -> None  # Line 712
-    async def _check_state_service_connectivity(self) -> dict[str, Any]  # Line 732
-    async def _check_database_connectivity(self) -> dict[str, Any]  # Line 756
-    async def _check_cache_connectivity(self) -> dict[str, Any]  # Line 787
-    async def _check_memory_usage(self) -> dict[str, Any]  # Line 818
-    async def _check_error_rate(self) -> dict[str, Any]  # Line 839
-    async def _run_all_health_checks(self) -> None  # Line 862
-    async def _run_health_check(self, check: HealthCheck) -> None  # Line 879
-    def _update_metric_aggregates(self, name: str, value: float) -> None  # Line 953
-    async def _check_metric_alerts(self, metric_name: str, value: float) -> None  # Line 972
-    def _evaluate_threshold(self, value: float, threshold: float, comparison: str) -> bool  # Line 1015
-    async def _create_alert(self, ...) -> None  # Line 1026
-    async def _get_key_metrics(self) -> dict[str, Any]  # Line 1077
-    async def _calculate_uptime(self, start_time: datetime, end_time: datetime) -> float  # Line 1117
-    async def _calculate_performance_metrics(self, report: PerformanceReport, start_time: datetime, end_time: datetime) -> None  # Line 1138
-    async def _calculate_resource_metrics(self, report: PerformanceReport, start_time: datetime, end_time: datetime) -> None  # Line 1167
-    async def _calculate_state_metrics(self, report: PerformanceReport, start_time: datetime, end_time: datetime) -> None  # Line 1183
-    async def _calculate_alert_metrics(self, report: PerformanceReport, start_time: datetime, end_time: datetime) -> None  # Line 1204
-    async def _health_check_loop(self) -> None  # Line 1231
-    async def _metrics_collection_loop(self) -> None  # Line 1242
-    async def _alert_processing_loop(self) -> None  # Line 1258
-    async def _cleanup_loop(self) -> None  # Line 1274
-    async def _collect_system_metrics(self) -> None  # Line 1287
-    async def _collect_state_service_metrics(self) -> None  # Line 1304
-    async def _auto_resolve_alerts(self) -> None  # Line 1322
-    async def _cleanup_old_alerts(self) -> None  # Line 1357
-    async def _cleanup_old_metrics(self) -> None  # Line 1373
-    async def _heartbeat_loop(self) -> None  # Line 1409
-    async def _send_heartbeat(self) -> None  # Line 1423
-    def _record_to_central_monitoring(self, metric: Metric) -> None  # Line 1453
-    async def _send_alert_to_central(self, alert: Alert) -> None  # Line 1490
-    def _setup_central_integration(self) -> None  # Line 1542
-    async def _forward_alert_handler(self, alert: Alert) -> None  # Line 1547
-    async def _forward_alert_to_central(self, alert: Alert) -> None  # Line 1554
+    def __init__(self, state_service: Any, metrics_collector: Any = None)  # Line 187
+    async def initialize(self) -> None  # Line 251
+    async def cleanup(self) -> None  # Line 272
+    def register_health_check(self, ...) -> str  # Line 339
+    async def get_health_status(self) -> dict[str, Any]  # Line 376
+    def record_metric(self, ...) -> None  # Line 443
+    def record_operation_time(self, operation_name: str, duration_ms: float) -> None  # Line 493
+    def get_metrics(self) -> dict[str, Any]  # Line 513
+    async def get_filtered_metrics(self, ...) -> dict[str, list[Metric]]  # Line 517
+    def set_alert_threshold(self, ...) -> None  # Line 566
+    def register_alert_handler(self, handler: Callable[[Alert], None]) -> None  # Line 596
+    async def get_active_alerts(self) -> list[Alert]  # Line 600
+    async def acknowledge_alert(self, alert_id: str, acknowledged_by: str = '') -> bool  # Line 604
+    async def generate_performance_report(self, start_time: datetime | None = None, end_time: datetime | None = None) -> PerformanceReport  # Line 621
+    def _initialize_builtin_health_checks(self) -> None  # Line 671
+    def _initialize_builtin_metrics(self) -> None  # Line 711
+    async def _check_state_service_connectivity(self) -> dict[str, Any]  # Line 731
+    async def _check_database_connectivity(self) -> dict[str, Any]  # Line 755
+    async def _check_cache_connectivity(self) -> dict[str, Any]  # Line 786
+    async def _check_memory_usage(self) -> dict[str, Any]  # Line 817
+    async def _check_error_rate(self) -> dict[str, Any]  # Line 838
+    async def _run_all_health_checks(self) -> None  # Line 861
+    async def _run_health_check(self, check: HealthCheck) -> None  # Line 878
+    def _update_metric_aggregates(self, name: str, value: float) -> None  # Line 952
+    async def _check_metric_alerts(self, metric_name: str, value: float) -> None  # Line 971
+    def _evaluate_threshold(self, value: float, threshold: float, comparison: str) -> bool  # Line 1014
+    async def _create_alert(self, ...) -> None  # Line 1025
+    async def _get_key_metrics(self) -> dict[str, Any]  # Line 1076
+    async def _calculate_uptime(self, start_time: datetime, end_time: datetime) -> float  # Line 1116
+    async def _calculate_performance_metrics(self, report: PerformanceReport, start_time: datetime, end_time: datetime) -> None  # Line 1137
+    async def _calculate_resource_metrics(self, report: PerformanceReport, start_time: datetime, end_time: datetime) -> None  # Line 1166
+    async def _calculate_state_metrics(self, report: PerformanceReport, start_time: datetime, end_time: datetime) -> None  # Line 1182
+    async def _calculate_alert_metrics(self, report: PerformanceReport, start_time: datetime, end_time: datetime) -> None  # Line 1203
+    async def _health_check_loop(self) -> None  # Line 1230
+    async def _metrics_collection_loop(self) -> None  # Line 1241
+    async def _alert_processing_loop(self) -> None  # Line 1257
+    async def _cleanup_loop(self) -> None  # Line 1273
+    async def _collect_system_metrics(self) -> None  # Line 1286
+    async def _collect_state_service_metrics(self) -> None  # Line 1303
+    async def _auto_resolve_alerts(self) -> None  # Line 1321
+    async def _cleanup_old_alerts(self) -> None  # Line 1356
+    async def _cleanup_old_metrics(self) -> None  # Line 1372
+    async def _heartbeat_loop(self) -> None  # Line 1408
+    async def _send_heartbeat(self) -> None  # Line 1422
+    def _record_to_central_monitoring(self, metric: Metric) -> None  # Line 1452
+    async def _send_alert_to_central(self, alert: Alert) -> None  # Line 1489
+    def _setup_central_integration(self) -> None  # Line 1541
+    async def _forward_alert_handler(self, alert: Alert) -> None  # Line 1546
+    async def _forward_alert_to_central(self, alert: Alert) -> None  # Line 1553
 ```
 
 ### File: monitoring_integration.py
@@ -1533,7 +1572,7 @@ class StateMonitoringService(BaseComponent):
 **Key Imports:**
 - `from src.core.base.component import BaseComponent`
 - `from src.core.exceptions import StateConsistencyError`
-- `from src.error_handling.context import ErrorContext`
+- `from src.error_handling import ErrorContext`
 - `from src.monitoring import MetricsCollector`
 - `from src.monitoring.alerting import Alert`
 
@@ -1575,7 +1614,7 @@ def create_integrated_monitoring_service(state_service: Any, metrics_collector: 
 - `from src.core.config.main import Config`
 - `from src.core.exceptions import StateConsistencyError`
 - `from src.core.exceptions import ValidationError`
-- `from src.core.logging import get_logger`
+- `from src.core.types import ExecutionResult`
 
 #### Class: `QualityLevel`
 
@@ -1586,39 +1625,6 @@ def create_integrated_monitoring_service(state_service: Any, metrics_collector: 
 class QualityLevel(Enum):
 ```
 
-#### Class: `ValidationResult`
-
-**Inherits**: Enum
-**Purpose**: Validation result enumeration
-
-```python
-class ValidationResult(Enum):
-```
-
-#### Class: `ValidationCheck`
-
-**Purpose**: Individual validation check result
-
-```python
-class ValidationCheck:
-```
-
-#### Class: `PreTradeValidation`
-
-**Purpose**: Pre-trade validation results
-
-```python
-class PreTradeValidation:
-```
-
-#### Class: `PostTradeAnalysis`
-
-**Purpose**: Post-trade analysis results
-
-```python
-class PostTradeAnalysis:
-```
-
 #### Class: `QualityTrend`
 
 **Purpose**: Quality trend analysis
@@ -1627,42 +1633,30 @@ class PostTradeAnalysis:
 class QualityTrend:
 ```
 
-#### Class: `MetricsStorage`
-
-**Inherits**: ABC
-**Purpose**: Abstract interface for metrics storage operations
-
-```python
-class MetricsStorage(ABC):
-    async def store_validation_metrics(self, validation_data: dict[str, Any]) -> bool  # Line 166
-    async def store_analysis_metrics(self, analysis_data: dict[str, Any]) -> bool  # Line 171
-    async def get_historical_metrics(self, metric_type: str, start_time: datetime, end_time: datetime) -> list[dict[str, Any]]  # Line 176
-```
-
 #### Class: `InfluxDBMetricsStorage`
 
-**Inherits**: MetricsStorage
+**Inherits**: MetricsStorageInterface
 **Purpose**: InfluxDB implementation of MetricsStorage interface
 
 ```python
-class InfluxDBMetricsStorage(MetricsStorage):
-    def __init__(self, config: Config | None = None)  # Line 191
-    async def close(self) -> None  # Line 209
-    async def store_validation_metrics(self, validation_data: dict[str, Any]) -> bool  # Line 245
-    async def store_analysis_metrics(self, analysis_data: dict[str, Any]) -> bool  # Line 280
-    async def get_historical_metrics(self, metric_type: str, start_time: datetime, end_time: datetime) -> list[dict[str, Any]]  # Line 326
+class InfluxDBMetricsStorage(MetricsStorageInterface):
+    def __init__(self, config: Config | None = None)  # Line 108
+    async def close(self) -> None  # Line 123
+    async def store_validation_metrics(self, validation_data: dict[str, Any]) -> bool  # Line 159
+    async def store_analysis_metrics(self, analysis_data: dict[str, Any]) -> bool  # Line 195
+    async def get_historical_metrics(self, metric_type: str, start_time: datetime, end_time: datetime) -> list[dict[str, Any]]  # Line 242
 ```
 
 #### Class: `NullMetricsStorage`
 
-**Inherits**: MetricsStorage
+**Inherits**: MetricsStorageInterface
 **Purpose**: Null implementation of MetricsStorage for testing or when metrics storage is disabled
 
 ```python
-class NullMetricsStorage(MetricsStorage):
-    async def store_validation_metrics(self, validation_data: dict[str, Any]) -> bool  # Line 347
-    async def store_analysis_metrics(self, analysis_data: dict[str, Any]) -> bool  # Line 351
-    async def get_historical_metrics(self, metric_type: str, start_time: datetime, end_time: datetime) -> list[dict[str, Any]]  # Line 355
+class NullMetricsStorage(MetricsStorageInterface):
+    async def store_validation_metrics(self, validation_data: dict[str, Any]) -> bool  # Line 263
+    async def store_analysis_metrics(self, analysis_data: dict[str, Any]) -> bool  # Line 267
+    async def get_historical_metrics(self, metric_type: str, start_time: datetime, end_time: datetime) -> list[dict[str, Any]]  # Line 271
 ```
 
 #### Class: `QualityController`
@@ -1672,35 +1666,35 @@ class NullMetricsStorage(MetricsStorage):
 
 ```python
 class QualityController(BaseComponent):
-    def __init__(self, ...)  # Line 376
-    async def initialize(self) -> None  # Line 485
-    async def validate_pre_trade(self, ...) -> PreTradeValidation  # Line 506
-    async def analyze_post_trade(self, ...) -> PostTradeAnalysis  # Line 570
-    async def get_quality_summary(self, bot_id: str | None = None, hours: int = 24) -> dict[str, Any]  # Line 630
-    async def get_quality_trend_analysis(self, metric: str, days: int = 7) -> QualityTrend  # Line 668
-    def _summarize_validations(self, validations: list[PreTradeValidation]) -> dict[str, Any]  # Line 759
-    def _summarize_analyses(self, analyses: list[PostTradeAnalysis]) -> dict[str, Any]  # Line 781
-    async def _get_quality_trends(self, hours: int) -> list[dict[str, Any]]  # Line 805
-    async def _get_quality_alerts(self) -> list[dict[str, Any]]  # Line 823
-    async def _get_improvement_recommendations(self) -> list[str]  # Line 857
-    def _update_quality_metrics(self, operation: str, data: Any) -> None  # Line 888
-    def _check_trend_alerts(self, metric: str, trend: QualityTrend) -> tuple[bool, str]  # Line 919
-    async def _load_benchmarks(self) -> None  # Line 946
-    async def _log_validation_metrics(self, validation: PreTradeValidation) -> None  # Line 958
-    async def _log_analysis_metrics(self, analysis: PostTradeAnalysis) -> None  # Line 982
-    async def _quality_monitoring_loop(self) -> None  # Line 1009
-    async def _trend_analysis_loop(self) -> None  # Line 1020
-    def get_quality_metrics(self) -> dict[str, Any]  # Line 1031
-    async def get_summary_statistics(self, hours: int = 24, bot_id: str | None = None) -> dict[str, Any]  # Line 1052
-    def _calculate_avg_validation_time(self) -> Decimal  # Line 1109
-    def _calculate_avg_analysis_time(self) -> Decimal  # Line 1118
-    async def validate_state_consistency(self, state: Any) -> bool  # Line 1126
-    async def validate_portfolio_balance(self, portfolio_state: Any) -> bool  # Line 1142
-    async def validate_position_consistency(self, position: Any, related_orders: list) -> bool  # Line 1158
-    async def run_integrity_checks(self, state: Any) -> dict[str, Any]  # Line 1175
-    async def suggest_corrections(self, state: Any) -> list[dict[str, Any]]  # Line 1212
-    async def cleanup(self) -> None  # Line 1265
-    def add_validation_rule(self, name: str, rule: Callable[Ellipsis, Any]) -> None  # Line 1278
+    def __init__(self, ...)  # Line 292
+    async def initialize(self) -> None  # Line 401
+    async def validate_pre_trade(self, ...) -> PreTradeValidation  # Line 422
+    async def analyze_post_trade(self, ...) -> PostTradeAnalysis  # Line 486
+    async def get_quality_summary(self, bot_id: str | None = None, hours: int = 24) -> dict[str, Any]  # Line 546
+    async def get_quality_trend_analysis(self, metric: str, days: int = 7) -> QualityTrend  # Line 584
+    def _summarize_validations(self, validations: list[PreTradeValidation]) -> dict[str, Any]  # Line 675
+    def _summarize_analyses(self, analyses: list[PostTradeAnalysis]) -> dict[str, Any]  # Line 697
+    async def _get_quality_trends(self, hours: int) -> list[dict[str, Any]]  # Line 721
+    async def _get_quality_alerts(self) -> list[dict[str, Any]]  # Line 739
+    async def _get_improvement_recommendations(self) -> list[str]  # Line 773
+    def _update_quality_metrics(self, operation: str, data: Any) -> None  # Line 804
+    def _check_trend_alerts(self, metric: str, trend: QualityTrend) -> tuple[bool, str]  # Line 835
+    async def _load_benchmarks(self) -> None  # Line 862
+    async def _log_validation_metrics(self, validation: PreTradeValidation) -> None  # Line 874
+    async def _log_analysis_metrics(self, analysis: PostTradeAnalysis) -> None  # Line 898
+    async def _quality_monitoring_loop(self) -> None  # Line 925
+    async def _trend_analysis_loop(self) -> None  # Line 936
+    def get_quality_metrics(self) -> dict[str, Any]  # Line 947
+    async def get_summary_statistics(self, hours: int = 24, bot_id: str | None = None) -> dict[str, Any]  # Line 968
+    def _calculate_avg_validation_time(self) -> Decimal  # Line 1025
+    def _calculate_avg_analysis_time(self) -> Decimal  # Line 1034
+    async def validate_state_consistency(self, state: Any) -> bool  # Line 1042
+    async def validate_portfolio_balance(self, portfolio_state: Any) -> bool  # Line 1058
+    async def validate_position_consistency(self, position: Any, related_orders: list) -> bool  # Line 1074
+    async def run_integrity_checks(self, state: Any) -> dict[str, Any]  # Line 1091
+    async def suggest_corrections(self, state: Any) -> list[dict[str, Any]]  # Line 1128
+    async def cleanup(self) -> None  # Line 1181
+    def add_validation_rule(self, name: str, rule: Callable[Ellipsis, Any]) -> None  # Line 1194
 ```
 
 ### File: recovery.py
@@ -1711,15 +1705,6 @@ class QualityController(BaseComponent):
 - `from src.core.exceptions import StateConsistencyError`
 - `from src.error_handling import ErrorContext`
 - `from src.error_handling import with_circuit_breaker`
-
-#### Class: `AuditEventType`
-
-**Inherits**: Enum
-**Purpose**: Audit event type enumeration
-
-```python
-class AuditEventType(Enum):
-```
 
 #### Class: `RecoveryStatus`
 
@@ -1769,30 +1754,30 @@ class CorruptionReport:
 
 ```python
 class StateRecoveryManager(BaseComponent):
-    def __init__(self, state_service: Any)  # Line 185
-    async def initialize(self) -> None  # Line 230
-    async def cleanup(self) -> None  # Line 257
-    async def record_state_change(self, ...) -> str  # Line 324
-    async def get_audit_trail(self, ...) -> list[AuditEntry]  # Line 388
-    async def create_recovery_point(self, description: str = '') -> str  # Line 447
-    async def list_recovery_points(self, ...) -> list[RecoveryPoint]  # Line 495
-    async def recover_to_point(self, ...) -> str  # Line 536
-    async def get_recovery_status(self, operation_id: str) -> RecoveryOperation | None  # Line 600
-    async def detect_corruption(self, state_type: str | None = None, state_id: str | None = None) -> list[CorruptionReport]  # Line 606
-    async def repair_corruption(self, report_id: str, repair_method: str = 'auto') -> bool  # Line 659
-    def _detect_changed_fields(self, old_value: dict[str, Any] | None, new_value: dict[str, Any] | None) -> set[str]  # Line 708
-    async def _capture_state_snapshot(self, recovery_point: RecoveryPoint) -> None  # Line 733
-    def _calculate_consistency_hash(self, recovery_point: RecoveryPoint) -> str  # Line 765
-    async def _validate_recovery_point(self, recovery_point: RecoveryPoint) -> bool  # Line 780
-    async def _execute_recovery(self, ...) -> None  # Line 801
-    async def _check_state_corruption(self, state_type: str, state_id: str) -> CorruptionReport | None  # Line 884
-    async def _get_states_by_type(self, state_type: str) -> list[tuple[str, str]]  # Line 923
-    async def _get_all_states(self) -> list[tuple[str, str]]  # Line 929
-    async def _auto_repair_corruption(self, report: CorruptionReport) -> bool  # Line 935
-    async def _rollback_repair_corruption(self, report: CorruptionReport) -> bool  # Line 940
-    async def _audit_cleanup_loop(self) -> None  # Line 947
-    async def _auto_recovery_loop(self) -> None  # Line 965
-    async def _corruption_monitor_loop(self) -> None  # Line 978
+    def __init__(self, state_service: Any)  # Line 170
+    async def initialize(self) -> None  # Line 215
+    async def cleanup(self) -> None  # Line 242
+    async def record_state_change(self, ...) -> str  # Line 309
+    async def get_audit_trail(self, ...) -> list[AuditEntry]  # Line 373
+    async def create_recovery_point(self, description: str = '') -> str  # Line 432
+    async def list_recovery_points(self, ...) -> list[RecoveryPoint]  # Line 480
+    async def recover_to_point(self, ...) -> str  # Line 521
+    async def get_recovery_status(self, operation_id: str) -> RecoveryOperation | None  # Line 585
+    async def detect_corruption(self, state_type: str | None = None, state_id: str | None = None) -> list[CorruptionReport]  # Line 591
+    async def repair_corruption(self, report_id: str, repair_method: str = 'auto') -> bool  # Line 644
+    def _detect_changed_fields(self, old_value: dict[str, Any] | None, new_value: dict[str, Any] | None) -> set[str]  # Line 693
+    async def _capture_state_snapshot(self, recovery_point: RecoveryPoint) -> None  # Line 718
+    def _calculate_consistency_hash(self, recovery_point: RecoveryPoint) -> str  # Line 750
+    async def _validate_recovery_point(self, recovery_point: RecoveryPoint) -> bool  # Line 765
+    async def _execute_recovery(self, ...) -> None  # Line 786
+    async def _check_state_corruption(self, state_type: str, state_id: str) -> CorruptionReport | None  # Line 869
+    async def _get_states_by_type(self, state_type: str) -> list[tuple[str, str]]  # Line 908
+    async def _get_all_states(self) -> list[tuple[str, str]]  # Line 914
+    async def _auto_repair_corruption(self, report: CorruptionReport) -> bool  # Line 920
+    async def _rollback_repair_corruption(self, report: CorruptionReport) -> bool  # Line 925
+    async def _audit_cleanup_loop(self) -> None  # Line 932
+    async def _auto_recovery_loop(self) -> None  # Line 950
+    async def _corruption_monitor_loop(self) -> None  # Line 963
 ```
 
 ### File: quality_service.py
@@ -1832,25 +1817,26 @@ class QualityService(BaseService):
 
 ```python
 class StateBusinessService(BaseService):
-    def __init__(self, config: Any = None)  # Line 65
-    async def validate_state_change(self, ...) -> dict[str, Any]  # Line 87
-    async def process_state_update(self, ...) -> 'StateChange'  # Line 154
-    async def calculate_state_metadata(self, ...) -> 'StateMetadata'  # Line 229
-    async def validate_business_rules(self, state_type: 'StateType', state_data: dict[str, Any], operation: str) -> list[str]  # Line 267
-    async def _validate_state_transition(self, ...) -> list[str]  # Line 316
-    async def _validate_critical_state_constraints(self, state_type: 'StateType', state_data: dict[str, Any]) -> list[str]  # Line 340
-    async def _validate_critical_priority_constraints(self, state_type: 'StateType', state_data: dict[str, Any]) -> list[str]  # Line 375
-    async def _apply_business_transformations(self, state_change: 'StateChange') -> 'StateChange'  # Line 398
-    def _generate_state_tags(self, state_type: 'StateType', state_data: dict[str, Any]) -> dict[str, str]  # Line 422
-    def _extract_status_field(self, state_data: dict[str, Any], state_type: 'StateType') -> str | None  # Line 441
-    async def _is_valid_transition(self, state_type: 'StateType', current_status: str, new_status: str) -> bool  # Line 462
-    async def _validate_bot_state_rules(self, state_data: dict[str, Any], operation: str) -> list[str]  # Line 493
-    async def _validate_position_state_rules(self, state_data: dict[str, Any], operation: str) -> list[str]  # Line 521
-    async def _validate_risk_state_rules(self, state_data: dict[str, Any], operation: str) -> list[str]  # Line 554
-    async def _validate_order_state_rules(self, state_data: dict[str, Any], operation: str) -> list[str]  # Line 593
-    async def _validate_general_business_rules(self, state_data: dict[str, Any], operation: str) -> list[str]  # Line 622
-    async def _transform_bot_state(self, state_change: 'StateChange') -> None  # Line 653
-    async def _transform_position_state(self, state_change: 'StateChange') -> None  # Line 670
+    def __init__(self, config: Any = None)  # Line 67
+    async def validate_state_change(self, ...) -> dict[str, Any]  # Line 89
+    async def process_state_update(self, ...) -> 'StateChange'  # Line 156
+    async def calculate_state_metadata(self, ...) -> 'StateMetadata'  # Line 231
+    async def validate_business_rules(self, state_type: 'StateType', state_data: dict[str, Any], operation: str) -> list[str]  # Line 269
+    async def _validate_state_transition(self, ...) -> list[str]  # Line 318
+    async def _validate_critical_state_constraints(self, state_type: 'StateType', state_data: dict[str, Any]) -> list[str]  # Line 342
+    async def _validate_critical_priority_constraints(self, state_type: 'StateType', state_data: dict[str, Any]) -> list[str]  # Line 377
+    async def _apply_business_transformations(self, state_change: 'StateChange') -> 'StateChange'  # Line 400
+    async def _apply_financial_transformations(self, state_data: dict[str, Any]) -> None  # Line 429
+    def _generate_state_tags(self, state_type: 'StateType', state_data: dict[str, Any]) -> dict[str, str]  # Line 461
+    def _extract_status_field(self, state_data: dict[str, Any], state_type: 'StateType') -> str | None  # Line 480
+    async def _is_valid_transition(self, state_type: 'StateType', current_status: str, new_status: str) -> bool  # Line 501
+    async def _validate_bot_state_rules(self, state_data: dict[str, Any], operation: str) -> list[str]  # Line 532
+    async def _validate_position_state_rules(self, state_data: dict[str, Any], operation: str) -> list[str]  # Line 560
+    async def _validate_risk_state_rules(self, state_data: dict[str, Any], operation: str) -> list[str]  # Line 593
+    async def _validate_order_state_rules(self, state_data: dict[str, Any], operation: str) -> list[str]  # Line 632
+    async def _validate_general_business_rules(self, state_data: dict[str, Any], operation: str) -> list[str]  # Line 661
+    async def _transform_bot_state(self, state_change: 'StateChange') -> None  # Line 692
+    async def _transform_position_state(self, state_change: 'StateChange') -> None  # Line 709
 ```
 
 ### File: state_persistence_service.py
@@ -1867,17 +1853,17 @@ class StateBusinessService(BaseService):
 
 ```python
 class StatePersistenceService(BaseService):
-    def __init__(self, database_service: Any = None)  # Line 58
-    def _get_database_service(self)  # Line 89
-    def database_service(self)  # Line 105
-    async def start(self) -> None  # Line 109
-    async def stop(self) -> None  # Line 124
-    async def save_state(self, ...) -> bool  # Line 157
-    async def load_state(self, state_type: 'StateType', state_id: str) -> dict[str, Any] | None  # Line 233
-    async def delete_state(self, state_type: 'StateType', state_id: str) -> bool  # Line 279
-    async def list_states(self, state_type: 'StateType', limit: int | None = None, offset: int = 0) -> list[dict[str, Any]]  # Line 320
-    async def save_snapshot(self, snapshot: 'StateSnapshot') -> bool  # Line 387
-    async def load_snapshot(self, snapshot_id: str) -> 'StateSnapshot | None'  # Line 433
+    def __init__(self, database_service: Any = None)  # Line 59
+    def _get_database_service(self)  # Line 90
+    def database_service(self)  # Line 106
+    async def start(self) -> None  # Line 110
+    async def stop(self) -> None  # Line 125
+    async def save_state(self, ...) -> bool  # Line 158
+    async def load_state(self, state_type: 'StateType', state_id: str) -> dict[str, Any] | None  # Line 234
+    async def delete_state(self, state_type: 'StateType', state_id: str) -> bool  # Line 280
+    async def list_states(self, state_type: 'StateType', limit: int | None = None, offset: int = 0) -> list[dict[str, Any]]  # Line 321
+    async def save_snapshot(self, snapshot: 'RuntimeStateSnapshot') -> bool  # Line 388
+    async def load_snapshot(self, snapshot_id: str) -> 'RuntimeStateSnapshot | None'  # Line 433
     async def queue_save_operation(self, ...) -> None  # Line 470
     async def queue_delete_operation(self, state_type: 'StateType', state_id: str) -> None  # Line 490
     async def _process_operations(self) -> None  # Line 504
@@ -1891,72 +1877,74 @@ class StatePersistenceService(BaseService):
 **Key Imports:**
 - `from src.core.base.service import BaseService`
 - `from src.core.exceptions import StateConsistencyError`
+- `from src.utils.messaging_patterns import ErrorPropagationMixin`
 - `from src.core.types import StateType`
 
 #### Class: `StateSynchronizationService`
 
-**Inherits**: BaseService
+**Inherits**: BaseService, ErrorPropagationMixin
 **Purpose**: State synchronization service providing distributed state consistency
 
 ```python
-class StateSynchronizationService(BaseService):
-    def __init__(self, event_service: Any = None)  # Line 52
-    async def synchronize_state_change(self, state_change: 'StateChange') -> bool  # Line 94
-    async def broadcast_state_change(self, ...) -> None  # Line 182
-    async def resolve_conflicts(self, ...) -> 'StateChange'  # Line 220
-    def subscribe_to_state_changes(self, state_type: StateType, callback: Callable) -> None  # Line 261
-    def unsubscribe_from_state_changes(self, state_type: StateType, callback: Callable) -> None  # Line 275
-    def get_synchronization_metrics(self) -> dict[str, Any]  # Line 287
-    async def _detect_conflicts(self, state_change: 'StateChange') -> bool  # Line 304
-    async def _resolve_conflict(self, state_change: 'StateChange') -> 'StateChange | None'  # Line 328
-    async def _perform_synchronization(self, state_change: 'StateChange') -> bool  # Line 349
-    async def _validate_change(self, state_change: 'StateChange') -> None  # Line 367
-    async def _apply_change(self, state_change: 'StateChange') -> None  # Line 376
-    async def _confirm_sync(self, state_change: 'StateChange') -> None  # Line 385
-    async def _notify_subscribers(self, state_change: 'StateChange') -> None  # Line 394
-    async def _send_to_subscribers(self, subscription_key: str, event_data: dict[str, Any]) -> None  # Line 418
-    async def _apply_conflict_resolution_strategy(self, ...) -> 'StateChange'  # Line 437
-    async def _create_conflict_audit_record(self, ...) -> None  # Line 496
-    async def cleanup_expired_locks(self) -> None  # Line 523
+class StateSynchronizationService(BaseService, ErrorPropagationMixin):
+    def __init__(self, event_service: Any = None)  # Line 53
+    async def synchronize_state_change(self, state_change: 'StateChange') -> bool  # Line 95
+    async def broadcast_state_change(self, ...) -> None  # Line 202
+    async def resolve_conflicts(self, ...) -> 'StateChange'  # Line 260
+    def subscribe_to_state_changes(self, state_type: StateType, callback: Callable) -> None  # Line 301
+    def unsubscribe_from_state_changes(self, state_type: StateType, callback: Callable) -> None  # Line 315
+    def get_synchronization_metrics(self) -> dict[str, Any]  # Line 327
+    async def _detect_conflicts(self, state_change: 'StateChange') -> bool  # Line 344
+    async def _resolve_conflict(self, state_change: 'StateChange') -> 'StateChange | None'  # Line 368
+    async def _perform_synchronization(self, state_change: 'StateChange') -> bool  # Line 389
+    async def _validate_change(self, state_change: 'StateChange') -> None  # Line 407
+    async def _apply_change(self, state_change: 'StateChange') -> None  # Line 416
+    async def _confirm_sync(self, state_change: 'StateChange') -> None  # Line 425
+    async def _notify_subscribers(self, state_change: 'StateChange') -> None  # Line 434
+    async def _send_to_subscribers(self, subscription_key: str, event_data: dict[str, Any]) -> None  # Line 458
+    async def _apply_conflict_resolution_strategy(self, ...) -> 'StateChange'  # Line 477
+    async def _create_conflict_audit_record(self, ...) -> None  # Line 536
+    async def cleanup_expired_locks(self) -> None  # Line 563
 ```
 
 ### File: state_validation_service.py
 
 **Key Imports:**
 - `from src.core.base.service import BaseService`
-- `from src.core.validator_registry import ValidatorRegistry`
+- `from src.utils.messaging_patterns import ErrorPropagationMixin`
 
 #### Class: `StateValidationService`
 
-**Inherits**: BaseService
+**Inherits**: BaseService, ErrorPropagationMixin
 **Purpose**: State validation service providing comprehensive validation capabilities
 
 ```python
-class StateValidationService(BaseService):
-    def __init__(self, validation_service: Any = None)  # Line 52
-    async def validate_state_data(self, ...) -> dict[str, Any]  # Line 85
-    async def validate_state_transition(self, ...) -> bool  # Line 177
-    async def validate_business_rules(self, state_type: 'StateType', state_data: dict[str, Any]) -> list[str]  # Line 225
-    def get_validation_metrics(self) -> dict[str, Any]  # Line 270
-    async def _validate_basic_data_structure(self, state_type: 'StateType', state_data: dict[str, Any]) -> list[str]  # Line 283
-    async def _validate_state_type_specific(self, state_type: 'StateType', state_data: dict[str, Any]) -> list[str]  # Line 312
-    async def _validate_strict_requirements(self, state_type: 'StateType', state_data: dict[str, Any]) -> list[str]  # Line 333
-    def _get_required_fields(self, state_type: 'StateType') -> list[str]  # Line 366
-    async def _validate_field_types(self, state_type: 'StateType', state_data: dict[str, Any]) -> list[str]  # Line 380
-    async def _validate_bot_state_structure(self, state_data: dict[str, Any]) -> list[str]  # Line 427
-    async def _validate_position_state_structure(self, state_data: dict[str, Any]) -> list[str]  # Line 446
-    async def _validate_order_state_structure(self, state_data: dict[str, Any]) -> list[str]  # Line 468
-    async def _validate_risk_state_structure(self, state_data: dict[str, Any]) -> list[str]  # Line 497
-    async def _validate_bot_business_rules(self, state_data: dict[str, Any]) -> list[str]  # Line 517
-    async def _validate_position_business_rules(self, state_data: dict[str, Any]) -> list[str]  # Line 539
-    async def _validate_order_business_rules(self, state_data: dict[str, Any]) -> list[str]  # Line 556
-    async def _validate_risk_business_rules(self, state_data: dict[str, Any]) -> list[str]  # Line 568
-    async def _validate_general_business_rules(self, state_data: dict[str, Any]) -> list[str]  # Line 588
-    def _extract_status_field(self, state_data: dict[str, Any], state_type: 'StateType') -> str | None  # Line 611
-    def _get_valid_transitions(self, state_type: 'StateType') -> dict[str, set[str]]  # Line 631
-    async def _get_cached_validation(self, state_type: 'StateType', state_data: dict[str, Any], validation_level: str) -> dict[str, Any] | None  # Line 655
-    async def _cache_validation_result(self, ...) -> None  # Line 673
-    def _generate_cache_key(self, state_type: 'StateType', state_data: dict[str, Any], validation_level: str) -> str  # Line 691
+class StateValidationService(BaseService, ErrorPropagationMixin):
+    def __init__(self, validation_service: ValidationService | None = None)  # Line 63
+    async def validate_state_data(self, ...) -> dict[str, Any]  # Line 103
+    async def validate_state_transition(self, ...) -> bool  # Line 200
+    async def validate_business_rules(self, ...) -> list[str]  # Line 248
+    def matches_criteria(self, state: dict[str, Any], criteria: dict[str, Any]) -> bool  # Line 294
+    def get_validation_metrics(self) -> dict[str, Any]  # Line 335
+    async def _validate_basic_data_structure(self, state_type: 'StateType', state_data: dict[str, Any]) -> list[str]  # Line 348
+    async def _validate_state_type_specific(self, state_type: 'StateType', state_data: dict[str, Any]) -> list[str]  # Line 377
+    async def _validate_strict_requirements(self, state_type: 'StateType', state_data: dict[str, Any]) -> list[str]  # Line 398
+    def _get_required_fields(self, state_type: 'StateType') -> list[str]  # Line 431
+    async def _validate_field_types(self, state_type: 'StateType', state_data: dict[str, Any]) -> list[str]  # Line 445
+    async def _validate_bot_state_structure(self, state_data: dict[str, Any]) -> list[str]  # Line 492
+    async def _validate_position_state_structure(self, state_data: dict[str, Any]) -> list[str]  # Line 511
+    async def _validate_order_state_structure(self, state_data: dict[str, Any]) -> list[str]  # Line 533
+    async def _validate_risk_state_structure(self, state_data: dict[str, Any]) -> list[str]  # Line 562
+    async def _validate_bot_business_rules(self, state_data: dict[str, Any]) -> list[str]  # Line 582
+    async def _validate_position_business_rules(self, state_data: dict[str, Any]) -> list[str]  # Line 604
+    async def _validate_order_business_rules(self, state_data: dict[str, Any]) -> list[str]  # Line 621
+    async def _validate_risk_business_rules(self, state_data: dict[str, Any]) -> list[str]  # Line 633
+    async def _validate_general_business_rules(self, state_data: dict[str, Any]) -> list[str]  # Line 653
+    def _extract_status_field(self, state_data: dict[str, Any], state_type: 'StateType') -> str | None  # Line 676
+    def _get_valid_transitions(self, state_type: 'StateType') -> dict[str, set[str]]  # Line 696
+    async def _get_cached_validation(self, state_type: 'StateType', state_data: dict[str, Any], validation_level: str) -> dict[str, Any] | None  # Line 720
+    async def _cache_validation_result(self, ...) -> None  # Line 738
+    def _generate_cache_key(self, state_type: 'StateType', state_data: dict[str, Any], validation_level: str) -> str  # Line 756
 ```
 
 ### File: trade_lifecycle_service.py
@@ -2052,35 +2040,35 @@ def get_cache_manager()  # Line 19
 
 ```python
 class StatePersistence(BaseComponent):
-    def __init__(self, state_service: 'StateService')  # Line 29
-    def database_service(self)  # Line 53
-    async def initialize(self) -> None  # Line 57
-    async def cleanup(self) -> None  # Line 84
-    async def load_state(self, state_type: 'StateType', state_id: str) -> dict[str, Any] | None  # Line 117
-    async def save_state(self, ...) -> bool  # Line 140
-    async def delete_state(self, state_type: 'StateType', state_id: str) -> bool  # Line 173
-    async def queue_state_save(self, ...) -> None  # Line 196
-    async def queue_state_delete(self, state_type: 'StateType', state_id: str) -> None  # Line 213
-    async def get_states_by_type(self, ...) -> list[dict[str, Any]]  # Line 222
-    async def search_states(self, ...) -> list[dict[str, Any]]  # Line 255
-    async def save_snapshot(self, snapshot: 'StateSnapshot') -> bool  # Line 303
-    async def load_snapshot(self, snapshot_id: str) -> 'StateSnapshot | None'  # Line 325
-    async def load_all_states_to_cache(self) -> None  # Line 347
-    async def _persistence_loop(self) -> None  # Line 368
-    async def _process_save_batch(self, batch: list[dict[str, Any]]) -> None  # Line 448
-    async def _process_delete_batch(self, batch: list[dict[str, Any]]) -> None  # Line 468
-    async def _flush_queues(self) -> None  # Line 483
-    def _matches_criteria(self, state_data: dict[str, Any], criteria: dict[str, Any]) -> bool  # Line 511
-    def _is_service_available(self) -> bool  # Line 518
-    def _is_database_available(self) -> bool  # Line 535
+    def __init__(self, state_service: 'StateService')  # Line 31
+    def database_service(self)  # Line 55
+    async def initialize(self) -> None  # Line 59
+    async def cleanup(self) -> None  # Line 86
+    async def load_state(self, state_type: 'StateType', state_id: str) -> dict[str, Any] | None  # Line 119
+    async def save_state(self, ...) -> bool  # Line 142
+    async def delete_state(self, state_type: 'StateType', state_id: str) -> bool  # Line 175
+    async def queue_state_save(self, ...) -> None  # Line 198
+    async def queue_state_delete(self, state_type: 'StateType', state_id: str) -> None  # Line 215
+    async def get_states_by_type(self, ...) -> list[dict[str, Any]]  # Line 224
+    async def search_states(self, ...) -> list[dict[str, Any]]  # Line 257
+    async def save_snapshot(self, snapshot: 'RuntimeStateSnapshot') -> bool  # Line 305
+    async def load_snapshot(self, snapshot_id: str) -> 'RuntimeStateSnapshot | None'  # Line 327
+    async def load_all_states_to_cache(self) -> None  # Line 349
+    async def _persistence_loop(self) -> None  # Line 370
+    async def _process_save_batch(self, batch: list[dict[str, Any]]) -> None  # Line 450
+    async def _process_delete_batch(self, batch: list[dict[str, Any]]) -> None  # Line 488
+    async def _flush_queues(self) -> None  # Line 521
+    def _matches_criteria(self, state_data: dict[str, Any], criteria: dict[str, Any]) -> bool  # Line 549
+    def _is_service_available(self) -> bool  # Line 556
+    def _is_database_available(self) -> bool  # Line 573
 ```
 
 ### File: state_service.py
 
 **Key Imports:**
 - `from src.core.base.events import BaseEventEmitter`
-- `from src.core.base.service import BaseService`
 - `from src.core.base.interfaces import HealthCheckResult`
+- `from src.core.base.service import BaseService`
 - `from src.core.config.main import Config`
 - `from src.core.exceptions import DependencyError`
 
@@ -2093,23 +2081,6 @@ class StatePersistence(BaseComponent):
 class StateOperation(Enum):
 ```
 
-#### Class: `StatePriority`
-
-**Inherits**: str, Enum
-**Purpose**: State operation priority levels
-
-```python
-class StatePriority(str, Enum):
-```
-
-#### Class: `StateMetadata`
-
-**Purpose**: Metadata for state tracking and versioning
-
-```python
-class StateMetadata:
-```
-
 #### Class: `StateChange`
 
 **Purpose**: Represents a state change for audit and synchronization
@@ -2118,12 +2089,12 @@ class StateMetadata:
 class StateChange:
 ```
 
-#### Class: `StateSnapshot`
+#### Class: `RuntimeStateSnapshot`
 
-**Purpose**: Complete state snapshot for recovery and backup
+**Purpose**: Runtime state snapshot data structure for in-memory operations
 
 ```python
-class StateSnapshot:
+class RuntimeStateSnapshot:
 ```
 
 #### Class: `StateValidationResult`
@@ -2140,7 +2111,7 @@ class StateValidationResult:
 
 ```python
 class StateMetrics:
-    def to_dict(self) -> dict[str, int | float | str | None]  # Line 215
+    def to_dict(self) -> dict[str, int | float | str | None]  # Line 199
 ```
 
 #### Class: `StateService`
@@ -2151,48 +2122,48 @@ state handling with synchronizatio
 
 ```python
 class StateService(BaseService, ErrorPropagationMixin):
-    def __init__(self, ...)  # Line 253
-    async def initialize(self) -> None  # Line 415
-    async def cleanup(self) -> None  # Line 465
-    async def get_state(self, state_type: StateType, state_id: str, include_metadata: bool = False) -> dict[str, Any] | None  # Line 546
-    async def set_state(self, ...) -> bool  # Line 705
-    async def delete_state(self, ...) -> bool  # Line 819
-    async def get_states_by_type(self, ...) -> list[dict[str, Any]]  # Line 893
-    async def search_states(self, ...) -> list[dict[str, Any]]  # Line 937
-    async def create_snapshot(self, description: str = '', state_types: list[StateType] | None = None) -> str  # Line 975
-    async def restore_snapshot(self, snapshot_id: str) -> bool  # Line 1020
-    def subscribe(self, ...) -> None  # Line 1063
-    def unsubscribe(self, state_type: StateType, callback: Callable) -> None  # Line 1081
-    def get_metrics(self) -> dict[str, int | float | str]  # Line 1096
-    async def get_state_metrics(self) -> StateMetrics  # Line 1114
-    async def get_health_status(self) -> dict[str, Any]  # Line 1122
-    async def _check_rate_limit(self, cache_key: str) -> bool  # Line 1177
-    def _get_state_lock(self, state_key: str) -> asyncio.Lock  # Line 1205
-    def _detect_changed_fields(self, old_state: dict[str, Any] | None, new_state: dict[str, Any]) -> set[str]  # Line 1228
-    def _get_next_version(self, cache_key: str) -> int  # Line 1249
-    def _update_hit_rate(self, hit: bool) -> float  # Line 1254
-    def _update_operation_metrics(self, operation_time_ms: float, success: bool) -> None  # Line 1266
-    def _calculate_memory_usage(self) -> float  # Line 1288
-    def _matches_criteria(self, state: dict[str, Any], criteria: dict[str, Any]) -> bool  # Line 1300
-    async def _load_metadata_through_service(self, cache_key: str, state_type: StateType, state_id: str) -> StateMetadata | None  # Line 1307
-    async def _load_existing_states(self) -> None  # Line 1332
-    async def _broadcast_state_change(self, ...) -> None  # Line 1342
-    async def _notify_legacy_subscribers(self, ...) -> None  # Line 1408
-    async def _synchronization_loop(self) -> None  # Line 1430
-    async def _cleanup_loop(self) -> None  # Line 1443
-    async def _metrics_loop(self) -> None  # Line 1464
-    async def _backup_loop(self) -> None  # Line 1488
-    async def _initialize_service_components(self) -> None  # Line 1518
-    async def _initialize_state_components(self) -> None  # Line 1582
-    def error_handler(self) -> ErrorHandler  # Line 1626
-    async def _store_state_through_services(self, ...) -> None  # Line 1644
-    async def _coordinate_post_storage_activities(self, ...) -> None  # Line 1673
-    def _resolve_service_dependency(self, service_name: str, fallback_factory)  # Line 1711
-    def _create_business_service_fallback(self)  # Line 1721
-    def _create_persistence_service_fallback(self)  # Line 1725
-    def _create_validation_service_fallback(self)  # Line 1729
-    def _create_synchronization_service_fallback(self)  # Line 1733
-    def _extract_config_dict(self, config: Config) -> dict[str, Any]  # Line 1739
+    def __init__(self, ...)  # Line 237
+    async def initialize(self) -> None  # Line 399
+    async def cleanup(self) -> None  # Line 449
+    async def get_state(self, state_type: StateType, state_id: str, include_metadata: bool = False) -> dict[str, Any] | None  # Line 530
+    async def set_state(self, ...) -> bool  # Line 689
+    async def delete_state(self, ...) -> bool  # Line 813
+    async def get_states_by_type(self, ...) -> list[dict[str, Any]]  # Line 887
+    async def search_states(self, ...) -> list[dict[str, Any]]  # Line 931
+    async def create_snapshot(self, description: str = '', state_types: list[StateType] | None = None) -> str  # Line 969
+    async def restore_snapshot(self, snapshot_id: str) -> bool  # Line 1014
+    def subscribe(self, ...) -> None  # Line 1057
+    def unsubscribe(self, state_type: StateType, callback: Callable) -> None  # Line 1075
+    def get_metrics(self) -> dict[str, int | float | str]  # Line 1090
+    async def get_state_metrics(self) -> StateMetrics  # Line 1108
+    async def get_health_status(self) -> dict[str, Any]  # Line 1116
+    async def _check_rate_limit(self, cache_key: str) -> bool  # Line 1171
+    def _get_state_lock(self, state_key: str) -> asyncio.Lock  # Line 1199
+    def _detect_changed_fields(self, old_state: dict[str, Any] | None, new_state: dict[str, Any]) -> set[str]  # Line 1222
+    def _get_next_version(self, cache_key: str) -> int  # Line 1243
+    def _update_hit_rate(self, hit: bool) -> float  # Line 1248
+    def _update_operation_metrics(self, operation_time_ms: float, success: bool) -> None  # Line 1260
+    def _calculate_memory_usage(self) -> float  # Line 1282
+    def _matches_criteria(self, state: dict[str, Any], criteria: dict[str, Any]) -> bool  # Line 1305
+    async def _load_metadata_through_service(self, cache_key: str, state_type: StateType, state_id: str) -> StateMetadata | None  # Line 1322
+    async def _load_existing_states(self) -> None  # Line 1347
+    async def _broadcast_state_change(self, ...) -> None  # Line 1357
+    async def _notify_legacy_subscribers(self, ...) -> None  # Line 1468
+    async def _synchronization_loop(self) -> None  # Line 1490
+    async def _cleanup_loop(self) -> None  # Line 1503
+    async def _metrics_loop(self) -> None  # Line 1524
+    async def _backup_loop(self) -> None  # Line 1548
+    async def _initialize_service_components(self) -> None  # Line 1578
+    async def _initialize_state_components(self) -> None  # Line 1642
+    def error_handler(self) -> ErrorHandler  # Line 1686
+    async def _store_state_through_services(self, ...) -> None  # Line 1702
+    async def _coordinate_post_storage_activities(self, ...) -> None  # Line 1731
+    def _resolve_service_dependency(self, service_name: str, fallback_factory)  # Line 1769
+    def _create_business_service_fallback(self)  # Line 1779
+    def _create_persistence_service_fallback(self)  # Line 1783
+    def _create_validation_service_fallback(self)  # Line 1787
+    def _create_synchronization_service_fallback(self)  # Line 1791
+    def _extract_config_dict(self, config: Config) -> dict[str, Any]  # Line 1797
 ```
 
 ### File: state_sync_manager.py
@@ -2454,15 +2425,54 @@ class TradeLifecycleManager(BaseComponent):
     def _update_performance_metrics(self, trade_context: TradeContext) -> None  # Line 939
     def _history_record_to_performance(self, record: TradeHistoryRecord) -> dict[str, Any]  # Line 964
     async def _load_active_trades(self) -> None  # Line 980
-    async def _monitoring_loop(self) -> None  # Line 1027
-    async def create_trade_state(self, trade: Any) -> None  # Line 1047
-    async def validate_trade_state(self, trade: Any) -> bool  # Line 1083
-    async def calculate_trade_pnl(self, trade: Any) -> Decimal  # Line 1116
-    async def assess_trade_risk(self, trade: Any) -> str  # Line 1145
-    async def close_trade(self, trade_id: str, final_pnl: Decimal) -> None  # Line 1174
-    async def update_trade_state(self, trade_id: str, trade_data: Any) -> None  # Line 1199
-    def _get_state_ttl(self) -> int  # Line 1234
-    def _get_staleness_threshold(self) -> int  # Line 1244
+    async def _monitoring_loop(self) -> None  # Line 1026
+    async def create_trade_state(self, trade: Any) -> None  # Line 1046
+    async def validate_trade_state(self, trade: Any) -> bool  # Line 1082
+    async def calculate_trade_pnl(self, trade: Any) -> Decimal  # Line 1115
+    async def assess_trade_risk(self, trade: Any) -> str  # Line 1144
+    async def close_trade(self, trade_id: str, final_pnl: Decimal) -> None  # Line 1173
+    async def update_trade_state(self, trade_id: str, trade_data: Any) -> None  # Line 1198
+    def _get_state_ttl(self) -> int  # Line 1233
+    def _get_staleness_threshold(self) -> int  # Line 1243
+```
+
+### File: types.py
+
+**Key Imports:**
+- `from src.core.types import ExecutionResult`
+- `from src.core.types import OrderRequest`
+
+#### Class: `ValidationResult`
+
+**Inherits**: Enum
+**Purpose**: Validation result enumeration
+
+```python
+class ValidationResult(Enum):
+```
+
+#### Class: `ValidationCheck`
+
+**Purpose**: Individual validation check result
+
+```python
+class ValidationCheck:
+```
+
+#### Class: `PreTradeValidation`
+
+**Purpose**: Pre-trade validation results
+
+```python
+class PreTradeValidation:
+```
+
+#### Class: `PostTradeAnalysis`
+
+**Purpose**: Post-trade analysis results
+
+```python
+class PostTradeAnalysis:
 ```
 
 ### File: versioning.py
@@ -2585,5 +2595,5 @@ class RenameFieldMigration(StateMigration):
 
 ---
 **Generated**: Complete reference for state module
-**Total Classes**: 98
+**Total Classes**: 96
 **Total Functions**: 12

@@ -223,3 +223,103 @@ def extract_error_details(error: Exception) -> dict[str, Any]:
         error_details["category"] = "general"
 
     return error_details
+
+
+def api_error_handler(operation: str, status_code: int = 500):
+    """
+    Decorator to handle API errors with consistent logging and HTTP exception conversion.
+
+    Args:
+        operation: The operation name for logging and error messages
+        status_code: Default HTTP status code for errors
+
+    Returns:
+        Decorator function
+    """
+    def decorator(func):
+        def wrapper(*args, **kwargs):
+            try:
+                return func(*args, **kwargs)
+            except HTTPException:
+                raise
+            except Exception as e:
+                logger.error(f"Error in {operation}: {e}")
+                raise HTTPException(status_code=status_code, detail=f"Failed to {operation.lower()}")
+        return wrapper
+    return decorator
+
+
+def async_api_error_handler(operation: str, status_code: int = 500):
+    """
+    Async decorator to handle API errors with consistent logging and HTTP exception conversion.
+
+    Args:
+        operation: The operation name for logging and error messages
+        status_code: Default HTTP status code for errors
+
+    Returns:
+        Async decorator function
+    """
+    def decorator(func):
+        async def wrapper(*args, **kwargs):
+            try:
+                return await func(*args, **kwargs)
+            except HTTPException:
+                raise
+            except Exception as e:
+                logger.error(f"Error in {operation}: {e}")
+                raise HTTPException(status_code=status_code, detail=f"Failed to {operation.lower()}")
+        return wrapper
+    return decorator
+
+
+def service_error_wrapper(operation: str):
+    """
+    Wrapper function to handle service calls with consistent error handling.
+
+    Args:
+        operation: The operation name for error messages
+
+    Returns:
+        Context manager for service operations
+    """
+    class ServiceErrorContext:
+        def __init__(self, operation_name: str):
+            self.operation_name = operation_name
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc_val, exc_tb):
+            if exc_type and exc_type != HTTPException:
+                logger.error(f"Error in {self.operation_name}: {exc_val}")
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Failed to {self.operation_name.lower()}"
+                ) from exc_val
+
+    return ServiceErrorContext(operation)
+
+
+def handle_service_errors(func):
+    """
+    Decorator that wraps service method calls with consistent error handling.
+
+    This is specifically designed for web service methods that need standardized
+    error handling without duplicating try-catch blocks.
+    """
+    async def wrapper(*args, **kwargs):
+        try:
+            return await func(*args, **kwargs)
+        except HTTPException:
+            raise
+        except Exception as e:
+            # Extract operation name from function name
+            operation = func.__name__.replace('_', ' ').title()
+            logger.error(f"Service error in {operation}: {e}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Service operation failed: {operation}"
+            )
+
+    return wrapper

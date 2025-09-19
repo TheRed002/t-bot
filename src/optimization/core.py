@@ -283,6 +283,8 @@ class OptimizationConfig(BaseModel):
     optimization algorithms.
     """
 
+    model_config = {"arbitrary_types_allowed": True}
+
     # Basic configuration
     max_iterations: int = Field(default=1000, ge=1, description="Maximum number of iterations")
     max_evaluations: int = Field(

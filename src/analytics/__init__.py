@@ -45,7 +45,7 @@ from src.analytics.interfaces import (
     RiskServiceProtocol,
 )
 from src.analytics.mixins import (
-    ErrorHandlingMixin,
+    ErrorPropagationMixin,
     OrderTrackingMixin,
     PositionTrackingMixin,
 )
@@ -61,7 +61,7 @@ __all__ = [
     "AnalyticsServiceFactory",
     "AnalyticsServiceProtocol",
     "ConfigurationDefaults",
-    "ErrorHandlingMixin",
+    "ErrorPropagationMixin",
     "ExportServiceProtocol",
     "MetricsDefaults",
     "OperationalServiceProtocol",

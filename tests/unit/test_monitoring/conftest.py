@@ -164,11 +164,8 @@ EXTERNAL_MOCKS = {
     ),
     
     # Math/statistics mocks
-    "numpy": Mock(
-        percentile=Mock(return_value=2.5),
-        mean=Mock(return_value=2.0),
-        std=Mock(return_value=0.5),
-    ),
+    # Note: numpy removed from global mocks to avoid sklearn import conflicts
+    # Individual test files can mock numpy locally if needed
     "scipy": Mock(
         stats=Mock(percentileofscore=Mock(return_value=50.0))
     ),

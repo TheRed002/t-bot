@@ -12,6 +12,7 @@ from typing import (
 )  # Using Any to avoid interface mismatch during mypy checking
 
 from src.core.base.component import BaseComponent
+from src.core.event_constants import BacktestEvents
 from src.core.exceptions import ServiceError
 from src.core.logging import get_logger
 from src.utils.decimal_utils import to_decimal
@@ -56,19 +57,59 @@ class BacktestRepository(BaseComponent):
         """
         try:
             async with self.db_manager.get_session() as session:
-                # Create backtest result record
-                from src.database.models.backtesting import BacktestResult
+                # Create backtest run first (required for FK relationship)
+                from src.database.models.backtesting import BacktestResult, BacktestRun
 
+                # Create backtest run with minimal required fields
+                backtest_run = BacktestRun(
+                    status=BacktestEvents.COMPLETED.replace("backtest.", ""),
+                    initial_capital=to_decimal(result_data.get("initial_capital", 10000)),
+                    symbols=result_data.get("symbols", ["BTCUSDT"]),
+                    timeframe=result_data.get("timeframe", "1h"),
+                    exchange=result_data.get("exchange", "binance"),
+                    start_date=result_data.get("start_date", datetime.utcnow()),
+                    end_date=result_data.get("end_date", datetime.utcnow()),
+                    strategy_config=request_data.get("strategy_config", {}),
+                    risk_config=request_data.get("risk_config", {}),
+                    user_id=None,  # TODO: Add user context when available
+                    strategy_id=None,  # TODO: Add strategy context when available
+                )
+
+                session.add(backtest_run)
+                await session.flush()  # Get ID without committing
+
+                # Map field names from Pydantic model to database columns
                 result = BacktestResult(
-                    total_return=to_decimal(result_data.get("total_return", 0)),
-                    annual_return=to_decimal(result_data.get("annual_return", 0)),
-                    sharpe_ratio=result_data.get("sharpe_ratio", 0.0),
-                    max_drawdown=to_decimal(result_data.get("max_drawdown", 0)),
+                    backtest_run_id=backtest_run.id,
+                    total_return_pct=to_decimal(result_data.get("total_return_pct", 0)),
+                    annual_return_pct=to_decimal(result_data.get("annual_return_pct", 0)),
+                    sharpe_ratio=to_decimal(result_data.get("sharpe_ratio")) if result_data.get("sharpe_ratio") is not None else None,
+                    sortino_ratio=to_decimal(result_data.get("sortino_ratio")) if result_data.get("sortino_ratio") is not None else None,
+                    max_drawdown_pct=to_decimal(result_data.get("max_drawdown_pct", 0)),
+                    win_rate_pct=to_decimal(result_data.get("win_rate_pct", 0)),
                     total_trades=result_data.get("total_trades", 0),
-                    win_rate=result_data.get("win_rate", 0.0),
-                    metadata=result_data.get("metadata", {}),
-                    request_config=request_data,
-                    created_at=datetime.utcnow(),
+                    winning_trades=result_data.get("winning_trades", 0),
+                    losing_trades=result_data.get("losing_trades", 0),
+                    avg_win_amount=to_decimal(result_data.get("avg_win_amount")) if result_data.get("avg_win_amount") is not None else None,
+                    avg_loss_amount=to_decimal(result_data.get("avg_loss_amount")) if result_data.get("avg_loss_amount") is not None else None,
+                    profit_factor=to_decimal(result_data.get("profit_factor")) if result_data.get("profit_factor") is not None else None,
+                    volatility_pct=to_decimal(result_data.get("volatility_pct")) if result_data.get("volatility_pct") is not None else None,
+                    value_at_risk_95_pct=to_decimal(result_data.get("value_at_risk_95_pct")) if result_data.get("value_at_risk_95_pct") is not None else None,
+                    conditional_var_95_pct=to_decimal(result_data.get("conditional_var_95_pct")) if result_data.get("conditional_var_95_pct") is not None else None,
+                    initial_capital=to_decimal(result_data.get("initial_capital", 0)),
+                    final_capital=to_decimal(result_data.get("final_capital", 0)),
+                    peak_capital=to_decimal(result_data.get("peak_capital", 0)),
+                    lowest_capital=to_decimal(result_data.get("lowest_capital", 0)),
+                    total_time_in_market_hours=to_decimal(result_data.get("total_time_in_market_hours")) if result_data.get("total_time_in_market_hours") is not None else None,
+                    avg_trade_duration_hours=to_decimal(result_data.get("avg_trade_duration_hours")) if result_data.get("avg_trade_duration_hours") is not None else None,
+                    longest_winning_streak=result_data.get("longest_winning_streak"),
+                    longest_losing_streak=result_data.get("longest_losing_streak"),
+                    equity_curve=result_data.get("equity_curve"),
+                    daily_returns=result_data.get("daily_returns"),
+                    monte_carlo_results=result_data.get("monte_carlo_results"),
+                    walk_forward_results=result_data.get("walk_forward_results"),
+                    performance_attribution=result_data.get("performance_attribution"),
+                    analysis_metadata=result_data.get("metadata", {}),
                 )
 
                 session.add(result)
@@ -99,16 +140,38 @@ class BacktestRepository(BaseComponent):
                 if not result:
                     return None
 
+                # Map database columns back to Pydantic model fields
                 return {
                     "id": str(result.id),
-                    "total_return": float(result.total_return),
-                    "annual_return": float(result.annual_return),
-                    "sharpe_ratio": result.sharpe_ratio,
-                    "max_drawdown": float(result.max_drawdown),
+                    "total_return_pct": float(result.total_return_pct),
+                    "annual_return_pct": float(result.annual_return_pct),
+                    "sharpe_ratio": float(result.sharpe_ratio) if result.sharpe_ratio is not None else None,
+                    "sortino_ratio": float(result.sortino_ratio) if result.sortino_ratio is not None else None,
+                    "max_drawdown_pct": float(result.max_drawdown_pct),
+                    "win_rate_pct": float(result.win_rate_pct),
                     "total_trades": result.total_trades,
-                    "win_rate": result.win_rate,
-                    "metadata": result.metadata,
-                    "request_config": result.request_config,
+                    "winning_trades": result.winning_trades,
+                    "losing_trades": result.losing_trades,
+                    "avg_win_amount": float(result.avg_win_amount) if result.avg_win_amount is not None else None,
+                    "avg_loss_amount": float(result.avg_loss_amount) if result.avg_loss_amount is not None else None,
+                    "profit_factor": float(result.profit_factor) if result.profit_factor is not None else None,
+                    "volatility_pct": float(result.volatility_pct) if result.volatility_pct is not None else None,
+                    "value_at_risk_95_pct": float(result.value_at_risk_95_pct) if result.value_at_risk_95_pct is not None else None,
+                    "conditional_var_95_pct": float(result.conditional_var_95_pct) if result.conditional_var_95_pct is not None else None,
+                    "initial_capital": float(result.initial_capital),
+                    "final_capital": float(result.final_capital),
+                    "peak_capital": float(result.peak_capital),
+                    "lowest_capital": float(result.lowest_capital),
+                    "total_time_in_market_hours": float(result.total_time_in_market_hours) if result.total_time_in_market_hours is not None else None,
+                    "avg_trade_duration_hours": float(result.avg_trade_duration_hours) if result.avg_trade_duration_hours is not None else None,
+                    "longest_winning_streak": result.longest_winning_streak,
+                    "longest_losing_streak": result.longest_losing_streak,
+                    "equity_curve": result.equity_curve,
+                    "daily_returns": result.daily_returns,
+                    "monte_carlo_results": result.monte_carlo_results,
+                    "walk_forward_results": result.walk_forward_results,
+                    "performance_attribution": result.performance_attribution,
+                    "metadata": result.analysis_metadata or {},
                     "created_at": result.created_at,
                 }
 
@@ -141,9 +204,9 @@ class BacktestRepository(BaseComponent):
                 query = select(BacktestResult).order_by(BacktestResult.created_at.desc())
 
                 if strategy_type:
-                    # Filter by strategy type in metadata
+                    # Filter by strategy type in analysis_metadata
                     query = query.where(
-                        BacktestResult.metadata.op("->>")("strategy_type") == strategy_type
+                        BacktestResult.analysis_metadata.op("->>")("strategy_type") == strategy_type
                     )
 
                 query = query.offset(offset).limit(limit)
@@ -152,11 +215,11 @@ class BacktestRepository(BaseComponent):
                 return [
                     {
                         "id": str(result.id),
-                        "total_return": float(result.total_return),
-                        "sharpe_ratio": result.sharpe_ratio,
-                        "max_drawdown": float(result.max_drawdown),
+                        "total_return_pct": float(result.total_return_pct),
+                        "sharpe_ratio": float(result.sharpe_ratio) if result.sharpe_ratio is not None else None,
+                        "max_drawdown_pct": float(result.max_drawdown_pct),
                         "total_trades": result.total_trades,
-                        "strategy_type": result.metadata.get("strategy_type", "unknown"),
+                        "strategy_type": (result.analysis_metadata or {}).get("strategy_type", "unknown"),
                         "created_at": result.created_at,
                     }
                     for result in results.scalars().all()

@@ -201,7 +201,7 @@ async def get_quality_controller() -> QualityController:
         # For now, create a singleton instance with config
         if not hasattr(get_quality_controller, "_instance"):
             # Get config from somewhere - for now use a basic config
-            from src.core.config.main import Config
+            from src.core.config import Config
 
             config = Config()
             get_quality_controller._instance = QualityController(config)

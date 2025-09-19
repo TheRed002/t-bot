@@ -368,3 +368,39 @@ class PortfolioState(BaseModel):
     )
     timestamp: datetime = Field(default_factory=datetime.now, description="State timestamp")
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class PortfolioMetrics(BaseModel):
+    """Unified portfolio metrics model for cross-module consistency."""
+
+    # Core metrics
+    total_value: Decimal = Field(default=Decimal("0"), ge=0)
+    total_exposure: Decimal = Field(default=Decimal("0"), ge=0)
+    total_pnl: Decimal = Field(default=Decimal("0"))
+    unrealized_pnl: Decimal = Field(default=Decimal("0"))
+    realized_pnl: Decimal = Field(default=Decimal("0"))
+
+    # Portfolio composition
+    position_count: int = Field(default=0, ge=0)
+    cash: Decimal = Field(default=Decimal("0"), ge=0)
+    invested_capital: Decimal = Field(default=Decimal("0"), ge=0)
+
+    # Risk metrics
+    leverage: Decimal = Field(default=Decimal("1.0"), ge=1)
+    volatility: Decimal = Field(default=Decimal("0"), ge=0)
+    beta: Decimal | None = None
+    correlation_btc: Decimal | None = None
+    largest_position_weight: Decimal = Field(default=Decimal("0"), ge=0, le=1)
+
+    # Performance metrics
+    daily_return: Decimal = Field(default=Decimal("0"))
+    weekly_return: Decimal = Field(default=Decimal("0"))
+    monthly_return: Decimal = Field(default=Decimal("0"))
+    total_return: Decimal = Field(default=Decimal("0"))
+    sharpe_ratio: Decimal | None = None
+    sortino_ratio: Decimal | None = None
+
+    # Metadata
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    bot_id: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)

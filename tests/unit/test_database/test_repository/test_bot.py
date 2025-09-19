@@ -460,7 +460,8 @@ class TestSignalRepository:
         return Signal(
             id=str(uuid.uuid4()),
             strategy_id=str(uuid.uuid4()),
-            action="BUY",
+            direction="BUY",
+            source="test",
             symbol="BTCUSD",
             strength=0.8,
             executed=False,

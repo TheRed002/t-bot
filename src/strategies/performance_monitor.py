@@ -128,8 +128,8 @@ class PerformanceMonitor:
 
     def __init__(
         self,
-        data_service: Any | None = None,
-        market_data_provider: MarketDataProviderInterface | None = None,
+        data_service: "Any | None" = None,
+        market_data_provider: "MarketDataProviderInterface | None" = None,
         update_interval_seconds: int = 60,
         calculation_window_days: int = 252,
     ):
@@ -157,7 +157,7 @@ class PerformanceMonitor:
 
         # Monitoring control
         self.monitoring_active = False
-        self.monitoring_task: asyncio.Task | None = None
+        self.monitoring_task: "asyncio.Task | None" = None
         self.last_update = datetime.now(timezone.utc)
 
         # Alert thresholds
@@ -1138,7 +1138,7 @@ class PerformanceMonitor:
 
         return trades
 
-    def _create_trade_from_dict(self, trade_dict: dict[str, Any]) -> Trade | None:
+    def _create_trade_from_dict(self, trade_dict: dict[str, Any]) -> "Trade | None":
         """Create a Trade object from dictionary data."""
         # Validate and map required fields
         required_fields = [
@@ -1236,7 +1236,7 @@ class PerformanceMonitor:
 
         return mapped_dict
 
-    async def _get_current_price(self, symbol: str) -> Decimal | None:
+    async def _get_current_price(self, symbol: str) -> "Decimal | None":
         """Get current market price for a symbol with timeout and error handling."""
         try:
             if not self.market_data_provider:

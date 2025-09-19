@@ -13,7 +13,7 @@ Core Components:
 - ResourceManager: Resource allocation and management
 """
 
-# Simplified exports
+# Service layer exports
 __all__ = [
     "BotCoordinator",
     "BotInstance",
@@ -21,6 +21,19 @@ __all__ = [
     "BotMonitor",
     "BotService",
     "ResourceManager",
+    # Service layer classes
+    "BotManagementController",
+    "BotInstanceService",
+    "BotLifecycleService",
+    "BotCoordinationService",
+    "BotMonitoringService",
+    "BotResourceService",
+    # Service interfaces
+    "IBotInstanceService",
+    "IBotLifecycleService",
+    "IBotCoordinationService",
+    "IBotMonitoringService",
+    "IResourceManagementService",
 ]
 
 
@@ -52,7 +65,7 @@ def __getattr__(name: str):
 
         return BotCoordinator
     elif name == "BotInstance":
-        from .bot_instance import BotInstance
+        from .bot_entity import BotInstance
 
         return BotInstance
     elif name == "BotLifecycle":
@@ -71,5 +84,41 @@ def __getattr__(name: str):
         from .resource_manager import ResourceManager
 
         return ResourceManager
+    # Service layer classes
+    elif name == "BotManagementController":
+        from .controller import BotManagementController
+
+        return BotManagementController
+    elif name == "BotInstanceService":
+        from .instance_service import BotInstanceService
+
+        return BotInstanceService
+    elif name == "BotLifecycleService":
+        from .lifecycle_service import BotLifecycleService
+
+        return BotLifecycleService
+    elif name == "BotCoordinationService":
+        from .coordination_service import BotCoordinationService
+
+        return BotCoordinationService
+    elif name == "BotMonitoringService":
+        from .monitoring_service import BotMonitoringService
+
+        return BotMonitoringService
+    elif name == "BotResourceService":
+        from .resource_service import BotResourceService
+
+        return BotResourceService
+    # Service interfaces
+    elif name in ["IBotInstanceService", "IBotLifecycleService", "IBotCoordinationService",
+                  "IBotMonitoringService", "IResourceManagementService"]:
+        from .interfaces import (
+            IBotInstanceService,
+            IBotLifecycleService,
+            IBotCoordinationService,
+            IBotMonitoringService,
+            IResourceManagementService,
+        )
+        return locals()[name]
     else:
         raise AttributeError(f"module '{__name__}' has no attribute '{name}'")

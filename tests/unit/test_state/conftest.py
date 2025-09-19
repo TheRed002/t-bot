@@ -39,9 +39,45 @@ for logger_name in ["src", "root", "__main__", "asyncio", "pytest"]:
     logger.propagate = False
 
 
+# Create proper mock modules that support imports
+class MockLoggingModule:
+    """Mock logging module that properly supports 'from src.core.logging import get_logger'."""
+
+    def __init__(self):
+        # Create a mock logger that looks like a real logger
+        mock_logger = Mock()
+        mock_logger.level = 50
+        mock_logger.setLevel = Mock()
+        mock_logger.debug = Mock()
+        mock_logger.info = Mock()
+        mock_logger.warning = Mock()
+        mock_logger.error = Mock()
+        mock_logger.critical = Mock()
+        # Ensure these methods always return None for clean testing
+        mock_logger.debug.return_value = None
+        mock_logger.info.return_value = None
+        mock_logger.warning.return_value = None
+        mock_logger.error.return_value = None
+        mock_logger.critical.return_value = None
+        self._mock_logger = mock_logger
+
+    def get_logger(self, name):
+        return self._mock_logger
+
+class MockTelemetryModule:
+    """Mock telemetry module that properly supports 'from src.monitoring.telemetry import get_tracer'."""
+
+    def __init__(self):
+        mock_tracer = Mock()
+        mock_tracer.start_span = Mock(return_value=Mock())
+        self._mock_tracer = mock_tracer
+
+    def get_tracer(self, name):
+        return self._mock_tracer
+
 # SELECTIVE module mocking - avoid mocking core DI functionality
 MOCK_MODULES = {
-    "src.core.logging": Mock(get_logger=Mock(return_value=Mock(level=50, setLevel=Mock()))),
+    "src.core.logging": MockLoggingModule(),
     "src.error_handling.service": Mock(ErrorHandlingService=Mock()),
     "src.error_handling.decorators": Mock(
         with_error_handling=lambda func: func, shutdown_all_error_handlers=AsyncMock()
@@ -53,7 +89,7 @@ MOCK_MODULES = {
     "src.database.connection": Mock(
         initialize_database=AsyncMock(), close_database=AsyncMock(), get_async_session=Mock()
     ),
-    "src.monitoring.telemetry": Mock(get_tracer=Mock(return_value=Mock())),
+    "src.monitoring.telemetry": MockTelemetryModule(),
     "src.utils.validation.core": Mock(ValidatorRegistry=Mock()),
     # Remove utils_imports mock to allow testing of actual module
     "src.utils.file_utils": Mock(ensure_directory_exists=Mock()),

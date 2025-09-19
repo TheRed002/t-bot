@@ -200,6 +200,7 @@ class DatabaseService(BaseService, DatabaseServiceInterface):
                 "entity_type": type(entity).__name__,
                 "processing_mode": processing_mode,
                 "data_format": "database_entity_v1",
+                "message_pattern": "pub_sub",  # Align with analytics patterns
             }
 
             # Add propagation step for cross-module error flow
@@ -408,6 +409,7 @@ class DatabaseService(BaseService, DatabaseServiceInterface):
                 "entity_type": model_class.__name__,
                 "processing_mode": processing_mode,
                 "data_format": "database_entity_v1",
+                "message_pattern": "pub_sub",  # Align with analytics patterns
                 "operation_type": "list",
                 "batch_size": limit,
             }

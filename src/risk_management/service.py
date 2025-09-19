@@ -35,6 +35,7 @@ from src.core.types import (
     AlertSeverity,
     MarketData,
     OrderRequest,
+    PortfolioMetrics,
     Position,
     PositionSizeMethod,
     RiskLevel,
@@ -135,31 +136,6 @@ class RiskConfiguration(BaseModel):
     )
 
     model_config = ConfigDict(use_enum_values=True, validate_assignment=True)
-
-
-class PortfolioMetrics(BaseModel):
-    """Portfolio metrics model for caching."""
-
-    total_value: Decimal = ZERO
-    total_exposure: Decimal = ZERO
-    total_pnl: Decimal = ZERO
-    unrealized_pnl: Decimal = ZERO
-    realized_pnl: Decimal = ZERO
-    position_count: int = 0
-    leverage: Decimal = ONE
-    correlation_risk: Decimal = ZERO
-    concentration_risk: Decimal = ZERO
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-
-    model_config = ConfigDict(
-        json_schema_extra={
-            "example": {
-                "var_95": "0.05",
-                "var_99": "0.10",
-                "cvar_95": "0.07",
-            }
-        }
-    )
 
 
 class RiskAlert(BaseModel):

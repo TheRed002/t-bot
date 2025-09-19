@@ -116,8 +116,15 @@ class Application:
     async def _initialize_components(self) -> None:
         """Initialize core application components."""
         try:
+            # Initialize dependency injection container first
+            await self._initialize_dependency_injection()
+
             # Initialize database connections (placeholder for P-002)
             await self._initialize_database()
+
+            # Initialize monitoring and analytics
+            await self._initialize_monitoring()
+            await self._initialize_analytics()
 
             # Initialize exchange connections (placeholder for P-003)
             await self._initialize_exchanges()
@@ -180,6 +187,176 @@ class Application:
             if self.config.environment != "development":
                 raise
 
+    async def _initialize_dependency_injection(self) -> None:
+        """Initialize dependency injection container."""
+        try:
+            from src.core.dependency_injection import DependencyInjector
+
+            # Create and configure DI container
+            self.components["injector"] = DependencyInjector()
+
+            # Register database dependencies first
+            from src.database.di_registration import register_database_services
+
+            register_database_services(self.components["injector"])
+
+            # Register monitoring dependencies
+            from src.monitoring.di_registration import register_monitoring_services
+
+            register_monitoring_services(self.components["injector"])
+
+            # Register core service dependencies in dependency order
+            try:
+                # State management (needed by many services)
+                from src.state.di_registration import register_state_services
+                register_state_services(self.components["injector"])
+                self.logger.info("State management dependencies registered")
+            except Exception as e:
+                self.logger.warning(f"Failed to register state dependencies: {e}")
+
+            try:
+                # Data services (needed by analytics and trading)
+                from src.data.di_registration import register_data_services
+                register_data_services(self.components["injector"])
+                self.logger.info("Data service dependencies registered")
+            except Exception as e:
+                self.logger.warning(f"Failed to register data dependencies: {e}")
+
+            try:
+                # Risk management (needed by execution and strategies)
+                from src.risk_management.di_registration import register_risk_services
+                register_risk_services(self.components["injector"])
+                self.logger.info("Risk management dependencies registered")
+            except Exception as e:
+                self.logger.warning(f"Failed to register risk dependencies: {e}")
+
+            try:
+                # Execution services
+                from src.execution.di_registration import register_execution_module
+                register_execution_module(self.components["injector"], self.config)
+                self.logger.info("Execution module dependencies registered")
+            except Exception as e:
+                self.logger.warning(f"Failed to register execution dependencies: {e}")
+
+            try:
+                # Bot management services
+                from src.bot_management.di_registration import register_bot_management_services
+                register_bot_management_services(self.components["injector"])
+                self.logger.info("Bot management dependencies registered")
+            except Exception as e:
+                self.logger.warning(f"Failed to register bot management dependencies: {e}")
+
+            try:
+                # Strategies services
+                from src.strategies.di_registration import register_strategies_dependencies
+                register_strategies_dependencies(self.components["injector"])
+                self.logger.info("Strategies dependencies registered")
+            except Exception as e:
+                self.logger.warning(f"Failed to register strategies dependencies: {e}")
+
+            try:
+                # Optimization services (needed by web interface and strategies)
+                from src.optimization.di_registration import register_optimization_dependencies
+                register_optimization_dependencies(self.components["injector"])
+                self.logger.info("Optimization dependencies registered")
+            except Exception as e:
+                self.logger.warning(f"Failed to register optimization dependencies: {e}")
+
+            try:
+                # ML services (needed by optimization and strategies)
+                from src.ml.di_registration import register_ml_services
+                register_ml_services(self.components["injector"])
+                self.logger.info("ML dependencies registered")
+            except Exception as e:
+                self.logger.warning(f"Failed to register ML dependencies: {e}")
+
+            try:
+                # Backtesting services (needed by optimization)
+                from src.backtesting.di_registration import register_backtesting_services
+                register_backtesting_services(self.components["injector"])
+                self.logger.info("Backtesting dependencies registered")
+            except Exception as e:
+                self.logger.warning(f"Failed to register backtesting dependencies: {e}")
+
+            try:
+                # Analytics services (needed by many modules)
+                from src.analytics.di_registration import register_analytics_services
+                register_analytics_services(self.components["injector"])
+                self.logger.info("Analytics dependencies registered")
+            except Exception as e:
+                self.logger.warning(f"Failed to register analytics dependencies: {e}")
+
+            try:
+                # Web interface dependencies (needs most other services)
+                from src.web_interface.di_registration import register_web_interface_services
+                register_web_interface_services(self.components["injector"])
+                self.logger.info("Web interface dependencies registered")
+            except Exception as e:
+                self.logger.warning(f"Failed to register web interface dependencies: {e}")
+
+            self.health_status["components"]["dependency_injection"] = "initialized"
+            self.logger.info("Dependency injection container initialized")
+
+        except Exception as e:
+            self.logger.error(f"Dependency injection initialization failed: {e}")
+            self.health_status["components"]["dependency_injection"] = "error"
+            raise
+
+    async def _initialize_monitoring(self) -> None:
+        """Initialize monitoring system."""
+        try:
+
+            # Get injector
+            injector = self.components.get("injector")
+            if not injector:
+                raise RuntimeError("Dependency injector not initialized")
+
+            # Register monitoring services and get composite service
+            from src.monitoring.di_registration import register_monitoring_services
+            register_monitoring_services(injector)
+            monitoring_service = injector.resolve("MonitoringServiceInterface")
+            await monitoring_service.start()
+
+            self.components["monitoring_service"] = monitoring_service
+            self.health_status["components"]["monitoring"] = "initialized"
+            self.logger.info("Monitoring system initialized")
+
+        except Exception as e:
+            self.logger.error(f"Monitoring initialization failed: {e}")
+            self.health_status["components"]["monitoring"] = "error"
+            # Continue without monitoring in development
+            if self.config.environment != "development":
+                raise
+
+    async def _initialize_analytics(self) -> None:
+        """Initialize analytics system."""
+        try:
+            from src.analytics import get_analytics_service
+            from src.analytics.di_registration import register_analytics_services
+
+            # Get injector
+            injector = self.components.get("injector")
+            if not injector:
+                raise RuntimeError("Dependency injector not initialized")
+
+            # Register analytics services
+            register_analytics_services(injector)
+
+            # Create analytics service
+            analytics_service = get_analytics_service(injector)
+            await analytics_service.start()
+
+            self.components["analytics_service"] = analytics_service
+            self.health_status["components"]["analytics"] = "initialized"
+            self.logger.info("Analytics system initialized")
+
+        except Exception as e:
+            self.logger.error(f"Analytics initialization failed: {e}")
+            self.health_status["components"]["analytics"] = "error"
+            # Continue without analytics in development
+            if self.config.environment != "development":
+                raise
+
     async def _initialize_exchanges(self) -> None:
         """Initialize exchange connections."""
         try:
@@ -216,8 +393,14 @@ class Application:
         try:
             from src.risk_management import RiskManager
 
-            # Create risk manager
-            self.components["risk_manager"] = RiskManager(self.config)
+            # Get injector and analytics service
+            injector = self.components.get("injector")
+            analytics_service = self.components.get("analytics_service")
+
+            # Create risk manager with proper dependencies
+            self.components["risk_manager"] = RiskManager(
+                self.config, analytics_service=analytics_service
+            )
 
             # Validate risk parameters
             await self.components["risk_manager"].validate_risk_parameters()
@@ -316,6 +499,8 @@ class Application:
             await self._shutdown_strategies()
             await self._shutdown_risk_management()
             await self._shutdown_exchanges()
+            await self._shutdown_analytics()
+            await self._shutdown_monitoring()
             await self._shutdown_database()
             await self._shutdown_error_handlers()
 
@@ -389,19 +574,48 @@ class Application:
         self.logger.info("ML models shutdown placeholder - will be implemented in P-017")
         self.health_status["components"]["ml_models"] = "shutdown"
 
+    async def _shutdown_analytics(self) -> None:
+        """Shutdown analytics system."""
+        try:
+            if "analytics_service" in self.components:
+                await self.components["analytics_service"].stop()
+                self.logger.info("Analytics service stopped")
+
+            self.health_status["components"]["analytics"] = "shutdown"
+
+        except Exception as e:
+            self.logger.error(f"Analytics shutdown failed: {e}")
+            self.health_status["components"]["analytics"] = "error"
+
+    async def _shutdown_monitoring(self) -> None:
+        """Shutdown monitoring system."""
+        try:
+            if "monitoring_service" in self.components:
+                await self.components["monitoring_service"].stop()
+                self.logger.info("Monitoring service stopped")
+
+            self.health_status["components"]["monitoring"] = "shutdown"
+
+        except Exception as e:
+            self.logger.error(f"Monitoring shutdown failed: {e}")
+            self.health_status["components"]["monitoring"] = "error"
+
     async def _shutdown_error_handlers(self) -> None:
         """Shutdown all error handlers and cleanup resources."""
         try:
-            from src.error_handling.decorators import shutdown_all_error_handlers, get_active_handler_count
-            
+            from src.error_handling.decorators import (
+                get_active_handler_count,
+                shutdown_all_error_handlers,
+            )
+
             active_count = get_active_handler_count()
             if active_count > 0:
                 self.logger.info(f"Shutting down {active_count} active error handlers")
                 await shutdown_all_error_handlers()
                 self.logger.info("All error handlers shut down successfully")
-            
+
             self.health_status["components"]["error_handlers"] = "shutdown"
-            
+
         except Exception as e:
             self.logger.error(f"Error handler shutdown failed: {e!s}")
             self.health_status["components"]["error_handlers"] = "error"

@@ -38,7 +38,7 @@ class InventoryManager:
     - Emergency inventory liquidation procedures
     """
 
-    def __init__(self, config: dict[str, Any], services: StrategyServiceContainer | None = None):
+    def __init__(self, config: dict[str, Any], services: "StrategyServiceContainer | None" = None):
         """
         Initialize Inventory Manager.
 

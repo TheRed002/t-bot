@@ -91,14 +91,13 @@ class DetailedLogger:
 
     def log_test_run(self, module: str, test_dir: str, timeout: int, result: Dict[str, Any]):
         """Log test execution details"""
-        success = result.get("success", False)
-        returncode = result.get("returncode", -1)
+        stats = result.get("stats", {})
+        success = stats.get("failed", 0) == 0 and stats.get("total", 0) > 0
         failures_count = len(result.get("failures", []))
-        slow_tests_count = len(result.get("slow_tests", []))
 
         self.logger.info(f"TEST_RUN | {module} | dir={test_dir} | timeout={timeout}s")
         self.logger.info(
-            f"TEST_RESULT | {module} | success={success} | returncode={returncode} | failures={failures_count} | slow_tests={slow_tests_count}")
+            f"TEST_RESULT | {module} | passed={stats.get('passed', 0)} | failed={stats.get('failed', 0)} | skipped={stats.get('skipped', 0)} | warnings={stats.get('warnings', 0)}")
 
         # Log failures in detail
         for failure in result.get("failures", [])[:10]:  # Limit to 10
@@ -109,7 +108,7 @@ class DetailedLogger:
         """Log Claude API request details"""
         self.logger.info(f"CLAUDE_CALL | {prompt_num:03d}/{total_prompts} | {description}")
         self.logger.info(f"CLAUDE_REQUEST | len={prompt_length} | timeout=900s")
-    
+
     def log_claude_response(self, response_time: float, response_length: int,
                             success: bool, error: str = ""):
         """Log Claude API response details"""
@@ -118,7 +117,11 @@ class DetailedLogger:
                 f"CLAUDE_RESPONSE | time={response_time:.1f}s | len={response_length} | SUCCESS")
         else:
             self.logger.error(f"CLAUDE_RESPONSE | time={response_time:.1f}s | ERROR | {error}")
-    
+
+    def log_session_created(self, session_key: str, session_id: str):
+        """Log session creation"""
+        self.logger.info(f"SESSION_CREATED | key={session_key} | id={session_id}")
+
     def log_claude_call(self, prompt_num: int, total_prompts: int, description: str,
                         prompt_length: int, response_time: float, response_length: int,
                         success: bool, error: str = ""):
@@ -269,12 +272,12 @@ TEST_DIRECTORIES = {
 # MAX_ITERATIONS_PER_MODULE:
 #   > 0: Maximum number of iterations before giving up on a module
 #   = 0: Infinite iterations until all tests pass (recommended for comprehensive fixes)
-MAX_ITERATIONS_PER_MODULE = 0
+MAX_ITERATIONS_PER_MODULE = 20  # Increased to 20 for more thorough fixing
 MAX_PARALLEL_MODULES = 2  # Reduced for safety
 API_RATE_LIMIT_PER_MINUTE = 5
 API_RATE_LIMIT_PER_HOUR = 100
 TEST_TIMEOUT_PER_MODULE = 300
-TEST_TIMEOUT_PER_TEST = 60
+TEST_TIMEOUT_PER_TEST = 10
 CASCADE_CHECK_ENABLED = True
 HALLUCINATION_CHECK_ENABLED = True
 DRY_RUN_MODE = False  # Set via command line argument
@@ -343,6 +346,14 @@ CRITICAL ANTI-HALLUCINATION RULES:
 8. Use ONLY existing types from src.core.types
 9. DO NOT write lengthy reports or documentation - just fix the code
 10. Focus on fixing issues, not explaining them
+
+FOR TEST FILES SPECIFICALLY:
+11. ALWAYS check the actual source file before mocking a function
+12. Count the EXACT parameters - do not add extra ones
+13. If a test calls SomeClass(param1, param2, param3) but the actual class only takes param1, param2 - DECiDE LOGICALLY IF THE TEST IS CORRECT OR IMPLEMENTATION IS CORRECT
+14. Mock functions MUST match the actual function signature exactly
+15. Do NOT mock functions/methods that don't exist in the source
+16. When in doubt, use Read tool to verify the actual implementation
 """
 
 # ============================================================================
@@ -398,7 +409,10 @@ class PromptType(Enum):
     RESOURCES_ONLY = "resources_only"
     ERRORS_ONLY = "errors_only"
     TEST_FIXES = "test_fixes"
+    TEST_WARNINGS = "test_warnings"
+    TEST_SKIPPED = "test_skipped"
     SLOW_TESTS = "slow_tests"
+    COLLECTION_ERRORS = "collection_errors"  # Fix import/patch errors during test collection
     TEST_VERIFICATION = "test_verification"  # New comprehensive test check
     TEST_COVERAGE = "test_coverage"  # New coverage enforcement
     INTEGRATION = "integration"
@@ -408,7 +422,12 @@ class PromptType(Enum):
     FINANCIAL_PRECISION = "financial_precision"
     DEPENDENCY_INJECTION = "dependency_injection"
     WEBSOCKET_ASYNC = "websocket_async"
+    REMOVE_ENHANCED = "remove_enhanced"  # Remove enhanced versions and simplify code
     FACTORY_PATTERNS = "factory_patterns"
+    CODE_DUPLICATION = "code_duplication"
+    CIRCULAR_DEPENDENCIES = "circular_dependencies"
+    MODULE_INTEGRATION = "module_integration"
+    FINAL_CLEANUP = "final_cleanup"
 
 
 # More granular, specific prompts with anti-hallucination and no-report instruction
@@ -517,6 +536,7 @@ ISSUES TO FIX:
 1. Bare except clauses - replace with specific exceptions
 2. Missing error handling for operations that can fail
 3. Swallowed exceptions that should be re-raised
+4. Properly using error_handling module (except core, and utils modules)
 
 RULES:
 - Replace `except:` with `except Exception:` or specific exception
@@ -531,6 +551,7 @@ RULES:
       logger.error(f"Operation failed: {{e}}")
       raise
   ```
+MENDATORY: You need to complete this in one go, do not stop in the middle, do not break the code into smaller steps, do not ask for confirmation, just do it.
 
 {anti_hallucination}
 """,
@@ -541,17 +562,110 @@ Fix ONLY these test failures in {test_dir}:
 TEST FAILURES:
 {failures}
 
+ANALYSIS FROM PREVIOUS REVIEW:
+{feedback}
+
+BASED ON THE ANALYSIS ABOVE:
+- If the analysis indicates these are real failures, fix them
+- If the analysis provides specific insights, use them to guide your fixes
+- If the analysis suggests a root cause, address it
+
+CRITICAL TEST FIXING RULES:
+1. VERIFY BEFORE MOCKING:
+   - Read the ACTUAL source file to check function signatures
+   - Count the EXACT number of parameters the function takes
+   - Check if the function is async or sync
+   - Verify the function actually exists in the module
+
+2. MOCK ACCURATELY:
+   - Mock.return_value must match actual function return type
+   - Mock.call_args must match actual function parameters
+   - Do NOT add extra parameters that don't exist
+   - Do NOT mock functions that don't exist
+
+3. FIX ONLY FAILURES:
+   - Fix ONLY the failing assertions or mocks
+   - DO NOT change test logic or coverage
+   - DO NOT skip or remove tests
+   - Update expected values to match actual behavior
+
+4. COMMON FIXES:
+   - Update mock.return_value to match actual return
+   - Fix mock side_effect for exceptions
+   - Add missing await for async tests
+   - Remove extra parameters from mock calls
+   - Fix import paths if functions were moved
+
+5. BEFORE WRITING ANY MOCK:
+   - First: Check if the function exists
+   - Second: Count its parameters
+   - Third: Check its return type
+   - Fourth: Write the mock correctly
+
+{anti_hallucination}
+""",
+
+    PromptType.TEST_WARNINGS: """Use Task tool: financial-qa-engineer
+Fix these warnings in the {module} module:
+
+{warnings}
+
 RULES:
-- Fix ONLY the failing assertions or mocks
-- DO NOT change test logic or coverage
-- DO NOT skip or remove tests
-- Update mocks to match actual interfaces
-- Fix expected values to match actual behavior
-- Common fixes:
-  - Update mock.return_value to match actual return
-  - Fix mock side_effect for exceptions
-  - Add missing await for async tests
-  - Update expected values in assertions
+1. Fix the root cause of warnings, not just suppress them
+2. Common warnings and their fixes:
+   - DeprecationWarning: Update to use modern APIs
+   - RuntimeWarning (coroutine never awaited): Add proper await statements
+   - ImportWarning: Fix import organization and cycles
+   - UserWarning: Address the underlying issue causing the warning
+3. DO NOT use warning filters or suppressions unless absolutely necessary
+4. Ensure all async functions are properly awaited
+5. Update deprecated code to use current best practices
+6. Follow the project's coding standards strictly
+
+Provide the fixes directly without asking questions.
+{anti_hallucination}
+""",
+
+    PromptType.TEST_SKIPPED: """Use Task tool: integration-test-architect
+Fix these skipped tests in {module} module - ALL unit tests should run:
+
+{skipped_tests}
+
+SKIPPED TEST ANALYSIS:
+1. Unit tests should NEVER be skipped - they must either pass or fail
+2. Common reasons for skipped tests that need fixing:
+   - Missing test implementations (add the test logic)
+   - Conditional skips based on environment (remove conditions for unit tests)
+   - Missing dependencies (mock them instead)
+   - Platform-specific tests (make them platform-independent)
+   - Feature flags (test both enabled and disabled states)
+
+FIXES TO APPLY:
+1. If test is not implemented:
+   - Add proper test implementation
+   - Test the actual functionality
+   - Add appropriate assertions
+
+2. If test has @pytest.skip or pytest.skip():
+   - Remove the skip decorator/call
+   - Fix the underlying issue causing the skip
+   - Add mocks for any external dependencies
+
+3. If test has @pytest.skipif:
+   - Remove conditional skipping for unit tests
+   - Mock environment-specific features
+   - Make tests run regardless of platform/environment
+
+4. If test imports are failing:
+   - Fix import errors
+   - Add missing dependencies to requirements
+   - Mock unavailable modules
+
+RULES:
+- ALL unit tests must run and produce pass/fail results
+- Integration tests can be skipped, but not unit tests
+- Use mocks instead of skipping due to dependencies
+- Implement placeholder tests rather than skipping
 
 {anti_hallucination}
 """,
@@ -561,6 +675,11 @@ Optimize ONLY these slow tests in {test_dir}:
 
 SLOW TESTS (>{timeout}s):
 {slow_tests}
+
+IMPORTANT: Review your previous attempts in this session before making changes.
+If you've already tried fixing these tests, check what approaches you used and their results.
+DO NOT repeat fixes that caused import errors or other test failures.
+If this issue has appeared multiple times, you may be undoing previous fixes - try a DIFFERENT approach.
 
 COMPREHENSIVE OPTIMIZATION STRATEGIES:
 1. **Mock Heavy Operations**: Mock database queries, network calls, file I/O with lightweight responses
@@ -586,6 +705,14 @@ CRITICAL RULES:
 
     PromptType.TEST_VERIFICATION: """Use Task tool: financial-qa-engineer
 Comprehensive test verification for {module} module - ensure tests are ACTUALLY testing logic correctly:
+
+CRITICAL: VERIFY FUNCTIONS ACTUALLY EXIST:
+0. **Function Existence Check** (DO THIS FIRST):
+   - For EVERY mocked function: verify it EXISTS in the source code
+   - For EVERY function call: verify parameter count matches source
+   - If a test calls obj.some_method(a, b, c) - CHECK the source has 3 params
+   - If source has obj.some_method(a, b) - FIX test to remove extra param c
+   - Do NOT mock non-existent functions - remove or fix the test
 
 VERIFICATION CHECKLIST:
 1. **Test Logic Correctness**:
@@ -632,6 +759,46 @@ FIX THESE COMMON ISSUES:
 VALIDATION:
 After fixes, run: python -m pytest {test_dir} -v --tb=short
 All tests must pass AND actually validate the module's behavior
+
+{anti_hallucination}
+""",
+
+    PromptType.COLLECTION_ERRORS: """Fix test collection/import errors in {test_dir}:
+
+COLLECTION ERRORS DETECTED:
+{collection_errors}
+
+IMPORTANT: Review your previous attempts in this session before making changes.
+If you've already tried fixing these collection errors, check what caused them.
+DO NOT undo fixes that resolved timeout issues - find a solution that works for both.
+If alternating between collection errors and timeouts, the issue likely needs a different approach entirely.
+
+COMMON FIXES:
+1. **Wrong patch paths**: 
+   - WRONG: patch('src.module.file.time.time') when 'file' is a module not a package
+   - RIGHT: patch('time.time') or patch('src.module.file', 'time')
+   
+2. **Missing dependencies**:
+   - Check if required packages are installed (pip install needed-package)
+   - Mock external dependencies that aren't available
+   
+3. **Incorrect mock targets**:
+   - Patch at the point of use, not definition
+   - Use spec/autospec for better type safety
+   
+4. **Module-level patches causing import failures**:
+   - Move patches inside test methods instead of module level
+   - Use setUp/tearDown for common patches
+
+5. **Circular imports**:
+   - Delay imports or reorganize code structure
+   - Use local imports inside functions
+
+FIX RULES:
+- Fix ALL import and collection errors
+- Ensure tests can be collected without errors
+- Keep existing test logic intact
+- Test with: pytest {test_dir} --collect-only
 
 {anti_hallucination}
 """,
@@ -813,6 +980,311 @@ RULES:
 - Follow service locator pattern for complex creation
 
 {anti_hallucination}
+""",
+
+    PromptType.CODE_DUPLICATION: """Use Task tool: code-guardian-enforcer
+Identify and eliminate code duplication in src/{module}/:
+
+CODE DUPLICATION ANALYSIS:
+1. Search for duplicate functions/methods across files
+2. Identify repeated logic patterns that should be extracted
+3. Find copy-pasted code blocks that need refactoring
+4. Detect similar data structures that should be unified
+5. Check for redundant utility functions
+
+REFACTORING RULES:
+1. Extract common logic into shared utility functions in src/utils/
+2. Create base classes for repeated patterns
+3. Use dependency injection to share services
+4. Move domain-specific utilities to appropriate service modules
+5. Ensure DRY principle without over-abstracting
+
+INTEGRATION REQUIREMENTS:
+- When extracting to utils, ensure proper imports in all affected files
+- Update tests to use refactored code
+- Maintain backward compatibility
+- Document extracted utilities properly
+- Ensure no circular dependencies are created
+
+DO NOT:
+- Create unnecessary abstractions
+- Move business logic out of service layers
+- Break existing module boundaries
+- Create utils for single-use cases
+
+{anti_hallucination}
+""",
+
+    PromptType.CIRCULAR_DEPENDENCIES: """Use Task tool: system-design-architect
+Detect and fix circular dependencies in src/{module}/:
+
+CIRCULAR DEPENDENCY DETECTION:
+1. Analyze all imports in the module
+2. Trace import chains to detect cycles
+3. Identify type-only imports that cause cycles
+4. Find service layer circular dependencies
+5. Detect hidden cycles through third modules
+
+FIXING STRATEGIES:
+1. Use TYPE_CHECKING for type-only imports:
+   ```python
+   from typing import TYPE_CHECKING
+   if TYPE_CHECKING:
+       from other_module import SomeType
+   ```
+
+2. Move shared interfaces to src/core/base/interfaces.py
+
+3. Use dependency injection instead of direct imports:
+   ```python
+   # Instead of: from other_service import OtherService
+   def __init__(self, other_service: 'OtherService'):
+       self.other_service = other_service
+   ```
+
+4. Extract common types to src/core/types/
+
+5. Use string annotations for forward references:
+   ```python
+   def process(self, data: 'FutureType') -> None:
+   ```
+
+VERIFICATION:
+- Ensure all imports still work after fixes
+- Run tests to verify functionality
+- Check that type hints are preserved
+- Validate service initialization order
+
+{anti_hallucination}
+""",
+
+    PromptType.MODULE_INTEGRATION: """Use Task tool: module-integration-validator
+Verify {module} properly integrates with and uses other modules:
+
+INTEGRATION VERIFICATION:
+1. Check that {module} correctly uses its dependencies:
+   - Verify service injection patterns
+   - Ensure proper API usage
+   - Validate data contracts
+   - Check error handling from dependencies
+
+2. Verify other modules correctly consume {module}:
+   - Find all modules that import {module}
+   - Verify they use the correct APIs
+   - Check they handle {module}'s exceptions
+   - Ensure they respect {module}'s contracts
+
+3. Integration patterns to verify:
+   - Service layer properly uses repositories
+   - Controllers correctly use services
+   - Proper event publishing/subscription
+   - Correct use of shared utilities
+   - Appropriate use of base classes
+
+4. Common integration issues to fix:
+   - Direct database access bypassing repositories
+   - Skipping service layer business logic
+   - Incorrect error propagation
+   - Missing dependency injection
+   - Improper transaction boundaries
+
+5. Module boundary verification:
+   - Ensure {module} doesn't access internals of other modules
+   - Verify only public APIs are used
+   - Check that module responsibilities are respected
+   - Validate data flow follows architecture
+
+FIXES TO APPLY:
+- Add missing service injections
+- Fix improper direct access patterns
+- Implement proper error handling
+- Add integration tests for module boundaries
+- Update incorrect API usage
+
+DO NOT:
+- Break existing working integrations
+- Add unnecessary coupling
+- Bypass architectural layers
+- Create circular dependencies
+
+{anti_hallucination}
+""",
+
+    PromptType.FINAL_CLEANUP: """Use Task tool: quality-control-enforcer
+Perform FINAL production-ready cleanup for {module} module:
+
+PRODUCTION READINESS CHECKLIST:
+
+1. **Code Quality**:
+   - Remove all debug print statements and console.log calls
+   - Remove commented-out code blocks
+   - Remove TODO/FIXME comments and if it's future work, convert to proper issues with TODO: TBD:
+   - Ensure all temporary test code is removed
+   - Clean up any experimental or unused code
+
+2. **Documentation**:
+   - Ensure all public APIs have proper docstrings
+   - Verify type hints are complete and accurate
+   - Update module-level docstrings with current functionality
+   - Document any complex algorithms or business logic
+   - Ensure examples in docstrings are correct
+
+3. **Error Handling**:
+   - Verify all exceptions have proper error messages
+   - Ensure no bare except clauses
+   - Check that errors are logged appropriately
+   - Verify graceful degradation for external dependencies
+
+4. **Performance**:
+   - Remove any unnecessary loops or iterations
+   - Optimize database queries (use select_related/prefetch_related)
+   - Ensure proper indexing is suggested for database fields
+   - Remove redundant API calls
+   - Implement proper caching where beneficial
+
+5. **Security**:
+   - Ensure no hardcoded credentials or API keys
+   - Verify input validation and sanitization
+   - Check for SQL injection vulnerabilities
+   - Ensure proper authentication/authorization checks
+   - Remove any sensitive data from logs
+
+6. **Configuration**:
+   - Move magic numbers to configuration constants
+   - Ensure all environment-specific values use config
+   - Verify feature flags are properly implemented
+   - Check that default values are production-appropriate
+
+7. **Testing**:
+   - Ensure test coverage is adequate (70%+ minimum)
+   - Verify edge cases are tested
+   - Check that mocks are properly cleaned up
+   - Ensure tests are deterministic (no random failures)
+   - Verify integration tests cover critical paths
+
+8. **Logging**:
+   - Ensure appropriate log levels (DEBUG/INFO/WARNING/ERROR)
+   - Verify no sensitive data in logs
+   - Check that logs are actionable and meaningful
+   - Ensure structured logging format
+
+9. **Resource Management**:
+   - Verify all connections are properly closed
+   - Check for memory leaks
+   - Ensure file handles are closed
+   - Verify database connections use connection pooling
+   - Check that async resources are properly awaited
+
+10. **Code Organization**:
+    - Ensure consistent naming conventions
+    - Verify proper separation of concerns
+    - Check that business logic is in services, not controllers
+    - Ensure DRY principle is followed
+    - Verify SOLID principles are applied
+
+11. **Dependencies**:
+    - Remove unused imports
+    - Ensure requirements.txt is up to date
+    - Verify no conflicting dependencies
+    - Check for security vulnerabilities in dependencies
+
+12. **Financial System Specific**:
+    - Verify all monetary calculations use Decimal
+    - Ensure proper transaction isolation
+    - Check idempotency for critical operations
+    - Verify audit trail for financial operations
+    - Ensure proper rate limiting for external APIs
+
+APPLY FIXES:
+- Fix all issues found during the checklist review
+- Ensure changes maintain backward compatibility
+- Do not break existing functionality
+- Keep changes minimal and focused
+
+DO NOT:
+- Add new features
+- Refactor working code without clear benefit
+- Change public API signatures
+- Remove necessary defensive programming
+
+{anti_hallucination}
+""",
+
+    PromptType.REMOVE_ENHANCED: """Use Task tool: code-guardian-enforcer
+Remove ALL enhanced versions and simplify code in {module} module:
+
+CRITICAL INSTRUCTIONS FOR SIMPLIFICATION:
+
+
+
+1. **REFACTOR ORIGINAL CODE**:
+   - Find ALL files with '_enhanced', '_v2', '_refactored', '_optimized' suffixes
+   - Take the SIMPLEST working parts from enhanced versions (if any)
+   - Integrate them into the ORIGINAL file without over-complicating
+   - Remove unnecessary abstractions and layers
+   - Eliminate redundant wrapper classes
+   - Remove excessive validation that duplicates what's done elsewhere
+
+2. **REMOVE ENHANCED VERSIONS**:
+   - Find ALL files with '_enhanced', '_v2', '_refactored', '_optimized' suffixes
+   - Delete these enhanced version files completely
+   - Keep ONLY the original simple implementation
+
+3. **UPDATE ALL REFERENCES**:
+   - Search for ALL imports of enhanced versions across the ENTIRE codebase
+   - Update them to use the original simple version
+   - Fix any method name changes or parameter differences
+   - Ensure all tests still pass after updates
+
+4. **SIMPLIFICATION RULES**:
+   - One class per responsibility - no "Manager of Managers"
+   - Direct function calls over complex event systems
+   - Clear variable names over clever abstractions
+
+5. **PRESERVE FUNCTIONALITY**:
+   - Keep ALL features that are actually used
+   - Maintain existing API contracts
+   - Preserve error handling and logging using src.core.exceptions and src.core.logging
+   - Keep necessary validation and security checks
+   - Maintain test coverage
+
+6. **REMOVE COMPLEXITY**:
+   - Delete unused configuration options
+   - Remove feature flags for features that are always on
+   - Eliminate dead code paths
+
+7. **SEARCH AND REPLACE**:
+   After removing enhanced versions, search ENTIRE codebase for:
+   - from src.{module}.something_enhanced import
+   - from src.{module}.something_v2 import
+   - from src.{module}.refactored_something import
+   - {module}_enhanced
+   - {module}_v2
+   
+   Replace ALL with the simple original version
+
+8. **TEST VALIDATION**:
+   After simplification, ensure:
+   - All unit tests pass
+   - No import errors
+   - No undefined references
+   - Coverage remains above 70%
+
+EXAMPLE TRANSFORMATION:
+Before: UserManagerEnhancedV2 → UserServiceAdapter → UserRepository → Database
+After: UserService → Database
+
+DO NOT:
+- Create new enhanced versions
+- Add new abstraction layers
+- Introduce new design patterns
+- Make the code more "elegant" or "sophisticated"
+- Add features not already present
+
+FOCUS: Make the code SIMPLER, CLEARER, and EASIER TO UNDERSTAND while keeping it WORKING.
+MENDATORY: You need to complete this in one go, do not stop in the middle, do not break the code into smaller steps, do not ask for confirmation, just do it.
+
+{anti_hallucination}
 """
 }
 
@@ -931,18 +1403,24 @@ class ModuleProgress:
     test_results: Dict[str, Any] = field(default_factory=dict)
     errors: List[str] = field(default_factory=list)
     cascade_checks: List[str] = field(default_factory=list)
+    hanging_tests: Optional[Dict[str, Any]] = None  # NEW: Track slow/hanging tests
     timestamp: str = field(default_factory=lambda: datetime.now().isoformat())
 
 
 class ProgressTracker:
     """Manages progress persistence and recovery"""
 
-    def __init__(self, progress_file: Path = Path("progress.json")):
-        self.progress_file = progress_file
+    def __init__(self, progress_file: Path = Path("progress.json"), dry_run: bool = False):
+        # Use separate file for dry runs to avoid contaminating real progress
+        if dry_run:
+            self.progress_file = Path("progress.dry.json")
+        else:
+            self.progress_file = progress_file
         self.progress_file.parent.mkdir(parents=True, exist_ok=True)
         self.modules: Dict[str, ModuleProgress] = {}
         self.completed_modules: Set[str] = set()
         self.failed_modules: Set[str] = set()
+        self.completed_integrations: Set[str] = set()  # Track completed integration checks
         self._lock = threading.Lock()
         self._load_progress()
 
@@ -959,7 +1437,10 @@ class ProgressTracker:
                             self.completed_modules.add(module.module)
                         elif module.status == "failed":
                             self.failed_modules.add(module.module)
-                    print(f"📚 Loaded progress: {len(self.completed_modules)} completed")
+                    # Load completed integrations
+                    self.completed_integrations = set(data.get("completed_integrations", []))
+                    print(
+                        f"📚 Loaded progress: {len(self.completed_modules)} completed, {len(self.completed_integrations)} integrations")
             except Exception as e:
                 print(f"⚠️ Could not load progress: {e}")
 
@@ -980,6 +1461,8 @@ class ProgressTracker:
                     }
                     for m in self.modules.values()
                 ],
+                # Save integration checks
+                "completed_integrations": list(self.completed_integrations),
                 "last_updated": datetime.now().isoformat(),
                 "dry_run": DRY_RUN_MODE  # Save dry_run flag
             }
@@ -1032,6 +1515,20 @@ class ProgressTracker:
         """Check if module is complete"""
         return module in self.completed_modules
 
+    def is_integration_complete(self, module1: str, module2: str) -> bool:
+        """Check if integration between two modules is complete"""
+        # Normalize module names to lowercase for consistent keys
+        key = f"{module1.lower()}->{module2.lower()}"
+        return key in self.completed_integrations
+
+    def mark_integration_complete(self, module1: str, module2: str):
+        """Mark integration between two modules as complete"""
+        with self._lock:
+            # Normalize module names to lowercase for consistent keys
+            key = f"{module1.lower()}->{module2.lower()}"
+            self.completed_integrations.add(key)
+            self._save_progress_internal()
+
 # ============================================================================
 # RATE LIMITER
 # ============================================================================
@@ -1044,39 +1541,47 @@ class RateLimiter:
         self.calls_per_minute = deque()
         self.calls_per_hour = deque()
         self.lock = threading.Lock()
+        # Allow up to 3 concurrent API calls for true parallel execution
+        self.api_semaphore = threading.Semaphore(3)
 
     def wait_if_needed(self) -> float:
         """Wait if rate limit would be exceeded"""
-        with self.lock:
-            now = time.time()
+        # Acquire semaphore to limit concurrent API calls to 3
+        self.api_semaphore.acquire()
+        try:
+            with self.lock:
+                now = time.time()
 
-            # Clean old entries
-            minute_ago = now - 60
-            hour_ago = now - 3600
+                # Clean old entries
+                minute_ago = now - 60
+                hour_ago = now - 3600
 
-            self.calls_per_minute = deque(
-                t for t in self.calls_per_minute if t > minute_ago
-            )
-            self.calls_per_hour = deque(
-                t for t in self.calls_per_hour if t > hour_ago
-            )
+                self.calls_per_minute = deque(
+                    t for t in self.calls_per_minute if t > minute_ago
+                )
+                self.calls_per_hour = deque(
+                    t for t in self.calls_per_hour if t > hour_ago
+                )
 
-            # Check limits
-            wait_time = 0
-            if len(self.calls_per_minute) >= API_RATE_LIMIT_PER_MINUTE:
-                wait_time = 60 - (now - self.calls_per_minute[0])
-            elif len(self.calls_per_hour) >= API_RATE_LIMIT_PER_HOUR:
-                wait_time = 3600 - (now - self.calls_per_hour[0])
+                # Check limits
+                wait_time = 0
+                if len(self.calls_per_minute) >= API_RATE_LIMIT_PER_MINUTE:
+                    wait_time = 60 - (now - self.calls_per_minute[0])
+                elif len(self.calls_per_hour) >= API_RATE_LIMIT_PER_HOUR:
+                    wait_time = 3600 - (now - self.calls_per_hour[0])
 
-            if wait_time > 0:
-                print(f"⏳ Rate limit: waiting {wait_time:.1f}s...")
-                time.sleep(wait_time)
+                if wait_time > 0:
+                    print(f"⏳ Rate limit: waiting {wait_time:.1f}s...")
+                    time.sleep(wait_time)
 
-            # Record call
-            self.calls_per_minute.append(now)
-            self.calls_per_hour.append(now)
+                # Record call
+                self.calls_per_minute.append(now)
+                self.calls_per_hour.append(now)
 
-            return wait_time
+                return wait_time
+        finally:
+            # Always release semaphore to allow next API call
+            self.api_semaphore.release()
 
 # ============================================================================
 # CLAUDE API EXECUTOR
@@ -1086,16 +1591,112 @@ class RateLimiter:
 class ClaudeExecutor:
     """Executes Claude API calls with error handling and retry logic"""
 
-    def __init__(self, rate_limiter: RateLimiter, hallucination_detector: HallucinationDetector):
+    def __init__(self, rate_limiter: RateLimiter, hallucination_detector: HallucinationDetector, dry_run: bool = False):
         self.rate_limiter = rate_limiter
         self.hallucination_detector = hallucination_detector
+        self.dry_run = dry_run
         self.max_retries = 3
         self.retry_delay = 5
         self.total_prompts = 0
         self.current_prompt = 0
+        self.session_per_milestone = {}  # Store session IDs for each module-milestone pair
+        self.session_lock = threading.Lock()  # Protect session dictionary from race conditions
+        # FIXED: Remove single current_session_key - we'll pass it as parameter instead
+        self._load_existing_sessions()  # Load any existing sessions from progress file
 
-    def execute_prompt(self, prompt: str, description: str = "") -> Tuple[bool, str]:
-        """Execute a Claude prompt with anti-hallucination and retry logic"""
+    def _load_existing_sessions(self):
+        """Load existing session IDs from progress file"""
+        try:
+            progress_file = Path("progress.dry.json" if self.dry_run else "progress.json")
+            if progress_file.exists():
+                with open(progress_file, 'r') as f:
+                    progress = json.load(f)
+
+                # Extract all session IDs from progress
+                for module_data in progress.get("modules", []):
+                    module_name = module_data["module"]
+                    if "sessions" in module_data:
+                        for milestone_key, session_data in module_data["sessions"].items():
+                            # Extract milestone number from key like "milestone_0"
+                            milestone_num = milestone_key.split('_')[-1]
+                            session_key = f"{module_name}_{milestone_num}"
+                            session_id = session_data.get("session_id")
+
+                            if session_id:
+                                self.session_per_milestone[session_key] = session_id
+                                print(f"📂 Loaded session {session_id[:8]}... for {session_key}")
+
+                if self.session_per_milestone:
+                    print(f"✅ Loaded {len(self.session_per_milestone)} existing sessions")
+
+        except Exception as e:
+            print(f"⚠️ Could not load existing sessions: {e}")
+
+    def get_session_key(self, module: str, milestone: int) -> str:
+        """Get the session key for a module-milestone pair"""
+        return f"{module}_{milestone}"
+
+    def has_session_for_context(self, module: str, milestone: int) -> bool:
+        """Check if we have a session for the given context"""
+        session_key = self.get_session_key(module, milestone)
+        with self.session_lock:
+            return session_key in self.session_per_milestone
+
+    def clear_sessions(self):
+        """Clear all stored sessions (useful when --reset is used)"""
+        self.session_per_milestone.clear()
+        print("🔄 Session cache cleared")
+
+    def _save_session_to_progress(self, session_key: str, session_id: str):
+        """Save session ID to progress file for tracking"""
+        try:
+            # Load current progress
+            progress_file = Path("progress.dry.json" if self.dry_run else "progress.json")
+            if progress_file.exists():
+                with open(progress_file, 'r') as f:
+                    progress = json.load(f)
+            else:
+                progress = {"modules": []}
+
+            # Find the module in progress
+            # Use rsplit to handle module names with underscores (e.g., "error_handling_0")
+            if '_' in session_key:
+                module_name, milestone_str = session_key.rsplit('_', 1)
+                milestone = int(milestone_str)
+            else:
+                module_name = session_key
+                milestone = 0
+
+            for module_data in progress.get("modules", []):
+                if module_data["module"] == module_name:
+                    # Add sessions field if it doesn't exist
+                    if "sessions" not in module_data:
+                        module_data["sessions"] = {}
+
+                    # Store session ID with milestone key
+                    module_data["sessions"][f"milestone_{milestone}"] = {
+                        "session_id": session_id,
+                        "created_at": datetime.now().isoformat()
+                    }
+                    break
+
+            # Save updated progress
+            with open(progress_file, 'w') as f:
+                json.dump(progress, f, indent=2)
+
+        except Exception as e:
+            progress_filename = "progress.dry.json" if self.dry_run else "progress.json"
+            print(f"⚠️ Could not save session to {progress_filename}: {e}")
+
+    def execute_prompt(self, prompt: str, description: str = "", module: str = None, milestone: int = None) -> Tuple[bool, str]:
+        """Execute a Claude prompt with anti-hallucination and retry logic
+
+        Args:
+            prompt: The prompt to send to Claude
+            description: Description of what this prompt does
+            module: The module being processed (for session management)
+            milestone: The milestone number (for session management)
+        """
 
         self.current_prompt += 1
 
@@ -1118,8 +1719,8 @@ class ClaudeExecutor:
                 "{anti_hallucination}",
                 self.hallucination_detector.get_constraints() + no_reports_instruction
             )
-        else:
-            prompt += no_reports_instruction
+        # else:
+        #     prompt += no_reports_instruction
 
         retries = 0
         while retries < self.max_retries:
@@ -1130,9 +1731,22 @@ class ClaudeExecutor:
             cmd = [
                 "claude",
                 "--dangerously-skip-permissions",
-                "--model", "claude-sonnet-4-20250514",
-                "-p", prompt
+                "--model", "claude-sonnet-4-20250514"
             ]
+
+            # Check if we have a session to resume (sessions are created separately in _initialize_session)
+            if module and milestone is not None:
+                session_key = self.get_session_key(module, milestone)
+                with self.session_lock:
+                    if session_key in self.session_per_milestone:
+                        # Resume existing session
+                        session_id = self.session_per_milestone[session_key]
+                        if session_id:  # Only use if we have a valid session ID
+                            cmd.extend(["--resume", session_id])
+                            print(f"📌 Resuming session {session_id[:8]}... for {session_key}")
+
+            # Always add the prompt normally (no JSON output needed here)
+            cmd.extend(["-p", prompt])
 
             try:
                 if retries > 0:
@@ -1147,8 +1761,6 @@ class ClaudeExecutor:
                         )
 
                 start_time = time.time()
-                print(f"⏳ Executing command...")
-
                 # No timeout for Claude API - it can legitimately take a long time
                 result = subprocess.run(
                     cmd,
@@ -1166,8 +1778,11 @@ class ClaudeExecutor:
                         elapsed, len(result.stdout), True
                     )
 
+                # Since we initialize sessions separately now, we just handle the plain text response
+                response_text = result.stdout
+
                 # Success - return result (no console spam)
-                return True, result.stdout
+                return True, response_text
 
             except subprocess.TimeoutExpired as e:
                 elapsed = time.time() - start_time
@@ -1197,6 +1812,37 @@ class ClaudeExecutor:
 
                 # Print error to console for visibility
                 print(f"❌ Claude API error: {error_msg[:200]}")
+
+                if "5-hour limit reached" in error_msg and "resets" in error_msg:
+                    import re
+                    from datetime import datetime, time as dt_time
+
+                    # Extract reset time (e.g., "8am")
+                    reset_match = re.search(r'resets (\d+)(am|pm)', error_msg)
+                    if reset_match:
+                        reset_hour = int(reset_match.group(1))
+                        is_pm = reset_match.group(2) == 'pm'
+
+                        # Convert to 24-hour format
+                        if is_pm and reset_hour != 12:
+                            reset_hour += 12
+                        elif not is_pm and reset_hour == 12:
+                            reset_hour = 0
+
+                        # Calculate wait time until reset
+                        now = datetime.now()
+                        reset_time = now.replace(hour=reset_hour, minute=0, second=0, microsecond=0)
+
+                        # If reset time is in the past today, it's tomorrow
+                        if reset_time <= now:
+                            reset_time = reset_time.replace(day=reset_time.day + 1)
+
+                        wait_seconds = (reset_time - now).total_seconds()
+
+                        print(
+                            f"⏰ 5-hour limit reached. Waiting until {reset_hour:02d}:00 ({wait_seconds/3600:.1f} hours)")
+                        time.sleep(wait_seconds)
+                        continue  # Don't increment retries, just continue
 
                 # Check for 500 error or rate limit
                 if "500" in error_msg or "rate" in error_msg.lower() or "limit" in error_msg.lower():
@@ -1235,7 +1881,7 @@ class ClaudeExecutor:
             )
         return False, f"Max retries ({self.max_retries}) exceeded"
 
-    def request_feedback(self, module: str, issue: str, agent: str = "code-guardian-enforcer") -> Tuple[bool, str]:
+    def request_feedback(self, module: str, issue: str, agent: str = "code-guardian-enforcer", milestone: int = 0) -> Tuple[bool, str]:
         """Request feedback from specialized agent"""
 
         feedback_prompt = f"""Use Task tool: {agent}
@@ -1253,7 +1899,7 @@ Provide ONLY:
 DO NOT write reports or lengthy explanations.
 """
 
-        return self.execute_prompt(feedback_prompt, f"Getting feedback from {agent}")
+        return self.execute_prompt(feedback_prompt, f"Getting feedback from {agent}", module=module, milestone=milestone)
 
 # ============================================================================
 # TEST RUNNER
@@ -1279,36 +1925,67 @@ class TestRunner:
         if DRY_RUN_MODE:
             print(f"🎭 DRY-RUN MODE: Simulating test execution")
             print(f"📄 Would run: pytest {test_dir} -v --tb=short")
-            # Return simulated test results
+            # Return simulated test results in the new JSON report format
             return {
-                "success": True,
-                "passed": True,
-                "failures": [],
-                "slow_tests": [],
-                "warnings": False,
-                "output": "[DRY-RUN] Simulated test output",
-                "returncode": 0,
+                "stats": {
+                    "passed": 10,  # Simulate some passing tests
+                    "failed": 2,   # Simulate some failures for testing
+                    "skipped": 1,
+                    "errors": 0,
+                    "total": 13,
+                    "warnings": 3  # Simulate some warnings
+                },
+                "failures": [
+                    {"test": "test_example_failure", "error": "AssertionError: Expected True but got False"},
+                    {"test": "test_another_failure", "error": "ValueError: Invalid input"}
+                ],
+                "warnings": [
+                    {"category": "DeprecationWarning", "message": "Use of deprecated API",
+                        "filename": "test_core.py", "lineno": 42},
+                    {"category": "RuntimeWarning", "message": "coroutine was never awaited",
+                        "filename": "test_async.py", "lineno": 100},
+                    {"category": "UserWarning", "message": "Resource not closed properly",
+                        "filename": "test_resources.py", "lineno": 55}
+                ],
+                "skipped": [{"test": "test_skipped_example", "reason": "Not implemented yet"}],
                 "dry_run": True
             }
 
         if not Path(test_dir).exists():
             print(f"⚠️  No test directory found")
             return {
-                "success": True,
+                "success": False,  # This is a failure, not success!
                 "skipped": True,
-                "message": "No tests found"
+                "message": "No test directory found",
+                "stats": {
+                    "passed": 0,
+                    "failed": 0,
+                    "skipped": 0,
+                    "errors": 1,  # Count as error
+                    "total": 0,
+                    "warnings": 0
+                },
+                "failures": [],
+                "warnings": [],
+                "skipped": []
             }
 
+        # Use pytest-json-report for structured output with microsecond precision to avoid collisions
+        json_report_file = f"/tmp/test_report_{module}_{int(time.time() * 1000000)}.json"
         cmd = [
             "python", "-m", "pytest",
             test_dir,
-            "-v", "--tb=short",
-            f"--timeout={TEST_TIMEOUT_PER_TEST}",
-            "--timeout-method=thread",
-            "-W", "ignore::DeprecationWarning"
+            "--json-report",
+            f"--json-report-file={json_report_file}",
+            "--json-report-omit", "collectors,keywords,metadata",  # Keep report small
+            "-q",  # Quiet mode
+            "--tb=short"  # Short traceback
         ]
 
-        print(f"🔧 Command: pytest {test_dir} -v --tb=short")
+        # Add timeout if pytest-timeout is available
+        # We'll skip it for now to avoid errors
+
+        print(f"🔧 Command: pytest {test_dir} --json-report -q --tb=short")
         print(f"⏱️  Timeout: {timeout}s")
 
         try:
@@ -1323,29 +2000,101 @@ class TestRunner:
             elapsed = time.time() - start_time
             print(f"✅ Tests completed in {elapsed:.1f}s")
 
-            output = result.stdout + result.stderr
-            passed = "passed" in output
-            failures = self._extract_failures(output)
-            slow_tests = self._extract_slow_tests(output)
-            warnings = "warnings summary" in output.lower()
+            # Check if pytest had collection errors (exit code 2 or 4)
+            if result.returncode in [2, 4]:
+                print(f"❌ Test collection failed - likely import/syntax errors")
+                # Return a special result indicating collection failure
+                return {
+                    "success": False,
+                    "collection_error": True,
+                    "stdout": result.stdout[:2000],  # First 2000 chars of output
+                    "stderr": result.stderr[:2000] if result.stderr else "",
+                    "message": "Test collection failed - check for import errors"
+                }
 
-            # Log test results
-            print(
-                f"📊 Result: {'PASS' if result.returncode == 0 else 'FAIL'} (return code: {result.returncode})")
-            if failures:
-                print(f"❌ {len(failures)} test failures found")
-            if slow_tests:
-                print(f"🐌 {len(slow_tests)} slow tests found")
+            # Parse JSON report
+            test_result = {}
+            if Path(json_report_file).exists():
+                with open(json_report_file, 'r') as f:
+                    json_data = json.load(f)
 
-            test_result = {
-                "success": result.returncode == 0,
-                "passed": passed,
-                "failures": failures,
-                "slow_tests": slow_tests,
-                "warnings": warnings,
-                "output": output[:5000],
-                "returncode": result.returncode
-            }
+                # Extract summary - clean structure without duplication
+                summary = json_data.get('summary', {})
+                test_result = {
+                    "stats": {
+                        "passed": summary.get('passed', 0),
+                        "failed": summary.get('failed', 0),
+                        "skipped": summary.get('skipped', 0),
+                        "errors": summary.get('error', 0),
+                        "total": summary.get('total', 0),
+                        "warnings": 0  # Will be set after counting warnings
+                    },
+                    "failures": [],
+                    "warnings": [],
+                    "skipped": []
+                }
+
+                # Extract detailed test results
+                tests = json_data.get('tests', [])
+                for test in tests:
+                    nodeid = test.get('nodeid', '')
+                    outcome = test.get('outcome', '')
+
+                    if outcome == 'failed':
+                        error_msg = ""
+                        if test.get('call', {}).get('longrepr'):
+                            error_msg = str(test['call']['longrepr'])[:500]
+                        test_result['failures'].append({
+                            "test": nodeid,
+                            "error": error_msg
+                        })
+                    elif outcome == 'skipped':
+                        test_result['skipped'].append({
+                            "test": nodeid,
+                            "reason": test.get('setup', {}).get('longrepr', '')
+                        })
+
+                # Extract warnings from JSON report
+                warnings_data = json_data.get('warnings', [])
+                for warning in warnings_data:
+                    test_result['warnings'].append({
+                        "category": warning.get('category', 'Warning'),
+                        "message": warning.get('message', ''),
+                        "filename": warning.get('filename', ''),
+                        "lineno": warning.get('lineno', 0)
+                    })
+
+                # Also count warnings in stats
+                test_result['stats']['warnings'] = len(warnings_data)
+
+                # Display summary
+                summary_str = f"❌ {test_result['stats']['failed']} failed" if test_result['stats']['failed'] else ""
+                summary_str += f", ✅ {test_result['stats']['passed']} passed" if test_result['stats']['passed'] else ""
+                summary_str += f", ⏭️ {test_result['stats']['skipped']} skipped" if test_result['stats']['skipped'] else ""
+                summary_str += f", ⚠️ {test_result['stats'].get('warnings', 0)} warnings" if test_result['stats'].get(
+                    'warnings', 0) else ""
+                print(f"📊 {summary_str.strip(', ')}")
+
+                # Clean up JSON report file
+                try:
+                    os.remove(json_report_file)
+                except:
+                    pass
+            else:
+                print(f"❌ No JSON report generated")
+                test_result = {
+                    "stats": {
+                        "passed": 0,
+                        "failed": 0,
+                        "skipped": 0,
+                        "errors": 0,
+                        "total": 0,
+                        "warnings": 0
+                    },
+                    "failures": [],
+                    "warnings": [],
+                    "skipped": []
+                }
 
             # Log detailed test results
             if detailed_logger:
@@ -1365,17 +2114,40 @@ class TestRunner:
                 "error": str(e)
             }
 
-    def _extract_failures(self, output: str) -> List[str]:
-        """Extract test failure information"""
-        failures = []
+    def _extract_failures(self, output: str) -> tuple[List[str], int]:
+        """Extract test failure information - returns (limited_list, total_count)"""
+        failures_set = set()  # Use set to avoid duplicates
         lines = output.split('\n')
-        for i, line in enumerate(lines):
-            if 'FAILED' in line or 'ERROR' in line:
-                failures.append(line.strip())
-                for j in range(1, min(4, len(lines) - i)):
-                    if lines[i + j].strip():
-                        failures.append(f"  {lines[i + j].strip()}")
-        return failures[:10]  # Limit to 10
+
+        for line in lines:
+            # Only capture lines that actually show a FAILED or ERROR test
+            if ('FAILED' in line or 'ERROR' in line) and '::' in line and 'test_' in line:
+                # Extract the test path (everything between start and FAILED/ERROR)
+                # This handles both formats:
+                # - tests/unit/test_core/test.py::TestClass::test_method FAILED [50%]
+                # - FAILED tests/unit/test_core/test.py::TestClass::test_method
+                if 'FAILED' in line:
+                    test_path = line.split('FAILED')[0].strip()
+                elif 'ERROR' in line:
+                    test_path = line.split('ERROR')[0].strip()
+                else:
+                    continue
+
+                # Remove percentage if present
+                if '[' in test_path and '%]' in line:
+                    test_path = test_path.split('[')[0].strip()
+
+                # Clean up test path - remove leading FAILED/ERROR if present
+                test_path = test_path.replace('FAILED ', '').replace('ERROR ', '').strip()
+
+                # Only add if it looks like a valid test path
+                if test_path and '::' in test_path and 'test_' in test_path:
+                    failures_set.add(test_path)
+
+        failures = list(failures_set)  # Convert back to list
+        total_count = len(failures)
+        limited_list = failures[:20]  # Return up to 20 failures for display
+        return limited_list, total_count
 
     def _extract_slow_tests(self, output: str) -> List[str]:
         """Extract slow test information"""
@@ -1393,6 +2165,102 @@ class TestRunner:
                 except:
                     pass
         return slow_tests[:5]  # Limit to 5
+
+    def identify_slow_tests(self, module: str, timeout: int = 30) -> Dict[str, Any]:
+        """Run tests with durations to identify slow/hanging tests"""
+        test_dir = TEST_DIRECTORIES.get(module)
+        if not test_dir:
+            return {"slowest": [], "error": f"No test directory for module {module}"}
+
+        cmd = f"python -m pytest {test_dir} --durations=10 --tb=no -q --maxfail=1"
+        print(f"🔍 Identifying slow tests: {cmd}")
+
+        try:
+            result = subprocess.run(
+                cmd, shell=True, capture_output=True,
+                text=True, timeout=timeout
+            )
+            # Parse durations from output
+            return self._parse_test_durations(result.stdout)
+        except subprocess.TimeoutExpired:
+            return {
+                "hanging_tests": ["UNKNOWN - entire suite hung during duration analysis"],
+                "slowest": [],
+                "timeout": True
+            }
+        except Exception as e:
+            return {
+                "slowest": [],
+                "error": f"Failed to identify slow tests: {str(e)}"
+            }
+
+    def _parse_test_durations(self, output: str) -> Dict[str, Any]:
+        """Parse pytest --durations output to extract slow tests"""
+        lines = output.split('\n')
+        slowest = []
+        parsing_durations = False
+
+        for line in lines:
+            # Start parsing after the durations header
+            if "slowest" in line and "durations" in line:
+                parsing_durations = True
+                continue
+
+            # Stop when we hit the summary line
+            if parsing_durations and ("passed" in line or "failed" in line):
+                break
+
+            # Parse duration lines: "0.05s teardown tests/unit/..."
+            if parsing_durations and line.strip():
+                parts = line.strip().split()
+                if len(parts) >= 3 and parts[0].endswith('s'):
+                    duration = parts[0]  # "0.05s"
+                    phase = parts[1]     # "teardown", "call", "setup"
+                    # "tests/unit/test_monitoring/test_alerting.py::TestAlertRule::test_alert_rule_creation"
+                    full_test_path = parts[2]
+
+                    # Extract just the test method name
+                    test_name = full_test_path.split("::")[-1]  # "test_alert_rule_creation"
+
+                    slowest.append({
+                        "test": test_name,
+                        "duration": duration,
+                        "phase": phase,
+                        "full_path": full_test_path
+                    })
+
+        return {"slowest": slowest}
+
+    def _format_slow_tests_for_prompt(self, slow_test_info: Dict[str, Any]) -> str:
+        """Format slow test info for Claude prompt"""
+        if slow_test_info.get("hanging_tests"):
+            return f"HANGING TESTS: {', '.join(slow_test_info['hanging_tests'])}"
+
+        if slow_test_info.get("timeout"):
+            return "TIMEOUT: Unable to identify specific slow tests - entire test suite hung"
+
+        if slow_test_info.get("error"):
+            return f"ERROR: {slow_test_info['error']}"
+
+        slowest = slow_test_info.get("slowest", [])
+        if not slowest:
+            return "ALL TESTS - Unable to identify specific slow tests"
+
+        # Filter for significant slow tests (>3s)
+        significant_slow = [
+            test for test in slowest
+            if float(test["duration"].replace('s', '')) > 3.0
+        ]
+
+        if not significant_slow:
+            return "NO SIGNIFICANT SLOW TESTS - All tests complete in <3s"
+
+        formatted = "SLOWEST TESTS (>3s):\n"
+        for test in significant_slow:
+            formatted += f"- {test['test']}: {test['duration']} ({test['phase']})\n"
+            formatted += f"  Path: {test['full_path']}\n"
+
+        return formatted
 
 # ============================================================================
 # SMART PARALLEL EXECUTOR
@@ -1498,7 +2366,15 @@ class ModuleProcessor:
         self.cascade_protector = cascade_protector
         self.current_step = 0
         self.total_steps = 0
+        self.current_module = None  # Track current module being processed
+        self.current_milestone = 0  # Track current milestone
         self._calculate_total_prompts()
+
+        # Calculate total modules to process for global progress
+        self.total_modules = len([m for m in MODULE_HIERARCHY if m not in SKIP_MODULES])
+        self.modules_to_process = [m for m in MODULE_HIERARCHY
+                                   if m not in SKIP_MODULES
+                                   and not self.progress.is_module_complete(m)]
 
     def _calculate_total_prompts(self):
         """Calculate total number of prompts for all modules"""
@@ -1532,17 +2408,101 @@ class ModuleProcessor:
         steps += len(DEPENDENT_MODULES.get(module, []))  # Cascade checks
         return steps
 
-    def _log_step(self, action: str, module: str = "unknown", phase: str = "PROCESSING"):
-        """Log current step with clean progress indicator"""
+    def _log_step(self, action: str, module: str = "unknown", phase: str = "PROCESSING", milestone_progress: float = None):
+        """Log current step with global progress indicator"""
         self.current_step += 1
-        progress_pct = (self.current_step / self.total_steps * 100) if self.total_steps > 0 else 0
+
+        # Calculate global progress based on all modules
+        # Each module has 3 milestones (0=fixes, 1=tests, 2=integration)
+        completed_modules = len([m for m in MODULE_HIERARCHY
+                                if m not in SKIP_MODULES
+                                and self.progress.is_module_complete(m)])
+
+        # milestone_progress is now passed as 0, 1, or 2 directly
+        milestone = milestone_progress if milestone_progress is not None else 0
+
+        # Apply the formula: ((completed_modules * 3) + milestone) / (total_modules * 3) * 100
+        if self.total_modules > 0:
+            progress_pct = ((completed_modules * 3) + milestone) / \
+                (self.total_modules * 3) * 100
+        else:
+            progress_pct = 0
 
         # Clean, concise output - use newline instead of carriage return for parallel safety
-        print(f"🔧 {module.upper()} | {phase} | {action} | {progress_pct:.0f}%")
+        print(f"🔧 {module.upper()} | {phase} | {action} | {progress_pct:.1f}%")
 
         # Log to detailed logger only
         if detailed_logger:
             detailed_logger.log_step(module, self.current_step, self.total_steps, action)
+
+    def _initialize_session(self, module: str, milestone: int):
+        """Initialize a new Claude session for this milestone"""
+        print(f"📝 Initializing session for {module} milestone {milestone}")
+
+        # Simple command to get session ID - run directly without going through execute_prompt
+        cmd = [
+            "claude",
+            "--dangerously-skip-permissions",
+            "--model", "claude-sonnet-4-20250514",
+            "-p", "Are you available? Please respond with yes.",
+            "--output-format", "json"
+        ]
+
+        print(f"🔍 Running direct session init command")
+        if DRY_RUN_MODE:
+            print(f"🔍 Skipping session init in dry-run mode")
+            return True
+
+        try:
+            # Run the command directly without all the complexity
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=30  # 30 second timeout for init
+            )
+
+            if result.returncode == 0 and result.stdout:
+                # Parse JSON response
+                try:
+                    response_json = json.loads(result.stdout)
+                    session_id = response_json.get('session_id')
+
+                    if session_id:
+                        # Save the session ID with lock protection
+                        session_key = f"{module}_{milestone}"
+                        with self.claude.session_lock:
+                            self.claude.session_per_milestone[session_key] = session_id
+                        print(
+                            f"✅ Session {session_id[:8]}... initialized for {module} milestone {milestone}")
+
+                        # Log session ID
+                        if detailed_logger:
+                            detailed_logger.log_session_created(session_key, session_id)
+
+                        # Save to progress.json
+                        self.claude._save_session_to_progress(session_key, session_id)
+
+                        return True
+                    else:
+                        print(f"⚠️ No session_id in response")
+
+                except json.JSONDecodeError as e:
+                    print(f"⚠️ Failed to parse JSON: {e}")
+                    print(f"Response: {result.stdout[:200]}")
+            else:
+                print(f"⚠️ Session init failed: return code {result.returncode}")
+                if result.stderr:
+                    print(f"⚠️ Error: {result.stderr[:200]}")
+
+        except subprocess.TimeoutExpired:
+            print(f"⚠️ Session initialization timed out")
+        except Exception as e:
+            print(f"⚠️ Error initializing session: {e}")
+
+        print(f"⚠️ Proceeding without session management")
+        return False
 
     def process_module(self, module: str) -> bool:
         """Process a module with granular fixes and cascade checks"""
@@ -1552,25 +2512,44 @@ class ModuleProcessor:
             print(f"\n✅ {module.upper()} | SKIPPED | Already completed")
             return True
 
+        # Create thread-local TestRunner to avoid race conditions in parallel execution
+        test_runner = TestRunner()
+
+        # Set current module for this processor instance
+        self.current_module = module
+
         # Initialize step tracking for this module
         self.current_step = 0
         self.total_steps = self._calculate_module_steps(module)
 
+        # Track milestones (3 major phases)
+        # Using 0-2 scale for milestones to align with global progress calculation
+        MILESTONE_FIXES = 0         # Milestone 0: Applying fixes
+        MILESTONE_TESTS = 1         # Milestone 1: Running tests
+        MILESTONE_INTEGRATION = 2   # Milestone 2: Integration checks
+
+        self.current_milestone = MILESTONE_FIXES
+
         # Clean module start indicator
-        print(f"\n📦 {module.upper()} | STARTING | {self.total_steps} steps")
+        print(f"\n📦 {module.upper()} | STARTING | 3 milestones")
+
+        # Initialize session for this milestone if needed
+        if not self.claude.has_session_for_context(module, self.current_milestone):
+            self._initialize_session(module, self.current_milestone)
 
         # Log module start
         if detailed_logger:
             detailed_logger.log_module_start(module, self.total_steps)
 
         # Update progress
-        self._log_step("Initializing", module, "SETUP")
+        self._log_step("Initializing", module, "SETUP", self.current_milestone)
         self.progress.update_module(module, status="in_progress")
 
         # Get baseline test results
-        self._log_step("Baseline tests", module, "TESTING")
-        baseline = self.test_runner.run_tests(module)
-        self.cascade_protector.update_baseline(module, baseline)
+        # COMMENTED OUT: Baseline tests to speed up the process
+        # self._log_step("Baseline tests", module, "TESTING")
+        # baseline = self.test_runner.run_tests(module)
+        # self.cascade_protector.update_baseline(module, baseline)
 
         try:
             module_progress = self.progress.get_module_progress(module)
@@ -1579,7 +2558,7 @@ class ModuleProcessor:
             # If MAX_ITERATIONS_PER_MODULE = 0, iterate indefinitely until tests pass
             iteration = module_progress.iteration
             consecutive_api_failures = 0
-            max_consecutive_failures = 5  # Safety: exit after 5 consecutive API failures
+            max_consecutive_failures = 10  # Safety: exit after 5 consecutive API failures
 
             while True:
                 # Check iteration limit (if not infinite)
@@ -1591,21 +2570,30 @@ class ModuleProcessor:
                     print(f"\n❌ {module.upper()} | FAILED | Too many consecutive API failures")
                     self.progress.update_module(module, status="failed")
                     return False
-                # Display iteration info
+                # Display iteration info with milestone progress
                 if MAX_ITERATIONS_PER_MODULE > 0:
                     self._log_step(
-                        f"Iteration {iteration + 1}/{MAX_ITERATIONS_PER_MODULE}", module, "FIXING")
+                        f"Iteration {iteration + 1}/{MAX_ITERATIONS_PER_MODULE}", module, "FIXING", self.current_milestone)
                 else:
-                    self._log_step(f"Iteration {iteration + 1} (infinite)", module, "FIXING")
+                    self._log_step(f"Iteration {iteration + 1}",
+                                   module, "FIXING", self.current_milestone)
                 self.progress.update_module(module, iteration=iteration + 1)
+
+                # DO NOT clear completed prompts - we need to track what's already been done
+                # Clearing prompts_completed was causing infinite loops by re-running already completed fixes
+                # Each prompt should only be executed once per module
 
                 # Granular fix sequence - run all prompts then test
                 fix_sequence = [
+                    # Basic fixes first - get tests running
                     (PromptType.IMPORTS_ONLY, "Fixing imports"),
                     (PromptType.TYPES_ONLY, "Fixing types"),
                     (PromptType.ASYNC_ONLY, "Fixing async/await"),
                     (PromptType.RESOURCES_ONLY, "Fixing resources"),
                     (PromptType.ERRORS_ONLY, "Fixing error handling"),
+                    # Test quality verification early - catch issues sooner
+                    (PromptType.TEST_VERIFICATION, "Verifying test logic correctness"),
+                    (PromptType.TEST_COVERAGE, "Ensuring 70%+ test coverage"),
                     # Trading-specific fixes
                     (PromptType.SERVICE_LAYER, "Fixing service layer"),
                     (PromptType.DATABASE_MODELS, "Fixing database models"),
@@ -1613,63 +2601,349 @@ class ModuleProcessor:
                     (PromptType.DEPENDENCY_INJECTION, "Fixing dependency injection"),
                     (PromptType.WEBSOCKET_ASYNC, "Fixing WebSocket/async"),
                     (PromptType.FACTORY_PATTERNS, "Fixing factory patterns"),
-                    # Test quality verification - run after code fixes
-                    (PromptType.TEST_VERIFICATION, "Verifying test logic correctness"),
-                    (PromptType.TEST_COVERAGE, "Ensuring 70%+ test coverage"),
+                    # Simplification after tests are more stable
+                    (PromptType.REMOVE_ENHANCED, "Removing enhanced versions and simplifying"),
+                    # Code quality checks
+                    (PromptType.CODE_DUPLICATION, "Eliminating code duplication"),
+                    (PromptType.CIRCULAR_DEPENDENCIES, "Fixing circular dependencies"),
+                    (PromptType.MODULE_INTEGRATION, "Verifying module integration"),
+                    # Final cleanup only at the very end
+                    (PromptType.FINAL_CLEANUP, "Final production cleanup"),
                 ]
 
-                # Execute all fix prompts for this iteration
-                for prompt_type, description in fix_sequence:
-                    if prompt_type.value in module_progress.prompts_completed:
-                        continue
+                # Check if all prompts are already completed
+                all_prompts_completed = all(
+                    prompt_type.value in module_progress.prompts_completed
+                    for prompt_type, _ in fix_sequence
+                )
 
-                    self._log_step(description, module, "FIXING")
+                # Execute all fix prompts for this iteration (skip if all complete)
+                if not all_prompts_completed:
+                    for prompt_type, description in fix_sequence:
+                        if prompt_type.value in module_progress.prompts_completed:
+                            continue
 
-                    # Prepare prompt with module-specific info
-                    if prompt_type not in MODULE_PROMPTS:
-                        continue
+                        # Show both the description and the prompt type for clarity
+                        prompt_display = f"{description} [{prompt_type.value}]"
+                        self._log_step(prompt_display, module, "FIXING", self.current_milestone)
 
-                    # Format prompt with appropriate parameters
-                    format_args = {
-                        "module": module,
-                        "anti_hallucination": "{anti_hallucination}",
-                        "test_dir": TEST_DIRECTORIES.get(module, f"tests/unit/test_{module}")
-                    }
-                    
-                    # Add specific parameters for certain prompt types
-                    if prompt_type == PromptType.TEST_COVERAGE:
-                        format_args["critical_modules"] = ", ".join(FINANCIAL_CRITICAL_MODULES)
-                    
-                    prompt = MODULE_PROMPTS[prompt_type].format(**format_args)
+                        # Prepare prompt with module-specific info
+                        if prompt_type not in MODULE_PROMPTS:
+                            continue
 
-                    success, output = self.claude.execute_prompt(prompt, description)
+                        # Format prompt with appropriate parameters
+                        format_args = {
+                            "module": module,
+                            "anti_hallucination": "{anti_hallucination}",
+                            "test_dir": TEST_DIRECTORIES.get(module, f"tests/unit/test_{module}")
+                        }
+
+                        # Add specific parameters for certain prompt types
+                        if prompt_type == PromptType.TEST_COVERAGE:
+                            format_args["critical_modules"] = ", ".join(FINANCIAL_CRITICAL_MODULES)
+
+                        prompt = MODULE_PROMPTS[prompt_type].format(**format_args)
+
+                        success, output = self.claude.execute_prompt(
+                            prompt, description, module=module, milestone=self.current_milestone)
+
+                        if success:
+                            consecutive_api_failures = 0  # Reset failure counter on success
+                            module_progress.prompts_completed.append(prompt_type.value)
+                            self.progress.update_module(
+                                module,
+                                prompts_completed=module_progress.prompts_completed
+                            )
+
+                            # Special handling for FINAL_CLEANUP - run verification tests
+                            if prompt_type == PromptType.FINAL_CLEANUP:
+                                self._log_step("Final verification after cleanup",
+                                               module, "TESTING", self.current_milestone)
+                                cleanup_test_results = test_runner.run_tests(module)
+                                self.progress.update_module(
+                                    module, test_results=cleanup_test_results)
+
+                                cleanup_stats = cleanup_test_results.get('stats', {})
+
+                                # If cleanup introduced issues, mark cleanup as incomplete and continue iteration
+                                if (cleanup_stats.get('failed', 0) > 0 or
+                                        len(cleanup_test_results.get('warnings', [])) > 0):
+                                    print(
+                                        f"\n⚠️  {module.upper()} | Cleanup introduced issues, removing from completed")
+                                    # Remove cleanup from completed prompts so it can be re-run
+                                    module_progress.prompts_completed.remove(
+                                        PromptType.FINAL_CLEANUP.value)
+                                    self.progress.update_module(
+                                        module,
+                                        prompts_completed=module_progress.prompts_completed
+                                    )
+                                else:
+                                    print(
+                                        f"\n✅ {module.upper()} | Production cleanup verified successfully")
+                        else:
+                            consecutive_api_failures += 1
+
+                # Full test run - Move to TESTING milestone (only if not already tested in this iteration)
+                self.current_milestone = MILESTONE_TESTS
+
+                # Check if we need to run tests (avoid duplicate runs)
+                needs_test_run = True
+
+                # Get current test results to check if they're fresh from this iteration
+                current_test_results = self.progress.get_module_progress(module).test_results
+
+                # If we have recent test results and they were updated this iteration, use them
+                if current_test_results and current_test_results.get('_test_iteration') == iteration:
+                    self._log_step("Using recent test results", module,
+                                   "TESTING", self.current_milestone)
+                    test_results = current_test_results
+                    needs_test_run = False
+
+                if needs_test_run:
+                    self._log_step("Running tests", module, "TESTING", self.current_milestone)
+                    test_results = test_runner.run_tests(module)
+                    # Mark these results with current iteration to avoid re-running
+                    test_results['_test_iteration'] = iteration
+                    self.progress.update_module(module, test_results=test_results)
+
+                # Check for collection errors first (before trying to get stats)
+                if test_results.get('collection_error'):
+                    print(f"\n❌ {module.upper()} | Test collection failed - fixing import errors")
+
+                    # Use COLLECTION_ERRORS prompt to fix import issues
+                    collection_errors = test_results.get(
+                        'stdout', '') + test_results.get('stderr', '')
+                    collection_errors_prompt = MODULE_PROMPTS[PromptType.COLLECTION_ERRORS].format(
+                        test_dir=TEST_DIRECTORIES.get(module),
+                        collection_errors=collection_errors[:2000],
+                        anti_hallucination="{anti_hallucination}"
+                    )
+
+                    success, output = self.claude.execute_prompt(
+                        collection_errors_prompt,
+                        "Fixing test collection errors",
+                        module=module,
+                        milestone=self.current_milestone
+                    )
 
                     if success:
-                        consecutive_api_failures = 0  # Reset failure counter on success
-                        module_progress.prompts_completed.append(prompt_type.value)
-                        self.progress.update_module(
-                            module,
-                            prompts_completed=module_progress.prompts_completed
+                        # Mark that we've tried to fix collection errors
+                        if PromptType.COLLECTION_ERRORS.value not in module_progress.prompts_completed:
+                            module_progress.prompts_completed.append(
+                                PromptType.COLLECTION_ERRORS.value)
+                            self.progress.update_module(
+                                module,
+                                prompts_completed=module_progress.prompts_completed
+                            )
+
+                        # Re-run tests after fixing
+                        test_results = test_runner.run_tests(module)
+                        test_results['_test_iteration'] = iteration
+                        self.progress.update_module(module, test_results=test_results)
+
+                    # Continue iteration regardless
+                    iteration += 1
+                    continue
+
+                # Log test results summary
+                stats = test_results.get('stats', {})
+                print(f"\n📊 Test Results:")
+                print(f"   - ✅ Passed: {stats.get('passed', 0)}")
+                print(f"   - ❌ Failed: {stats.get('failed', 0)}")
+                print(f"   - ⏭️ Skipped: {stats.get('skipped', 0)}")
+                print(f"   - ⚠️ Warnings: {len(test_results.get('warnings', []))}")
+
+                # Determine test status - HANDLE ALL EDGE CASES
+                # First, check for timeout (tests hanging)
+                if test_results.get('timeout'):
+                    print(f"\n⚠️  {module.upper()} | Tests timed out after {TEST_TIMEOUT_PER_MODULE}s")
+
+                    # Check if it's actually a collection error by running --collect-only
+                    test_dir = TEST_DIRECTORIES.get(module)
+                    collect_cmd = f"python -m pytest {test_dir} --collect-only -q 2>&1"
+                    print(f"🔍 Checking if timeout is due to collection errors...")
+
+                    try:
+                        collect_result = subprocess.run(
+                            collect_cmd, shell=True, capture_output=True,
+                            text=True, timeout=10
                         )
+
+                        # Check for collection errors in output (check both stdout and stderr)
+                        output = collect_result.stdout + collect_result.stderr
+                        if "ERROR collecting" in output or \
+                           "ModuleNotFoundError" in output or \
+                           "ImportError" in output or \
+                           "AttributeError" in output:
+
+                            print(f"\n❌ {module.upper()} | Collection errors detected - fixing imports")
+
+                            # Use COLLECTION_ERRORS prompt instead of SLOW_TESTS
+                            collection_errors_prompt = MODULE_PROMPTS[PromptType.COLLECTION_ERRORS].format(
+                                test_dir=test_dir,
+                                # First 2000 chars of errors from both stdout and stderr
+                                collection_errors=output[:2000],
+                                anti_hallucination="{anti_hallucination}"
+                            )
+
+                            success, claude_response = self.claude.execute_prompt(
+                                collection_errors_prompt,
+                                "Fixing test collection errors",
+                                module=module,
+                                milestone=self.current_milestone
+                            )
+
+                            if success:
+                                module_progress.prompts_completed.append(
+                                    PromptType.COLLECTION_ERRORS.value)
+                                self.progress.update_module(
+                                    module,
+                                    prompts_completed=module_progress.prompts_completed
+                                )
+                        else:
+                            # Real timeout - tests are actually slow/hanging
+                            print(
+                                f"\n⚠️  {module.upper()} | Tests are genuinely slow/hanging - identifying specific slow tests")
+
+                            # NEW: Identify specific slow tests
+                            slow_test_info = test_runner.identify_slow_tests(module, timeout=30)
+
+                            # Record hanging tests in progress
+                            self.progress.update_module(module, hanging_tests=slow_test_info)
+
+                            # Create detailed slow tests prompt
+                            slow_tests_details = test_runner._format_slow_tests_for_prompt(
+                                slow_test_info)
+
+                            slow_tests_prompt = MODULE_PROMPTS[PromptType.SLOW_TESTS].format(
+                                test_dir=test_dir,
+                                module=module,
+                                slow_tests=slow_tests_details,  # SPECIFIC instead of "ALL TESTS"
+                                timeout=TEST_TIMEOUT_PER_TEST,
+                                anti_hallucination="{anti_hallucination}"
+                            )
+
+                            success, output = self.claude.execute_prompt(
+                                slow_tests_prompt,
+                                "Fixing slow/hanging tests",
+                                module=module,
+                                milestone=self.current_milestone
+                            )
+
+                    except subprocess.TimeoutExpired:
+                        # Even collect-only timed out - likely infinite loop in imports
+                        print(f"\n❌ {module.upper()} | Even collection timed out - major import issues")
+                        collection_errors_prompt = MODULE_PROMPTS[PromptType.COLLECTION_ERRORS].format(
+                            test_dir=test_dir,
+                            collection_errors="Collection phase timed out - likely infinite loop in imports or module-level code",
+                            anti_hallucination="{anti_hallucination}"
+                        )
+
+                        success, output = self.claude.execute_prompt(
+                            collection_errors_prompt,
+                            "Fixing import timeout issues",
+                            module=module,
+                            milestone=self.current_milestone
+                        )
+
+                    # Re-run tests after fixing
+                    if success:
+                        test_results = test_runner.run_tests(module)
+                        test_results['_test_iteration'] = iteration
+                        self.progress.update_module(module, test_results=test_results)
+                        stats = test_results.get('stats', {})
+
+                    # Continue iteration regardless
+                    iteration += 1
+                    continue
+
+                # Check if stats exist (missing stats = import error)
+                elif 'stats' not in test_results and not test_results.get('success', True):
+                    print(f"\n❌ {module.upper()} | Test collection failed - likely import errors")
+                    # Continue iteration to fix import issues
+                    iteration += 1
+                    continue
+
+                # Now we have stats, check various conditions
+                has_errors = stats.get('errors', 0) > 0
+                has_failures = stats.get('failed', 0) > 0
+                has_warnings = len(test_results.get('warnings', [])) > 0
+                has_skipped = len(test_results.get('skipped', [])) > 0
+                total_tests = stats.get('total', 0)
+
+                # Check for test ERRORS (not just failures)
+                if has_errors:
+                    print(f"\n❌ {module.upper()} | {stats.get('errors', 0)} test ERRORS detected")
+                    # Treat errors like failures - they need fixing
+                    test_results['failures'] = test_results.get('failures', [])
+                    # Add errors to failures list for processing
+                    for i in range(stats.get('errors', 0)):
+                        test_results['failures'].append({
+                            'test': f'error_{i}',
+                            'error': 'Test error (not failure) - check test collection'
+                        })
+
+                # Check if no tests exist (very rare - usually means directory issue)
+                if total_tests == 0:
+                    print(
+                        f"\n⚠️  {module.upper()} | No tests found - likely collection error not caught")
+
+                    # This is likely a collection error that wasn't caught
+                    # Try running with --collect-only to get the actual error
+                    test_dir = TEST_DIRECTORIES.get(module)
+                    collect_cmd = f"python -m pytest {test_dir} --collect-only -q 2>&1"
+
+                    try:
+                        collect_result = subprocess.run(
+                            collect_cmd, shell=True, capture_output=True,
+                            text=True, timeout=10
+                        )
+
+                        if "ERROR collecting" in collect_result.stdout or \
+                           "ERROR collecting" in collect_result.stderr:
+                            print(f"\n❌ {module.upper()} | Collection errors detected")
+                            # Will be handled by COLLECTION_ERRORS prompt on next iteration
+                            iteration += 1
+                            continue
+                    except:
+                        pass
+
+                    # If we've tried many times and still have 0 tests, fail the module
+                    if iteration >= 10:
+                        print(f"\n❌ {module.upper()} | No tests found after {iteration} attempts")
+                        self.progress.update_module(module, status="failed",
+                                                    errors=[f"No tests found after {iteration} attempts - check test directory"])
+                        return False
+
+                    iteration += 1
+                    continue
+
+                # Now determine if tests actually passed (no failures AND no errors)
+                tests_passed = not has_failures and not has_errors and total_tests > 0
+
+                # Check completion conditions
+                if tests_passed and not has_warnings and not has_skipped:
+                    # Check if ALL prompts including FINAL_CLEANUP are completed
+                    all_prompts_completed = all(
+                        prompt_type.value in module_progress.prompts_completed
+                        for prompt_type, _ in fix_sequence
+                    )
+
+                    if all_prompts_completed:
+                        # Move to INTEGRATION milestone when tests pass and ALL prompts complete
+                        self.current_milestone = MILESTONE_INTEGRATION
+                        print(
+                            f"\n✅ {module.upper()} | TESTS PASSING & ALL PROMPTS COMPLETE | Moving to integration")
                     else:
-                        consecutive_api_failures += 1
-
-                # Full test run
-                self._log_step("Running tests", module, "TESTING")
-                test_results = self.test_runner.run_tests(module)
-                self.progress.update_module(module, test_results=test_results)
-
-                if test_results.get("skipped"):
-                    print(f"\n✅ {module.upper()} | COMPLETED | No tests found")
-                    self.progress.update_module(module, status="completed")
-                    return True
-
-                elif test_results["success"]:
-                    print(f"\n✅ {module.upper()} | COMPLETED | All tests passing")
+                        print(
+                            f"\n⚠️  {module.upper()} | Tests pass but missing prompts, continuing iteration")
+                        iteration += 1
+                        continue
 
                     # Handle slow tests and cascade checks silently
                     if test_results.get("slow_tests"):
-                        self._log_step("Optimizing slow tests", module, "OPTIMIZING")
+                        self._log_step("Optimizing slow tests", module,
+                                       "OPTIMIZING", self.current_milestone)
                         slow_tests_str = "\n".join(test_results["slow_tests"])
                         prompt = MODULE_PROMPTS[PromptType.SLOW_TESTS].format(
                             test_dir=TEST_DIRECTORIES.get(module),
@@ -1678,11 +2952,13 @@ class ModuleProcessor:
                             timeout=TEST_TIMEOUT_PER_TEST,
                             anti_hallucination="{anti_hallucination}"
                         )
-                        self.claude.execute_prompt(prompt, "Optimizing slow tests")
+                        self.claude.execute_prompt(
+                            prompt, "Optimizing slow tests", module=module, milestone=self.current_milestone)
 
                     # Final cascade check
                     if CASCADE_CHECK_ENABLED:
-                        self._log_step("Cascade check", module, "VALIDATING")
+                        self._log_step("Cascade check", module,
+                                       "VALIDATING", self.current_milestone)
                         cascade_results = self.cascade_protector.check_dependents(module)
                         for dependent, ok in cascade_results:
                             if not ok:
@@ -1691,11 +2967,12 @@ class ModuleProcessor:
 
                                 # Request feedback on cascade failure
                                 self._log_step(
-                                    f"Analyzing cascade: {dependent}", module, "FEEDBACK")
+                                    f"Analyzing cascade: {dependent}", module, "FEEDBACK", self.current_milestone)
                                 feedback_success, feedback = self.claude.request_feedback(
                                     module,
                                     f"Cascade failure detected: {module} changes broke {dependent}. Should we proceed with fixes or rollback?",
-                                    "system-design-architect"
+                                    "system-design-architect",
+                                    milestone=self.current_milestone
                                 )
 
                                 if feedback_success:
@@ -1707,70 +2984,276 @@ class ModuleProcessor:
                                         print(
                                             f"\n🤖 {module.upper()} | FEEDBACK | Proceeding with cascade fixes for {dependent}")
 
+                    # Final cleanup is now handled in the main prompt sequence above
+                    # All prompts including cleanup have been completed at this point
+
+                    # Commit and push the module to git before marking complete
+                    print(f"\n📦 {module.upper()} | Committing to git...")
+
+                    git_commit_prompt = f"""Commit and push the {module} module to git:
+
+1. Stage files for {module} module:
+   git add src/{module}/ tests/unit/test_{module}/
+
+2. Create commit with message:
+   git commit -m "fix({module}): resolve all test failures and warnings
+
+   - Fixed all test failures  
+   - Resolved all warnings
+   - Tests passing: {stats.get('passed', 0)}/{stats.get('total', 0)}
+   - Module ready for production"
+
+3. Push to remote:
+   git push origin main
+
+Execute these commands in order. Only commit files for THIS module.
+"""
+
+                    commit_success, commit_output = self.claude.execute_prompt(
+                        git_commit_prompt,
+                        f"Committing {module} to git",
+                        module=module,
+                        milestone=self.current_milestone
+                    )
+
+                    if commit_success:
+                        print(f"✅ {module.upper()} | Committed and pushed to git")
+                    else:
+                        print(f"⚠️  {module.upper()} | Git commit may have failed - check manually")
+
+                    # Mark as complete
                     self.progress.update_module(module, status="completed")
+                    # Calculate final progress after this module completes
+                    completed_modules = len([m for m in MODULE_HIERARCHY
+                                            if m not in SKIP_MODULES
+                                            and self.progress.is_module_complete(m)])
+                    final_progress = (completed_modules * 3) / (self.total_modules *
+                                                                3) * 100 if self.total_modules > 0 else 100
+                    print(f"\n✅ {module.upper()} | COMPLETED | PRODUCTION READY | {final_progress:.1f}%")
                     return True
+
+                # Handle skipped tests (higher priority than warnings)
+                elif has_skipped:
+                    skipped_count = len(test_results.get('skipped', []))
+                    self._log_step(f"Fixing {skipped_count} skipped tests", module, "FIXING")
+
+                    # SIMPLIFIED: Let Claude investigate skipped tests directly
+                    prompt = f"""
+Run tests for the {module} module and fix skipped tests.
+
+Test directory: tests/unit/test_{module}/
+Current status: {skipped_count} skipped tests
+
+Instructions:
+1. Run: python -m pytest tests/unit/test_{module}/ -v --tb=short
+2. Identify why tests are being skipped (look for skip markers, missing dependencies)
+3. Fix the root causes:
+   - Missing dependencies: install or mock them
+   - Conditional skips: ensure conditions are met
+   - Platform-specific: add appropriate handling
+4. Run tests again to verify skipped tests now run
+
+IMPORTANT: Make skipped tests actually run and pass.
+{{anti_hallucination}}
+"""
+
+                    success, output = self.claude.execute_prompt(
+                        prompt, "Fixing skipped tests", module=module, milestone=self.current_milestone)
+
+                    if success:
+                        # Re-test to check if skipped tests are fixed
+                        self._log_step("Verifying skipped test fixes", module, "TESTING")
+                        test_results = test_runner.run_tests(module)
+                        # Mark results with current iteration to avoid duplicate main test run
+                        test_results['_test_iteration'] = iteration
+                        self.progress.update_module(module, test_results=test_results)
+
+                        stats = test_results.get('stats', {})
+                        new_skipped_count = len(test_results.get('skipped', []))
+
+                        if new_skipped_count < skipped_count:
+                            print(
+                                f"\n✅ Reduced skipped tests from {skipped_count} to {new_skipped_count}")
+
+                        # If all skipped tests are fixed and tests pass, check warnings next
+                        if new_skipped_count == 0 and stats.get('failed', 0) == 0:
+                            if len(test_results.get('warnings', [])) == 0:
+                                print(f"\n✅ {module.upper()} | All skipped tests fixed, no warnings")
+                                # Don't mark as complete yet - need to run cleanup
+                                # Continue to next iteration
+                                pass
+                            else:
+                                print(
+                                    f"\n⚠️  {module.upper()} | Skipped tests fixed, {len(test_results.get('warnings', []))} warnings remain")
+
+                    # Continue to next iteration
+                    iteration += 1
+                    continue
+
+                # Handle warnings even if tests pass
+                elif tests_passed and has_warnings:
+                    warning_count = len(test_results.get('warnings', []))
+                    self._log_step(f"Fixing {warning_count} warnings", module, "FIXING")
+
+                    # SIMPLIFIED: Let Claude run tests and see warnings directly
+                    prompt = f"""
+Run tests for the {module} module and fix the warnings.
+
+Test directory: tests/unit/test_{module}/
+Current status: {warning_count} warnings
+
+Instructions:
+1. Run: python -m pytest tests/unit/test_{module}/ -v --tb=short
+2. Analyze ALL warnings in the output
+3. Identify patterns (e.g., if you see 600+ identical warnings, they have ONE root cause)
+4. Fix the root causes:
+   - For asyncio warnings: check for nest_asyncio conflicts, pytest-asyncio config
+   - For deprecation warnings: update to current APIs
+   - For import warnings: fix module dependencies
+5. Run tests again to verify warnings are reduced/eliminated
+
+IMPORTANT: Fix root causes, not symptoms. Pattern recognition is key.
+{{anti_hallucination}}
+"""
+
+                    success, output = self.claude.execute_prompt(
+                        prompt, "Fixing warnings", module=module, milestone=self.current_milestone)
+
+                    if success:
+                        # Re-test to check if warnings are resolved
+                        self._log_step("Verifying warning fixes", module, "TESTING")
+                        test_results = test_runner.run_tests(module)
+                        # Mark results with current iteration to avoid duplicate main test run
+                        test_results['_test_iteration'] = iteration
+                        self.progress.update_module(module, test_results=test_results)
+
+                        stats = test_results.get('stats', {})
+                        new_warning_count = len(test_results.get('warnings', []))
+
+                        if new_warning_count < warning_count:
+                            print(
+                                f"\n✅ Reduced warnings from {warning_count} to {new_warning_count}")
+
+                        # If all warnings are fixed and tests still pass, continue to cleanup
+                        if new_warning_count == 0 and stats.get('failed', 0) == 0:
+                            print(f"\n✅ {module.upper()} | All warnings fixed, proceeding to cleanup")
+                            # Continue to next iteration which will trigger cleanup
+                            # No explicit action needed here
+
+                    # Continue to next iteration to try again or handle failures
+                    iteration += 1
+                    continue
 
                 # Comprehensive test failure fixing
                 elif test_results.get("failures"):
-                    failure_count = len(test_results["failures"])
+                    failure_count = len(test_results.get("failures", []))
+                    error_count = test_results.get('stats', {}).get('errors', 0)
 
-                    # Request feedback before attempting to fix failures
-                    self._log_step("Getting feedback on failures", module, "ANALYZING")
-                    # Limit to first 3 for feedback
-                    first_few_failures = test_results["failures"][:3]
-                    failure_summary = "\n".join(first_few_failures)
+                    self._log_step(
+                        f"Fixing {failure_count} failures and {error_count} errors", module, "FIXING")
 
-                    feedback_success, feedback = self.claude.request_feedback(
-                        module,
-                        f"Test failures detected:\n{failure_summary}\n\nShould these failures be fixed or are they false positives?",
-                        "integration-test-architect"
-                    )
+                    # SIMPLIFIED: Let Claude run tests and see everything
+                    prompt = f"""
+Run tests for the {module} module and fix all failures and errors.
 
-                    # Skip fixing if feedback indicates issues aren't real
-                    if feedback_success and "NO" in feedback.upper():
-                        self._log_step("Skipping fixes (feedback: not real issues)",
-                                       module, "SKIPPING")
-                        print(
-                            f"\n🤖 {module.upper()} | FEEDBACK | Skipping test fixes - identified as false positives")
-                        iteration += 1
-                        continue
+Test directory: tests/unit/test_{module}/
+Current status: {failure_count} failures, {error_count} errors
 
-                    # Fix ALL failures at once
-                    self._log_step(f"Fixing {failure_count} failures", module, "FIXING")
+Instructions:
+1. Run: python -m pytest tests/unit/test_{module}/ -xvs --tb=short
+2. Analyze the COMPLETE output to understand all issues
+3. Fix the root causes of failures:
+   - Import errors: check module dependencies
+   - Async errors: fix await/async issues, check event loop
+   - Mock errors: ensure proper mock configuration
+   - Timeout errors: optimize slow code or add timeout handling
+4. Run tests again to verify all failures are fixed
+5. If issues persist, try alternative approaches
 
-                    prompt = MODULE_PROMPTS[PromptType.TEST_FIXES].format(
-                        test_dir=TEST_DIRECTORIES.get(module),
-                        failures="\n".join(test_results["failures"]),
-                        anti_hallucination="{anti_hallucination}"
-                    )
+IMPORTANT: 
+- See the actual error messages by running tests yourself
+- Fix root causes, not symptoms
+- Ensure tests actually pass after fixes
+{{anti_hallucination}}
+"""
 
-                    success, output = self.claude.execute_prompt(prompt, "Fixing test failures")
+                    # Store previous failure count before fixing
+                    previous_failed = failure_count
+
+                    success, output = self.claude.execute_prompt(
+                        prompt, "Fixing test failures", module=module, milestone=self.current_milestone)
 
                     if success:
                         consecutive_api_failures = 0  # Reset failure counter on success
+
+                        # CRITICAL: Verify files were actually modified
+                        git_diff = subprocess.run(
+                            ["git", "diff", "--name-only"], capture_output=True, text=True)
+                        if not git_diff.stdout.strip():
+                            print(
+                                f"⚠️  {module.upper()} | No files were modified by Claude - response may be analysis only")
+                            # Track attempts with no actual fixes
+                            if not hasattr(module_progress, 'no_fix_attempts'):
+                                module_progress.no_fix_attempts = 0
+                            module_progress.no_fix_attempts += 1
+
+                            # Exit early if Claude isn't actually fixing anything
+                            if module_progress.no_fix_attempts >= 3:
+                                print(
+                                    f"❌ {module.upper()} | Claude not producing actual code fixes after 3 attempts")
+                                self.progress.update_module(module, status="failed",
+                                                            errors=["Claude responses contain no actual code changes"])
+                                return False
+                        else:
+                            modified_files = git_diff.stdout.strip().split('\n')
+                            print(
+                                f"✅ {module.upper()} | Files modified: {len(modified_files)} files changed")
+                            module_progress.no_fix_attempts = 0  # Reset counter
+
                         # Re-test to check if issues are resolved
                         self._log_step("Verifying fixes", module, "TESTING")
-                        test_results = self.test_runner.run_tests(module)
+                        test_results = test_runner.run_tests(module)
+                        # Mark results with current iteration to avoid duplicate main test run
+                        test_results['_test_iteration'] = iteration
                         self.progress.update_module(module, test_results=test_results)
 
-                        if test_results["success"]:
-                            print(f"\n✅ {module.upper()} | COMPLETED | All failures fixed")
+                        stats = test_results.get('stats', {})
+                        new_failed = stats.get('failed', 0)
 
-                            # Handle optimizations silently
-                            if test_results.get("slow_tests"):
-                                self._log_step("Optimizing slow tests", module, "OPTIMIZING")
-                                slow_tests_str = "\n".join(test_results["slow_tests"])
-                                prompt = MODULE_PROMPTS[PromptType.SLOW_TESTS].format(
-                                    test_dir=TEST_DIRECTORIES.get(module),
-                                    module=module,
-                                    slow_tests=slow_tests_str,
-                                    timeout=TEST_TIMEOUT_PER_TEST,
-                                    anti_hallucination="{anti_hallucination}"
-                                )
-                                self.claude.execute_prompt(prompt, "Optimizing slow tests")
+                        # Check if we're making progress
+                        if previous_failed > 0 and new_failed >= previous_failed:
+                            if not hasattr(module_progress, 'no_improvement_count'):
+                                module_progress.no_improvement_count = 0
+                            module_progress.no_improvement_count += 1
+                            print(
+                                f"⚠️  {module.upper()} | No improvement: {new_failed} failures (was {previous_failed})")
 
-                            self.progress.update_module(module, status="completed")
-                            return True
+                            # Exit if no improvement after multiple attempts
+                            if module_progress.no_improvement_count >= 3:
+                                print(f"❌ {module.upper()} | No improvement after 3 fix attempts")
+                                self.progress.update_module(module, status="failed",
+                                                            errors=[f"Stuck at {new_failed} failures after multiple attempts"])
+                                return False
+                        elif previous_failed > new_failed:
+                            module_progress.no_improvement_count = 0  # Reset if we see improvement
+                            print(
+                                f"✅ {module.upper()} | Improvement: {previous_failed} → {new_failed} failures")
+
+                        stats = test_results.get('stats', {})
+                        # Check if tests pass AND no warnings remain
+                        if (stats.get('failed', 0) == 0 and
+                            len(test_results.get('warnings', [])) == 0 and
+                                stats.get('total', 0) > 0):
+                            print(f"\n✅ {module.upper()} | All failures and warnings fixed")
+                            # Don't mark as complete yet - need to run cleanup first
+                            # Continue to next iteration which will trigger the cleanup phase
+                            pass
+                        # If tests pass but warnings exist, continue to handle them
+                        elif stats.get('failed', 0) == 0 and len(test_results.get('warnings', [])) > 0:
+                            print(
+                                f"\n⚠️  {module.upper()} | Tests passing but {len(test_results.get('warnings', []))} warnings remain")
+                            # Continue to next iteration to handle warnings
+                            pass
                     else:
                         consecutive_api_failures += 1
 
@@ -1788,7 +3271,8 @@ class ModuleProcessor:
                 feedback_success, feedback = self.claude.request_feedback(
                     module,
                     f"Module {module} reached max iterations ({MAX_ITERATIONS_PER_MODULE}) with persistent issues:\n{failure_summary}\n\nShould we continue or mark as failed?",
-                    "quality-control-enforcer"
+                    "quality-control-enforcer",
+                    milestone=self.current_milestone
                 )
 
                 if feedback_success and "CONTINUE" in feedback.upper():
@@ -1830,8 +3314,14 @@ class IntegrationChecker:
         self.claude = claude
         self.progress = progress_tracker
 
-    def check_integration(self, module: str, dependency: str) -> bool:
-        """Check integration between module and dependency"""
+    def check_integration(self, module: str, dependency: str, milestone: int = 2) -> bool:
+        """Check integration between module and dependency
+
+        Args:
+            module: The module to check
+            dependency: The dependency module
+            milestone: The milestone number (default 2 for integration phase)
+        """
 
         if not self.progress.is_module_complete(module):
             return False
@@ -1839,13 +3329,19 @@ class IntegrationChecker:
         if not self.progress.is_module_complete(dependency):
             return False
 
+        # Check if integration already completed
+        if self.progress.is_integration_complete(module, dependency):
+            print(f"✅ {module.upper()} → {dependency.upper()} | Already integrated")
+            return True
+
         print(f"🔗 {module.upper()} → {dependency.upper()} | INTEGRATING")
 
         # Request feedback before integration checks
         feedback_success, feedback = self.claude.request_feedback(
             module,
             f"About to run integration checks between {module} and {dependency}. Are there known integration issues or conflicts?",
-            "integration-architect"
+            "integration-architect",
+            milestone=milestone
         )
 
         # Skip integration if feedback indicates major conflicts
@@ -1864,7 +3360,9 @@ class IntegrationChecker:
         )
         success, output = self.claude.execute_prompt(
             prompt,
-            f"Verifying {module} uses {dependency} correctly"
+            f"Verifying {module} uses {dependency} correctly",
+            module=module,
+            milestone=milestone
         )
 
         # 2. Check cross-module integration
@@ -1875,7 +3373,9 @@ class IntegrationChecker:
         )
         self.claude.execute_prompt(
             prompt,
-            f"Checking cross-module integration between {module} and {dependency}"
+            f"Checking cross-module integration between {module} and {dependency}",
+            module=module,
+            milestone=milestone
         )
 
         # 3. Fix service layer violations
@@ -1885,7 +3385,9 @@ class IntegrationChecker:
         )
         self.claude.execute_prompt(
             prompt,
-            f"Fixing service layer violations in {module}"
+            f"Fixing service layer violations in {module}",
+            module=module,
+            milestone=milestone
         )
 
         # 4. Align data flow patterns
@@ -1896,7 +3398,9 @@ class IntegrationChecker:
         )
         self.claude.execute_prompt(
             prompt,
-            f"Aligning data flow between {module} and {dependency}"
+            f"Aligning data flow between {module} and {dependency}",
+            module=module,
+            milestone=milestone
         )
 
         # 5. Prevent breaking changes in dependent modules
@@ -1910,10 +3414,16 @@ class IntegrationChecker:
                 )
                 self.claude.execute_prompt(
                     prompt,
-                    f"Ensuring {module} doesn't break {dependent}"
+                    f"Ensuring {module} doesn't break {dependent}",
+                    module=module,
+                    milestone=milestone
                 )
 
         print(f"✅ Integration verified: {module} → {dependency}")
+
+        # Mark this integration as complete
+        self.progress.mark_integration_complete(module, dependency)
+
         return True
 
 # ============================================================================
@@ -1934,11 +3444,12 @@ class AutoFixer:
         print("✅ Hallucination detector ready")
 
         self.rate_limiter = RateLimiter()
-        self.claude = ClaudeExecutor(self.rate_limiter, self.hallucination_detector)
+        self.claude = ClaudeExecutor(
+            self.rate_limiter, self.hallucination_detector, dry_run=DRY_RUN_MODE)
         self.test_runner = TestRunner()
 
         print("📁 Loading progress...")
-        self.progress = ProgressTracker()
+        self.progress = ProgressTracker(dry_run=DRY_RUN_MODE)
 
         self.cascade_protector = CascadeProtector(self.test_runner)
         self.module_processor = ModuleProcessor(
@@ -1974,19 +3485,11 @@ class AutoFixer:
 
             # Check integrations immediately after module completes successfully
             if success:
+                # Only check A→B when processing module A (and B is already complete)
                 deps = MODULE_DEPENDENCIES.get(module, [])
                 for dep in deps:
                     if dep not in SKIP_MODULES and self.progress.is_module_complete(dep):
-                        self.integration_checker.check_integration(module, dep)
-
-                # Also check if this module is a dependency for any completed modules
-                for other_module in MODULE_HIERARCHY:
-                    if other_module in SKIP_MODULES or other_module == module:
-                        continue
-                    if self.progress.is_module_complete(other_module):
-                        other_deps = MODULE_DEPENDENCIES.get(other_module, [])
-                        if module in other_deps:
-                            self.integration_checker.check_integration(other_module, module)
+                        self.integration_checker.check_integration(module, dep, milestone=2)
             else:
                 all_success = False
                 if self.cascade_protector.cascade_detected:
@@ -2065,17 +3568,19 @@ class AutoFixer:
                     deps = MODULE_DEPENDENCIES.get(module, [])
                     for dep in deps:
                         if self.progress.is_module_complete(dep):
-                            self.integration_checker.check_integration(module, dep)
+                            self.integration_checker.check_integration(module, dep, milestone=2)
 
                     # Check integration with other modules in the same group
                     for other in group:
                         if other != module and self.progress.is_module_complete(other):
                             # Check if they have dependencies on each other
                             if other in deps:
-                                self.integration_checker.check_integration(module, other)
+                                self.integration_checker.check_integration(
+                                    module, other, milestone=2)
                             other_deps = MODULE_DEPENDENCIES.get(other, [])
                             if module in other_deps:
-                                self.integration_checker.check_integration(other, module)
+                                self.integration_checker.check_integration(
+                                    other, module, milestone=2)
 
         return all_success
 
@@ -2157,7 +3662,7 @@ def main():
         if progress_file.exists():
             progress_file.unlink()
             print("🔄 Progress reset")
-        
+
         # Also handle log file - rename old one if exists
         log_file = Path("scripts/AUTO.logs")
         if log_file.exists():

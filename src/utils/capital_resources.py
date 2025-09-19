@@ -331,3 +331,35 @@ def safe_clear_references(*objects) -> None:
 
     except Exception as e:
         logger.warning(f"Error clearing object references: {e}")
+
+
+async def async_cleanup_resources(*cleanup_tasks, logger_instance=None) -> None:
+    """
+    Common async cleanup pattern for capital management services.
+
+    This function consolidates the repeated cleanup pattern found across
+    multiple capital management services to eliminate code duplication.
+
+    Args:
+        *cleanup_tasks: Async functions to execute for cleanup
+        logger_instance: Logger instance for error reporting
+    """
+    import asyncio
+
+    if not cleanup_tasks:
+        return
+
+    log = logger_instance or logger
+
+    try:
+        # Execute cleanup tasks concurrently with proper error handling
+        results = await asyncio.gather(*cleanup_tasks, return_exceptions=True)
+
+        # Log any exceptions that occurred
+        for i, result in enumerate(results):
+            if isinstance(result, Exception):
+                log.warning(f"Cleanup task {i} failed: {result}")
+
+    except Exception as e:
+        log.error(f"Critical error during resource cleanup: {e}")
+        # Continue execution despite cleanup failure

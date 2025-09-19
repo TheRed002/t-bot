@@ -499,6 +499,7 @@ class TestUtilityFunctions:
 
         # Mock the injector.resolve method to return different services
         mock_services = {
+            "auth": Mock(),
             "analytics": Mock(),
             "capital": Mock(),
             "data": Mock(),
@@ -512,6 +513,7 @@ class TestUtilityFunctions:
 
         # Map service names to their mocks
         service_name_mapping = {
+            "WebAuthService": mock_services["auth"],
             "WebAnalyticsService": mock_services["analytics"],
             "WebCapitalService": mock_services["capital"],
             "WebDataService": mock_services["data"],
@@ -539,6 +541,7 @@ class TestUtilityFunctions:
 
         # Mock the injector.resolve method to return different services
         mock_services = {
+            "auth": Mock(),
             "analytics": Mock(),
             "capital": Mock(),
             "data": Mock(),
@@ -552,6 +555,7 @@ class TestUtilityFunctions:
 
         # Map service names to their mocks
         service_name_mapping = {
+            "WebAuthService": mock_services["auth"],
             "WebAnalyticsService": mock_services["analytics"],
             "WebCapitalService": mock_services["capital"],
             "WebDataService": mock_services["data"],

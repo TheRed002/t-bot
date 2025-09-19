@@ -313,7 +313,11 @@ class TestAuthenticateWebSocket:
         """Create mock token data."""
         token_data = Mock()
         token_data.user_id = "user123"
+        token_data.id = "user123"  # Add the id field that User model expects
         token_data.username = "testuser"
+        token_data.email = "testuser@example.com"
+        token_data.is_active = True
+        token_data.is_verified = True
         token_data.scopes = ["read", "write"]
         return token_data
 
@@ -326,7 +330,7 @@ class TestAuthenticateWebSocket:
             user = await authenticate_websocket(mock_websocket)
             
         assert isinstance(user, User)
-        assert user.user_id == "user123"
+        assert user.id == "user123"
         assert user.username == "testuser"
 
     async def test_authenticate_websocket_header_success(self, mock_websocket, mock_jwt_handler, mock_token_data):
@@ -338,7 +342,7 @@ class TestAuthenticateWebSocket:
             user = await authenticate_websocket(mock_websocket)
             
         assert isinstance(user, User)
-        assert user.user_id == "user123"
+        assert user.id == "user123"
 
     async def test_authenticate_websocket_no_token(self, mock_websocket):
         """Test authentication failure with no token."""
@@ -371,7 +375,7 @@ class TestAuthenticateWebSocket:
             user = await authenticate_websocket(mock_websocket)
             
         assert isinstance(user, User)
-        assert user.user_id == "user123"
+        assert user.id == "user123"
 
     async def test_authenticate_websocket_exception(self, mock_websocket):
         """Test authentication exception handling."""

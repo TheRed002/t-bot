@@ -23,6 +23,9 @@ from src.core.types import (
     StrategyType,
 )
 
+# Technical indicators for centralized calculations
+from src.data.features.technical_indicators import TechnicalIndicators
+
 # From P-002A - Use error handling decorators
 from src.error_handling.decorators import with_circuit_breaker, with_error_context, with_retry
 
@@ -56,7 +59,7 @@ class TrendFollowingStrategy(BaseStrategy):
     - Time-based exit rules
     """
 
-    def __init__(self, config: dict[str, Any], services: StrategyServiceContainer | None = None):
+    def __init__(self, config: dict[str, Any], services: "StrategyServiceContainer | None" = None):
         """Initialize Trend Following Strategy.
 
         Args:
@@ -94,6 +97,11 @@ class TrendFollowingStrategy(BaseStrategy):
             slow_ma=self.slow_ma,
             rsi_period=self.rsi_period,
         )
+
+    def set_technical_indicators(self, technical_indicators: TechnicalIndicators) -> None:
+        """Set technical indicators service for centralized calculations."""
+        self._technical_indicators = technical_indicators
+        self.logger.info("Technical indicators service set", strategy=self.name)
 
     @property
     def strategy_type(self) -> StrategyType:
@@ -253,7 +261,7 @@ class TrendFollowingStrategy(BaseStrategy):
 
     async def _generate_bullish_signal(
         self, data: MarketData, fast_ma: float, slow_ma: float, rsi: float
-    ) -> Signal | None:
+    ) -> "Signal | None":
         """Generate bullish trend signal.
 
         Args:
@@ -324,7 +332,7 @@ class TrendFollowingStrategy(BaseStrategy):
 
     async def _generate_bearish_signal(
         self, data: MarketData, fast_ma: float, slow_ma: float, rsi: float
-    ) -> Signal | None:
+    ) -> "Signal | None":
         """Generate bearish trend signal.
 
         Args:
@@ -395,7 +403,7 @@ class TrendFollowingStrategy(BaseStrategy):
 
     async def _generate_exit_signal(
         self, data: MarketData, direction: SignalDirection, reason: str
-    ) -> Signal | None:
+    ) -> "Signal | None":
         """Generate exit signal for trend reversal.
 
         Args:

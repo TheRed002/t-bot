@@ -129,7 +129,8 @@ class TestInitializeServices:
     @patch("src.web_interface.app.app_config", None)
     async def test_initialize_services_no_security_config(self):
         """Test service initialization fails without security config."""
-        with pytest.raises(RuntimeError, match="Security configuration is required"):
+        from src.core.exceptions import ConfigurationError
+        with pytest.raises(ConfigurationError, match="Security configuration is required"):
             await _initialize_services()
 
     @patch("src.web_interface.app._services_initialized", True)
@@ -614,14 +615,14 @@ class TestAppModuleVariables:
             _app_instance,
             _monitoring_setup_done,
             _services_initialized,
-            app_config,
+            _app_config_instance,
             bot_orchestrator,
             execution_engine,
             model_manager,
         )
 
         # These should be initialized to proper default values
-        assert app_config is None or hasattr(app_config, '__dict__')
+        assert _app_config_instance is None or hasattr(_app_config_instance, '__dict__')
         assert bot_orchestrator is None or hasattr(bot_orchestrator, '__dict__')
         assert execution_engine is None or hasattr(execution_engine, '__dict__')
         assert model_manager is None or hasattr(model_manager, '__dict__')

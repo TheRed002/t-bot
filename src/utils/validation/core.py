@@ -466,9 +466,12 @@ class ValidationFramework:
 
             except ValidationError as ve:
                 # Use consistent error propagation pattern
-                from src.core.logging import get_logger
-
-                logger = get_logger(__name__)
+                try:
+                    from src.core.logging import get_logger
+                    logger = get_logger(__name__)
+                except ImportError:
+                    import logging
+                    logger = logging.getLogger(__name__)
 
                 try:
                     # Apply consistent validation error propagation
@@ -554,3 +557,47 @@ class ValidationFramework:
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "validations": results,
         }
+
+    @staticmethod
+    def validate_positive_amount(amount_str: str) -> str:
+        """
+        Validate that a string amount is a valid positive Decimal.
+
+        Args:
+            amount_str: String representation of amount
+
+        Returns:
+            The validated string amount
+
+        Raises:
+            ValidationError: If amount is invalid or not positive
+        """
+        try:
+            amount = Decimal(amount_str)
+            if amount <= 0:
+                raise ValidationError("Amount must be positive")
+            return amount_str
+        except (ValueError, InvalidOperation) as e:
+            raise ValidationError(f"Invalid amount: {e}") from e
+
+    @staticmethod
+    def validate_non_negative_amount(amount_str: str) -> str:
+        """
+        Validate that a string amount is a valid non-negative Decimal.
+
+        Args:
+            amount_str: String representation of amount
+
+        Returns:
+            The validated string amount
+
+        Raises:
+            ValidationError: If amount is invalid or negative
+        """
+        try:
+            amount = Decimal(amount_str)
+            if amount < 0:
+                raise ValidationError("Amount cannot be negative")
+            return amount_str
+        except (ValueError, InvalidOperation) as e:
+            raise ValidationError(f"Invalid amount: {e}") from e

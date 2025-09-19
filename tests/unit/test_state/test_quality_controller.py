@@ -16,31 +16,13 @@ os.environ.update(
         "TESTING": "1",
         "PYTHONHASHSEED": "0",
         "DISABLE_TELEMETRY": "1",
-        "DISABLE_LOGGING": "1",
         "DISABLE_DATABASE": "1",
         "DISABLE_METRICS": "1",
     }
 )
 
-
-# Optimize: Function-level mocking to avoid conflicts
-@pytest.fixture(autouse=True)
-def ultra_performance_mocking():
-    """Ultra-aggressive mocking for maximum test performance."""
-    mock_modules = {
-        "src.core.logging": Mock(get_logger=Mock(return_value=Mock())),
-        "src.database": Mock(),
-        "src.database.influxdb_client": Mock(InfluxDBClient=Mock()),
-        "src.monitoring": Mock(),
-        "src.error_handling": Mock(),
-    }
-
-    with (
-        patch.dict("sys.modules", mock_modules),
-        patch("time.sleep"),
-        patch("uuid.uuid4", return_value="test-uuid"),
-    ):
-        yield
+# Note: Module-level mocks are handled by conftest.py
+# The conftest.py file sets up comprehensive mocking for src.core.logging and other modules
 
 
 from src.core.exceptions import StateError, StateConsistencyError
@@ -386,6 +368,11 @@ class TestInfluxDBMetricsStorage:
         mock_client.close = AsyncMock()
 
         storage = InfluxDBMetricsStorage(config)
+        # Mock the logger directly to ensure it has the required methods
+        mock_logger = Mock()
+        mock_logger.debug = Mock()
+        mock_logger.warning = Mock()
+        storage.logger = mock_logger
         storage._influx_client = mock_client
         storage._available = True
 

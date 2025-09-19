@@ -37,6 +37,7 @@ if TYPE_CHECKING:
 from src.core.base.interfaces import HealthCheckResult, HealthStatus
 from src.core.base.service import BaseService
 from src.core.config import Config
+from src.core.event_constants import BacktestEvents
 from src.core.exceptions import ServiceError, ValidationError
 from src.core.logging import get_logger
 from src.data.types import DataRequest
@@ -332,21 +333,25 @@ class BacktestService(BaseService, ErrorPropagationMixin):
         """Serialize BacktestResult for API response (moved from controller)."""
         try:
             return {
-                "total_return": float(result.total_return),
-                "annual_return": float(result.annual_return),
-                "sharpe_ratio": result.sharpe_ratio,
-                "sortino_ratio": result.sortino_ratio,
-                "max_drawdown": float(result.max_drawdown),
-                "win_rate": result.win_rate,
+                "total_return_pct": float(result.total_return_pct),
+                "annual_return_pct": float(result.annual_return_pct),
+                "sharpe_ratio": float(result.sharpe_ratio) if result.sharpe_ratio is not None else None,
+                "sortino_ratio": float(result.sortino_ratio) if result.sortino_ratio is not None else None,
+                "max_drawdown_pct": float(result.max_drawdown_pct),
+                "win_rate_pct": float(result.win_rate_pct),
                 "total_trades": result.total_trades,
                 "winning_trades": result.winning_trades,
                 "losing_trades": result.losing_trades,
-                "avg_win": float(result.avg_win),
-                "avg_loss": float(result.avg_loss),
-                "profit_factor": result.profit_factor,
-                "volatility": result.volatility,
-                "var_95": float(result.var_95),
-                "cvar_95": float(result.cvar_95),
+                "avg_win_amount": float(result.avg_win_amount) if result.avg_win_amount is not None else None,
+                "avg_loss_amount": float(result.avg_loss_amount) if result.avg_loss_amount is not None else None,
+                "profit_factor": float(result.profit_factor) if result.profit_factor is not None else None,
+                "volatility_pct": float(result.volatility_pct) if result.volatility_pct is not None else None,
+                "value_at_risk_95_pct": float(result.value_at_risk_95_pct) if result.value_at_risk_95_pct is not None else None,
+                "conditional_var_95_pct": float(result.conditional_var_95_pct) if result.conditional_var_95_pct is not None else None,
+                "initial_capital": float(result.initial_capital),
+                "final_capital": float(result.final_capital),
+                "peak_capital": float(result.peak_capital),
+                "lowest_capital": float(result.lowest_capital),
                 "equity_curve": result.equity_curve,
                 "trades": result.trades,
                 "daily_returns": result.daily_returns,
@@ -434,7 +439,7 @@ class BacktestService(BaseService, ErrorPropagationMixin):
         await self._update_backtest_stage(backtest_id, "results_consolidation", 90)
         final_result = await self._consolidate_results(simulation_result, advanced_metrics, request)
 
-        await self._update_backtest_stage(backtest_id, "completed", 100)
+        await self._update_backtest_stage(backtest_id, BacktestEvents.COMPLETED.replace("backtest.", ""), 100)
         return final_result
 
     async def _prepare_market_data(self, request: BacktestRequest) -> dict[str, pd.DataFrame]:
@@ -498,7 +503,8 @@ class BacktestService(BaseService, ErrorPropagationMixin):
             strategy = await self.strategy_service.create_strategy(strategy_config)
         except Exception as e:
             self._logger.error(f"Failed to create strategy: {e}")  # type: ignore
-            raise ServiceError(f"Failed to create strategy: {e}") from e
+            # Use enhanced error propagation with boundary validation
+            self._propagate_error_with_boundary_validation(e, "strategy_initialization", "backtesting", "strategies")
 
         if not strategy:
             raise ServiceError(
@@ -518,9 +524,8 @@ class BacktestService(BaseService, ErrorPropagationMixin):
             return await self.risk_service.create_risk_manager(risk_config)
         except Exception as e:
             self._logger.error(f"Failed to setup risk management: {e}")  # type: ignore
-            raise ServiceError(
-                f"Failed to setup risk management: {e}", error_code="BACKTEST_013"
-            ) from e
+            # Use enhanced error propagation with boundary validation
+            self._propagate_error_with_boundary_validation(e, "risk_management_setup", "backtesting", "risk_management")
 
     async def _run_core_simulation(
         self,
@@ -576,13 +581,14 @@ class BacktestService(BaseService, ErrorPropagationMixin):
                 "execution_stats": {
                     "total_trades": result.total_trades,
                     "winning_trades": result.winning_trades,
-                    "win_rate": result.win_rate,
+                    "win_rate_pct": float(result.win_rate_pct),
                 },
                 "result": result,  # Keep full result for metrics
             }
         except Exception as e:
             self._logger.error(f"BacktestEngine execution failed: {e}")  # type: ignore
-            raise ServiceError(f"Simulation engine failed: {e}", error_code="BACKTEST_016") from e
+            # Use enhanced error propagation with boundary validation
+            self._propagate_error_with_boundary_validation(e, "simulation_engine_execution", "backtesting", "execution")
 
     async def _run_advanced_analysis(
         self,
@@ -653,24 +659,28 @@ class BacktestService(BaseService, ErrorPropagationMixin):
             from src.backtesting.engine import BacktestResult
 
             return BacktestResult(
-                total_return=base_result.total_return,
-                annual_return=base_result.annual_return,
+                total_return_pct=base_result.total_return_pct,
+                annual_return_pct=base_result.annual_return_pct,
                 sharpe_ratio=base_result.sharpe_ratio,
                 sortino_ratio=base_result.sortino_ratio,
-                max_drawdown=base_result.max_drawdown,
-                win_rate=base_result.win_rate,
+                max_drawdown_pct=base_result.max_drawdown_pct,
+                win_rate_pct=base_result.win_rate_pct,
                 total_trades=base_result.total_trades,
                 winning_trades=base_result.winning_trades,
                 losing_trades=base_result.losing_trades,
-                avg_win=base_result.avg_win,
-                avg_loss=base_result.avg_loss,
+                avg_win_amount=base_result.avg_win_amount,
+                avg_loss_amount=base_result.avg_loss_amount,
                 profit_factor=base_result.profit_factor,
-                volatility=base_result.volatility,
-                var_95=base_result.var_95,
-                cvar_95=base_result.cvar_95,
+                volatility_pct=base_result.volatility_pct,
+                value_at_risk_95_pct=base_result.value_at_risk_95_pct,
+                conditional_var_95_pct=base_result.conditional_var_95_pct,
+                initial_capital=base_result.initial_capital,
+                final_capital=base_result.final_capital,
+                peak_capital=base_result.peak_capital,
+                lowest_capital=base_result.lowest_capital,
                 equity_curve=base_result.equity_curve,
-                trades=base_result.trades,
                 daily_returns=base_result.daily_returns,
+                trades=base_result.trades,
                 metadata=metadata,
             )
         else:
@@ -696,7 +706,7 @@ class BacktestService(BaseService, ErrorPropagationMixin):
                     "sharpe_ratio": 0.0,
                     "sortino_ratio": 0.0,
                     "max_drawdown": to_decimal("0"),
-                    "win_rate": 0.0,
+                    "win_rate": to_decimal("0"),
                     "avg_win": to_decimal("0"),
                     "avg_loss": to_decimal("0"),
                     "profit_factor": 0.0,
@@ -714,22 +724,31 @@ class BacktestService(BaseService, ErrorPropagationMixin):
 
             from src.backtesting.engine import BacktestResult
 
+            # Calculate capital metrics
+            final_capital = equity_curve[-1]["equity"] if equity_curve else request.initial_capital
+            peak_capital = max(equity_curve, key=lambda x: x["equity"])["equity"] if equity_curve else request.initial_capital
+            lowest_capital = min(equity_curve, key=lambda x: x["equity"])["equity"] if equity_curve else request.initial_capital
+
             return BacktestResult(
-                total_return=all_metrics.get("total_return", to_decimal("0")),
-                annual_return=all_metrics.get("annual_return", to_decimal("0")),
-                sharpe_ratio=all_metrics.get("sharpe_ratio", 0.0),
-                sortino_ratio=all_metrics.get("sortino_ratio", 0.0),
-                max_drawdown=all_metrics.get("max_drawdown", to_decimal("0")),
-                win_rate=all_metrics.get("win_rate", 0.0),
+                total_return_pct=all_metrics.get("total_return", to_decimal("0")),
+                annual_return_pct=all_metrics.get("annual_return", to_decimal("0")),
+                sharpe_ratio=to_decimal(str(all_metrics.get("sharpe_ratio"))) if all_metrics.get("sharpe_ratio") is not None else None,
+                sortino_ratio=to_decimal(str(all_metrics.get("sortino_ratio"))) if all_metrics.get("sortino_ratio") is not None else None,
+                max_drawdown_pct=all_metrics.get("max_drawdown", to_decimal("0")),
+                win_rate_pct=all_metrics.get("win_rate", to_decimal("0")),
                 total_trades=len(trades),
                 winning_trades=len(winning_trades),
                 losing_trades=len(losing_trades),
-                avg_win=all_metrics.get("avg_win", to_decimal("0")),
-                avg_loss=all_metrics.get("avg_loss", to_decimal("0")),
-                profit_factor=all_metrics.get("profit_factor", 0.0),
-                volatility=all_metrics.get("volatility", 0.0),
-                var_95=all_metrics.get("var_95", to_decimal("0")),
-                cvar_95=all_metrics.get("cvar_95", to_decimal("0")),
+                avg_win_amount=all_metrics.get("avg_win") if all_metrics.get("avg_win", to_decimal("0")) != to_decimal("0") else None,
+                avg_loss_amount=all_metrics.get("avg_loss") if all_metrics.get("avg_loss", to_decimal("0")) != to_decimal("0") else None,
+                profit_factor=to_decimal(str(all_metrics.get("profit_factor"))) if all_metrics.get("profit_factor") is not None else None,
+                volatility_pct=to_decimal(str(all_metrics.get("volatility"))) if all_metrics.get("volatility") is not None else None,
+                value_at_risk_95_pct=all_metrics.get("var_95") if all_metrics.get("var_95", to_decimal("0")) != to_decimal("0") else None,
+                conditional_var_95_pct=all_metrics.get("cvar_95") if all_metrics.get("cvar_95", to_decimal("0")) != to_decimal("0") else None,
+                initial_capital=request.initial_capital,
+                final_capital=final_capital,
+                peak_capital=peak_capital,
+                lowest_capital=lowest_capital,
                 equity_curve=equity_curve,
                 trades=trades,
                 daily_returns=daily_returns,
@@ -868,7 +887,7 @@ class BacktestService(BaseService, ErrorPropagationMixin):
     async def _cancel_backtest_impl(self, backtest_id: str) -> bool:
         """Implementation for cancelling backtest."""
         if backtest_id in self._active_backtests:
-            self._active_backtests[backtest_id]["stage"] = "cancelled"
+            self._active_backtests[backtest_id]["stage"] = BacktestEvents.CANCELLED.replace("backtest.", "")
             self._logger.info(f"Backtest {backtest_id} cancelled")  # type: ignore
             return True
         return False
@@ -1094,3 +1113,53 @@ class BacktestService(BaseService, ErrorPropagationMixin):
             self._logger.debug(f"{service_name} cleanup completed")  # type: ignore
         except Exception as cleanup_error:
             self._logger.warning(f"{service_name} cleanup error: {cleanup_error}")  # type: ignore
+
+    def _propagate_error_with_boundary_validation(
+        self,
+        error: Exception,
+        context: str,
+        source_module: str,
+        target_module: str
+    ) -> None:
+        """
+        Enhanced error propagation with boundary validation aligned with core module.
+
+        Args:
+            error: Exception to propagate
+            context: Error context
+            source_module: Source module name
+            target_module: Target module name
+        """
+        # Apply data transformation for error propagation
+        try:
+            from src.backtesting.data_transformer import BacktestDataTransformer
+
+            # Create error data with boundary validation
+            error_data = {
+                "error_type": type(error).__name__,
+                "error_message": str(error),
+                "context": context,
+                "source_module": source_module,
+                "target_module": target_module,
+                "processing_mode": "stream",  # Align with core error handling
+                "boundary_crossed": True,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+
+            # Apply cross-module validation
+            validated_error_data = BacktestDataTransformer.apply_cross_module_validation(
+                error_data, source_module, target_module
+            )
+
+            # Log with enhanced metadata
+            self._logger.error(
+                f"Enhanced error propagation in {context}: {error}",
+                extra=validated_error_data
+            )
+
+        except Exception:
+            # Fallback to standard error propagation
+            pass
+
+        # Use standard error propagation as fallback
+        self.propagate_service_error(error, context)

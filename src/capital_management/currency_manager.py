@@ -16,7 +16,6 @@ Author: Trading Bot Framework
 Version: 1.0.0
 """
 
-import statistics
 from datetime import datetime, timezone
 from decimal import ROUND_HALF_UP, Decimal, getcontext
 from typing import TYPE_CHECKING, Any
@@ -376,7 +375,7 @@ class CurrencyManager(AbstractCurrencyManagementService, TransactionalService):
                         )
                         correlation = Decimal("0.0")
                         var_95 = await self._calculate_currency_var_via_risk_service(
-                            exposure.base_currency_equivalent, volatility
+                            exposure.base_currency_equivalent, rate_history
                         )
                     except Exception as risk_error:
                         self.logger.warning(
@@ -664,31 +663,50 @@ class CurrencyManager(AbstractCurrencyManagementService, TransactionalService):
     async def _calculate_currency_volatility_via_risk_service(
         self, currency: str, rate_history: list[tuple[datetime, Decimal]]
     ) -> Decimal:
-        """Calculate currency volatility using RiskService when available."""
+        """Calculate currency volatility using proper utils functions."""
         try:
+            from src.utils.math_utils import calculate_volatility
+
             # Extract just the rates for volatility calculation
             if len(rate_history) > 1:
                 rates = [
                     rate for _, rate in rate_history[-RATE_CALCULATION_LOOKBACK_DAYS:]
                 ]  # Last N data points
                 if len(rates) > 1:
-                    # Convert to float for statistics calculation, then back to Decimal
-                    float_rates = [float(rate) for rate in rates]
-                    volatility = safe_decimal_conversion(statistics.stdev(float_rates))
+                    # Use proper volatility calculation from utils
+                    volatility = calculate_volatility(rates)
                     return volatility
             return Decimal("0.0")
-        except (statistics.StatisticsError, ValueError):
+        except Exception as e:
+            self.logger.warning(f"Volatility calculation failed: {e}")
             return Decimal("0.0")
 
     async def _calculate_currency_var_via_risk_service(
-        self, exposure_amount: Decimal, volatility: Decimal
+        self, exposure_amount: Decimal, rate_history: list[tuple[datetime, Decimal]]
     ) -> Decimal:
-        """Calculate currency VaR using RiskService when available."""
+        """Calculate currency VaR using proper utils functions."""
         try:
-            # Use standardized VaR calculation (95% confidence level)
-            # In future, integrate with RiskService's _calculate_var method
-            var_95 = exposure_amount * (volatility * DEFAULT_VaR_CONFIDENCE_MULTIPLIER)
-            return var_95
+            from src.utils.math_utils import calculate_var
+
+            # Extract returns from rate history for VaR calculation
+            if len(rate_history) > 1:
+                rates = [rate for _, rate in rate_history]
+                if len(rates) > 1:
+                    # Calculate returns from rates
+                    returns = []
+                    for i in range(1, len(rates)):
+                        if rates[i-1] > 0:
+                            return_val = (rates[i] - rates[i-1]) / rates[i-1]
+                            returns.append(return_val)
+
+                    if returns:
+                        # Use proper VaR calculation from utils (95% confidence level)
+                        var_return = calculate_var(returns, Decimal("0.95"))
+                        # Apply to exposure amount
+                        var_95 = exposure_amount * abs(var_return)
+                        return var_95
+
+            return Decimal("0.0")
         except Exception as e:
             self.logger.warning(f"VaR calculation failed: {e}")
             return Decimal("0.0")
@@ -701,25 +719,36 @@ class CurrencyManager(AbstractCurrencyManagementService, TransactionalService):
     ) -> tuple[Decimal, Decimal]:
         """Fallback risk calculation when RiskService is not available."""
         try:
+            from src.utils.math_utils import calculate_volatility, calculate_var
+
+            volatility = Decimal("0.0")
+            var_95 = Decimal("0.0")
+
             if len(rate_history) > 1:
                 # Last N data points
                 rates = [rate for _, rate in rate_history[-RATE_CALCULATION_LOOKBACK_DAYS:]]
                 if len(rates) > 1:
-                    # Convert to float for statistics calculation, then back to Decimal
-                    float_rates = [float(rate) for rate in rates]
-                    volatility = safe_decimal_conversion(statistics.stdev(float_rates))
-                else:
-                    volatility = Decimal("0.0")
-            else:
-                volatility = Decimal("0.0")
+                    # Use proper volatility calculation from utils
+                    volatility = calculate_volatility(rates)
 
-            # Calculate VaR (95% confidence level)
-            var_95 = exposure.base_currency_equivalent * (
-                volatility * DEFAULT_VaR_CONFIDENCE_MULTIPLIER
-            )
+                    # Calculate returns for VaR
+                    returns = []
+                    for i in range(1, len(rates)):
+                        if rates[i-1] > 0:
+                            return_val = (rates[i] - rates[i-1]) / rates[i-1]
+                            returns.append(return_val)
+
+                    if returns:
+                        # Use proper VaR calculation from utils (95% confidence level)
+                        var_return = calculate_var(returns, Decimal("0.95"))
+                        var_95 = exposure.base_currency_equivalent * abs(var_return)
+                    else:
+                        var_95 = exposure.base_currency_equivalent * (
+                            volatility * DEFAULT_VaR_CONFIDENCE_MULTIPLIER
+                        )
 
             return volatility, var_95
-        except (statistics.StatisticsError, ValueError):
+        except Exception:
             return Decimal("0.0"), Decimal("0.0")
 
     async def _validate_currencies(self, balances: dict[str, dict[str, Decimal]]) -> None:

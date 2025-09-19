@@ -91,12 +91,21 @@ def _register_web_business_services(
         """Factory function for WebBotService with DI."""
         from src.web_interface.services.bot_service import WebBotService
 
-        api_facade = (
-            injector.resolve("APIFacade")
-            if injector.has_service("APIFacade")
-            else factory.create_api_facade()
-        )
-        return WebBotService(bot_facade=api_facade)
+        # Try to get BotManagementController first
+        bot_controller = None
+        if injector.has_service("BotManagementController"):
+            bot_controller = injector.resolve("BotManagementController")
+        else:
+            # Register bot management services if not available
+            try:
+                from src.bot_management.di_registration import register_bot_management_services
+                register_bot_management_services(injector)
+                if injector.has_service("BotManagementController"):
+                    bot_controller = injector.resolve("BotManagementController")
+            except Exception as e:
+                logger.warning(f"Could not register bot management services: {e}")
+
+        return WebBotService(bot_facade=bot_controller)
 
     def _create_web_monitoring_service():
         """Factory function for WebMonitoringService with DI."""
@@ -113,12 +122,12 @@ def _register_web_business_services(
         """Factory function for WebRiskService with DI."""
         from src.web_interface.services.risk_service import WebRiskService
 
-        api_facade = (
-            injector.resolve("APIFacade")
-            if injector.has_service("APIFacade")
-            else factory.create_api_facade()
-        )
-        return WebRiskService(risk_facade=api_facade)
+        # Try to get actual RiskService first
+        risk_service = None
+        if injector.has_service("RiskService"):
+            risk_service = injector.resolve("RiskService")
+
+        return WebRiskService(risk_service=risk_service)
 
     # Register using factory functions
     injector.register_factory("WebPortfolioService", _create_web_portfolio_service, singleton=True)
@@ -356,6 +365,15 @@ def _register_utility_services(
 ) -> None:
     """Register utility services."""
 
+    def _create_web_auth_service():
+        """Factory function for WebAuthService with DI."""
+        from src.web_interface.services.auth_service import WebAuthService
+
+        user_repository = (
+            injector.resolve("UserRepository") if injector.has_service("UserRepository") else None
+        )
+        return WebAuthService(user_repository=user_repository)
+
     def _create_web_data_service():
         """Factory function for WebDataService with DI."""
         from src.web_interface.services.data_service import WebDataService
@@ -374,6 +392,7 @@ def _register_utility_services(
         )
         return WebExchangeService(exchange_service=exchange_service)
 
+    injector.register_factory("WebAuthService", _create_web_auth_service, singleton=True)
     injector.register_factory("WebDataService", _create_web_data_service, singleton=True)
     injector.register_factory("WebExchangeService", _create_web_exchange_service, singleton=True)
 

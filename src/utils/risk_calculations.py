@@ -104,26 +104,14 @@ def calculate_sharpe_ratio(
     Returns:
         Sharpe ratio as Decimal or None if insufficient data
     """
+    from src.utils.financial_calculations import calculate_sharpe_ratio as calc_sharpe
+
     if not returns or len(returns) < 30:
         return None
 
     try:
         returns_array = np.array([float(ret) for ret in returns])
-
-        # Annualized metrics with Decimal precision
-        mean_return_float = np.mean(returns_array) * 252
-        volatility_float = np.std(returns_array) * np.sqrt(252)
-
-        mean_return = to_decimal(str(mean_return_float))
-        volatility = to_decimal(str(volatility_float))
-
-        if volatility == ZERO:
-            return None
-
-        # Sharpe ratio = (return - risk_free_rate) / volatility
-        sharpe_ratio = safe_divide(mean_return - risk_free_rate, volatility, ZERO)
-        return sharpe_ratio
-
+        return calc_sharpe(returns_array, risk_free_rate)
     except Exception as e:
         logger.error(f"Sharpe ratio calculation failed: {e}")
         return None
@@ -139,24 +127,13 @@ def calculate_max_drawdown(values: list[Decimal]) -> tuple[Decimal, int, int]:
     Returns:
         Tuple of (max_drawdown, peak_index, trough_index)
     """
+    from src.utils.financial_calculations import calculate_max_drawdown_simple
+
     if not values or len(values) < 2:
         return ZERO, 0, 0
 
     try:
-        values_array = np.array([float(val) for val in values])
-        running_max = np.maximum.accumulate(values_array)
-        drawdowns = (running_max - values_array) / running_max
-
-        max_dd_idx = np.argmax(drawdowns)
-        max_drawdown_float = drawdowns[max_dd_idx]
-
-        # Find peak before max drawdown
-        peak_idx = np.argmax(values_array[: max_dd_idx + 1]) if max_dd_idx > 0 else 0
-
-        # Convert result back to Decimal with precision
-        max_drawdown = to_decimal(str(max_drawdown_float))
-        return max_drawdown, int(peak_idx), int(max_dd_idx)
-
+        return calculate_max_drawdown_simple(values)
     except Exception as e:
         logger.error(f"Max drawdown calculation failed: {e}")
         return ZERO, 0, 0
@@ -225,34 +202,24 @@ def calculate_sortino_ratio(
     target_return: Decimal = ZERO,
 ) -> Decimal:
     """
-    Calculate Sortino ratio.
+    Calculate Sortino ratio using centralized utility.
 
     Args:
         returns: Historical returns
         risk_free_rate: Risk-free rate
-        target_return: Target return for downside deviation
+        target_return: Target return for downside deviation (currently ignored for compatibility)
 
     Returns:
         Sortino ratio as Decimal
     """
+    from src.utils.financial_calculations import calculate_sortino_ratio as calc_sortino
+
     if not returns or len(returns) < 10:
         return ZERO
 
     try:
         returns_array = np.array([float(ret) for ret in returns])
-        excess_returns = returns_array - float(risk_free_rate)
-
-        # Calculate downside deviation
-        downside_returns = np.minimum(returns_array - float(target_return), 0)
-        downside_deviation = np.std(downside_returns)
-
-        if downside_deviation == 0:
-            return ZERO
-
-        # Convert result back to Decimal with precision
-        sortino_float = np.mean(excess_returns) / downside_deviation
-        return to_decimal(str(sortino_float))
-
+        return calc_sortino(returns_array, risk_free_rate)
     except Exception as e:
         logger.error(f"Sortino ratio calculation failed: {e}")
         return ZERO

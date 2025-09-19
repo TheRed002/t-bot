@@ -1,6 +1,17 @@
 """Base classes and mixins for the T-Bot trading system."""
 
-from src.core.logging import get_logger
+# Import get_logger with robust fallback
+def _get_logger_function():
+    """Get the logger function with fallback."""
+    try:
+        from src.core.logging import get_logger
+        return get_logger
+    except ImportError:
+        # Fallback for testing or import issues
+        import logging
+        return logging.getLogger
+
+get_logger = _get_logger_function()
 
 
 class LoggerMixin:
@@ -10,6 +21,12 @@ class LoggerMixin:
     def logger(self):
         """Get or create logger for this instance."""
         if not hasattr(self, "_logger"):
+            # Import get_logger locally to avoid module loading issues
+            try:
+                from src.core.logging import get_logger
+            except ImportError:
+                import logging
+                get_logger = logging.getLogger
             self._logger = get_logger(self.__class__.__module__)
         return self._logger
 

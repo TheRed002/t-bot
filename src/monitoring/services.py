@@ -83,6 +83,7 @@ class DefaultAlertService(BaseService, AlertServiceInterface, ErrorPropagationMi
         if alert_manager is None:
             raise ValueError("alert_manager is required - use dependency injection")
         self._alert_manager = alert_manager
+        self._data_transformer = MonitoringDataTransformer()
 
     async def create_alert(self, request: AlertRequest) -> str:
         """Create a new alert and return its fingerprint."""

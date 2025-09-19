@@ -10,12 +10,353 @@ This module provides fixtures and configuration for all test types:
 import os
 import subprocess
 
+# Set testing environment variables before importing anything else
+os.environ["TESTING"] = "1"
+os.environ["DISABLE_ERROR_HANDLER_LOGGING"] = "true"
+
+import asyncio
+import gc
+import sys
+import uuid
+from typing import Any, Dict
+from unittest import mock
+from unittest.mock import AsyncMock, MagicMock
+
 import pytest
 import pytest_asyncio
 
 from src.core.config import Config
 from src.core.exceptions import DataSourceError
 from src.database.connection import close_database, initialize_database
+
+
+class TestConfig:
+    """Test configuration helper class."""
+
+    def __init__(self, **kwargs):
+        """Initialize test config with optional overrides."""
+        self.config = Config()
+
+        # Apply any override values
+        for key, value in kwargs.items():
+            if hasattr(self.config, key):
+                setattr(self.config, key, value)
+            elif hasattr(self.config.database, key):
+                setattr(self.config.database, key, value)
+            elif hasattr(self.config.exchange, key):
+                setattr(self.config.exchange, key, value)
+
+    def get_config(self) -> Config:
+        """Get the underlying config object."""
+        return self.config
+
+
+# Enhanced Test Isolation Framework
+def clear_prometheus_metrics():
+    """Clear Prometheus metrics registry."""
+    try:
+        import prometheus_client
+        prometheus_client.REGISTRY._collector_to_names.clear()
+        prometheus_client.REGISTRY._names_to_collectors.clear()
+    except (ImportError, AttributeError):
+        pass
+
+
+def clear_singleton_registry():
+    """Enhanced singleton cleanup covering all identified classes."""
+    singleton_classes = [
+        # Core Infrastructure
+        'src.core.dependency_injection.DependencyInjector',
+        'src.core.dependency_injection.DependencyContainer',
+        'src.database.connection.DatabaseManager',
+        'src.database.connection.DatabaseConnection',
+        'src.core.caching.cache_manager.CacheManager',
+        # Monitoring & Metrics
+        'src.monitoring.services.MetricsCollector',
+        'src.monitoring.alerting.AlertManager',
+        'src.monitoring.performance_monitor.PerformanceMonitor',
+        'src.analytics.services.dashboard_service.DashboardService',
+        # Data Services
+        'src.data.streaming.streaming_service.StreamingService',
+        'src.data.services.data_service.DataService',
+        'src.data.monitoring.data_monitoring_service.DataMonitoringService',
+        # Trading Components
+        'src.execution.order_manager.OrderManager',
+        'src.risk_management.core.calculator.RiskCalculator',
+        'src.strategies.performance_monitor.PerformanceMonitor',
+        # State Management
+        'src.state.state_manager.StateManager',
+        'src.state.state_persistence.StatePersistence',
+        'src.state.state_service.StateService',
+        # Bot Management
+        'src.bot_management.bot_coordinator.BotCoordinator',
+        'src.bot_management.resource_manager.ResourceManager',
+        'src.bot_management.factory.BotFactory',
+        # Error Handling
+        'src.error_handling.decorators.HandlerPool',
+        'src.error_handling.base.ErrorHandler',
+        # Web Interface
+        'src.web_interface.socketio_manager.SocketIOManager',
+        'src.web_interface.facade.service_registry.ServiceRegistry',
+        # Validation & Security
+        'src.utils.validation.core.ValidationFramework',
+        'src.web_interface.security.auth.SecuritySanitizer',
+        # Capital & Optimization
+        'src.capital_management.service.CapitalManagementService',
+        'src.optimization.service.OptimizationService',
+        'src.backtesting.service.BacktestService',
+    ]
+
+    for class_path in singleton_classes:
+        try:
+            module_path, class_name = class_path.rsplit('.', 1)
+            if module_path in sys.modules:
+                module = sys.modules[module_path]
+                if hasattr(module, class_name):
+                    cls = getattr(module, class_name)
+                    # Clear all possible singleton patterns
+                    for attr in ['_instance', '_instances', '_registry', '_cache',
+                               '_handlers', '_observers', '_services', '_connections']:
+                        if hasattr(cls, attr):
+                            attr_value = getattr(cls, attr)
+                            if isinstance(attr_value, dict):
+                                attr_value.clear()
+                            elif isinstance(attr_value, list):
+                                attr_value.clear()
+                            elif isinstance(attr_value, set):
+                                attr_value.clear()
+                            else:
+                                setattr(cls, attr, None)
+        except Exception:
+            pass
+
+
+def cleanup_event_loops():
+    """Clean up event loops and async tasks."""
+    try:
+        loop = asyncio.get_running_loop()
+        pending = asyncio.all_tasks(loop)
+        for task in pending:
+            if not task.done():
+                task.cancel()
+        if pending:
+            try:
+                loop.run_until_complete(
+                    asyncio.gather(*pending, return_exceptions=True)
+                )
+            except Exception:
+                pass
+    except RuntimeError:
+        pass
+
+
+def nuclear_module_reset():
+    """Nuclear option: completely remove and reimport contaminated modules."""
+    critical_modules = [
+        'src.core.types', 'src.core.types.bot', 'src.core.types.risk',
+        'src.core.types.strategy', 'src.core.types.position', 'src.core.types.order',
+        'src.core.types.signal', 'src.core.types.base', 'src.backtesting.engine',
+        'src.monitoring.alerting', 'src.monitoring.telemetry', 'src.strategies.base',
+    ]
+
+    contaminated_modules = set()
+    for module_name in critical_modules:
+        if module_name not in sys.modules:
+            continue
+        try:
+            module = sys.modules[module_name]
+            is_contaminated = False
+            # Check for Mock contamination
+            for attr_name in dir(module):
+                if attr_name.startswith('_'):
+                    continue
+                attr = getattr(module, attr_name, None)
+                if attr is None:
+                    continue
+                # Check if it's a Mock object
+                if hasattr(attr, '_mock_name') or 'Mock' in str(type(attr)):
+                    is_contaminated = True
+                    break
+                # Check enum contamination
+                if hasattr(attr, '__members__'):  # It's an enum
+                    for enum_value in attr:
+                        if hasattr(enum_value, '_mock_name') or 'Mock' in str(type(enum_value)):
+                            is_contaminated = True
+                            break
+                    if is_contaminated:
+                        break
+            if is_contaminated:
+                contaminated_modules.add(module_name)
+        except Exception:
+            contaminated_modules.add(module_name)
+
+    # Nuclear removal of contaminated modules
+    for module_name in contaminated_modules:
+        modules_to_remove = [key for key in sys.modules.keys()
+                           if key == module_name or key.startswith(module_name + '.')]
+        for mod_name in modules_to_remove:
+            if mod_name in sys.modules:
+                del sys.modules[mod_name]
+
+    # Force reimport critical modules
+    for module_name in ['src.core.types', 'src.backtesting.engine', 'src.monitoring.telemetry']:
+        if module_name not in sys.modules:
+            try:
+                __import__(module_name)
+            except ImportError:
+                pass
+
+
+def comprehensive_mock_cleanup():
+    """Enhanced mock cleanup targeting all mock persistence issues."""
+    # Stop all active patches
+    mock.patch.stopall()
+
+    # Clear unittest.mock internal state
+    try:
+        from unittest.mock import _patch_object
+        if hasattr(_patch_object, '_active_patches'):
+            active_patches = list(_patch_object._active_patches)
+            for patch in active_patches:
+                try:
+                    patch.stop()
+                except Exception:
+                    pass
+            _patch_object._active_patches.clear()
+    except Exception:
+        pass
+
+    # Scan loaded modules for Mock contamination
+    for module_name, module in list(sys.modules.items()):
+        if not module_name.startswith('src.') or module is None:
+            continue
+        try:
+            # Check module-level attributes
+            for attr_name in dir(module):
+                if attr_name.startswith('_'):
+                    continue
+                attr = getattr(module, attr_name, None)
+                if attr and (hasattr(attr, '_mock_name') or 'Mock' in str(type(attr))):
+                    try:
+                        delattr(module, attr_name)
+                    except Exception:
+                        pass
+            # Check class attributes for Mock contamination
+            for attr_name in dir(module):
+                attr = getattr(module, attr_name, None)
+                if attr and hasattr(attr, '__dict__') and hasattr(attr, '__module__'):
+                    try:
+                        for class_attr_name in list(attr.__dict__.keys()):
+                            class_attr = getattr(attr, class_attr_name, None)
+                            if class_attr and (hasattr(class_attr, '_mock_name') or
+                                             'Mock' in str(type(class_attr))):
+                                try:
+                                    delattr(attr, class_attr_name)
+                                except Exception:
+                                    pass
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+
+@pytest.fixture(autouse=True, scope="function")
+def test_isolation():
+    """Enhanced test isolation with surgical cleanup."""
+    # PRE-TEST CLEANUP
+    clear_singleton_registry()
+    comprehensive_mock_cleanup()
+    clear_prometheus_metrics()
+
+    yield
+
+    # POST-TEST CLEANUP
+    try:
+        # 1. Comprehensive mock cleanup
+        comprehensive_mock_cleanup()
+        # 2. Event loop cleanup
+        cleanup_event_loops()
+        # 3. Singleton cleanup
+        clear_singleton_registry()
+        # 4. Nuclear module reset for persistent contamination
+        nuclear_module_reset()
+        # 5. Clear metrics
+        clear_prometheus_metrics()
+        # 6. Force garbage collection
+        gc.collect()
+    except Exception as e:
+        # Non-fatal cleanup errors
+        print(f"Test cleanup warning: {e}")
+
+
+@pytest.fixture(scope="function")
+def isolated_event_loop():
+    """Provide completely isolated event loop."""
+    # Create fresh loop
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+
+    yield loop
+
+    # Cleanup
+    try:
+        pending = asyncio.all_tasks(loop)
+        for task in pending:
+            task.cancel()
+
+        if pending:
+            loop.run_until_complete(
+                asyncio.gather(*pending, return_exceptions=True)
+            )
+    finally:
+        loop.close()
+        asyncio.set_event_loop(None)
+
+
+class CleanMockFactory:
+    """Factory for creating proper, isolated mocks."""
+
+    @staticmethod
+    def create_async_mock(name: str, return_value: Any = None, **kwargs) -> AsyncMock:
+        """Create AsyncMock with proper attributes."""
+        mock = AsyncMock(name=name, **kwargs)
+        mock.__name__ = name
+        mock.__qualname__ = name
+
+        if return_value is not None:
+            mock.return_value = return_value
+
+        return mock
+
+    @staticmethod
+    def create_bot_instance_mocks():
+        """Create clean bot instance mocks."""
+
+        async def mock_get_bot_summary():
+            return {
+                "bot_id": "test_bot",
+                "status": "running",
+                "uptime": 100,
+                "last_heartbeat": "2023-01-01T00:00:00Z"
+            }
+
+        async def mock_get_heartbeat():
+            return {
+                "status": "healthy",
+                "timestamp": "2023-01-01T00:00:00Z",
+                "memory_usage": 50.0
+            }
+
+        return {
+            'get_bot_summary': mock_get_bot_summary,
+            'get_heartbeat': mock_get_heartbeat,
+        }
+
+
+@pytest.fixture
+def clean_mock_factory():
+    """Provide clean mock factory for tests."""
+    return CleanMockFactory()
 
 
 @pytest.fixture(scope="session")
@@ -40,13 +381,13 @@ def config():
         influxdb_org="trading_bot_dev",
         influxdb_token="trading_bot_token",
     )
-    
+
     # Create Config instance
     config = Config()
     config.environment = "development"
     config.debug = True
     config.database = db_config
-    
+
     return config
 
 
@@ -339,10 +680,11 @@ async def cleanup_after_all_tests():
     # Clean up any remaining error handlers
     try:
         from src.error_handling.decorators import shutdown_all_error_handlers
+
         await shutdown_all_error_handlers()
     except Exception:
         pass  # Ignore cleanup errors
-    
+
     # Clean up any remaining connections
     try:
         await close_database()

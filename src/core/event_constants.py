@@ -52,6 +52,9 @@ class RiskEvents:
     CIRCUIT_BREAKER_TRIGGERED = "risk.circuit_breaker_triggered"
     EXPOSURE_WARNING = "risk.exposure_warning"
     VALIDATION_ERROR = "risk.validation_error"
+    THRESHOLD_BREACH = "risk.threshold_breach"  # Added for consistency with risk_management
+    EMERGENCY_CONDITION = "risk.emergency_condition"  # Added for consistency with risk_management
+    RISK_LEVEL_CHANGE = "risk.risk_level_change"  # Added for consistency with risk_management
 
 
 class MetricEvents:
@@ -88,6 +91,10 @@ class StrategyEvents:
     ENTRY_TRIGGERED = "strategy.entry_triggered"
     EXIT_TRIGGERED = "strategy.exit_triggered"
     REBALANCE_REQUIRED = "strategy.rebalance_required"
+    OPTIMIZATION_STARTED = "strategy.optimization_started"
+    OPTIMIZATION_COMPLETED = "strategy.optimization_completed"
+    OPTIMIZATION_FAILED = "strategy.optimization_failed"
+    PARAMETERS_UPDATED = "strategy.parameters_updated"
 
 
 class CapitalEvents:
@@ -215,3 +222,36 @@ class OptimizationEvents:
     BACKTEST_REQUESTED = "optimization.backtest_requested"
     BACKTEST_COMPLETED = "optimization.backtest_completed"
     BACKTEST_FAILED = "optimization.backtest_failed"
+
+
+class BotEvents:
+    """Bot management event names."""
+
+    # Lifecycle events
+    CREATED = "bot.created"
+    STARTED = "bot.started"
+    STOPPED = "bot.stopped"
+    PAUSED = "bot.paused"
+    RESUMED = "bot.resumed"
+    ERROR = "bot.error"
+    DELETED = "bot.deleted"
+
+    # Status events
+    STARTING = "bot.starting"
+    STOPPING = "bot.stopping"
+    INITIALIZING = "bot.initializing"
+
+    # Performance events
+    METRICS_UPDATE = "bot.metrics_update"
+    PERFORMANCE_ALERT = "bot.performance_alert"
+
+    # Risk events
+    RISK_ALERT = "bot.risk_alert"
+    RISK_LIMIT_EXCEEDED = "bot.risk_limit_exceeded"
+    EMERGENCY_STOP = "bot.emergency_stop"
+
+    # Trading events
+    TRADE_EXECUTED = "bot.trade_executed"
+    ORDER_PLACED = "bot.order_placed"
+    ORDER_FILLED = "bot.order_filled"
+    POSITION_UPDATE = "bot.position_update"

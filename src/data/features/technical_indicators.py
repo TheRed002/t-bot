@@ -190,12 +190,12 @@ class TechnicalIndicators(BaseComponent):
                 return {}
 
             # Convert market data to numpy arrays for efficiency - use Decimal for precision
-            prices = np.array([float(d.price) for d in data if d.price], dtype=np.float64)
+            prices = np.array([float(d.close) for d in data if d.close], dtype=np.float64)
             high_prices = np.array(
-                [float(d.high_price) for d in data if d.high_price], dtype=np.float64
+                [float(d.high) for d in data if d.high], dtype=np.float64
             )
             low_prices = np.array(
-                [float(d.low_price) for d in data if d.low_price], dtype=np.float64
+                [float(d.low) for d in data if d.low], dtype=np.float64
             )
 
             if len(prices) == 0:

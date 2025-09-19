@@ -67,24 +67,22 @@ class TestSimplifiedBotService:
         assert service._execution_service == execution_service
         assert service._risk_service == risk_service
 
-    def test_bot_service_init_with_repositories(self):
-        """Test service initialization with repository dependencies."""
-        # Create mock services and repositories
+    def test_bot_service_init_minimal_dependencies(self):
+        """Test service initialization with minimal required dependencies."""
+        # Create mock services
         exchange_service = MagicMock()
         capital_service = MagicMock()
-        bot_repository = MagicMock()
-        bot_instance_repository = MagicMock()
-        bot_metrics_repository = MagicMock()
 
-        # Create service with repositories
+        # Create service with minimal dependencies
         service = BotService(
             exchange_service=exchange_service,
-            capital_service=capital_service,
-            bot_repository=bot_repository,
-            bot_instance_repository=bot_instance_repository,
-            bot_metrics_repository=bot_metrics_repository
+            capital_service=capital_service
         )
 
-        assert service._bot_repository == bot_repository
-        assert service._bot_instance_repository == bot_instance_repository
-        assert service._bot_metrics_repository == bot_metrics_repository
+        # Verify the required services are set
+        assert service._exchange_service == exchange_service
+        assert service._capital_service == capital_service
+        # Optional services should be None or handled via DI
+        assert hasattr(service, '_execution_service')
+        assert hasattr(service, '_state_service')
+        assert hasattr(service, '_risk_service')

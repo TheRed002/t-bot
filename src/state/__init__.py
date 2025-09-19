@@ -72,8 +72,9 @@ from .state_manager import StateManager
 from .state_sync_manager import StateSyncManager, SyncEventType
 
 if TYPE_CHECKING:
-    from .state_service import StatePriority, StateService, StateType
+    from .state_service import StateService
     from .state_validator import StateValidator
+    from src.core.types import StatePriority, StateType
 
 # Trading-specific components
 # Dependency injection registration
@@ -85,7 +86,8 @@ from .trade_lifecycle_manager import TradeEvent, TradeLifecycleManager
 def __getattr__(name: str):
     """Lazy import for circular dependency resolution."""
     if name in ("StatePriority", "StateService", "StateType"):
-        from .state_service import StatePriority, StateService, StateType
+        from .state_service import StateService
+        from src.core.types import StatePriority, StateType
 
         if name == "StatePriority":
             return StatePriority

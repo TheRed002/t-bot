@@ -85,6 +85,7 @@ class BacktestRun(Base, TimestampMixin):
     # Relationships
     user = relationship("User", back_populates="backtest_runs")
     strategy = relationship("Strategy", back_populates="backtest_runs")
+    optimization_runs = relationship("OptimizationRun", back_populates="backtest_run", cascade="all, delete-orphan")
     backtest_results = relationship(
         "BacktestResult", back_populates="backtest_run", cascade="all, delete-orphan"
     )

@@ -7,7 +7,7 @@ from unittest.mock import Mock, patch, MagicMock
 import asyncio
 
 from src.analytics.base_analytics_service import BaseAnalyticsService
-from src.core.exceptions import ValidationError
+from src.core.exceptions import ValidationError, ServiceError
 
 
 class ConcreteAnalyticsService(BaseAnalyticsService):
@@ -141,13 +141,27 @@ class TestBaseAnalyticsService:
     @pytest.mark.asyncio
     async def test_execute_monitored_with_error(self, service):
         """Test execute_monitored with error."""
-        from src.core.exceptions import ServiceError
-        
+
         async def failing_func():
             raise ValueError('Test error')
-        
-        with pytest.raises(ServiceError):
+
+        # Robust contamination-resistant approach: catch any Exception
+        # and verify it's the right type by string matching
+        try:
             await service.execute_monitored('test_op', failing_func)
+            # If we reach here, the test should fail because an exception should have been raised
+            assert False, "Expected ServiceError to be raised but got no exception"
+        except Exception as e:
+            # Verify it's a ServiceError by checking its class name and module
+            # This avoids isinstance checks that fail with Mock contamination
+            error_class_name = e.__class__.__name__
+            error_module = getattr(e.__class__, '__module__', '')
+
+            assert error_class_name == 'ServiceError', f"Expected ServiceError, got {error_class_name}"
+            assert 'src.core.exceptions' in error_module, f"Expected ServiceError from src.core.exceptions, got {error_module}"
+
+            # Verify the error message shows it failed in the test operation
+            assert 'test_op failed' in str(e), f"Expected error to contain 'test_op failed', got: {str(e)}"
 
     @pytest.mark.asyncio
     async def test_calculate_metrics(self, service):

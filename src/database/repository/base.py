@@ -139,6 +139,8 @@ class DatabaseRepository(CoreBaseRepository):
     async def _count_entities(self, filters: dict[str, Any] | None) -> int:
         """Count entities in database."""
         try:
+            # Import locally to avoid test contamination issues
+            from sqlalchemy import func
             stmt = select(func.count()).select_from(self.model)
 
             if filters:

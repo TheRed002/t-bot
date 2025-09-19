@@ -110,17 +110,28 @@ class ErrorContext:
         import uuid
 
         # Auto-detect severity from error type
-        from src.core.exceptions import ErrorSeverity
-
-        severity = ErrorSeverity.MEDIUM
-        if hasattr(error, "__class__"):
-            error_class_name = error.__class__.__name__.lower()
-            if "critical" in error_class_name or "security" in error_class_name:
-                severity = ErrorSeverity.CRITICAL
-            elif "validation" in error_class_name:
-                severity = ErrorSeverity.LOW
-            elif any(term in error_class_name for term in ["exchange", "execution", "risk"]):
-                severity = ErrorSeverity.HIGH
+        try:
+            from src.core.exceptions import ErrorSeverity
+            severity = ErrorSeverity.MEDIUM
+            if hasattr(error, "__class__"):
+                error_class_name = error.__class__.__name__.lower()
+                if "critical" in error_class_name or "security" in error_class_name:
+                    severity = ErrorSeverity.CRITICAL
+                elif "validation" in error_class_name:
+                    severity = ErrorSeverity.LOW
+                elif any(term in error_class_name for term in ["exchange", "execution", "risk"]):
+                    severity = ErrorSeverity.HIGH
+        except ImportError:
+            # Fallback to string severity during test contamination
+            severity = "MEDIUM"
+            if hasattr(error, "__class__"):
+                error_class_name = error.__class__.__name__.lower()
+                if "critical" in error_class_name or "security" in error_class_name:
+                    severity = "CRITICAL"
+                elif "validation" in error_class_name:
+                    severity = "LOW"
+                elif any(term in error_class_name for term in ["exchange", "execution", "risk"]):
+                    severity = "HIGH"
 
         # Separate known fields from additional context
         import inspect

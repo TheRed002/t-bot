@@ -767,7 +767,7 @@ def _setup_auto_instrumentation(config: OpenTelemetryConfig) -> None:
         logger.error(f"Error setting up auto instrumentation: {e}")
 
 
-def get_tracer(name: str = "tbot-trading") -> trace.Tracer:
+def get_tracer(name: str = "tbot-trading"):
     """
     Get a tracer instance.
 
@@ -777,7 +777,16 @@ def get_tracer(name: str = "tbot-trading") -> trace.Tracer:
     Returns:
         OpenTelemetry tracer instance
     """
-    return trace.get_tracer(name)
+    try:
+        # Check if trace is available and has get_tracer method
+        if trace and hasattr(trace, 'get_tracer'):
+            return trace.get_tracer(name)
+        else:
+            # Fallback to mock tracer
+            return MockTracer()
+    except (NameError, AttributeError):
+        # If trace is not defined or doesn't have get_tracer, return mock
+        return MockTracer()
 
 
 def instrument_fastapi(app: Any, config: OpenTelemetryConfig) -> None:

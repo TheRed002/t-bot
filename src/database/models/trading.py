@@ -1,9 +1,10 @@
 """Trading-related database models."""
 
 import uuid
+from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import DECIMAL, CheckConstraint, Column, ForeignKey, Index, String, UniqueConstraint
+from sqlalchemy import DECIMAL, CheckConstraint, Column, DateTime, ForeignKey, Index, String, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -142,6 +143,7 @@ class Position(Base, AuditMixin, MetadataMixin):
 
     realized_pnl: Mapped[Decimal] = mapped_column(DECIMAL(20, 8), default=0)
     unrealized_pnl: Mapped[Decimal] = mapped_column(DECIMAL(20, 8), default=0)
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))  # Position close timestamp
 
     bot_id = Column(UUID(as_uuid=True), ForeignKey("bots.id", ondelete="CASCADE"), nullable=False, index=True)
     strategy_id = Column(

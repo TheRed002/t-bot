@@ -552,6 +552,47 @@ class DataService(BaseComponent):
             self.logger.error(f"Data count retrieval failed for {symbol}: {e}")
             return 0
 
+    async def get_volatility(
+        self, symbol: str, period: int = 20, exchange: str = DEFAULT_EXCHANGE
+    ) -> Decimal | None:
+        """Get volatility for a symbol."""
+        try:
+            request = DataRequest(
+                symbol=symbol,
+                exchange=exchange,
+                limit=period,
+                data_types=["volatility"]
+            )
+
+            records = await self.get_market_data(request)
+            if not records:
+                return None
+
+            # Calculate simple volatility from price changes
+            if len(records) < 2:
+                return None
+
+            prices = [record.close_price for record in records]
+            returns = []
+            for i in range(1, len(prices)):
+                if prices[i-1] and prices[i]:
+                    ret = (prices[i] - prices[i-1]) / prices[i-1]
+                    returns.append(ret)
+
+            if not returns:
+                return None
+
+            # Calculate standard deviation
+            mean_return = sum(returns) / len(returns)
+            variance = sum((ret - mean_return) ** 2 for ret in returns) / len(returns)
+            volatility = variance ** Decimal("0.5")
+
+            return volatility
+
+        except Exception as e:
+            self.logger.error(f"Failed to get volatility for {symbol}: {e}")
+            raise DataError(f"Failed to get volatility for {symbol}: {e}")
+
     async def health_check(self) -> HealthCheckResult:
         """Perform health check."""
         status = HealthStatus.HEALTHY

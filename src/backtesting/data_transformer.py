@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any
 
 from src.core.types import MarketData, Signal
 from src.utils.decimal_utils import to_decimal
+from src.utils.messaging_patterns import MessagePattern
 
 if TYPE_CHECKING:
     from src.backtesting.engine import BacktestResult
@@ -32,7 +33,8 @@ class BacktestDataTransformer:
         Returns:
             Dict with consistent event data format
         """
-        return {
+        # Apply consistent data transformation aligned with core module
+        transformed = {
             "symbol": signal.symbol,
             "direction": signal.direction.value,
             "strength": str(signal.strength),
@@ -41,7 +43,14 @@ class BacktestDataTransformer:
             if signal.timestamp
             else datetime.now(timezone.utc).isoformat(),
             "metadata": metadata or {},
+            # Core module alignment fields
+            "processing_mode": "stream",  # Align with core default
+            "data_format": "core_event_data_v1",  # Use core format
+            "message_pattern": MessagePattern.PUB_SUB.value,  # Align with core default
+            "boundary_crossed": True,
+            "validation_status": "validated",
         }
+        return BacktestDataTransformer.validate_financial_precision(transformed)
 
     @staticmethod
     def transform_backtest_result_to_event_data(
@@ -57,24 +66,31 @@ class BacktestDataTransformer:
         Returns:
             Dict with consistent event data format
         """
-        return {
-            "total_return": str(result.total_return),
-            "annual_return": str(result.annual_return),
-            "sharpe_ratio": result.sharpe_ratio,
-            "max_drawdown": str(result.max_drawdown),
-            "win_rate": result.win_rate,
+        # Apply consistent data transformation aligned with core module
+        transformed = {
+            "total_return_pct": str(result.total_return_pct),
+            "annual_return_pct": str(result.annual_return_pct),
+            "sharpe_ratio": float(result.sharpe_ratio) if result.sharpe_ratio is not None else None,
+            "max_drawdown_pct": str(result.max_drawdown_pct),
+            "win_rate_pct": str(result.win_rate_pct),
             "total_trades": result.total_trades,
             "winning_trades": result.winning_trades,
             "losing_trades": result.losing_trades,
-            "avg_win": str(result.avg_win),
-            "avg_loss": str(result.avg_loss),
-            "profit_factor": result.profit_factor,
-            "volatility": result.volatility,
+            "avg_win_amount": str(result.avg_win_amount) if result.avg_win_amount is not None else None,
+            "avg_loss_amount": str(result.avg_loss_amount) if result.avg_loss_amount is not None else None,
+            "profit_factor": float(result.profit_factor) if result.profit_factor is not None else None,
+            "volatility_pct": float(result.volatility_pct) if result.volatility_pct is not None else None,
+            "initial_capital": str(result.initial_capital),
+            "final_capital": str(result.final_capital),
             "processing_mode": "batch",  # Backtesting results are batch data
-            "data_format": "event_data_v1",
+            "data_format": "batch_event_data_v1",  # Use versioned format
+            "message_pattern": MessagePattern.BATCH.value,  # Align with batch processing
+            "boundary_crossed": True,
+            "validation_status": "validated",
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "metadata": metadata or {},
         }
+        return BacktestDataTransformer.validate_financial_precision(transformed)
 
     @staticmethod
     def transform_market_data_to_event_data(
@@ -90,7 +106,8 @@ class BacktestDataTransformer:
         Returns:
             Dict with consistent event data format
         """
-        return {
+        # Apply consistent data transformation aligned with core module
+        transformed = {
             "symbol": market_data.symbol,
             "price": str(market_data.close),
             "volume": str(market_data.volume) if market_data.volume else "0",
@@ -102,12 +119,16 @@ class BacktestDataTransformer:
             if hasattr(market_data, "open")
             else str(market_data.close),
             "processing_mode": "batch",  # Historical market data is batch
-            "data_format": "event_data_v1",
+            "data_format": "batch_event_data_v1",  # Use versioned format
+            "message_pattern": MessagePattern.BATCH.value,  # Align with batch processing
+            "boundary_crossed": True,
+            "validation_status": "validated",
             "timestamp": market_data.timestamp.isoformat()
             if market_data.timestamp
             else datetime.now(timezone.utc).isoformat(),
             "metadata": metadata or {},
         }
+        return BacktestDataTransformer.validate_financial_precision(transformed)
 
     @staticmethod
     def transform_trade_to_event_data(
@@ -149,7 +170,7 @@ class BacktestDataTransformer:
     @staticmethod
     def validate_financial_precision(data: dict[str, Any]) -> dict[str, Any]:
         """
-        Ensure financial data has proper precision using Decimal.
+        Ensure financial data has proper precision using centralized financial utils.
 
         Args:
             data: Data dictionary to validate
@@ -157,41 +178,29 @@ class BacktestDataTransformer:
         Returns:
             Dict with validated financial precision
         """
-        financial_fields = [
-            "price",
-            "size",
-            "pnl",
-            "entry_price",
-            "exit_price",
-            "volume",
-            "total_return",
-            "annual_return",
-            "max_drawdown",
-            "avg_win",
-            "avg_loss",
-            "strength",
-            "high",
-            "low",
-            "open",
+        from src.utils.financial_utils import validate_financial_precision
+
+        # Define backtesting-specific fields in addition to defaults
+        backtesting_fields = [
+            "price", "size", "pnl", "entry_price", "exit_price", "volume",
+            "total_return_pct", "annual_return_pct", "max_drawdown_pct",
+            "avg_win_amount", "avg_loss_amount", "initial_capital",
+            "final_capital", "strength", "high", "low", "open"
         ]
 
-        for field in financial_fields:
-            if field in data and data[field] is not None and data[field] != "":
-                try:
-                    # Convert to Decimal for financial precision
-                    decimal_value = to_decimal(data[field])
-                    # Convert back to string for consistent format
-                    data[field] = str(decimal_value)
-                except (ValueError, TypeError, KeyError):
-                    # Keep original value if conversion fails
-                    pass
+        validated_data = validate_financial_precision(data, backtesting_fields)
 
-        return data
+        # Add financial precision metadata aligned with core
+        if any(field in validated_data for field in backtesting_fields):
+            validated_data["financial_precision_applied"] = True
+            validated_data["decimal_precision"] = "20,8"
+
+        return validated_data
 
     @staticmethod
     def ensure_boundary_fields(data: dict[str, Any], source: str = "backtesting") -> dict[str, Any]:
         """
-        Ensure data has required boundary fields for cross-module communication.
+        Ensure data has required boundary fields using centralized financial utils.
 
         Args:
             data: Data dictionary to enhance
@@ -200,38 +209,29 @@ class BacktestDataTransformer:
         Returns:
             Dict with required boundary fields
         """
-        # Ensure processing mode is set (batch for backtesting)
-        if "processing_mode" not in data:
-            data["processing_mode"] = "batch"
+        from src.utils.financial_utils import ensure_boundary_fields
 
-        # Ensure data format is set
-        if "data_format" not in data:
-            data["data_format"] = "event_data_v1"
-
-        # Ensure timestamp is set
-        if "timestamp" not in data:
-            data["timestamp"] = datetime.now(timezone.utc).isoformat()
-
-        # Add source information
-        if "source" not in data:
-            data["source"] = source
-
-        # Ensure metadata exists
-        if "metadata" not in data:
-            data["metadata"] = {}
+        # Use centralized boundary fields function
+        enhanced_data = ensure_boundary_fields(data, source)
 
         # Add backtesting-specific fields
-        data["message_pattern"] = "req_reply"  # Backtesting typically requires responses
-        data["boundary_crossed"] = True
+        if "metadata" not in enhanced_data:
+            enhanced_data["metadata"] = {}
 
-        return data
+        # Add backtesting-specific fields - align with batch processing mode
+        enhanced_data["message_pattern"] = enhanced_data.get("message_pattern", MessagePattern.BATCH.value)
+        enhanced_data["boundary_crossed"] = True
+
+        return enhanced_data
 
     @classmethod
     def transform_for_req_reply(
         cls, request_type: str, data: Any, correlation_id: str | None = None
     ) -> dict[str, Any]:
         """
-        Transform data for request/reply messaging pattern (aligned with execution).
+        Transform data for request/reply messaging pattern aligned with core module.
+
+        Uses core module's request/reply pattern for consistency.
 
         Args:
             request_type: Type of request
@@ -244,7 +244,7 @@ class BacktestDataTransformer:
         # Base transformation
         if isinstance(data, Signal):
             transformed = cls.transform_signal_to_event_data(data)
-        elif hasattr(data, "total_return"):  # Duck typing for BacktestResult
+        elif hasattr(data, "total_return_pct"):  # Duck typing for BacktestResult
             from src.backtesting.engine import BacktestResult
 
             if isinstance(data, BacktestResult):
@@ -268,13 +268,16 @@ class BacktestDataTransformer:
         # Validate financial precision
         transformed = cls.validate_financial_precision(transformed)
 
-        # Add request/reply specific fields
+        # Add request/reply specific fields aligned with core patterns
         transformed.update(
             {
                 "request_type": request_type,
                 "correlation_id": correlation_id or datetime.now(timezone.utc).isoformat(),
-                "processing_mode": "batch",  # Override to batch for backtesting
-                "message_pattern": "req_reply",
+                "processing_mode": "request_reply",  # Align processing mode with req_reply pattern
+                "data_format": "request_reply_data_v1",  # Use core format
+                "message_pattern": MessagePattern.REQ_REPLY.value,
+                "response_required": True,
+                "acknowledgment_required": True,
                 "boundary_crossed": True,
                 "validation_status": "validated",
             }
@@ -307,7 +310,7 @@ class BacktestDataTransformer:
         for item in data_items:
             if isinstance(item, Signal):
                 transformed_items.append(cls.transform_signal_to_event_data(item))
-            elif hasattr(item, "total_return"):  # Duck typing for BacktestResult
+            elif hasattr(item, "total_return_pct"):  # Duck typing for BacktestResult
                 from src.backtesting.engine import BacktestResult
 
                 if isinstance(item, BacktestResult):
@@ -332,19 +335,27 @@ class BacktestDataTransformer:
                     }
                 )
 
-        return {
+        batch_data = {
             "batch_type": batch_type,
             "batch_id": batch_id or datetime.now(timezone.utc).isoformat(),
             "batch_size": len(data_items),
             "items": transformed_items,
             "processing_mode": "batch",
             "data_format": "batch_event_data_v1",
+            "message_pattern": MessagePattern.BATCH.value,
+            "distribution_mode": "batch",
+            "acknowledgment_required": False,  # Align with core batch pattern
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "source": "backtesting",
-            "message_pattern": "batch",
             "boundary_crossed": True,
+            "validation_status": "validated",
             "metadata": metadata or {},
         }
+
+        # Apply consistent financial validation to batch data
+        batch_data = cls.validate_financial_precision(batch_data)
+
+        return batch_data
 
     @classmethod
     def align_processing_paradigm(
@@ -373,14 +384,17 @@ class BacktestDataTransformer:
             source_mode=source_mode, target_mode=target_mode, data=aligned_data
         )
 
-        # Add mode-specific fields (consistent with optimization patterns)
+        # Add mode-specific fields aligned with core module patterns
         if target_mode == "batch":
             if "batch_id" not in aligned_data:
                 aligned_data["batch_id"] = datetime.now(timezone.utc).isoformat()
             aligned_data.update(
                 {
                     "data_format": "batch_event_data_v1",
-                    "message_pattern": "batch",
+                    "message_pattern": MessagePattern.BATCH.value,
+                    "distribution_mode": "batch",
+                    "acknowledgment_required": False,
+                    "batch_processing": True,
                     "boundary_crossed": True,
                 }
             )
@@ -390,7 +404,10 @@ class BacktestDataTransformer:
             aligned_data.update(
                 {
                     "data_format": "request_reply_data_v1",
-                    "message_pattern": "req_reply",
+                    "message_pattern": MessagePattern.REQ_REPLY.value,
+                    "response_required": True,
+                    "acknowledgment_required": True,
+                    "synchronous_processing": True,
                     "boundary_crossed": True,
                 }
             )
@@ -398,14 +415,24 @@ class BacktestDataTransformer:
             aligned_data.update(
                 {
                     "stream_position": datetime.now(timezone.utc).timestamp(),
-                    "data_format": "event_data_v1",
-                    "message_pattern": "pub_sub",
+                    "data_format": "core_event_data_v1",  # Use core format for stream
+                    "message_pattern": MessagePattern.PUB_SUB.value,
+                    "distribution_mode": "broadcast",
+                    "acknowledgment_required": False,
+                    "real_time_processing": True,
                     "boundary_crossed": True,
                 }
             )
 
         # Add consistent validation status
         aligned_data["validation_status"] = "validated"
+
+        # Apply consistent financial validation
+        aligned_data = cls.validate_financial_precision(aligned_data)
+
+        # Add processing paradigm metadata
+        aligned_data["paradigm_alignment_applied"] = True
+        aligned_data["target_processing_mode"] = target_mode
 
         return aligned_data
 
@@ -501,5 +528,59 @@ class BacktestDataTransformer:
         except Exception:
             # Log validation issues but don't fail the data flow
             pass
+
+        # Apply consistent financial validation for cross-module data flow
+        validated_data = cls.validate_financial_precision(validated_data)
+
+        # Apply core module boundary validation for consistency
+        validated_data = cls._apply_core_boundary_validation(
+            validated_data, source_module, target_module
+        )
+
+        return validated_data
+
+    @classmethod
+    def _apply_core_boundary_validation(
+        cls,
+        data: dict[str, Any],
+        source_module: str,
+        target_module: str,
+    ) -> dict[str, Any]:
+        """
+        Apply core module boundary validation patterns for consistency.
+
+        Args:
+            data: Data to validate
+            source_module: Source module name
+            target_module: Target module name
+
+        Returns:
+            Dict with core boundary validation applied
+        """
+        validated_data = data.copy()
+
+        # Apply core module validation patterns using existing utility
+        try:
+            from src.core.data_transformer import CoreDataTransformer
+
+            # Apply core cross-module consistency
+            validated_data = CoreDataTransformer.apply_cross_module_consistency(
+                validated_data, target_module, source_module
+            )
+
+            # Add boundary validation metadata
+            validated_data.update({
+                "core_boundary_validation": True,
+                "boundary_validation_timestamp": datetime.now(timezone.utc).isoformat(),
+                "validation_source": "backtesting_core_aligned",
+            })
+
+        except ImportError:
+            # Fallback validation if core transformer not available
+            validated_data.update({
+                "core_boundary_validation": False,
+                "fallback_validation": True,
+                "boundary_validation_timestamp": datetime.now(timezone.utc).isoformat(),
+            })
 
         return validated_data

@@ -60,7 +60,7 @@ class MeanReversionStrategy(BaseStrategy):
     - Multi-timeframe confirmation
     """
 
-    def __init__(self, config: dict[str, Any], services: StrategyServiceContainer | None = None):
+    def __init__(self, config: dict[str, Any], services: "StrategyServiceContainer | None" = None):
         """Initialize Mean Reversion Strategy.
 
         Args:
@@ -103,7 +103,7 @@ class MeanReversionStrategy(BaseStrategy):
             self.logger.info("Analytics service integrated for strategy performance tracking", strategy=self.name)
 
         # Store symbol for indicator calculations
-        self._current_symbol: str | None = None
+        self._current_symbol: "str | None" = None
 
         self.logger.info(
             "Mean Reversion Strategy initialized",

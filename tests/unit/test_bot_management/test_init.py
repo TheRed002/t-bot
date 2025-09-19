@@ -31,11 +31,24 @@ class TestBotManagementModuleLazyImports:
         
         expected_exports = [
             "BotCoordinator",
-            "BotInstance", 
+            "BotInstance",
             "BotLifecycle",
             "BotMonitor",
             "BotService",
             "ResourceManager",
+            # Service layer classes
+            "BotManagementController",
+            "BotInstanceService",
+            "BotLifecycleService",
+            "BotCoordinationService",
+            "BotMonitoringService",
+            "BotResourceService",
+            # Service interfaces
+            "IBotInstanceService",
+            "IBotLifecycleService",
+            "IBotCoordinationService",
+            "IBotMonitoringService",
+            "IResourceManagementService",
         ]
         
         assert hasattr(bot_management, '__all__')

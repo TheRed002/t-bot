@@ -37,7 +37,7 @@ class SpreadOptimizer:
     - Adaptive spread widening during high volatility
     """
 
-    def __init__(self, config: dict[str, Any], services: StrategyServiceContainer | None = None):
+    def __init__(self, config: dict[str, Any], services: "StrategyServiceContainer | None" = None):
         """
         Initialize Spread Optimizer.
 
@@ -94,8 +94,8 @@ class SpreadOptimizer:
         self,
         base_spread: Decimal,
         market_data: MarketData,
-        order_book: OrderBook | None = None,
-        competitor_spreads: list[float] | None = None,
+        order_book: "OrderBook | None" = None,
+        competitor_spreads: "list[float] | None" = None,
     ) -> Decimal:
         """
         Optimize spread based on market conditions.
@@ -210,7 +210,7 @@ class SpreadOptimizer:
 
     @time_execution
     async def _calculate_imbalance_adjustment(
-        self, base_spread: Decimal, order_book: OrderBook | None
+        self, base_spread: Decimal, order_book: "OrderBook | None"
     ) -> Decimal:
         """
         Calculate spread adjustment based on order book imbalance.
@@ -263,7 +263,7 @@ class SpreadOptimizer:
 
     @time_execution
     async def _calculate_competitor_adjustment(
-        self, base_spread: Decimal, competitor_spreads: list[float] | None
+        self, base_spread: Decimal, competitor_spreads: "list[float] | None"
     ) -> Decimal:
         """
         Calculate spread adjustment based on competitor spreads.
@@ -398,8 +398,8 @@ class SpreadOptimizer:
     async def calculate_optimal_spread(
         self,
         market_data: MarketData,
-        order_book: OrderBook | None = None,
-        competitor_spreads: list[float] | None = None,
+        order_book: "OrderBook | None" = None,
+        competitor_spreads: "list[float] | None" = None,
     ) -> tuple[Decimal, Decimal]:
         """
         Calculate optimal bid and ask spreads.
