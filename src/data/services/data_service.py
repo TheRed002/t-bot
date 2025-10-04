@@ -199,10 +199,12 @@ class DataService(BaseComponent):
             from src.utils.validation.market_data_validation import MarketDataValidator
 
             # Use consolidated validator
+            # Use 18 decimal places (Ethereum/ERC-20 standard) as per project requirements
             validator = MarketDataValidator(
                 enable_precision_validation=True,
                 enable_consistency_validation=True,
                 enable_timestamp_validation=False,  # May be None for some data
+                max_decimal_places=18,  # Ethereum/ERC-20 standard for crypto precision
             )
 
             # Validate batch and return valid data
