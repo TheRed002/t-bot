@@ -842,7 +842,7 @@ class BaseStrategy(BaseComponent, BaseStrategyInterface):
             },
         }
 
-    def cleanup(self) -> None:
+    async def cleanup(self) -> None:
         """Cleanup strategy resources."""
         try:
             if self._status == StrategyStatus.ACTIVE:
@@ -873,7 +873,8 @@ class BaseStrategy(BaseComponent, BaseStrategyInterface):
             else:
                 self.logger.error("Error during strategy cleanup", strategy=self.name, error=str(e))
         finally:
-            super().cleanup()  # Call parent cleanup
+            # Call parent cleanup
+            await super().cleanup()
 
     # Service-based data access methods
     async def get_market_data(self, symbol: str) -> MarketData | None:

@@ -253,7 +253,7 @@ class MarketDataPipelineGenerator:
 class TestRealMarketDataPipeline:
     """Test real market data pipeline with Decimal precision."""
 
-    @pytest.fixture
+    @pytest_asyncio.fixture
     async def real_data_service(self, strategy_service_container):
         """Get real data service from container."""
         return strategy_service_container.data_service
@@ -457,36 +457,14 @@ class TestRealMarketDataPipeline:
 class TestRealIndicatorPipelineIntegration:
     """Test technical indicator pipeline with real market data."""
 
-    @pytest.fixture(autouse=True, scope="function")
-    async def cleanup_database_before_test(self):
-        """
-        Clean database before each test in this class.
-
-        This ensures each test starts with a clean slate, preventing data pollution
-        when tests store market data and then fetch "recent" records.
-        """
-        # Yield first so cleanup happens AFTER test setup
-        yield
-
-        # Cleanup AFTER the test
-        print("\n[CLEANUP FIXTURE] Running database cleanup AFTER test")
-        from sqlalchemy import text
-        from src.database.connection import get_async_session
-
-        async with get_async_session() as session:
-            try:
-                await session.execute(text("SET session_replication_role = replica;"))
-                await session.execute(text("TRUNCATE TABLE market_data_records CASCADE;"))
-                await session.execute(text("SET session_replication_role = DEFAULT;"))
-                await session.commit()
-                print("[CLEANUP FIXTURE] Database cleaned successfully after test")
-            except Exception as e:
-                await session.rollback()
-                print(f"[CLEANUP FIXTURE] Warning: Could not clean database: {e}")
-
     @pytest_asyncio.fixture
-    async def strategy_with_real_data(self, strategy_service_container, market_data_generator):
+    async def strategy_with_real_data(self, strategy_service_container):
         """Create strategy with real market data pipeline."""
+        from tests.integration.modules.strategies.fixtures.market_data_generators import MarketDataGenerator
+
+        # Create market data generator
+        market_data_generator = MarketDataGenerator(seed=42)
+
         config = StrategyConfig(
             strategy_id="indicator_pipeline_test",
             name="indicator_pipeline_test_strategy",
@@ -502,7 +480,7 @@ class TestRealIndicatorPipelineIntegration:
         )
 
         strategy = MeanReversionStrategy(
-            config=config.dict(),
+            config=config.model_dump(),
             services=strategy_service_container
         )
         await strategy.initialize(config)
@@ -527,7 +505,7 @@ class TestRealIndicatorPipelineIntegration:
 
         yield strategy, market_data
         print("[STRATEGY FIXTURE] Test completed, cleaning up strategy")
-        strategy.cleanup()
+        await strategy.cleanup()
 
     @pytest.mark.asyncio
     async def test_rsi_pipeline_accuracy(self, strategy_with_real_data):
@@ -786,13 +764,13 @@ class TestRealIndicatorPipelineIntegration:
         )
 
         strategy_1h = TrendFollowingStrategy(
-            config=config_1h.dict(),
+            config=config_1h.model_dump(),
             services=strategy_service_container
         )
         await strategy_1h.initialize(config_1h)
 
         strategy_4h = TrendFollowingStrategy(
-            config=config_4h.dict(),
+            config=config_4h.model_dump(),
             services=strategy_service_container
         )
         await strategy_4h.initialize(config_4h)

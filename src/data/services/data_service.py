@@ -792,6 +792,173 @@ class DataService(BaseComponent):
         self._cache_misses = 0
         self._total_operations = 0
 
+    async def store_market_data_batch(self, market_data_list: list[MarketData]) -> bool:
+        """
+        Store multiple market data records in batch.
+
+        Args:
+            market_data_list: List of market data to store
+
+        Returns:
+            bool: True if all stored successfully
+        """
+        try:
+            if not market_data_list:
+                return True
+
+            # Convert to database records
+            records = []
+            for data in market_data_list:
+                record = MarketDataRecord(
+                    symbol=data.symbol,
+                    open=data.open,
+                    high=data.high,
+                    low=data.low,
+                    close=data.close,
+                    volume=data.volume,
+                    timestamp=data.timestamp,
+                    exchange=data.exchange or DEFAULT_EXCHANGE,
+                    bid_price=data.bid_price,
+                    ask_price=data.ask_price,
+                    validation_status=DEFAULT_VALIDATION_STATUS,
+                    quality_score=DEFAULT_QUALITY_SCORE,
+                    data_source=DEFAULT_DATA_SOURCE,
+                )
+                records.append(record)
+
+            # Bulk insert to database
+            await self._store_to_database(records, processing_mode="batch")
+
+            # Update cache with latest data
+            await self._update_l1_cache(market_data_list)
+
+            self.logger.info(f"Stored {len(records)} market data records in batch")
+            return True
+
+        except Exception as e:
+            self.logger.error(f"Batch storage failed: {e}")
+            raise DataError(f"Batch storage failed: {e}") from e
+
+    async def aggregate_market_data(
+        self,
+        symbol: str,
+        source_timeframe: str,
+        target_timeframe: str,
+        periods: int,
+        exchange: str = DEFAULT_EXCHANGE,
+    ) -> list[MarketData]:
+        """
+        Aggregate market data from source timeframe to target timeframe.
+
+        Args:
+            symbol: Trading symbol
+            source_timeframe: Source timeframe (e.g., '1h')
+            target_timeframe: Target timeframe (e.g., '4h')
+            periods: Number of target periods to generate
+            exchange: Exchange name
+
+        Returns:
+            List of aggregated MarketData
+        """
+        try:
+            # Parse timeframe multiplier (simple implementation)
+            timeframe_map = {"1m": 1, "5m": 5, "15m": 15, "1h": 60, "4h": 240, "1d": 1440}
+
+            if source_timeframe not in timeframe_map or target_timeframe not in timeframe_map:
+                raise DataError(f"Unsupported timeframe: {source_timeframe} or {target_timeframe}")
+
+            source_minutes = timeframe_map[source_timeframe]
+            target_minutes = timeframe_map[target_timeframe]
+
+            if target_minutes <= source_minutes:
+                raise DataError("Target timeframe must be larger than source timeframe")
+
+            # Calculate how many source periods per target period
+            periods_per_aggregation = target_minutes // source_minutes
+
+            # Fetch source data
+            total_source_periods = periods * periods_per_aggregation
+            request = DataRequest(
+                symbol=symbol, exchange=exchange, limit=total_source_periods, interval=source_timeframe
+            )
+
+            source_records = await self.get_market_data(request)
+
+            if len(source_records) < total_source_periods:
+                self.logger.warning(
+                    f"Insufficient data for aggregation: got {len(source_records)}, need {total_source_periods}"
+                )
+
+            # Aggregate data
+            aggregated = []
+            for i in range(0, len(source_records), periods_per_aggregation):
+                chunk = source_records[i : i + periods_per_aggregation]
+                if len(chunk) == periods_per_aggregation:
+                    # Create aggregated candle
+                    agg_data = MarketData(
+                        symbol=symbol,
+                        open=chunk[0].open_price,
+                        high=max(r.high_price for r in chunk),
+                        low=min(r.low_price for r in chunk),
+                        close=chunk[-1].close_price,
+                        volume=sum(r.volume for r in chunk),
+                        timestamp=chunk[-1].timestamp or chunk[-1].data_timestamp,
+                        exchange=exchange,
+                        bid_price=chunk[-1].bid if hasattr(chunk[-1], 'bid') else None,
+                        ask_price=chunk[-1].ask if hasattr(chunk[-1], 'ask') else None,
+                    )
+                    aggregated.append(agg_data)
+
+            self.logger.info(
+                f"Aggregated {len(source_records)} {source_timeframe} records into {len(aggregated)} {target_timeframe} records"
+            )
+            return aggregated
+
+        except Exception as e:
+            self.logger.error(f"Market data aggregation failed: {e}")
+            raise DataError(f"Market data aggregation failed: {e}") from e
+
+    async def get_market_data_history(
+        self, symbol: str, limit: int = 100, exchange: str = DEFAULT_EXCHANGE
+    ) -> list[MarketData]:
+        """
+        Get market data history in chronological order.
+
+        Args:
+            symbol: Trading symbol
+            limit: Number of records to retrieve
+            exchange: Exchange name
+
+        Returns:
+            List of MarketData in chronological order (oldest first)
+        """
+        try:
+            request = DataRequest(symbol=symbol, exchange=exchange, limit=limit)
+            records = await self.get_market_data(request)
+
+            # Convert records to MarketData objects
+            market_data_list = [
+                MarketData(
+                    symbol=r.symbol,
+                    open=r.open_price,
+                    high=r.high_price,
+                    low=r.low_price,
+                    close=r.close_price,
+                    volume=r.volume,
+                    timestamp=r.timestamp or r.data_timestamp,
+                    exchange=r.exchange,
+                    bid_price=r.bid if hasattr(r, 'bid') else None,
+                    ask_price=r.ask if hasattr(r, 'ask') else None,
+                )
+                for r in records
+            ]
+
+            return market_data_list
+
+        except Exception as e:
+            self.logger.error(f"Failed to get market data history: {e}")
+            raise DataError(f"Failed to get market data history: {e}") from e
+
     async def cleanup(self) -> None:
         """Cleanup resources."""
         try:
