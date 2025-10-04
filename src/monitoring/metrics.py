@@ -826,6 +826,18 @@ class MetricsCollector(BaseComponent):
 
     async def _collection_loop(self) -> None:
         """Background loop for collecting system metrics."""
+        # Check if in mock mode - skip I/O operations
+        mock_mode = os.getenv("MOCK_MODE", "false").lower() == "true"
+        if mock_mode:
+            self.logger.info("Metrics collector running in MOCK_MODE - skipping actual collection")
+            # Just keep the loop alive but don't do any real work
+            try:
+                while self._running:
+                    await asyncio.sleep(self._collection_interval)
+            except asyncio.CancelledError:
+                self.logger.debug("Collection loop cancelled in MOCK_MODE")
+            return
+
         while self._running:
             try:
                 await self._collect_system_metrics()

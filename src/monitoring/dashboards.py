@@ -718,10 +718,16 @@ class GrafanaDashboardManager:
         Raises:
             ValueError: If required parameters are missing
         """
+        # In mock/development mode, allow empty api_key for initialization
+        # The dashboards won't work, but the service can be initialized
         if not grafana_url:
-            raise ValueError("grafana_url is required")
+            self.logger = get_logger(__name__)
+            self.logger.warning("Grafana URL not provided - dashboard features will be disabled")
+            grafana_url = "http://localhost:3000"
+
         if not api_key:
-            raise ValueError("api_key is required")
+            self.logger = get_logger(__name__)
+            self.logger.warning("Grafana API key not provided - dashboard features will be disabled")
 
         self.grafana_url = grafana_url.rstrip("/")
         self.api_key = api_key

@@ -772,19 +772,29 @@ class MonitoringService(BaseService):
 
     async def start_monitoring(self) -> None:
         """Start monitoring services."""
+        self.logger.info("CompositeMonitoringService.start_monitoring() called")
+
         # Start underlying services if they have start methods
         if hasattr(self.alerts, "_alert_manager") and hasattr(self.alerts._alert_manager, "start"):
+            self.logger.info("Starting alert manager...")
             await self.alerts._alert_manager.start()
+            self.logger.info("Alert manager started")
 
         if hasattr(self.metrics, "_metrics_collector") and hasattr(
             self.metrics._metrics_collector, "start"
         ):
+            self.logger.info("Starting metrics collector...")
             await self.metrics._metrics_collector.start()
+            self.logger.info("Metrics collector started")
 
         if hasattr(self.performance, "_performance_profiler") and hasattr(
             self.performance._performance_profiler, "start"
         ):
+            self.logger.info("Starting performance profiler...")
             await self.performance._performance_profiler.start()
+            self.logger.info("Performance profiler started")
+
+        self.logger.info("CompositeMonitoringService.start_monitoring() completed")
 
     async def stop_monitoring(self) -> None:
         """Stop monitoring services."""

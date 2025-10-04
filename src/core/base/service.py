@@ -185,13 +185,13 @@ class BaseService(BaseComponent, ServiceComponent):
             return result
 
         except Exception as e:
-            # ValidationErrors should not be wrapped - re-raise immediately
-            if isinstance(e, ValidationError):
-                raise
-
-            # Record failed operation
+            # Record failed operation (including ValidationErrors for circuit breaker)
             execution_time = (datetime.now(timezone.utc) - start_time).total_seconds()
             self._record_operation_failure(operation_name, execution_time, e)
+
+            # ValidationErrors should not be wrapped - re-raise immediately after recording
+            if isinstance(e, ValidationError):
+                raise
 
             self._logger.error(
                 "Service operation failed",

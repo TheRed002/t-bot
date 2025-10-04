@@ -53,8 +53,15 @@ class HTTPSessionManager:
 
     async def get_session(self, key: str = "default", **session_kwargs) -> aiohttp.ClientSession:
         """Get or create a shared HTTP session."""
+        # Create lock lazily to avoid event loop issues during __init__
         if key not in self._locks:
-            self._locks[key] = asyncio.Lock()
+            try:
+                self._locks[key] = asyncio.Lock()
+            except RuntimeError:
+                # No event loop - this can happen during synchronous initialization
+                # Create a simple threading lock as fallback
+                import threading
+                self._locks[key] = threading.Lock()  # type: ignore[assignment]
 
         async with self._locks[key]:
             if key not in self._sessions or self._sessions[key].closed:

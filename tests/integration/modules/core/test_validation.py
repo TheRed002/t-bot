@@ -163,18 +163,24 @@ class TestCoreModuleIntegration:
         test_service.configure_dependencies(injector)
         test_service.configure_circuit_breaker(enabled=True, threshold=3, timeout=60)
         await test_service.start()
-        
+
         # Trigger multiple failures to trip circuit breaker
+        # The circuit breaker counts failures that propagate, so we need to let them raise
+        failure_count = 0
         for _ in range(4):
             try:
                 await test_service.test_operation({"valid": False})
             except (ValidationError, ServiceError):
-                pass
-                
-        # Circuit breaker should now be open
+                failure_count += 1
+
+        # Verify we got the expected failures
+        assert failure_count == 4, f"Expected 4 failures, got {failure_count}"
+
+        # Circuit breaker should now be open (3 threshold + 1 more = open)
+        # Next operation should fail immediately with circuit breaker error
         with pytest.raises(ServiceError, match="Circuit breaker is OPEN"):
             await test_service.test_operation({"valid": True})
-            
+
         await test_service.stop()
         
     @pytest.mark.asyncio

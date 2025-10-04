@@ -77,11 +77,20 @@ class Application:
 
     def _setup_logging(self) -> None:
         """Setup logging configuration."""
+        import os
+        from pathlib import Path
+
         # Setup logging based on environment
         environment = (
             getattr(self.config, "environment", "development") if self.config else "development"
         )
-        setup_logging(environment=environment)
+
+        # Determine log file path - write to file in ALL environments for ELK
+        logs_dir = Path(os.getenv("LOGS_DIR", "./logs"))
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        log_file = str(logs_dir / f"tbot-{environment}.log")
+
+        setup_logging(environment=environment, log_file=log_file)
 
         # Enable debug logging only in development mode
         if self.config and self.config.debug and environment == "development":
@@ -90,15 +99,15 @@ class Application:
             setup_debug_logging()
             self.logger.debug("Debug logging enabled for development environment")
 
-        self.logger.info("Logging system initialized")
+        self.logger.info("Logging system initialized", log_file=log_file)
 
     async def _load_configuration(self) -> None:
         """Load and validate application configuration."""
         try:
             self.config = Config()
 
-            # Generate configuration schema for validation
-            self.config.generate_schema()
+            # Validate configuration
+            self.config.validate()
 
             self.logger.info(
                 "Configuration loaded successfully",
@@ -209,7 +218,7 @@ class Application:
             try:
                 # State management (needed by many services)
                 from src.state.di_registration import register_state_services
-                register_state_services(self.components["injector"])
+                register_state_services(self.components["injector"].get_container())
                 self.logger.info("State management dependencies registered")
             except Exception as e:
                 self.logger.warning(f"Failed to register state dependencies: {e}")
@@ -224,8 +233,8 @@ class Application:
 
             try:
                 # Risk management (needed by execution and strategies)
-                from src.risk_management.di_registration import register_risk_services
-                register_risk_services(self.components["injector"])
+                from src.risk_management.di_registration import register_risk_management_services
+                register_risk_management_services(self.components["injector"])
                 self.logger.info("Risk management dependencies registered")
             except Exception as e:
                 self.logger.warning(f"Failed to register risk dependencies: {e}")
@@ -249,7 +258,7 @@ class Application:
             try:
                 # Strategies services
                 from src.strategies.di_registration import register_strategies_dependencies
-                register_strategies_dependencies(self.components["injector"])
+                register_strategies_dependencies(self.components["injector"].get_container())
                 self.logger.info("Strategies dependencies registered")
             except Exception as e:
                 self.logger.warning(f"Failed to register strategies dependencies: {e}")
@@ -265,7 +274,10 @@ class Application:
             try:
                 # ML services (needed by optimization and strategies)
                 from src.ml.di_registration import register_ml_services
-                register_ml_services(self.components["injector"])
+                register_ml_services(
+                    self.components["injector"].get_container(),
+                    self.config.to_dict() if hasattr(self.config, 'to_dict') else {}
+                )
                 self.logger.info("ML dependencies registered")
             except Exception as e:
                 self.logger.warning(f"Failed to register ML dependencies: {e}")
@@ -314,8 +326,11 @@ class Application:
             # Register monitoring services and get composite service
             from src.monitoring.di_registration import register_monitoring_services
             register_monitoring_services(injector)
+            self.logger.info("About to resolve MonitoringServiceInterface...")
             monitoring_service = injector.resolve("MonitoringServiceInterface")
-            await monitoring_service.start()
+            self.logger.info("MonitoringServiceInterface resolved, calling start_monitoring()...")
+            await monitoring_service.start_monitoring()
+            self.logger.info("start_monitoring() completed successfully")
 
             self.components["monitoring_service"] = monitoring_service
             self.health_status["components"]["monitoring"] = "initialized"
@@ -369,7 +384,7 @@ class Application:
             register_exchanges(self.components["exchange_factory"])
 
             # Initialize supported exchanges from configuration
-            supported_exchanges = self.config.exchanges.supported_exchanges
+            supported_exchanges = self.config.exchange.enabled_exchanges if hasattr(self.config, 'exchange') else []
             for exchange_name in supported_exchanges:
                 if self.components["exchange_factory"].is_exchange_supported(exchange_name):
                     try:
@@ -393,14 +408,11 @@ class Application:
         try:
             from src.risk_management import RiskManager
 
-            # Get injector and analytics service
+            # Get injector
             injector = self.components.get("injector")
-            analytics_service = self.components.get("analytics_service")
 
             # Create risk manager with proper dependencies
-            self.components["risk_manager"] = RiskManager(
-                self.config, analytics_service=analytics_service
-            )
+            self.components["risk_manager"] = RiskManager(config=self.config)
 
             # Validate risk parameters
             await self.components["risk_manager"].validate_risk_parameters()
@@ -424,18 +436,8 @@ class Application:
             # Create strategy factory
             self.components["strategy_factory"] = StrategyFactory()
 
-            # Set dependencies for strategy factory
-            if "risk_manager" in self.components:
-                self.components["strategy_factory"].set_risk_manager(
-                    self.components["risk_manager"]
-                )
-
-            if "exchange_factory" in self.components:
-                # Get first available exchange for strategies
-                exchanges = await self.components["exchange_factory"].get_all_active_exchanges()
-                if exchanges:
-                    first_exchange = next(iter(exchanges.values()))
-                    self.components["strategy_factory"].set_exchange(first_exchange)
+            # Note: StrategyFactory dependencies are managed through DI container
+            # No manual setter methods needed - the factory uses injected dependencies
 
             # Load and create strategies from configuration
             available_strategies = self.components[
@@ -558,8 +560,8 @@ class Application:
         """Shutdown trading strategies."""
         try:
             if "strategy_factory" in self.components:
-                await self.components["strategy_factory"].shutdown_all_strategies()
-                self.logger.info("All strategies shutdown successfully")
+                # Strategy factory cleanup handled by DI container
+                self.logger.info("Strategy factory cleanup delegated to DI container")
             else:
                 self.logger.warning("Strategy factory not found during shutdown")
 

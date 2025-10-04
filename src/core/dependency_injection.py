@@ -5,7 +5,7 @@ from __future__ import annotations
 import inspect
 from collections.abc import Callable
 from functools import wraps
-from threading import Lock
+from threading import RLock
 from typing import Any, TypeVar
 
 from src.core.exceptions import ComponentError, DependencyError
@@ -24,7 +24,7 @@ class DependencyContainer:
         self._services: dict[str, Any] = {}
         self._factories: dict[str, Callable] = {}
         self._singletons: dict[str, Any] = {}
-        self._lock = Lock()
+        self._lock = RLock()  # Use RLock to allow re-entrant dependency resolution
         self._logger = logger
 
     def register(self, name: str, service: Any | Callable, singleton: bool = False) -> None:
@@ -196,7 +196,7 @@ class DependencyInjector:
     """
 
     _instance: DependencyInjector | None = None
-    _lock = Lock()
+    _lock = RLock()  # Use RLock for singleton pattern
 
     def __new__(cls) -> DependencyInjector:
         """Singleton pattern with proper thread safety."""

@@ -129,11 +129,17 @@ def setup_logging(
         _safe_unicode_decoder,
     ]
 
-    # Add JSON formatting for production
-    if environment == "production":
+    # Add JSON formatting for all file-based logging (ELK compatibility)
+    # Files always use JSON, console adapts based on environment
+    if log_file:
+        # File output: Always JSON for ELK parsing
         processors.append(structlog.processors.JSONRenderer())
     else:
-        processors.append(structlog.dev.ConsoleRenderer())
+        # Console-only output
+        if environment in ("production", "staging"):
+            processors.append(structlog.processors.JSONRenderer())
+        else:
+            processors.append(structlog.dev.ConsoleRenderer())
 
     # Configure structlog
     structlog.configure(

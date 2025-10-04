@@ -317,10 +317,11 @@ class PerformanceProfiler(BaseComponent):
             mock_lock.__exit__ = Mock(return_value=None)
             self._lock = mock_lock
 
-        self._async_lock = asyncio.Lock()  # For async methods
+        # Delay async primitive creation until first use to avoid event loop issues during __init__
+        self._async_lock: asyncio.Lock | None = None  # For async methods
         self._running = False
         self._background_task: asyncio.Task | None = None
-        self._shutdown_event = asyncio.Event()
+        self._shutdown_event: asyncio.Event | None = None
         from src.monitoring.config import (
             PERFORMANCE_ALERT_TASK_TIMEOUT,
             PERFORMANCE_FORCE_SHUTDOWN_TIMEOUT,
@@ -355,6 +356,13 @@ class PerformanceProfiler(BaseComponent):
         self._register_metrics()
 
         self.logger.info("PerformanceProfiler initialized with comprehensive monitoring")
+
+    def _ensure_async_primitives(self) -> None:
+        """Ensure async primitives are initialized (lazy initialization)."""
+        if self._async_lock is None:
+            self._async_lock = asyncio.Lock()
+        if self._shutdown_event is None:
+            self._shutdown_event = asyncio.Event()
 
     def _register_metrics(self) -> None:
         """Register performance metrics with Prometheus collector."""
@@ -476,21 +484,23 @@ class PerformanceProfiler(BaseComponent):
 
     async def start(self) -> None:
         """Start performance monitoring (BaseComponent interface)."""
+        self._ensure_async_primitives()
         if self._running:
             self.logger.warning("Performance profiler already running")
             return
         self._running = True
-        self._shutdown_event.clear()
+        self._shutdown_event.clear()  # type: ignore[union-attr]
         self.logger.info("Started performance monitoring")
 
     async def start_async(self) -> None:
         """Start background performance monitoring with proper task lifecycle."""
+        self._ensure_async_primitives()
         if self._running:
             self.logger.warning("Performance profiler already running")
             return
 
         self._running = True
-        self._shutdown_event.clear()
+        self._shutdown_event.clear()  # type: ignore[union-attr]
 
         try:
             self._background_task = asyncio.create_task(self._monitoring_loop())
@@ -570,8 +580,9 @@ class PerformanceProfiler(BaseComponent):
 
     async def stop(self) -> None:
         """Stop performance monitoring (BaseComponent interface)."""
+        self._ensure_async_primitives()
         self._running = False
-        self._shutdown_event.set()
+        self._shutdown_event.set()  # type: ignore[union-attr]
         self.logger.info("Performance monitoring stopped")
 
     async def cleanup(self) -> None:
@@ -610,14 +621,27 @@ class PerformanceProfiler(BaseComponent):
     @logged(level="debug")
     async def _monitoring_loop(self) -> None:
         """Background loop for collecting system metrics with proper cancellation."""
+        self._ensure_async_primitives()
         consecutive_errors = 0
         max_consecutive_errors = 5
 
+        # Check if in mock mode - skip I/O operations
+        mock_mode = os.getenv("MOCK_MODE", "false").lower() == "true"
+        if mock_mode:
+            self.logger.info("Performance profiler running in MOCK_MODE - skipping actual monitoring")
+            # Just keep the loop alive but don't do any real work
+            try:
+                while self._running and not self._shutdown_event.is_set():  # type: ignore[union-attr]
+                    await asyncio.sleep(self.collection_interval)
+            except asyncio.CancelledError:
+                self.logger.debug("Monitoring loop cancelled in MOCK_MODE")
+            return
+
         try:
-            while self._running and not self._shutdown_event.is_set():
+            while self._running and not self._shutdown_event.is_set():  # type: ignore[union-attr]
                 try:
                     # Check shutdown signal first
-                    if self._shutdown_event.is_set():
+                    if self._shutdown_event.is_set():  # type: ignore[union-attr]
                         self.logger.debug("Shutdown signal received, exiting monitoring loop")
                         break
 

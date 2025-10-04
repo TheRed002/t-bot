@@ -20,6 +20,7 @@ Key Features:
 import asyncio
 import hashlib
 import logging
+import os
 import time
 from collections import deque
 from dataclasses import dataclass, field
@@ -352,7 +353,8 @@ class AlertManager(BaseComponent):
         self._escalation_policies: dict[str, EscalationPolicy] = {}
         self._running = False
         self._background_task: asyncio.Task | None = None
-        self._notification_queue: asyncio.Queue = asyncio.Queue()
+        # Delay async primitive creation to avoid event loop issues during __init__
+        self._notification_queue: asyncio.Queue | None = None
         # Initialize HTTP session manager for connection pooling
         try:
             from src.utils.monitoring_helpers import HTTPSessionManager
@@ -369,6 +371,11 @@ class AlertManager(BaseComponent):
         self._escalations_triggered = 0
 
         self.logger.debug("AlertManager initialized")
+
+    def _ensure_async_primitives(self) -> None:
+        """Ensure async primitives are initialized (lazy initialization)."""
+        if self._notification_queue is None:
+            self._notification_queue = asyncio.Queue()
 
     def add_rule(self, rule: AlertRule) -> None:
         """
@@ -426,6 +433,7 @@ class AlertManager(BaseComponent):
         Args:
             alert: Alert to fire
         """
+        self._ensure_async_primitives()
         try:
             # Check if alert should be suppressed
             if self._is_suppressed(alert):
@@ -447,7 +455,7 @@ class AlertManager(BaseComponent):
             self._alerts_fired += 1
 
             # Queue notification
-            await self._notification_queue.put(("fire", alert))
+            await self._notification_queue.put(("fire", alert))  # type: ignore[union-attr]
 
             self.logger.warning(
                 f"Alert fired: {alert.rule_name} (severity: {alert.severity.value}) - "
@@ -489,6 +497,7 @@ class AlertManager(BaseComponent):
         Args:
             fingerprint: Alert fingerprint
         """
+        self._ensure_async_primitives()
         try:
             alert = self._active_alerts.get(fingerprint)
             if not alert:
@@ -502,7 +511,7 @@ class AlertManager(BaseComponent):
             self._alerts_resolved += 1
 
             # Queue resolution notification
-            await self._notification_queue.put(("resolve", alert))
+            await self._notification_queue.put(("resolve", alert))  # type: ignore[union-attr]
 
             self.logger.info(f"Alert resolved: {alert.rule_name}")
 
@@ -632,6 +641,7 @@ class AlertManager(BaseComponent):
 
     async def start(self) -> None:
         """Start alert manager background tasks."""
+        self._ensure_async_primitives()
         if self._running:
             self.logger.warning("Alert manager already running")
             return
@@ -642,6 +652,7 @@ class AlertManager(BaseComponent):
 
     async def stop(self) -> None:
         """Stop alert manager background tasks."""
+        self._ensure_async_primitives()
         self._running = False
 
         if self._background_task and not self._background_task.done():
@@ -656,9 +667,9 @@ class AlertManager(BaseComponent):
                 self._background_task = None
 
         # Clear notification queue to prevent memory leaks
-        while not self._notification_queue.empty():
+        while not self._notification_queue.empty():  # type: ignore[union-attr]
             try:
-                self._notification_queue.get_nowait()
+                self._notification_queue.get_nowait()  # type: ignore[union-attr]
             except asyncio.QueueEmpty:
                 break
 
@@ -716,7 +727,29 @@ class AlertManager(BaseComponent):
 
     async def _processing_loop(self) -> None:
         """Background loop for processing notifications and escalations."""
+        self._ensure_async_primitives()
         processing_tasks = set()
+
+        # Check if in mock mode - skip actual notification sending
+        mock_mode = os.getenv("MOCK_MODE", "false").lower() == "true"
+        if mock_mode:
+            self.logger.info("Alert manager running in MOCK_MODE - skipping actual notifications")
+            # Just keep the loop alive but don't do any real work
+            try:
+                while self._running:
+                    # Still process the queue to prevent it from filling up
+                    try:
+                        action, alert = await asyncio.wait_for(
+                            self._notification_queue.get(),  # type: ignore[union-attr]
+                            timeout=ALERT_PROCESSING_CHECK_INTERVAL / 10.0,
+                        )
+                        self.logger.debug(f"MOCK: Would {action} alert: {alert.summary}")
+                    except asyncio.TimeoutError:
+                        pass
+                    await asyncio.sleep(0.1)
+            except asyncio.CancelledError:
+                self.logger.debug("Processing loop cancelled in MOCK_MODE")
+            return
 
         while self._running:
             try:
@@ -726,7 +759,7 @@ class AlertManager(BaseComponent):
                 # Process notification queue with timeout protection
                 try:
                     action, alert = await asyncio.wait_for(
-                        self._notification_queue.get(),
+                        self._notification_queue.get(),  # type: ignore[union-attr]
                         timeout=ALERT_PROCESSING_CHECK_INTERVAL / 10.0,
                     )
 
