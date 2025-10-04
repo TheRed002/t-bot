@@ -28,6 +28,11 @@ def register_error_handling_services(injector, config: Config | None = None) -> 
     # DependencyInjector has register_factory, DependencyContainer has register
     has_register_factory = hasattr(injector, 'register_factory')
 
+    # Get the actual container for service resolution
+    # DependencyInjector.get_container() returns DependencyContainer
+    # DependencyContainer is passed directly
+    container = injector.get_container() if has_register_factory else injector
+
     def _register_service(name: str, factory, singleton: bool = True):
         """Helper to register with correct method based on container type."""
         if has_register_factory:
@@ -68,7 +73,7 @@ def register_error_handling_services(injector, config: Config | None = None) -> 
                 from src.error_handling.error_handler import ErrorHandler
 
                 resolved_config = (
-                    injector.get("Config") if injector.has("Config") else config or Config()
+                    container.get("Config") if container.has("Config") else config or Config()
                 )
 
                 # Try to resolve security components
@@ -76,12 +81,12 @@ def register_error_handling_services(injector, config: Config | None = None) -> 
                 rate_limiter = None
 
                 try:
-                    sanitizer = injector.get("SecuritySanitizer")
+                    sanitizer = container.get("SecuritySanitizer")
                 except Exception as e:
                     logger.debug(f"Failed to resolve SecuritySanitizer: {e}")
 
                 try:
-                    rate_limiter = injector.get("SecurityRateLimiter")
+                    rate_limiter = container.get("SecurityRateLimiter")
                 except Exception as e:
                     logger.debug(f"Failed to resolve SecurityRateLimiter: {e}")
 
@@ -130,11 +135,11 @@ def register_error_handling_services(injector, config: Config | None = None) -> 
                 from src.error_handling.global_handler import GlobalErrorHandler
 
                 resolved_config = (
-                    injector.get("Config") if injector.has("Config") else config or Config()
+                    container.get("Config") if container.has("Config") else config or Config()
                 )
                 context_factory = (
-                    injector.get("ErrorContextFactory")
-                    if injector.has("ErrorContextFactory")
+                    container.get("ErrorContextFactory")
+                    if container.has("ErrorContextFactory")
                     else None
                 )
                 instance = GlobalErrorHandler(resolved_config, context_factory)
@@ -157,7 +162,7 @@ def register_error_handling_services(injector, config: Config | None = None) -> 
                 from src.error_handling.pattern_analytics import ErrorPatternAnalytics
 
                 resolved_config = (
-                    injector.get("Config") if injector.has("Config") else config or Config()
+                    container.get("Config") if container.has("Config") else config or Config()
                 )
                 instance = ErrorPatternAnalytics(resolved_config)
 
@@ -179,7 +184,7 @@ def register_error_handling_services(injector, config: Config | None = None) -> 
                 from src.error_handling.state_monitor import StateMonitor
 
                 resolved_config = (
-                    injector.get("Config") if injector.has("Config") else config or Config()
+                    container.get("Config") if container.has("Config") else config or Config()
                 )
 
                 # Try to resolve dependencies - these are optional for StateMonitor
@@ -189,22 +194,22 @@ def register_error_handling_services(injector, config: Config | None = None) -> 
 
                 try:
                     state_data_service = (
-                        injector.get("StateDataService") if injector.has("StateDataService") else None
+                        container.get("StateDataService") if container.has("StateDataService") else None
                     )
                 except Exception as e:
                     logger.debug(f"Failed to resolve StateDataService for StateMonitor: {e}")
 
                 try:
                     risk_service = (
-                        injector.get("RiskService") if injector.has("RiskService") else None
+                        container.get("RiskService") if container.has("RiskService") else None
                     )
                 except Exception as e:
                     logger.debug(f"Failed to resolve RiskService for StateMonitor: {e}")
 
                 try:
                     execution_service = (
-                        injector.get("ExecutionService")
-                        if injector.has("ExecutionService")
+                        container.get("ExecutionService")
+                        if container.has("ExecutionService")
                         else None
                     )
                 except Exception as e:
@@ -235,7 +240,7 @@ def register_error_handling_services(injector, config: Config | None = None) -> 
                 from src.error_handling.service import ErrorHandlingService
 
                 resolved_config = (
-                    injector.get("Config") if injector.has("Config") else config or Config()
+                    container.get("Config") if container.has("Config") else config or Config()
                 )
 
                 # Resolve required dependencies - these should be available
@@ -246,15 +251,15 @@ def register_error_handling_services(injector, config: Config | None = None) -> 
 
                 try:
                     error_handler = (
-                        injector.get("ErrorHandler") if injector.has("ErrorHandler") else None
+                        container.get("ErrorHandler") if container.has("ErrorHandler") else None
                     )
                 except Exception as e:
                     logger.debug(f"Failed to resolve ErrorHandler: {e}")
 
                 try:
                     global_handler = (
-                        injector.get("GlobalErrorHandler")
-                        if injector.has("GlobalErrorHandler")
+                        container.get("GlobalErrorHandler")
+                        if container.has("GlobalErrorHandler")
                         else None
                     )
                 except Exception as e:
@@ -262,8 +267,8 @@ def register_error_handling_services(injector, config: Config | None = None) -> 
 
                 try:
                     pattern_analytics = (
-                        injector.get("ErrorPatternAnalytics")
-                        if injector.has("ErrorPatternAnalytics")
+                        container.get("ErrorPatternAnalytics")
+                        if container.has("ErrorPatternAnalytics")
                         else None
                     )
                 except Exception as e:
@@ -271,7 +276,7 @@ def register_error_handling_services(injector, config: Config | None = None) -> 
 
                 try:
                     state_monitor = (
-                        injector.get("StateMonitor") if injector.has("StateMonitor") else None
+                        container.get("StateMonitor") if container.has("StateMonitor") else None
                     )
                 except Exception as e:
                     logger.debug(f"Failed to resolve StateMonitor: {e}")
@@ -356,6 +361,9 @@ def _configure_service_dependencies(injector) -> None:
     try:
         logger.debug("Configuring error handling service dependencies")
 
+        # Get container for service resolution
+        container = injector.get_container() if hasattr(injector, 'get_container') else injector
+
         # Configure dependencies in dependency order (avoid circular refs)
         service_names = [
             "ErrorHandler",  # First - has minimal dependencies
@@ -370,8 +378,8 @@ def _configure_service_dependencies(injector) -> None:
 
         for service_name in service_names:
             try:
-                if injector.has(service_name) and service_name not in configured_services:
-                    service_instance = injector.get(service_name)
+                if container.has(service_name) and service_name not in configured_services:
+                    service_instance = container.get(service_name)
                     if hasattr(service_instance, "configure_dependencies"):
                         service_instance.configure_dependencies(injector)
                         logger.debug(f"Configured dependencies for {service_name}")
@@ -411,8 +419,11 @@ def _setup_global_error_handler(injector) -> None:
     try:
         from src.error_handling import set_global_error_handler
 
-        if injector.has("GlobalErrorHandler"):
-            global_handler = injector.get("GlobalErrorHandler")
+        # Get container for service resolution
+        container = injector.get_container() if hasattr(injector, 'get_container') else injector
+
+        if container.has("GlobalErrorHandler"):
+            global_handler = container.get("GlobalErrorHandler")
             set_global_error_handler(global_handler)
             logger.debug("Global error handler instance configured")
         else:

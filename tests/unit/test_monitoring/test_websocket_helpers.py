@@ -445,25 +445,26 @@ class TestWebSocketManager:
         """Test waiting for connection successfully."""
         manager = WebSocketManager(self.config)
 
-        async def wait_for_success(*args, **kwargs):
+        # Mock the event's wait method to avoid creating unawaited coroutines
+        async def event_wait():
             return None
 
-        with patch("asyncio.wait_for", side_effect=wait_for_success) as mock_wait_for:
+        with patch.object(manager._connected_event, "wait", side_effect=event_wait):
             # Simulate success
             await manager.wait_connected(timeout=1.0)
-            mock_wait_for.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_websocket_manager_wait_connected_timeout(self):
         """Test waiting for connection with timeout."""
         manager = WebSocketManager(self.config)
 
-        async def wait_for_timeout(*args, **kwargs):
-            raise asyncio.TimeoutError()
+        # Mock the event's wait method to simulate a long wait
+        async def event_wait():
+            await asyncio.sleep(10)  # Simulates waiting longer than timeout
 
-        with patch("asyncio.wait_for", side_effect=wait_for_timeout):
+        with patch.object(manager._connected_event, "wait", side_effect=event_wait):
             with pytest.raises(asyncio.TimeoutError):
-                await manager.wait_connected(timeout=0.1)
+                await manager.wait_connected(timeout=0.01)
 
     @pytest.mark.asyncio
     async def test_websocket_manager_establish_connection(self):
@@ -473,19 +474,21 @@ class TestWebSocketManager:
         async def async_noop(*args, **kwargs):
             return None
 
+        # Create coroutine functions that will run as tasks
+        async def heartbeat_loop():
+            pass
+
+        async def message_loop():
+            pass
+
         with (
             patch("time.time", return_value=1234567890.0),
             patch("asyncio.sleep", side_effect=async_noop),
-            patch("asyncio.wait_for", side_effect=async_noop),
-            patch("asyncio.create_task") as mock_create_task,
+            patch.object(manager, "_simulate_connection", side_effect=async_noop),
             patch.object(manager, "_connected_event") as mock_event,
-            patch.object(manager, "_set_error_state", side_effect=async_noop),
-            patch.object(manager, "_heartbeat_loop", side_effect=async_noop),
-            patch.object(manager, "_message_processing_loop", side_effect=async_noop),
+            patch.object(manager, "_heartbeat_loop", side_effect=heartbeat_loop),
+            patch.object(manager, "_message_processing_loop", side_effect=message_loop),
         ):
-            mock_task = Mock()
-            mock_task.cancel = Mock()
-            mock_create_task.return_value = mock_task
             mock_event.set = Mock()
             await manager._establish_connection()
             mock_event.set.assert_called_once()
@@ -495,6 +498,20 @@ class TestWebSocketManager:
         assert manager.metrics.last_message_time == 1234567890.0
         assert manager._reconnect_attempts == 0
         assert manager._heartbeat_task is not None
+
+        # Clean up created tasks
+        if manager._heartbeat_task and not manager._heartbeat_task.done():
+            manager._heartbeat_task.cancel()
+            try:
+                await manager._heartbeat_task
+            except asyncio.CancelledError:
+                pass
+        if manager._connection_task and not manager._connection_task.done():
+            manager._connection_task.cancel()
+            try:
+                await manager._connection_task
+            except asyncio.CancelledError:
+                pass
 
     def test_websocket_manager_heartbeat_loop_success(self):
         """Test successful heartbeat loop setup."""
@@ -945,20 +962,20 @@ class TestEdgeCases:
         """Test WebSocket manager properly cleans up on exceptions."""
         manager = WebSocketManager(WebSocketConfig(url="wss://test.com"))
 
-        # Set up some state - use AsyncMock for async close method
-        from unittest.mock import AsyncMock
-        manager._websocket = AsyncMock()
+        # Set up some state
+        manager._websocket = Mock()
         manager._connection_task = Mock()
+        manager._connection_task.done.return_value = True  # Task already done
         manager._heartbeat_task = Mock()
+        manager._heartbeat_task.done.return_value = True  # Task already done
 
-        # Force an exception during disconnect
-        async def close_with_error():
+        # Mock asyncio.wait_for to raise an exception directly
+        async def wait_for_error(*args, **kwargs):
             raise Exception("Close error")
 
-        manager._websocket.close = close_with_error
-
-        # Should not raise, should cleanup gracefully
-        await manager.disconnect()
+        with patch("asyncio.wait_for", side_effect=wait_for_error):
+            # Should not raise, should cleanup gracefully
+            await manager.disconnect()
 
         assert manager._websocket is None
 
