@@ -1,0 +1,8 @@
+# Kibana Configuration for T-Bot Trading System (minimal 8.x compatible)
+
+# Server settings
+server.port: 5601
+server.host: "0.0.0.0"
+
+# Elasticsearch connection
+elasticsearch.hosts: ["http://elasticsearch:9200"]

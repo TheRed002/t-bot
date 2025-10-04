@@ -1,0 +1,23 @@
+# Logstash Configuration for T-Bot Trading System
+# Optimized for financial log processing
+
+# HTTP API settings
+http.host: "0.0.0.0"
+http.port: 9600
+
+# Log settings
+log.level: info
+log.format: json
+
+# Pipeline settings
+pipeline.workers: 2
+pipeline.batch.size: 125
+pipeline.batch.delay: 50
+
+# Queue settings
+queue.type: memory
+queue.max_bytes: 1gb
+
+# Monitoring
+xpack.monitoring.enabled: true
+xpack.monitoring.elasticsearch.hosts: ["http://elasticsearch:9200"]

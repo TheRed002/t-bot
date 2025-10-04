@@ -391,6 +391,75 @@ services:
           memory: 2G
           cpus: '1.0'
 
+  # Logstash - Log processing pipeline
+  logstash:
+    image: docker.elastic.co/logstash/logstash:8.8.0
+    container_name: tbot-logstash
+    hostname: logstash
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5044:5044"  # Beats input
+      - "127.0.0.1:9600:9600"  # API/Metrics
+    environment:
+      - "LS_JAVA_OPTS=-Xms1g -Xmx1g"
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+    volumes:
+      - ../monitoring/logstash/pipeline:/usr/share/logstash/pipeline:ro
+      - ../monitoring/logstash/config/logstash.yml:/usr/share/logstash/config/logstash.yml:ro
+      - ../logs:/var/log/tbot:ro
+    networks:
+      - tbot-monitoring
+    depends_on:
+      - elasticsearch
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1.0'
+        reservations:
+          memory: 1G
+          cpus: '0.5'
+
+  # Kibana - Log visualization and exploration
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.8.0
+    container_name: tbot-kibana
+    hostname: kibana
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5601:5601"
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+      - SERVER_NAME=kibana.tbot.local
+      - SERVER_BASEPATH=/kibana
+      - SERVER_REWRITEBASEPATH=true
+      - KIBANA_DEFAULTAPPID=discover
+      - LOGGING_DEST=stdout
+      - LOGGING_QUIET=false
+      - XPACK_MONITORING_ENABLED=true
+      - XPACK_MONITORING_COLLECTION_ENABLED=true
+    volumes:
+      - ../monitoring/kibana/kibana.yml:/usr/share/kibana/config/kibana.yml:ro
+      - kibana_data:/usr/share/kibana/data
+    networks:
+      - tbot-monitoring
+    depends_on:
+      - elasticsearch
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:5601/api/status || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1.0'
+        reservations:
+          memory: 1G
+          cpus: '0.5'
+
   # ==============================================================================
   # Business Intelligence and Analytics
   # ==============================================================================
@@ -464,6 +533,10 @@ volumes:
   
   # Business intelligence
   metabase_data:
+    driver: local
+
+  # ELK stack
+  kibana_data:
     driver: local
 
 # ==============================================================================
