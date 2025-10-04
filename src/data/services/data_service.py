@@ -440,13 +440,18 @@ class DataService(BaseComponent):
                     time_filter["lte"] = request.end_time
                 filters["data_timestamp"] = time_filter
 
-            return await self.database_service.list_entities(
+            # Get most recent data first (DESC order), then reverse to chronological order
+            # This ensures we get the LATEST N records, not the OLDEST N records
+            records = await self.database_service.list_entities(
                 model_class=MarketDataRecord,
                 filters=filters,
                 order_by="data_timestamp",
-                order_desc=False,  # Ascending order (oldest first) for technical indicators
+                order_desc=True,  # DESC order to get most recent records first
                 limit=request.limit,
             )
+
+            # Reverse to chronological order (oldest first) for technical indicator calculations
+            return list(reversed(records))
 
         except Exception as e:
             self.logger.error(f"Database retrieval failed: {e}")
@@ -657,9 +662,7 @@ class DataService(BaseComponent):
         """
         try:
             indicators = self._get_technical_indicators()
-            # TechnicalIndicators doesn't have calculate_ema, so we'll use calculate_sma for now
-            # This is a temporary solution - proper EMA implementation would be in TechnicalIndicators
-            return await indicators.calculate_sma(symbol, period)
+            return await indicators.calculate_ema(symbol, period)
         except Exception as e:
             self.logger.error(f"Failed to calculate EMA for {symbol}: {e}")
             return None

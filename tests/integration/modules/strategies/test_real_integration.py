@@ -16,6 +16,7 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 import pytest
+import pytest_asyncio
 
 from src.core.config import Config
 from src.core.types import (
@@ -32,7 +33,7 @@ from src.strategies.static.trend_following import TrendFollowingStrategy
 
 
 # Module-level fixtures shared across test classes
-@pytest.fixture
+@pytest_asyncio.fixture
 async def real_config():
     """Create real configuration for testing."""
     # Use default config - no overrides needed for integration tests
@@ -40,7 +41,7 @@ async def real_config():
     return config
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def real_database_service_fixture(real_config, clean_database):
     """
     Create real DatabaseService for testing.
@@ -65,7 +66,7 @@ async def real_database_service_fixture(real_config, clean_database):
     await connection_manager.close()
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def real_data_service(real_config, real_database_service_fixture):
     """Create real DataService with database integration."""
     from src.data.services.data_service import DataService
@@ -82,7 +83,7 @@ async def real_data_service(real_config, real_database_service_fixture):
     await data_service.cleanup()
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def real_risk_service(real_config, real_database_service_fixture):
     """Create real RiskService with database integration."""
     from src.database.repository.risk import PortfolioRepository, RiskMetricsRepository
@@ -107,7 +108,7 @@ async def real_risk_service(real_config, real_database_service_fixture):
     await risk_service.cleanup()
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def strategy_service_container(
     real_config, real_database_service_fixture, real_data_service, real_risk_service
 ):
@@ -135,7 +136,7 @@ async def strategy_service_container(
     # No cleanup needed - container doesn't require explicit cleanup
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def real_strategy_service(strategy_service_container):
     """Create real StrategyService with injected dependencies."""
     # Extract services from container to pass to StrategyService
@@ -151,7 +152,7 @@ async def real_strategy_service(strategy_service_container):
     await strategy_service.stop()
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def strategy_factory(strategy_service_container):
     """Create StrategyFactory for creating strategy instances."""
     factory = StrategyFactory(
@@ -298,7 +299,7 @@ class TestRealStrategyServiceIntegration:
         # Cleanup
         await real_strategy_service.cleanup_strategy(real_mean_reversion_config.strategy_id)
         # cleanup() is not async - it returns None
-        strategy.cleanup()
+        await strategy.cleanup()
 
     @pytest.mark.asyncio
     async def test_real_strategy_database_persistence(
@@ -341,13 +342,13 @@ class TestRealStrategyServiceIntegration:
 
         # Cleanup
         await real_strategy_service.cleanup_strategy(real_mean_reversion_config.strategy_id)
-        strategy.cleanup()
+        await strategy.cleanup()
 
 
 class TestRealTechnicalIndicatorCalculations:
     """Test real technical indicator calculations with mathematical accuracy."""
 
-    @pytest.fixture(autouse=True)
+    @pytest_asyncio.fixture(autouse=True)
     async def cleanup_database_before_test(self, real_database_service_fixture):
         """
         Clean database before each test in this class.
@@ -360,10 +361,8 @@ class TestRealTechnicalIndicatorCalculations:
         """
         from sqlalchemy import text
 
-        from src.database.connection import get_async_session
-
-        # Clean the market_data_records table before the test
-        async with get_async_session() as session:
+        # Use the database service's get_session() method to obtain an async session
+        async with real_database_service_fixture.get_session() as session:
             try:
                 await session.execute(text("SET session_replication_role = replica;"))
                 await session.execute(text("TRUNCATE TABLE market_data_records CASCADE;"))
@@ -377,7 +376,7 @@ class TestRealTechnicalIndicatorCalculations:
         yield
         # No cleanup needed after - next test will clean before it runs
 
-    @pytest.fixture
+    @pytest_asyncio.fixture
     async def real_mean_reversion_strategy(
         self, real_mean_reversion_config, strategy_service_container
     ):
@@ -389,11 +388,11 @@ class TestRealTechnicalIndicatorCalculations:
         real_database_service_fixture -> clean_database
         """
         strategy = MeanReversionStrategy(
-            config=real_mean_reversion_config.dict(), services=strategy_service_container
+            config=real_mean_reversion_config.model_dump(), services=strategy_service_container
         )
         await strategy.initialize(real_mean_reversion_config)
         yield strategy
-        strategy.cleanup()  # cleanup() is not async
+        await strategy.cleanup()
 
     def calculate_expected_sma(self, prices: list[Decimal], period: int) -> Decimal:
         """Calculate expected SMA for verification."""
@@ -615,7 +614,7 @@ class TestRealTechnicalIndicatorCalculations:
 class TestRealSignalGenerationIntegration:
     """Test real signal generation using actual indicator calculations."""
 
-    @pytest.fixture
+    @pytest_asyncio.fixture
     async def real_strategies(self, strategy_service_container):
         """Create multiple real strategies for testing."""
         # Mean Reversion Strategy
@@ -646,14 +645,14 @@ class TestRealSignalGenerationIntegration:
 
         # Create mean reversion strategy
         mean_reversion = MeanReversionStrategy(
-            config=mean_reversion_config.dict(), services=strategy_service_container
+            config=mean_reversion_config.model_dump(), services=strategy_service_container
         )
         await mean_reversion.initialize(mean_reversion_config)
         strategies.append(mean_reversion)
 
         # Create trend following strategy
         trend_following = TrendFollowingStrategy(
-            config=trend_following_config.dict(), services=strategy_service_container
+            config=trend_following_config.model_dump(), services=strategy_service_container
         )
         await trend_following.initialize(trend_following_config)
         strategies.append(trend_following)
@@ -662,7 +661,7 @@ class TestRealSignalGenerationIntegration:
 
         # Cleanup
         for strategy in strategies:
-            strategy.cleanup()  # cleanup() is not async
+            await strategy.cleanup()
 
     def create_mean_reversion_market_data(self) -> MarketData:
         """Create market data that should trigger mean reversion signals."""
@@ -901,7 +900,7 @@ class TestRealStrategyPerformanceIntegration:
 
         # Cleanup
         await real_strategy_service.cleanup_strategy(config.strategy_id)
-        strategy.cleanup()
+        await strategy.cleanup()
 
     @pytest.mark.asyncio
     async def test_real_indicator_calculation_performance(
@@ -956,7 +955,7 @@ class TestRealStrategyPerformanceIntegration:
         assert sma_time < 1.0  # Less than 1 second for 10 calculations
 
         # Cleanup
-        strategy.cleanup()
+        await strategy.cleanup()
 
     @pytest.mark.asyncio
     async def test_real_strategy_memory_usage(self, strategy_factory):
@@ -998,4 +997,4 @@ class TestRealStrategyPerformanceIntegration:
 
         # Cleanup strategies
         for strategy in strategies:
-            strategy.cleanup()  # cleanup() is not async
+            await strategy.cleanup()

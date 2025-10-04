@@ -401,6 +401,27 @@ class TechnicalIndicators(BaseComponent):
             self.logger.error(f"SMA calculation failed for {symbol}: {e}")
             return None
 
+    async def calculate_ema(self, symbol: str, period: int) -> Decimal | None:
+        """Calculate EMA using symbol - wrapper for strategy integration."""
+        try:
+            # EMA needs more historical data than SMA for accurate calculation
+            # Request significantly more data to build proper EMA context
+            price_data = await self._get_price_data(symbol, limit=1000)  # Get all available data
+            if not price_data or len(price_data) < period:
+                self.logger.warning(f"Insufficient price data for EMA calculation: {len(price_data) if price_data else 0} < {period}")
+                return None
+
+            prices = np.array([float(d.close) for d in price_data if hasattr(d, 'close') and d.close], dtype=np.float64)
+            if len(prices) < period:
+                self.logger.warning(f"Insufficient valid prices for EMA calculation: {len(prices)} < {period}")
+                return None
+
+            return await self._calculate_ema(prices, period)
+
+        except Exception as e:
+            self.logger.error(f"EMA calculation failed for {symbol}: {e}")
+            return None
+
     async def calculate_rsi(self, symbol: str, period: int) -> Decimal | None:
         """Calculate RSI using symbol - wrapper for strategy integration."""
         try:
