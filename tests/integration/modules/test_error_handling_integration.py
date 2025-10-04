@@ -9,6 +9,7 @@ This ensures error handling works properly in production scenarios.
 import asyncio
 import pytest
 import pytest_asyncio
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any, Dict
 from unittest.mock import AsyncMock, Mock, MagicMock
@@ -26,6 +27,18 @@ from src.error_handling.state_monitor import StateMonitor
 
 class TestErrorHandlingModuleIntegration:
     """Integration tests for error_handling module with real service dependencies."""
+
+    def create_test_context(self, **kwargs) -> Dict[str, Any]:
+        """Create context dict with all required boundary fields."""
+        context = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "source": "test_module",
+            "processing_mode": "request_reply",
+            "data_format": "json",
+            "message_pattern": "req_reply"
+        }
+        context.update(kwargs)
+        return context
 
     @pytest_asyncio.fixture(autouse=True)
     async def setup_services(self):
@@ -72,7 +85,7 @@ class TestErrorHandlingModuleIntegration:
                 error=test_error,
                 component="test_component",
                 operation="test_operation",
-                context={"test_context": "integration_test"}
+                context=self.create_test_context(test_context="integration_test")
             )
 
             assert result is not None
@@ -216,7 +229,7 @@ class TestErrorHandlingModuleIntegration:
                     error=test_error,
                     component="trading_engine",
                     operation="place_order",
-                    context=financial_context
+                    context=self.create_test_context(**financial_context)
                 )
 
                 if isinstance(test_error, ValidationError):
@@ -251,7 +264,7 @@ class TestErrorHandlingModuleIntegration:
             error=recoverable_error,
             component="exchange_service",
             operation="get_balance",
-            context={"retry_strategy": "exponential_backoff"}
+            context=self.create_test_context(retry_strategy="exponential_backoff")
         )
 
         assert result is not None
@@ -276,7 +289,7 @@ class TestErrorHandlingModuleIntegration:
                     error=persistent_error,
                     component="external_service",
                     operation=f"operation_{i}",
-                    context={"failure_simulation": True}
+                    context=self.create_test_context(failure_simulation=True)
                 )
             except Exception:
                 # Circuit breaker may prevent further calls
@@ -302,11 +315,11 @@ class TestErrorHandlingModuleIntegration:
                 error=cross_module_error,
                 component="risk_management",
                 operation="validate_position",
-                context={
-                    "source_module": "risk_management",
-                    "target_module": "execution",
-                    "propagation_test": True
-                }
+                context=self.create_test_context(
+                    source_module="risk_management",
+                    target_module="execution",
+                    propagation_test=True
+                )
             )
 
         # Verify the error was properly propagated
@@ -326,7 +339,7 @@ class TestErrorHandlingModuleIntegration:
                 error=ServiceError(f"Concurrent error {error_id}"),
                 component="concurrent_service",
                 operation=f"concurrent_operation_{error_id}",
-                context={"concurrent_test": True, "error_id": error_id}
+                context=self.create_test_context(concurrent_test=True, error_id=error_id)
             )
 
         # Run multiple error handling operations concurrently
@@ -361,7 +374,7 @@ class TestErrorHandlingModuleIntegration:
                 error=ValueError(f"Performance test error {i}"),
                 component="performance_test",
                 operation=f"operation_{i}",
-                context={"performance_test": True}
+                context=self.create_test_context(performance_test=True)
             )
 
         end_time = time.time()
@@ -398,7 +411,7 @@ class TestErrorHandlingModuleIntegration:
                 error=ValidationError("Context preservation test"),
                 component="context_test",
                 operation="preserve_context",
-                context=rich_context
+                context=self.create_test_context(**rich_context)
             )
 
         # Verify the error was properly propagated with context preserved
