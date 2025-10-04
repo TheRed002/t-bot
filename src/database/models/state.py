@@ -80,20 +80,20 @@ class StateSnapshot(Base, AuditMixin, MetadataMixin, SoftDeleteMixin):
     bot_id = Column(
         UUID(as_uuid=True),
         ForeignKey("bots.id", ondelete="SET NULL", onupdate="CASCADE"),
-        nullable=True,
-        index=True
+        nullable=True
+        # Note: index created explicitly in __table_args__ as ix_state_snapshots_bot_id
     )
     strategy_id = Column(
         UUID(as_uuid=True),
         ForeignKey("strategies.id", ondelete="SET NULL", onupdate="CASCADE"),
-        nullable=True,
-        index=True
+        nullable=True
+        # Note: index created explicitly in __table_args__ as ix_state_snapshots_strategy_id
     )
     position_id = Column(
         UUID(as_uuid=True),
         ForeignKey("positions.id", ondelete="SET NULL", onupdate="CASCADE"),
-        nullable=True,
-        index=True
+        nullable=True
+        # Note: index created explicitly in __table_args__ as ix_state_snapshots_position_id
     )
 
     # Relationships
@@ -211,20 +211,20 @@ class StateCheckpoint(Base, AuditMixin, MetadataMixin):
     bot_id = Column(
         UUID(as_uuid=True),
         ForeignKey("bots.id", ondelete="SET NULL", onupdate="CASCADE"),
-        nullable=True,
-        index=True
+        nullable=True
+        # Note: index created explicitly in __table_args__ as ix_state_checkpoints_bot_id
     )
     strategy_id = Column(
         UUID(as_uuid=True),
         ForeignKey("strategies.id", ondelete="SET NULL", onupdate="CASCADE"),
-        nullable=True,
-        index=True
+        nullable=True
+        # Note: index created explicitly in __table_args__ as ix_state_checkpoints_strategy_id
     )
     order_id = Column(
         UUID(as_uuid=True),
         ForeignKey("orders.id", ondelete="SET NULL", onupdate="CASCADE"),
-        nullable=True,
-        index=True
+        nullable=True
+        # Note: index created explicitly in __table_args__ as ix_state_checkpoints_order_id
     )
 
     # Storage info
@@ -324,32 +324,32 @@ class StateHistory(Base, TimestampMixin, MetadataMixin):
     bot_id = Column(
         UUID(as_uuid=True),
         ForeignKey("bots.id", ondelete="SET NULL", onupdate="CASCADE"),
-        nullable=True,
-        index=True
+        nullable=True
+        # Note: index created explicitly in __table_args__ as ix_state_history_bot_id
     )
     strategy_id = Column(
         UUID(as_uuid=True),
         ForeignKey("strategies.id", ondelete="SET NULL", onupdate="CASCADE"),
-        nullable=True,
-        index=True
+        nullable=True
+        # Note: index created explicitly in __table_args__ as ix_state_history_strategy_id
     )
     order_id = Column(
         UUID(as_uuid=True),
         ForeignKey("orders.id", ondelete="SET NULL", onupdate="CASCADE"),
-        nullable=True,
-        index=True
+        nullable=True
+        # Note: index created explicitly in __table_args__ as ix_state_history_order_id
     )
     position_id = Column(
         UUID(as_uuid=True),
         ForeignKey("positions.id", ondelete="SET NULL", onupdate="CASCADE"),
-        nullable=True,
-        index=True
+        nullable=True
+        # Note: index created explicitly in __table_args__ as ix_state_history_position_id
     )
     trade_id = Column(
         UUID(as_uuid=True),
         ForeignKey("trades.id", ondelete="SET NULL", onupdate="CASCADE"),
-        nullable=True,
-        index=True
+        nullable=True
+        # Note: index created explicitly in __table_args__ as ix_state_history_trade_id
     )
 
     # Validation and checksums
@@ -474,14 +474,14 @@ class StateMetadata(Base, AuditMixin):
     bot_id = Column(
         UUID(as_uuid=True),
         ForeignKey("bots.id", ondelete="SET NULL", onupdate="CASCADE"),
-        nullable=True,
-        index=True
+        nullable=True
+        # Note: index created explicitly in __table_args__ as ix_state_metadata_bot_id
     )
     strategy_id = Column(
         UUID(as_uuid=True),
         ForeignKey("strategies.id", ondelete="SET NULL", onupdate="CASCADE"),
-        nullable=True,
-        index=True
+        nullable=True
+        # Note: index created explicitly in __table_args__ as ix_state_metadata_strategy_id
     )
 
     # Validation
@@ -580,14 +580,14 @@ class StateBackup(Base, AuditMixin, MetadataMixin):
     bot_id = Column(
         UUID(as_uuid=True),
         ForeignKey("bots.id", ondelete="SET NULL", onupdate="CASCADE"),
-        nullable=True,
-        index=True
+        nullable=True
+        # Note: index created explicitly in __table_args__ as ix_state_backups_bot_id
     )
     strategy_id = Column(
         UUID(as_uuid=True),
         ForeignKey("strategies.id", ondelete="SET NULL", onupdate="CASCADE"),
-        nullable=True,
-        index=True
+        nullable=True
+        # Note: index created explicitly in __table_args__ as ix_state_backups_strategy_id
     )
 
     # Storage information

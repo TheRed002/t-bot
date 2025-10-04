@@ -57,6 +57,20 @@ class DatabaseConnectionManager:
         self.influxdb_client: InfluxDBClient | None = None
         self._health_check_task: Task[None] | None = None
         self._connection_healthy = True
+        self._test_schema: str | None = None  # For test isolation
+
+    def set_test_schema(self, schema: str) -> None:
+        """
+        Set test schema for session isolation.
+
+        This method is used by integration tests to configure sessions
+        to use a specific schema for test isolation.
+
+        Args:
+            schema: The schema name to use for test isolation
+        """
+        self._test_schema = schema
+        logger.debug(f"Test schema set to: {schema}")
 
     @time_execution
     @with_retry(max_attempts=3)
