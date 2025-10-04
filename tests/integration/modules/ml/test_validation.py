@@ -230,6 +230,7 @@ class TestMLModuleIntegration:
 class TestMLModuleBoundaryValidation:
     """Test ML module boundary validation and data contracts."""
     
+    @pytest.mark.asyncio
     async def test_ml_service_implements_required_interface(self):
         """Test that MLService implements required interface methods."""
         from src.ml.interfaces import IMLService

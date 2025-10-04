@@ -106,6 +106,7 @@ class TestBacktestingIntegrationSimple:
         mock_backtest_service.run_backtest.return_value = result
         
         # Test that service manager is used properly
+        @pytest.mark.asyncio
         async def test_run():
             await strategy_service._run_backtest_impl('test', {
                 'symbols': ['BTCUSDT'],

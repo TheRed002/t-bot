@@ -63,6 +63,7 @@ class TestDatabaseIntegrationWorkflows:
         finally:
             await service_factory.cleanup()
 
+    @pytest.mark.asyncio
     async def test_complete_trading_workflow(self, real_repositories):
         """Test a complete trading workflow from bot creation to trade execution using real database."""
         repositories, service_factory = real_repositories
@@ -205,6 +206,7 @@ class TestDatabaseIntegrationWorkflows:
 
         logger.info("✅ Complete trading workflow test completed successfully")
 
+    @pytest.mark.asyncio
     async def test_capital_management_workflow(self, real_repositories):
         """Test capital allocation and fund flow workflow using real database."""
         repositories, service_factory = real_repositories
@@ -300,6 +302,7 @@ class TestDatabaseIntegrationWorkflows:
 
         logger.info("✅ Capital management workflow test completed successfully")
 
+    @pytest.mark.asyncio
     async def test_concurrent_repository_operations(self, real_repositories):
         """Test sequential operations across repositories using real database (real DBs don't support concurrent operations on same session)."""
         repositories, service_factory = real_repositories
@@ -358,6 +361,7 @@ class TestDatabaseIntegrationWorkflows:
 
         logger.info("✅ Concurrent repository operations test completed successfully")
 
+    @pytest.mark.asyncio
     async def test_data_consistency_across_updates(self, real_repositories):
         """Test data consistency when updating related entities using real database."""
         repositories, service_factory = real_repositories
@@ -435,6 +439,7 @@ class TestDatabaseIntegrationWorkflows:
 
         logger.info("✅ Data consistency across updates test completed successfully")
 
+    @pytest.mark.asyncio
     async def test_repository_error_handling(self, real_repositories):
         """Test error handling across repository operations using real database."""
         repositories, service_factory = real_repositories
@@ -499,6 +504,7 @@ class TestDatabaseIntegrationWorkflows:
 
         logger.info("✅ Repository error handling test completed successfully")
 
+    @pytest.mark.asyncio
     async def test_repository_filtering_and_querying(self, real_repositories):
         """Test complex filtering and querying across repositories using real database."""
         repositories, service_factory = real_repositories
@@ -561,6 +567,7 @@ class TestDatabaseIntegrationWorkflows:
 
         logger.info("✅ Repository filtering and querying test completed successfully")
 
+    @pytest.mark.asyncio
     async def test_transaction_rollback_scenario(self, real_repositories):
         """Test transaction rollback in complex scenarios using real database."""
         repositories, service_factory = real_repositories
@@ -635,6 +642,7 @@ class TestDatabaseIntegrationWorkflows:
 
         logger.info("✅ Transaction rollback scenario test completed successfully")
 
+    @pytest.mark.asyncio
     async def test_financial_precision_across_models(self, real_repositories):
         """Test financial precision is maintained across different models using real database."""
         repositories, service_factory = real_repositories

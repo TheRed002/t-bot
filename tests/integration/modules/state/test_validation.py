@@ -68,6 +68,7 @@ class TestStateModuleIntegration:
         
         await state_service.cleanup()
 
+    @pytest.mark.asyncio
     async def test_state_service_dependency_injection(self, dependency_container):
         """Test that state service dependencies are properly injected."""
         # Register state services
@@ -80,6 +81,7 @@ class TestStateModuleIntegration:
         assert dependency_container.get("StateSynchronizationService") is not None
         assert dependency_container.get("StateService") is not None
 
+    @pytest.mark.asyncio
     async def test_bot_service_state_integration(self, config, state_service):
         """Test that BotService properly integrates with StateService."""
         # Create mock dependencies
@@ -129,6 +131,7 @@ class TestStateModuleIntegration:
         
         await bot_service.stop()
 
+    @pytest.mark.asyncio
     async def test_order_manager_state_integration(self, config, state_service):
         """Test that OrderManager properly integrates with StateService."""
         # Create mock exchange
@@ -169,6 +172,7 @@ class TestStateModuleIntegration:
         
         await order_manager.cleanup()
 
+    @pytest.mark.asyncio
     async def test_state_service_error_propagation(self, state_service):
         """Test that errors are properly propagated across module boundaries."""
         # Test invalid state type handling
@@ -179,6 +183,7 @@ class TestStateModuleIntegration:
                 None  # Invalid data
             )
 
+    @pytest.mark.asyncio
     async def test_cross_module_event_integration(self, state_service):
         """Test that state events are properly broadcast to other modules."""
         # Track event emissions
@@ -214,6 +219,7 @@ class TestStateModuleIntegration:
         # Note: Events might be processed asynchronously
         # This validates the subscription mechanism works
 
+    @pytest.mark.asyncio
     async def test_state_service_handles_missing_dependencies(self, config):
         """Test that StateService gracefully handles missing dependencies."""
         # Create StateService without injected dependencies
@@ -244,6 +250,7 @@ class TestStateModuleIntegration:
         
         await state_service.cleanup()
 
+    @pytest.mark.asyncio
     async def test_module_boundary_validation(self, state_service):
         """Test that modules respect state module boundaries."""
         # Test that state service doesn't expose internal implementation details
@@ -260,6 +267,7 @@ class TestStateModuleIntegration:
             # These should exist but not be part of public API contract
             assert hasattr(state_service, method)
 
+    @pytest.mark.asyncio
     async def test_consistency_utilities_integration(self):
         """Test that consistency utilities are properly integrated."""
         from src.state.consistency import validate_state_data, emit_state_event
@@ -285,6 +293,7 @@ class TestStateModuleIntegration:
         # Test event emission
         await emit_state_event("test.event", {"test": "data"})
 
+    @pytest.mark.asyncio
     async def test_service_layer_compliance(self, state_service):
         """Test that state service follows service layer architecture."""
         # Verify StateService inherits from BaseComponent
@@ -305,6 +314,7 @@ class TestStateModuleIntegration:
         assert isinstance(metrics, dict)
         assert "total_operations" in metrics
 
+    @pytest.mark.asyncio
     async def test_state_service_concurrent_access(self, state_service):
         """Test that state service handles concurrent access properly."""
         # Create multiple concurrent operations

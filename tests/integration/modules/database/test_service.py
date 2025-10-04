@@ -408,6 +408,7 @@ class TestDatabaseServiceIntegration:
 class TestDatabaseServiceDependencyInjection:
     """Test dependency injection patterns for database service with real services."""
 
+    @pytest.mark.asyncio
     async def test_database_services_registered(self, real_dependency_injector):
         """Test that all database services are registered with real implementations."""
         injector, service_factory = real_dependency_injector
@@ -423,6 +424,7 @@ class TestDatabaseServiceDependencyInjection:
 
         logger.info("✅ Real database services registration verified")
 
+    @pytest.mark.asyncio
     async def test_database_service_singleton_behavior(self, real_dependency_injector):
         """Test that real DatabaseService is properly managed as singleton."""
         injector, service_factory = real_dependency_injector
@@ -439,6 +441,7 @@ class TestDatabaseServiceDependencyInjection:
 
         logger.info("✅ Real DatabaseService singleton behavior verified")
 
+    @pytest.mark.asyncio
     async def test_repository_factory_integration(self, real_dependency_injector):
         """Test repository factory integration with real services."""
         injector, service_factory = real_dependency_injector
@@ -451,6 +454,7 @@ class TestDatabaseServiceDependencyInjection:
         except Exception as e:
             logger.info(f"Repository factory test: {e}")
 
+    @pytest.mark.asyncio
     async def test_unit_of_work_factory_integration(self, real_dependency_injector):
         """Test unit of work factory integration with real services."""
         injector, service_factory = real_dependency_injector

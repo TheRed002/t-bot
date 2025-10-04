@@ -59,6 +59,7 @@ class TestDatabaseModuleIntegration:
         """Create mock validation service."""
         return MagicMock()
 
+    @pytest.mark.asyncio
     async def test_database_service_dependency_injection_constructor(
         self, real_connection_manager, mock_config_service, mock_validation_service
     ):
@@ -87,6 +88,7 @@ class TestDatabaseModuleIntegration:
         finally:
             await service_factory.cleanup()
 
+    @pytest.mark.asyncio
     async def test_dependency_injection_registration(self):
         """Test database services are properly registered in DI container."""
         injector = DependencyInjector()
@@ -106,6 +108,7 @@ class TestDatabaseModuleIntegration:
 
         logger.info("✅ Database services DI registration verified")
 
+    @pytest.mark.asyncio
     async def test_database_service_integration_with_di(self):
         """Test DatabaseService can be resolved from DI container."""
         injector = DependencyInjector()
@@ -127,6 +130,7 @@ class TestDatabaseModuleIntegration:
 
         logger.info("✅ Database service DI resolution verified")
 
+    @pytest.mark.asyncio
     async def test_database_service_transaction_context_manager(self, real_connection_manager):
         """Test database service transaction context manager works correctly with real database."""
         service_factory = RealServiceFactory()
@@ -152,6 +156,7 @@ class TestDatabaseModuleIntegration:
         finally:
             await service_factory.cleanup()
 
+    @pytest.mark.asyncio
     async def test_database_service_transaction_rollback_on_error(self, real_connection_manager):
         """Test database service rolls back transaction on error using real database."""
         service_factory = RealServiceFactory()
@@ -196,6 +201,7 @@ class TestDatabaseModuleIntegration:
         finally:
             await service_factory.cleanup()
 
+    @pytest.mark.asyncio
     async def test_database_service_crud_operations_integration(self, real_connection_manager):
         """Test database service CRUD operations work with proper error handling using real database."""
         service_factory = RealServiceFactory()
@@ -237,6 +243,7 @@ class TestDatabaseModuleIntegration:
         finally:
             await service_factory.cleanup()
 
+    @pytest.mark.asyncio
     async def test_database_service_error_handling(self, real_connection_manager):
         """Test database service properly handles and propagates errors using real database."""
         service_factory = RealServiceFactory()
@@ -268,6 +275,7 @@ class TestDatabaseModuleIntegration:
         finally:
             await service_factory.cleanup()
 
+    @pytest.mark.asyncio
     async def test_consuming_module_integration_pattern(self):
         """Test that consuming modules properly use database service through DI."""
         injector = DependencyInjector()
@@ -304,6 +312,7 @@ class TestDatabaseModuleIntegration:
 
         logger.info(f"✅ Database model contracts verified for: {entity_type.__name__}")
 
+    @pytest.mark.asyncio
     async def test_repository_pattern_integration(self):
         """Test repository pattern works with database service."""
         injector = DependencyInjector()
@@ -330,6 +339,7 @@ class TestDatabaseModuleIntegration:
         except Exception as e:
             logger.info(f"PositionRepository test: {e}")
 
+    @pytest.mark.asyncio
     async def test_health_check_integration(self, real_connection_manager):
         """Test database service health check works correctly with real database."""
         from src.core.base.interfaces import HealthStatus
@@ -353,6 +363,7 @@ class TestDatabaseModuleIntegration:
         finally:
             await service_factory.cleanup()
 
+    @pytest.mark.asyncio
     async def test_financial_precision_integration(self, real_connection_manager):
         """Test database service handles financial precision correctly with real database."""
         service_factory = RealServiceFactory()
@@ -414,6 +425,7 @@ class TestDatabaseModuleIntegration:
 class TestDatabaseModuleBoundaryValidation:
     """Test database module boundaries and proper separation of concerns using real services."""
 
+    @pytest.mark.asyncio
     async def test_database_module_does_not_import_business_logic(self):
         """Test database module doesn't import business logic modules."""
         # Database module should not import from trading, strategies, execution, etc.
@@ -436,6 +448,7 @@ class TestDatabaseModuleBoundaryValidation:
 
         logger.info("✅ Database module boundary validation verified")
 
+    @pytest.mark.asyncio
     async def test_consuming_modules_use_interfaces(self):
         """Test consuming modules use database interfaces, not concrete classes."""
         # Check that modules import DatabaseServiceInterface, not DatabaseService directly

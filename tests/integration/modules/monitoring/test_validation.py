@@ -62,6 +62,7 @@ class TestMonitoringDependencyInjection:
         mock.get_system_resource_stats = MagicMock(return_value={})
         return mock
 
+    @pytest.mark.asyncio
     async def test_monitoring_services_registration(self, injector, mock_alert_manager, mock_metrics_collector, mock_performance_profiler):
         """Test that monitoring services register correctly with dependency injection."""
         # Mock the components
@@ -91,6 +92,7 @@ class TestMonitoringDependencyInjection:
             assert injector.resolve("MonitoringService") is not None
             assert injector.resolve("MonitoringServiceInterface") is not None
 
+    @pytest.mark.asyncio
     async def test_default_alert_service_dependency_injection(self, mock_alert_manager):
         """Test DefaultAlertService constructor accepts correct dependency injection parameters."""
         # Test with valid parameters only
@@ -103,6 +105,7 @@ class TestMonitoringDependencyInjection:
         service_minimal = DefaultAlertService(alert_manager=mock_alert_manager)
         assert service_minimal._alert_manager is mock_alert_manager
 
+    @pytest.mark.asyncio
     async def test_default_metrics_service_dependency_injection(self, mock_metrics_collector):
         """Test DefaultMetricsService constructor accepts correct dependency injection parameters."""
         # Test with valid parameters only
@@ -114,6 +117,7 @@ class TestMonitoringDependencyInjection:
         service_minimal = DefaultMetricsService(metrics_collector=mock_metrics_collector)
         assert service_minimal._metrics_collector is mock_metrics_collector
 
+    @pytest.mark.asyncio
     async def test_default_performance_service_dependency_injection(self, mock_performance_profiler):
         """Test DefaultPerformanceService constructor accepts correct dependency injection parameters."""
         # Test with valid parameters only
@@ -125,6 +129,7 @@ class TestMonitoringDependencyInjection:
         service_minimal = DefaultPerformanceService(performance_profiler=mock_performance_profiler)
         assert service_minimal._performance_profiler is mock_performance_profiler
 
+    @pytest.mark.asyncio
     async def test_monitoring_service_composition(self):
         """Test that MonitoringService properly composes service interfaces."""
         mock_alert_service = MagicMock()
@@ -147,6 +152,7 @@ class TestMonitoringDependencyInjection:
         assert monitoring_service.metrics is mock_metrics_service
         assert monitoring_service.performance is mock_performance_service
 
+    @pytest.mark.asyncio
     async def test_monitoring_service_validation(self):
         """Test that MonitoringService validates service interfaces."""
         mock_metrics_service = MagicMock()
@@ -179,6 +185,7 @@ class TestMonitoringModuleBoundaries:
         service.health_check = AsyncMock()
         return service
 
+    @pytest.mark.asyncio
     async def test_main_app_monitoring_integration(self, mock_monitoring_service):
         """Test that main application correctly integrates monitoring service."""
         from src.main import Application
@@ -203,6 +210,7 @@ class TestMonitoringModuleBoundaries:
             assert app.components["monitoring_service"] is mock_monitoring_service
             assert app.health_status["components"]["monitoring"] == "initialized"
 
+    @pytest.mark.asyncio
     async def test_execution_service_monitoring_integration(self):
         """Test execution service properly uses monitoring interfaces."""
         from src.monitoring.interfaces import MetricsServiceInterface
@@ -223,6 +231,7 @@ class TestMonitoringModuleBoundaries:
         # Verify monitoring service is properly injected
         assert execution_service.metrics_service is mock_metrics_service
 
+    @pytest.mark.asyncio
     async def test_strategy_monitoring_integration(self):
         """Test strategy base properly integrates with monitoring."""
         from src.strategies.base import BaseStrategy
@@ -269,6 +278,7 @@ class TestMonitoringModuleBoundaries:
 class TestMonitoringErrorIntegration:
     """Test monitoring error handling integration."""
 
+    @pytest.mark.asyncio
     async def test_monitoring_service_error_propagation(self):
         """Test that monitoring services properly propagate errors."""
         from src.monitoring.services import DefaultAlertService
@@ -281,6 +291,7 @@ class TestMonitoringErrorIntegration:
         with pytest.raises(ValidationError):
             await service.create_alert("invalid_request")  # Should be AlertRequest object
 
+    @pytest.mark.asyncio
     async def test_monitoring_circuit_breaker_integration(self):
         """Test monitoring integrates with circuit breaker patterns."""
         # This would test that monitoring services use circuit breakers

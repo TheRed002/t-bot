@@ -102,6 +102,7 @@ def error_handler_with_real_services(config, real_security_services):
 class TestErrorHandlerIntegration:
     """Test error handler integration."""
 
+    @pytest.mark.asyncio
     async def test_error_handler_initialization(self, error_handler_with_real_services, setup_logging_for_tests):
         """Test error handler initialization."""
         handler = error_handler_with_real_services
@@ -109,6 +110,7 @@ class TestErrorHandlerIntegration:
         assert handler.config is not None
         assert isinstance(handler.config, Config)
 
+    @pytest.mark.asyncio
     async def test_error_classification(self, error_handler_with_real_services, setup_logging_for_tests):
         """Test error classification functionality."""
         handler = error_handler_with_real_services
@@ -125,6 +127,7 @@ class TestErrorHandlerIntegration:
             severity = handler.classify_error(error)
             assert severity == expected_severity, f"Expected {expected_severity}, got {severity}"
 
+    @pytest.mark.asyncio
     async def test_error_context_creation(self, error_handler_with_real_services, setup_logging_for_tests):
         """Test error context creation."""
         handler = error_handler_with_real_services
@@ -146,6 +149,7 @@ class TestErrorHandlerIntegration:
         assert context.bot_id == "test_bot"
         assert context.symbol == "BTCUSDT"
 
+    @pytest.mark.asyncio
     async def test_circuit_breaker_functionality(self, error_handler_with_real_services, setup_logging_for_tests):
         """Test circuit breaker functionality."""
         from src.core.exceptions import TradingBotError
@@ -171,6 +175,7 @@ class TestErrorHandlerIntegration:
         with pytest.raises(TradingBotError):
             circuit_breaker.call(lambda: "should not execute")
 
+    @pytest.mark.asyncio
     async def test_error_handler_decorator(self, config, setup_logging_for_tests):
         """Test error handler decorator."""
 
@@ -188,6 +193,7 @@ class TestErrorHandlerIntegration:
 class TestRecoveryScenariosIntegration:
     """Test recovery scenario integrations."""
 
+    @pytest.mark.asyncio
     async def test_partial_fill_recovery(self, config, setup_logging_for_tests):
         """Test partial fill recovery scenario."""
         recovery = PartialFillRecovery(config)
@@ -206,6 +212,7 @@ class TestRecoveryScenariosIntegration:
         )
         assert result is not None
 
+    @pytest.mark.asyncio
     async def test_network_disconnection_recovery(self, config, setup_logging_for_tests):
         """Test network disconnection recovery scenario."""
         recovery = NetworkDisconnectionRecovery(config)
@@ -218,6 +225,7 @@ class TestRecoveryScenariosIntegration:
         )
         assert result is not None
 
+    @pytest.mark.asyncio
     async def test_exchange_maintenance_recovery(self, config, setup_logging_for_tests):
         """Test exchange maintenance recovery scenario."""
         recovery = ExchangeMaintenanceRecovery(config)
@@ -230,6 +238,7 @@ class TestRecoveryScenariosIntegration:
         )
         assert result is not None
 
+    @pytest.mark.asyncio
     async def test_data_feed_interruption_recovery(self, config, setup_logging_for_tests):
         """Test data feed interruption recovery scenario."""
         recovery = DataFeedInterruptionRecovery(config)
@@ -242,6 +251,7 @@ class TestRecoveryScenariosIntegration:
         )
         assert result is not None
 
+    @pytest.mark.asyncio
     async def test_order_rejection_recovery(self, config, setup_logging_for_tests):
         """Test order rejection recovery scenario."""
         recovery = OrderRejectionRecovery(config)
@@ -255,6 +265,7 @@ class TestRecoveryScenariosIntegration:
         )
         assert result is not None
 
+    @pytest.mark.asyncio
     async def test_api_rate_limit_recovery(self, config, setup_logging_for_tests):
         """Test API rate limit recovery scenario."""
         recovery = APIRateLimitRecovery(config)
@@ -273,6 +284,7 @@ class TestRecoveryScenariosIntegration:
 class TestConnectionManagerIntegration:
     """Test connection manager integration."""
 
+    @pytest.mark.asyncio
     async def test_connection_establishment(self, config, setup_logging_for_tests):
         """Test connection establishment."""
         manager = ConnectionManager(config)
@@ -296,6 +308,7 @@ class TestConnectionManagerIntegration:
         assert status is not None
         assert status.get("state") == ConnectionState.CONNECTED.value
 
+    @pytest.mark.asyncio
     async def test_message_queuing(self, config, setup_logging_for_tests):
         """Test message queuing functionality."""
         manager = ConnectionManager(config)
@@ -317,6 +330,7 @@ class TestConnectionManagerIntegration:
         message_count = await manager.flush_message_queue("test_connection")
         assert message_count > 0
 
+    @pytest.mark.asyncio
     async def test_connection_closure(self, config, setup_logging_for_tests):
         """Test connection closure."""
         manager = ConnectionManager(config)
@@ -343,6 +357,7 @@ class TestConnectionManagerIntegration:
 class TestStateMonitorIntegration:
     """Test state monitor integration."""
 
+    @pytest.mark.asyncio
     async def test_state_validation(self, config, setup_logging_for_tests):
         """Test state validation functionality."""
         monitor = StateMonitor(config)
@@ -352,6 +367,7 @@ class TestStateMonitorIntegration:
         assert validation_result is not None
         assert isinstance(validation_result, StateValidationResult)
 
+    @pytest.mark.asyncio
     async def test_state_reconciliation(self, config, setup_logging_for_tests):
         """Test state reconciliation functionality."""
         monitor = StateMonitor(config)
@@ -362,6 +378,7 @@ class TestStateMonitorIntegration:
         )
         assert reconciliation_result is not None
 
+    @pytest.mark.asyncio
     async def test_monitoring_summary(self, config, setup_logging_for_tests):
         """Test monitoring summary functionality."""
         monitor = StateMonitor(config)
@@ -371,6 +388,7 @@ class TestStateMonitorIntegration:
         assert summary is not None
         assert "total_validations" in summary
 
+    @pytest.mark.asyncio
     async def test_validation_history(self, config, setup_logging_for_tests):
         """Test validation history functionality."""
         monitor = StateMonitor(config)
@@ -384,6 +402,7 @@ class TestStateMonitorIntegration:
 class TestPatternAnalyticsIntegration:
     """Test pattern analytics integration."""
 
+    @pytest.mark.asyncio
     async def test_error_pattern_analysis(self, config, setup_logging_for_tests):
         """Test error pattern analysis functionality."""
         analytics = ErrorPatternAnalytics(config)
@@ -404,6 +423,7 @@ class TestPatternAnalyticsIntegration:
         patterns = analytics.get_pattern_summary()
         assert patterns is not None
 
+    @pytest.mark.asyncio
     async def test_correlation_analysis(self, config, setup_logging_for_tests):
         """Test correlation analysis functionality."""
         analytics = ErrorPatternAnalytics(config)
@@ -424,6 +444,7 @@ class TestPatternAnalyticsIntegration:
         correlations = analytics.get_correlation_summary()
         assert correlations is not None
 
+    @pytest.mark.asyncio
     async def test_trend_analysis(self, config, setup_logging_for_tests):
         """Test trend analysis functionality."""
         analytics = ErrorPatternAnalytics(config)
@@ -449,6 +470,7 @@ class TestPatternAnalyticsIntegration:
 class TestErrorHandlingIntegration:
     """Test comprehensive error handling integration."""
 
+    @pytest.mark.asyncio
     async def test_error_handling_with_connection_issues(self, config, setup_logging_for_tests):
         """Test error handling with connection issues."""
         # Create error handler with proper dependencies
@@ -487,6 +509,7 @@ class TestErrorHandlingIntegration:
         assert error_context is not None
         assert error_context.severity == ErrorSeverity.HIGH
 
+    @pytest.mark.asyncio
     async def test_error_handling_with_state_monitoring(self, config, setup_logging_for_tests):
         """Test error handling with state monitoring integration."""
         # Create error handler with proper dependencies
@@ -513,6 +536,7 @@ class TestErrorHandlingIntegration:
         assert error_context is not None
         assert error_context.severity == ErrorSeverity.CRITICAL
 
+    @pytest.mark.asyncio
     async def test_error_handling_with_pattern_analytics(self, config, setup_logging_for_tests):
         """Test error handling with pattern analytics integration."""
         # Create error handler with proper dependencies
@@ -550,6 +574,7 @@ class TestErrorHandlingIntegration:
         assert error_context is not None
         assert error_context.severity == ErrorSeverity.HIGH
 
+    @pytest.mark.asyncio
     async def test_comprehensive_error_recovery_flow(self, config, setup_logging_for_tests):
         """Test comprehensive error recovery flow."""
         # Create error handler with proper dependencies
@@ -716,6 +741,7 @@ class TestErrorHandlingServiceIntegration:
         asyncio.run(service.initialize())
         assert service._initialized
 
+    @pytest.mark.asyncio
     async def test_service_handles_error_with_proper_delegation(self):
         """Test service properly delegates error handling to components."""
         from unittest.mock import AsyncMock, Mock
@@ -779,6 +805,7 @@ class TestErrorHandlingServiceIntegration:
         assert result["handled"] is True
         assert result["error_id"] == "test-123"
 
+    @pytest.mark.asyncio
     async def test_service_health_check_reflects_component_health(self):
         """Test service health check properly reflects component health."""
         from unittest.mock import Mock
@@ -990,6 +1017,7 @@ class TestErrorHandlingCircularDependencyPrevention:
 class TestErrorHandlingResourceManagement:
     """Test error handling properly manages resources."""
 
+    @pytest.mark.asyncio
     async def test_service_cleanup_cancels_background_tasks(self):
         """Test service cleanup properly cancels background tasks."""
         from unittest.mock import AsyncMock, Mock
@@ -1039,6 +1067,7 @@ class TestErrorHandlingResourceManagement:
         error_handler.cleanup_resources.assert_called_once()
         pattern_analytics.cleanup.assert_called_once()
 
+    @pytest.mark.asyncio
     async def test_service_shutdown_resets_state(self):
         """Test service shutdown properly resets initialization state."""
         from unittest.mock import AsyncMock, Mock

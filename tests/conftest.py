@@ -246,12 +246,19 @@ def comprehensive_mock_cleanup():
                 attr = getattr(module, attr_name, None)
                 if attr and hasattr(attr, '__dict__') and hasattr(attr, '__module__'):
                     try:
-                        for class_attr_name in list(attr.__dict__.keys()):
-                            class_attr = getattr(attr, class_attr_name, None)
-                            if class_attr and (hasattr(class_attr, '_mock_name') or
-                                             'Mock' in str(type(class_attr))):
+                        # Suppress SQLAlchemy warnings for mixin classes
+                        import warnings
+                        with warnings.catch_warnings():
+                            warnings.filterwarnings('ignore', category=Warning, module='sqlalchemy')
+                            for class_attr_name in list(attr.__dict__.keys()):
                                 try:
-                                    delattr(attr, class_attr_name)
+                                    class_attr = getattr(attr, class_attr_name, None)
+                                    if class_attr and (hasattr(class_attr, '_mock_name') or
+                                                     'Mock' in str(type(class_attr))):
+                                        try:
+                                            delattr(attr, class_attr_name)
+                                        except Exception:
+                                            pass
                                 except Exception:
                                     pass
                     except Exception:

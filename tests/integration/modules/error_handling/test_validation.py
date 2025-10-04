@@ -107,6 +107,7 @@ class TestErrorHandlingDependencyInjection:
 class TestModuleBoundaryIntegration:
     """Test integration across module boundaries."""
 
+    @pytest.mark.asyncio
     async def test_database_service_integration(self, mock_database_service):
         """Test that DatabaseService properly integrates with error handling."""
         from src.database.connection import DatabaseConnectionManager
@@ -121,6 +122,7 @@ class TestModuleBoundaryIntegration:
         assert db_service is not None
         assert db_service.name == "DatabaseService"
 
+    @pytest.mark.asyncio
     async def test_web_interface_error_middleware_integration(self):
         """Test web interface error middleware uses error handling properly."""
         from src.web_interface.middleware.error_handler import ErrorHandlerMiddleware
@@ -131,6 +133,7 @@ class TestModuleBoundaryIntegration:
         # Verify middleware can be instantiated and has error handling integration
         assert hasattr(middleware, "app")
 
+    @pytest.mark.asyncio
     async def test_monitoring_service_integration(self, mock_monitoring_service):
         """Test monitoring service integration with error handling."""
         # Test that monitoring service can handle error events from error_handling
@@ -149,6 +152,7 @@ class TestModuleBoundaryIntegration:
 class TestErrorPropagationPatterns:
     """Test error propagation patterns between modules."""
 
+    @pytest.mark.asyncio
     async def test_validation_error_propagation(self):
         """Test validation errors are properly propagated."""
         from src.utils.messaging_patterns import BoundaryValidator
@@ -172,6 +176,7 @@ class TestErrorPropagationPatterns:
             # This might raise if validation fails, which is expected behavior
             assert isinstance(e, (ValidationError, ServiceError))
 
+    @pytest.mark.asyncio
     async def test_financial_data_transformation(self):
         """Test financial data transformation in error contexts."""
         from src.error_handling.service import ErrorHandlingService
@@ -193,11 +198,13 @@ class TestErrorPropagationPatterns:
 class TestDecoratorIntegration:
     """Test error handling decorator integration."""
 
+    @pytest.mark.asyncio
     async def test_retry_decorator_integration(self):
         """Test retry decorator can be used across modules."""
         call_count = 0
         
         @with_retry(max_attempts=3)
+        @pytest.mark.asyncio
         async def test_function():
             nonlocal call_count
             call_count += 1
@@ -209,9 +216,11 @@ class TestDecoratorIntegration:
         assert result == "success"
         assert call_count == 2
 
+    @pytest.mark.asyncio
     async def test_circuit_breaker_decorator_integration(self):
         """Test circuit breaker decorator can be used across modules."""
         @with_circuit_breaker(failure_threshold=2)
+        @pytest.mark.asyncio
         async def test_function():
             return "success"
         
@@ -234,6 +243,7 @@ class TestDecoratorIntegration:
 class TestServiceLayerIntegration:
     """Test service layer integration patterns."""
 
+    @pytest.mark.asyncio
     async def test_error_handling_service_interface(self):
         """Test ErrorHandlingService implements proper service interface."""
         from src.error_handling.interfaces import ErrorHandlingServiceInterface
@@ -245,6 +255,7 @@ class TestServiceLayerIntegration:
         # Verify service implements the interface
         assert isinstance(service, ErrorHandlingServiceInterface)
 
+    @pytest.mark.asyncio
     async def test_global_error_handler_setup(self):
         """Test global error handler setup patterns."""
         # Test that global error handler can be accessed
@@ -255,6 +266,7 @@ class TestServiceLayerIntegration:
         from src.error_handling import set_global_error_handler
         assert callable(set_global_error_handler)
 
+    @pytest.mark.asyncio
     async def test_error_context_creation_patterns(self):
         """Test error context creation across modules."""
         from src.error_handling.context import ErrorContext
@@ -276,6 +288,7 @@ class TestServiceLayerIntegration:
 class TestIntegrationErrorScenarios:
     """Test integration error scenarios and recovery."""
 
+    @pytest.mark.asyncio
     async def test_missing_dependency_handling(self):
         """Test handling of missing dependencies in integration."""
         # Test that services handle missing dependencies gracefully
@@ -291,6 +304,7 @@ class TestIntegrationErrorScenarios:
         with pytest.raises(ServiceError, match="Required dependencies not injected"):
             await service.initialize()
 
+    @pytest.mark.asyncio
     async def test_circular_dependency_prevention(self, dependency_container, config):
         """Test that circular dependencies are prevented."""
         # Register error handling services
@@ -300,6 +314,7 @@ class TestIntegrationErrorScenarios:
         assert dependency_container.has("ErrorHandlingService")
         assert dependency_container.has("ErrorHandler")
 
+    @pytest.mark.asyncio
     async def test_service_lifecycle_integration(self):
         """Test service lifecycle integration patterns."""
         from src.error_handling.service import ErrorHandlingService

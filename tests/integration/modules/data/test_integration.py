@@ -65,6 +65,7 @@ class TestDataModuleIntegration:
             exchange="binance",
         )
 
+    @pytest.mark.asyncio
     async def test_dependency_injection_configuration(self, injector):
         """Test that all required dependencies are properly configured."""
         # Test that core interfaces are registered
@@ -78,6 +79,7 @@ class TestDataModuleIntegration:
         assert injector.is_registered("VectorizedProcessor")
         assert injector.is_registered("DataServiceFactory")
 
+    @pytest.mark.asyncio
     async def test_data_service_factory_creation(self, injector):
         """Test that data service factories are properly configured."""
         # Test that all required factories are registered
@@ -94,6 +96,7 @@ class TestDataModuleIntegration:
         for factory_name in required_factories:
             assert injector.is_registered(factory_name), f"Factory {factory_name} not registered"
 
+    @pytest.mark.asyncio
     async def test_data_module_configuration_completeness(self, injector):
         """Test that the data module has all necessary configuration."""
         # Verify all data interfaces are properly registered
@@ -112,6 +115,7 @@ class TestDataModuleIntegration:
         assert injector.is_registered("DataService")  # Legacy name
         assert injector.is_registered("data_service")  # Lowercase alias
 
+    @pytest.mark.asyncio
     async def test_specialized_services_registration(self, injector):
         """Test that specialized data services are properly registered."""
         specialized_services = [
@@ -123,6 +127,7 @@ class TestDataModuleIntegration:
         for service_name in specialized_services:
             assert injector.is_registered(service_name), f"Specialized service {service_name} not registered"
 
+    @pytest.mark.asyncio
     async def test_market_data_model_validation(self, sample_market_data):
         """Test that market data model is properly structured."""
         # Test that sample data has all required fields

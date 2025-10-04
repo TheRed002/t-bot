@@ -105,6 +105,7 @@ class TestMonitoringModuleIntegration:
         assert "PerformanceServiceInterface" in factory_names
         assert "MonitoringServiceInterface" in factory_names
 
+    @pytest.mark.asyncio
     async def test_alert_service_integration(self, mock_alert_manager):
         """Test alert service integration with proper data validation."""
         from src.monitoring.alerting import AlertSeverity
@@ -183,6 +184,7 @@ class TestMonitoringModuleIntegration:
         assert monitoring_service.metrics == metrics_service
         assert monitoring_service.performance == performance_service
 
+    @pytest.mark.asyncio
     async def test_error_handling_to_monitoring_integration(self, mock_alert_manager):
         """Test error_handling -> monitoring boundary validation."""
         alert_service = DefaultAlertService(mock_alert_manager)

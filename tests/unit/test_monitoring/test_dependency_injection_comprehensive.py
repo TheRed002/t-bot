@@ -126,7 +126,7 @@ class TestFactoryFunctions:
         # Should be a BaseService with MetricsServiceInterface methods
         from src.monitoring.services import DefaultMetricsService
         assert isinstance(result, DefaultMetricsService)
-        assert hasattr(result, 'record_metric') or hasattr(result, 'get_metric')
+        assert hasattr(result, 'record_counter') or hasattr(result, 'record_gauge')
 
     @patch("src.monitoring.dependency_injection.create_performance_profiler")
     @patch("src.monitoring.services.DefaultPerformanceService")

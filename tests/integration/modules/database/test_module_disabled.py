@@ -476,6 +476,7 @@ class TestPerformanceIntegrationReal:
             # Test multiple concurrent connections
             import asyncio
 
+            @pytest.mark.asyncio
             async def test_connection():
                 async with clean_database.get_async_session() as session:
                     result = await session.execute(text("SELECT 1 as pool_test"))

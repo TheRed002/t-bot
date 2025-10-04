@@ -104,6 +104,7 @@ class TestBacktestingIntegrationValidation:
 
         return injector
 
+    @pytest.mark.asyncio
     async def test_service_dependency_resolution(self, injector):
         """Test that BacktestService correctly resolves dependencies via DI."""
         # Resolve service through interface
@@ -126,6 +127,7 @@ class TestBacktestingIntegrationValidation:
         if service.repository is not None:
             assert hasattr(service.repository, 'save_backtest_result')
 
+    @pytest.mark.asyncio
     async def test_service_layer_architecture(self, injector):
         """Test that service follows proper layer architecture."""
         service = injector.resolve("BacktestServiceInterface")
@@ -143,6 +145,7 @@ class TestBacktestingIntegrationValidation:
         health_result = await service.health_check()
         assert health_result.status.value in ['healthy', 'degraded', 'unhealthy']
 
+    @pytest.mark.asyncio
     async def test_controller_uses_service_interface(self, injector):
         """Test that BacktestController uses service through interface."""
         controller = injector.resolve("BacktestController")
@@ -153,6 +156,7 @@ class TestBacktestingIntegrationValidation:
         service = controller.backtest_service
         assert isinstance(service, BacktestServiceInterface)
 
+    @pytest.mark.asyncio
     async def test_factory_creates_proper_components(self, injector):
         """Test that factory creates components with proper dependencies."""
         factory = injector.resolve("BacktestFactory")
@@ -175,6 +179,7 @@ class TestBacktestingIntegrationValidation:
             # This is acceptable behavior for integration tests
             pass
 
+    @pytest.mark.asyncio
     async def test_no_circular_dependencies(self, injector):
         """Test that there are no circular dependencies."""
         # This should not hang or throw circular dependency errors
@@ -186,6 +191,7 @@ class TestBacktestingIntegrationValidation:
         assert controller is not None
         assert factory is not None
 
+    @pytest.mark.asyncio
     async def test_service_error_propagation(self, injector, mock_services):
         """Test that service errors are properly propagated."""
         # Mock service to throw error
@@ -212,6 +218,7 @@ class TestBacktestingIntegrationValidation:
         # Both behaviors are acceptable for graceful error handling
         # The key is that it doesn't crash or expose internal errors
 
+    @pytest.mark.asyncio
     async def test_module_boundary_respect(self, injector):
         """Test that backtesting respects other module boundaries."""
         service = injector.resolve("BacktestServiceInterface")
@@ -246,6 +253,7 @@ class TestBacktestingIntegrationValidation:
         # Should initialize without throwing errors
         await service.initialize()
 
+    @pytest.mark.asyncio
     async def test_interface_compliance(self, injector):
         """Test that concrete implementations comply with interfaces."""
         service = injector.resolve("BacktestServiceInterface")
@@ -265,6 +273,7 @@ class TestBacktestingIntegrationValidation:
         assert hasattr(service, 'delete_backtest_result')
         assert hasattr(service, 'cleanup')
 
+    @pytest.mark.asyncio
     async def test_dependency_injection_patterns(self, injector):
         """Test that proper DI patterns are followed."""
         # Constructor injection
@@ -280,6 +289,7 @@ class TestBacktestingIntegrationValidation:
         service_via_interface = injector.resolve("BacktestServiceInterface")
         assert service_via_interface is not None
 
+    @pytest.mark.asyncio
     async def test_service_lifecycle_management(self, injector):
         """Test proper service lifecycle management."""
         service = injector.resolve("BacktestServiceInterface")
@@ -302,6 +312,7 @@ class TestBacktestingIntegrationValidation:
 class TestOptimizationBacktestingIntegration:
     """Test optimization module's integration with backtesting."""
 
+    @pytest.mark.asyncio
     async def test_optimization_uses_interface(self):
         """Test that optimization module uses BacktestService through interface."""
         with patch('src.optimization.backtesting_integration.BacktestServiceInterface') as mock_interface:
@@ -311,6 +322,7 @@ class TestOptimizationBacktestingIntegration:
             service = BacktestIntegrationService(backtest_service=mock_service)
             assert service._backtest_service is mock_service
 
+    @pytest.mark.asyncio
     async def test_strategy_evaluation_error_handling(self):
         """Test that strategy evaluation handles errors properly."""
         with patch('src.optimization.backtesting_integration.BacktestServiceInterface'):
@@ -343,6 +355,7 @@ class TestOptimizationBacktestingIntegration:
 class TestWebInterfaceBacktestingIntegration:
     """Test web interface integration with backtesting."""
 
+    @pytest.mark.asyncio
     async def test_playground_uses_dependency_injection(self):
         """Test that playground API uses DI instead of globals."""
         from src.web_interface.api.playground import get_dependencies
@@ -360,6 +373,7 @@ class TestWebInterfaceBacktestingIntegration:
             assert deps['strategy_factory'] is None
             assert deps['bot_orchestrator'] is None
 
+    @pytest.mark.asyncio
     async def test_playground_handles_missing_services(self):
         """Test that playground handles missing services gracefully."""
         from src.web_interface.api.playground import get_dependencies

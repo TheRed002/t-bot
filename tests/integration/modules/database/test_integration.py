@@ -32,6 +32,7 @@ logger = logging.getLogger(__name__)
 class TestDatabaseConnection:
     """Test database connection and health check with real services."""
 
+    @pytest.mark.asyncio
     async def test_database_connection(self, clean_database):
         """Test database connection and health check using real PostgreSQL."""
         service_factory = RealServiceFactory()
@@ -65,6 +66,7 @@ class TestDatabaseConnection:
 class TestDatabaseModels:
     """Test database model creation and validation with real database."""
 
+    @pytest.mark.asyncio
     async def test_user_creation(self, clean_database):
         """Test user creation and validation using real PostgreSQL."""
         service_factory = RealServiceFactory()
@@ -96,6 +98,7 @@ class TestDatabaseModels:
         finally:
             await service_factory.cleanup()
 
+    @pytest.mark.asyncio
     async def test_bot_instance_creation(self, clean_database):
         """Test bot instance creation and validation using real PostgreSQL."""
         service_factory = RealServiceFactory()
@@ -137,6 +140,7 @@ class TestDatabaseModels:
         finally:
             await service_factory.cleanup()
 
+    @pytest.mark.asyncio
     async def test_order_creation_with_strategy(self, clean_database):
         """Test order creation and validation using real PostgreSQL."""
         service_factory = RealServiceFactory()
@@ -223,6 +227,7 @@ class TestDatabaseModels:
         finally:
             await service_factory.cleanup()
 
+    @pytest.mark.asyncio
     async def test_position_creation(self, clean_database):
         """Test position creation and validation using real PostgreSQL."""
         service_factory = RealServiceFactory()
@@ -307,6 +312,7 @@ class TestDatabaseModels:
         finally:
             await service_factory.cleanup()
 
+    @pytest.mark.asyncio
     async def test_balance_snapshot_creation(self, clean_database):
         """Test balance snapshot creation and validation using real PostgreSQL."""
         service_factory = RealServiceFactory()
@@ -360,6 +366,7 @@ class TestDatabaseModels:
 class TestDatabaseQueries:
     """Test database query operations with real PostgreSQL."""
 
+    @pytest.mark.asyncio
     async def test_get_by_id(self, clean_database):
         """Test get_by_id query using real database."""
         service_factory = RealServiceFactory()
@@ -391,6 +398,7 @@ class TestDatabaseQueries:
         finally:
             await service_factory.cleanup()
 
+    @pytest.mark.asyncio
     async def test_get_all(self, clean_database):
         """Test get_all query using real database."""
         service_factory = RealServiceFactory()
@@ -434,6 +442,7 @@ class TestDatabaseQueries:
 class TestRedisIntegration:
     """Test Redis client integration with real Redis service."""
 
+    @pytest.mark.asyncio
     async def test_redis_basic_operations(self, clean_database):
         """Test Redis basic operations using real Redis."""
         service_factory = RealServiceFactory()
@@ -465,6 +474,7 @@ class TestRedisIntegration:
         finally:
             await service_factory.cleanup()
 
+    @pytest.mark.asyncio
     async def test_redis_trading_operations(self, clean_database):
         """Test Redis trading-specific operations using real Redis."""
         service_factory = RealServiceFactory()
@@ -518,6 +528,7 @@ class TestRedisIntegration:
 class TestInfluxDBIntegration:
     """Test InfluxDB client integration with real InfluxDB service."""
 
+    @pytest.mark.asyncio
     async def test_influxdb_connection(self, clean_database):
         """Test InfluxDB connection using real InfluxDB."""
         service_factory = RealServiceFactory()
@@ -538,6 +549,7 @@ class TestInfluxDBIntegration:
         finally:
             await service_factory.cleanup()
 
+    @pytest.mark.asyncio
     async def test_influxdb_data_writing(self, clean_database):
         """Test InfluxDB data writing using real InfluxDB."""
         service_factory = RealServiceFactory()
@@ -627,6 +639,7 @@ class TestInfluxDBIntegration:
 class TestFinancialPrecisionIntegration:
     """Test financial precision with real database operations."""
 
+    @pytest.mark.asyncio
     async def test_decimal_precision_maintenance(self, clean_database):
         """Test that Decimal precision is maintained through real database operations."""
         service_factory = RealServiceFactory()

@@ -377,12 +377,14 @@ class TestRealWorldIntegrationPatterns:
             def __init__(self):
                 super().__init__("MetricsTestService")
                 
+            @pytest.mark.asyncio
             async def test_operation_success(self):
                 return await self.execute_with_monitoring(
                     "test_operation",
                     self._success_impl
                 )
                 
+            @pytest.mark.asyncio
             async def test_operation_failure(self):
                 return await self.execute_with_monitoring(
                     "test_operation",

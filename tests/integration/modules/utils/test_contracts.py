@@ -58,6 +58,7 @@ class TestValidationServiceContract:
         yield service
         await service.shutdown()
 
+    @pytest.mark.asyncio
     async def test_validate_order_contract(self, validation_service):
         """Test validate_order method contract."""
         # Valid order data
@@ -91,6 +92,7 @@ class TestValidationServiceContract:
         assert isinstance(result.execution_time_ms, float)
         assert isinstance(result.cache_hit, bool)
 
+    @pytest.mark.asyncio
     async def test_validate_order_with_context_contract(self, validation_service):
         """Test validate_order with context parameter."""
         order_data = {"symbol": "BTC/USDT", "side": "BUY", "type": "MARKET", "quantity": "0.1"}
@@ -107,6 +109,7 @@ class TestValidationServiceContract:
         assert result.context.trading_mode == "live"
         assert result.context.strategy_type == "momentum"
 
+    @pytest.mark.asyncio
     async def test_validate_order_error_contract(self, validation_service):
         """Test validate_order error handling contract."""
         # Invalid order data
@@ -134,6 +137,7 @@ class TestValidationServiceContract:
             assert isinstance(error.message, str)
             assert isinstance(error.severity, ValidationLevel)
 
+    @pytest.mark.asyncio
     async def test_validate_risk_parameters_contract(self, validation_service):
         """Test validate_risk_parameters method contract."""
         risk_data = {
@@ -148,6 +152,7 @@ class TestValidationServiceContract:
         assert isinstance(result, ValidationResult)
         assert result.validation_type == ValidationType.RISK
 
+    @pytest.mark.asyncio
     async def test_validate_strategy_config_contract(self, validation_service):
         """Test validate_strategy_config method contract."""
         strategy_data = {
@@ -161,6 +166,7 @@ class TestValidationServiceContract:
         assert isinstance(result, ValidationResult)
         assert result.validation_type == ValidationType.STRATEGY
 
+    @pytest.mark.asyncio
     async def test_validate_market_data_contract(self, validation_service):
         """Test validate_market_data method contract."""
         market_data = {
@@ -179,6 +185,7 @@ class TestValidationServiceContract:
         assert isinstance(result, ValidationResult)
         assert result.validation_type == ValidationType.MARKET_DATA
 
+    @pytest.mark.asyncio
     async def test_validate_batch_contract(self, validation_service):
         """Test validate_batch method contract."""
         validations = [
@@ -208,6 +215,7 @@ class TestValidationServiceContract:
             assert isinstance(result, ValidationResult)
             assert isinstance(validation_name, str)
 
+    @pytest.mark.asyncio
     async def test_backward_compatibility_contract(self, validation_service):
         """Test backward compatibility methods contract."""
         # Test legacy boolean methods
@@ -220,6 +228,7 @@ class TestValidationServiceContract:
         assert isinstance(validation_service.validate_quantity("0.1"), bool)
         assert isinstance(validation_service.validate_symbol("BTC/USDT"), bool)
 
+    @pytest.mark.asyncio
     async def test_service_lifecycle_contract(self, validation_service):
         """Test service lifecycle method contracts."""
         # Service should be initialized from fixture
@@ -320,6 +329,7 @@ class TestDataValidationContracts:
         yield service
         await service.shutdown()
 
+    @pytest.mark.asyncio
     async def test_decimal_precision_contract(self, validation_service):
         """Test decimal precision is maintained in validation results."""
         order_data = {
@@ -340,6 +350,7 @@ class TestDataValidationContracts:
                 # Should preserve original precision
                 assert str(normalized_qty) == "0.12345678"
 
+    @pytest.mark.asyncio
     async def test_validation_context_contract(self, validation_service):
         """Test validation context is properly handled."""
         order_data = {"symbol": "BTC/USDT", "side": "BUY", "type": "MARKET", "quantity": "0.1"}
@@ -366,6 +377,7 @@ class TestDataValidationContracts:
         assert result2.context.trading_mode == "paper"
         assert result2.context.additional_context["test"] == "value"
 
+    @pytest.mark.asyncio
     async def test_error_severity_contract(self, validation_service):
         """Test error severity levels are properly assigned."""
         # Create order with various severity issues
@@ -402,6 +414,7 @@ class TestPerformanceContracts:
         yield service
         await service.shutdown()
 
+    @pytest.mark.asyncio
     async def test_validation_timing_contract(self, validation_service):
         """Test that validation operations complete within reasonable time."""
         order_data = {
@@ -426,6 +439,7 @@ class TestPerformanceContracts:
         assert result.execution_time_ms >= 0
         assert result.execution_time_ms < 1000  # < 1 second in milliseconds
 
+    @pytest.mark.asyncio
     async def test_batch_validation_efficiency_contract(self, validation_service):
         """Test that batch validation is more efficient than individual validations."""
         # Create multiple validation requests with different types to avoid key collision
@@ -475,6 +489,7 @@ class TestPerformanceContracts:
         assert batch_time < 0.01, f"Batch validation too slow: {batch_time}s"
         assert individual_time < 0.01, f"Individual validations too slow: {individual_time}s"
 
+    @pytest.mark.asyncio
     async def test_concurrent_validation_contract(self, validation_service):
         """Test that concurrent validations work correctly."""
         order_template = {"symbol": "BTC/USDT", "side": "BUY", "type": "LIMIT", "price": "50000.0"}
@@ -509,6 +524,7 @@ class TestErrorContractConsistency:
         yield service
         await service.shutdown()
 
+    @pytest.mark.asyncio
     async def test_error_message_contract(self, validation_service):
         """Test error messages follow consistent format."""
         invalid_order = {
@@ -537,6 +553,7 @@ class TestErrorContractConsistency:
             assert len(error.validation_type) > 0
             assert isinstance(error.validation_type, str)
 
+    @pytest.mark.asyncio
     async def test_exception_handling_contract(self, validation_service):
         """Test that validation service handles exceptions gracefully."""
         # Test with malformed data that might cause internal errors
@@ -554,6 +571,7 @@ class TestErrorContractConsistency:
         assert not result.is_valid
         assert len(result.errors) > 0
 
+    @pytest.mark.asyncio
     async def test_suggestion_contract(self, validation_service):
         """Test that validation errors include helpful suggestions."""
         invalid_order = {

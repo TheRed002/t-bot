@@ -99,6 +99,7 @@ class TestBacktestingModuleIntegration:
             "CacheService": mock_cache,
         }
 
+    @pytest.mark.asyncio
     async def test_dependency_injection_integration(self, injector):
         """Test that dependency injection works without circular dependencies."""
         # Should not hang or fail
@@ -115,6 +116,7 @@ class TestBacktestingModuleIntegration:
         repository = factory.create_repository()
         assert repository is not None
 
+    @pytest.mark.asyncio
     async def test_service_layer_compliance(self, injector, mock_services):
         """Test that backtesting follows service layer patterns correctly."""
         # Register mock services
@@ -136,6 +138,7 @@ class TestBacktestingModuleIntegration:
         mock_services["DataService"].initialize.assert_called_once()
         mock_services["StrategyService"].initialize.assert_called_once()
 
+    @pytest.mark.asyncio
     async def test_interface_compliance(self, injector, mock_services):
         """Test that services use interfaces correctly."""
         # Register mock services
@@ -174,6 +177,7 @@ class TestBacktestingModuleIntegration:
         except AttributeError as e:
             pytest.fail(f"Interface compliance error: {e}")
 
+    @pytest.mark.asyncio
     async def test_error_propagation(self, injector, mock_services):
         """Test that errors are properly handled across module boundaries."""
         # Make data service fail
@@ -193,6 +197,7 @@ class TestBacktestingModuleIntegration:
         # Should propagate the error appropriately
         assert "Data service failed" in str(exc_info.value) or isinstance(exc_info.value, Exception)
 
+    @pytest.mark.asyncio
     async def test_repository_integration(self, injector):
         """Test that repository properly integrates with database services."""
         factory = injector.resolve('BacktestFactory')
@@ -204,6 +209,7 @@ class TestBacktestingModuleIntegration:
         # Database manager should implement the expected interface
         assert hasattr(repository.db_manager, 'get_session')
 
+    @pytest.mark.asyncio
     async def test_module_boundary_respect(self, injector):
         """Test that backtesting module respects other module boundaries."""
         factory = injector.resolve('BacktestFactory')
@@ -218,6 +224,7 @@ class TestBacktestingModuleIntegration:
             assert not hasattr(service.data_service, '_connection')
             assert not hasattr(service.data_service, '_session')
 
+    @pytest.mark.asyncio
     async def test_health_check_integration(self, injector, mock_services):
         """Test that health checks work across module boundaries."""
         # Register mock services with health check support
@@ -238,6 +245,7 @@ class TestBacktestingModuleIntegration:
         health = await service.health_check()
         assert health.status in [HealthStatus.HEALTHY, HealthStatus.DEGRADED, HealthStatus.UNHEALTHY]
 
+    @pytest.mark.asyncio
     async def test_service_cleanup_integration(self, injector, mock_services):
         """Test that cleanup works properly across all services."""
         # Register mock services

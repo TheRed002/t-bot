@@ -47,6 +47,7 @@ class TestCoreService(BaseService):
             # Repository is optional for this test
             pass
             
+    @pytest.mark.asyncio
     async def test_operation(self, data):
         """Test operation that uses monitoring."""
         return await self.execute_with_monitoring(
@@ -209,6 +210,7 @@ class TestCoreModuleIntegration:
             def __init__(self):
                 super().__init__(name="TestTransactionalService")
                 
+            @pytest.mark.asyncio
             async def test_transaction_operation(self, data):
                 return await self.execute_in_transaction(
                     "test_transaction",

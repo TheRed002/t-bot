@@ -89,6 +89,7 @@ class TestOptimizationDependencyInjectionValidation:
         # Verify dependency not tracked
         assert "AsyncSession" not in repo._dependencies
 
+    @pytest.mark.asyncio
     async def test_repository_save_without_session_fails(self):
         """Test repository operations fail gracefully without session."""
         from src.optimization.repository import OptimizationRepository
@@ -117,6 +118,7 @@ class TestOptimizationDependencyInjectionValidation:
         with pytest.raises(RepositoryError, match="Database session not available"):
             await repo.save_optimization_result(result)
 
+    @pytest.mark.asyncio
     async def test_repository_get_without_session_returns_none(self):
         """Test repository get operations return None without session."""
         from src.optimization.repository import OptimizationRepository
@@ -127,6 +129,7 @@ class TestOptimizationDependencyInjectionValidation:
         result = await repo.get_optimization_result("test-id")
         assert result is None
 
+    @pytest.mark.asyncio
     async def test_repository_list_without_session_returns_empty(self):
         """Test repository list operations return empty list without session."""
         from src.optimization.repository import OptimizationRepository
@@ -147,6 +150,7 @@ class TestOptimizationDependencyInjectionValidation:
         # Verify no dependency tracked when None provided
         assert "BacktestService" not in service._dependencies
 
+    @pytest.mark.asyncio
     async def test_backtest_integration_simulate_without_service(self):
         """Test backtest integration uses simulation when service unavailable."""
         from src.optimization.backtesting_integration import BacktestIntegrationService
@@ -222,6 +226,7 @@ class TestOptimizationDependencyInjectionValidation:
         assert service._optimization_repository is None
         assert service._analysis_service is None
 
+    @pytest.mark.asyncio
     async def test_service_optimization_with_missing_dependencies(self):
         """Test service handles missing dependencies during optimization."""
         from src.optimization.service import OptimizationService
@@ -279,6 +284,7 @@ class TestOptimizationDependencyInjectionValidation:
             for pattern in prohibited_patterns:
                 assert pattern not in import_name, f"Improper internal import: {import_name}"
 
+    @pytest.mark.asyncio
     async def test_integration_error_propagation(self):
         """Test that errors are properly propagated through integration layers."""
         from src.optimization.service import OptimizationService
