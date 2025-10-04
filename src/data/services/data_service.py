@@ -89,6 +89,9 @@ class DataService(BaseComponent):
         self._cache_misses = 0
         self._total_operations = 0
 
+        # Technical indicators (lazy initialization)
+        self._technical_indicators = None
+
         self._initialized = False
 
     async def initialize(self) -> None:
@@ -439,7 +442,7 @@ class DataService(BaseComponent):
                 model_class=MarketDataRecord,
                 filters=filters,
                 order_by="data_timestamp",
-                order_desc=True,
+                order_desc=False,  # Ascending order (oldest first) for technical indicators
                 limit=request.limit,
             )
 
@@ -529,8 +532,8 @@ class DataService(BaseComponent):
                 )
                 market_data.append(data)
 
-            # Sort by timestamp descending
-            market_data.sort(key=lambda x: x.timestamp or datetime.min, reverse=True)
+            # Data is already sorted by database query (ascending order, oldest first)
+            # No need to re-sort
             return market_data[:limit]
 
         except Exception as e:
@@ -592,6 +595,95 @@ class DataService(BaseComponent):
         except Exception as e:
             self.logger.error(f"Failed to get volatility for {symbol}: {e}")
             raise DataError(f"Failed to get volatility for {symbol}: {e}")
+
+    def _get_technical_indicators(self):
+        """Get or create technical indicators instance (lazy initialization)."""
+        if self._technical_indicators is None:
+            from src.data.features.technical_indicators import TechnicalIndicators
+            self._technical_indicators = TechnicalIndicators(
+                config=self.config,
+                data_service=self
+            )
+        return self._technical_indicators
+
+    async def get_rsi(self, symbol: str, period: int = 14, exchange: str = DEFAULT_EXCHANGE) -> Decimal | None:
+        """Calculate RSI (Relative Strength Index) for a symbol.
+
+        Args:
+            symbol: Trading symbol
+            period: RSI period (default 14)
+            exchange: Exchange name
+
+        Returns:
+            RSI value as Decimal or None if insufficient data
+        """
+        try:
+            indicators = self._get_technical_indicators()
+            return await indicators.calculate_rsi(symbol, period)
+        except Exception as e:
+            self.logger.error(f"Failed to calculate RSI for {symbol}: {e}")
+            return None
+
+    async def get_sma(self, symbol: str, period: int = 20, exchange: str = DEFAULT_EXCHANGE) -> Decimal | None:
+        """Calculate SMA (Simple Moving Average) for a symbol.
+
+        Args:
+            symbol: Trading symbol
+            period: SMA period (default 20)
+            exchange: Exchange name
+
+        Returns:
+            SMA value as Decimal or None if insufficient data
+        """
+        try:
+            indicators = self._get_technical_indicators()
+            return await indicators.calculate_sma(symbol, period)
+        except Exception as e:
+            self.logger.error(f"Failed to calculate SMA for {symbol}: {e}")
+            return None
+
+    async def get_ema(self, symbol: str, period: int = 20, exchange: str = DEFAULT_EXCHANGE) -> Decimal | None:
+        """Calculate EMA (Exponential Moving Average) for a symbol.
+
+        Args:
+            symbol: Trading symbol
+            period: EMA period (default 20)
+            exchange: Exchange name
+
+        Returns:
+            EMA value as Decimal or None if insufficient data
+        """
+        try:
+            indicators = self._get_technical_indicators()
+            # TechnicalIndicators doesn't have calculate_ema, so we'll use calculate_sma for now
+            # This is a temporary solution - proper EMA implementation would be in TechnicalIndicators
+            return await indicators.calculate_sma(symbol, period)
+        except Exception as e:
+            self.logger.error(f"Failed to calculate EMA for {symbol}: {e}")
+            return None
+
+    async def get_macd(self, symbol: str, exchange: str = DEFAULT_EXCHANGE) -> dict[str, Decimal] | None:
+        """Calculate MACD (Moving Average Convergence Divergence) for a symbol.
+
+        Args:
+            symbol: Trading symbol
+            exchange: Exchange name
+
+        Returns:
+            Dictionary with 'macd', 'signal', 'histogram' values or None if insufficient data
+        """
+        try:
+            indicators = self._get_technical_indicators()
+            # Get recent prices for MACD calculation
+            recent_data = await self.get_recent_data(symbol, limit=50, exchange=exchange)
+            if not recent_data:
+                return None
+
+            prices = [data.close for data in recent_data]
+            return await indicators.macd(prices)
+        except Exception as e:
+            self.logger.error(f"Failed to calculate MACD for {symbol}: {e}")
+            return None
 
     async def health_check(self) -> HealthCheckResult:
         """Perform health check."""

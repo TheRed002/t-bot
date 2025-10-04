@@ -384,16 +384,17 @@ class TechnicalIndicators(BaseComponent):
     async def calculate_sma(self, symbol: str, period: int) -> Decimal | None:
         """Calculate SMA using symbol - wrapper for strategy integration."""
         try:
-            if not self.feature_store:
-                self.logger.warning("Feature store not available for SMA calculation")
-                return None
-
-            # Get price data from feature store or data service
+            # Get price data from feature store or data service (both are optional)
             price_data = await self._get_price_data(symbol, period + 10)  # Extra buffer
             if not price_data or len(price_data) < period:
+                self.logger.warning(f"Insufficient price data for SMA calculation: {len(price_data) if price_data else 0} < {period}")
                 return None
 
-            prices = np.array([float(d.price) for d in price_data if d.price], dtype=np.float64)
+            prices = np.array([float(d.close) for d in price_data if hasattr(d, 'close') and d.close], dtype=np.float64)
+            if len(prices) < period:
+                self.logger.warning(f"Insufficient valid prices for SMA calculation: {len(prices)} < {period}")
+                return None
+
             return await self._calculate_sma(prices, period)
 
         except Exception as e:
@@ -403,16 +404,18 @@ class TechnicalIndicators(BaseComponent):
     async def calculate_rsi(self, symbol: str, period: int) -> Decimal | None:
         """Calculate RSI using symbol - wrapper for strategy integration."""
         try:
-            if not self.feature_store:
-                self.logger.warning("Feature store not available for RSI calculation")
-                return None
-
-            # Get price data from feature store or data service
-            price_data = await self._get_price_data(symbol, period + 20)  # Extra buffer for RSI
+            # Get price data from feature store or data service (both are optional)
+            # Request more data to get better RSI accuracy with proper initialization period
+            price_data = await self._get_price_data(symbol, limit=1000)  # Get all available data
             if not price_data or len(price_data) < period + 1:
+                self.logger.warning(f"Insufficient price data for RSI calculation: {len(price_data) if price_data else 0} < {period + 1}")
                 return None
 
-            prices = np.array([float(d.price) for d in price_data if d.price], dtype=np.float64)
+            prices = np.array([float(d.close) for d in price_data if hasattr(d, 'close') and d.close], dtype=np.float64)
+            if len(prices) < period + 1:
+                self.logger.warning(f"Insufficient valid prices for RSI calculation: {len(prices)} < {period + 1}")
+                return None
+
             return await self._calculate_rsi(prices, period)
 
         except Exception as e:
@@ -422,16 +425,12 @@ class TechnicalIndicators(BaseComponent):
     async def calculate_momentum(self, symbol: str, period: int) -> Decimal | None:
         """Calculate price momentum - NEW implementation for strategy integration."""
         try:
-            if not self.feature_store:
-                self.logger.warning("Feature store not available for momentum calculation")
-                return None
-
-            # Get price data from feature store or data service
+            # Get price data from feature store or data service (both are optional)
             price_data = await self._get_price_data(symbol, period + 5)
             if not price_data or len(price_data) < period + 1:
                 return None
 
-            prices = np.array([float(d.price) for d in price_data if d.price], dtype=np.float64)
+            prices = np.array([float(d.close) for d in price_data if hasattr(d, 'close') and d.close], dtype=np.float64)
 
             # Calculate momentum as percent change over period
             if len(prices) >= period + 1:
@@ -454,16 +453,12 @@ class TechnicalIndicators(BaseComponent):
     async def calculate_volatility(self, symbol: str, period: int) -> Decimal | None:
         """Calculate historical volatility - NEW implementation for strategy integration."""
         try:
-            if not self.feature_store:
-                self.logger.warning("Feature store not available for volatility calculation")
-                return None
-
-            # Get price data from feature store or data service
+            # Get price data from feature store or data service (both are optional)
             price_data = await self._get_price_data(symbol, period + 5)
             if not price_data or len(price_data) < period:
                 return None
 
-            prices = np.array([float(d.price) for d in price_data if d.price], dtype=np.float64)
+            prices = np.array([float(d.close) for d in price_data if hasattr(d, 'close') and d.close], dtype=np.float64)
 
             # Calculate returns
             if len(prices) < 2:
@@ -485,11 +480,7 @@ class TechnicalIndicators(BaseComponent):
     async def calculate_volume_ratio(self, symbol: str, period: int) -> Decimal | None:
         """Calculate volume ratio - NEW implementation for strategy integration."""
         try:
-            if not self.feature_store:
-                self.logger.warning("Feature store not available for volume ratio calculation")
-                return None
-
-            # Get price data with volume from feature store or data service
+            # Get price data with volume from feature store or data service (both are optional)
             price_data = await self._get_price_data(symbol, period + 5)
             if not price_data or len(price_data) < period:
                 return None
@@ -527,11 +518,7 @@ class TechnicalIndicators(BaseComponent):
     async def calculate_atr(self, symbol: str, period: int) -> Decimal | None:
         """Calculate ATR using symbol - wrapper for strategy integration."""
         try:
-            if not self.feature_store:
-                self.logger.warning("Feature store not available for ATR calculation")
-                return None
-
-            # Get OHLC data from feature store or data service
+            # Get OHLC data from feature store or data service (both are optional)
             price_data = await self._get_price_data(symbol, period + 10)
             if not price_data or len(price_data) < period:
                 return None
@@ -576,16 +563,15 @@ class TechnicalIndicators(BaseComponent):
     ) -> dict[str, Decimal] | None:
         """Calculate Bollinger Bands using symbol - wrapper for strategy integration."""
         try:
-            if not self.feature_store:
-                self.logger.warning("Feature store not available for Bollinger Bands calculation")
-                return None
-
-            # Get price data from feature store or data service
+            # Get price data from feature store or data service (both are optional)
             price_data = await self._get_price_data(symbol, period + 10)
             if not price_data or len(price_data) < period:
                 return None
 
-            prices = np.array([float(d.price) for d in price_data if d.price], dtype=np.float64)
+            prices = np.array([float(d.close) for d in price_data if hasattr(d, 'close') and d.close], dtype=np.float64)
+            if len(prices) < period:
+                return None
+
             return await self._calculate_bollinger_bands(prices, period, std_dev)
 
         except Exception as e:

@@ -533,9 +533,8 @@ class TestRealIndicatorPipelineIntegration:
         # Validate RSI using reference calculation on same data
         # Note: market_data is in chronological order (oldest first) as generated
         # This matches what get_rsi does internally after reversing DB results
-        validator = IndicatorValidator()
         prices = [md.close for md in market_data]  # Already in correct chronological order
-        expected_rsi = validator.calculate_rsi(prices, 14)
+        expected_rsi = IndicatorValidator.calculate_rsi(prices, 14)
 
         # Verify calculation accuracy
         assert calculated_rsi is not None
