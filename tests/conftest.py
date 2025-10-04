@@ -242,25 +242,32 @@ def comprehensive_mock_cleanup():
                     except Exception:
                         pass
             # Check class attributes for Mock contamination
-            for attr_name in dir(module):
-                attr = getattr(module, attr_name, None)
-                if attr and hasattr(attr, '__dict__') and hasattr(attr, '__module__'):
+            # Skip SQLAlchemy mixin classes to avoid warnings
+            import warnings
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                for attr_name in dir(module):
                     try:
-                        # Suppress SQLAlchemy warnings for mixin classes
-                        import warnings
-                        with warnings.catch_warnings():
-                            warnings.filterwarnings('ignore', category=Warning, module='sqlalchemy')
-                            for class_attr_name in list(attr.__dict__.keys()):
-                                try:
-                                    class_attr = getattr(attr, class_attr_name, None)
-                                    if class_attr and (hasattr(class_attr, '_mock_name') or
-                                                     'Mock' in str(type(class_attr))):
-                                        try:
-                                            delattr(attr, class_attr_name)
-                                        except Exception:
-                                            pass
-                                except Exception:
-                                    pass
+                        attr = getattr(module, attr_name, None)
+                        # Skip if it's a mixin class or declarative class
+                        if attr and hasattr(attr, '__dict__') and hasattr(attr, '__module__'):
+                            # Skip SQLAlchemy classes
+                            if hasattr(attr, '__tablename__') or hasattr(attr, '__mapper__') or 'Mixin' in attr_name:
+                                continue
+                            try:
+                                for class_attr_name in list(attr.__dict__.keys()):
+                                    try:
+                                        class_attr = getattr(attr, class_attr_name, None)
+                                        if class_attr and (hasattr(class_attr, '_mock_name') or
+                                                         'Mock' in str(type(class_attr))):
+                                            try:
+                                                delattr(attr, class_attr_name)
+                                            except Exception:
+                                                pass
+                                    except Exception:
+                                        pass
+                            except Exception:
+                                pass
                     except Exception:
                         pass
         except Exception:

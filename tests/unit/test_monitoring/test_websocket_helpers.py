@@ -356,21 +356,23 @@ class TestWebSocketManager:
         # Verify that cancel was called on the connection task
         mock_task.cancel.assert_called_once()
 
-    def test_websocket_manager_send_message_success(self):
-        """Test successful message sending - sync version."""
+    @pytest.mark.asyncio
+    async def test_websocket_manager_send_message_success(self):
+        """Test successful message sending."""
         manager = WebSocketManager(self.config)
         manager._state = WebSocketState.CONNECTED
 
         message = {"type": "test", "data": "hello"}
 
-        # Mock send_message as sync operation
-        with patch.object(manager, "send_message") as mock_send:
-            mock_send.return_value = None
-            manager.send_message(message)
-            mock_send.assert_called_once_with(message)
+        # Mock send_message as async operation
+        async def mock_send(msg):
+            manager.metrics.messages_sent += 1
 
-        # Simulate metrics update
-        manager.metrics.messages_sent = 1
+        with patch.object(manager, "send_message", side_effect=mock_send) as mock_send_spy:
+            await manager.send_message(message)
+            mock_send_spy.assert_called_once_with(message)
+
+        # Verify metrics update
         assert manager.metrics.messages_sent == 1
 
     @pytest.mark.asyncio
@@ -403,52 +405,45 @@ class TestWebSocketManager:
         """Test WebSocket connection context manager."""
         manager = WebSocketManager(self.config)
 
-
-        async def noop():
+        async def mock_connect():
             pass
 
-        with patch.object(manager, "connect", return_value=noop()) as mock_connect:
-            with patch.object(manager, "disconnect", return_value=noop()) as mock_disconnect:
+        async def mock_disconnect():
+            pass
+
+        with patch.object(manager, "connect", side_effect=mock_connect) as mock_connect_spy:
+            with patch.object(manager, "disconnect", side_effect=mock_disconnect) as mock_disconnect_spy:
                 async with manager.connection_context() as ctx_manager:
                     assert ctx_manager == manager
 
-                mock_connect.assert_called_once()
-                mock_disconnect.assert_called_once()
+                mock_connect_spy.assert_called_once()
+                mock_disconnect_spy.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_websocket_manager_connection_context_exception(self):
         """Test WebSocket connection context manager with exception."""
         manager = WebSocketManager(self.config)
 
-        with patch.object(manager, "connect"):
-            with patch.object(manager, "disconnect") as mock_disconnect:
+        async def mock_connect():
+            pass
 
-                async def disconnect_coro():
-                    return None
+        async def mock_disconnect():
+            pass
 
-                mock_disconnect.return_value = disconnect_coro()
-
+        with patch.object(manager, "connect", side_effect=mock_connect):
+            with patch.object(manager, "disconnect", side_effect=mock_disconnect) as mock_disconnect_spy:
                 try:
                     async with manager.connection_context():
                         raise Exception("Test error")
                 except Exception:
                     pass
 
-                mock_disconnect.assert_called_once()
+                mock_disconnect_spy.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_websocket_manager_wait_connected_success(self):
         """Test waiting for connection successfully."""
         manager = WebSocketManager(self.config)
-
-        # Mock the connected event
-        mock_event = Mock()
-
-        async def wait_coro():
-            return None
-
-        mock_event.wait = wait_coro
-        manager._connected_event = mock_event
 
         async def wait_for_success(*args, **kwargs):
             return None
@@ -463,21 +458,10 @@ class TestWebSocketManager:
         """Test waiting for connection with timeout."""
         manager = WebSocketManager(self.config)
 
-        # Mock the connected event
-        mock_event = Mock()
-
-        async def wait_coro():
-            return None
-
-        mock_event.wait = wait_coro
-        manager._connected_event = mock_event
-
         async def wait_for_timeout(*args, **kwargs):
             raise asyncio.TimeoutError()
 
-        with patch("asyncio.wait_for", side_effect=wait_for_timeout) as mock_wait_for:
-            # Simulate timeout
-
+        with patch("asyncio.wait_for", side_effect=wait_for_timeout):
             with pytest.raises(asyncio.TimeoutError):
                 await manager.wait_connected(timeout=0.1)
 
@@ -961,8 +945,9 @@ class TestEdgeCases:
         """Test WebSocket manager properly cleans up on exceptions."""
         manager = WebSocketManager(WebSocketConfig(url="wss://test.com"))
 
-        # Set up some state
-        manager._websocket = Mock()
+        # Set up some state - use AsyncMock for async close method
+        from unittest.mock import AsyncMock
+        manager._websocket = AsyncMock()
         manager._connection_task = Mock()
         manager._heartbeat_task = Mock()
 

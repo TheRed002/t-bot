@@ -31,7 +31,7 @@ def register_error_handling_services(injector, config: Config | None = None) -> 
     def _register_service(name: str, factory, singleton: bool = True):
         """Helper to register with correct method based on container type."""
         if has_register_factory:
-            _register_service(name, factory, singleton=singleton)
+            injector.register_factory(name, factory, singleton=singleton)
         else:
             # DependencyContainer uses register() directly
             injector.register(name, factory, singleton=singleton)
