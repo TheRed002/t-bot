@@ -603,6 +603,30 @@ async def mock_websocket_manager():
         await manager.disconnect(connection_id)
 
 
+def register_all_services_for_testing():
+    """
+    Register ALL services in correct dependency order for integration tests.
+
+    This comprehensive DI registration ensures all modules have their dependencies
+    properly configured without circular dependency issues.
+
+    Returns:
+        Configured DependencyInjector instance
+    """
+    from src.core.dependency_injection import DependencyInjector
+    from src.core.di_master_registration import register_all_services
+    from src.core.config import Config
+
+    # Create test configuration
+    config = Config()
+
+    # Use the master registration to register all services in order
+    injector = register_all_services(config=config)
+
+    logger.info("Registered all services for integration testing")
+    return injector
+
+
 @pytest.fixture(scope="session", autouse=True)
 def setup_test_logging():
     """Setup logging for integration tests."""
@@ -613,11 +637,11 @@ def setup_test_logging():
             logging.StreamHandler(),
         ]
     )
-    
+
     # Reduce noise from external libraries
     logging.getLogger("asyncio").setLevel(logging.WARNING)
     logging.getLogger("urllib3").setLevel(logging.WARNING)
-    
+
     logger.info("Integration test logging configured")
 
 

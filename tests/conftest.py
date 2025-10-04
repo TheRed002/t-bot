@@ -30,7 +30,7 @@ from src.core.exceptions import DataSourceError
 from src.database.connection import close_database, initialize_database
 
 
-class TestConfig:
+class ConfigHelper:
     """Test configuration helper class."""
 
     def __init__(self, **kwargs):

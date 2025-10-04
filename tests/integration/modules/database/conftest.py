@@ -2,6 +2,7 @@
 
 import os
 import pytest
+import pytest_asyncio
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -24,3 +25,19 @@ def setup_redis_for_tests():
 def redis_localhost_override(monkeypatch):
     """Force Redis to use localhost for all tests in this module."""
     monkeypatch.setenv("REDIS_HOST", "localhost")
+
+
+@pytest_asyncio.fixture
+async def di_container():
+    """
+    Provide fully configured DI container with all services registered.
+
+    Uses master DI registration to ensure all dependencies are properly configured
+    in the correct order without circular dependency issues.
+    """
+    from tests.integration.conftest import register_all_services_for_testing
+
+    container = register_all_services_for_testing()
+    yield container
+
+    # Cleanup is handled by individual services
