@@ -1,0 +1,710 @@
+"""
+Comprehensive integration tests for ExchangeService.
+
+This test file targets the critical uncovered service.py module which currently has 22% coverage.
+Tests focus on real integration scenarios and business logic flows.
+"""
+
+from decimal import Decimal
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+
+from src.core.base.interfaces import HealthStatus
+from src.core.config import Config
+from src.core.exceptions import ServiceError, ValidationError
+from src.core.types import (
+    ExchangeInfo,
+    MarketData,
+    OrderBook,
+    OrderRequest,
+    OrderResponse,
+    OrderStatus,
+    Position,
+    Ticker,
+)
+from src.exchanges.interfaces import IExchange, IExchangeFactory
+from src.exchanges.service import ExchangeService
+
+
+@pytest.fixture
+def mock_config():
+    """Create mock config with proper attributes."""
+    config = MagicMock(spec=Config)
+    config.to_dict.return_value = {"test": "config"}
+    config.exchange_service = MagicMock()
+    config.exchange_service.default_timeout_seconds = 30
+    config.exchange_service.max_retries = 3
+    config.exchange_service.health_check_interval_seconds = 60
+    return config
+
+
+@pytest.fixture
+def mock_exchange():
+    """Create mock exchange with all required methods."""
+    exchange = AsyncMock(spec=IExchange)
+    exchange.exchange_name = "binance"
+    exchange.health_check.return_value = True
+    exchange.disconnect.return_value = None
+    return exchange
+
+
+@pytest.fixture
+def mock_exchange_factory(mock_exchange):
+    """Create mock exchange factory."""
+    factory = AsyncMock(spec=IExchangeFactory)
+    factory.get_exchange.return_value = mock_exchange
+    factory.start.return_value = None
+    factory.stop.return_value = None
+    factory.get_supported_exchanges.return_value = ["binance", "coinbase", "okx"]
+    factory.get_available_exchanges.return_value = ["binance", "coinbase"]
+    return factory
+
+
+@pytest.fixture
+async def exchange_service(mock_exchange_factory, mock_config):
+    """Create exchange service with mocked dependencies."""
+    service = ExchangeService(
+        exchange_factory=mock_exchange_factory, config=mock_config, correlation_id="test-123"
+    )
+    await service.start()
+    yield service
+    await service.stop()
+
+
+class TestExchangeServiceInitialization:
+    """Test service initialization and configuration."""
+
+    def test_init_with_config_dict(self, mock_exchange_factory):
+        """Test initialization with dict config."""
+        config_dict = {"test": "value"}
+        service = ExchangeService(exchange_factory=mock_exchange_factory, config=config_dict)
+        assert service.config == config_dict
+        assert service._default_timeout == 30  # default value
+        assert service._max_retries == 3
+        assert service._health_check_interval == 60
+
+    def test_init_with_config_object(self, mock_exchange_factory, mock_config):
+        """Test initialization with Config object."""
+        service = ExchangeService(exchange_factory=mock_exchange_factory, config=mock_config)
+        assert service.config == mock_config
+        mock_config.to_dict.assert_called_once()
+
+
+class TestExchangeServiceStartStop:
+    """Test service lifecycle management."""
+
+    async def test_start_success(self, mock_exchange_factory, mock_config):
+        """Test successful service start."""
+        service = ExchangeService(exchange_factory=mock_exchange_factory, config=mock_config)
+
+        await service.start()
+
+        mock_exchange_factory.start.assert_called_once()
+        assert service.is_running()
+
+    async def test_start_failure(self, mock_exchange_factory, mock_config):
+        """Test service start failure."""
+        mock_exchange_factory.start.side_effect = Exception("Factory start failed")
+
+        service = ExchangeService(exchange_factory=mock_exchange_factory, config=mock_config)
+
+        with pytest.raises(ServiceError, match="Exchange service startup failed"):
+            await service.start()
+
+    async def test_stop_success(self, exchange_service):
+        """Test successful service stop."""
+        # Add an active exchange
+        await exchange_service.get_exchange("binance")
+
+        await exchange_service.stop()
+
+        assert not exchange_service.is_running()
+        assert len(exchange_service._active_exchanges) == 0
+
+    async def test_stop_with_error(self, exchange_service):
+        """Test service stop with errors."""
+        # Mock disconnect to raise exception
+        exchange_service.exchange_factory.stop.side_effect = Exception("Stop failed")
+
+        # Should not raise exception but log error
+        await exchange_service.stop()
+        assert not exchange_service.is_running()
+
+
+class TestExchangeManagement:
+    """Test exchange management operations."""
+
+    async def test_get_exchange_success(self, exchange_service):
+        """Test successful exchange retrieval."""
+        exchange = await exchange_service.get_exchange("binance")
+
+        assert exchange is not None
+        assert exchange.exchange_name == "binance"
+        assert "binance" in exchange_service._active_exchanges
+        exchange_service.exchange_factory.get_exchange.assert_called_once_with(
+            exchange_name="binance", create_if_missing=True
+        )
+
+    async def test_get_exchange_cached(self, exchange_service, mock_exchange):
+        """Test exchange retrieval from cache."""
+        # First call
+        await exchange_service.get_exchange("binance")
+
+        # Second call should use cached exchange
+        exchange = await exchange_service.get_exchange("binance")
+
+        assert exchange == mock_exchange
+        # Factory should be called only once
+        assert exchange_service.exchange_factory.get_exchange.call_count == 1
+
+    async def test_get_exchange_unhealthy_cached(self, exchange_service, mock_exchange):
+        """Test exchange replacement when cached exchange is unhealthy."""
+        # First call
+        await exchange_service.get_exchange("binance")
+
+        # Make cached exchange unhealthy
+        mock_exchange.health_check.return_value = False
+
+        # Second call should create new exchange
+        new_exchange = await exchange_service.get_exchange("binance")
+
+        assert new_exchange == mock_exchange
+        # Factory should be called twice
+        assert exchange_service.exchange_factory.get_exchange.call_count == 2
+        mock_exchange.disconnect.assert_called_once()
+
+    async def test_get_exchange_validation_error(self, exchange_service):
+        """Test exchange retrieval with invalid name."""
+        with pytest.raises(ValidationError, match="Exchange name is required"):
+            await exchange_service.get_exchange("")
+
+    async def test_get_exchange_factory_failure(self, exchange_service):
+        """Test exchange retrieval when factory fails."""
+        exchange_service.exchange_factory.get_exchange.return_value = None
+
+        with pytest.raises(ServiceError, match="Failed to create exchange"):
+            await exchange_service.get_exchange("binance")
+
+    async def test_get_exchange_factory_exception(self, exchange_service):
+        """Test exchange retrieval when factory raises exception."""
+        exchange_service.exchange_factory.get_exchange.side_effect = Exception("Factory error")
+
+        with pytest.raises(ServiceError, match="Exchange retrieval failed"):
+            await exchange_service.get_exchange("binance")
+
+    async def test_remove_exchange(self, exchange_service, mock_exchange):
+        """Test exchange removal."""
+        # Add exchange first
+        await exchange_service.get_exchange("binance")
+        assert "binance" in exchange_service._active_exchanges
+
+        # Remove it
+        await exchange_service._remove_exchange("binance")
+
+        assert "binance" not in exchange_service._active_exchanges
+        mock_exchange.disconnect.assert_called_once()
+
+    async def test_remove_exchange_with_error(self, exchange_service, mock_exchange):
+        """Test exchange removal when disconnect fails."""
+        # Add exchange first
+        await exchange_service.get_exchange("binance")
+
+        # Make disconnect fail
+        mock_exchange.disconnect.side_effect = Exception("Disconnect failed")
+
+        # Should not raise exception
+        await exchange_service._remove_exchange("binance")
+        assert "binance" not in exchange_service._active_exchanges
+
+
+class TestTradingOperations:
+    """Test trading-related operations."""
+
+    async def test_place_order_success(self, exchange_service, mock_exchange):
+        """Test successful order placement."""
+        order = OrderRequest(
+            symbol="BTCUSDT",
+            side="BUY",
+            type="LIMIT",
+            quantity=Decimal("1.0"),
+            price=Decimal("50000.0"),
+        )
+
+        expected_response = OrderResponse(
+            id="order-123", symbol="BTCUSDT", side="BUY", status=OrderStatus.NEW
+        )
+        mock_exchange.place_order.return_value = expected_response
+
+        result = await exchange_service.place_order("binance", order)
+
+        assert result == expected_response
+        mock_exchange.place_order.assert_called_once_with(order)
+
+    async def test_place_order_validation_failure(self, exchange_service):
+        """Test order placement with validation error."""
+        order = OrderRequest(
+            symbol="",  # Invalid symbol
+            side="BUY",
+            type="LIMIT",
+            quantity=Decimal("1.0"),
+            price=Decimal("50000.0"),
+        )
+
+        with pytest.raises(ValidationError, match="Order symbol is required"):
+            await exchange_service.place_order("binance", order)
+
+    async def test_place_order_exchange_failure(self, exchange_service, mock_exchange):
+        """Test order placement when exchange fails."""
+        order = OrderRequest(
+            symbol="BTCUSDT",
+            side="BUY",
+            type="LIMIT",
+            quantity=Decimal("1.0"),
+            price=Decimal("50000.0"),
+        )
+
+        mock_exchange.place_order.side_effect = Exception("Exchange error")
+
+        with pytest.raises(ServiceError, match="Failed to place order"):
+            await exchange_service.place_order("binance", order)
+
+    async def test_cancel_order_success(self, exchange_service, mock_exchange):
+        """Test successful order cancellation."""
+        mock_exchange.cancel_order.return_value = True
+
+        result = await exchange_service.cancel_order("binance", "order-123")
+
+        assert result is True
+        mock_exchange.cancel_order.assert_called_once_with("order-123")
+
+    async def test_cancel_order_validation_error(self, exchange_service):
+        """Test order cancellation with invalid order ID."""
+        with pytest.raises(ValidationError, match="Order ID is required"):
+            await exchange_service.cancel_order("binance", "")
+
+    async def test_cancel_order_failure(self, exchange_service, mock_exchange):
+        """Test order cancellation when exchange fails."""
+        mock_exchange.cancel_order.side_effect = Exception("Cancel failed")
+
+        with pytest.raises(ServiceError, match="Failed to cancel order"):
+            await exchange_service.cancel_order("binance", "order-123")
+
+    async def test_get_order_status_success(self, exchange_service, mock_exchange):
+        """Test successful order status retrieval."""
+        mock_exchange.get_order_status.return_value = OrderStatus.FILLED
+
+        result = await exchange_service.get_order_status("binance", "order-123")
+
+        assert result == OrderStatus.FILLED
+        mock_exchange.get_order_status.assert_called_once_with("order-123")
+
+    async def test_get_order_status_validation_error(self, exchange_service):
+        """Test order status retrieval with invalid order ID."""
+        with pytest.raises(ValidationError, match="Order ID is required"):
+            await exchange_service.get_order_status("binance", "")
+
+
+class TestMarketDataOperations:
+    """Test market data operations."""
+
+    async def test_get_market_data_success(self, exchange_service, mock_exchange):
+        """Test successful market data retrieval."""
+        expected_data = MarketData(
+            symbol="BTCUSDT",
+            timestamp=1234567890,
+            open_price=Decimal("49000"),
+            high_price=Decimal("51000"),
+            low_price=Decimal("48000"),
+            close_price=Decimal("50000"),
+            volume=Decimal("1000"),
+        )
+        mock_exchange.get_market_data.return_value = expected_data
+
+        result = await exchange_service.get_market_data("binance", "BTCUSDT", "1h")
+
+        assert result == expected_data
+        mock_exchange.get_market_data.assert_called_once_with("BTCUSDT", "1h")
+
+    async def test_get_market_data_validation_error(self, exchange_service):
+        """Test market data retrieval with invalid symbol."""
+        with pytest.raises(ValidationError, match="Symbol is required"):
+            await exchange_service.get_market_data("binance", "")
+
+    async def test_get_order_book_success(self, exchange_service, mock_exchange):
+        """Test successful order book retrieval."""
+        expected_book = OrderBook(
+            symbol="BTCUSDT",
+            bids=[(Decimal("49999"), Decimal("1.0"))],
+            asks=[(Decimal("50001"), Decimal("1.0"))],
+            timestamp=1234567890,
+        )
+        mock_exchange.get_order_book.return_value = expected_book
+
+        result = await exchange_service.get_order_book("binance", "BTCUSDT", 20)
+
+        assert result == expected_book
+        mock_exchange.get_order_book.assert_called_once_with("BTCUSDT", 20)
+
+    async def test_get_order_book_validation_error(self, exchange_service):
+        """Test order book retrieval with invalid depth."""
+        with pytest.raises(ValidationError, match="Depth must be between 1 and 1000"):
+            await exchange_service.get_order_book("binance", "BTCUSDT", 0)
+
+        with pytest.raises(ValidationError, match="Depth must be between 1 and 1000"):
+            await exchange_service.get_order_book("binance", "BTCUSDT", 1001)
+
+    async def test_get_ticker_success(self, exchange_service, mock_exchange):
+        """Test successful ticker retrieval."""
+        expected_ticker = Ticker(
+            symbol="BTCUSDT",
+            bid_price=Decimal("49999"),
+            ask_price=Decimal("50001"),
+            last_price=Decimal("50000"),
+            volume=Decimal("1000"),
+            price_change_24h=Decimal("1000"),
+        )
+        mock_exchange.get_ticker.return_value = expected_ticker
+
+        result = await exchange_service.get_ticker("binance", "BTCUSDT")
+
+        assert result == expected_ticker
+        mock_exchange.get_ticker.assert_called_once_with("BTCUSDT")
+
+
+class TestAccountOperations:
+    """Test account-related operations."""
+
+    async def test_get_account_balance_success(self, exchange_service, mock_exchange):
+        """Test successful balance retrieval."""
+        expected_balance = {"BTC": Decimal("1.0"), "USDT": Decimal("50000")}
+        mock_exchange.get_account_balance.return_value = expected_balance
+
+        result = await exchange_service.get_account_balance("binance")
+
+        assert result == expected_balance
+        mock_exchange.get_account_balance.assert_called_once()
+
+    async def test_get_positions_success(self, exchange_service, mock_exchange):
+        """Test successful positions retrieval."""
+        expected_positions = [
+            Position(
+                symbol="BTCUSDT",
+                side="LONG",
+                size=Decimal("1.0"),
+                entry_price=Decimal("49000"),
+                market_value=Decimal("50000"),
+                unrealized_pnl=Decimal("1000"),
+            )
+        ]
+        mock_exchange.get_positions.return_value = expected_positions
+
+        result = await exchange_service.get_positions("binance")
+
+        assert result == expected_positions
+        mock_exchange.get_positions.assert_called_once()
+
+
+class TestExchangeInformation:
+    """Test exchange information operations."""
+
+    async def test_get_exchange_info_success(self, exchange_service, mock_exchange):
+        """Test successful exchange info retrieval."""
+        expected_info = ExchangeInfo(
+            name="binance",
+            trading_fees={"maker": Decimal("0.001"), "taker": Decimal("0.001")},
+            symbols=["BTCUSDT", "ETHUSDT"],
+            status="TRADING",
+        )
+        mock_exchange.get_exchange_info.return_value = expected_info
+
+        result = await exchange_service.get_exchange_info("binance")
+
+        assert result == expected_info
+        mock_exchange.get_exchange_info.assert_called_once()
+
+    def test_get_supported_exchanges(self, exchange_service):
+        """Test getting supported exchanges list."""
+        result = exchange_service.get_supported_exchanges()
+
+        assert result == ["binance", "coinbase", "okx"]
+        exchange_service.exchange_factory.get_supported_exchanges.assert_called_once()
+
+    def test_get_available_exchanges(self, exchange_service):
+        """Test getting available exchanges list."""
+        result = exchange_service.get_available_exchanges()
+
+        assert result == ["binance", "coinbase"]
+        exchange_service.exchange_factory.get_available_exchanges.assert_called_once()
+
+
+class TestHealthAndManagement:
+    """Test health monitoring and service management."""
+
+    async def test_get_service_health_no_exchanges(self, exchange_service):
+        """Test health status with no active exchanges."""
+        result = await exchange_service.get_service_health()
+
+        assert result["service"] == "ExchangeService"
+        assert result["status"] == HealthStatus.HEALTHY
+        assert result["active_exchanges"] == 0
+        assert result["exchanges"] == {}
+
+    async def test_get_service_health_with_healthy_exchanges(self, exchange_service, mock_exchange):
+        """Test health status with healthy exchanges."""
+        # Add an active exchange
+        await exchange_service.get_exchange("binance")
+        mock_exchange.health_check.return_value = True
+
+        result = await exchange_service.get_service_health()
+
+        assert result["service"] == "ExchangeService"
+        assert result["status"] == HealthStatus.HEALTHY
+        assert result["active_exchanges"] == 1
+        assert "binance" in result["exchanges"]
+        assert result["exchanges"]["binance"]["healthy"] is True
+
+    async def test_get_service_health_with_unhealthy_exchanges(
+        self, exchange_service, mock_exchange
+    ):
+        """Test health status with unhealthy exchanges."""
+        # Add an active exchange
+        await exchange_service.get_exchange("binance")
+        mock_exchange.health_check.return_value = False
+
+        result = await exchange_service.get_service_health()
+
+        assert result["service"] == "ExchangeService"
+        assert result["status"] == HealthStatus.UNHEALTHY
+        assert result["active_exchanges"] == 1
+        assert result["exchanges"]["binance"]["healthy"] is False
+
+    async def test_disconnect_all_exchanges(self, exchange_service, mock_exchange):
+        """Test disconnecting all exchanges."""
+        # Add multiple exchanges
+        await exchange_service.get_exchange("binance")
+        exchange_service._active_exchanges["coinbase"] = mock_exchange
+
+        await exchange_service.disconnect_all_exchanges()
+
+        assert len(exchange_service._active_exchanges) == 0
+        # Should be called for each exchange removal
+        assert mock_exchange.disconnect.call_count >= 1
+
+
+class TestMultiExchangeOperations:
+    """Test advanced multi-exchange operations."""
+
+    async def test_get_best_price_success(self, exchange_service):
+        """Test successful best price calculation."""
+        # Setup multiple exchanges
+        binance_exchange = AsyncMock(spec=IExchange)
+        coinbase_exchange = AsyncMock(spec=IExchange)
+
+        binance_ticker = Ticker(
+            symbol="BTCUSDT",
+            bid_price=Decimal("49999"),
+            ask_price=Decimal("50001"),
+            last_price=Decimal("50000"),
+            volume=Decimal("1000"),
+            price_change_24h=Decimal("1000"),
+        )
+
+        coinbase_ticker = Ticker(
+            symbol="BTCUSDT",
+            bid_price=Decimal("50001"),  # Better for selling
+            ask_price=Decimal("49999"),  # Better for buying
+            last_price=Decimal("50000"),
+            volume=Decimal("1000"),
+            price_change_24h=Decimal("1000"),
+        )
+
+        binance_exchange.get_ticker.return_value = binance_ticker
+        coinbase_exchange.get_ticker.return_value = coinbase_ticker
+
+        # Mock the _get_ticker_safe method
+        exchange_service._get_ticker_safe = AsyncMock(side_effect=[binance_ticker, coinbase_ticker])
+
+        result = await exchange_service.get_best_price("BTCUSDT", "BUY", ["binance", "coinbase"])
+
+        assert result["symbol"] == "BTCUSDT"
+        assert result["side"] == "BUY"
+        assert result["best_price"] == Decimal("49999")  # Coinbase has lower ask
+        assert result["best_exchange"] == "coinbase"
+        assert len(result["all_prices"]) == 2
+
+    async def test_get_best_price_with_failures(self, exchange_service):
+        """Test best price calculation with some exchange failures."""
+        # Mock one successful ticker and one failure
+        success_ticker = Ticker(
+            symbol="BTCUSDT",
+            bid_price=Decimal("49999"),
+            ask_price=Decimal("50001"),
+            last_price=Decimal("50000"),
+            volume=Decimal("1000"),
+            price_change_24h=Decimal("1000"),
+        )
+
+        exchange_service._get_ticker_safe = AsyncMock(side_effect=[success_ticker, None])
+
+        result = await exchange_service.get_best_price("BTCUSDT", "BUY", ["binance", "coinbase"])
+
+        assert result["best_price"] == Decimal("50001")  # From successful exchange
+        assert result["best_exchange"] == "binance"
+        assert result["all_prices"]["binance"] == Decimal("50001")
+        assert result["all_prices"]["coinbase"] is None
+
+    async def test_get_ticker_safe_success(self, exchange_service, mock_exchange):
+        """Test safe ticker retrieval success."""
+        expected_ticker = Ticker(
+            symbol="BTCUSDT",
+            bid_price=Decimal("49999"),
+            ask_price=Decimal("50001"),
+            last_price=Decimal("50000"),
+            volume=Decimal("1000"),
+            price_change_24h=Decimal("1000"),
+        )
+
+        with patch.object(exchange_service, "get_ticker", return_value=expected_ticker):
+            result = await exchange_service._get_ticker_safe("binance", "BTCUSDT")
+            assert result == expected_ticker
+
+    async def test_get_ticker_safe_failure(self, exchange_service):
+        """Test safe ticker retrieval with exception."""
+        with patch.object(exchange_service, "get_ticker", side_effect=Exception("Ticker failed")):
+            result = await exchange_service._get_ticker_safe("binance", "BTCUSDT")
+            assert result is None
+
+
+class TestWebSocketOperations:
+    """Test WebSocket operations."""
+
+    async def test_subscribe_to_stream_success(self, exchange_service, mock_exchange):
+        """Test successful stream subscription."""
+        callback = MagicMock()
+
+        await exchange_service.subscribe_to_stream("binance", "BTCUSDT", callback)
+
+        mock_exchange.subscribe_to_stream.assert_called_once_with("BTCUSDT", callback)
+
+    async def test_subscribe_to_stream_failure(self, exchange_service, mock_exchange):
+        """Test stream subscription failure."""
+        callback = MagicMock()
+        mock_exchange.subscribe_to_stream.side_effect = Exception("Stream failed")
+
+        with pytest.raises(ServiceError, match="Failed to subscribe to stream"):
+            await exchange_service.subscribe_to_stream("binance", "BTCUSDT", callback)
+
+
+class TestOrderValidation:
+    """Test order validation logic."""
+
+    async def test_validate_order_request_success(self, exchange_service):
+        """Test successful order validation."""
+        order = OrderRequest(
+            symbol="BTCUSDT",
+            side="BUY",
+            type="LIMIT",
+            quantity=Decimal("1.0"),
+            price=Decimal("50000.0"),
+        )
+
+        # Should not raise exception
+        await exchange_service._validate_order_request(order)
+
+    async def test_validate_order_request_empty_symbol(self, exchange_service):
+        """Test order validation with empty symbol."""
+        order = OrderRequest(
+            symbol="", side="BUY", type="LIMIT", quantity=Decimal("1.0"), price=Decimal("50000.0")
+        )
+
+        with pytest.raises(ValidationError, match="Order symbol is required"):
+            await exchange_service._validate_order_request(order)
+
+    async def test_validate_order_request_invalid_quantity(self, exchange_service):
+        """Test order validation with invalid quantity."""
+        order = OrderRequest(
+            symbol="BTCUSDT",
+            side="BUY",
+            type="LIMIT",
+            quantity=Decimal("0"),  # Invalid
+            price=Decimal("50000.0"),
+        )
+
+        with pytest.raises(ValidationError, match="Order quantity must be positive"):
+            await exchange_service._validate_order_request(order)
+
+    async def test_validate_order_request_empty_side(self, exchange_service):
+        """Test order validation with empty side."""
+        order = OrderRequest(
+            symbol="BTCUSDT",
+            side="",
+            type="LIMIT",
+            quantity=Decimal("1.0"),
+            price=Decimal("50000.0"),
+        )
+
+        with pytest.raises(ValidationError, match="Order side is required"):
+            await exchange_service._validate_order_request(order)
+
+
+class TestServiceHealthCheck:
+    """Test service health check implementation."""
+
+    async def test_service_health_check_no_supported_exchanges(self, exchange_service):
+        """Test health check when no exchanges are supported."""
+        exchange_service.exchange_factory.get_supported_exchanges.return_value = []
+
+        result = await exchange_service._service_health_check()
+        assert result == HealthStatus.UNHEALTHY
+
+    async def test_service_health_check_healthy_active_exchange(
+        self, exchange_service, mock_exchange
+    ):
+        """Test health check with healthy active exchange."""
+        await exchange_service.get_exchange("binance")
+        mock_exchange.health_check.return_value = True
+
+        result = await exchange_service._service_health_check()
+        assert result == HealthStatus.HEALTHY
+
+    async def test_service_health_check_unhealthy_active_exchange(
+        self, exchange_service, mock_exchange
+    ):
+        """Test health check with unhealthy active exchange."""
+        await exchange_service.get_exchange("binance")
+        mock_exchange.health_check.return_value = False
+
+        result = await exchange_service._service_health_check()
+        assert result == HealthStatus.UNHEALTHY
+
+    async def test_service_health_check_exception(self, exchange_service):
+        """Test health check when exception occurs."""
+        exchange_service.exchange_factory.get_supported_exchanges.side_effect = Exception("Error")
+
+        result = await exchange_service._service_health_check()
+        assert result == HealthStatus.UNHEALTHY
+
+
+class TestProcessOrderResponse:
+    """Test order response processing."""
+
+    async def test_process_order_response_success(self, exchange_service):
+        """Test successful order response processing."""
+        order_response = OrderResponse(
+            id="order-123", symbol="BTCUSDT", side="BUY", status=OrderStatus.FILLED
+        )
+
+        # Should not raise exception
+        await exchange_service._process_order_response("binance", order_response)
+
+    async def test_process_order_response_with_exception(self, exchange_service):
+        """Test order response processing with logging error."""
+        order_response = OrderResponse(
+            id="order-123", symbol="BTCUSDT", side="BUY", status=OrderStatus.FILLED
+        )
+
+        # Mock logger to raise exception
+        with patch.object(exchange_service.logger, "info", side_effect=Exception("Log error")):
+            # Should not raise exception but log warning
+            await exchange_service._process_order_response("binance", order_response)

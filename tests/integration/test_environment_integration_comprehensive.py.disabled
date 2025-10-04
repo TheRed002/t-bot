@@ -1,0 +1,830 @@
+"""
+Comprehensive Integration Tests for Environment-Aware Trading System.
+
+This test suite validates the complete integration of all T-Bot services
+with the sandbox/live environment-aware exchange system.
+"""
+
+import asyncio
+import pytest
+from decimal import Decimal
+from datetime import datetime, timezone
+from unittest.mock import AsyncMock, MagicMock, patch
+
+from src.core.config.environment import ExchangeEnvironment, TradingEnvironment
+from src.core.integration.environment_orchestrator import EnvironmentIntegrationOrchestrator
+from src.core.integration.environment_aware_service import (
+    EnvironmentAwareService,
+    EnvironmentContext,
+)
+from src.core.types import (
+    MarketData,
+    OrderRequest,
+    OrderSide,
+    OrderType,
+    Signal,
+    StateType,
+)
+
+# Import environment integrations
+from src.risk_management.environment_integration import EnvironmentAwareRiskManager
+from src.execution.environment_integration import EnvironmentAwareExecutionManager
+from src.strategies.environment_integration import EnvironmentAwareStrategyManager
+from src.data.environment_integration import EnvironmentAwareDataManager
+from src.analytics.environment_integration import EnvironmentAwareAnalyticsManager
+from src.state.environment_integration import EnvironmentAwareStateManager
+
+
+class MockConfig:
+    """Mock configuration for testing."""
+    
+    def __init__(self):
+        self.environment = MagicMock()
+        self.sandbox = MagicMock()
+        self.exchange = MagicMock()
+    
+    def get_environment_exchange_config(self, exchange: str) -> dict:
+        return {
+            'environment_mode': 'sandbox',
+            'is_production': False,
+            'api_url': f'https://api.{exchange}.test',
+            'ws_url': f'wss://stream.{exchange}.test',
+        }
+    
+    def validate_production_credentials(self, exchange: str) -> bool:
+        return True  # Mock valid credentials
+
+
+class MockEnvironmentAwareService(EnvironmentAwareService):
+    """Mock service for testing environment awareness."""
+    
+    def __init__(self, name: str):
+        super().__init__(name=name, config={'test': True})
+        self.switch_calls = []
+        self.validation_calls = []
+    
+    async def switch_environment(self, environment, exchange=None):
+        self.switch_calls.append((environment, exchange))
+        return True
+    
+    async def validate_environment_operation(self, operation, context=None, exchange=None):
+        self.validation_calls.append((operation, context, exchange))
+        return True
+
+
+@pytest.fixture
+def mock_config():
+    """Provide mock configuration."""
+    return MockConfig()
+
+
+@pytest.fixture
+def orchestrator(mock_config):
+    """Provide environment integration orchestrator."""
+    return EnvironmentIntegrationOrchestrator(config=mock_config.get_environment_exchange_config('test'))
+
+
+@pytest.fixture
+def mock_services():
+    """Provide mock services for testing."""
+    return {
+        'risk_management': MockEnvironmentAwareService('RiskManagement'),
+        'execution': MockEnvironmentAwareService('Execution'),
+        'strategies': MockEnvironmentAwareService('Strategies'),
+        'data': MockEnvironmentAwareService('Data'),
+        'analytics': MockEnvironmentAwareService('Analytics'),
+        'state': MockEnvironmentAwareService('State'),
+    }
+
+
+class TestEnvironmentIntegrationOrchestrator:
+    """Test the main environment integration orchestrator."""
+    
+    @pytest.mark.asyncio
+    async def test_orchestrator_initialization(self, orchestrator):
+        """Test orchestrator initializes correctly."""
+        await orchestrator.start()
+        
+        assert orchestrator.is_running()
+        assert 'binance' in orchestrator._environment_switch_locks
+        assert 'coinbase' in orchestrator._environment_switch_locks
+        assert 'okx' in orchestrator._environment_switch_locks
+        
+        await orchestrator.stop()
+    
+    @pytest.mark.asyncio
+    async def test_service_registration(self, orchestrator, mock_services):
+        """Test service registration with orchestrator."""
+        await orchestrator.start()
+        
+        # Register services
+        for service_name, service in mock_services.items():
+            orchestrator.register_service(service_name, service)
+        
+        # Verify registration
+        assert len(orchestrator._registered_services) == len(mock_services)
+        assert 'risk_management' in orchestrator._registered_services
+        assert 'execution' in orchestrator._registered_services
+        
+        # Check integration status
+        for service_name in mock_services:
+            assert service_name in orchestrator._integration_status
+            assert orchestrator._integration_status[service_name]['switch_count'] == 0
+        
+        await orchestrator.stop()
+    
+    @pytest.mark.asyncio
+    async def test_exchange_environment_switch(self, orchestrator, mock_services):
+        """Test switching environment for a specific exchange."""
+        await orchestrator.start()
+        
+        # Register services
+        for service_name, service in mock_services.items():
+            orchestrator.register_service(service_name, service)
+        
+        # Switch binance to live environment
+        result = await orchestrator.switch_exchange_environment(
+            'binance', ExchangeEnvironment.LIVE
+        )
+        
+        # Verify switch result
+        assert result['success'] is True
+        assert result['exchange'] == 'binance'
+        assert result['target_environment'] == 'live'
+        assert len(result['services_updated']) == len(mock_services)
+        assert len(result['errors']) == 0
+        
+        # Verify services were called
+        for service in mock_services.values():
+            assert len(service.switch_calls) == 1
+            assert service.switch_calls[0][0] == ExchangeEnvironment.LIVE
+            assert service.switch_calls[0][1] == 'binance'
+        
+        await orchestrator.stop()
+    
+    @pytest.mark.asyncio
+    async def test_global_environment_switch(self, orchestrator, mock_services):
+        """Test switching global trading environment."""
+        await orchestrator.start()
+        
+        # Register services
+        for service_name, service in mock_services.items():
+            orchestrator.register_service(service_name, service)
+        
+        # Switch to live environment globally
+        result = await orchestrator.switch_global_environment(
+            TradingEnvironment.LIVE, confirm_production=True
+        )
+        
+        # Verify switch result
+        assert result['success'] is True
+        assert result['target_environment'] == 'live'
+        assert len(result['exchanges_switched']) == 3  # binance, coinbase, okx
+        assert len(result['errors']) == 0
+        
+        # Verify each service was called for each exchange
+        for service in mock_services.values():
+            assert len(service.switch_calls) == 3  # One per exchange
+        
+        await orchestrator.stop()
+    
+    @pytest.mark.asyncio
+    async def test_production_switch_requires_confirmation(self, orchestrator, mock_services):
+        """Test that production switches require explicit confirmation."""
+        await orchestrator.start()
+        
+        # Register services
+        for service_name, service in mock_services.items():
+            orchestrator.register_service(service_name, service)
+        
+        # Attempt switch to live without confirmation
+        with pytest.raises(Exception):
+            await orchestrator.switch_global_environment(TradingEnvironment.LIVE)
+        
+        await orchestrator.stop()
+    
+    @pytest.mark.asyncio
+    async def test_health_status_integration(self, orchestrator, mock_services):
+        """Test integrated health status reporting."""
+        await orchestrator.start()
+        
+        # Register services
+        for service_name, service in mock_services.items():
+            orchestrator.register_service(service_name, service)
+        
+        # Get health status
+        health_status = await orchestrator.get_integrated_health_status()
+        
+        # Verify health status structure
+        assert 'orchestrator' in health_status
+        assert 'services' in health_status
+        assert 'exchanges' in health_status
+        assert 'global_status' in health_status
+        
+        # Verify service health
+        assert len(health_status['services']) == len(mock_services)
+        for service_name in mock_services:
+            assert service_name in health_status['services']
+        
+        # Verify exchange health
+        for exchange in ['binance', 'coinbase', 'okx']:
+            assert exchange in health_status['exchanges']
+        
+        await orchestrator.stop()
+
+
+class TestEnvironmentAwareRiskManagement:
+    """Test risk management with environment awareness."""
+    
+    def test_sandbox_vs_live_risk_configs(self):
+        """Test different risk configurations for sandbox vs live."""
+        from src.risk_management.environment_integration import EnvironmentAwareRiskConfiguration
+        
+        sandbox_config = EnvironmentAwareRiskConfiguration.get_sandbox_risk_config()
+        live_config = EnvironmentAwareRiskConfiguration.get_live_risk_config()
+        
+        # Sandbox should have higher risk tolerance
+        assert sandbox_config['max_position_size_pct'] > live_config['max_position_size_pct']
+        assert sandbox_config['risk_per_trade'] > live_config['risk_per_trade']
+        assert sandbox_config['max_drawdown_pct'] > live_config['max_drawdown_pct']
+        
+        # Live should have stricter controls
+        assert live_config['circuit_breaker_threshold'] < sandbox_config['circuit_breaker_threshold']
+        assert live_config['leverage_multiplier'] <= sandbox_config['leverage_multiplier']
+    
+    @pytest.mark.asyncio
+    async def test_environment_aware_position_sizing(self, mock_config):
+        """Test position sizing with environment awareness."""
+        risk_manager = EnvironmentAwareRiskManager(config=mock_config)
+        
+        # Mock order request
+        order_request = OrderRequest(
+            symbol='BTC/USDT',
+            side=OrderSide.BUY,
+            type=OrderType.MARKET,
+            quantity=Decimal('1.0'),
+            price=Decimal('50000'),
+        )
+        
+        account_balance = Decimal('10000')
+        
+        # Test sandbox position sizing
+        sandbox_size = risk_manager.calculate_environment_aware_position_size(
+            order_request, 'binance', account_balance
+        )
+        
+        # Switch to production environment
+        await risk_manager.switch_environment(ExchangeEnvironment.LIVE, 'binance')
+        
+        # Test live position sizing
+        live_size = risk_manager.calculate_environment_aware_position_size(
+            order_request, 'binance', account_balance
+        )
+        
+        # Live position should be smaller than sandbox
+        assert live_size <= sandbox_size
+    
+    @pytest.mark.asyncio
+    async def test_environment_risk_validation(self, mock_config):
+        """Test risk validation differs by environment."""
+        risk_manager = EnvironmentAwareRiskManager(config=mock_config)
+        
+        # Mock high-risk order
+        risky_order = OrderRequest(
+            symbol='BTC/USDT',
+            side=OrderSide.BUY,
+            type=OrderType.MARKET,
+            quantity=Decimal('10.0'),  # Large quantity
+            price=Decimal('50000'),
+        )
+        
+        # Test sandbox validation (should be more lenient)
+        sandbox_valid = await risk_manager.validate_environment_order(risky_order, 'binance')
+        
+        # Switch to production
+        await risk_manager.switch_environment(ExchangeEnvironment.LIVE, 'binance')
+        
+        # Test production validation (should be stricter)
+        live_valid = await risk_manager.validate_environment_order(risky_order, 'binance')
+        
+        # Production should be stricter (though both might pass depending on implementation)
+        # At minimum, they should have different risk configurations applied
+        risk_config_sandbox = risk_manager.get_environment_risk_config('binance')
+        
+        await risk_manager.switch_environment(ExchangeEnvironment.SANDBOX, 'binance')
+        risk_config_live = risk_manager.get_environment_risk_config('binance')
+        
+        # Configurations should be different
+        assert risk_config_sandbox != risk_config_live
+
+
+class TestEnvironmentAwareExecution:
+    """Test execution with environment awareness."""
+    
+    @pytest.mark.asyncio
+    async def test_execution_algorithm_selection(self, mock_config):
+        """Test execution algorithm selection varies by environment."""
+        execution_manager = EnvironmentAwareExecutionManager(config=mock_config)
+        
+        # Mock order request
+        order_request = OrderRequest(
+            symbol='BTC/USDT',
+            side=OrderSide.BUY,
+            type=OrderType.MARKET,
+            quantity=Decimal('100.0'),  # Large order
+            price=Decimal('50000'),
+        )
+        
+        # Test sandbox algorithm selection
+        sandbox_algorithm = await execution_manager._select_execution_algorithm(order_request, 'binance')
+        
+        # Switch to production
+        await execution_manager.switch_environment(ExchangeEnvironment.LIVE, 'binance')
+        
+        # Test production algorithm selection
+        live_algorithm = await execution_manager._select_execution_algorithm(order_request, 'binance')
+        
+        # Algorithms might be different based on environment
+        # At minimum, configurations should differ
+        sandbox_config = execution_manager.get_environment_execution_config('binance')
+        assert sandbox_config is not None
+    
+    @pytest.mark.asyncio
+    async def test_execution_confirmation_requirements(self, mock_config):
+        """Test execution confirmation requirements in production."""
+        execution_manager = EnvironmentAwareExecutionManager(config=mock_config)
+        
+        order_request = OrderRequest(
+            symbol='BTC/USDT',
+            side=OrderSide.BUY,
+            type=OrderType.MARKET,
+            quantity=Decimal('1.0'),
+            price=Decimal('50000'),
+        )
+        
+        # Switch to production environment
+        await execution_manager.switch_environment(ExchangeEnvironment.LIVE, 'binance')
+        
+        # Get execution config
+        config = execution_manager.get_environment_execution_config('binance')
+        
+        # Production should require confirmation
+        assert config.get('confirmation_required') is True
+        
+        # Sandbox should not require confirmation
+        await execution_manager.switch_environment(ExchangeEnvironment.SANDBOX, 'binance')
+        sandbox_config = execution_manager.get_environment_execution_config('binance')
+        assert sandbox_config.get('confirmation_required') is False
+
+
+class TestEnvironmentAwareStrategies:
+    """Test strategy management with environment awareness."""
+    
+    @pytest.mark.asyncio
+    async def test_strategy_validation_by_environment(self, mock_config):
+        """Test strategy validation differs by environment."""
+        strategy_manager = EnvironmentAwareStrategyManager(config=mock_config)
+        
+        # Mock experimental strategy config
+        from src.core.types import StrategyConfig
+        experimental_strategy = StrategyConfig(
+            name='experimental_ml_strategy',
+            max_position_size=Decimal('0.20'),  # High position size
+            uses_ml=True,
+            is_experimental=True,
+        )
+        
+        # Test sandbox validation (should allow experimental)
+        sandbox_valid = await strategy_manager.validate_strategy_for_environment(
+            experimental_strategy, 'binance'
+        )
+        assert sandbox_valid is True
+        
+        # Switch to production
+        await strategy_manager.switch_environment(ExchangeEnvironment.LIVE, 'binance')
+        
+        # Test production validation (should reject experimental)
+        live_valid = await strategy_manager.validate_strategy_for_environment(
+            experimental_strategy, 'binance'
+        )
+        assert live_valid is False  # Should reject experimental strategies in production
+    
+    @pytest.mark.asyncio
+    async def test_signal_filtering_by_environment(self, mock_config):
+        """Test signal filtering varies by environment."""
+        strategy_manager = EnvironmentAwareStrategyManager(config=mock_config)
+        
+        # Mock market data and signal
+        market_data = MarketData(
+            symbol='BTC/USDT',
+            price=Decimal('50000'),
+            volume=Decimal('100'),
+            timestamp=datetime.now(timezone.utc),
+        )
+        
+        # Create mock signal with borderline confidence
+        mock_signal = Signal(
+            strategy_name='test_strategy',
+            symbol='BTC/USDT',
+            action='BUY',
+            confidence=Decimal('0.5'),  # Borderline confidence
+            position_size_pct=Decimal('0.10'),
+            price=Decimal('50000'),
+            timestamp=datetime.now(timezone.utc),
+        )
+        
+        # Mock the signal generation
+        with patch.object(strategy_manager, '_generate_base_signal', return_value=mock_signal):
+            # Test sandbox signal generation (should be more lenient)
+            sandbox_signal = await strategy_manager.generate_environment_aware_signal(
+                'test_strategy', market_data, 'binance'
+            )
+            
+            # Switch to production
+            await strategy_manager.switch_environment(ExchangeEnvironment.LIVE, 'binance')
+            
+            # Test production signal generation (should be stricter)
+            live_signal = await strategy_manager.generate_environment_aware_signal(
+                'test_strategy', market_data, 'binance'
+            )
+            
+            # Different environments should have different confidence thresholds
+            sandbox_config = strategy_manager.get_environment_strategy_config('binance')
+            
+            await strategy_manager.switch_environment(ExchangeEnvironment.SANDBOX, 'binance')
+            live_config = strategy_manager.get_environment_strategy_config('binance')
+            
+            # Confidence thresholds should be different
+            assert sandbox_config.get('min_signal_confidence') != live_config.get('min_signal_confidence')
+
+
+class TestEnvironmentAwareData:
+    """Test data management with environment awareness."""
+    
+    @pytest.mark.asyncio
+    async def test_data_validation_levels(self, mock_config):
+        """Test data validation levels vary by environment."""
+        data_manager = EnvironmentAwareDataManager(config=mock_config)
+        
+        # Mock market data with potential quality issues
+        market_data = MarketData(
+            symbol='BTC/USDT',
+            price=Decimal('50000'),
+            volume=Decimal('100'),
+            timestamp=datetime.now(timezone.utc) - timedelta(minutes=10),  # Slightly old data
+        )
+        
+        # Test sandbox validation (should be more lenient)
+        sandbox_valid = await data_manager.validate_market_data_for_environment(
+            market_data, 'binance'
+        )
+        
+        # Switch to production
+        await data_manager.switch_environment(ExchangeEnvironment.LIVE, 'binance')
+        
+        # Test production validation (should be stricter)
+        live_valid = await data_manager.validate_market_data_for_environment(
+            market_data, 'binance'
+        )
+        
+        # Get validation configs
+        sandbox_config = data_manager.get_environment_data_config('binance')
+        
+        await data_manager.switch_environment(ExchangeEnvironment.SANDBOX, 'binance')
+        live_config = data_manager.get_environment_data_config('binance')
+        
+        # Validation levels should be different
+        assert sandbox_config.get('data_quality_level') != live_config.get('data_quality_level')
+    
+    @pytest.mark.asyncio
+    async def test_storage_strategy_by_environment(self, mock_config):
+        """Test storage strategies differ by environment."""
+        data_manager = EnvironmentAwareDataManager(config=mock_config)
+        
+        # Get sandbox storage strategy
+        sandbox_config = data_manager.get_environment_data_config('binance')
+        sandbox_storage = sandbox_config.get('storage_strategy')
+        
+        # Switch to production
+        await data_manager.switch_environment(ExchangeEnvironment.LIVE, 'binance')
+        
+        # Get production storage strategy
+        live_config = data_manager.get_environment_data_config('binance')
+        live_storage = live_config.get('storage_strategy')
+        
+        # Storage strategies should be appropriate for each environment
+        # Production should have more robust storage (replicated, encrypted)
+        assert live_config.get('enable_state_encryption', False) is True
+        assert live_config.get('enable_audit_logging', False) is True
+
+
+class TestEnvironmentAwareAnalytics:
+    """Test analytics with environment awareness."""
+    
+    @pytest.mark.asyncio
+    async def test_reporting_levels_by_environment(self, mock_config):
+        """Test analytics reporting levels vary by environment."""
+        analytics_manager = EnvironmentAwareAnalyticsManager(config=mock_config)
+        
+        # Test sandbox analytics config
+        sandbox_config = analytics_manager.get_environment_analytics_config('binance')
+        sandbox_reporting = sandbox_config.get('reporting_level')
+        
+        # Switch to production
+        await analytics_manager.switch_environment(ExchangeEnvironment.LIVE, 'binance')
+        
+        # Test production analytics config
+        live_config = analytics_manager.get_environment_analytics_config('binance')
+        live_reporting = live_config.get('reporting_level')
+        
+        # Sandbox should have more comprehensive reporting for analysis
+        # Production should be more focused for efficiency
+        assert sandbox_config.get('enable_experimental_metrics', False) is True
+        assert live_config.get('enable_experimental_metrics', True) is False
+    
+    @pytest.mark.asyncio
+    async def test_performance_tracking_by_environment(self, mock_config):
+        """Test performance tracking varies by environment."""
+        analytics_manager = EnvironmentAwareAnalyticsManager(config=mock_config)
+        
+        # Track performance metric
+        await analytics_manager.track_environment_performance(
+            'binance', 'pnl', Decimal('100.50'), {'trade_id': 'test_trade'}
+        )
+        
+        # Switch to production and track again
+        await analytics_manager.switch_environment(ExchangeEnvironment.LIVE, 'binance')
+        
+        await analytics_manager.track_environment_performance(
+            'binance', 'pnl', Decimal('200.75'), {'trade_id': 'prod_trade'}
+        )
+        
+        # Verify metrics are tracked separately by environment
+        metrics = analytics_manager.get_environment_analytics_metrics('binance')
+        assert metrics is not None
+        assert metrics['is_production'] is True
+
+
+class TestEnvironmentAwareState:
+    """Test state management with environment awareness."""
+    
+    @pytest.mark.asyncio
+    async def test_state_isolation_by_environment(self, mock_config):
+        """Test state isolation between environments."""
+        state_manager = EnvironmentAwareStateManager(config=mock_config)
+        
+        # Set state in sandbox
+        await state_manager.set_environment_aware_state(
+            'test_key', 'sandbox_value', StateType.GENERAL, 'binance'
+        )
+        
+        # Verify state exists in sandbox
+        sandbox_value = await state_manager.get_environment_aware_state(
+            'test_key', StateType.GENERAL, 'binance'
+        )
+        assert sandbox_value == 'sandbox_value'
+        
+        # Switch to production
+        await state_manager.switch_environment(ExchangeEnvironment.LIVE, 'binance')
+        
+        # State should not exist in production (isolated)
+        live_value = await state_manager.get_environment_aware_state(
+            'test_key', StateType.GENERAL, 'binance', default='not_found'
+        )
+        assert live_value == 'not_found'  # Should not exist in production environment
+        
+        # Set different value in production
+        await state_manager.set_environment_aware_state(
+            'test_key', 'production_value', StateType.GENERAL, 'binance'
+        )
+        
+        # Verify production value
+        live_value = await state_manager.get_environment_aware_state(
+            'test_key', StateType.GENERAL, 'binance'
+        )
+        assert live_value == 'production_value'
+        
+        # Switch back to sandbox and verify isolation
+        await state_manager.switch_environment(ExchangeEnvironment.SANDBOX, 'binance')
+        
+        sandbox_value = await state_manager.get_environment_aware_state(
+            'test_key', StateType.GENERAL, 'binance'
+        )
+        assert sandbox_value == 'sandbox_value'  # Original sandbox value preserved
+    
+    @pytest.mark.asyncio
+    async def test_state_persistence_modes(self, mock_config):
+        """Test different state persistence modes by environment."""
+        state_manager = EnvironmentAwareStateManager(config=mock_config)
+        
+        # Get sandbox persistence mode
+        sandbox_config = state_manager.get_environment_state_config('binance')
+        sandbox_persistence = sandbox_config.get('persistence_mode')
+        
+        # Switch to production
+        await state_manager.switch_environment(ExchangeEnvironment.LIVE, 'binance')
+        
+        # Get production persistence mode
+        live_config = state_manager.get_environment_state_config('binance')
+        live_persistence = live_config.get('persistence_mode')
+        
+        # Production should have more robust persistence
+        assert live_config.get('enable_state_encryption', False) is True
+        assert live_config.get('enable_audit_logging', False) is True
+        assert live_config.get('state_ttl_hours', 0) > sandbox_config.get('state_ttl_hours', 0)
+
+
+class TestEndToEndIntegration:
+    """End-to-end integration tests."""
+    
+    @pytest.mark.asyncio
+    async def test_complete_environment_switch_workflow(self, orchestrator, mock_config):
+        """Test complete workflow of environment switching."""
+        await orchestrator.start()
+        
+        # Create and register integrated services
+        risk_manager = EnvironmentAwareRiskManager(config=mock_config)
+        execution_manager = EnvironmentAwareExecutionManager(config=mock_config)
+        strategy_manager = EnvironmentAwareStrategyManager(config=mock_config)
+        data_manager = EnvironmentAwareDataManager(config=mock_config)
+        analytics_manager = EnvironmentAwareAnalyticsManager(config=mock_config)
+        state_manager = EnvironmentAwareStateManager(config=mock_config)
+        
+        services = {
+            'risk_management': risk_manager,
+            'execution': execution_manager,
+            'strategies': strategy_manager,
+            'data': data_manager,
+            'analytics': analytics_manager,
+            'state': state_manager,
+        }
+        
+        # Register services with orchestrator
+        for service_name, service in services.items():
+            orchestrator.register_service(service_name, service)
+        
+        # Verify initial state (all should be in sandbox)
+        initial_status = await orchestrator.get_environment_status_summary()
+        assert initial_status['global_environment'] is not None
+        
+        # Perform global switch to production
+        switch_result = await orchestrator.switch_global_environment(
+            TradingEnvironment.LIVE, confirm_production=True
+        )
+        
+        # Verify switch was successful
+        assert switch_result['success'] is True
+        assert len(switch_result['exchanges_switched']) == 3
+        
+        # Verify all services switched environments
+        for service in services.values():
+            for exchange in ['binance', 'coinbase', 'okx']:
+                context = service.get_environment_context(exchange)
+                assert context.is_production is True
+                assert context.environment == ExchangeEnvironment.LIVE
+        
+        # Verify health status after switch
+        health_status = await orchestrator.get_integrated_health_status()
+        assert health_status['global_status'] in ['healthy', 'degraded']  # Should be operational
+        
+        # Verify environment consistency
+        consistency_result = await orchestrator.validate_environment_consistency()
+        assert consistency_result['consistent'] is True
+        
+        # Switch back to sandbox
+        switch_back_result = await orchestrator.switch_global_environment(
+            TradingEnvironment.SANDBOX
+        )
+        assert switch_back_result['success'] is True
+        
+        # Verify all services switched back
+        for service in services.values():
+            for exchange in ['binance', 'coinbase', 'okx']:
+                context = service.get_environment_context(exchange)
+                assert context.is_production is False
+                assert context.environment == ExchangeEnvironment.SANDBOX
+        
+        await orchestrator.stop()
+    
+    @pytest.mark.asyncio
+    async def test_trading_workflow_across_environments(self, mock_config):
+        """Test complete trading workflow in different environments."""
+        # Initialize services
+        risk_manager = EnvironmentAwareRiskManager(config=mock_config)
+        execution_manager = EnvironmentAwareExecutionManager(config=mock_config)
+        strategy_manager = EnvironmentAwareStrategyManager(config=mock_config)
+        data_manager = EnvironmentAwareDataManager(config=mock_config)
+        analytics_manager = EnvironmentAwareAnalyticsManager(config=mock_config)
+        state_manager = EnvironmentAwareStateManager(config=mock_config)
+        
+        # Mock market data
+        market_data = MarketData(
+            symbol='BTC/USDT',
+            price=Decimal('50000'),
+            volume=Decimal('100'),
+            timestamp=datetime.now(timezone.utc),
+        )
+        
+        # Test sandbox trading workflow
+        # 1. Validate and store market data
+        data_valid = await data_manager.validate_market_data_for_environment(market_data, 'binance')
+        assert data_valid is True
+        
+        await data_manager.store_market_data_by_environment(market_data, 'binance')
+        
+        # 2. Generate trading signal
+        with patch.object(strategy_manager, '_generate_base_signal') as mock_signal:
+            mock_signal.return_value = Signal(
+                strategy_name='test_strategy',
+                symbol='BTC/USDT',
+                action='BUY',
+                confidence=Decimal('0.75'),
+                position_size_pct=Decimal('0.05'),
+                price=Decimal('50000'),
+                timestamp=datetime.now(timezone.utc),
+            )
+            
+            signal = await strategy_manager.generate_environment_aware_signal(
+                'test_strategy', market_data, 'binance'
+            )
+            assert signal is not None
+        
+        # 3. Calculate position size with risk management
+        order_request = OrderRequest(
+            symbol='BTC/USDT',
+            side=OrderSide.BUY,
+            type=OrderType.MARKET,
+            quantity=Decimal('1.0'),
+            price=Decimal('50000'),
+        )
+        
+        position_size = risk_manager.calculate_environment_aware_position_size(
+            order_request, 'binance', Decimal('10000')
+        )
+        assert position_size > 0
+        
+        # 4. Validate order with risk management
+        risk_valid = await risk_manager.validate_environment_order(order_request, 'binance')
+        assert risk_valid is True
+        
+        # 5. Execute order
+        execution_valid = await execution_manager.validate_environment_execution(order_request, 'binance')
+        assert execution_valid is True
+        
+        # Mock execution
+        with patch.object(execution_manager, '_execute_market_order') as mock_execute:
+            from src.core.types import ExecutionResult, ExecutionStatus
+            mock_execute.return_value = ExecutionResult(
+                order_id=order_request.id,
+                status=ExecutionStatus.COMPLETED,
+                filled_quantity=order_request.quantity,
+                average_price=order_request.price,
+                total_fees=Decimal('0.001') * order_request.quantity,
+            )
+            
+            execution_result = await execution_manager.execute_environment_aware_order(
+                order_request, 'binance'
+            )
+            assert execution_result.status == ExecutionStatus.COMPLETED
+        
+        # 6. Track performance
+        await analytics_manager.track_environment_performance(
+            'binance', 'trade_performance', Decimal('100'), {'order_id': order_request.id}
+        )
+        
+        # 7. Update state
+        await state_manager.set_environment_aware_state(
+            f'last_trade_{order_request.id}', execution_result.model_dump() if hasattr(execution_result, 'model_dump') else str(execution_result),
+            StateType.GENERAL, 'binance'
+        )
+        
+        # Now switch to production and verify workflow still works with different parameters
+        services = [risk_manager, execution_manager, strategy_manager, data_manager, analytics_manager, state_manager]
+        
+        for service in services:
+            await service.switch_environment(ExchangeEnvironment.LIVE, 'binance')
+        
+        # Verify production configurations are applied
+        prod_risk_config = risk_manager.get_environment_risk_config('binance')
+        sandbox_risk_config = risk_manager.get_environment_risk_config('binance')
+        
+        # Switch back to get sandbox config for comparison
+        await risk_manager.switch_environment(ExchangeEnvironment.SANDBOX, 'binance')
+        sandbox_risk_config = risk_manager.get_environment_risk_config('binance')
+        
+        # Switch back to production
+        await risk_manager.switch_environment(ExchangeEnvironment.LIVE, 'binance')
+        prod_risk_config = risk_manager.get_environment_risk_config('binance')
+        
+        # Configs should be different
+        assert prod_risk_config['max_position_size_pct'] != sandbox_risk_config['max_position_size_pct']
+        
+        # State should be isolated between environments
+        state_in_prod = await state_manager.get_environment_aware_state(
+            f'last_trade_{order_request.id}', StateType.GENERAL, 'binance', default='not_found'
+        )
+        assert state_in_prod == 'not_found'  # Should not exist in production environment
+
+
+if __name__ == '__main__':
+    pytest.main([__file__, '-v', '--tb=short'])

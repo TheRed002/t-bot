@@ -1,0 +1,288 @@
+"""
+Simple Integration Tests for Exchanges Module Coverage
+
+This test suite provides simple, working integration tests specifically
+designed to achieve maximum coverage for the exchanges module.
+"""
+
+import asyncio
+import time
+from decimal import Decimal
+from unittest.mock import AsyncMock, Mock, patch
+
+import pytest
+
+from src.core.config import Config
+from src.core.exceptions import ValidationError
+from src.core.types import OrderRequest, OrderSide, OrderType
+from src.exchanges.factory import ExchangeFactory
+from src.exchanges.service import ExchangeService
+from src.exchanges.types import ExchangeTypes
+
+
+@pytest.fixture
+def simple_config():
+    """Create simple configuration for testing."""
+    config = Mock(spec=Config)
+    config.exchange = Mock()
+    config.exchange.binance_api_key = "test_key"
+    config.exchange.binance_api_secret = "test_secret"
+    config.exchange.binance_testnet = True
+    config.database = Mock()
+    config.database.url = "sqlite:///:memory:"
+    config.redis = Mock()
+    config.redis.host = "localhost"
+    config.redis.port = 6379
+    return config
+
+
+class TestExchangeFactorySimpleCoverage:
+    """Simple tests for ExchangeFactory coverage."""
+
+    def test_factory_initialization(self, simple_config):
+        """Test factory initialization."""
+        factory = ExchangeFactory(simple_config)
+        assert factory.config == simple_config
+
+    def test_factory_supported_exchanges(self, simple_config):
+        """Test getting supported exchanges."""
+        factory = ExchangeFactory(simple_config)
+        supported = factory.get_supported_exchanges()
+        assert isinstance(supported, list)
+        assert len(supported) > 0
+
+    def test_factory_available_exchanges(self, simple_config):
+        """Test getting available exchanges."""
+        factory = ExchangeFactory(simple_config)
+        available = factory.get_available_exchanges()
+        assert isinstance(available, list)
+
+    def test_factory_is_exchange_supported(self, simple_config):
+        """Test checking if exchange is supported."""
+        factory = ExchangeFactory(simple_config)
+        
+        # Test with known exchange
+        supported = factory.get_supported_exchanges()
+        if supported:
+            assert factory.is_exchange_supported(supported[0]) is True
+        
+        # Test with unknown exchange
+        assert factory.is_exchange_supported("unknown_exchange") is False
+
+    async def test_factory_create_unsupported_exchange(self, simple_config):
+        """Test creating unsupported exchange raises error."""
+        factory = ExchangeFactory(simple_config)
+        
+        with pytest.raises(ValueError, match="Unsupported exchange"):
+            await factory.create_exchange("unsupported_exchange")
+
+    async def test_factory_get_exchange_not_found(self, simple_config):
+        """Test getting non-existent exchange."""
+        factory = ExchangeFactory(simple_config)
+        
+        exchange = await factory.get_exchange("nonexistent", create_if_missing=False)
+        assert exchange is None
+
+    async def test_factory_remove_nonexistent_exchange(self, simple_config):
+        """Test removing non-existent exchange."""
+        factory = ExchangeFactory(simple_config)
+        
+        removed = await factory.remove_exchange("nonexistent")
+        assert removed is False
+
+
+class TestExchangeServiceSimpleCoverage:
+    """Simple tests for ExchangeService coverage."""
+
+    async def test_service_initialization(self, simple_config):
+        """Test service initialization."""
+        mock_factory = Mock()
+        service = ExchangeService(exchange_factory=mock_factory, config=simple_config)
+        
+        assert service.exchange_factory == mock_factory
+        assert service.config == simple_config
+
+    async def test_service_lifecycle(self, simple_config):
+        """Test service start/stop lifecycle."""
+        mock_factory = Mock()
+        mock_factory.disconnect_all = AsyncMock()
+        
+        service = ExchangeService(exchange_factory=mock_factory, config=simple_config)
+        
+        await service.start()
+        assert service._started is True
+        
+        await service.stop()
+        mock_factory.disconnect_all.assert_called_once()
+        assert service._started is False
+
+    async def test_service_validation_errors(self, simple_config):
+        """Test service validation error handling."""
+        mock_factory = Mock()
+        service = ExchangeService(exchange_factory=mock_factory, config=simple_config)
+        
+        await service.start()
+        
+        # Test empty symbol validation
+        with pytest.raises(ValidationError, match="symbol is required"):
+            await service.get_market_data("test_exchange", "")
+        
+        # Test empty order_id validation
+        with pytest.raises(ValidationError, match="order_id is required"):
+            await service.cancel_order("test_exchange", "")
+        
+        with pytest.raises(ValidationError, match="order_id is required"):
+            await service.get_order_status("test_exchange", "")
+        
+        # Test invalid order validation
+        invalid_order = OrderRequest(
+            symbol="",  # Invalid symbol
+            quantity=Decimal("0.001"),
+            side=OrderSide.BUY,
+            order_type=OrderType.MARKET,
+        )
+        
+        with pytest.raises(ValidationError, match="symbol is required"):
+            await service.place_order("test_exchange", invalid_order)
+
+    async def test_service_factory_error_handling(self, simple_config):
+        """Test service error handling when factory fails."""
+        mock_factory = Mock()
+        mock_factory.get_exchange = AsyncMock(side_effect=Exception("Factory error"))
+        
+        service = ExchangeService(exchange_factory=mock_factory, config=simple_config)
+        await service.start()
+        
+        # Test various operations that should catch and wrap factory errors
+        order_request = OrderRequest(
+            symbol="BTCUSDT",
+            quantity=Decimal("0.001"),
+            side=OrderSide.BUY,
+            order_type=OrderType.MARKET,
+        )
+        
+        with pytest.raises(Exception):  # ServiceError should be raised but might be wrapped
+            await service.place_order("test_exchange", order_request)
+        
+        with pytest.raises(Exception):
+            await service.get_account_balance("test_exchange")
+        
+        with pytest.raises(Exception):
+            await service.get_market_data("test_exchange", "BTCUSDT")
+
+    async def test_service_health_check_all(self, simple_config):
+        """Test service health check all method."""
+        mock_factory = Mock()
+        mock_factory.health_check_all = AsyncMock(return_value={"test": {"healthy": True}})
+        
+        service = ExchangeService(exchange_factory=mock_factory, config=simple_config)
+        await service.start()
+        
+        health_results = await service.health_check_all()
+        mock_factory.health_check_all.assert_called_once()
+        assert health_results == {"test": {"healthy": True}}
+
+
+class TestExchangeTypesSimpleCoverage:
+    """Simple tests for ExchangeTypes coverage."""
+
+    def test_validate_symbol_valid(self):
+        """Test symbol validation with valid symbols."""
+        assert ExchangeTypes.validate_symbol("BTCUSDT") is True
+        assert ExchangeTypes.validate_symbol("ETHUSDT") is True
+        assert ExchangeTypes.validate_symbol("BTC") is True
+
+    def test_validate_symbol_invalid(self):
+        """Test symbol validation with invalid symbols."""
+        assert ExchangeTypes.validate_symbol("") is False
+        assert ExchangeTypes.validate_symbol(None) is False
+        
+        # Test various invalid patterns
+        invalid_symbols = [
+            "BTC-USD",  # Contains hyphen
+            "BTC/USD",  # Contains slash
+            "BTC USD",  # Contains space
+            "btc",      # Lowercase
+            "BTC@USD",  # Contains @
+            "123BTC",   # Starts with number
+        ]
+        
+        for symbol in invalid_symbols:
+            assert ExchangeTypes.validate_symbol(symbol) is False
+
+    def test_normalize_symbol(self):
+        """Test symbol normalization."""
+        # Test that normalize_symbol method exists and works
+        normalized = ExchangeTypes.normalize_symbol("btcusdt")
+        assert normalized == "BTCUSDT"
+        
+        normalized = ExchangeTypes.normalize_symbol("BTC-USD")
+        assert normalized == "BTCUSD"
+
+    def test_exchange_capabilities(self):
+        """Test exchange capabilities enumeration."""
+        from src.exchanges.types import ExchangeCapability
+        
+        # Test that capabilities exist
+        assert hasattr(ExchangeCapability, 'SPOT_TRADING')
+        assert hasattr(ExchangeCapability, 'FUTURES_TRADING')
+        assert hasattr(ExchangeCapability, 'MARGIN_TRADING')
+
+    def test_exchange_rate_limit(self):
+        """Test exchange rate limit class."""
+        from src.exchanges.types import ExchangeRateLimit
+        
+        rate_limit = ExchangeRateLimit(
+            requests_per_minute=1200,
+            orders_per_second=10,
+            websocket_connections=5
+        )
+        
+        assert rate_limit.requests_per_minute == 1200
+        assert rate_limit.orders_per_second == 10
+        assert rate_limit.websocket_connections == 5
+
+
+class TestConnectionManagerSimpleCoverage:
+    """Simple tests for ConnectionManager coverage."""
+
+    def test_connection_manager_initialization(self, simple_config):
+        """Test ConnectionManager initialization."""
+        from src.exchanges.connection_manager import ConnectionManager
+        
+        manager = ConnectionManager(simple_config, "test_exchange")
+        
+        assert manager.config == simple_config
+        assert manager.exchange_name == "test_exchange"
+        assert hasattr(manager, 'rest_connections')
+        assert hasattr(manager, 'websocket_connections')
+
+
+class TestMiscellaneousSimpleCoverage:
+    """Simple tests for miscellaneous coverage."""
+
+    def test_exchanges_init_imports(self):
+        """Test that exchanges __init__ imports work."""
+        # This exercises the __init__.py file
+        from src.exchanges import ExchangeFactory, ExchangeService
+        
+        assert ExchangeFactory is not None
+        assert ExchangeService is not None
+
+    def test_exchange_interfaces_imports(self):
+        """Test exchange interfaces imports."""
+        from src.exchanges.interfaces import IExchange, IExchangeFactory
+        
+        assert IExchange is not None
+        assert IExchangeFactory is not None
+
+    def test_exchange_types_imports(self):
+        """Test exchange types imports."""
+        from src.exchanges.types import ExchangeCapability, ExchangeRateLimit
+        
+        assert ExchangeCapability is not None
+        assert ExchangeRateLimit is not None
+
+
+if __name__ == "__main__":
+    pytest.main([__file__, "-v"])

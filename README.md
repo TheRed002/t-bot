@@ -1,229 +1,238 @@
-# T-Bot Trading System
+# T-Bot - Cryptocurrency Trading Bot
+
+![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)
+![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)
+![Status: Beta](https://img.shields.io/badge/status-beta-yellow.svg)
+
+## ⚠️ Disclaimer
+
+**READ THIS BEFORE USING**
+
+- 🚫 **NOT FINANCIAL ADVICE** - This is for educational and research purposes only
+- ⚠️ **USE AT YOUR OWN RISK** - Cryptocurrency trading carries substantial risk
+- 📜 **NO WARRANTY** - Provided "AS IS" without warranty of any kind
+- 🏛️ **REGULATORY COMPLIANCE** - Ensure compliance with your local laws
+- 📝 **TEST FIRST** - Always use testnet/sandbox mode before live trading
+
+**The developers are not responsible for any financial losses.**
+
+---
 
 ## Overview
 
-T-Bot is a professional-grade cryptocurrency trading bot with advanced features for automated trading across multiple exchanges. Built with Python and React, it provides institutional-level trading capabilities with comprehensive risk management, machine learning integration, and real-time performance monitoring.
+T-Bot is a professional cryptocurrency trading bot supporting automated trading across multiple exchanges. Built with Python 3.10+ and React, it features institutional-grade risk management, machine learning integration, and real-time monitoring.
 
-## Key Features
+## Features
 
-### 🏦 Multi-Exchange Support
-- **Binance** - Full spot and futures trading
-- **Coinbase** - Professional trading interface
-- **OKX** - Complete API integration
-- **Kraken** - Coming soon
-- **Bybit** - Coming soon
+### Exchanges
+- **Binance** - Spot and futures trading via REST API and WebSocket
+- **Coinbase** - Advanced trading interface with full API support
+- **OKX** - Complete exchange integration with WebSocket streams
+- **Mock Mode** - Test without API keys or real funds
 
-### 📊 Advanced Trading Strategies
-- **Static Strategies**: Mean reversion, trend following, breakout
-- **Market Making**: Automated liquidity provision with spread optimization
-- **Arbitrage**: Cross-exchange and triangular arbitrage detection
-- **Dynamic Strategies**: Adaptive momentum, volatility breakout
-- **ML-Based**: AI-powered prediction and regime detection
-- **Hybrid Strategies**: Ensemble methods combining multiple approaches
+### Trading Strategies
+**Static**: Mean reversion, trend following, breakout, market making, cross-exchange arbitrage, triangular arbitrage
+**Dynamic**: Adaptive momentum, volatility breakout
+**Hybrid**: Rule-based AI, fallback strategies, ensemble methods
 
-### 🛡️ Risk Management
-- **Position Sizing**: Kelly Criterion with half-Kelly safety factor
-- **Circuit Breakers**: Correlation-based and threshold-based halts
-- **Portfolio Limits**: Maximum positions and exposure controls
-- **Stop-Loss/Take-Profit**: Automated risk controls
-- **Order Idempotency**: Duplicate order prevention
-- **Decimal Precision**: Financial-grade calculation accuracy
+### Risk Management
+- Position sizing with Kelly Criterion
+- Stop-loss and take-profit automation
+- Portfolio exposure limits
+- Circuit breakers (correlation and threshold-based)
+- Order idempotency (duplicate prevention)
+- Financial-grade decimal precision
 
-### 🤖 Machine Learning
-- **Price Prediction**: LSTM and transformer models
-- **Regime Detection**: Market condition classification
-- **Volatility Forecasting**: GARCH and ML models
-- **Feature Engineering**: 100+ technical and statistical indicators
-- **Model Management**: Versioning, validation, and drift detection
+### Machine Learning
+- Feature engineering (100+ indicators via TA-Lib)
+- Model training (TensorFlow, scikit-learn, XGBoost, LightGBM)
+- Hyperparameter optimization (Optuna)
+- Model validation and drift detection
 
-### 🎮 Playground & Optimization
-- **Strategy Testing**: Backtest on historical data
-- **Paper Trading**: Test with live data without risk
-- **Parameter Optimization**: Brute force and Bayesian optimization
-- **A/B Testing**: Compare strategy performance
-- **Walk-Forward Analysis**: Prevent overfitting
+### Analytics
+- Backtesting engine with walk-forward analysis
+- Parameter optimization (brute force and Bayesian)
+- Real-time performance monitoring
+- Portfolio analytics and reporting
 
-### 📈 Web Interface
-- **Dashboard**: Real-time portfolio and performance metrics
-- **Trading Interface**: Manual and automated order management
-- **Bot Management**: Create, configure, and monitor bots
-- **Risk Dashboard**: Live risk metrics and alerts
-- **Performance Analytics**: Detailed trading statistics
-
-## System Architecture
-
-```
-T-Bot Trading System
-├── Core Infrastructure
-│   ├── Configuration Management
-│   ├── Logging & Monitoring
-│   ├── Error Handling
-│   └── Type System
-├── Exchange Layer
-│   ├── Unified API Interface
-│   ├── WebSocket Streams
-│   ├── Rate Limiting
-│   └── Connection Management
-├── Execution Engine
-│   ├── Order Management
-│   ├── Smart Order Routing
-│   ├── Execution Algorithms (TWAP, VWAP)
-│   └── Slippage Control
-├── Risk Management
-│   ├── Position Sizing
-│   ├── Portfolio Management
-│   ├── Circuit Breakers
-│   └── Correlation Monitoring
-├── Strategy Engine
-│   ├── Strategy Factory
-│   ├── Signal Generation
-│   ├── Backtesting Engine
-│   └── Optimization Module
-├── Machine Learning
-│   ├── Feature Engineering
-│   ├── Model Training
-│   ├── Inference Engine
-│   └── Model Registry
-├── Data Pipeline
-│   ├── Market Data Ingestion
-│   ├── Data Validation
-│   ├── Storage (PostgreSQL, InfluxDB, Redis)
-│   └── Real-time Processing
-├── Web Interface
-│   ├── FastAPI Backend
-│   ├── React Frontend
-│   ├── WebSocket Server
-│   └── Authentication
-└── Monitoring & Alerting
-    ├── Prometheus Metrics
-    ├── Grafana Dashboards
-    ├── Log Aggregation
-    └── Alert Management
-```
+### Web Interface
+- FastAPI backend with JWT authentication
+- React frontend with Material-UI
+- Real-time WebSocket updates
+- Interactive dashboards
 
 ## Technology Stack
 
-### Backend
-- **Language**: Python 3.10+
-- **Framework**: FastAPI
-- **Async**: asyncio, aiohttp
-- **Database**: PostgreSQL, InfluxDB, Redis
-- **Message Queue**: Redis Pub/Sub
-- **ML**: TensorFlow, scikit-learn, XGBoost
+**Backend**: Python 3.10+, FastAPI, SQLAlchemy, asyncio
+**Database**: PostgreSQL 15, Redis 7, InfluxDB 2.7
+**ML**: TensorFlow, scikit-learn, XGBoost, LightGBM, TA-Lib
+**Frontend**: React 18, TypeScript, Webpack, Material-UI
+**Infrastructure**: Docker, Docker Compose
+**Testing**: pytest, pytest-asyncio
+**Code Quality**: ruff, black, mypy
 
-### Frontend
-- **Framework**: React 18
-- **State Management**: Redux Toolkit
-- **UI Components**: Material-UI
-- **Charts**: Recharts, TradingView
-- **WebSocket**: socket.io-client
-
-### Infrastructure
-- **Containerization**: Docker, Docker Compose
-- **Monitoring**: Prometheus, Grafana, Loki
-- **CI/CD**: GitHub Actions
-- **Testing**: pytest, Jest
-- **Code Quality**: ruff, black, mypy
-
-## Performance
-
-- **Order Latency**: < 50ms average
-- **WebSocket Throughput**: 10,000+ messages/second
-- **Backtesting Speed**: 1M+ candles/second
-- **Concurrent Bots**: 100+ per instance
-- **Test Coverage**: 97%
-- **Decimal Precision**: 28 digits
-
-## Security Features
-
-- **API Key Encryption**: AES-256 encryption at rest
-- **JWT Authentication**: Secure token-based auth
-- **Rate Limiting**: Per-user and per-endpoint limits
-- **Input Validation**: Comprehensive sanitization
-- **SQL Injection Prevention**: Parameterized queries
-- **XSS Protection**: Content Security Policy
-- **Audit Logging**: Complete transaction history
-
-## Getting Started
+## Installation
 
 ### Prerequisites
-
-- Python 3.10 or higher
-- Node.js 18 or higher
+- Python 3.10.12 or higher
 - Docker and Docker Compose
-- PostgreSQL 14+
-- Redis 7+
+- Node.js 18+ (for frontend)
 - Git
 
-### Quick Start
+### Quick Setup
 
-1. Clone the repository:
 ```bash
-git clone https://github.com/your-org/t-bot.git
+# Clone repository
+git clone https://github.com/TheRed002/t-bot.git
 cd t-bot
+
+# Complete setup (Python venv, dependencies, Docker services)
+make setup
+
+# Or step-by-step:
+make setup-venv      # Create Python virtual environment
+make install-deps    # Install Python dependencies
+make setup-external  # Install TA-Lib and external libraries
+make services-up     # Start PostgreSQL, Redis, InfluxDB
+make migrate         # Run database migrations
 ```
 
-2. Follow the setup instructions in [SETUP.md](SETUP.md)
+### Configuration
 
-3. Configure your exchange API keys in `config/config.yaml`
-
-4. Start the system:
+1. Copy environment template:
 ```bash
-docker-compose up -d
+cp .env.example .env
 ```
 
-5. Access the web interface at http://localhost:3000
+2. Edit `.env` with your settings:
+   - Database credentials
+   - Exchange API keys (or leave blank for mock mode)
+   - JWT secret key
+   - Other configuration
 
-## Documentation
+3. Configure strategies in `config/strategies/`
 
-- [Setup Guide](SETUP.md) - Detailed installation instructions
-- [API Documentation](http://localhost:8000/docs) - FastAPI Swagger docs
-- [Strategy Guide](docs/STRATEGIES.md) - Strategy development guide
-- [Risk Management](docs/RISK_MANAGEMENT.md) - Risk configuration
-- [ML Models](docs/ML_MODELS.md) - Machine learning documentation
+## Running
+
+### Full Application
+```bash
+make run-all        # Backend + Web API + Frontend
+```
+
+### Individual Components
+```bash
+make run            # Trading bot backend only
+make run-mock       # Mock mode (no API keys needed)
+make run-web        # Web API only (port 8000)
+make run-frontend   # React frontend only (port 3000)
+```
+
+### Services
+```bash
+make services-up    # Start PostgreSQL, Redis, InfluxDB
+make services-down  # Stop services
+make services-logs  # View service logs
+make status         # Check status of all components
+```
+
+### Stop All
+```bash
+make kill          # Stop all T-Bot processes
+```
 
 ## Testing
 
-Run the test suite:
+```bash
+make test          # Run all tests
+make test-unit     # Unit tests only
+make test-integration  # Integration tests only
+make test-mock     # Tests in mock mode
+make coverage      # Generate coverage report
+```
+
+## Development
 
 ```bash
-# Unit tests
-pytest tests/unit -v
-
-# Integration tests
-pytest tests/integration -v
-
-# Test coverage
-pytest --cov=src --cov-report=html
-
-# Frontend tests
-cd frontend && npm test
+make lint          # Check code quality
+make format        # Auto-format code (ruff + black)
+make typecheck     # Run mypy type checking
+make check-all     # Lint + typecheck + test
+make clean         # Remove temporary files
 ```
+
+## Security Best Practices
+
+1. **Never commit secrets** - Use `.env` file (already gitignored)
+2. **Start with testnet** - Use `BINANCE_TESTNET=true`, `OKX_SANDBOX=true`
+3. **Use mock mode** - Test strategies with `make run-mock`
+4. **Limit API permissions** - Read-only for testing, restrict withdrawal
+5. **Monitor actively** - Watch logs and set up alerts
+6. **Regular backups** - Database and configuration backups
+
+## Project Structure
+
+```
+t-bot/
+├── src/
+│   ├── analytics/          # Performance analytics
+│   ├── backtesting/        # Backtesting engine
+│   ├── bot_management/     # Bot lifecycle
+│   ├── capital_management/ # Portfolio allocation
+│   ├── core/              # Base classes, config, DI
+│   ├── data/              # Market data pipeline
+│   ├── database/          # Models, repositories
+│   ├── error_handling/    # Error recovery
+│   ├── exchanges/         # Exchange integrations
+│   ├── execution/         # Order execution
+│   ├── ml/                # Machine learning
+│   ├── monitoring/        # Telemetry
+│   ├── optimization/      # Parameter optimization
+│   ├── risk_management/   # Risk controls
+│   ├── state/             # State management
+│   ├── strategies/        # Trading strategies
+│   ├── utils/             # Shared utilities
+│   └── web_interface/     # Web API + frontend
+├── tests/                 # Unit and integration tests
+├── config/                # Strategy configs
+├── docker/                # Docker configuration
+├── frontend/              # React frontend
+├── scripts/               # Setup and deployment scripts
+├── Makefile              # Build automation
+└── README.md             # This file
+```
+
+## Documentation
+
+- API Documentation: http://localhost:8000/docs (when running)
+- Code Standards: `CODING_STANDARDS.md`
+- Common Patterns: `COMMON_PATTERNS.md`
+- Claude Instructions: `CLAUDE.md`
 
 ## Contributing
 
-Please read [CONTRIBUTING.md](CONTRIBUTING.md) for details on our code of conduct and the process for submitting pull requests.
+Contributions welcome! Please:
+1. Fork the repository
+2. Create a feature branch
+3. Follow coding standards (`make format` and `make lint`)
+4. Add tests for new features
+5. Submit a pull request
 
 ## License
 
-This project is proprietary software. All rights reserved.
+MIT License - see [LICENSE.txt.md](LICENSE.txt.md)
 
-## Support
-
-For support, please contact the development team or create an issue in the issue tracker.
-
-## Disclaimer
-
-**IMPORTANT**: This software is for educational and research purposes. Cryptocurrency trading carries substantial risk of loss. Users should understand the risks involved and trade responsibly. The developers are not responsible for any financial losses incurred through the use of this software.
+Copyright (c) 2025 Muhammad Bilal Farooq
 
 ## Acknowledgments
 
 - Exchange APIs: Binance, Coinbase, OKX
-- Open source libraries: FastAPI, React, Redux, Material-UI
-- The cryptocurrency trading community
+- Technical Analysis: TA-Lib
+- ML Frameworks: TensorFlow, scikit-learn, XGBoost
+- Web Framework: FastAPI, React
+- Database: PostgreSQL, Redis, InfluxDB
 
 ---
 
-**Version**: 1.0.0  
-**Last Updated**: 2024  
-**Status**: Production Ready
+**Version**: 0.9.0 (Beta)
+**Author**: Muhammad Bilal Farooq
+**Repository**: https://github.com/TheRed002/t-bot

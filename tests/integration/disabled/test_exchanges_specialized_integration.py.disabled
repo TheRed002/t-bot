@@ -1,0 +1,1001 @@
+"""
+Specialized Integration Tests for Exchanges Module
+
+This test suite focuses on specific integration scenarios that are critical
+for achieving 70% coverage and production readiness.
+
+Specialized test areas:
+1. WebSocket integration and message handling
+2. Rate limiter integration with token bucket algorithms
+3. Connection manager lifecycle and pooling
+4. Exchange-specific implementations (Binance, Coinbase, OKX)
+5. State management integration
+6. Real-time data streaming integration
+7. Order management lifecycle integration
+"""
+
+import asyncio
+import json
+import time
+from collections.abc import AsyncIterator
+from decimal import Decimal
+from typing import Any
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
+
+import pytest
+
+# Core imports
+from src.core.config import Config
+from src.core.exceptions import (
+    ExchangeConnectionError,
+    ExchangeRateLimitError,
+    ValidationError,
+)
+from src.core.logging import get_logger
+from src.core.types import (
+    MarketData,
+    OrderBook,
+    OrderRequest,
+    OrderResponse,
+    OrderSide,
+    OrderStatus,
+    OrderType,
+    Ticker,
+    Trade,
+)
+
+# Exchanges imports
+from src.exchanges.advanced_rate_limiter import AdvancedRateLimiter, TokenBucket
+from src.exchanges.base import BaseExchange
+from src.exchanges.binance import BinanceExchange
+from src.exchanges.binance_websocket import BinanceWebSocketManager
+from src.exchanges.coinbase import CoinbaseExchange
+from src.exchanges.coinbase_websocket import CoinbaseWebSocketManager
+from src.exchanges.connection_manager import ConnectionManager
+from src.exchanges.connection_pool import ConnectionPool
+from src.exchanges.factory import ExchangeFactory
+from src.exchanges.global_coordinator import GlobalExchangeCoordinator
+from src.exchanges.health_monitor import ExchangeHealthMonitor
+from src.exchanges.high_performance_websocket import HighPerformanceWebSocket
+from src.exchanges.interfaces import IExchange, IStateService
+from src.exchanges.okx import OKXExchange
+from src.exchanges.okx_websocket import OKXWebSocketManager
+from src.exchanges.rate_limiter import RateLimiter, RateLimitDecorator
+from src.exchanges.service import ExchangeService
+from src.exchanges.types import ExchangeCapability, ExchangeRateLimit, ExchangeTypes
+from src.exchanges.validation import ExchangeValidator
+
+logger = get_logger(__name__)
+
+
+@pytest.fixture
+async def advanced_config() -> Config:
+    """Create advanced configuration for specialized testing."""
+    config = Mock(spec=Config)
+    
+    # Exchange-specific configurations
+    config.exchange = Mock()
+    config.exchange.binance_api_key = "test_binance_key"
+    config.exchange.binance_api_secret = "test_binance_secret"
+    config.exchange.binance_testnet = True
+    config.exchange.coinbase_api_key = "test_coinbase_key"
+    config.exchange.coinbase_api_secret = "test_coinbase_secret"
+    config.exchange.coinbase_passphrase = "test_passphrase"
+    config.exchange.coinbase_sandbox = True
+    config.exchange.okx_api_key = "test_okx_key"
+    config.exchange.okx_api_secret = "test_okx_secret"
+    config.exchange.okx_passphrase = "test_okx_passphrase"
+    config.exchange.okx_testnet = True
+    
+    # Advanced rate limiting
+    config.rate_limits = Mock()
+    config.rate_limits.global_requests_per_minute = 6000
+    config.rate_limits.exchange_requests_per_minute = 1200
+    config.rate_limits.orders_per_second = 10
+    config.rate_limits.websocket_connections = 5
+    config.rate_limits.burst_capacity = 50
+    
+    # WebSocket configuration
+    config.websocket = Mock()
+    config.websocket.max_connections = 10
+    config.websocket.reconnect_delay = 5.0
+    config.websocket.ping_interval = 30.0
+    config.websocket.message_buffer_size = 1000
+    
+    # Health monitoring
+    config.health = Mock()
+    config.health.check_interval = 30.0
+    config.health.failure_threshold = 3
+    config.health.recovery_threshold = 2
+    
+    return config
+
+
+@pytest.fixture
+async def mock_websocket_manager():
+    """Create mock WebSocket manager for testing."""
+    ws_manager = Mock()
+    ws_manager.connect = AsyncMock(return_value=True)
+    ws_manager.disconnect = AsyncMock()
+    ws_manager.subscribe = AsyncMock()
+    ws_manager.unsubscribe = AsyncMock()
+    ws_manager.send_message = AsyncMock(return_value=True)
+    ws_manager.is_connected = Mock(return_value=True)
+    ws_manager.get_connection_count = Mock(return_value=2)
+    return ws_manager
+
+
+class TestWebSocketIntegration:
+    """Test WebSocket integration across all exchanges."""
+
+    async def test_binance_websocket_integration(self, advanced_config):
+        """Test Binance WebSocket integration."""
+        # Mock the websocket connection
+        with patch('websockets.connect') as mock_connect:
+            mock_ws = Mock()
+            mock_ws.send = AsyncMock()
+            mock_ws.recv = AsyncMock(side_effect=[
+                json.dumps({
+                    "stream": "btcusdt@ticker",
+                    "data": {
+                        "s": "BTCUSDT",
+                        "c": "50000.00",
+                        "h": "51000.00",
+                        "l": "49000.00",
+                        "v": "1000.0"
+                    }
+                })
+            ])
+            mock_connect.return_value.__aenter__ = AsyncMock(return_value=mock_ws)
+            mock_connect.return_value.__aexit__ = AsyncMock()
+            
+            ws_manager = BinanceWebSocketManager(advanced_config)
+            
+            # Test connection
+            connected = await ws_manager.connect("wss://stream.binance.com:9443/ws")
+            assert connected is True
+            
+            # Test subscription
+            await ws_manager.subscribe_ticker("BTCUSDT")
+            
+            # Verify WebSocket calls
+            mock_ws.send.assert_called()
+
+    async def test_coinbase_websocket_integration(self, advanced_config):
+        """Test Coinbase WebSocket integration."""
+        with patch('websockets.connect') as mock_connect:
+            mock_ws = Mock()
+            mock_ws.send = AsyncMock()
+            mock_ws.recv = AsyncMock(side_effect=[
+                json.dumps({
+                    "type": "ticker",
+                    "product_id": "BTC-USD",
+                    "price": "50000.00",
+                    "volume_24h": "1000.0"
+                })
+            ])
+            mock_connect.return_value.__aenter__ = AsyncMock(return_value=mock_ws)
+            mock_connect.return_value.__aexit__ = AsyncMock()
+            
+            ws_manager = CoinbaseWebSocketManager(advanced_config)
+            
+            # Test connection
+            connected = await ws_manager.connect("wss://ws-feed-public.sandbox.pro.coinbase.com")
+            assert connected is True
+            
+            # Test subscription
+            await ws_manager.subscribe_ticker("BTC-USD")
+            
+            mock_ws.send.assert_called()
+
+    async def test_okx_websocket_integration(self, advanced_config):
+        """Test OKX WebSocket integration."""
+        with patch('websockets.connect') as mock_connect:
+            mock_ws = Mock()
+            mock_ws.send = AsyncMock()
+            mock_ws.recv = AsyncMock(side_effect=[
+                json.dumps({
+                    "arg": {"channel": "tickers", "instId": "BTC-USDT"},
+                    "data": [{
+                        "instId": "BTC-USDT",
+                        "last": "50000",
+                        "vol24h": "1000"
+                    }]
+                })
+            ])
+            mock_connect.return_value.__aenter__ = AsyncMock(return_value=mock_ws)
+            mock_connect.return_value.__aexit__ = AsyncMock()
+            
+            ws_manager = OKXWebSocketManager(advanced_config)
+            
+            # Test connection
+            connected = await ws_manager.connect("wss://ws.okx.com:8443/ws/v5/public")
+            assert connected is True
+            
+            # Test subscription
+            await ws_manager.subscribe_ticker("BTC-USDT")
+            
+            mock_ws.send.assert_called()
+
+    async def test_high_performance_websocket_integration(self, advanced_config):
+        """Test high-performance WebSocket integration."""
+        with patch('websockets.connect') as mock_connect:
+            mock_ws = Mock()
+            mock_ws.send = AsyncMock()
+            mock_ws.recv = AsyncMock(side_effect=["pong"])
+            mock_connect.return_value.__aenter__ = AsyncMock(return_value=mock_ws)
+            mock_connect.return_value.__aexit__ = AsyncMock()
+            
+            hp_ws = HighPerformanceWebSocket("wss://test.com/ws", "test_connection")
+            
+            # Test connection
+            connected = await hp_ws.connect()
+            assert connected is True
+            
+            # Test message sending
+            await hp_ws.send_message({"test": "message"})
+            
+            # Test ping/pong
+            await hp_ws.ping()
+            
+            mock_ws.send.assert_called()
+
+    async def test_websocket_message_handling(self, advanced_config):
+        """Test WebSocket message handling across exchanges."""
+        callback_data = []
+        
+        def message_callback(data):
+            callback_data.append(data)
+        
+        # Test with mock WebSocket manager
+        ws_manager = BinanceWebSocketManager(advanced_config)
+        
+        # Mock internal methods
+        ws_manager._handle_message = Mock(side_effect=lambda msg: message_callback(msg))
+        
+        # Simulate message handling
+        test_message = {
+            "stream": "btcusdt@ticker",
+            "data": {"s": "BTCUSDT", "c": "50000.00"}
+        }
+        
+        ws_manager._handle_message(test_message)
+        
+        assert len(callback_data) == 1
+        assert callback_data[0] == test_message
+
+
+class TestRateLimiterIntegration:
+    """Test rate limiter integration with advanced algorithms."""
+
+    async def test_token_bucket_algorithm_integration(self, advanced_config):
+        """Test token bucket algorithm integration."""
+        # Create token bucket with specific parameters
+        bucket = TokenBucket(capacity=100, refill_rate=10.0, initial_tokens=50)
+        
+        # Test token consumption
+        assert bucket.consume(10) is True
+        assert bucket.tokens == 40
+        
+        # Test token refill
+        await asyncio.sleep(0.1)
+        bucket.consume(1)  # Trigger refill calculation
+        assert bucket.tokens > 40  # Should have refilled some tokens
+        
+        # Test bucket exhaustion
+        bucket.tokens = 5
+        assert bucket.consume(10) is False  # Not enough tokens
+        assert bucket.tokens == 5  # Tokens unchanged
+
+    async def test_advanced_rate_limiter_integration(self, advanced_config):
+        """Test advanced rate limiter integration."""
+        rate_limiter = AdvancedRateLimiter(advanced_config, "test_exchange")
+        
+        # Test bucket configuration
+        assert "requests_per_minute" in rate_limiter.buckets
+        assert "orders_per_second" in rate_limiter.buckets
+        
+        # Test rate limiting acquire
+        result = await rate_limiter.acquire("requests_per_minute", tokens=1, timeout=1.0)
+        assert result is True
+        
+        # Test burst capacity
+        burst_results = []
+        for i in range(10):
+            result = await rate_limiter.acquire("requests_per_minute", tokens=1, timeout=0.1)
+            burst_results.append(result)
+        
+        # At least some should succeed (burst capacity)
+        assert any(burst_results)
+
+    async def test_rate_limit_decorator_integration(self, advanced_config):
+        """Test rate limit decorator integration."""
+        rate_limiter = RateLimiter(advanced_config, "test_exchange")
+        
+        class TestService:
+            def __init__(self):
+                self.rate_limiter = rate_limiter
+                self.call_count = 0
+            
+            @RateLimitDecorator(bucket_name="requests_per_minute", tokens=1, timeout=1.0)
+            async def rate_limited_operation(self):
+                self.call_count += 1
+                return f"call_{self.call_count}"
+        
+        service = TestService()
+        
+        # Test multiple calls
+        results = []
+        for i in range(5):
+            try:
+                result = await service.rate_limited_operation()
+                results.append(result)
+            except ExchangeRateLimitError:
+                # Some calls might be rate limited
+                continue
+        
+        assert len(results) > 0
+        assert service.call_count >= len(results)
+
+    async def test_global_rate_limiting_coordination(self, advanced_config):
+        """Test global rate limiting coordination."""
+        # Create multiple rate limiters for coordination
+        limiter1 = AdvancedRateLimiter(advanced_config, "exchange1")
+        limiter2 = AdvancedRateLimiter(advanced_config, "exchange2")
+        
+        # Test that global limits affect all exchanges
+        tasks = []
+        for i in range(10):
+            if i % 2 == 0:
+                task = limiter1.acquire("requests_per_minute", tokens=1, timeout=0.1)
+            else:
+                task = limiter2.acquire("requests_per_minute", tokens=1, timeout=0.1)
+            tasks.append(asyncio.create_task(task))
+        
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        # Check that some succeeded and some were rate limited
+        successful = [r for r in results if r is True]
+        rate_limited = [r for r in results if isinstance(r, ExchangeRateLimitError)]
+        
+        assert len(successful) > 0
+        # Global rate limiting might cause some to be rate limited
+
+
+class TestConnectionManagerIntegration:
+    """Test connection manager lifecycle and pooling."""
+
+    async def test_connection_pool_integration(self, advanced_config):
+        """Test connection pool integration."""
+        connection_pool = ConnectionPool(advanced_config)
+        
+        # Test pool initialization
+        assert connection_pool.max_connections > 0
+        assert len(connection_pool._connections) == 0
+        
+        # Test connection acquisition
+        conn = await connection_pool.acquire_connection("test_endpoint")
+        assert conn is not None
+        
+        # Test connection reuse
+        conn2 = await connection_pool.acquire_connection("test_endpoint")
+        assert conn2 is conn  # Should reuse same connection
+        
+        # Test connection release
+        await connection_pool.release_connection("test_endpoint")
+        
+        # Test pool cleanup
+        await connection_pool.cleanup()
+
+    async def test_connection_lifecycle_management(self, advanced_config):
+        """Test comprehensive connection lifecycle management."""
+        connection_manager = ConnectionManager(advanced_config, "test_exchange")
+        
+        # Test REST connection lifecycle
+        rest_conn = await connection_manager.get_rest_connection("api_v3")
+        assert rest_conn is not None
+        assert "api_v3" in connection_manager.rest_connections
+        
+        # Test WebSocket connection lifecycle
+        ws_conn = await connection_manager.create_websocket_connection(
+            "wss://test.com/ws", "test_stream"
+        )
+        assert ws_conn is not None
+        assert "test_stream" in connection_manager.websocket_connections
+        
+        # Test connection health monitoring
+        health_results = await connection_manager.health_check_all()
+        assert isinstance(health_results, dict)
+        
+        # Test connection cleanup
+        await connection_manager.cleanup()
+        assert len(connection_manager.rest_connections) == 0
+        assert len(connection_manager.websocket_connections) == 0
+
+    async def test_concurrent_connection_management(self, advanced_config):
+        """Test concurrent connection management."""
+        connection_manager = ConnectionManager(advanced_config, "test_exchange")
+        
+        # Create multiple concurrent connections
+        connection_tasks = []
+        for i in range(10):
+            task = connection_manager.get_rest_connection(f"endpoint_{i}")
+            connection_tasks.append(asyncio.create_task(task))
+        
+        connections = await asyncio.gather(*connection_tasks)
+        
+        # Verify all connections created
+        assert len(connections) == 10
+        assert all(conn is not None for conn in connections)
+        
+        # Test concurrent WebSocket connections
+        ws_tasks = []
+        for i in range(5):
+            task = connection_manager.create_websocket_connection(
+                f"wss://test{i}.com/ws", f"stream_{i}"
+            )
+            ws_tasks.append(asyncio.create_task(task))
+        
+        ws_connections = await asyncio.gather(*ws_tasks)
+        
+        assert len(ws_connections) == 5
+        assert all(ws is not None for ws in ws_connections)
+
+
+class TestExchangeSpecificIntegration:
+    """Test exchange-specific implementation integration."""
+
+    async def test_binance_exchange_integration(self, advanced_config):
+        """Test Binance exchange implementation integration."""
+        with patch('aiohttp.ClientSession') as mock_session:
+            mock_response = Mock()
+            mock_response.json = AsyncMock(return_value={
+                "symbol": "BTCUSDT",
+                "price": "50000.00"
+            })
+            mock_response.status = 200
+            mock_session.return_value.__aenter__ = AsyncMock(return_value=Mock())
+            mock_session.return_value.__aexit__ = AsyncMock()
+            mock_session.return_value.get = AsyncMock(return_value=mock_response)
+            
+            # Create Binance exchange
+            exchange = BinanceExchange(advanced_config)
+            
+            # Test connection
+            connected = await exchange.connect()
+            assert connected is True
+            
+            # Test ticker retrieval
+            ticker = await exchange.get_ticker("BTCUSDT")
+            assert ticker is not None
+
+    async def test_coinbase_exchange_integration(self, advanced_config):
+        """Test Coinbase exchange implementation integration."""
+        with patch('aiohttp.ClientSession') as mock_session:
+            mock_response = Mock()
+            mock_response.json = AsyncMock(return_value={
+                "product_id": "BTC-USD",
+                "price": "50000.00",
+                "volume": "1000.0"
+            })
+            mock_response.status = 200
+            mock_session.return_value.__aenter__ = AsyncMock(return_value=Mock())
+            mock_session.return_value.__aexit__ = AsyncMock()
+            mock_session.return_value.get = AsyncMock(return_value=mock_response)
+            
+            # Create Coinbase exchange
+            exchange = CoinbaseExchange(advanced_config)
+            
+            # Test connection
+            connected = await exchange.connect()
+            assert connected is True
+            
+            # Test ticker retrieval
+            ticker = await exchange.get_ticker("BTC-USD")
+            assert ticker is not None
+
+    async def test_okx_exchange_integration(self, advanced_config):
+        """Test OKX exchange implementation integration."""
+        with patch('aiohttp.ClientSession') as mock_session:
+            mock_response = Mock()
+            mock_response.json = AsyncMock(return_value={
+                "data": [{
+                    "instId": "BTC-USDT",
+                    "last": "50000",
+                    "vol24h": "1000"
+                }]
+            })
+            mock_response.status = 200
+            mock_session.return_value.__aenter__ = AsyncMock(return_value=Mock())
+            mock_session.return_value.__aexit__ = AsyncMock()
+            mock_session.return_value.get = AsyncMock(return_value=mock_response)
+            
+            # Create OKX exchange
+            exchange = OKXExchange(advanced_config)
+            
+            # Test connection
+            connected = await exchange.connect()
+            assert connected is True
+            
+            # Test ticker retrieval
+            ticker = await exchange.get_ticker("BTC-USDT")
+            assert ticker is not None
+
+    async def test_exchange_specific_validation(self, advanced_config):
+        """Test exchange-specific validation logic."""
+        validator = ExchangeValidator()
+        
+        # Test Binance-specific validation
+        binance_symbols = validator.get_valid_symbols("binance")
+        assert "BTCUSDT" in binance_symbols
+        
+        # Test Coinbase-specific validation
+        coinbase_symbols = validator.get_valid_symbols("coinbase")
+        assert "BTC-USD" in coinbase_symbols
+        
+        # Test OKX-specific validation
+        okx_symbols = validator.get_valid_symbols("okx")
+        assert "BTC-USDT" in okx_symbols
+        
+        # Test cross-exchange symbol conversion
+        binance_symbol = validator.convert_symbol("BTC/USDT", "binance")
+        assert binance_symbol == "BTCUSDT"
+        
+        coinbase_symbol = validator.convert_symbol("BTC/USDT", "coinbase")
+        assert coinbase_symbol == "BTC-USD"
+
+
+class TestStateManagementIntegration:
+    """Test state management integration."""
+
+    async def test_state_service_integration(self, advanced_config):
+        """Test state service integration with exchanges."""
+        # Mock state service
+        mock_state_service = Mock(spec=IStateService)
+        mock_state_service.set_state = AsyncMock()
+        mock_state_service.get_state = AsyncMock(return_value={
+            "connection_status": "connected",
+            "last_heartbeat": time.time()
+        })
+        mock_state_service.update_state = AsyncMock()
+        
+        # Create exchange with state service
+        exchange = ComprehensiveTestExchange(advanced_config, "test")
+        # Inject state service (would normally be done by DI)
+        exchange.state_service = mock_state_service
+        
+        await exchange.connect()
+        
+        # Test state updates during operations
+        await exchange.get_ticker("BTCUSDT")
+        
+        # Verify state service was called
+        mock_state_service.update_state.assert_called()
+
+    async def test_order_state_tracking_integration(self, advanced_config):
+        """Test order state tracking integration."""
+        # Mock state service for order tracking
+        mock_state_service = Mock(spec=IStateService)
+        mock_state_service.set_state = AsyncMock()
+        mock_state_service.get_state = AsyncMock(return_value={})
+        
+        exchange = ComprehensiveTestExchange(advanced_config, "test")
+        exchange.state_service = mock_state_service
+        await exchange.connect()
+        
+        # Test order placement with state tracking
+        order_request = OrderRequest(
+            symbol="BTCUSDT",
+            quantity=Decimal("0.001"),
+            side=OrderSide.BUY,
+            order_type=OrderType.MARKET,
+        )
+        
+        order_response = await exchange.place_order(order_request)
+        
+        # Verify order state was set
+        mock_state_service.set_state.assert_called()
+
+    async def test_connection_state_synchronization(self, advanced_config):
+        """Test connection state synchronization."""
+        connection_manager = ConnectionManager(advanced_config, "test_exchange")
+        
+        # Mock state service
+        mock_state_service = Mock()
+        mock_state_service.update_connection_state = AsyncMock()
+        connection_manager.state_service = mock_state_service
+        
+        # Test state synchronization during connection operations
+        conn = await connection_manager.get_rest_connection("test_endpoint")
+        
+        # Verify connection state updates
+        assert conn is not None
+
+
+class TestRealTimeDataIntegration:
+    """Test real-time data streaming integration."""
+
+    async def test_market_data_streaming_integration(self, advanced_config, mock_websocket_manager):
+        """Test market data streaming integration."""
+        exchange = ComprehensiveTestExchange(advanced_config, "test")
+        exchange.ws_manager = mock_websocket_manager
+        
+        await exchange.connect()
+        
+        # Test stream subscription
+        stream_data = []
+        def data_callback(data):
+            stream_data.append(data)
+        
+        await exchange.subscribe_to_stream("BTCUSDT", data_callback)
+        
+        # Verify subscription was called
+        mock_websocket_manager.subscribe.assert_called()
+
+    async def test_order_book_streaming_integration(self, advanced_config):
+        """Test order book streaming integration."""
+        with patch('websockets.connect') as mock_connect:
+            mock_ws = Mock()
+            mock_ws.send = AsyncMock()
+            mock_ws.recv = AsyncMock(side_effect=[
+                json.dumps({
+                    "stream": "btcusdt@depth",
+                    "data": {
+                        "bids": [["50000", "1.0"]],
+                        "asks": [["50001", "1.0"]]
+                    }
+                })
+            ])
+            mock_connect.return_value.__aenter__ = AsyncMock(return_value=mock_ws)
+            mock_connect.return_value.__aexit__ = AsyncMock()
+            
+            ws_manager = BinanceWebSocketManager(advanced_config)
+            
+            # Test order book streaming
+            await ws_manager.connect("wss://stream.binance.com:9443/ws")
+            await ws_manager.subscribe_order_book("BTCUSDT")
+            
+            mock_ws.send.assert_called()
+
+    async def test_trade_streaming_integration(self, advanced_config):
+        """Test trade streaming integration."""
+        exchange = ComprehensiveTestExchange(advanced_config, "test")
+        await exchange.connect()
+        
+        # Test trade history with real-time updates
+        trades = await exchange.get_trade_history("BTCUSDT", limit=10)
+        
+        assert len(trades) > 0
+        assert all(isinstance(trade, Trade) for trade in trades)
+
+
+class TestOrderManagementLifecycle:
+    """Test complete order management lifecycle integration."""
+
+    async def test_order_placement_lifecycle(self, advanced_config):
+        """Test complete order placement lifecycle."""
+        exchange = ComprehensiveTestExchange(advanced_config, "test")
+        await exchange.connect()
+        
+        # Test order placement
+        order_request = OrderRequest(
+            symbol="BTCUSDT",
+            quantity=Decimal("0.001"),
+            side=OrderSide.BUY,
+            order_type=OrderType.LIMIT,
+            price=Decimal("50000.00"),
+        )
+        
+        order_response = await exchange.place_order(order_request)
+        
+        assert order_response.id is not None
+        assert order_response.status in ["OPEN", "FILLED"]
+        
+        # Test order status checking
+        status = await exchange.get_order_status(order_response.id)
+        assert status in [OrderStatus.OPEN, OrderStatus.FILLED]
+        
+        # Test order cancellation (if not filled)
+        if status == OrderStatus.OPEN:
+            cancelled = await exchange.cancel_order(order_response.id)
+            assert cancelled is True
+
+    async def test_order_validation_lifecycle(self, advanced_config):
+        """Test order validation throughout lifecycle."""
+        exchange = ComprehensiveTestExchange(advanced_config, "test")
+        await exchange.connect()
+        
+        # Test invalid order rejection
+        invalid_order = OrderRequest(
+            symbol="",  # Invalid symbol
+            quantity=Decimal("0.001"),
+            side=OrderSide.BUY,
+            order_type=OrderType.LIMIT,
+            price=Decimal("50000.00"),
+        )
+        
+        with pytest.raises(ValidationError, match="Symbol is required"):
+            await exchange.place_order(invalid_order)
+        
+        # Test quantity validation
+        invalid_quantity_order = OrderRequest(
+            symbol="BTCUSDT",
+            quantity=Decimal("-0.001"),  # Invalid quantity
+            side=OrderSide.BUY,
+            order_type=OrderType.LIMIT,
+            price=Decimal("50000.00"),
+        )
+        
+        with pytest.raises(ValidationError, match="Quantity must be positive"):
+            await exchange.place_order(invalid_quantity_order)
+
+    async def test_order_error_handling_lifecycle(self, advanced_config):
+        """Test order error handling throughout lifecycle."""
+        exchange = ComprehensiveTestExchange(advanced_config, "test")
+        await exchange.connect()
+        
+        # Test order rejection handling
+        rejection_order = OrderRequest(
+            symbol="REJECT",  # Triggers rejection in test exchange
+            quantity=Decimal("0.001"),
+            side=OrderSide.BUY,
+            order_type=OrderType.MARKET,
+        )
+        
+        with pytest.raises(OrderRejectionError, match="Order rejected for testing"):
+            await exchange.place_order(rejection_order)
+        
+        # Test invalid order ID handling
+        with pytest.raises(ValidationError, match="Order not found"):
+            await exchange.get_order_status("NOTFOUND")
+        
+        with pytest.raises(ValidationError, match="Order not found"):
+            await exchange.cancel_order("NOTFOUND")
+
+
+class TestGlobalCoordinationIntegration:
+    """Test global coordination and health monitoring integration."""
+
+    async def test_global_coordinator_integration(self, advanced_config):
+        """Test global exchange coordinator integration."""
+        coordinator = GlobalExchangeCoordinator(advanced_config)
+        
+        # Register test exchange
+        test_exchange = ComprehensiveTestExchange(advanced_config, "test")
+        coordinator.register_exchange("test", test_exchange)
+        
+        # Test global health check
+        health_results = await coordinator.health_check_all()
+        assert "test" in health_results
+        
+        # Test global operations
+        await coordinator.connect_all()
+        await coordinator.disconnect_all()
+
+    async def test_health_monitor_integration(self, advanced_config):
+        """Test health monitor integration."""
+        health_monitor = ExchangeHealthMonitor(advanced_config)
+        
+        # Create and register exchange
+        test_exchange = ComprehensiveTestExchange(advanced_config, "test")
+        await test_exchange.connect()
+        
+        health_monitor.register_exchange("test", test_exchange)
+        
+        # Test health monitoring
+        health_result = await health_monitor.check_exchange_health("test")
+        assert health_result.healthy is True
+        
+        # Test health metrics collection
+        metrics = await health_monitor.collect_health_metrics()
+        assert "test" in metrics
+
+    async def test_factory_coordination_integration(self, advanced_config):
+        """Test factory coordination with other components."""
+        factory = ExchangeFactory(advanced_config)
+        factory.register_exchange("test", ComprehensiveTestExchange)
+        
+        # Test factory integration with health monitoring
+        health_results = await factory.health_check_all()
+        assert isinstance(health_results, dict)
+        
+        # Test factory integration with global coordination
+        exchanges = factory.get_available_exchanges()
+        assert "test" in exchanges
+        
+        # Test cleanup coordination
+        await factory.disconnect_all()
+
+
+# Helper class for comprehensive testing
+class ComprehensiveTestExchange(BaseExchange):
+    """Extended test exchange for specialized integration testing."""
+    
+    def __init__(self, config: Config, exchange_name: str):
+        super().__init__(config, exchange_name)
+        self.connected = False
+        self.order_count = 0
+        self.trade_count = 0
+        self.last_error = None
+        self.state_service = None
+        self.ws_manager = None
+        
+        # Initialize components
+        from src.exchanges.rate_limiter import RateLimiter
+        self.rate_limiter = RateLimiter(config, exchange_name)
+
+    async def connect(self) -> bool:
+        """Connect with state tracking."""
+        self.connected = True
+        if self.state_service:
+            await self.state_service.update_state(
+                "connection", 
+                {"status": "connected", "timestamp": time.time()}
+            )
+        return True
+
+    async def disconnect(self) -> None:
+        """Disconnect with state tracking."""
+        self.connected = False
+        if self.state_service:
+            await self.state_service.update_state(
+                "connection", 
+                {"status": "disconnected", "timestamp": time.time()}
+            )
+
+    async def place_order(self, order_request: OrderRequest) -> OrderResponse:
+        """Place order with comprehensive validation and state tracking."""
+        if not self.connected:
+            raise ExchangeConnectionError("Exchange not connected")
+        
+        # Validate order request
+        if not order_request.symbol:
+            raise ValidationError("Symbol is required")
+        if order_request.quantity <= 0:
+            raise ValidationError("Quantity must be positive")
+        if order_request.side not in [OrderSide.BUY, OrderSide.SELL]:
+            raise ValidationError("Invalid order side")
+        if order_request.order_type not in [OrderType.MARKET, OrderType.LIMIT]:
+            raise ValidationError("Invalid order type")
+        if order_request.order_type == OrderType.LIMIT and not order_request.price:
+            raise ValidationError("Price required for limit orders")
+        
+        # Test rejection scenario
+        if order_request.symbol == "REJECT":
+            raise OrderRejectionError("Order rejected for testing")
+        
+        self.order_count += 1
+        order_id = f"order_{self.order_count}"
+        
+        # Track order state
+        if self.state_service:
+            await self.state_service.set_state(
+                "orders",
+                order_id,
+                {
+                    "symbol": order_request.symbol,
+                    "quantity": str(order_request.quantity),
+                    "side": order_request.side.value,
+                    "status": "OPEN",
+                    "timestamp": time.time()
+                }
+            )
+        
+        return OrderResponse(
+            id=order_id,
+            symbol=order_request.symbol,
+            quantity=order_request.quantity,
+            side=order_request.side,
+            order_type=order_request.order_type,
+            status="FILLED" if order_request.order_type == OrderType.MARKET else "OPEN",
+            price=order_request.price or Decimal("50000.00"),
+            filled_quantity=order_request.quantity if order_request.order_type == OrderType.MARKET else Decimal("0"),
+        )
+
+    async def get_order_status(self, order_id: str) -> OrderStatus:
+        """Get order status with validation."""
+        if not order_id:
+            raise ValidationError("Order ID cannot be empty")
+        if order_id == "NOTFOUND":
+            raise ValidationError("Order not found")
+        return OrderStatus.FILLED
+
+    async def cancel_order(self, order_id: str) -> bool:
+        """Cancel order with validation."""
+        if not order_id:
+            raise ValidationError("Order ID cannot be empty")
+        if order_id == "NOTFOUND":
+            raise ValidationError("Order not found")
+        return True
+
+    async def get_ticker(self, symbol: str) -> Ticker:
+        """Get ticker with validation."""
+        if not symbol:
+            raise ValidationError("Symbol cannot be empty")
+        if symbol == "INVALID":
+            raise ValidationError("Invalid symbol")
+        
+        return Ticker(
+            symbol=symbol,
+            bid=Decimal("49999.00"),
+            ask=Decimal("50001.00"),
+            last_price=Decimal("50000.00"),
+            volume_24h=Decimal("1000.0"),
+            price_change_24h=Decimal("100.00"),
+            timestamp=time.time()
+        )
+
+    async def get_trade_history(self, symbol: str, limit: int = 100) -> list[Trade]:
+        """Get trade history with validation."""
+        if not symbol:
+            raise ValidationError("Symbol cannot be empty")
+        if limit <= 0 or limit > 1000:
+            raise ValidationError("Limit must be between 1 and 1000")
+        
+        self.trade_count += 1
+        
+        return [
+            Trade(
+                id=f"trade_{self.trade_count}_{i}",
+                symbol=symbol,
+                price=Decimal("50000.00"),
+                quantity=Decimal("0.001"),
+                side=OrderSide.BUY if i % 2 == 0 else OrderSide.SELL,
+                timestamp=time.time() - i * 60
+            )
+            for i in range(min(limit, 5))
+        ]
+
+    async def subscribe_to_stream(self, symbol: str, callback) -> None:
+        """Subscribe to stream with WebSocket manager integration."""
+        if not symbol:
+            raise ValidationError("Symbol cannot be empty")
+        
+        if self.ws_manager:
+            await self.ws_manager.subscribe(symbol, callback)
+        else:
+            # Simulate subscription
+            await asyncio.sleep(0.01)
+
+    # Additional methods for comprehensive coverage
+    async def get_account_balance(self) -> dict[str, Decimal]:
+        """Get account balance."""
+        if not self.connected:
+            raise ExchangeConnectionError("Exchange not connected")
+        return {"BTC": Decimal("1.0"), "USDT": Decimal("10000.0")}
+
+    async def get_market_data(self, symbol: str) -> MarketData:
+        """Get market data."""
+        if not symbol:
+            raise ValidationError("Symbol cannot be empty")
+        return MarketData(
+            symbol=symbol,
+            timeframe="1m",
+            open_price=Decimal("50000.00"),
+            high_price=Decimal("51000.00"),
+            low_price=Decimal("49000.00"),
+            close_price=Decimal("50500.00"),
+            volume=Decimal("1000.0"),
+            timestamp=time.time()
+        )
+
+    async def get_order_book(self, symbol: str, depth: int = 10) -> OrderBook:
+        """Get order book."""
+        if not symbol:
+            raise ValidationError("Symbol cannot be empty")
+        if depth <= 0:
+            raise ValidationError("Depth must be positive")
+        
+        bids = [(Decimal("50000.00") - i, Decimal("1.0")) for i in range(depth)]
+        asks = [(Decimal("50001.00") + i, Decimal("1.0")) for i in range(depth)]
+        
+        return OrderBook(
+            symbol=symbol,
+            bids=bids,
+            asks=asks,
+            timestamp=time.time()
+        )
+
+
+if __name__ == "__main__":
+    pytest.main([__file__, "-v", "--tb=short"])

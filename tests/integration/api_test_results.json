@@ -1,0 +1,1609 @@
+{
+  "timestamp": "2025-09-08T15:28:56.112299",
+  "test_duration": 0.23,
+  "endpoints": {
+    "GET /health": {
+      "status_code": 200,
+      "category": "working",
+      "status_desc": "\u2705 Working",
+      "duration_ms": 3.25,
+      "response_sample": "{'status': 'healthy', 'service': 't-bot-api', 'version': '2.0.0', 'architecture': 'unified', 'components': {'api_facade': {'status': 'not_initialized'",
+      "auth_used": false,
+      "method": "GET"
+    },
+    "GET /": {
+      "status_code": 200,
+      "category": "working",
+      "status_desc": "\u2705 Working",
+      "duration_ms": 2.92,
+      "response_sample": "{'message': 'T-Bot Trading System API - Unified Architecture', 'version': '2.0.0', 'api_versions': ['v1', 'v1.1', 'v2'], 'default_version': 'v2', 'doc",
+      "auth_used": false,
+      "method": "GET"
+    },
+    "POST /api/auth/login": {
+      "status_code": 404,
+      "category": "not_implemented",
+      "status_desc": "\u274c Not Found/Not Implemented",
+      "duration_ms": 3.91,
+      "response_sample": "{'detail': 'Not Found'}",
+      "auth_used": false,
+      "method": "POST"
+    },
+    "POST /api/auth/refresh": {
+      "status_code": 404,
+      "category": "not_implemented",
+      "status_desc": "\u274c Not Found/Not Implemented",
+      "duration_ms": 4.4,
+      "response_sample": "{'detail': 'Not Found'}",
+      "auth_used": false,
+      "method": "POST"
+    },
+    "POST /api/auth/logout": {
+      "status_code": 404,
+      "category": "not_implemented",
+      "status_desc": "\u274c Not Found/Not Implemented",
+      "duration_ms": 3.26,
+      "response_sample": "{'detail': 'Not Found'}",
+      "auth_used": false,
+      "method": "POST"
+    },
+    "GET /api/auth/users": {
+      "status_code": 404,
+      "category": "not_implemented",
+      "status_desc": "\u274c Not Found/Not Implemented",
+      "duration_ms": 2.86,
+      "response_sample": "{'detail': 'Not Found'}",
+      "auth_used": false,
+      "method": "GET"
+    },
+    "POST /api/auth/users": {
+      "status_code": 404,
+      "category": "not_implemented",
+      "status_desc": "\u274c Not Found/Not Implemented",
+      "duration_ms": 3.76,
+      "response_sample": "{'detail': 'Not Found'}",
+      "auth_used": false,
+      "method": "POST"
+    },
+    "GET /api/analytics/portfolio/metrics": {
+      "status_code": 403,
+      "category": "auth_required",
+      "status_desc": "\ud83d\udd10 Forbidden (needs higher permissions)",
+      "duration_ms": 3.58,
+      "response_sample": "{'detail': 'Not authenticated'}",
+      "auth_used": false,
+      "method": "GET",
+      "auth_required": true,
+      "auth_test_result": {
+        "status_code": 401,
+        "category": "auth_required",
+        "status_desc": "\ud83d\udd10 Authentication Required",
+        "duration_ms": 3.18,
+        "response_sample": "{'detail': 'Invalid authentication credentials'}",
+        "auth_used": true,
+        "method": "GET"
+      }
+    },
+    "GET /api/analytics/portfolio/composition": {
+      "status_code": 403,
+      "category": "auth_required",
+      "status_desc": "\ud83d\udd10 Forbidden (needs higher permissions)",
+      "duration_ms": 2.74,
+      "response_sample": "{'detail': 'Not authenticated'}",
+      "auth_used": false,
+      "method": "GET",
+      "auth_required": true,
+      "auth_test_result": {
+        "status_code": 401,
+        "category": "auth_required",
+        "status_desc": "\ud83d\udd10 Authentication Required",
+        "duration_ms": 2.98,
+        "response_sample": "{'detail': 'Invalid authentication credentials'}",
+        "auth_used": true,
+        "method": "GET"
+      }
+    },
+    "GET /api/analytics/portfolio/correlation": {
+      "status_code": 403,
+      "category": "auth_required",
+      "status_desc": "\ud83d\udd10 Forbidden (needs higher permissions)",
+      "duration_ms": 2.75,
+      "response_sample": "{'detail': 'Not authenticated'}",
+      "auth_used": false,
+      "method": "GET",
+      "auth_required": true,
+      "auth_test_result": {
+        "status_code": 401,
+        "category": "auth_required",
+        "status_desc": "\ud83d\udd10 Authentication Required",
+        "duration_ms": 3.26,
+        "response_sample": "{'detail': 'Invalid authentication credentials'}",
+        "auth_used": true,
+        "method": "GET"
+      }
+    },
+    "GET /api/analytics/risk/metrics": {
+      "status_code": 403,
+      "category": "auth_required",
+      "status_desc": "\ud83d\udd10 Forbidden (needs higher permissions)",
+      "duration_ms": 2.83,
+      "response_sample": "{'detail': 'Not authenticated'}",
+      "auth_used": false,
+      "method": "GET",
+      "auth_required": true,
+      "auth_test_result": {
+        "status_code": 401,
+        "category": "auth_required",
+        "status_desc": "\ud83d\udd10 Authentication Required",
+        "duration_ms": 2.87,
+        "response_sample": "{'detail': 'Invalid authentication credentials'}",
+        "auth_used": true,
+        "method": "GET"
+      }
+    },
+    "GET /api/analytics/performance/attribution": {
+      "status_code": 404,
+      "category": "not_implemented",
+      "status_desc": "\u274c Not Found/Not Implemented",
+      "duration_ms": 3.13,
+      "response_sample": "{'detail': 'Not Found'}",
+      "auth_used": false,
+      "method": "GET"
+    },
+    "GET /api/analytics/reports": {
+      "status_code": 404,
+      "category": "not_implemented",
+      "status_desc": "\u274c Not Found/Not Implemented",
+      "duration_ms": 2.75,
+      "response_sample": "{'detail': 'Not Found'}",
+      "auth_used": false,
+      "method": "GET"
+    },
+    "GET /api/analytics/alerts": {
+      "status_code": 403,
+      "category": "auth_required",
+      "status_desc": "\ud83d\udd10 Forbidden (needs higher permissions)",
+      "duration_ms": 2.94,
+      "response_sample": "{'detail': 'Not authenticated'}",
+      "auth_used": false,
+      "method": "GET",
+      "auth_required": true,
+      "auth_test_result": {
+        "status_code": 401,
+        "category": "auth_required",
+        "status_desc": "\ud83d\udd10 Authentication Required",
+        "duration_ms": 3.31,
+        "response_sample": "{'detail': 'Invalid authentication credentials'}",
+        "auth_used": true,
+        "method": "GET"
+      }
+    },
+    "POST /api/analytics/portfolio/export": {
+      "status_code": 403,
+      "category": "auth_required",
+      "status_desc": "\ud83d\udd10 Forbidden (needs higher permissions)",
+      "duration_ms": 3.54,
+      "response_sample": "{'detail': 'Not authenticated'}",
+      "auth_used": false,
+      "method": "POST",
+      "auth_required": true,
+      "auth_test_result": {
+        "status_code": 401,
+        "category": "auth_required",
+        "status_desc": "\ud83d\udd10 Authentication Required",
+        "duration_ms": 4.6,
+        "response_sample": "{'detail': 'Invalid authentication credentials'}",
+        "auth_used": true,
+        "method": "POST"
+      }
+    },
+    "GET /api/bot/status": {
+      "status_code": 404,
+      "category": "not_implemented",
+      "status_desc": "\u274c Not Found/Not Implemented",
+      "duration_ms": 3.47,
+      "response_sample": "{'detail': 'Not Found'}",
+      "auth_used": false,
+      "method": "GET"
+    },
+    "GET /api/bot/list": {
+      "status_code": 404,
+      "category": "not_implemented",
+      "status_desc": "\u274c Not Found/Not Implemented",
+      "duration_ms": 3.63,
+      "response_sample": "{'detail': 'Not Found'}",
+      "auth_used": false,
+      "method": "GET"
+    },
+    "POST /api/bot/create": {
+      "status_code": 404,
+      "category": "not_implemented",
+      "status_desc": "\u274c Not Found/Not Implemented",
+      "duration_ms": 3.84,
+      "response_sample": "{'detail': 'Not Found'}",
+      "auth_used": false,
+      "method": "POST"
+    },
+    "POST /api/bot/start": {
+      "status_code": 404,
+      "category": "not_implemented",
+      "status_desc": "\u274c Not Found/Not Implemented",
+      "duration_ms": 3.3,
+      "response_sample": "{'detail': 'Not Found'}",
+      "auth_used": false,
+      "method": "POST"
+    },
+    "POST /api/bot/stop": {
+      "status_code": 404,
+      "category": "not_implemented",
+      "status_desc": "\u274c Not Found/Not Implemented",
+      "duration_ms": 3.49,
+      "response_sample": "{'detail': 'Not Found'}",
+      "auth_used": false,
+      "method": "POST"
+    },
+    "GET /api/bot/config": {
+      "status_code": 404,
+      "category": "not_implemented",
+      "status_desc": "\u274c Not Found/Not Implemented",
+      "duration_ms": 3.21,
+      "response_sample": "{'detail': 'Not Found'}",
+      "auth_used": false,
+      "method": "GET"
+    },
+    "GET /api/bot/logs": {
+      "status_code": 404,
+      "category": "not_implemented",
+      "status_desc": "\u274c Not Found/Not Implemented",
+      "duration_ms": 3.23,
+      "response_sample": "{'detail': 'Not Found'}",
+      "auth_used": false,
+      "method": "GET"
+    },
+    "GET /api/portfolio/summary": {
+      "status_code": 403,
+      "category": "auth_required",
+      "status_desc": "\ud83d\udd10 Forbidden (needs higher permissions)",
+      "duration_ms": 2.86,
+      "response_sample": "{'detail': 'Not authenticated'}",
+      "auth_used": false,
+      "method": "GET",
+      "auth_required": true,
+      "auth_test_result": {
+        "status_code": 401,
+        "category": "auth_required",
+        "status_desc": "\ud83d\udd10 Authentication Required",
+        "duration_ms": 3.32,
+        "response_sample": "{'detail': 'Could not validate credentials'}",
+        "auth_used": true,
+        "method": "GET"
+      }
+    },
+    "GET /api/portfolio/positions": {
+      "status_code": 403,
+      "category": "auth_required",
+      "status_desc": "\ud83d\udd10 Forbidden (needs higher permissions)",
+      "duration_ms": 3.9,
+      "response_sample": "{'detail': 'Not authenticated'}",
+      "auth_used": false,
+      "method": "GET",
+      "auth_required": true,
+      "auth_test_result": {
+        "status_code": 401,
+        "category": "auth_required",
+        "status_desc": "\ud83d\udd10 Authentication Required",
+        "duration_ms": 3.25,
+        "response_sample": "{'detail': 'Could not validate credentials'}",
+        "auth_used": true,
+        "method": "GET"
+      }
+    },
+    "GET /api/portfolio/history": {
+      "status_code": 404,
+      "category": "not_implemented",
+      "status_desc": "\u274c Not Found/Not Implemented",
+      "duration_ms": 3.06,
+      "response_sample": "{'detail': 'Not Found'}",
+      "auth_used": false,
+      "method": "GET"
+    },
+    "GET /api/portfolio/performance": {
+      "status_code": 404,
+      "category": "not_implemented",
+      "status_desc": "\u274c Not Found/Not Implemented",
+      "duration_ms": 2.9,
+      "response_sample": "{'detail': 'Not Found'}",
+      "auth_used": false,
+      "method": "GET"
+    },
+    "GET /api/portfolio/allocation": {
+      "status_code": 403,
+      "category": "auth_required",
+      "status_desc": "\ud83d\udd10 Forbidden (needs higher permissions)",
+      "duration_ms": 2.77,
+      "response_sample": "{'detail': 'Not authenticated'}",
+      "auth_used": false,
+      "method": "GET",
+      "auth_required": true,
+      "auth_test_result": {
+        "status_code": 401,
+        "category": "auth_required",
+        "status_desc": "\ud83d\udd10 Authentication Required",
+        "duration_ms": 3.54,
+        "response_sample": "{'detail': 'Could not validate credentials'}",
+        "auth_used": true,
+        "method": "GET"
+      }
+    },
+    "POST /api/portfolio/rebalance": {
+      "status_code": 404,
+      "category": "not_implemented",
+      "status_desc": "\u274c Not Found/Not Implemented",
+      "duration_ms": 3.42,
+      "response_sample": "{'detail': 'Not Found'}",
+      "auth_used": false,
+      "method": "POST"
+    },
+    "GET /api/trading/orders": {
+      "status_code": 403,
+      "category": "auth_required",
+      "status_desc": "\ud83d\udd10 Forbidden (needs higher permissions)",
+      "duration_ms": 2.82,
+      "response_sample": "{'detail': 'Not authenticated'}",
+      "auth_used": false,
+      "method": "GET",
+      "auth_required": true,
+      "auth_test_result": {
+        "status_code": 401,
+        "category": "auth_required",
+        "status_desc": "\ud83d\udd10 Authentication Required",
+        "duration_ms": 2.84,
+        "response_sample": "{'detail': 'Could not validate credentials'}",
+        "auth_used": true,
+        "method": "GET"
+      }
+    },
+    "POST /api/trading/orders": {
+      "status_code": 403,
+      "category": "auth_required",
+      "status_desc": "\ud83d\udd10 Forbidden (needs higher permissions)",
+      "duration_ms": 3.8,
+      "response_sample": "{'detail': 'Not authenticated'}",
+      "auth_used": false,
+      "method": "POST",
+      "auth_required": true,
+      "auth_test_result": {
+        "status_code": 401,
+        "category": "auth_required",
+        "status_desc": "\ud83d\udd10 Authentication Required",
+        "duration_ms": 4.05,
+        "response_sample": "{'detail': 'Could not validate credentials'}",
+        "auth_used": true,
+        "method": "POST"
+      }
+    },
+    "GET /api/trading/orders/active": {
+      "status_code": 403,
+      "category": "auth_required",
+      "status_desc": "\ud83d\udd10 Forbidden (needs higher permissions)",
+      "duration_ms": 2.74,
+      "response_sample": "{'detail': 'Not authenticated'}",
+      "auth_used": false,
+      "method": "GET",
+      "auth_required": true,
+      "auth_test_result": {
+        "status_code": 401,
+        "category": "auth_required",
+        "status_desc": "\ud83d\udd10 Authentication Required",
+        "duration_ms": 3.97,
+        "response_sample": "{'detail': 'Could not validate credentials'}",
+        "auth_used": true,
+        "method": "GET"
+      }
+    },
+    "GET /api/trading/trades": {
+      "status_code": 403,
+      "category": "auth_required",
+      "status_desc": "\ud83d\udd10 Forbidden (needs higher permissions)",
+      "duration_ms": 3.15,
+      "response_sample": "{'detail': 'Not authenticated'}",
+      "auth_used": false,
+      "method": "GET",
+      "auth_required": true,
+      "auth_test_result": {
+        "status_code": 401,
+        "category": "auth_required",
+        "status_desc": "\ud83d\udd10 Authentication Required",
+        "duration_ms": 3.64,
+        "response_sample": "{'detail': 'Could not validate credentials'}",
+        "auth_used": true,
+        "method": "GET"
+      }
+    },
+    "GET /api/trading/positions": {
+      "status_code": 404,
+      "category": "not_implemented",
+      "status_desc": "\u274c Not Found/Not Implemented",
+      "duration_ms": 3.23,
+      "response_sample": "{'detail': 'Not Found'}",
+      "auth_used": false,
+      "method": "GET"
+    },
+    "GET /api/trading/balance": {
+      "status_code": 404,
+      "category": "not_implemented",
+      "status_desc": "\u274c Not Found/Not Implemented",
+      "duration_ms": 3.12,
+      "response_sample": "{'detail': 'Not Found'}",
+      "auth_used": false,
+      "method": "GET"
+    },
+    "GET /api/strategies/list": {
+      "status_code": 403,
+      "category": "auth_required",
+      "status_desc": "\ud83d\udd10 Forbidden (needs higher permissions)",
+      "duration_ms": 3.14,
+      "response_sample": "{'detail': 'Not authenticated'}",
+      "auth_used": false,
+      "method": "GET",
+      "auth_required": true,
+      "auth_test_result": {
+        "status_code": 401,
+        "category": "auth_required",
+        "status_desc": "\ud83d\udd10 Authentication Required",
+        "duration_ms": 3.59,
+        "response_sample": "{'detail': 'Could not validate credentials'}",
+        "auth_used": true,
+        "method": "GET"
+      }
+    },
+    "POST /api/strategies/create": {
+      "status_code": 405,
+      "category": "method_error",
+      "status_desc": "\u26a0\ufe0f  Method Not Allowed",
+      "duration_ms": 3.84,
+      "response_sample": "{'detail': 'Method Not Allowed'}",
+      "auth_used": false,
+      "method": "POST"
+    },
+    "GET /api/strategies/status": {
+      "status_code": 403,
+      "category": "auth_required",
+      "status_desc": "\ud83d\udd10 Forbidden (needs higher permissions)",
+      "duration_ms": 3.29,
+      "response_sample": "{'detail': 'Not authenticated'}",
+      "auth_used": false,
+      "method": "GET",
+      "auth_required": true,
+      "auth_test_result": {
+        "status_code": 401,
+        "category": "auth_required",
+        "status_desc": "\ud83d\udd10 Authentication Required",
+        "duration_ms": 3.88,
+        "response_sample": "{'detail': 'Could not validate credentials'}",
+        "auth_used": true,
+        "method": "GET"
+      }
+    },
+    "GET /api/strategies/performance": {
+      "status_code": 403,
+      "category": "auth_required",
+      "status_desc": "\ud83d\udd10 Forbidden (needs higher permissions)",
+      "duration_ms": 3.57,
+      "response_sample": "{'detail': 'Not authenticated'}",
+      "auth_used": false,
+      "method": "GET",
+      "auth_required": true,
+      "auth_test_result": {
+        "status_code": 401,
+        "category": "auth_required",
+        "status_desc": "\ud83d\udd10 Authentication Required",
+        "duration_ms": 3.34,
+        "response_sample": "{'detail': 'Could not validate credentials'}",
+        "auth_used": true,
+        "method": "GET"
+      }
+    },
+    "GET /api/strategies/config": {
+      "status_code": 403,
+      "category": "auth_required",
+      "status_desc": "\ud83d\udd10 Forbidden (needs higher permissions)",
+      "duration_ms": 2.95,
+      "response_sample": "{'detail': 'Not authenticated'}",
+      "auth_used": false,
+      "method": "GET",
+      "auth_required": true,
+      "auth_test_result": {
+        "status_code": 401,
+        "category": "auth_required",
+        "status_desc": "\ud83d\udd10 Authentication Required",
+        "duration_ms": 3.04,
+        "response_sample": "{'detail': 'Could not validate credentials'}",
+        "auth_used": true,
+        "method": "GET"
+      }
+    },
+    "GET /api/risk/metrics": {
+      "status_code": 403,
+      "category": "auth_required",
+      "status_desc": "\ud83d\udd10 Forbidden (needs higher permissions)",
+      "duration_ms": 3.61,
+      "response_sample": "{'detail': 'Not authenticated'}",
+      "auth_used": false,
+      "method": "GET",
+      "auth_required": true,
+      "auth_test_result": {
+        "status_code": 401,
+        "category": "auth_required",
+        "status_desc": "\ud83d\udd10 Authentication Required",
+        "duration_ms": 3.46,
+        "response_sample": "{'detail': 'Could not validate credentials'}",
+        "auth_used": true,
+        "method": "GET"
+      }
+    },
+    "GET /api/risk/limits": {
+      "status_code": 403,
+      "category": "auth_required",
+      "status_desc": "\ud83d\udd10 Forbidden (needs higher permissions)",
+      "duration_ms": 3.32,
+      "response_sample": "{'detail': 'Not authenticated'}",
+      "auth_used": false,
+      "method": "GET",
+      "auth_required": true,
+      "auth_test_result": {
+        "status_code": 401,
+        "category": "auth_required",
+        "status_desc": "\ud83d\udd10 Authentication Required",
+        "duration_ms": 3.01,
+        "response_sample": "{'detail': 'Could not validate credentials'}",
+        "auth_used": true,
+        "method": "GET"
+      }
+    },
+    "GET /api/risk/violations": {
+      "status_code": 404,
+      "category": "not_implemented",
+      "status_desc": "\u274c Not Found/Not Implemented",
+      "duration_ms": 2.94,
+      "response_sample": "{'detail': 'Not Found'}",
+      "auth_used": false,
+      "method": "GET"
+    },
+    "POST /api/risk/stress-test": {
+      "status_code": 0,
+      "category": "error",
+      "status_desc": "\ud83d\udca5 Exception: 429: Rate limit exceeded",
+      "duration_ms": 1.54,
+      "error": "429: Rate limit exceeded",
+      "auth_used": false,
+      "method": "POST"
+    },
+    "GET /api/monitoring/system": {
+      "status_code": 0,
+      "category": "error",
+      "status_desc": "\ud83d\udca5 Exception: 429: Rate limit exceeded",
+      "duration_ms": 1.56,
+      "error": "429: Rate limit exceeded",
+      "auth_used": false,
+      "method": "GET"
+    },
+    "GET /api/monitoring/metrics": {
+      "status_code": 0,
+      "category": "error",
+      "status_desc": "\ud83d\udca5 Exception: 429: Rate limit exceeded",
+      "duration_ms": 1.47,
+      "error": "429: Rate limit exceeded",
+      "auth_used": false,
+      "method": "GET"
+    },
+    "GET /api/monitoring/alerts": {
+      "status_code": 0,
+      "category": "error",
+      "status_desc": "\ud83d\udca5 Exception: 429: Rate limit exceeded",
+      "duration_ms": 1.25,
+      "error": "429: Rate limit exceeded",
+      "auth_used": false,
+      "method": "GET"
+    },
+    "GET /api/monitoring/health": {
+      "status_code": 0,
+      "category": "error",
+      "status_desc": "\ud83d\udca5 Exception: 429: Rate limit exceeded",
+      "duration_ms": 1.42,
+      "error": "429: Rate limit exceeded",
+      "auth_used": false,
+      "method": "GET"
+    },
+    "GET /api/capital/balance": {
+      "status_code": 0,
+      "category": "error",
+      "status_desc": "\ud83d\udca5 Exception: 429: Rate limit exceeded",
+      "duration_ms": 1.3,
+      "error": "429: Rate limit exceeded",
+      "auth_used": false,
+      "method": "GET"
+    },
+    "GET /api/capital/allocation": {
+      "status_code": 0,
+      "category": "error",
+      "status_desc": "\ud83d\udca5 Exception: 429: Rate limit exceeded",
+      "duration_ms": 1.76,
+      "error": "429: Rate limit exceeded",
+      "auth_used": false,
+      "method": "GET"
+    },
+    "POST /api/capital/allocation": {
+      "status_code": 0,
+      "category": "error",
+      "status_desc": "\ud83d\udca5 Exception: 429: Rate limit exceeded",
+      "duration_ms": 1.44,
+      "error": "429: Rate limit exceeded",
+      "auth_used": false,
+      "method": "POST"
+    },
+    "GET /api/capital/transfers": {
+      "status_code": 0,
+      "category": "error",
+      "status_desc": "\ud83d\udca5 Exception: 429: Rate limit exceeded",
+      "duration_ms": 1.17,
+      "error": "429: Rate limit exceeded",
+      "auth_used": false,
+      "method": "GET"
+    },
+    "GET /api/capital/history": {
+      "status_code": 0,
+      "category": "error",
+      "status_desc": "\ud83d\udca5 Exception: 429: Rate limit exceeded",
+      "duration_ms": 1.41,
+      "error": "429: Rate limit exceeded",
+      "auth_used": false,
+      "method": "GET"
+    },
+    "GET /api/data/market": {
+      "status_code": 0,
+      "category": "error",
+      "status_desc": "\ud83d\udca5 Exception: 429: Rate limit exceeded",
+      "duration_ms": 1.37,
+      "error": "429: Rate limit exceeded",
+      "auth_used": false,
+      "method": "GET"
+    },
+    "GET /api/data/symbols": {
+      "status_code": 0,
+      "category": "error",
+      "status_desc": "\ud83d\udca5 Exception: 429: Rate limit exceeded",
+      "duration_ms": 1.64,
+      "error": "429: Rate limit exceeded",
+      "auth_used": false,
+      "method": "GET"
+    },
+    "GET /api/data/historical": {
+      "status_code": 0,
+      "category": "error",
+      "status_desc": "\ud83d\udca5 Exception: 429: Rate limit exceeded",
+      "duration_ms": 1.42,
+      "error": "429: Rate limit exceeded",
+      "auth_used": false,
+      "method": "GET"
+    },
+    "GET /api/data/status": {
+      "status_code": 0,
+      "category": "error",
+      "status_desc": "\ud83d\udca5 Exception: 429: Rate limit exceeded",
+      "duration_ms": 2.14,
+      "error": "429: Rate limit exceeded",
+      "auth_used": false,
+      "method": "GET"
+    },
+    "GET /api/exchanges/list": {
+      "status_code": 0,
+      "category": "error",
+      "status_desc": "\ud83d\udca5 Exception: 429: Rate limit exceeded",
+      "duration_ms": 1.48,
+      "error": "429: Rate limit exceeded",
+      "auth_used": false,
+      "method": "GET"
+    },
+    "GET /api/exchanges/status": {
+      "status_code": 0,
+      "category": "error",
+      "status_desc": "\ud83d\udca5 Exception: 429: Rate limit exceeded",
+      "duration_ms": 1.19,
+      "error": "429: Rate limit exceeded",
+      "auth_used": false,
+      "method": "GET"
+    },
+    "GET /api/exchanges/balance": {
+      "status_code": 0,
+      "category": "error",
+      "status_desc": "\ud83d\udca5 Exception: 429: Rate limit exceeded",
+      "duration_ms": 1.78,
+      "error": "429: Rate limit exceeded",
+      "auth_used": false,
+      "method": "GET"
+    },
+    "GET /api/exchanges/orders": {
+      "status_code": 0,
+      "category": "error",
+      "status_desc": "\ud83d\udca5 Exception: 429: Rate limit exceeded",
+      "duration_ms": 1.16,
+      "error": "429: Rate limit exceeded",
+      "auth_used": false,
+      "method": "GET"
+    }
+  },
+  "summary": {
+    "total": 60,
+    "working": 2,
+    "auth_required": 19,
+    "not_implemented": 20,
+    "errors": 19,
+    "success_rate": "3.3%",
+    "functional_rate": "35.0%"
+  },
+  "categories": {
+    "health": {
+      "endpoints": {
+        "GET /health": {
+          "status_code": 200,
+          "category": "working",
+          "status_desc": "\u2705 Working",
+          "duration_ms": 3.25,
+          "response_sample": "{'status': 'healthy', 'service': 't-bot-api', 'version': '2.0.0', 'architecture': 'unified', 'components': {'api_facade': {'status': 'not_initialized'",
+          "auth_used": false,
+          "method": "GET"
+        },
+        "GET /": {
+          "status_code": 200,
+          "category": "working",
+          "status_desc": "\u2705 Working",
+          "duration_ms": 2.92,
+          "response_sample": "{'message': 'T-Bot Trading System API - Unified Architecture', 'version': '2.0.0', 'api_versions': ['v1', 'v1.1', 'v2'], 'default_version': 'v2', 'doc",
+          "auth_used": false,
+          "method": "GET"
+        }
+      },
+      "summary": {
+        "total": 2,
+        "working": 2,
+        "auth_required": 0,
+        "not_implemented": 0,
+        "errors": 0
+      }
+    },
+    "auth": {
+      "endpoints": {
+        "POST /api/auth/login": {
+          "status_code": 404,
+          "category": "not_implemented",
+          "status_desc": "\u274c Not Found/Not Implemented",
+          "duration_ms": 3.91,
+          "response_sample": "{'detail': 'Not Found'}",
+          "auth_used": false,
+          "method": "POST"
+        },
+        "POST /api/auth/refresh": {
+          "status_code": 404,
+          "category": "not_implemented",
+          "status_desc": "\u274c Not Found/Not Implemented",
+          "duration_ms": 4.4,
+          "response_sample": "{'detail': 'Not Found'}",
+          "auth_used": false,
+          "method": "POST"
+        },
+        "POST /api/auth/logout": {
+          "status_code": 404,
+          "category": "not_implemented",
+          "status_desc": "\u274c Not Found/Not Implemented",
+          "duration_ms": 3.26,
+          "response_sample": "{'detail': 'Not Found'}",
+          "auth_used": false,
+          "method": "POST"
+        },
+        "GET /api/auth/users": {
+          "status_code": 404,
+          "category": "not_implemented",
+          "status_desc": "\u274c Not Found/Not Implemented",
+          "duration_ms": 2.86,
+          "response_sample": "{'detail': 'Not Found'}",
+          "auth_used": false,
+          "method": "GET"
+        },
+        "POST /api/auth/users": {
+          "status_code": 404,
+          "category": "not_implemented",
+          "status_desc": "\u274c Not Found/Not Implemented",
+          "duration_ms": 3.76,
+          "response_sample": "{'detail': 'Not Found'}",
+          "auth_used": false,
+          "method": "POST"
+        }
+      },
+      "summary": {
+        "total": 5,
+        "working": 0,
+        "auth_required": 0,
+        "not_implemented": 5,
+        "errors": 0
+      }
+    },
+    "analytics": {
+      "endpoints": {
+        "GET /api/analytics/portfolio/metrics": {
+          "status_code": 403,
+          "category": "auth_required",
+          "status_desc": "\ud83d\udd10 Forbidden (needs higher permissions)",
+          "duration_ms": 3.58,
+          "response_sample": "{'detail': 'Not authenticated'}",
+          "auth_used": false,
+          "method": "GET",
+          "auth_required": true,
+          "auth_test_result": {
+            "status_code": 401,
+            "category": "auth_required",
+            "status_desc": "\ud83d\udd10 Authentication Required",
+            "duration_ms": 3.18,
+            "response_sample": "{'detail': 'Invalid authentication credentials'}",
+            "auth_used": true,
+            "method": "GET"
+          }
+        },
+        "GET /api/analytics/portfolio/composition": {
+          "status_code": 403,
+          "category": "auth_required",
+          "status_desc": "\ud83d\udd10 Forbidden (needs higher permissions)",
+          "duration_ms": 2.74,
+          "response_sample": "{'detail': 'Not authenticated'}",
+          "auth_used": false,
+          "method": "GET",
+          "auth_required": true,
+          "auth_test_result": {
+            "status_code": 401,
+            "category": "auth_required",
+            "status_desc": "\ud83d\udd10 Authentication Required",
+            "duration_ms": 2.98,
+            "response_sample": "{'detail': 'Invalid authentication credentials'}",
+            "auth_used": true,
+            "method": "GET"
+          }
+        },
+        "GET /api/analytics/portfolio/correlation": {
+          "status_code": 403,
+          "category": "auth_required",
+          "status_desc": "\ud83d\udd10 Forbidden (needs higher permissions)",
+          "duration_ms": 2.75,
+          "response_sample": "{'detail': 'Not authenticated'}",
+          "auth_used": false,
+          "method": "GET",
+          "auth_required": true,
+          "auth_test_result": {
+            "status_code": 401,
+            "category": "auth_required",
+            "status_desc": "\ud83d\udd10 Authentication Required",
+            "duration_ms": 3.26,
+            "response_sample": "{'detail': 'Invalid authentication credentials'}",
+            "auth_used": true,
+            "method": "GET"
+          }
+        },
+        "GET /api/analytics/risk/metrics": {
+          "status_code": 403,
+          "category": "auth_required",
+          "status_desc": "\ud83d\udd10 Forbidden (needs higher permissions)",
+          "duration_ms": 2.83,
+          "response_sample": "{'detail': 'Not authenticated'}",
+          "auth_used": false,
+          "method": "GET",
+          "auth_required": true,
+          "auth_test_result": {
+            "status_code": 401,
+            "category": "auth_required",
+            "status_desc": "\ud83d\udd10 Authentication Required",
+            "duration_ms": 2.87,
+            "response_sample": "{'detail': 'Invalid authentication credentials'}",
+            "auth_used": true,
+            "method": "GET"
+          }
+        },
+        "GET /api/analytics/performance/attribution": {
+          "status_code": 404,
+          "category": "not_implemented",
+          "status_desc": "\u274c Not Found/Not Implemented",
+          "duration_ms": 3.13,
+          "response_sample": "{'detail': 'Not Found'}",
+          "auth_used": false,
+          "method": "GET"
+        },
+        "GET /api/analytics/reports": {
+          "status_code": 404,
+          "category": "not_implemented",
+          "status_desc": "\u274c Not Found/Not Implemented",
+          "duration_ms": 2.75,
+          "response_sample": "{'detail': 'Not Found'}",
+          "auth_used": false,
+          "method": "GET"
+        },
+        "GET /api/analytics/alerts": {
+          "status_code": 403,
+          "category": "auth_required",
+          "status_desc": "\ud83d\udd10 Forbidden (needs higher permissions)",
+          "duration_ms": 2.94,
+          "response_sample": "{'detail': 'Not authenticated'}",
+          "auth_used": false,
+          "method": "GET",
+          "auth_required": true,
+          "auth_test_result": {
+            "status_code": 401,
+            "category": "auth_required",
+            "status_desc": "\ud83d\udd10 Authentication Required",
+            "duration_ms": 3.31,
+            "response_sample": "{'detail': 'Invalid authentication credentials'}",
+            "auth_used": true,
+            "method": "GET"
+          }
+        },
+        "POST /api/analytics/portfolio/export": {
+          "status_code": 403,
+          "category": "auth_required",
+          "status_desc": "\ud83d\udd10 Forbidden (needs higher permissions)",
+          "duration_ms": 3.54,
+          "response_sample": "{'detail': 'Not authenticated'}",
+          "auth_used": false,
+          "method": "POST",
+          "auth_required": true,
+          "auth_test_result": {
+            "status_code": 401,
+            "category": "auth_required",
+            "status_desc": "\ud83d\udd10 Authentication Required",
+            "duration_ms": 4.6,
+            "response_sample": "{'detail': 'Invalid authentication credentials'}",
+            "auth_used": true,
+            "method": "POST"
+          }
+        }
+      },
+      "summary": {
+        "total": 8,
+        "working": 0,
+        "auth_required": 6,
+        "not_implemented": 2,
+        "errors": 0
+      }
+    },
+    "bot_management": {
+      "endpoints": {
+        "GET /api/bot/status": {
+          "status_code": 404,
+          "category": "not_implemented",
+          "status_desc": "\u274c Not Found/Not Implemented",
+          "duration_ms": 3.47,
+          "response_sample": "{'detail': 'Not Found'}",
+          "auth_used": false,
+          "method": "GET"
+        },
+        "GET /api/bot/list": {
+          "status_code": 404,
+          "category": "not_implemented",
+          "status_desc": "\u274c Not Found/Not Implemented",
+          "duration_ms": 3.63,
+          "response_sample": "{'detail': 'Not Found'}",
+          "auth_used": false,
+          "method": "GET"
+        },
+        "POST /api/bot/create": {
+          "status_code": 404,
+          "category": "not_implemented",
+          "status_desc": "\u274c Not Found/Not Implemented",
+          "duration_ms": 3.84,
+          "response_sample": "{'detail': 'Not Found'}",
+          "auth_used": false,
+          "method": "POST"
+        },
+        "POST /api/bot/start": {
+          "status_code": 404,
+          "category": "not_implemented",
+          "status_desc": "\u274c Not Found/Not Implemented",
+          "duration_ms": 3.3,
+          "response_sample": "{'detail': 'Not Found'}",
+          "auth_used": false,
+          "method": "POST"
+        },
+        "POST /api/bot/stop": {
+          "status_code": 404,
+          "category": "not_implemented",
+          "status_desc": "\u274c Not Found/Not Implemented",
+          "duration_ms": 3.49,
+          "response_sample": "{'detail': 'Not Found'}",
+          "auth_used": false,
+          "method": "POST"
+        },
+        "GET /api/bot/config": {
+          "status_code": 404,
+          "category": "not_implemented",
+          "status_desc": "\u274c Not Found/Not Implemented",
+          "duration_ms": 3.21,
+          "response_sample": "{'detail': 'Not Found'}",
+          "auth_used": false,
+          "method": "GET"
+        },
+        "GET /api/bot/logs": {
+          "status_code": 404,
+          "category": "not_implemented",
+          "status_desc": "\u274c Not Found/Not Implemented",
+          "duration_ms": 3.23,
+          "response_sample": "{'detail': 'Not Found'}",
+          "auth_used": false,
+          "method": "GET"
+        }
+      },
+      "summary": {
+        "total": 7,
+        "working": 0,
+        "auth_required": 0,
+        "not_implemented": 7,
+        "errors": 0
+      }
+    },
+    "portfolio": {
+      "endpoints": {
+        "GET /api/portfolio/summary": {
+          "status_code": 403,
+          "category": "auth_required",
+          "status_desc": "\ud83d\udd10 Forbidden (needs higher permissions)",
+          "duration_ms": 2.86,
+          "response_sample": "{'detail': 'Not authenticated'}",
+          "auth_used": false,
+          "method": "GET",
+          "auth_required": true,
+          "auth_test_result": {
+            "status_code": 401,
+            "category": "auth_required",
+            "status_desc": "\ud83d\udd10 Authentication Required",
+            "duration_ms": 3.32,
+            "response_sample": "{'detail': 'Could not validate credentials'}",
+            "auth_used": true,
+            "method": "GET"
+          }
+        },
+        "GET /api/portfolio/positions": {
+          "status_code": 403,
+          "category": "auth_required",
+          "status_desc": "\ud83d\udd10 Forbidden (needs higher permissions)",
+          "duration_ms": 3.9,
+          "response_sample": "{'detail': 'Not authenticated'}",
+          "auth_used": false,
+          "method": "GET",
+          "auth_required": true,
+          "auth_test_result": {
+            "status_code": 401,
+            "category": "auth_required",
+            "status_desc": "\ud83d\udd10 Authentication Required",
+            "duration_ms": 3.25,
+            "response_sample": "{'detail': 'Could not validate credentials'}",
+            "auth_used": true,
+            "method": "GET"
+          }
+        },
+        "GET /api/portfolio/history": {
+          "status_code": 404,
+          "category": "not_implemented",
+          "status_desc": "\u274c Not Found/Not Implemented",
+          "duration_ms": 3.06,
+          "response_sample": "{'detail': 'Not Found'}",
+          "auth_used": false,
+          "method": "GET"
+        },
+        "GET /api/portfolio/performance": {
+          "status_code": 404,
+          "category": "not_implemented",
+          "status_desc": "\u274c Not Found/Not Implemented",
+          "duration_ms": 2.9,
+          "response_sample": "{'detail': 'Not Found'}",
+          "auth_used": false,
+          "method": "GET"
+        },
+        "GET /api/portfolio/allocation": {
+          "status_code": 403,
+          "category": "auth_required",
+          "status_desc": "\ud83d\udd10 Forbidden (needs higher permissions)",
+          "duration_ms": 2.77,
+          "response_sample": "{'detail': 'Not authenticated'}",
+          "auth_used": false,
+          "method": "GET",
+          "auth_required": true,
+          "auth_test_result": {
+            "status_code": 401,
+            "category": "auth_required",
+            "status_desc": "\ud83d\udd10 Authentication Required",
+            "duration_ms": 3.54,
+            "response_sample": "{'detail': 'Could not validate credentials'}",
+            "auth_used": true,
+            "method": "GET"
+          }
+        },
+        "POST /api/portfolio/rebalance": {
+          "status_code": 404,
+          "category": "not_implemented",
+          "status_desc": "\u274c Not Found/Not Implemented",
+          "duration_ms": 3.42,
+          "response_sample": "{'detail': 'Not Found'}",
+          "auth_used": false,
+          "method": "POST"
+        }
+      },
+      "summary": {
+        "total": 6,
+        "working": 0,
+        "auth_required": 3,
+        "not_implemented": 3,
+        "errors": 0
+      }
+    },
+    "trading": {
+      "endpoints": {
+        "GET /api/trading/orders": {
+          "status_code": 403,
+          "category": "auth_required",
+          "status_desc": "\ud83d\udd10 Forbidden (needs higher permissions)",
+          "duration_ms": 2.82,
+          "response_sample": "{'detail': 'Not authenticated'}",
+          "auth_used": false,
+          "method": "GET",
+          "auth_required": true,
+          "auth_test_result": {
+            "status_code": 401,
+            "category": "auth_required",
+            "status_desc": "\ud83d\udd10 Authentication Required",
+            "duration_ms": 2.84,
+            "response_sample": "{'detail': 'Could not validate credentials'}",
+            "auth_used": true,
+            "method": "GET"
+          }
+        },
+        "POST /api/trading/orders": {
+          "status_code": 403,
+          "category": "auth_required",
+          "status_desc": "\ud83d\udd10 Forbidden (needs higher permissions)",
+          "duration_ms": 3.8,
+          "response_sample": "{'detail': 'Not authenticated'}",
+          "auth_used": false,
+          "method": "POST",
+          "auth_required": true,
+          "auth_test_result": {
+            "status_code": 401,
+            "category": "auth_required",
+            "status_desc": "\ud83d\udd10 Authentication Required",
+            "duration_ms": 4.05,
+            "response_sample": "{'detail': 'Could not validate credentials'}",
+            "auth_used": true,
+            "method": "POST"
+          }
+        },
+        "GET /api/trading/orders/active": {
+          "status_code": 403,
+          "category": "auth_required",
+          "status_desc": "\ud83d\udd10 Forbidden (needs higher permissions)",
+          "duration_ms": 2.74,
+          "response_sample": "{'detail': 'Not authenticated'}",
+          "auth_used": false,
+          "method": "GET",
+          "auth_required": true,
+          "auth_test_result": {
+            "status_code": 401,
+            "category": "auth_required",
+            "status_desc": "\ud83d\udd10 Authentication Required",
+            "duration_ms": 3.97,
+            "response_sample": "{'detail': 'Could not validate credentials'}",
+            "auth_used": true,
+            "method": "GET"
+          }
+        },
+        "GET /api/trading/trades": {
+          "status_code": 403,
+          "category": "auth_required",
+          "status_desc": "\ud83d\udd10 Forbidden (needs higher permissions)",
+          "duration_ms": 3.15,
+          "response_sample": "{'detail': 'Not authenticated'}",
+          "auth_used": false,
+          "method": "GET",
+          "auth_required": true,
+          "auth_test_result": {
+            "status_code": 401,
+            "category": "auth_required",
+            "status_desc": "\ud83d\udd10 Authentication Required",
+            "duration_ms": 3.64,
+            "response_sample": "{'detail': 'Could not validate credentials'}",
+            "auth_used": true,
+            "method": "GET"
+          }
+        },
+        "GET /api/trading/positions": {
+          "status_code": 404,
+          "category": "not_implemented",
+          "status_desc": "\u274c Not Found/Not Implemented",
+          "duration_ms": 3.23,
+          "response_sample": "{'detail': 'Not Found'}",
+          "auth_used": false,
+          "method": "GET"
+        },
+        "GET /api/trading/balance": {
+          "status_code": 404,
+          "category": "not_implemented",
+          "status_desc": "\u274c Not Found/Not Implemented",
+          "duration_ms": 3.12,
+          "response_sample": "{'detail': 'Not Found'}",
+          "auth_used": false,
+          "method": "GET"
+        }
+      },
+      "summary": {
+        "total": 6,
+        "working": 0,
+        "auth_required": 4,
+        "not_implemented": 2,
+        "errors": 0
+      }
+    },
+    "strategies": {
+      "endpoints": {
+        "GET /api/strategies/list": {
+          "status_code": 403,
+          "category": "auth_required",
+          "status_desc": "\ud83d\udd10 Forbidden (needs higher permissions)",
+          "duration_ms": 3.14,
+          "response_sample": "{'detail': 'Not authenticated'}",
+          "auth_used": false,
+          "method": "GET",
+          "auth_required": true,
+          "auth_test_result": {
+            "status_code": 401,
+            "category": "auth_required",
+            "status_desc": "\ud83d\udd10 Authentication Required",
+            "duration_ms": 3.59,
+            "response_sample": "{'detail': 'Could not validate credentials'}",
+            "auth_used": true,
+            "method": "GET"
+          }
+        },
+        "POST /api/strategies/create": {
+          "status_code": 405,
+          "category": "method_error",
+          "status_desc": "\u26a0\ufe0f  Method Not Allowed",
+          "duration_ms": 3.84,
+          "response_sample": "{'detail': 'Method Not Allowed'}",
+          "auth_used": false,
+          "method": "POST"
+        },
+        "GET /api/strategies/status": {
+          "status_code": 403,
+          "category": "auth_required",
+          "status_desc": "\ud83d\udd10 Forbidden (needs higher permissions)",
+          "duration_ms": 3.29,
+          "response_sample": "{'detail': 'Not authenticated'}",
+          "auth_used": false,
+          "method": "GET",
+          "auth_required": true,
+          "auth_test_result": {
+            "status_code": 401,
+            "category": "auth_required",
+            "status_desc": "\ud83d\udd10 Authentication Required",
+            "duration_ms": 3.88,
+            "response_sample": "{'detail': 'Could not validate credentials'}",
+            "auth_used": true,
+            "method": "GET"
+          }
+        },
+        "GET /api/strategies/performance": {
+          "status_code": 403,
+          "category": "auth_required",
+          "status_desc": "\ud83d\udd10 Forbidden (needs higher permissions)",
+          "duration_ms": 3.57,
+          "response_sample": "{'detail': 'Not authenticated'}",
+          "auth_used": false,
+          "method": "GET",
+          "auth_required": true,
+          "auth_test_result": {
+            "status_code": 401,
+            "category": "auth_required",
+            "status_desc": "\ud83d\udd10 Authentication Required",
+            "duration_ms": 3.34,
+            "response_sample": "{'detail': 'Could not validate credentials'}",
+            "auth_used": true,
+            "method": "GET"
+          }
+        },
+        "GET /api/strategies/config": {
+          "status_code": 403,
+          "category": "auth_required",
+          "status_desc": "\ud83d\udd10 Forbidden (needs higher permissions)",
+          "duration_ms": 2.95,
+          "response_sample": "{'detail': 'Not authenticated'}",
+          "auth_used": false,
+          "method": "GET",
+          "auth_required": true,
+          "auth_test_result": {
+            "status_code": 401,
+            "category": "auth_required",
+            "status_desc": "\ud83d\udd10 Authentication Required",
+            "duration_ms": 3.04,
+            "response_sample": "{'detail': 'Could not validate credentials'}",
+            "auth_used": true,
+            "method": "GET"
+          }
+        }
+      },
+      "summary": {
+        "total": 5,
+        "working": 0,
+        "auth_required": 4,
+        "not_implemented": 0,
+        "errors": 1
+      }
+    },
+    "risk": {
+      "endpoints": {
+        "GET /api/risk/metrics": {
+          "status_code": 403,
+          "category": "auth_required",
+          "status_desc": "\ud83d\udd10 Forbidden (needs higher permissions)",
+          "duration_ms": 3.61,
+          "response_sample": "{'detail': 'Not authenticated'}",
+          "auth_used": false,
+          "method": "GET",
+          "auth_required": true,
+          "auth_test_result": {
+            "status_code": 401,
+            "category": "auth_required",
+            "status_desc": "\ud83d\udd10 Authentication Required",
+            "duration_ms": 3.46,
+            "response_sample": "{'detail': 'Could not validate credentials'}",
+            "auth_used": true,
+            "method": "GET"
+          }
+        },
+        "GET /api/risk/limits": {
+          "status_code": 403,
+          "category": "auth_required",
+          "status_desc": "\ud83d\udd10 Forbidden (needs higher permissions)",
+          "duration_ms": 3.32,
+          "response_sample": "{'detail': 'Not authenticated'}",
+          "auth_used": false,
+          "method": "GET",
+          "auth_required": true,
+          "auth_test_result": {
+            "status_code": 401,
+            "category": "auth_required",
+            "status_desc": "\ud83d\udd10 Authentication Required",
+            "duration_ms": 3.01,
+            "response_sample": "{'detail': 'Could not validate credentials'}",
+            "auth_used": true,
+            "method": "GET"
+          }
+        },
+        "GET /api/risk/violations": {
+          "status_code": 404,
+          "category": "not_implemented",
+          "status_desc": "\u274c Not Found/Not Implemented",
+          "duration_ms": 2.94,
+          "response_sample": "{'detail': 'Not Found'}",
+          "auth_used": false,
+          "method": "GET"
+        },
+        "POST /api/risk/stress-test": {
+          "status_code": 0,
+          "category": "error",
+          "status_desc": "\ud83d\udca5 Exception: 429: Rate limit exceeded",
+          "duration_ms": 1.54,
+          "error": "429: Rate limit exceeded",
+          "auth_used": false,
+          "method": "POST"
+        }
+      },
+      "summary": {
+        "total": 4,
+        "working": 0,
+        "auth_required": 2,
+        "not_implemented": 1,
+        "errors": 1
+      }
+    },
+    "monitoring": {
+      "endpoints": {
+        "GET /api/monitoring/system": {
+          "status_code": 0,
+          "category": "error",
+          "status_desc": "\ud83d\udca5 Exception: 429: Rate limit exceeded",
+          "duration_ms": 1.56,
+          "error": "429: Rate limit exceeded",
+          "auth_used": false,
+          "method": "GET"
+        },
+        "GET /api/monitoring/metrics": {
+          "status_code": 0,
+          "category": "error",
+          "status_desc": "\ud83d\udca5 Exception: 429: Rate limit exceeded",
+          "duration_ms": 1.47,
+          "error": "429: Rate limit exceeded",
+          "auth_used": false,
+          "method": "GET"
+        },
+        "GET /api/monitoring/alerts": {
+          "status_code": 0,
+          "category": "error",
+          "status_desc": "\ud83d\udca5 Exception: 429: Rate limit exceeded",
+          "duration_ms": 1.25,
+          "error": "429: Rate limit exceeded",
+          "auth_used": false,
+          "method": "GET"
+        },
+        "GET /api/monitoring/health": {
+          "status_code": 0,
+          "category": "error",
+          "status_desc": "\ud83d\udca5 Exception: 429: Rate limit exceeded",
+          "duration_ms": 1.42,
+          "error": "429: Rate limit exceeded",
+          "auth_used": false,
+          "method": "GET"
+        }
+      },
+      "summary": {
+        "total": 4,
+        "working": 0,
+        "auth_required": 0,
+        "not_implemented": 0,
+        "errors": 4
+      }
+    },
+    "capital": {
+      "endpoints": {
+        "GET /api/capital/balance": {
+          "status_code": 0,
+          "category": "error",
+          "status_desc": "\ud83d\udca5 Exception: 429: Rate limit exceeded",
+          "duration_ms": 1.3,
+          "error": "429: Rate limit exceeded",
+          "auth_used": false,
+          "method": "GET"
+        },
+        "GET /api/capital/allocation": {
+          "status_code": 0,
+          "category": "error",
+          "status_desc": "\ud83d\udca5 Exception: 429: Rate limit exceeded",
+          "duration_ms": 1.76,
+          "error": "429: Rate limit exceeded",
+          "auth_used": false,
+          "method": "GET"
+        },
+        "POST /api/capital/allocation": {
+          "status_code": 0,
+          "category": "error",
+          "status_desc": "\ud83d\udca5 Exception: 429: Rate limit exceeded",
+          "duration_ms": 1.44,
+          "error": "429: Rate limit exceeded",
+          "auth_used": false,
+          "method": "POST"
+        },
+        "GET /api/capital/transfers": {
+          "status_code": 0,
+          "category": "error",
+          "status_desc": "\ud83d\udca5 Exception: 429: Rate limit exceeded",
+          "duration_ms": 1.17,
+          "error": "429: Rate limit exceeded",
+          "auth_used": false,
+          "method": "GET"
+        },
+        "GET /api/capital/history": {
+          "status_code": 0,
+          "category": "error",
+          "status_desc": "\ud83d\udca5 Exception: 429: Rate limit exceeded",
+          "duration_ms": 1.41,
+          "error": "429: Rate limit exceeded",
+          "auth_used": false,
+          "method": "GET"
+        }
+      },
+      "summary": {
+        "total": 5,
+        "working": 0,
+        "auth_required": 0,
+        "not_implemented": 0,
+        "errors": 5
+      }
+    },
+    "data": {
+      "endpoints": {
+        "GET /api/data/market": {
+          "status_code": 0,
+          "category": "error",
+          "status_desc": "\ud83d\udca5 Exception: 429: Rate limit exceeded",
+          "duration_ms": 1.37,
+          "error": "429: Rate limit exceeded",
+          "auth_used": false,
+          "method": "GET"
+        },
+        "GET /api/data/symbols": {
+          "status_code": 0,
+          "category": "error",
+          "status_desc": "\ud83d\udca5 Exception: 429: Rate limit exceeded",
+          "duration_ms": 1.64,
+          "error": "429: Rate limit exceeded",
+          "auth_used": false,
+          "method": "GET"
+        },
+        "GET /api/data/historical": {
+          "status_code": 0,
+          "category": "error",
+          "status_desc": "\ud83d\udca5 Exception: 429: Rate limit exceeded",
+          "duration_ms": 1.42,
+          "error": "429: Rate limit exceeded",
+          "auth_used": false,
+          "method": "GET"
+        },
+        "GET /api/data/status": {
+          "status_code": 0,
+          "category": "error",
+          "status_desc": "\ud83d\udca5 Exception: 429: Rate limit exceeded",
+          "duration_ms": 2.14,
+          "error": "429: Rate limit exceeded",
+          "auth_used": false,
+          "method": "GET"
+        }
+      },
+      "summary": {
+        "total": 4,
+        "working": 0,
+        "auth_required": 0,
+        "not_implemented": 0,
+        "errors": 4
+      }
+    },
+    "exchanges": {
+      "endpoints": {
+        "GET /api/exchanges/list": {
+          "status_code": 0,
+          "category": "error",
+          "status_desc": "\ud83d\udca5 Exception: 429: Rate limit exceeded",
+          "duration_ms": 1.48,
+          "error": "429: Rate limit exceeded",
+          "auth_used": false,
+          "method": "GET"
+        },
+        "GET /api/exchanges/status": {
+          "status_code": 0,
+          "category": "error",
+          "status_desc": "\ud83d\udca5 Exception: 429: Rate limit exceeded",
+          "duration_ms": 1.19,
+          "error": "429: Rate limit exceeded",
+          "auth_used": false,
+          "method": "GET"
+        },
+        "GET /api/exchanges/balance": {
+          "status_code": 0,
+          "category": "error",
+          "status_desc": "\ud83d\udca5 Exception: 429: Rate limit exceeded",
+          "duration_ms": 1.78,
+          "error": "429: Rate limit exceeded",
+          "auth_used": false,
+          "method": "GET"
+        },
+        "GET /api/exchanges/orders": {
+          "status_code": 0,
+          "category": "error",
+          "status_desc": "\ud83d\udca5 Exception: 429: Rate limit exceeded",
+          "duration_ms": 1.16,
+          "error": "429: Rate limit exceeded",
+          "auth_used": false,
+          "method": "GET"
+        }
+      },
+      "summary": {
+        "total": 4,
+        "working": 0,
+        "auth_required": 0,
+        "not_implemented": 0,
+        "errors": 4
+      }
+    }
+  }
+}

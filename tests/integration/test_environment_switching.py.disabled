@@ -1,0 +1,510 @@
+"""
+Integration tests for environment switching functionality.
+
+Tests the complete environment switching system including configuration,
+connection managers, factory, and safety validation.
+"""
+
+import asyncio
+import pytest
+from unittest.mock import Mock, patch, AsyncMock
+from datetime import datetime, timezone
+
+from src.core.config import Config
+from src.core.config.environment import TradingEnvironment, ExchangeEnvironment
+from src.core.dependency_injection import DependencyInjector
+from src.exchanges.environment_factory import EnvironmentExchangeFactory
+from src.exchanges.connection.environment_manager import EnvironmentConnectionManager
+from src.exchanges.safety.environment_validator import EnvironmentSafetyValidator, SafetyLevel
+from src.core.exceptions import ValidationError, ExchangeError
+
+
+@pytest.fixture
+def mock_config():
+    """Mock configuration with environment settings."""
+    config = Mock(spec=Config)
+    
+    # Mock environment configuration
+    config.environment = Mock()
+    config.environment.global_environment = TradingEnvironment.SANDBOX
+    config.environment.production_confirmation = True
+    config.environment.enable_production_safeguards = True
+    config.environment.max_environment_switches_per_hour = 5
+    
+    # Mock exchange configuration
+    config.exchange = Mock()
+    config.exchange.connection_timeout = 30
+    config.exchange.request_timeout = 30
+    
+    # Mock environment methods
+    config.environment.get_exchange_environment = Mock(return_value=ExchangeEnvironment.SANDBOX)
+    config.environment.get_exchange_endpoints = Mock(return_value={
+        "api_url": "https://testnet.binance.vision/api",
+        "ws_url": "wss://testnet.binance.vision/ws",
+        "environment": "sandbox"
+    })
+    config.environment.get_exchange_credentials = Mock(return_value={
+        "api_key": "test_key",
+        "api_secret": "test_secret",
+        "testnet": True
+    })
+    config.environment.is_production_environment = Mock(return_value=False)
+    config.environment.validate_production_credentials = Mock(return_value=True)
+    config.environment.get_environment_summary = Mock(return_value={
+        "global_environment": "sandbox",
+        "exchanges": {}
+    })
+    
+    # Mock configuration methods
+    config.get_environment_exchange_config = Mock(return_value={
+        "api_url": "https://testnet.binance.vision/api",
+        "ws_url": "wss://testnet.binance.vision/ws",
+        "api_key": "test_key",
+        "api_secret": "test_secret",
+        "testnet": True,
+        "environment_mode": "sandbox",
+        "is_production": False
+    })
+    
+    config.validate_environment_switch = Mock(return_value={
+        "valid": True,
+        "warnings": [],
+        "errors": [],
+        "required_actions": []
+    })
+    
+    config.is_production_mode = Mock(return_value=False)
+    config.get_risk_config = Mock(return_value={
+        "max_position_size": 0.02,
+        "risk_per_trade": 0.01,
+        "require_stop_loss": True
+    })
+    
+    return config
+
+
+@pytest.fixture
+def mock_injector():
+    """Mock dependency injector."""
+    injector = Mock(spec=DependencyInjector)
+    injector.has_service = Mock(return_value=False)
+    injector.register_service = Mock()
+    injector.register_factory = Mock()
+    injector.resolve = Mock()
+    injector.clear = Mock()
+    
+    return injector
+
+
+@pytest.fixture
+def mock_exchange():
+    """Mock exchange instance."""
+    exchange = Mock()
+    exchange.connected = True
+    exchange.connect = AsyncMock(return_value=True)
+    exchange.disconnect = AsyncMock()
+    exchange.health_check = AsyncMock(return_value=True)
+    
+    return exchange
+
+
+@pytest.mark.asyncio
+class TestEnvironmentConnectionManager:
+    """Test environment-aware connection manager."""
+    
+    async def test_connection_manager_initialization(self, mock_config):
+        """Test connection manager initialization."""
+        manager = EnvironmentConnectionManager("binance", mock_config)
+        
+        assert manager.exchange_name == "binance"
+        assert manager.config == mock_config
+        assert manager._state.value == "disconnected"
+        assert manager._sessions == []
+    
+    async def test_connect_to_sandbox(self, mock_config):
+        """Test connecting to sandbox environment."""
+        manager = EnvironmentConnectionManager("binance", mock_config)
+        
+        # Mock session creation
+        with patch('aiohttp.ClientSession') as mock_session_class:
+            mock_session = AsyncMock()
+            mock_session.closed = False
+            mock_session_class.return_value = mock_session
+            
+            # Mock validation
+            manager._validate_environment = AsyncMock(return_value={"valid": True})
+            manager._create_connection_pool = AsyncMock(return_value=True)
+            
+            success = await manager.connect()
+            
+            assert success is True
+            assert manager._state.value == "connected"
+    
+    async def test_switch_environment(self, mock_config):
+        """Test switching between environments."""
+        manager = EnvironmentConnectionManager("binance", mock_config)
+        
+        # Mock initial connection
+        manager._state.value = "connected"
+        manager._current_environment = "sandbox"
+        
+        # Mock methods
+        manager._update_connection_config = AsyncMock()
+        manager._validate_environment = AsyncMock(return_value={"valid": True})
+        manager._close_all_sessions = AsyncMock()
+        manager._create_connection_pool = AsyncMock(return_value=True)
+        
+        # Test switch to live
+        mock_config.environment.get_exchange_endpoints.return_value = {
+            "api_url": "https://api.binance.com",
+            "ws_url": "wss://stream.binance.com:9443",
+            "environment": "production"
+        }
+        
+        success = await manager.switch_environment("live")
+        
+        assert success is True
+        manager._update_connection_config.assert_called_once_with("live")
+    
+    async def test_request_with_authentication(self, mock_config):
+        """Test making authenticated requests."""
+        manager = EnvironmentConnectionManager("binance", mock_config)
+        
+        # Mock session and response
+        mock_session = AsyncMock()
+        mock_response = AsyncMock()
+        mock_response.status = 200
+        mock_response.json = AsyncMock(return_value={"test": "data"})
+        mock_session.request.return_value.__aenter__.return_value = mock_response
+        
+        manager._sessions = [mock_session]
+        manager._session_health = {id(mock_session): True}
+        manager._current_endpoints = {"api_url": "https://api.binance.com"}
+        manager._state.value = "connected"
+        
+        # Mock authentication
+        manager._get_auth_headers = AsyncMock(return_value={"X-API-KEY": "test"})
+        
+        result = await manager.request("GET", "/api/v3/account", signed=True)
+        
+        assert result == {"test": "data"}
+        manager._get_auth_headers.assert_called_once()
+    
+    async def test_health_check(self, mock_config):
+        """Test connection health check."""
+        manager = EnvironmentConnectionManager("binance", mock_config)
+        manager.request = AsyncMock(return_value={"status": "ok"})
+        
+        is_healthy = await manager.health_check()
+        
+        assert is_healthy is True
+        manager.request.assert_called_once_with("GET", "/api/v3/ping", timeout=5)
+    
+    async def test_reconnect_with_backoff(self, mock_config):
+        """Test reconnection with exponential backoff."""
+        manager = EnvironmentConnectionManager("binance", mock_config, max_reconnect_attempts=2)
+        manager.connect = AsyncMock(return_value=True)
+        
+        with patch('asyncio.sleep') as mock_sleep:
+            success = await manager.reconnect()
+            
+            assert success is True
+            assert manager._reconnect_count == 1
+            mock_sleep.assert_called_once_with(2)  # 2^1 = 2 seconds backoff
+
+
+@pytest.mark.asyncio 
+class TestEnvironmentExchangeFactory:
+    """Test environment-aware exchange factory."""
+    
+    async def test_factory_initialization(self, mock_config, mock_injector):
+        """Test factory initialization."""
+        factory = EnvironmentExchangeFactory(mock_config, mock_injector)
+        
+        assert factory.config == mock_config
+        assert factory.injector == mock_injector
+        assert factory._environment_connections == {}
+    
+    async def test_register_exchange_with_environments(self, mock_config, mock_injector, mock_exchange):
+        """Test registering exchange with environment managers."""
+        factory = EnvironmentExchangeFactory(mock_config, mock_injector)
+        
+        # Mock base registration
+        with patch.object(EnvironmentExchangeFactory.__bases__[0], 'register_exchange'):
+            factory.register_exchange("binance", type(mock_exchange))
+        
+        assert "binance" in factory._environment_connections
+        assert "sandbox" in factory._environment_connections["binance"]
+        assert "live" in factory._environment_connections["binance"]
+    
+    async def test_create_exchange_with_environment(self, mock_config, mock_injector, mock_exchange):
+        """Test creating exchange for specific environment."""
+        factory = EnvironmentExchangeFactory(mock_config, mock_injector)
+        
+        # Mock methods
+        factory._validate_environment_switch = AsyncMock()
+        factory._get_connection_manager = AsyncMock(return_value=Mock())
+        factory.create_exchange = AsyncMock(return_value=mock_exchange)
+        factory._record_environment_switch = Mock()
+        
+        exchange = await factory.create_exchange_with_environment("binance", "sandbox")
+        
+        assert exchange == mock_exchange
+        factory._validate_environment_switch.assert_called_once()
+    
+    async def test_switch_exchange_environment(self, mock_config, mock_injector, mock_exchange):
+        """Test switching existing exchange environment."""
+        factory = EnvironmentExchangeFactory(mock_config, mock_injector)
+        factory._active_exchanges = {"binance": mock_exchange}
+        
+        # Mock connection managers
+        current_manager = Mock()
+        current_manager.get_current_environment.return_value = "sandbox"
+        current_manager.disconnect = AsyncMock()
+        
+        target_manager = Mock()
+        target_manager.connect = AsyncMock()
+        
+        mock_exchange._connection_manager = current_manager
+        
+        # Mock methods
+        factory._get_current_connection_manager = Mock(return_value=current_manager)
+        factory._validate_environment_switch = AsyncMock()
+        factory._get_connection_manager = AsyncMock(return_value=target_manager)
+        factory._record_environment_switch = Mock()
+        
+        success = await factory.switch_exchange_environment("binance", "live")
+        
+        assert success is True
+        current_manager.disconnect.assert_called_once()
+        target_manager.connect.assert_called_once_with(force_environment="live")
+    
+    async def test_validate_all_environments(self, mock_config, mock_injector):
+        """Test validating all exchange environments."""
+        factory = EnvironmentExchangeFactory(mock_config, mock_injector)
+        factory._exchange_registry = {"binance": Mock, "coinbase": Mock}
+        
+        # Mock validation
+        mock_config.validate_environment_switch.return_value = {
+            "valid": True,
+            "errors": [],
+            "warnings": []
+        }
+        
+        results = await factory.validate_all_environments()
+        
+        assert results["overall_valid"] is True
+        assert "binance" in results["exchanges"]
+        assert "coinbase" in results["exchanges"]
+    
+    async def test_emergency_switch_all_to_sandbox(self, mock_config, mock_injector, mock_exchange):
+        """Test emergency switch to sandbox."""
+        factory = EnvironmentExchangeFactory(mock_config, mock_injector)
+        factory._active_exchanges = {"binance": mock_exchange, "coinbase": mock_exchange}
+        
+        # Mock switch method
+        factory.switch_exchange_environment = AsyncMock(return_value=True)
+        
+        results = await factory.emergency_switch_all_to_sandbox()
+        
+        assert results["binance"] is True
+        assert results["coinbase"] is True
+        assert factory.switch_exchange_environment.call_count == 2
+
+
+@pytest.mark.asyncio
+class TestEnvironmentSafetyValidator:
+    """Test environment safety validator."""
+    
+    async def test_validator_initialization(self, mock_config):
+        """Test validator initialization."""
+        validator = EnvironmentSafetyValidator(mock_config, SafetyLevel.STANDARD)
+        
+        assert validator.config == mock_config
+        assert validator.safety_level == SafetyLevel.STANDARD
+        assert validator._validation_history == []
+    
+    async def test_validate_sandbox_switch(self, mock_config):
+        """Test validating switch to sandbox."""
+        validator = EnvironmentSafetyValidator(mock_config, SafetyLevel.BASIC)
+        
+        result = await validator.validate_environment_switch("binance", "sandbox")
+        
+        assert result["valid"] is True
+        assert result["risk_level"] == "low"
+        assert len(result["errors"]) == 0
+    
+    async def test_validate_production_switch_with_safeguards(self, mock_config):
+        """Test validating switch to production with safeguards."""
+        validator = EnvironmentSafetyValidator(mock_config, SafetyLevel.STANDARD)
+        
+        # Mock production confirmation
+        validator.require_production_confirmation = AsyncMock(return_value=True)
+        validator._count_daily_switches = AsyncMock(return_value=2)
+        validator._count_concurrent_production = AsyncMock(return_value=1)
+        
+        result = await validator.validate_environment_switch("binance", "live")
+        
+        assert result["valid"] is True
+        assert result["target_environment"] == "live"
+    
+    async def test_validate_production_switch_blocked(self, mock_config):
+        """Test production switch blocked by safeguards."""
+        validator = EnvironmentSafetyValidator(mock_config, SafetyLevel.STANDARD)
+        
+        # Mock failed confirmation
+        validator.require_production_confirmation = AsyncMock(return_value=False)
+        validator._count_daily_switches = AsyncMock(return_value=12)  # Over limit
+        validator._count_concurrent_production = AsyncMock(return_value=1)
+        
+        result = await validator.validate_environment_switch("binance", "live")
+        
+        assert result["valid"] is False
+        assert "Production confirmation required" in result["errors"]
+        assert "Daily switch limit exceeded" in result["errors"]
+    
+    async def test_production_readiness_assessment(self, mock_config):
+        """Test production readiness assessment."""
+        validator = EnvironmentSafetyValidator(mock_config)
+        
+        # Mock check methods
+        validator._check_production_credentials = AsyncMock(return_value={"valid": True, "errors": []})
+        validator._check_production_configuration = AsyncMock(return_value={"valid": True, "errors": []})
+        validator._check_risk_management = AsyncMock(return_value={"valid": True, "errors": []})
+        validator._check_network_connectivity = AsyncMock(return_value={"valid": True, "errors": []})
+        
+        assessment = await validator.validate_production_readiness("binance")
+        
+        assert assessment["ready_for_production"] is True
+        assert len(assessment["critical_issues"]) == 0
+    
+    async def test_emergency_safety_override(self, mock_config):
+        """Test emergency safety override."""
+        validator = EnvironmentSafetyValidator(mock_config)
+        
+        success = await validator.emergency_safety_override(
+            "System critical error", 
+            "system_admin"
+        )
+        
+        assert success is True
+        assert validator._emergency_mode is True
+        assert validator.safety_level == SafetyLevel.EMERGENCY
+    
+    async def test_production_confirmation_timeout(self, mock_config):
+        """Test production confirmation timeout."""
+        validator = EnvironmentSafetyValidator(mock_config)
+        
+        # Provide confirmation
+        validator.provide_production_confirmation("binance", "test_operation", confirmed=True)
+        
+        # Should be valid immediately
+        valid = await validator.require_production_confirmation("binance", "test_operation", timeout_minutes=15)
+        assert valid is False  # Returns False because no actual confirmation mechanism
+        
+        # Test confirmation exists in tracking
+        assert "binance_test_operation" in validator._production_confirmations
+    
+    async def test_risk_level_assessment(self, mock_config):
+        """Test risk level assessment."""
+        validator = EnvironmentSafetyValidator(mock_config)
+        
+        # Test low risk scenario
+        result = {"exchange": "binance", "target_environment": "sandbox", "errors": []}
+        await validator._assess_risk_level(result)
+        assert result["risk_level"] == "low"
+        
+        # Test high risk scenario
+        validator._emergency_mode = True
+        result = {"exchange": "binance", "target_environment": "live", "errors": ["test error"]}
+        await validator._assess_risk_level(result)
+        assert result["risk_level"] in ("high", "critical")
+
+
+@pytest.mark.asyncio
+class TestIntegratedEnvironmentSwitching:
+    """Integration tests for complete environment switching workflow."""
+    
+    async def test_full_environment_switch_workflow(self, mock_config, mock_injector, mock_exchange):
+        """Test complete environment switching workflow."""
+        # Initialize components
+        factory = EnvironmentExchangeFactory(mock_config, mock_injector)
+        validator = EnvironmentSafetyValidator(mock_config)
+        
+        # Register exchange
+        with patch.object(EnvironmentExchangeFactory.__bases__[0], 'register_exchange'):
+            factory.register_exchange("binance", type(mock_exchange))
+        
+        # Mock active exchange
+        factory._active_exchanges = {"binance": mock_exchange}
+        
+        # Mock components
+        factory._validate_environment_switch = AsyncMock()
+        factory._get_connection_manager = AsyncMock(return_value=Mock())
+        factory._get_current_connection_manager = Mock(return_value=Mock())
+        
+        # Validate switch
+        validation = await validator.validate_environment_switch("binance", "sandbox")
+        assert validation["valid"] is True
+        
+        # Perform switch
+        success = await factory.switch_exchange_environment("binance", "sandbox")
+        assert success is True
+    
+    async def test_configuration_integration(self, mock_config):
+        """Test configuration integration with environment switching."""
+        # Test environment-aware config retrieval
+        config_data = mock_config.get_environment_exchange_config("binance")
+        
+        assert "api_url" in config_data
+        assert "environment_mode" in config_data
+        assert "is_production" in config_data
+        
+        # Test environment switching
+        validation = mock_config.validate_environment_switch("live", "binance")
+        assert validation["valid"] is True
+    
+    async def test_error_handling_and_recovery(self, mock_config, mock_injector):
+        """Test error handling and recovery scenarios."""
+        factory = EnvironmentExchangeFactory(mock_config, mock_injector)
+        
+        # Test invalid exchange
+        with pytest.raises(ValidationError):
+            await factory.create_exchange_with_environment("invalid_exchange", "sandbox")
+        
+        # Test invalid environment
+        with pytest.raises(ValidationError):
+            await factory.create_exchange_with_environment("binance", "invalid_environment")
+        
+        # Test connection failure recovery
+        manager = EnvironmentConnectionManager("binance", mock_config)
+        manager.connect = AsyncMock(return_value=False)
+        
+        success = await manager.connect()
+        assert success is False
+    
+    async def test_concurrent_environment_operations(self, mock_config, mock_injector, mock_exchange):
+        """Test concurrent environment operations."""
+        factory = EnvironmentExchangeFactory(mock_config, mock_injector)
+        
+        # Mock methods for concurrency
+        factory._validate_environment_switch = AsyncMock()
+        factory._get_connection_manager = AsyncMock(return_value=Mock())
+        factory.create_exchange = AsyncMock(return_value=mock_exchange)
+        
+        # Run concurrent operations
+        tasks = []
+        for i in range(3):
+            task = factory.create_exchange_with_environment(f"binance", "sandbox")
+            tasks.append(task)
+        
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        # All should succeed
+        for result in results:
+            assert not isinstance(result, Exception)
+            assert result == mock_exchange
+
+
+if __name__ == "__main__":
+    pytest.main([__file__, "-v"])

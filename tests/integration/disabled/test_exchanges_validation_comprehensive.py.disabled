@@ -1,0 +1,748 @@
+"""
+Comprehensive integration tests for Exchange Validation functionality.
+
+This test file targets the critical uncovered validation.py module which currently has 0% coverage.
+Tests focus on order validation logic and trading rule enforcement.
+"""
+
+from decimal import Decimal
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from src.core.exceptions import ValidationError
+from src.exchanges.validation import OrderValidationMixin
+
+
+class MockExchangeWithValidation(OrderValidationMixin):
+    """Mock exchange class that inherits from OrderValidationMixin for testing."""
+
+    def __init__(self):
+        """Initialize mock exchange with logger."""
+        self.logger = MagicMock()
+        self.symbol_info_cache = {}
+
+    def _validate_exchange_specific(
+        self,
+        symbol: str,
+        side: str,
+        order_type: str,
+        quantity: Decimal,
+        price: Decimal | None = None,
+        **kwargs,
+    ):
+        """Mock implementation of exchange-specific validation."""
+        # Default implementation does nothing
+        pass
+
+    def _get_symbol_info(self, symbol: str) -> dict[str, any] | None:
+        """Mock implementation of get symbol info."""
+        return self.symbol_info_cache.get(symbol)
+
+
+@pytest.fixture
+def mock_exchange():
+    """Create mock exchange with validation mixin."""
+    return MockExchangeWithValidation()
+
+
+class TestOrderValidationBasics:
+    """Test basic order validation functionality."""
+
+    def test_validate_order_success(self, mock_exchange):
+        """Test successful order validation."""
+        # Should not raise exception
+        mock_exchange.validate_order(
+            symbol="BTCUSDT",
+            side="BUY",
+            order_type="LIMIT",
+            quantity=Decimal("1.0"),
+            price=Decimal("50000.0"),
+        )
+
+    def test_validate_order_empty_symbol(self, mock_exchange):
+        """Test validation with empty symbol."""
+        with pytest.raises(ValidationError, match="Symbol is required and must be a string"):
+            mock_exchange.validate_order(
+                symbol="",
+                side="BUY",
+                order_type="LIMIT",
+                quantity=Decimal("1.0"),
+                price=Decimal("50000.0"),
+            )
+
+    def test_validate_order_none_symbol(self, mock_exchange):
+        """Test validation with None symbol."""
+        with pytest.raises(ValidationError, match="Symbol is required and must be a string"):
+            mock_exchange.validate_order(
+                symbol=None,
+                side="BUY",
+                order_type="LIMIT",
+                quantity=Decimal("1.0"),
+                price=Decimal("50000.0"),
+            )
+
+    def test_validate_order_non_string_symbol(self, mock_exchange):
+        """Test validation with non-string symbol."""
+        with pytest.raises(ValidationError, match="Symbol is required and must be a string"):
+            mock_exchange.validate_order(
+                symbol=123,
+                side="BUY",
+                order_type="LIMIT",
+                quantity=Decimal("1.0"),
+                price=Decimal("50000.0"),
+            )
+
+
+class TestOrderSideValidation:
+    """Test order side validation."""
+
+    def test_validate_order_valid_buy_side(self, mock_exchange):
+        """Test validation with valid BUY side."""
+        mock_exchange.validate_order(
+            symbol="BTCUSDT", side="BUY", order_type="MARKET", quantity=Decimal("1.0")
+        )
+
+    def test_validate_order_valid_sell_side(self, mock_exchange):
+        """Test validation with valid SELL side."""
+        mock_exchange.validate_order(
+            symbol="BTCUSDT", side="SELL", order_type="MARKET", quantity=Decimal("1.0")
+        )
+
+    def test_validate_order_lowercase_side(self, mock_exchange):
+        """Test validation with lowercase side (should work due to upper())."""
+        mock_exchange.validate_order(
+            symbol="BTCUSDT",
+            side="buy",  # lowercase
+            order_type="MARKET",
+            quantity=Decimal("1.0"),
+        )
+
+    def test_validate_order_invalid_side(self, mock_exchange):
+        """Test validation with invalid side."""
+        with pytest.raises(ValidationError, match="Invalid order side: INVALID"):
+            mock_exchange.validate_order(
+                symbol="BTCUSDT", side="INVALID", order_type="MARKET", quantity=Decimal("1.0")
+            )
+
+
+class TestOrderTypeValidation:
+    """Test order type validation."""
+
+    @pytest.mark.parametrize("order_type", ["MARKET", "LIMIT", "STOP", "STOP_LIMIT", "STOP_MARKET"])
+    def test_validate_order_valid_types(self, mock_exchange, order_type):
+        """Test validation with all valid order types."""
+        mock_exchange.validate_order(
+            symbol="BTCUSDT",
+            side="BUY",
+            order_type=order_type,
+            quantity=Decimal("1.0"),
+            price=Decimal("50000.0") if "LIMIT" in order_type else None,
+        )
+
+    def test_validate_order_lowercase_type(self, mock_exchange):
+        """Test validation with lowercase order type."""
+        mock_exchange.validate_order(
+            symbol="BTCUSDT",
+            side="BUY",
+            order_type="limit",  # lowercase
+            quantity=Decimal("1.0"),
+            price=Decimal("50000.0"),
+        )
+
+    def test_validate_order_invalid_type(self, mock_exchange):
+        """Test validation with invalid order type."""
+        with pytest.raises(ValidationError, match="Invalid order type: INVALID"):
+            mock_exchange.validate_order(
+                symbol="BTCUSDT", side="BUY", order_type="INVALID", quantity=Decimal("1.0")
+            )
+
+
+class TestQuantityValidation:
+    """Test order quantity validation."""
+
+    def test_validate_order_decimal_quantity(self, mock_exchange):
+        """Test validation with Decimal quantity."""
+        mock_exchange.validate_order(
+            symbol="BTCUSDT", side="BUY", order_type="MARKET", quantity=Decimal("1.5")
+        )
+
+    def test_validate_order_int_quantity(self, mock_exchange):
+        """Test validation with int quantity."""
+        mock_exchange.validate_order(
+            symbol="BTCUSDT",
+            side="BUY",
+            order_type="MARKET",
+            quantity=1,  # int
+        )
+
+    def test_validate_order_float_quantity(self, mock_exchange):
+        """Test validation with float quantity."""
+        mock_exchange.validate_order(
+            symbol="BTCUSDT",
+            side="BUY",
+            order_type="MARKET",
+            quantity=1.5,  # float
+        )
+
+    def test_validate_order_zero_quantity(self, mock_exchange):
+        """Test validation with zero quantity."""
+        with pytest.raises(ValidationError, match="Quantity must be positive, got 0"):
+            mock_exchange.validate_order(
+                symbol="BTCUSDT", side="BUY", order_type="MARKET", quantity=Decimal("0")
+            )
+
+    def test_validate_order_negative_quantity(self, mock_exchange):
+        """Test validation with negative quantity."""
+        with pytest.raises(ValidationError, match="Quantity must be positive, got -1.0"):
+            mock_exchange.validate_order(
+                symbol="BTCUSDT", side="BUY", order_type="MARKET", quantity=Decimal("-1.0")
+            )
+
+    def test_validate_order_string_quantity(self, mock_exchange):
+        """Test validation with string quantity."""
+        with pytest.raises(ValidationError, match="Quantity must be numeric, got <class 'str'>"):
+            mock_exchange.validate_order(
+                symbol="BTCUSDT",
+                side="BUY",
+                order_type="MARKET",
+                quantity="1.0",  # string
+            )
+
+
+class TestPriceValidation:
+    """Test order price validation."""
+
+    def test_validate_order_limit_with_price(self, mock_exchange):
+        """Test LIMIT order with valid price."""
+        mock_exchange.validate_order(
+            symbol="BTCUSDT",
+            side="BUY",
+            order_type="LIMIT",
+            quantity=Decimal("1.0"),
+            price=Decimal("50000.0"),
+        )
+
+    def test_validate_order_stop_limit_with_price(self, mock_exchange):
+        """Test STOP_LIMIT order with valid price."""
+        mock_exchange.validate_order(
+            symbol="BTCUSDT",
+            side="BUY",
+            order_type="STOP_LIMIT",
+            quantity=Decimal("1.0"),
+            price=Decimal("50000.0"),
+        )
+
+    def test_validate_order_limit_without_price(self, mock_exchange):
+        """Test LIMIT order without price."""
+        with pytest.raises(ValidationError, match="Price is required for LIMIT orders"):
+            mock_exchange.validate_order(
+                symbol="BTCUSDT",
+                side="BUY",
+                order_type="LIMIT",
+                quantity=Decimal("1.0"),
+                price=None,
+            )
+
+    def test_validate_order_stop_limit_without_price(self, mock_exchange):
+        """Test STOP_LIMIT order without price."""
+        with pytest.raises(ValidationError, match="Price is required for STOP_LIMIT orders"):
+            mock_exchange.validate_order(
+                symbol="BTCUSDT",
+                side="BUY",
+                order_type="STOP_LIMIT",
+                quantity=Decimal("1.0"),
+                price=None,
+            )
+
+    def test_validate_order_market_without_price(self, mock_exchange):
+        """Test MARKET order without price (should be OK)."""
+        mock_exchange.validate_order(
+            symbol="BTCUSDT", side="BUY", order_type="MARKET", quantity=Decimal("1.0"), price=None
+        )
+
+    def test_validate_order_price_decimal(self, mock_exchange):
+        """Test validation with Decimal price."""
+        mock_exchange.validate_order(
+            symbol="BTCUSDT",
+            side="BUY",
+            order_type="LIMIT",
+            quantity=Decimal("1.0"),
+            price=Decimal("50000.0"),
+        )
+
+    def test_validate_order_price_int(self, mock_exchange):
+        """Test validation with int price."""
+        mock_exchange.validate_order(
+            symbol="BTCUSDT",
+            side="BUY",
+            order_type="LIMIT",
+            quantity=Decimal("1.0"),
+            price=50000,  # int
+        )
+
+    def test_validate_order_price_float(self, mock_exchange):
+        """Test validation with float price."""
+        mock_exchange.validate_order(
+            symbol="BTCUSDT",
+            side="BUY",
+            order_type="LIMIT",
+            quantity=Decimal("1.0"),
+            price=50000.0,  # float
+        )
+
+    def test_validate_order_zero_price(self, mock_exchange):
+        """Test validation with zero price."""
+        with pytest.raises(ValidationError, match="Price must be positive, got 0"):
+            mock_exchange.validate_order(
+                symbol="BTCUSDT",
+                side="BUY",
+                order_type="LIMIT",
+                quantity=Decimal("1.0"),
+                price=Decimal("0"),
+            )
+
+    def test_validate_order_negative_price(self, mock_exchange):
+        """Test validation with negative price."""
+        with pytest.raises(ValidationError, match="Price must be positive, got -1000.0"):
+            mock_exchange.validate_order(
+                symbol="BTCUSDT",
+                side="BUY",
+                order_type="LIMIT",
+                quantity=Decimal("1.0"),
+                price=Decimal("-1000.0"),
+            )
+
+    def test_validate_order_string_price(self, mock_exchange):
+        """Test validation with string price."""
+        with pytest.raises(ValidationError, match="Price must be numeric, got <class 'str'>"):
+            mock_exchange.validate_order(
+                symbol="BTCUSDT",
+                side="BUY",
+                order_type="LIMIT",
+                quantity=Decimal("1.0"),
+                price="50000.0",  # string
+            )
+
+
+class TestExchangeSpecificValidation:
+    """Test exchange-specific validation hook."""
+
+    def test_exchange_specific_validation_called(self, mock_exchange):
+        """Test that exchange-specific validation is called."""
+        with patch.object(mock_exchange, "_validate_exchange_specific") as mock_validate:
+            mock_exchange.validate_order(
+                symbol="BTCUSDT",
+                side="BUY",
+                order_type="LIMIT",
+                quantity=Decimal("1.0"),
+                price=Decimal("50000.0"),
+                extra_param="test",
+            )
+
+            mock_validate.assert_called_once_with(
+                symbol="BTCUSDT",
+                side="BUY",
+                order_type="LIMIT",
+                quantity=Decimal("1.0"),
+                price=Decimal("50000.0"),
+                extra_param="test",
+            )
+
+    def test_exchange_specific_validation_custom_error(self, mock_exchange):
+        """Test exchange-specific validation with custom error."""
+
+        def custom_validation(*args, **kwargs):
+            raise ValidationError("Custom exchange validation failed")
+
+        mock_exchange._validate_exchange_specific = custom_validation
+
+        with pytest.raises(ValidationError, match="Custom exchange validation failed"):
+            mock_exchange.validate_order(
+                symbol="BTCUSDT", side="BUY", order_type="MARKET", quantity=Decimal("1.0")
+            )
+
+
+class TestSymbolTradingRulesValidation:
+    """Test symbol trading rules validation."""
+
+    def test_validate_symbol_trading_rules_no_info(self, mock_exchange):
+        """Test validation when no symbol info is available."""
+        # Should not raise exception but log warning
+        mock_exchange.validate_symbol_trading_rules(
+            symbol="UNKNOWNSYMBOL", quantity=Decimal("1.0"), price=Decimal("50000.0")
+        )
+
+        mock_exchange.logger.warning.assert_called_once_with(
+            "No trading rules found for UNKNOWNSYMBOL"
+        )
+
+    def test_validate_symbol_trading_rules_quantity_too_small(self, mock_exchange):
+        """Test validation with quantity below minimum."""
+        mock_exchange.symbol_info_cache["BTCUSDT"] = {"min_quantity": Decimal("0.1")}
+
+        with pytest.raises(ValidationError, match="Quantity 0.05 below minimum 0.1 for BTCUSDT"):
+            mock_exchange.validate_symbol_trading_rules(
+                symbol="BTCUSDT", quantity=Decimal("0.05"), price=Decimal("50000.0")
+            )
+
+    def test_validate_symbol_trading_rules_quantity_too_large(self, mock_exchange):
+        """Test validation with quantity above maximum."""
+        mock_exchange.symbol_info_cache["BTCUSDT"] = {"max_quantity": Decimal("100.0")}
+
+        with pytest.raises(ValidationError, match="Quantity 150.0 above maximum 100.0 for BTCUSDT"):
+            mock_exchange.validate_symbol_trading_rules(
+                symbol="BTCUSDT", quantity=Decimal("150.0"), price=Decimal("50000.0")
+            )
+
+    def test_validate_symbol_trading_rules_quantity_step_size(self, mock_exchange):
+        """Test validation with quantity not matching step size."""
+        mock_exchange.symbol_info_cache["BTCUSDT"] = {"step_size": Decimal("0.1")}
+
+        with pytest.raises(ValidationError, match="Quantity 1.05 not a multiple of step size 0.1"):
+            mock_exchange.validate_symbol_trading_rules(
+                symbol="BTCUSDT", quantity=Decimal("1.05"), price=Decimal("50000.0")
+            )
+
+    def test_validate_symbol_trading_rules_quantity_valid_step_size(self, mock_exchange):
+        """Test validation with quantity matching step size."""
+        mock_exchange.symbol_info_cache["BTCUSDT"] = {"step_size": Decimal("0.1")}
+
+        # Should not raise exception
+        mock_exchange.validate_symbol_trading_rules(
+            symbol="BTCUSDT",
+            quantity=Decimal("1.0"),  # Multiple of 0.1
+            price=Decimal("50000.0"),
+        )
+
+    def test_validate_symbol_trading_rules_price_too_low(self, mock_exchange):
+        """Test validation with price below minimum."""
+        mock_exchange.symbol_info_cache["BTCUSDT"] = {"min_price": Decimal("1000.0")}
+
+        with pytest.raises(ValidationError, match="Price 500.0 below minimum 1000.0 for BTCUSDT"):
+            mock_exchange.validate_symbol_trading_rules(
+                symbol="BTCUSDT", quantity=Decimal("1.0"), price=Decimal("500.0")
+            )
+
+    def test_validate_symbol_trading_rules_price_too_high(self, mock_exchange):
+        """Test validation with price above maximum."""
+        mock_exchange.symbol_info_cache["BTCUSDT"] = {"max_price": Decimal("100000.0")}
+
+        with pytest.raises(
+            ValidationError, match="Price 150000.0 above maximum 100000.0 for BTCUSDT"
+        ):
+            mock_exchange.validate_symbol_trading_rules(
+                symbol="BTCUSDT", quantity=Decimal("1.0"), price=Decimal("150000.0")
+            )
+
+    def test_validate_symbol_trading_rules_price_tick_size(self, mock_exchange):
+        """Test validation with price not matching tick size."""
+        mock_exchange.symbol_info_cache["BTCUSDT"] = {"tick_size": Decimal("0.01")}
+
+        with pytest.raises(
+            ValidationError, match="Price 50000.005 not a multiple of tick size 0.01"
+        ):
+            mock_exchange.validate_symbol_trading_rules(
+                symbol="BTCUSDT", quantity=Decimal("1.0"), price=Decimal("50000.005")
+            )
+
+    def test_validate_symbol_trading_rules_price_valid_tick_size(self, mock_exchange):
+        """Test validation with price matching tick size."""
+        mock_exchange.symbol_info_cache["BTCUSDT"] = {"tick_size": Decimal("0.01")}
+
+        # Should not raise exception
+        mock_exchange.validate_symbol_trading_rules(
+            symbol="BTCUSDT",
+            quantity=Decimal("1.0"),
+            price=Decimal("50000.00"),  # Multiple of 0.01
+        )
+
+    def test_validate_symbol_trading_rules_without_price(self, mock_exchange):
+        """Test validation without price (market orders)."""
+        mock_exchange.symbol_info_cache["BTCUSDT"] = {
+            "min_quantity": Decimal("0.1"),
+            "max_quantity": Decimal("100.0"),
+            "step_size": Decimal("0.1"),
+        }
+
+        # Should not raise exception and not check price constraints
+        mock_exchange.validate_symbol_trading_rules(
+            symbol="BTCUSDT", quantity=Decimal("1.0"), price=None
+        )
+
+    def test_validate_symbol_trading_rules_comprehensive(self, mock_exchange):
+        """Test comprehensive validation with all rules passing."""
+        mock_exchange.symbol_info_cache["BTCUSDT"] = {
+            "min_quantity": Decimal("0.1"),
+            "max_quantity": Decimal("100.0"),
+            "step_size": Decimal("0.1"),
+            "min_price": Decimal("1000.0"),
+            "max_price": Decimal("100000.0"),
+            "tick_size": Decimal("0.01"),
+        }
+
+        # Should not raise exception
+        mock_exchange.validate_symbol_trading_rules(
+            symbol="BTCUSDT",
+            quantity=Decimal("1.0"),  # Within bounds and matches step size
+            price=Decimal("50000.00"),  # Within bounds and matches tick size
+        )
+
+
+class TestBalanceValidation:
+    """Test balance validation for orders."""
+
+    def test_validate_balance_no_balance_provided(self, mock_exchange):
+        """Test balance validation when no balance is provided."""
+        # Should not raise exception but log warning
+        mock_exchange.validate_balance_for_order(
+            side="BUY",
+            order_type="LIMIT",
+            quantity=Decimal("1.0"),
+            price=Decimal("50000.0"),
+            available_balance=None,
+        )
+
+        mock_exchange.logger.warning.assert_called_once_with(
+            "Balance validation skipped - no balance provided"
+        )
+
+    def test_validate_balance_buy_market_order(self, mock_exchange):
+        """Test balance validation for BUY market order (cannot validate without price estimate)."""
+        # Should not raise exception but log warning
+        mock_exchange.validate_balance_for_order(
+            side="BUY",
+            order_type="MARKET",
+            quantity=Decimal("1.0"),
+            price=None,
+            available_balance=Decimal("50000.0"),
+        )
+
+        mock_exchange.logger.warning.assert_called_once_with(
+            "Cannot validate market buy order without price estimate"
+        )
+
+    def test_validate_balance_buy_limit_sufficient(self, mock_exchange):
+        """Test balance validation for BUY limit order with sufficient balance."""
+        # Should not raise exception
+        mock_exchange.validate_balance_for_order(
+            side="BUY",
+            order_type="LIMIT",
+            quantity=Decimal("1.0"),
+            price=Decimal("50000.0"),
+            available_balance=Decimal("60000.0"),  # Sufficient
+        )
+
+    def test_validate_balance_buy_limit_insufficient(self, mock_exchange):
+        """Test balance validation for BUY limit order with insufficient balance."""
+        with pytest.raises(
+            ValidationError, match="Insufficient balance: need 50000.0, have 40000.0"
+        ):
+            mock_exchange.validate_balance_for_order(
+                side="BUY",
+                order_type="LIMIT",
+                quantity=Decimal("1.0"),
+                price=Decimal("50000.0"),
+                available_balance=Decimal("40000.0"),  # Insufficient
+            )
+
+    def test_validate_balance_sell_sufficient(self, mock_exchange):
+        """Test balance validation for SELL order with sufficient asset balance."""
+        # Should not raise exception
+        mock_exchange.validate_balance_for_order(
+            side="SELL",
+            order_type="LIMIT",
+            quantity=Decimal("1.0"),
+            price=Decimal("50000.0"),
+            available_balance=Decimal("2.0"),  # Sufficient asset quantity
+        )
+
+    def test_validate_balance_sell_insufficient(self, mock_exchange):
+        """Test balance validation for SELL order with insufficient asset balance."""
+        with pytest.raises(ValidationError, match="Insufficient asset balance: need 1.0, have 0.5"):
+            mock_exchange.validate_balance_for_order(
+                side="SELL",
+                order_type="MARKET",
+                quantity=Decimal("1.0"),
+                price=None,
+                available_balance=Decimal("0.5"),  # Insufficient asset quantity
+            )
+
+    def test_validate_balance_case_insensitive_sides(self, mock_exchange):
+        """Test balance validation with lowercase sides."""
+        # Test lowercase buy
+        mock_exchange.validate_balance_for_order(
+            side="buy",  # lowercase
+            order_type="LIMIT",
+            quantity=Decimal("1.0"),
+            price=Decimal("50000.0"),
+            available_balance=Decimal("60000.0"),
+        )
+
+        # Test lowercase sell
+        mock_exchange.validate_balance_for_order(
+            side="sell",  # lowercase
+            order_type="LIMIT",
+            quantity=Decimal("1.0"),
+            price=Decimal("50000.0"),
+            available_balance=Decimal("2.0"),
+        )
+
+    def test_validate_balance_case_insensitive_order_types(self, mock_exchange):
+        """Test balance validation with lowercase order types."""
+        # Should not raise exception but log warning for market order
+        mock_exchange.validate_balance_for_order(
+            side="BUY",
+            order_type="market",  # lowercase
+            quantity=Decimal("1.0"),
+            price=None,
+            available_balance=Decimal("50000.0"),
+        )
+
+
+class TestLoggerProtocol:
+    """Test logger protocol compliance."""
+
+    def test_logger_protocol_methods(self, mock_exchange):
+        """Test that logger has all required methods."""
+        # Test that all logger methods are available
+        mock_exchange.logger.warning("test")
+        mock_exchange.logger.info("test")
+        mock_exchange.logger.error("test")
+        mock_exchange.logger.debug("test")
+
+        # Verify methods were called
+        mock_exchange.logger.warning.assert_called_with("test")
+        mock_exchange.logger.info.assert_called_with("test")
+        mock_exchange.logger.error.assert_called_with("test")
+        mock_exchange.logger.debug.assert_called_with("test")
+
+
+class TestValidationMixinIntegration:
+    """Test integration scenarios for validation mixin."""
+
+    def test_complete_order_validation_flow(self, mock_exchange):
+        """Test complete order validation flow with all features."""
+        # Setup symbol info with comprehensive rules
+        mock_exchange.symbol_info_cache["BTCUSDT"] = {
+            "min_quantity": Decimal("0.01"),
+            "max_quantity": Decimal("1000.0"),
+            "step_size": Decimal("0.01"),
+            "min_price": Decimal("100.0"),
+            "max_price": Decimal("200000.0"),
+            "tick_size": Decimal("0.01"),
+        }
+
+        # Test valid order
+        mock_exchange.validate_order(
+            symbol="BTCUSDT",
+            side="BUY",
+            order_type="LIMIT",
+            quantity=Decimal("1.00"),
+            price=Decimal("50000.00"),
+        )
+
+        # Test symbol trading rules
+        mock_exchange.validate_symbol_trading_rules(
+            symbol="BTCUSDT", quantity=Decimal("1.00"), price=Decimal("50000.00")
+        )
+
+        # Test balance validation
+        mock_exchange.validate_balance_for_order(
+            side="BUY",
+            order_type="LIMIT",
+            quantity=Decimal("1.00"),
+            price=Decimal("50000.00"),
+            available_balance=Decimal("60000.0"),
+        )
+
+    def test_validation_with_kwargs(self, mock_exchange):
+        """Test validation with additional keyword arguments."""
+
+        def custom_validation(*args, **kwargs):
+            assert "time_in_force" in kwargs
+            assert kwargs["time_in_force"] == "GTC"
+
+        mock_exchange._validate_exchange_specific = custom_validation
+
+        mock_exchange.validate_order(
+            symbol="BTCUSDT",
+            side="BUY",
+            order_type="LIMIT",
+            quantity=Decimal("1.0"),
+            price=Decimal("50000.0"),
+            time_in_force="GTC",  # Additional parameter
+        )
+
+    def test_validation_error_messages_contain_details(self, mock_exchange):
+        """Test that validation error messages contain helpful details."""
+        # Test detailed error message for quantity
+        with pytest.raises(ValidationError) as exc_info:
+            mock_exchange.validate_order(
+                symbol="BTCUSDT",
+                side="BUY",
+                order_type="LIMIT",
+                quantity=Decimal("-1.5"),
+                price=Decimal("50000.0"),
+            )
+
+        assert "Quantity must be positive, got -1.5" in str(exc_info.value)
+
+        # Test detailed error message for price
+        with pytest.raises(ValidationError) as exc_info:
+            mock_exchange.validate_order(
+                symbol="BTCUSDT",
+                side="BUY",
+                order_type="LIMIT",
+                quantity=Decimal("1.0"),
+                price=Decimal("-1000.0"),
+            )
+
+        assert "Price must be positive, got -1000.0" in str(exc_info.value)
+
+
+class TestEdgeCases:
+    """Test edge cases and boundary conditions."""
+
+    def test_very_small_decimal_values(self, mock_exchange):
+        """Test validation with very small decimal values."""
+        mock_exchange.validate_order(
+            symbol="BTCUSDT",
+            side="BUY",
+            order_type="LIMIT",
+            quantity=Decimal("0.000000000000000001"),
+            price=Decimal("0.000000000000000001"),
+        )
+
+    def test_very_large_decimal_values(self, mock_exchange):
+        """Test validation with very large decimal values."""
+        mock_exchange.validate_order(
+            symbol="BTCUSDT",
+            side="BUY",
+            order_type="LIMIT",
+            quantity=Decimal("999999999999.99999999"),
+            price=Decimal("999999999999.99999999"),
+        )
+
+    def test_exact_zero_modulo_operations(self, mock_exchange):
+        """Test modulo operations that result in exactly zero."""
+        mock_exchange.symbol_info_cache["BTCUSDT"] = {
+            "step_size": Decimal("0.1"),
+            "tick_size": Decimal("0.01"),
+        }
+
+        # These should pass because modulo results in exactly zero
+        mock_exchange.validate_symbol_trading_rules(
+            symbol="BTCUSDT",
+            quantity=Decimal("1.0"),  # 1.0 % 0.1 = 0.0
+            price=Decimal("50000.00"),  # 50000.00 % 0.01 = 0.00
+        )
+
+    def test_unicode_symbol_names(self, mock_exchange):
+        """Test validation with Unicode symbol names."""
+        mock_exchange.validate_order(
+            symbol="BTC₿USDT",  # Unicode character
+            side="BUY",
+            order_type="MARKET",
+            quantity=Decimal("1.0"),
+        )

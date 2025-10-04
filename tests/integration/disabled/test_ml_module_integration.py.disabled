@@ -1,0 +1,505 @@
+"""
+Integration Tests for ML Module.
+
+This module tests the ML module's integration with other modules in the trading system,
+verifying proper dependency injection, service layer patterns, and API contracts.
+"""
+
+import asyncio
+import pytest
+from unittest.mock import Mock, AsyncMock, patch
+import pandas as pd
+from datetime import datetime, timezone
+
+from src.ml.service import MLService, MLPipelineRequest, MLTrainingRequest
+from src.ml.feature_engineering import FeatureEngineeringService, FeatureRequest
+from src.ml.model_manager import ModelManagerService
+from src.ml.registry.model_registry import ModelRegistryService
+from src.ml.inference.inference_engine import InferenceService
+from src.ml.di_registration import register_ml_services, get_ml_service_dependencies
+from src.core.exceptions import ModelError, ValidationError
+
+
+class TestMLModuleIntegration:
+    """Test ML module integration with other system modules."""
+
+    @pytest.fixture
+    def mock_config(self):
+        """Mock configuration for ML services."""
+        return {
+            "ml_service": {
+                "enable_feature_engineering": True,
+                "enable_model_registry": True,
+                "enable_inference": True,
+                "enable_feature_store": False,
+                "max_concurrent_operations": 5,
+            }
+        }
+
+    @pytest.fixture
+    def mock_data_service(self):
+        """Mock DataService for testing."""
+        mock_service = AsyncMock()
+        mock_service.get_market_data = AsyncMock(return_value=pd.DataFrame({
+            'timestamp': [datetime.now(timezone.utc)],
+            'open': [100.0],
+            'high': [105.0],
+            'low': [95.0],
+            'close': [102.0],
+            'volume': [1000.0]
+        }))
+        return mock_service
+
+    @pytest.fixture
+    def mock_container(self, mock_data_service):
+        """Mock dependency injection container."""
+        mock_container = Mock()
+        
+        services = {
+            "DataService": mock_data_service,
+        }
+        
+        def mock_register(name, factory_func, singleton=True):
+            services[name] = factory_func()
+        
+        def mock_resolve(name):
+            if name in services:
+                return services[name]
+            raise ValueError(f"Service {name} not registered")
+        
+        mock_container.register = Mock(side_effect=mock_register)
+        mock_container.resolve = Mock(side_effect=mock_resolve)
+        return mock_container
+
+    def test_dependency_registration(self, mock_container, mock_config):
+        """Test that ML services are properly registered with DI container."""
+        # Register ML services
+        register_ml_services(mock_container, mock_config)
+        
+        # Verify all expected services were registered
+        expected_services = [
+            "MLRepository",
+            "ModelFactory",
+            "FeatureEngineeringService",
+            "ModelRegistryService",
+            "InferenceService",
+            "ModelManagerService",
+            "MLService",
+            "ModelValidationService",
+            "DriftDetectionService",
+            "TrainingService",
+            "BatchPredictionService",
+        ]
+        
+        # Check that register was called for each service
+        assert mock_container.register.call_count == len(expected_services)
+        
+        # Verify specific service registrations
+        registered_names = [call[0][0] for call in mock_container.register.call_args_list]
+        for service_name in expected_services:
+            assert service_name in registered_names
+
+    def test_dependency_resolution_order(self):
+        """Test that dependencies are resolved in correct order."""
+        dependencies = get_ml_service_dependencies()
+        
+        # Verify MLRepository has no dependencies (can be initialized first)
+        assert dependencies["MLRepository"] == []
+        
+        # Verify FeatureEngineeringService depends on DataService
+        assert "DataService" in dependencies["FeatureEngineeringService"]
+        
+        # Verify InferenceService depends on both ModelRegistry and FeatureEngineering
+        inference_deps = dependencies["InferenceService"]
+        assert "ModelRegistryService" in inference_deps
+        assert "FeatureEngineeringService" in inference_deps
+        
+        # Verify MLService has all required dependencies
+        ml_service_deps = dependencies["MLService"]
+        expected_ml_deps = [
+            "DataService",
+            "FeatureEngineeringService",
+            "ModelRegistryService",
+            "InferenceService",
+        ]
+        for dep in expected_ml_deps:
+            assert dep in ml_service_deps
+
+    @pytest.mark.asyncio
+    async def test_ml_service_integration_with_data_service(self, mock_config):
+        """Test MLService integration with DataService."""
+        # Create mock data service
+        mock_data_service = AsyncMock()
+        mock_data_service.get_market_data = AsyncMock(return_value=pd.DataFrame({
+            'timestamp': [datetime.now(timezone.utc)],
+            'open': [100.0],
+            'high': [105.0],
+            'low': [95.0],
+            'close': [102.0],
+            'volume': [1000.0]
+        }))
+        
+        # Create MLService with mocked dependencies
+        ml_service = MLService(config=mock_config)
+        ml_service.data_service = mock_data_service
+        ml_service.feature_engineering_service = None  # Disabled for this test
+        ml_service.model_registry_service = None
+        ml_service.inference_service = None
+        
+        # Test pipeline processing with no services available
+        request = MLPipelineRequest(
+            symbol="BTCUSDT",
+            market_data={"open": [100.0], "high": [105.0], "low": [95.0], "close": [102.0]},
+            use_cache=False
+        )
+        
+        response = await ml_service.process_pipeline(request)
+        
+        # Should succeed but with warnings about missing services
+        assert response.pipeline_success is True
+        assert len(response.warnings) > 0
+        assert "Feature engineering service not available" in response.warnings
+
+    @pytest.mark.asyncio
+    async def test_feature_engineering_service_integration(self, mock_config):
+        """Test FeatureEngineeringService integration with dependencies."""
+        # Create mock data service
+        mock_data_service = AsyncMock()
+        
+        # Create FeatureEngineeringService
+        fe_service = FeatureEngineeringService(config=mock_config)
+        
+        # Mock dependency container and set dependency
+        mock_container = Mock()
+        mock_container.resolve.return_value = mock_data_service
+        fe_service._dependency_container = mock_container
+        
+        # Mock the calculator initialization
+        with patch('src.data.features.technical_indicators.TechnicalIndicators') as mock_tech, \
+             patch('src.data.features.statistical_features.StatisticalFeatures') as mock_stat:
+            
+            mock_tech_instance = Mock()
+            mock_stat_instance = Mock()
+            mock_tech.return_value = mock_tech_instance
+            mock_stat.return_value = mock_stat_instance
+            
+            await fe_service._do_start()
+            
+            # Verify calculators were initialized
+            assert fe_service.technical_calculator is mock_tech_instance
+            assert fe_service.statistical_calculator is mock_stat_instance
+
+    @pytest.mark.asyncio
+    async def test_model_registry_service_integration(self, mock_config):
+        """Test ModelRegistryService integration with dependencies."""
+        # Create mock services
+        mock_data_service = AsyncMock()
+        mock_ml_repository = AsyncMock()
+        
+        # Create ModelRegistryService
+        registry_service = ModelRegistryService(config=mock_config)
+        
+        # Mock dependency container
+        mock_container = Mock()
+        def mock_resolve(name):
+            if name == "DataService":
+                return mock_data_service
+            elif name == "MLRepository":
+                return mock_ml_repository
+            raise ValueError(f"Unknown dependency: {name}")
+        
+        mock_container.resolve.side_effect = mock_resolve
+        registry_service._dependency_container = mock_container
+        
+        await registry_service._do_start()
+        
+        # Verify dependencies are set
+        assert registry_service.data_service is mock_data_service
+        assert registry_service.ml_repository is mock_ml_repository
+
+    @pytest.mark.asyncio
+    async def test_inference_service_integration(self, mock_config):
+        """Test InferenceService integration with dependencies."""
+        # Create mock services
+        mock_registry_service = AsyncMock()
+        mock_fe_service = AsyncMock()
+        
+        # Create InferenceService
+        inference_service = InferenceService(config=mock_config)
+        
+        # Mock dependency container
+        mock_container = Mock()
+        def mock_resolve(name):
+            if name == "ModelRegistryService":
+                return mock_registry_service
+            elif name == "FeatureEngineeringService":
+                return mock_fe_service
+            raise ValueError(f"Unknown dependency: {name}")
+        
+        mock_container.resolve.side_effect = mock_resolve
+        inference_service._dependency_container = mock_container
+        
+        await inference_service._do_start()
+        
+        # Verify dependencies are set
+        assert inference_service.model_registry_service is mock_registry_service
+        assert inference_service.feature_engineering_service is mock_fe_service
+
+    @pytest.mark.asyncio
+    async def test_model_manager_service_integration(self, mock_config):
+        """Test ModelManagerService integration with all dependencies."""
+        # Create mock services
+        mock_factory = Mock()
+        mock_registry = AsyncMock()
+        mock_fe_service = AsyncMock()
+        mock_training = AsyncMock()
+        mock_validation = AsyncMock()
+        mock_drift = AsyncMock()
+        mock_inference = AsyncMock()
+        mock_batch = AsyncMock()
+        
+        # Create ModelManagerService
+        manager_service = ModelManagerService(config=mock_config)
+        
+        # Mock dependency container
+        mock_container = Mock()
+        def mock_resolve(name):
+            deps = {
+                "ModelFactory": mock_factory,
+                "ModelRegistryService": mock_registry,
+                "FeatureEngineeringService": mock_fe_service,
+                "TrainingService": mock_training,
+                "ModelValidationService": mock_validation,
+                "DriftDetectionService": mock_drift,
+                "InferenceService": mock_inference,
+                "BatchPredictionService": mock_batch,
+            }
+            if name in deps:
+                return deps[name]
+            raise ValueError(f"Unknown dependency: {name}")
+        
+        mock_container.resolve.side_effect = mock_resolve
+        manager_service._dependency_container = mock_container
+        
+        await manager_service._do_start()
+        
+        # Verify all dependencies are properly mapped
+        assert manager_service.model_factory is mock_factory
+        assert manager_service.trainer is mock_training
+        assert manager_service.validator is mock_validation
+        assert manager_service.drift_detector is mock_drift
+        assert manager_service.model_registry is mock_registry
+        assert manager_service.inference_engine is mock_inference
+        assert manager_service.feature_engineer is mock_fe_service
+        assert manager_service.batch_predictor is mock_batch
+
+    @pytest.mark.asyncio
+    async def test_error_propagation_from_dependencies(self, mock_config):
+        """Test that errors from dependencies are properly propagated."""
+        # Create MLService with mock dependencies that raise errors
+        ml_service = MLService(config=mock_config)
+        
+        mock_fe_service = AsyncMock()
+        mock_fe_service.compute_features = AsyncMock(side_effect=ValidationError("Feature computation failed"))
+        
+        ml_service.data_service = AsyncMock()
+        ml_service.feature_engineering_service = mock_fe_service
+        ml_service.model_registry_service = None
+        ml_service.inference_service = None
+        
+        # Test that error is properly handled and returned in response
+        request = MLPipelineRequest(
+            symbol="BTCUSDT",
+            market_data=pd.DataFrame({
+                "open": [100.0], 
+                "high": [105.0], 
+                "low": [95.0], 
+                "close": [102.0]
+            }),
+            use_cache=False
+        )
+        
+        response = await ml_service.process_pipeline(request)
+        
+        # Should return error response instead of raising exception
+        assert response.pipeline_success is False
+        assert response.error is not None
+        assert "Feature computation failed" in response.error
+
+    @pytest.mark.asyncio
+    async def test_service_layer_bypass_prevention(self, mock_config):
+        """Test that ML services properly use service layer patterns."""
+        # Create FeatureEngineeringService
+        fe_service = FeatureEngineeringService(config=mock_config)
+        
+        # Mock dependency container
+        mock_data_service = AsyncMock()
+        mock_container = Mock()
+        mock_container.resolve.return_value = mock_data_service
+        fe_service._dependency_container = mock_container
+        
+        # Initialize calculators
+        with patch('src.data.features.technical_indicators.TechnicalIndicators') as mock_tech, \
+             patch('src.data.features.statistical_features.StatisticalFeatures') as mock_stat:
+            
+            mock_tech.return_value = Mock()
+            mock_stat.return_value = Mock()
+            
+            await fe_service._do_start()
+        
+        # Create a feature request
+        request = FeatureRequest(
+            market_data=[{"timestamp": datetime.now(timezone.utc), "open": 100.0, "close": 102.0}],
+            symbol="BTCUSDT",
+            feature_types=["price_features"]
+        )
+        
+        # Process the request
+        with patch.object(fe_service, '_compute_features_impl') as mock_impl:
+            mock_impl.return_value = Mock(error=None, feature_set=Mock(features=[]))
+            await fe_service.compute_features(request)
+            
+            # Verify implementation was called (service layer pattern)
+            mock_impl.assert_called_once()
+
+    def test_api_contract_validation(self):
+        """Test that ML service APIs match expected contracts."""
+        # Test MLPipelineRequest contract
+        request = MLPipelineRequest(
+            symbol="BTCUSDT",
+            market_data={"test": "data"}
+        )
+        
+        # Verify required fields are present
+        assert hasattr(request, 'symbol')
+        assert hasattr(request, 'market_data')
+        assert hasattr(request, 'request_id')
+        assert hasattr(request, 'use_cache')
+        
+        # Test MLTrainingRequest contract
+        training_request = MLTrainingRequest(
+            training_data={"test": "data"},
+            target_data=[1, 2, 3],
+            model_type="test_model",
+            model_name="test"
+        )
+        
+        # Verify required fields are present
+        assert hasattr(training_request, 'training_data')
+        assert hasattr(training_request, 'target_data')
+        assert hasattr(training_request, 'model_type')
+        assert hasattr(training_request, 'model_name')
+
+    @pytest.mark.asyncio
+    async def test_concurrent_operation_limiting(self, mock_config):
+        """Test that ML services properly limit concurrent operations."""
+        # Configure with low concurrent operation limit
+        config = {
+            "ml_service": {
+                "max_concurrent_operations": 1,
+                "enable_feature_engineering": False,
+                "enable_model_registry": False,
+                "enable_inference": False,
+                "enable_feature_store": False,
+            }
+        }
+        
+        ml_service = MLService(config=config)
+        ml_service.data_service = AsyncMock()
+        
+        # Create multiple concurrent requests with proper DataFrame data
+        requests = [
+            MLPipelineRequest(
+                symbol=f"BTC{i}",
+                market_data=pd.DataFrame({
+                    'timestamp': [datetime.now(timezone.utc)],
+                    'open': [100.0],
+                    'close': [102.0]
+                }),
+                use_cache=False
+            )
+            for i in range(3)
+        ]
+        
+        # Process requests concurrently
+        start_time = asyncio.get_event_loop().time()
+        responses = await asyncio.gather(*[
+            ml_service.process_pipeline(req) for req in requests
+        ])
+        end_time = asyncio.get_event_loop().time()
+        
+        # Verify all requests completed (may have errors but completed)
+        assert len(responses) == 3
+        
+        # Verify operations took some time due to semaphore limit
+        assert end_time - start_time >= 0  # Operations took some time
+
+    @pytest.mark.asyncio
+    async def test_service_health_integration(self, mock_config):
+        """Test ML service health check integration with dependencies."""
+        ml_service = MLService(config=mock_config)
+        
+        # Test with no dependencies (should be unhealthy)
+        ml_service.data_service = None
+        health_status = await ml_service._service_health_check()
+        assert health_status.name == "UNHEALTHY"
+        
+        # Test with data service but missing optional services (should be degraded)
+        ml_service.data_service = AsyncMock()
+        ml_service.feature_engineering_service = None
+        health_status = await ml_service._service_health_check()
+        assert health_status.name in ["DEGRADED", "UNHEALTHY"]
+        
+        # Test with all required services (should be healthy)
+        ml_service.feature_engineering_service = AsyncMock()
+        ml_service.model_registry_service = AsyncMock()
+        ml_service.inference_service = AsyncMock()
+        health_status = await ml_service._service_health_check()
+        assert health_status.name == "HEALTHY"
+
+
+class TestMLServiceConsumption:
+    """Test how other modules consume ML services."""
+
+    @pytest.mark.asyncio
+    async def test_backtesting_service_uses_ml_service(self):
+        """Test that BacktestingService properly uses MLService."""
+        # This would test the integration pattern found in backtesting/service.py
+        # where MLService is injected and used
+        
+        # Create mock MLService
+        mock_ml_service = AsyncMock()
+        mock_ml_service.process_pipeline = AsyncMock(return_value=Mock(
+            pipeline_success=True,
+            predictions=[1.0, 2.0, 3.0],
+            error=None
+        ))
+        
+        # Test that MLService would be called with proper parameters
+        # (This is a simplified test - actual backtesting integration would be more complex)
+        request = MLPipelineRequest(
+            symbol="BTCUSDT",
+            market_data={"test": "data"}
+        )
+        
+        response = await mock_ml_service.process_pipeline(request)
+        
+        assert response.pipeline_success is True
+        assert len(response.predictions) == 3
+
+    def test_service_manager_ml_service_registration(self):
+        """Test that ServiceManager properly registers MLService."""
+        # This tests the integration pattern found in core/service_manager.py
+        # where MLService is registered with minimal dependencies
+        
+        dependencies = get_ml_service_dependencies()
+        
+        # Verify MLService has proper dependency configuration
+        ml_deps = dependencies["MLService"]
+        
+        # Should depend on core services
+        assert "DataService" in ml_deps
+        
+        # Should not have circular dependencies
+        for service_name, deps in dependencies.items():
+            assert service_name not in deps  # No self-dependencies

@@ -518,7 +518,7 @@ def setup_test_databases(config: Config) -> None:
 
         # Run migrations for test database
         env = os.environ.copy()
-        env["DATABASE_URL"] = config.get_database_url()
+        env["DATABASE_URL"] = config.database.postgresql_url
         env["ALEMBIC_CONFIG"] = "alembic.ini"
         env["TESTING"] = "true"
 

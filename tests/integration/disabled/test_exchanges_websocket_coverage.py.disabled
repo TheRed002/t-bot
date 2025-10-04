@@ -1,0 +1,898 @@
+"""
+Comprehensive Integration Tests for exchanges/high_performance_websocket.py - Full Coverage
+
+This test suite provides comprehensive integration testing for the HighPerformanceWebSocket class
+and related components including ConnectionPool, MessageBatcher, and WebSocketMessage.
+
+Target: Cover ALL of high_performance_websocket.py (649 lines) to achieve 70% coverage target.
+"""
+
+import asyncio
+import time
+from datetime import datetime, timezone
+from unittest.mock import AsyncMock, Mock, patch
+
+import pytest
+
+from src.core.config import Config
+from src.core.exceptions import ExchangeConnectionError
+from src.core.types import ConnectionType
+from src.exchanges.high_performance_websocket import (
+    ConnectionPool,
+    HighPerformanceWebSocket,
+    MessageBatcher,
+    MessagePriority,
+    PooledConnection,
+    WebSocketMessage,
+)
+
+
+@pytest.fixture
+def mock_config():
+    """Create mock configuration."""
+    config = Mock(spec=Config)
+    config.websocket = Mock()
+    config.websocket.batch_size = 50
+    config.websocket.batch_time_ms = 5.0
+    config.websocket.enable_compression = True
+    return config
+
+
+@pytest.fixture
+def mock_websocket():
+    """Create mock WebSocket connection."""
+    ws = AsyncMock()
+    ws.extensions = []
+    ws.binary_type = "arraybuffer"
+    ws.send = AsyncMock()
+    ws.recv = AsyncMock()
+    ws.close = AsyncMock()
+    ws.ping = AsyncMock()
+    ws.pong = AsyncMock()
+    return ws
+
+
+class TestWebSocketMessage:
+    """Test WebSocketMessage dataclass functionality."""
+
+    def test_message_creation_with_dict(self):
+        """Test WebSocketMessage creation with dict data."""
+        data = {"exchange": "binance", "symbol": "BTCUSDT", "type": "ticker", "price": 50000}
+
+        message = WebSocketMessage(data=data, priority=MessagePriority.HIGH)
+
+        assert message.data == data
+        assert message.exchange == "binance"
+        assert message.symbol == "BTCUSDT"
+        assert message.message_type == "ticker"
+        assert message.priority == MessagePriority.HIGH
+
+    def test_message_creation_with_bytes(self):
+        """Test WebSocketMessage creation with bytes data."""
+        data = b"binary data"
+
+        message = WebSocketMessage(
+            data=data, priority=MessagePriority.CRITICAL, exchange="okx", symbol="ETHUSDT"
+        )
+
+        assert message.data == data
+        assert message.exchange == "okx"
+        assert message.symbol == "ETHUSDT"
+        assert message.priority == MessagePriority.CRITICAL
+
+    def test_message_timestamp_default(self):
+        """Test that timestamp is set automatically."""
+        message = WebSocketMessage(data={"test": "data"})
+        assert message.timestamp > 0
+        assert message.timestamp <= time.time()
+
+    def test_message_priority_default(self):
+        """Test default priority setting."""
+        message = WebSocketMessage(data={"test": "data"})
+        assert message.priority == MessagePriority.MEDIUM
+
+
+class TestPooledConnection:
+    """Test PooledConnection dataclass functionality."""
+
+    def test_pooled_connection_creation(self):
+        """Test PooledConnection creation."""
+        connection = PooledConnection(
+            connection_id="test_conn_1",
+            exchange="binance",
+            connection_type=ConnectionType.WEBSOCKET,
+            connection=Mock(),
+            created_at=datetime.now(timezone.utc),
+            last_used=datetime.now(timezone.utc),
+        )
+
+        assert connection.connection_id == "test_conn_1"
+        assert connection.exchange == "binance"
+        assert connection.connection_type == ConnectionType.WEBSOCKET
+        assert connection.is_healthy is True
+        assert connection.message_count == 0
+        assert connection.subscription_count == 0
+
+    def test_pooled_connection_defaults(self):
+        """Test PooledConnection default values."""
+        connection = PooledConnection(
+            connection_id="test_conn_1",
+            exchange="binance",
+            connection_type=ConnectionType.WEBSOCKET,
+            connection=Mock(),
+            created_at=datetime.now(timezone.utc),
+            last_used=datetime.now(timezone.utc),
+        )
+
+        assert connection.is_healthy is True
+        assert connection.message_count == 0
+        assert connection.subscription_count == 0
+
+
+class TestConnectionPool:
+    """Test ConnectionPool functionality."""
+
+    def test_connection_pool_creation(self):
+        """Test ConnectionPool creation."""
+        pool = ConnectionPool()
+
+        assert len(pool.connections) == 0
+        assert len(pool.active_connections) == 0
+        assert len(pool.failed_connections) == 0
+        assert pool.max_connections_per_exchange == 5
+
+    def test_get_best_connection_empty_pool(self):
+        """Test get_best_connection with empty pool."""
+        pool = ConnectionPool()
+
+        result = pool.get_best_connection("binance")
+        assert result is None
+
+    def test_get_best_connection_with_connections(self):
+        """Test get_best_connection with available connections."""
+        pool = ConnectionPool()
+
+        # Create mock connections
+        ws1 = Mock()
+        ws2 = Mock()
+
+        pool.connections["binance_1"] = ws1
+        pool.connections["binance_2"] = ws2
+        pool.active_connections.add("binance_1")
+        pool.active_connections.add("binance_2")
+
+        # Set weights
+        pool.connection_weights["binance_1"] = 10.0
+        pool.connection_weights["binance_2"] = 5.0  # Lower weight, should be selected
+
+        result = pool.get_best_connection("binance")
+        assert result == ws2
+
+    def test_update_connection_weight(self):
+        """Test connection weight updates."""
+        pool = ConnectionPool()
+
+        start_time = time.time()
+        pool.update_connection_weight("test_conn", 15.5)
+
+        assert pool.connection_weights["test_conn"] == 15.5
+        assert pool.last_used["test_conn"] >= start_time
+
+    def test_get_best_connection_no_exchange_connections(self):
+        """Test get_best_connection when no connections for exchange."""
+        pool = ConnectionPool()
+
+        # Add connections for different exchange
+        pool.connections["okx_1"] = Mock()
+        pool.active_connections.add("okx_1")
+
+        result = pool.get_best_connection("binance")
+        assert result is None
+
+
+class TestMessageBatcher:
+    """Test MessageBatcher functionality."""
+
+    def test_message_batcher_creation(self):
+        """Test MessageBatcher creation."""
+        batcher = MessageBatcher(max_batch_size=200, max_batch_time_ms=20.0)
+
+        assert batcher.max_batch_size == 200
+        assert batcher.max_batch_time_ms == 20.0
+        assert len(batcher.batches) == 0
+        assert len(batcher.batch_timers) == 0
+        assert len(batcher.callbacks) == 0
+
+    def test_add_message_single(self):
+        """Test adding a single message."""
+        batcher = MessageBatcher()
+
+        message = WebSocketMessage(data={"test": "data"}, priority=MessagePriority.HIGH)
+
+        batcher.add_message(message)
+
+        assert len(batcher.batches[MessagePriority.HIGH]) == 1
+        assert batcher.batches[MessagePriority.HIGH][0] == message
+
+    def test_add_multiple_messages_same_priority(self):
+        """Test adding multiple messages with same priority."""
+        batcher = MessageBatcher()
+
+        messages = [
+            WebSocketMessage(data={"msg": i}, priority=MessagePriority.MEDIUM) for i in range(5)
+        ]
+
+        for msg in messages:
+            batcher.add_message(msg)
+
+        assert len(batcher.batches[MessagePriority.MEDIUM]) == 5
+
+    @pytest.mark.asyncio
+    async def test_batch_flush_by_size(self):
+        """Test batch flushing when size limit is reached."""
+        batcher = MessageBatcher(max_batch_size=3, max_batch_time_ms=1000.0)
+
+        callback = AsyncMock()
+        batcher.add_callback(MessagePriority.HIGH, callback)
+
+        # Add messages to trigger flush
+        for i in range(3):
+            message = WebSocketMessage(data={"msg": i}, priority=MessagePriority.HIGH)
+            batcher.add_message(message)
+
+        # Give time for flush to complete
+        await asyncio.sleep(0.1)
+
+        # Batch should be flushed
+        assert len(batcher.batches[MessagePriority.HIGH]) == 0
+
+    @pytest.mark.asyncio
+    async def test_batch_flush_by_time(self):
+        """Test batch flushing when time limit is reached."""
+        batcher = MessageBatcher(max_batch_size=100, max_batch_time_ms=10.0)
+
+        callback = AsyncMock()
+        batcher.add_callback(MessagePriority.LOW, callback)
+
+        # Add a single message
+        message = WebSocketMessage(data={"test": "data"}, priority=MessagePriority.LOW)
+        batcher.add_message(message)
+
+        # Wait for time-based flush
+        await asyncio.sleep(0.05)  # 50ms > 10ms batch time
+
+        # Batch should be flushed
+        assert len(batcher.batches[MessagePriority.LOW]) == 0
+
+    def test_add_callback_single(self):
+        """Test adding a single callback."""
+        batcher = MessageBatcher()
+
+        callback = Mock()
+        batcher.add_callback(MessagePriority.CRITICAL, callback)
+
+        assert len(batcher.callbacks[MessagePriority.CRITICAL]) == 1
+        assert batcher.callbacks[MessagePriority.CRITICAL][0] == callback
+
+    def test_add_multiple_callbacks(self):
+        """Test adding multiple callbacks for same priority."""
+        batcher = MessageBatcher()
+
+        callbacks = [Mock(), Mock(), Mock()]
+        for callback in callbacks:
+            batcher.add_callback(MessagePriority.MEDIUM, callback)
+
+        assert len(batcher.callbacks[MessagePriority.MEDIUM]) == 3
+
+    @pytest.mark.asyncio
+    async def test_flush_batch_with_async_callbacks(self):
+        """Test flushing batch with async callbacks."""
+        batcher = MessageBatcher()
+
+        async_callback = AsyncMock()
+        batcher.add_callback(MessagePriority.HIGH, async_callback)
+
+        # Add messages
+        messages = [
+            WebSocketMessage(data={"msg": i}, priority=MessagePriority.HIGH) for i in range(2)
+        ]
+        for msg in messages:
+            batcher.add_message(msg)
+
+        # Manually flush
+        await batcher._flush_batch(MessagePriority.HIGH)
+
+        # Callback should be called
+        async_callback.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_flush_batch_with_sync_callbacks(self):
+        """Test flushing batch with sync callbacks."""
+        batcher = MessageBatcher()
+
+        sync_callback = Mock()
+        batcher.add_callback(MessagePriority.MEDIUM, sync_callback)
+
+        # Add messages
+        message = WebSocketMessage(data={"test": "data"}, priority=MessagePriority.MEDIUM)
+        batcher.add_message(message)
+
+        # Manually flush
+        await batcher._flush_batch(MessagePriority.MEDIUM)
+
+        # Give time for executor to complete
+        await asyncio.sleep(0.1)
+
+    @pytest.mark.asyncio
+    async def test_flush_empty_batch(self):
+        """Test flushing an empty batch."""
+        batcher = MessageBatcher()
+
+        # Should not raise exception
+        await batcher._flush_batch(MessagePriority.LOW)
+
+
+class TestHighPerformanceWebSocket:
+    """Test HighPerformanceWebSocket functionality."""
+
+    def test_websocket_creation(self, mock_config):
+        """Test WebSocket creation."""
+        ws = HighPerformanceWebSocket(
+            url="wss://example.com/ws",
+            config=mock_config,
+            connection_id="test_ws_1",
+            exchange="binance",
+        )
+
+        assert ws.url == "wss://example.com/ws"
+        assert ws.connection_id == "test_ws_1"
+        assert ws.exchange == "binance"
+        assert ws.is_connected is False
+        assert ws.is_authenticated is False
+        assert ws.reconnect_attempts == 0
+
+    def test_websocket_creation_with_pool(self, mock_config):
+        """Test WebSocket creation with connection pool."""
+        pool = ConnectionPool()
+
+        ws = HighPerformanceWebSocket(
+            url="wss://example.com/ws",
+            config=mock_config,
+            connection_id="test_ws_1",
+            exchange="binance",
+            connection_pool=pool,
+        )
+
+        assert ws.connection_pool == pool
+
+    def test_websocket_metrics_initialization(self, mock_config):
+        """Test metrics initialization."""
+        ws = HighPerformanceWebSocket(
+            url="wss://example.com/ws", config=mock_config, connection_id="test_ws_1"
+        )
+
+        expected_metrics = {
+            "messages_sent",
+            "messages_received",
+            "messages_dropped",
+            "bytes_sent",
+            "bytes_received",
+            "connection_time",
+            "avg_latency_ms",
+            "error_count",
+            "reconnections",
+            "last_heartbeat",
+        }
+
+        assert set(ws.metrics.keys()) == expected_metrics
+
+    @pytest.mark.asyncio
+    @patch("websockets.connect")
+    async def test_successful_connection(
+        self, mock_websockets_connect, mock_config, mock_websocket
+    ):
+        """Test successful WebSocket connection."""
+        mock_websockets_connect.return_value = mock_websocket
+
+        ws = HighPerformanceWebSocket(
+            url="wss://example.com/ws", config=mock_config, connection_id="test_ws_1"
+        )
+
+        with patch.object(ws, "_start_background_tasks") as mock_start_tasks:
+            result = await ws.connect()
+
+            assert result is True
+            assert ws.is_connected is True
+            assert ws.websocket == mock_websocket
+            mock_start_tasks.assert_called_once()
+
+    @pytest.mark.asyncio
+    @patch("websockets.connect")
+    async def test_connection_failure(self, mock_websockets_connect, mock_config):
+        """Test WebSocket connection failure."""
+        mock_websockets_connect.side_effect = Exception("Connection failed")
+
+        ws = HighPerformanceWebSocket(
+            url="wss://invalid-url", config=mock_config, connection_id="test_ws_1"
+        )
+
+        result = await ws.connect()
+
+        assert result is False
+        assert ws.is_connected is False
+        assert ws.websocket is None
+
+    @pytest.mark.asyncio
+    @patch("websockets.connect")
+    async def test_connection_with_compression(
+        self, mock_websockets_connect, mock_config, mock_websocket
+    ):
+        """Test WebSocket connection with compression enabled."""
+        mock_websocket.extensions = [Mock(name="deflate")]
+        mock_websockets_connect.return_value = mock_websocket
+
+        ws = HighPerformanceWebSocket(
+            url="wss://example.com/ws", config=mock_config, connection_id="test_ws_1"
+        )
+
+        with patch.object(ws, "_start_background_tasks"):
+            await ws.connect()
+
+            assert ws.compression_enabled is True
+
+    @pytest.mark.asyncio
+    @patch("websockets.connect")
+    async def test_connection_with_pool_update(
+        self, mock_websockets_connect, mock_config, mock_websocket
+    ):
+        """Test connection with connection pool updates."""
+        mock_websockets_connect.return_value = mock_websocket
+        pool = ConnectionPool()
+
+        ws = HighPerformanceWebSocket(
+            url="wss://example.com/ws",
+            config=mock_config,
+            connection_id="test_ws_1",
+            connection_pool=pool,
+        )
+
+        with patch.object(ws, "_start_background_tasks"):
+            await ws.connect()
+
+            assert "test_ws_1" in pool.active_connections
+            assert "test_ws_1" not in pool.failed_connections
+
+    @pytest.mark.asyncio
+    async def test_disconnect(self, mock_config, mock_websocket):
+        """Test WebSocket disconnection."""
+        ws = HighPerformanceWebSocket(
+            url="wss://example.com/ws", config=mock_config, connection_id="test_ws_1"
+        )
+
+        ws.websocket = mock_websocket
+        ws.is_connected = True
+
+        # Add some tasks
+        ws.tasks.add(asyncio.create_task(asyncio.sleep(1)))
+
+        with patch.object(ws, "_stop_background_tasks") as mock_stop_tasks:
+            await ws.disconnect()
+
+            assert ws.is_connected is False
+            assert ws.websocket is None
+            mock_websocket.close.assert_called_once()
+            mock_stop_tasks.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_disconnect_with_pool_update(self, mock_config, mock_websocket):
+        """Test disconnection with connection pool updates."""
+        pool = ConnectionPool()
+        pool.active_connections.add("test_ws_1")
+
+        ws = HighPerformanceWebSocket(
+            url="wss://example.com/ws",
+            config=mock_config,
+            connection_id="test_ws_1",
+            connection_pool=pool,
+        )
+
+        ws.websocket = mock_websocket
+        ws.is_connected = True
+
+        with patch.object(ws, "_stop_background_tasks"):
+            await ws.disconnect()
+
+            assert "test_ws_1" not in pool.active_connections
+
+    @pytest.mark.asyncio
+    async def test_send_message_dict(self, mock_config, mock_websocket):
+        """Test sending dictionary message."""
+        ws = HighPerformanceWebSocket(
+            url="wss://example.com/ws", config=mock_config, connection_id="test_ws_1"
+        )
+
+        ws.websocket = mock_websocket
+        ws.is_connected = True
+
+        message = {"type": "subscribe", "symbol": "BTCUSDT"}
+        await ws.send_message(message)
+
+        mock_websocket.send.assert_called_once()
+        assert ws.metrics["messages_sent"] == 1
+
+    @pytest.mark.asyncio
+    async def test_send_message_bytes(self, mock_config, mock_websocket):
+        """Test sending bytes message."""
+        ws = HighPerformanceWebSocket(
+            url="wss://example.com/ws", config=mock_config, connection_id="test_ws_1"
+        )
+
+        ws.websocket = mock_websocket
+        ws.is_connected = True
+        ws.supports_binary = True
+
+        message = b"binary message"
+        await ws.send_message(message)
+
+        mock_websocket.send.assert_called_once_with(message)
+        assert ws.metrics["messages_sent"] == 1
+
+    @pytest.mark.asyncio
+    async def test_send_message_not_connected(self, mock_config):
+        """Test sending message when not connected."""
+        ws = HighPerformanceWebSocket(
+            url="wss://example.com/ws", config=mock_config, connection_id="test_ws_1"
+        )
+
+        with pytest.raises(ExchangeConnectionError):
+            await ws.send_message({"test": "data"})
+
+    @pytest.mark.asyncio
+    async def test_send_message_with_error(self, mock_config, mock_websocket):
+        """Test sending message with WebSocket error."""
+        ws = HighPerformanceWebSocket(
+            url="wss://example.com/ws", config=mock_config, connection_id="test_ws_1"
+        )
+
+        ws.websocket = mock_websocket
+        ws.is_connected = True
+        mock_websocket.send.side_effect = Exception("Send failed")
+
+        with pytest.raises(ExchangeConnectionError):
+            await ws.send_message({"test": "data"})
+
+        assert ws.metrics["error_count"] == 1
+
+    @pytest.mark.asyncio
+    async def test_receive_message(self, mock_config, mock_websocket):
+        """Test receiving message."""
+        import json
+
+        ws = HighPerformanceWebSocket(
+            url="wss://example.com/ws", config=mock_config, connection_id="test_ws_1"
+        )
+
+        ws.websocket = mock_websocket
+        ws.is_connected = True
+
+        test_data = {"type": "ticker", "symbol": "BTCUSDT", "price": 50000}
+        mock_websocket.recv.return_value = json.dumps(test_data)
+
+        message = await ws.receive_message()
+
+        assert message.data == test_data
+        assert message.exchange == ws.exchange
+        assert ws.metrics["messages_received"] == 1
+
+    @pytest.mark.asyncio
+    async def test_receive_binary_message(self, mock_config, mock_websocket):
+        """Test receiving binary message."""
+        ws = HighPerformanceWebSocket(
+            url="wss://example.com/ws", config=mock_config, connection_id="test_ws_1"
+        )
+
+        ws.websocket = mock_websocket
+        ws.is_connected = True
+
+        binary_data = b"binary message"
+        mock_websocket.recv.return_value = binary_data
+
+        message = await ws.receive_message()
+
+        assert message.data == binary_data
+        assert message.priority == MessagePriority.MEDIUM
+
+    @pytest.mark.asyncio
+    async def test_receive_compressed_message(self, mock_config, mock_websocket):
+        """Test receiving compressed message."""
+        import json
+        import zlib
+
+        ws = HighPerformanceWebSocket(
+            url="wss://example.com/ws", config=mock_config, connection_id="test_ws_1"
+        )
+
+        ws.websocket = mock_websocket
+        ws.is_connected = True
+        ws.compression_enabled = True
+
+        test_data = {"type": "ticker", "price": 50000}
+        compressed_data = zlib.compress(json.dumps(test_data).encode())
+        mock_websocket.recv.return_value = compressed_data
+
+        message = await ws.receive_message()
+
+        assert message.data == test_data
+
+    @pytest.mark.asyncio
+    async def test_receive_message_not_connected(self, mock_config):
+        """Test receiving message when not connected."""
+        ws = HighPerformanceWebSocket(
+            url="wss://example.com/ws", config=mock_config, connection_id="test_ws_1"
+        )
+
+        with pytest.raises(ExchangeConnectionError):
+            await ws.receive_message()
+
+    @pytest.mark.asyncio
+    async def test_ping_pong(self, mock_config, mock_websocket):
+        """Test ping/pong functionality."""
+        ws = HighPerformanceWebSocket(
+            url="wss://example.com/ws", config=mock_config, connection_id="test_ws_1"
+        )
+
+        ws.websocket = mock_websocket
+        ws.is_connected = True
+
+        await ws.ping()
+        mock_websocket.ping.assert_called_once()
+
+        await ws.pong()
+        mock_websocket.pong.assert_called_once()
+
+    def test_add_message_handler(self, mock_config):
+        """Test adding message handler."""
+        ws = HighPerformanceWebSocket(
+            url="wss://example.com/ws", config=mock_config, connection_id="test_ws_1"
+        )
+
+        handler = Mock()
+        ws.add_message_handler("ticker", handler)
+
+        assert "ticker" in ws.message_handlers
+        assert handler in ws.message_handlers["ticker"]
+
+    def test_remove_message_handler(self, mock_config):
+        """Test removing message handler."""
+        ws = HighPerformanceWebSocket(
+            url="wss://example.com/ws", config=mock_config, connection_id="test_ws_1"
+        )
+
+        handler = Mock()
+        ws.add_message_handler("ticker", handler)
+        ws.remove_message_handler("ticker", handler)
+
+        assert handler not in ws.message_handlers["ticker"]
+
+    def test_get_metrics(self, mock_config):
+        """Test getting metrics."""
+        ws = HighPerformanceWebSocket(
+            url="wss://example.com/ws", config=mock_config, connection_id="test_ws_1"
+        )
+
+        ws.metrics["messages_sent"] = 100
+        ws.metrics["messages_received"] = 200
+
+        metrics = ws.get_metrics()
+
+        assert metrics["messages_sent"] == 100
+        assert metrics["messages_received"] == 200
+        assert "connection_time" in metrics
+
+    def test_is_healthy(self, mock_config, mock_websocket):
+        """Test health check."""
+        ws = HighPerformanceWebSocket(
+            url="wss://example.com/ws", config=mock_config, connection_id="test_ws_1"
+        )
+
+        # Not connected
+        assert ws.is_healthy() is False
+
+        # Connected
+        ws.websocket = mock_websocket
+        ws.is_connected = True
+        assert ws.is_healthy() is True
+
+        # Too many errors
+        ws.metrics["error_count"] = 100
+        assert ws.is_healthy() is False
+
+    @pytest.mark.asyncio
+    async def test_reconnect(self, mock_config, mock_websocket):
+        """Test reconnection functionality."""
+        with patch("websockets.connect") as mock_connect:
+            mock_connect.return_value = mock_websocket
+
+            ws = HighPerformanceWebSocket(
+                url="wss://example.com/ws", config=mock_config, connection_id="test_ws_1"
+            )
+
+            with patch.object(ws, "_start_background_tasks"):
+                result = await ws.reconnect()
+
+                assert result is True
+                assert ws.reconnect_attempts == 0  # Reset on successful reconnect
+
+    @pytest.mark.asyncio
+    async def test_reconnect_max_attempts(self, mock_config):
+        """Test maximum reconnection attempts."""
+        with patch("websockets.connect") as mock_connect:
+            mock_connect.side_effect = Exception("Connection failed")
+
+            ws = HighPerformanceWebSocket(
+                url="wss://example.com/ws", config=mock_config, connection_id="test_ws_1"
+            )
+            ws.max_reconnect_attempts = 2
+
+            result = await ws.reconnect()
+
+            assert result is False
+            assert ws.reconnect_attempts == 2
+
+    def test_cleanup(self, mock_config):
+        """Test cleanup functionality."""
+        ws = HighPerformanceWebSocket(
+            url="wss://example.com/ws", config=mock_config, connection_id="test_ws_1"
+        )
+
+        # Add some data
+        ws.metrics["messages_sent"] = 100
+        ws.message_handlers["test"] = [Mock()]
+
+        ws.cleanup()
+
+        # Thread pool should be shutdown
+        assert ws.thread_pool._shutdown is True
+
+
+class TestHighPerformanceWebSocketBackgroundTasks:
+    """Test background task functionality."""
+
+    @pytest.mark.asyncio
+    async def test_start_background_tasks(self, mock_config, mock_websocket):
+        """Test starting background tasks."""
+        ws = HighPerformanceWebSocket(
+            url="wss://example.com/ws", config=mock_config, connection_id="test_ws_1"
+        )
+
+        ws.websocket = mock_websocket
+        ws.is_connected = True
+
+        await ws._start_background_tasks()
+
+        assert len(ws.tasks) > 0
+
+    @pytest.mark.asyncio
+    async def test_stop_background_tasks(self, mock_config):
+        """Test stopping background tasks."""
+        ws = HighPerformanceWebSocket(
+            url="wss://example.com/ws", config=mock_config, connection_id="test_ws_1"
+        )
+
+        # Create a mock task
+        task = asyncio.create_task(asyncio.sleep(10))
+        ws.tasks.add(task)
+
+        await ws._stop_background_tasks()
+
+        assert task.cancelled()
+        assert len(ws.tasks) == 0
+
+    @pytest.mark.asyncio
+    async def test_message_processing_loop(self, mock_config, mock_websocket):
+        """Test message processing loop."""
+        import json
+
+        ws = HighPerformanceWebSocket(
+            url="wss://example.com/ws", config=mock_config, connection_id="test_ws_1"
+        )
+
+        ws.websocket = mock_websocket
+        ws.is_connected = True
+
+        # Mock received messages
+        messages = [
+            json.dumps({"type": "ticker", "symbol": "BTCUSDT"}),
+            json.dumps({"type": "trade", "symbol": "ETHUSDT"}),
+        ]
+        mock_websocket.recv.side_effect = messages + [asyncio.CancelledError()]
+
+        # Add handler
+        handler = AsyncMock()
+        ws.add_message_handler("ticker", handler)
+
+        try:
+            await ws._message_processing_loop()
+        except asyncio.CancelledError:
+            pass
+
+        # Should have processed messages
+        assert ws.metrics["messages_received"] >= 1
+
+    @pytest.mark.asyncio
+    async def test_heartbeat_loop(self, mock_config, mock_websocket):
+        """Test heartbeat loop."""
+        ws = HighPerformanceWebSocket(
+            url="wss://example.com/ws", config=mock_config, connection_id="test_ws_1"
+        )
+
+        ws.websocket = mock_websocket
+        ws.is_connected = True
+
+        # Start heartbeat and cancel quickly
+        task = asyncio.create_task(ws._heartbeat_loop())
+        await asyncio.sleep(0.01)
+        task.cancel()
+
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+        # Should have updated heartbeat metric
+        assert ws.metrics["last_heartbeat"] > 0
+
+
+@pytest.mark.asyncio
+async def test_comprehensive_websocket_integration(mock_config):
+    """Test comprehensive WebSocket integration flow."""
+    with patch("websockets.connect") as mock_connect:
+        mock_ws = AsyncMock()
+        mock_ws.extensions = []
+        mock_connect.return_value = mock_ws
+
+        # Create WebSocket with connection pool
+        pool = ConnectionPool()
+        ws = HighPerformanceWebSocket(
+            url="wss://example.com/ws",
+            config=mock_config,
+            connection_id="integration_test",
+            exchange="binance",
+            connection_pool=pool,
+        )
+
+        # 1. Connect
+        with patch.object(ws, "_start_background_tasks"):
+            result = await ws.connect()
+            assert result is True
+            assert "integration_test" in pool.active_connections
+
+        # 2. Add message handler
+        handler = AsyncMock()
+        ws.add_message_handler("ticker", handler)
+
+        # 3. Send message
+        test_message = {"type": "subscribe", "symbol": "BTCUSDT"}
+        await ws.send_message(test_message)
+
+        # 4. Test message batching
+        for i in range(5):
+            message = WebSocketMessage(data={"msg": i}, priority=MessagePriority.HIGH)
+            ws.message_batcher.add_message(message)
+
+        # 5. Test metrics
+        metrics = ws.get_metrics()
+        assert metrics["messages_sent"] == 1
+
+        # 6. Test health check
+        assert ws.is_healthy() is True
+
+        # 7. Disconnect
+        with patch.object(ws, "_stop_background_tasks"):
+            await ws.disconnect()
+            assert ws.is_connected is False
+            assert "integration_test" not in pool.active_connections
+
+
+if __name__ == "__main__":
+    pytest.main([__file__, "-v"])

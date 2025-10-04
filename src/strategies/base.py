@@ -592,7 +592,7 @@ class BaseStrategy(BaseComponent, BaseStrategyInterface):
             config: Strategy configuration
         """
         self.config = config
-        self.name = config.name
+        self._name = config.name
         await self._on_initialize()
         self.logger.info("Strategy initialized", strategy=self.name)
 

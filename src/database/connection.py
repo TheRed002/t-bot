@@ -223,7 +223,7 @@ class DatabaseConnectionManager:
     async def _setup_redis(self) -> None:
         """Setup Redis connection with async support."""
         self.redis_client = redis.from_url(
-            self.config.cache.redis_url,
+            self.config.database.redis_url,
             decode_responses=True,
             max_connections=200,  # Increased for production load
             retry_on_timeout=True,
@@ -608,8 +608,8 @@ async def debug_connection_info() -> dict[str, Any]:
         "postgresql_url": _connection_manager.config.database.postgresql_url.replace(
             _connection_manager.config.database.postgresql_password, "***"
         ),
-        "redis_url": _connection_manager.config.cache.redis_url.replace(
-            _connection_manager.config.cache.redis_password or "", "***"
+        "redis_url": _connection_manager.config.database.redis_url.replace(
+            _connection_manager.config.database.redis_password or "", "***"
         ),
         "influxdb_url": f"http://{_connection_manager.config.database.influxdb_host}:{_connection_manager.config.database.influxdb_port}",
         "health_status": is_database_healthy(),

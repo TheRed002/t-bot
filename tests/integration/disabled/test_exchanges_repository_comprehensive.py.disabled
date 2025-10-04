@@ -1,0 +1,598 @@
+"""
+Comprehensive integration tests for Exchange Repository layers.
+
+This test file targets the critical uncovered repository.py module which currently has 0% coverage.
+Tests focus on repository adapters and data conversion functionality.
+"""
+
+from unittest.mock import AsyncMock, patch
+
+import pytest
+
+from src.exchanges.connection_manager import ConnectionManager
+from src.exchanges.repository import ExchangeMarketDataRepository, ExchangeOrderRepository
+
+
+@pytest.fixture
+def mock_connection_manager():
+    """Create mock connection manager."""
+    connection = AsyncMock(spec=ConnectionManager)
+    return connection
+
+
+@pytest.fixture
+def order_repository(mock_connection_manager):
+    """Create order repository with mocked connection."""
+    return ExchangeOrderRepository(mock_connection_manager)
+
+
+@pytest.fixture
+def market_data_repository(mock_connection_manager):
+    """Create market data repository with mocked connection."""
+    return ExchangeMarketDataRepository(mock_connection_manager)
+
+
+class TestExchangeOrderRepository:
+    """Test order repository operations."""
+
+    async def test_place_order_success(self, order_repository, mock_connection_manager):
+        """Test successful order placement through repository."""
+        order_data = {
+            "symbol": "BTCUSDT",
+            "side": "BUY",
+            "type": "LIMIT",
+            "quantity": "1.0",
+            "price": "50000.0",
+        }
+
+        expected_response = {
+            "orderId": 12345,
+            "symbol": "BTCUSDT",
+            "status": "NEW",
+            "clientOrderId": "test-order-123",
+        }
+
+        mock_connection_manager.request.return_value = expected_response
+
+        result = await order_repository.place_order(order_data)
+
+        assert result == expected_response
+        mock_connection_manager.request.assert_called_once_with(
+            method="POST", endpoint="/api/v3/order", data=order_data, signed=True
+        )
+
+    async def test_place_order_failure(self, order_repository, mock_connection_manager):
+        """Test order placement failure through repository."""
+        order_data = {
+            "symbol": "BTCUSDT",
+            "side": "BUY",
+            "type": "LIMIT",
+            "quantity": "1.0",
+            "price": "50000.0",
+        }
+
+        mock_connection_manager.request.side_effect = Exception("API Error")
+
+        with pytest.raises(Exception, match="API Error"):
+            await order_repository.place_order(order_data)
+
+    async def test_cancel_order_success(self, order_repository, mock_connection_manager):
+        """Test successful order cancellation through repository."""
+        expected_response = {"orderId": 12345, "symbol": "BTCUSDT", "status": "CANCELED"}
+
+        mock_connection_manager.request.return_value = expected_response
+
+        result = await order_repository.cancel_order("12345", "BTCUSDT")
+
+        assert result == expected_response
+        mock_connection_manager.request.assert_called_once_with(
+            method="DELETE",
+            endpoint="/api/v3/order",
+            params={"orderId": "12345", "symbol": "BTCUSDT"},
+            signed=True,
+        )
+
+    async def test_cancel_order_without_symbol(self, order_repository, mock_connection_manager):
+        """Test order cancellation without symbol parameter."""
+        expected_response = {"orderId": 12345, "status": "CANCELED"}
+
+        mock_connection_manager.request.return_value = expected_response
+
+        result = await order_repository.cancel_order("12345")
+
+        assert result == expected_response
+        mock_connection_manager.request.assert_called_once_with(
+            method="DELETE", endpoint="/api/v3/order", params={"orderId": "12345"}, signed=True
+        )
+
+    async def test_cancel_order_failure(self, order_repository, mock_connection_manager):
+        """Test order cancellation failure through repository."""
+        mock_connection_manager.request.side_effect = Exception("Cancel failed")
+
+        with pytest.raises(Exception, match="Cancel failed"):
+            await order_repository.cancel_order("12345")
+
+    async def test_get_order_success(self, order_repository, mock_connection_manager):
+        """Test successful order retrieval through repository."""
+        expected_response = {
+            "orderId": 12345,
+            "symbol": "BTCUSDT",
+            "status": "FILLED",
+            "price": "50000.0",
+            "quantity": "1.0",
+        }
+
+        mock_connection_manager.request.return_value = expected_response
+
+        result = await order_repository.get_order("12345", "BTCUSDT")
+
+        assert result == expected_response
+        mock_connection_manager.request.assert_called_once_with(
+            method="GET",
+            endpoint="/api/v3/order",
+            params={"orderId": "12345", "symbol": "BTCUSDT"},
+            signed=True,
+        )
+
+    async def test_get_order_without_symbol(self, order_repository, mock_connection_manager):
+        """Test order retrieval without symbol parameter."""
+        expected_response = {"orderId": 12345, "status": "FILLED"}
+
+        mock_connection_manager.request.return_value = expected_response
+
+        result = await order_repository.get_order("12345")
+
+        assert result == expected_response
+        mock_connection_manager.request.assert_called_once_with(
+            method="GET", endpoint="/api/v3/order", params={"orderId": "12345"}, signed=True
+        )
+
+    async def test_get_order_failure(self, order_repository, mock_connection_manager):
+        """Test order retrieval failure through repository."""
+        mock_connection_manager.request.side_effect = Exception("Get order failed")
+
+        with pytest.raises(Exception, match="Get order failed"):
+            await order_repository.get_order("12345")
+
+    async def test_get_open_orders_success_list_response(
+        self, order_repository, mock_connection_manager
+    ):
+        """Test successful open orders retrieval with list response."""
+        expected_response = [
+            {"orderId": 12345, "symbol": "BTCUSDT", "status": "NEW"},
+            {"orderId": 12346, "symbol": "ETHUSDT", "status": "PARTIALLY_FILLED"},
+        ]
+
+        mock_connection_manager.request.return_value = expected_response
+
+        result = await order_repository.get_open_orders("BTCUSDT")
+
+        assert result == expected_response
+        mock_connection_manager.request.assert_called_once_with(
+            method="GET", endpoint="/api/v3/openOrders", params={"symbol": "BTCUSDT"}, signed=True
+        )
+
+    async def test_get_open_orders_success_dict_response(
+        self, order_repository, mock_connection_manager
+    ):
+        """Test successful open orders retrieval with single dict response."""
+        dict_response = {"orderId": 12345, "symbol": "BTCUSDT", "status": "NEW"}
+
+        mock_connection_manager.request.return_value = dict_response
+
+        result = await order_repository.get_open_orders("BTCUSDT")
+
+        assert result == [dict_response]  # Should be wrapped in list
+
+    async def test_get_open_orders_success_no_symbol(
+        self, order_repository, mock_connection_manager
+    ):
+        """Test open orders retrieval without symbol filter."""
+        expected_response = [
+            {"orderId": 12345, "symbol": "BTCUSDT", "status": "NEW"},
+            {"orderId": 12346, "symbol": "ETHUSDT", "status": "NEW"},
+        ]
+
+        mock_connection_manager.request.return_value = expected_response
+
+        result = await order_repository.get_open_orders()
+
+        assert result == expected_response
+        mock_connection_manager.request.assert_called_once_with(
+            method="GET", endpoint="/api/v3/openOrders", params={}, signed=True
+        )
+
+    async def test_get_open_orders_empty_response(self, order_repository, mock_connection_manager):
+        """Test open orders retrieval with unexpected response type."""
+        mock_connection_manager.request.return_value = None
+
+        result = await order_repository.get_open_orders()
+
+        assert result == []
+
+    async def test_get_open_orders_failure(self, order_repository, mock_connection_manager):
+        """Test open orders retrieval failure."""
+        mock_connection_manager.request.side_effect = Exception("Get open orders failed")
+
+        with pytest.raises(Exception, match="Get open orders failed"):
+            await order_repository.get_open_orders()
+
+
+class TestExchangeMarketDataRepository:
+    """Test market data repository operations."""
+
+    async def test_get_ticker_success(self, market_data_repository, mock_connection_manager):
+        """Test successful ticker retrieval through repository."""
+        api_response = {
+            "symbol": "BTCUSDT",
+            "bidPrice": "49999.00",
+            "askPrice": "50001.00",
+            "lastPrice": "50000.00",
+            "volume": "1000.50",
+            "priceChange": "1000.00",
+            "priceChangePercent": "2.04",
+            "highPrice": "51000.00",
+            "lowPrice": "48000.00",
+            "openPrice": "49000.00",
+            "closeTime": 1234567890,
+            "count": 1234,
+        }
+
+        mock_connection_manager.request.return_value = api_response
+
+        result = await market_data_repository.get_ticker("BTCUSDT")
+
+        # Check that standardization occurred
+        assert result["symbol"] == "BTCUSDT"
+        assert result["bid_price"] == "49999.00"
+        assert result["ask_price"] == "50001.00"
+        assert result["last_price"] == "50000.00"
+        assert result["volume"] == "1000.50"
+        assert result["price_change"] == "1000.00"
+        assert result["price_change_percent"] == "2.04"
+        assert result["high_price"] == "51000.00"
+        assert result["low_price"] == "48000.00"
+        assert result["open_price"] == "49000.00"
+        assert result["close_time"] == 1234567890
+        assert result["count"] == 1234
+
+        mock_connection_manager.request.assert_called_once_with(
+            method="GET", endpoint="/api/v3/ticker/24hr", params={"symbol": "BTCUSDT"}, signed=False
+        )
+
+    async def test_get_ticker_failure(self, market_data_repository, mock_connection_manager):
+        """Test ticker retrieval failure through repository."""
+        mock_connection_manager.request.side_effect = Exception("Ticker API failed")
+
+        with pytest.raises(Exception, match="Ticker API failed"):
+            await market_data_repository.get_ticker("BTCUSDT")
+
+    async def test_get_order_book_success(self, market_data_repository, mock_connection_manager):
+        """Test successful order book retrieval through repository."""
+        api_response = {
+            "symbol": "BTCUSDT",
+            "bids": [["49999.00", "1.50"], ["49998.00", "2.00"]],
+            "asks": [["50001.00", "1.20"], ["50002.00", "1.80"]],
+            "lastUpdateId": 987654321,
+        }
+
+        mock_connection_manager.request.return_value = api_response
+
+        result = await market_data_repository.get_order_book("BTCUSDT", 20)
+
+        # Check that standardization occurred
+        assert result["symbol"] == "BTCUSDT"
+        assert result["bids"] == [["49999.00", "1.50"], ["49998.00", "2.00"]]
+        assert result["asks"] == [["50001.00", "1.20"], ["50002.00", "1.80"]]
+        assert result["last_update_id"] == 987654321
+
+        mock_connection_manager.request.assert_called_once_with(
+            method="GET",
+            endpoint="/api/v3/depth",
+            params={"symbol": "BTCUSDT", "limit": 20},
+            signed=False,
+        )
+
+    async def test_get_order_book_default_depth(
+        self, market_data_repository, mock_connection_manager
+    ):
+        """Test order book retrieval with default depth."""
+        api_response = {
+            "symbol": "BTCUSDT",
+            "bids": [["49999.00", "1.50"]],
+            "asks": [["50001.00", "1.20"]],
+            "lastUpdateId": 987654321,
+        }
+
+        mock_connection_manager.request.return_value = api_response
+
+        result = await market_data_repository.get_order_book("BTCUSDT")
+
+        assert result["symbol"] == "BTCUSDT"
+
+        mock_connection_manager.request.assert_called_once_with(
+            method="GET",
+            endpoint="/api/v3/depth",
+            params={"symbol": "BTCUSDT", "limit": 10},  # Default depth
+            signed=False,
+        )
+
+    async def test_get_order_book_failure(self, market_data_repository, mock_connection_manager):
+        """Test order book retrieval failure through repository."""
+        mock_connection_manager.request.side_effect = Exception("Order book API failed")
+
+        with pytest.raises(Exception, match="Order book API failed"):
+            await market_data_repository.get_order_book("BTCUSDT")
+
+    async def test_get_recent_trades_success_list_response(
+        self, market_data_repository, mock_connection_manager
+    ):
+        """Test successful recent trades retrieval with list response."""
+        api_response = [
+            {"id": 123456, "price": "50000.00", "qty": "1.0", "time": 1234567890},
+            {"id": 123457, "price": "50001.00", "qty": "0.5", "time": 1234567891},
+        ]
+
+        mock_connection_manager.request.return_value = api_response
+
+        result = await market_data_repository.get_recent_trades("BTCUSDT", 50)
+
+        assert result == api_response
+
+        mock_connection_manager.request.assert_called_once_with(
+            method="GET",
+            endpoint="/api/v3/trades",
+            params={"symbol": "BTCUSDT", "limit": 50},
+            signed=False,
+        )
+
+    async def test_get_recent_trades_success_dict_response(
+        self, market_data_repository, mock_connection_manager
+    ):
+        """Test recent trades retrieval with single dict response."""
+        dict_response = {"id": 123456, "price": "50000.00", "qty": "1.0", "time": 1234567890}
+
+        mock_connection_manager.request.return_value = dict_response
+
+        result = await market_data_repository.get_recent_trades("BTCUSDT")
+
+        assert result == [dict_response]  # Should be wrapped in list
+
+    async def test_get_recent_trades_default_limit(
+        self, market_data_repository, mock_connection_manager
+    ):
+        """Test recent trades retrieval with default limit."""
+        api_response = [{"id": 123456, "price": "50000.00", "qty": "1.0", "time": 1234567890}]
+
+        mock_connection_manager.request.return_value = api_response
+
+        result = await market_data_repository.get_recent_trades("BTCUSDT")
+
+        assert result == api_response
+
+        mock_connection_manager.request.assert_called_once_with(
+            method="GET",
+            endpoint="/api/v3/trades",
+            params={"symbol": "BTCUSDT", "limit": 100},  # Default limit
+            signed=False,
+        )
+
+    async def test_get_recent_trades_empty_response(
+        self, market_data_repository, mock_connection_manager
+    ):
+        """Test recent trades retrieval with unexpected response type."""
+        mock_connection_manager.request.return_value = None
+
+        result = await market_data_repository.get_recent_trades("BTCUSDT")
+
+        assert result == []
+
+    async def test_get_recent_trades_failure(self, market_data_repository, mock_connection_manager):
+        """Test recent trades retrieval failure."""
+        mock_connection_manager.request.side_effect = Exception("Trades API failed")
+
+        with pytest.raises(Exception, match="Trades API failed"):
+            await market_data_repository.get_recent_trades("BTCUSDT")
+
+    def test_standardize_ticker(self, market_data_repository):
+        """Test ticker data standardization."""
+        raw_data = {
+            "symbol": "BTCUSDT",
+            "bidPrice": "49999.00",
+            "askPrice": "50001.00",
+            "lastPrice": "50000.00",
+            "volume": "1000.50",
+            "priceChange": "1000.00",
+            "priceChangePercent": "2.04",
+            "highPrice": "51000.00",
+            "lowPrice": "48000.00",
+            "openPrice": "49000.00",
+            "closeTime": 1234567890,
+            "count": 1234,
+            "extraField": "should_be_ignored",  # This should not appear in standardized output
+        }
+
+        result = market_data_repository._standardize_ticker(raw_data)
+
+        expected_keys = {
+            "symbol",
+            "bid_price",
+            "ask_price",
+            "last_price",
+            "volume",
+            "price_change",
+            "price_change_percent",
+            "high_price",
+            "low_price",
+            "open_price",
+            "close_time",
+            "count",
+        }
+
+        assert set(result.keys()) == expected_keys
+        assert result["symbol"] == "BTCUSDT"
+        assert result["bid_price"] == "49999.00"
+        assert result["ask_price"] == "50001.00"
+        assert "extraField" not in result
+
+    def test_standardize_ticker_missing_fields(self, market_data_repository):
+        """Test ticker standardization with missing fields."""
+        raw_data = {
+            "symbol": "BTCUSDT",
+            "bidPrice": "49999.00",
+            # Missing other fields
+        }
+
+        result = market_data_repository._standardize_ticker(raw_data)
+
+        assert result["symbol"] == "BTCUSDT"
+        assert result["bid_price"] == "49999.00"
+        assert result["ask_price"] is None  # Should be None for missing fields
+        assert result["last_price"] is None
+
+    def test_standardize_order_book(self, market_data_repository):
+        """Test order book data standardization."""
+        raw_data = {
+            "symbol": "BTCUSDT",
+            "bids": [["49999.00", "1.50"], ["49998.00", "2.00"]],
+            "asks": [["50001.00", "1.20"], ["50002.00", "1.80"]],
+            "lastUpdateId": 987654321,
+            "extraField": "should_be_ignored",
+        }
+
+        result = market_data_repository._standardize_order_book(raw_data)
+
+        expected_keys = {"symbol", "bids", "asks", "last_update_id"}
+
+        assert set(result.keys()) == expected_keys
+        assert result["symbol"] == "BTCUSDT"
+        assert result["bids"] == [["49999.00", "1.50"], ["49998.00", "2.00"]]
+        assert result["asks"] == [["50001.00", "1.20"], ["50002.00", "1.80"]]
+        assert result["last_update_id"] == 987654321
+        assert "extraField" not in result
+
+    def test_standardize_order_book_missing_fields(self, market_data_repository):
+        """Test order book standardization with missing fields."""
+        raw_data = {
+            "symbol": "BTCUSDT"
+            # Missing other fields
+        }
+
+        result = market_data_repository._standardize_order_book(raw_data)
+
+        assert result["symbol"] == "BTCUSDT"
+        assert result["bids"] == []  # Should default to empty list
+        assert result["asks"] == []
+        assert result["last_update_id"] is None
+
+
+class TestRepositoryInitialization:
+    """Test repository initialization and configuration."""
+
+    def test_order_repository_initialization(self, mock_connection_manager):
+        """Test order repository initialization."""
+        repository = ExchangeOrderRepository(mock_connection_manager)
+
+        assert repository.connection == mock_connection_manager
+
+    def test_market_data_repository_initialization(self, mock_connection_manager):
+        """Test market data repository initialization."""
+        repository = ExchangeMarketDataRepository(mock_connection_manager)
+
+        assert repository.connection == mock_connection_manager
+
+
+class TestRepositoryErrorHandling:
+    """Test error handling and logging in repositories."""
+
+    async def test_order_repository_error_logging(self, order_repository, mock_connection_manager):
+        """Test error logging in order repository."""
+        mock_connection_manager.request.side_effect = Exception("Connection error")
+
+        with patch("src.exchanges.repository.logger") as mock_logger:
+            with pytest.raises(Exception):
+                await order_repository.place_order({"symbol": "BTCUSDT"})
+
+            mock_logger.error.assert_called_once()
+            args = mock_logger.error.call_args[0]
+            assert "Repository: Failed to place order" in args[0]
+
+    async def test_market_data_repository_error_logging(
+        self, market_data_repository, mock_connection_manager
+    ):
+        """Test error logging in market data repository."""
+        mock_connection_manager.request.side_effect = Exception("API error")
+
+        with patch("src.exchanges.repository.logger") as mock_logger:
+            with pytest.raises(Exception):
+                await market_data_repository.get_ticker("BTCUSDT")
+
+            mock_logger.error.assert_called_once()
+            args = mock_logger.error.call_args[0]
+            assert "Repository: Failed to get ticker for BTCUSDT" in args[0]
+
+    async def test_order_cancellation_error_logging(
+        self, order_repository, mock_connection_manager
+    ):
+        """Test error logging in order cancellation."""
+        mock_connection_manager.request.side_effect = Exception("Cancel failed")
+
+        with patch("src.exchanges.repository.logger") as mock_logger:
+            with pytest.raises(Exception):
+                await order_repository.cancel_order("12345")
+
+            mock_logger.error.assert_called_once()
+            args = mock_logger.error.call_args[0]
+            assert "Repository: Failed to cancel order 12345" in args[0]
+
+    async def test_get_order_error_logging(self, order_repository, mock_connection_manager):
+        """Test error logging in get order."""
+        mock_connection_manager.request.side_effect = Exception("Get failed")
+
+        with patch("src.exchanges.repository.logger") as mock_logger:
+            with pytest.raises(Exception):
+                await order_repository.get_order("12345")
+
+            mock_logger.error.assert_called_once()
+            args = mock_logger.error.call_args[0]
+            assert "Repository: Failed to get order 12345" in args[0]
+
+    async def test_get_open_orders_error_logging(self, order_repository, mock_connection_manager):
+        """Test error logging in get open orders."""
+        mock_connection_manager.request.side_effect = Exception("Open orders failed")
+
+        with patch("src.exchanges.repository.logger") as mock_logger:
+            with pytest.raises(Exception):
+                await order_repository.get_open_orders()
+
+            mock_logger.error.assert_called_once()
+            args = mock_logger.error.call_args[0]
+            assert "Repository: Failed to get open orders" in args[0]
+
+    async def test_get_order_book_error_logging(
+        self, market_data_repository, mock_connection_manager
+    ):
+        """Test error logging in get order book."""
+        mock_connection_manager.request.side_effect = Exception("Order book failed")
+
+        with patch("src.exchanges.repository.logger") as mock_logger:
+            with pytest.raises(Exception):
+                await market_data_repository.get_order_book("BTCUSDT")
+
+            mock_logger.error.assert_called_once()
+            args = mock_logger.error.call_args[0]
+            assert "Repository: Failed to get order book for BTCUSDT" in args[0]
+
+    async def test_get_recent_trades_error_logging(
+        self, market_data_repository, mock_connection_manager
+    ):
+        """Test error logging in get recent trades."""
+        mock_connection_manager.request.side_effect = Exception("Trades failed")
+
+        with patch("src.exchanges.repository.logger") as mock_logger:
+            with pytest.raises(Exception):
+                await market_data_repository.get_recent_trades("BTCUSDT")
+
+            mock_logger.error.assert_called_once()
+            args = mock_logger.error.call_args[0]
+            assert "Repository: Failed to get trades for BTCUSDT" in args[0]

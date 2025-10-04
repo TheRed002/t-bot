@@ -1,0 +1,342 @@
+"""
+Integration tests for exchanges module boundaries and dependency injection.
+
+This test suite verifies that the exchanges module properly integrates
+with other modules and follows correct service layer patterns.
+"""
+
+from decimal import Decimal
+from unittest.mock import AsyncMock, Mock
+
+import pytest
+
+from src.core.dependency_injection import DependencyInjector
+from src.core.exceptions import ServiceError, ValidationError
+from src.core.types import OrderRequest, OrderResponse, OrderSide, OrderType
+from src.exchanges.di_registration import create_exchange_di_container
+from src.exchanges.interfaces import IExchange, IExchangeFactory
+from src.exchanges.service import ExchangeService
+
+
+@pytest.fixture
+async def config():
+    """Create test configuration."""
+    from unittest.mock import Mock
+
+    # Create mock config that matches the real Config interface
+    config = Mock()
+    config.exchange = Mock()
+    config.exchange.binance_api_key = "test_key"
+    config.exchange.binance_api_secret = "test_secret"
+    config.exchange.binance_testnet = True
+    config.exchange.get_exchange_credentials = Mock(
+        return_value={"api_key": "test_key", "api_secret": "test_secret", "testnet": True}
+    )
+    config.database = Mock()
+    config.database.url = "sqlite:///:memory:"
+    config.database.postgresql_url = "postgresql://localhost/test"
+    config.redis = Mock()
+    config.redis.host = "localhost"
+    config.redis.port = 6379
+    return config
+
+
+@pytest.fixture
+async def mock_exchange():
+    """Create mock exchange implementation."""
+    exchange = Mock(spec=IExchange)
+    exchange.exchange_name = "binance"
+    exchange.connect = AsyncMock(return_value=True)
+    exchange.disconnect = AsyncMock()
+    exchange.health_check = AsyncMock(return_value=True)
+    exchange.is_connected = Mock(return_value=True)
+
+    # Trading operations
+    exchange.place_order = AsyncMock(
+        return_value=OrderResponse(
+            id="test_order_123",
+            symbol="BTCUSDT",
+            quantity=Decimal("0.001"),
+            side=OrderSide.BUY,
+            order_type=OrderType.LIMIT,
+            status="FILLED",
+            price=Decimal("50000"),
+            filled_quantity=Decimal("0.001"),
+        )
+    )
+    exchange.cancel_order = AsyncMock(return_value=True)
+    exchange.get_order_status = AsyncMock(return_value="FILLED")
+
+    # Market data operations
+    exchange.get_account_balance = AsyncMock(return_value={"BTC": Decimal("1.0")})
+    exchange.get_positions = AsyncMock(return_value=[])
+
+    return exchange
+
+
+@pytest.fixture
+async def mock_exchange_factory(mock_exchange):
+    """Create mock exchange factory."""
+    factory = Mock(spec=IExchangeFactory)
+    factory.get_supported_exchanges = Mock(return_value=["binance"])
+    factory.get_available_exchanges = Mock(return_value=["binance"])
+    factory.is_exchange_supported = Mock(return_value=True)
+    factory.get_exchange = AsyncMock(return_value=mock_exchange)
+    factory.create_exchange = AsyncMock(return_value=mock_exchange)
+    factory.remove_exchange = AsyncMock(return_value=True)
+    factory.health_check_all = AsyncMock(return_value={"binance": {"healthy": True}})
+    factory.disconnect_all = AsyncMock()
+
+    return factory
+
+
+class TestExchangesModuleIntegration:
+    """Test exchanges module integration with dependency injection."""
+
+    async def test_di_container_creation(self, config):
+        """Test DI container creation and registration."""
+        injector = DependencyInjector()
+
+        # Create DI container
+        di_container = create_exchange_di_container(config, injector)
+
+        # Verify services are registered
+        assert injector.has_service("config")
+        assert injector.has_service("exchange_factory")
+        assert injector.has_service("ExchangeService")
+
+        # Verify services can be resolved
+        exchange_factory = injector.resolve("exchange_factory")
+        assert exchange_factory is not None
+
+        exchange_service = injector.resolve("ExchangeService")
+        assert isinstance(exchange_service, ExchangeService)
+
+    async def test_exchange_service_dependency_injection(self, config, mock_exchange_factory):
+        """Test ExchangeService gets dependencies injected correctly."""
+        injector = DependencyInjector()
+        injector.register_service("config", config, singleton=True)
+        injector.register_service("exchange_factory", mock_exchange_factory, singleton=True)
+
+        # Create service with dependency injection
+        service = ExchangeService(exchange_factory=mock_exchange_factory, config=config)
+
+        # Verify dependencies are injected
+        assert service.exchange_factory == mock_exchange_factory
+        assert service.config == config
+
+    async def test_service_layer_pattern_compliance(
+        self, config, mock_exchange_factory, mock_exchange
+    ):
+        """Test that service layer patterns are followed correctly."""
+        # Create service
+        service = ExchangeService(exchange_factory=mock_exchange_factory, config=config)
+
+        # Start service
+        await service.start()
+
+        try:
+            # Test order placement through service layer
+            order_request = OrderRequest(
+                symbol="BTCUSDT",
+                quantity=Decimal("0.001"),
+                side=OrderSide.BUY,
+                order_type=OrderType.LIMIT,
+                price=Decimal("50000"),
+            )
+
+            # Service should handle business logic and delegate to exchange
+            order_response = await service.place_order("binance", order_request)
+
+            # Verify service called exchange factory
+            mock_exchange_factory.get_exchange.assert_called_once_with(
+                exchange_name="binance", create_if_missing=True
+            )
+
+            # Verify exchange was called
+            mock_exchange.place_order.assert_called_once_with(order_request)
+
+            # Verify response
+            assert order_response.id == "test_order_123"
+            assert order_response.symbol == "BTCUSDT"
+
+        finally:
+            await service.stop()
+
+    async def test_module_boundary_enforcement(self, config, mock_exchange_factory):
+        """Test that modules respect each other's boundaries."""
+        service = ExchangeService(exchange_factory=mock_exchange_factory, config=config)
+
+        await service.start()
+
+        try:
+            # Test that service validates business rules
+            invalid_order = OrderRequest(
+                symbol="",  # Invalid symbol
+                quantity=Decimal("0.001"),
+                side=OrderSide.BUY,
+                order_type=OrderType.LIMIT,
+                price=Decimal("50000"),
+            )
+
+            with pytest.raises(ValidationError, match="symbol is required"):
+                await service.place_order("binance", invalid_order)
+
+            # Exchange should not be called for invalid orders
+            mock_exchange_factory.get_exchange.assert_not_called()
+
+        finally:
+            await service.stop()
+
+    async def test_error_handling_integration(self, config, mock_exchange_factory, mock_exchange):
+        """Test error handling across module boundaries."""
+        # Configure exchange to raise error
+        mock_exchange.place_order.side_effect = Exception("Exchange error")
+
+        service = ExchangeService(exchange_factory=mock_exchange_factory, config=config)
+
+        await service.start()
+
+        try:
+            order_request = OrderRequest(
+                symbol="BTCUSDT",
+                quantity=Decimal("0.001"),
+                side=OrderSide.BUY,
+                order_type=OrderType.LIMIT,
+                price=Decimal("50000"),
+            )
+
+            # Service should catch and wrap errors appropriately
+            with pytest.raises(ServiceError, match="Failed to place order"):
+                await service.place_order("binance", order_request)
+
+        finally:
+            await service.stop()
+
+    async def test_multi_exchange_coordination(self, config, mock_exchange_factory):
+        """Test service layer coordination of multiple exchanges."""
+        # Create multiple mock exchanges
+        binance_exchange = Mock(spec=IExchange)
+        binance_exchange.exchange_name = "binance"
+        binance_exchange.get_ticker = AsyncMock(
+            return_value=Mock(bid=Decimal("50000"), ask=Decimal("50100"))
+        )
+
+        okx_exchange = Mock(spec=IExchange)
+        okx_exchange.exchange_name = "okx"
+        okx_exchange.get_ticker = AsyncMock(
+            return_value=Mock(bid=Decimal("49900"), ask=Decimal("50000"))
+        )
+
+        # Configure factory to return appropriate exchange
+        def mock_get_exchange(exchange_name, **kwargs):
+            if exchange_name == "binance":
+                return binance_exchange
+            elif exchange_name == "okx":
+                return okx_exchange
+            return None
+
+        mock_exchange_factory.get_exchange.side_effect = mock_get_exchange
+        mock_exchange_factory.get_available_exchanges.return_value = ["binance", "okx"]
+
+        service = ExchangeService(exchange_factory=mock_exchange_factory, config=config)
+
+        await service.start()
+
+        try:
+            # Test multi-exchange price comparison (service-layer business logic)
+            best_price = await service.get_best_price("BTCUSDT", "BUY", ["binance", "okx"])
+
+            # Verify service coordinated multiple exchanges
+            assert mock_exchange_factory.get_exchange.call_count == 2
+
+            # Verify business logic worked correctly (OKX has lower ask price)
+            assert best_price["best_exchange"] == "okx"
+            assert best_price["best_price"] == Decimal("50000")
+
+        finally:
+            await service.stop()
+
+    async def test_interface_compliance(self, config):
+        """Test that exchanges implement required interfaces correctly."""
+        from src.exchanges.factory import ExchangeFactory
+        from src.exchanges.mock_exchange import MockExchange
+
+        # Create real factory with mock exchange
+        factory = ExchangeFactory(config)
+        factory.register_exchange("mock", MockExchange)
+
+        # Get exchange through factory
+        exchange = await factory.get_exchange("mock")
+
+        # Verify exchange implements IExchange interface
+        assert hasattr(exchange, "connect")
+        assert hasattr(exchange, "disconnect")
+        assert hasattr(exchange, "health_check")
+        assert hasattr(exchange, "is_connected")
+        assert hasattr(exchange, "place_order")
+        assert hasattr(exchange, "cancel_order")
+        assert hasattr(exchange, "get_order_status")
+        assert hasattr(exchange, "get_market_data")
+        assert hasattr(exchange, "get_order_book")
+        assert hasattr(exchange, "get_ticker")
+        assert hasattr(exchange, "get_account_balance")
+        assert hasattr(exchange, "get_positions")
+        assert hasattr(exchange, "get_exchange_info")
+        assert hasattr(exchange, "subscribe_to_stream")
+        assert hasattr(exchange, "exchange_name")
+
+        # Cleanup
+        await factory.disconnect_all()
+
+
+class TestModuleCouplingValidation:
+    """Test proper module coupling and dependency management."""
+
+    def test_no_circular_imports(self):
+        """Test that there are no circular import dependencies."""
+        # This test passes if the module can be imported without issues
+
+        # All imports successful - no circular dependencies
+        assert True
+
+    def test_interface_abstraction(self):
+        """Test that proper abstractions are used."""
+        # Verify service uses interfaces, not concrete classes
+        import inspect
+
+        from src.exchanges.service import ExchangeService
+
+        # Get service constructor signature
+        sig = inspect.signature(ExchangeService.__init__)
+        params = sig.parameters
+
+        # Verify exchange_factory parameter uses interface type hint
+        factory_param = params.get("exchange_factory")
+        if factory_param and factory_param.annotation:
+            # Should be IExchangeFactory or Union with IExchangeFactory
+            annotation_str = str(factory_param.annotation)
+            assert "IExchangeFactory" in annotation_str
+
+    async def test_dependency_injection_registration(self, config):
+        """Test that DI registration follows proper patterns."""
+        injector = DependencyInjector()
+
+        # Test DI container registration
+        di_container = create_exchange_di_container(config, injector)
+
+        # Verify singleton registration
+        factory1 = injector.resolve("exchange_factory")
+        factory2 = injector.resolve("exchange_factory")
+        assert factory1 is factory2  # Should be the same instance
+
+        service1 = injector.resolve("ExchangeService")
+        service2 = injector.resolve("ExchangeService")
+        assert service1 is service2  # Should be the same instance
+
+        # Cleanup
+        di_container.clear()
+
+
+if __name__ == "__main__":
+    pytest.main([__file__, "-v"])

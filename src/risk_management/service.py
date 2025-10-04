@@ -223,18 +223,20 @@ class RiskService(BaseService):
 
         # Risk configuration with defaults if config not provided
         if config and hasattr(config, "risk"):
+            # Map RiskConfig attributes to RiskConfiguration
+            # Note: RiskConfig uses risk_per_trade (percentage) while RiskConfiguration uses max_position_size_pct
             self.risk_config = RiskConfiguration(
                 position_sizing_method=PositionSizeMethod(config.risk.position_sizing_method),
-                max_position_size_pct=to_decimal(config.risk.max_position_size_pct),
-                min_position_size_pct=to_decimal(config.risk.get("min_position_size_pct", "0.01")),
-                default_position_size_pct=to_decimal(config.risk.default_position_size_pct),
-                kelly_lookback_days=config.risk.get("kelly_lookback_days", 30),
-                volatility_window=config.risk.get("volatility_window", 20),
-                volatility_target=to_decimal(config.risk.get("volatility_target", "0.02")),
+                max_position_size_pct=to_decimal(str(config.risk.risk_per_trade)),  # Use risk_per_trade as position size pct
+                min_position_size_pct=to_decimal("0.01"),  # Default minimum
+                default_position_size_pct=to_decimal(str(config.risk.risk_per_trade)),  # Use risk_per_trade
+                kelly_lookback_days=30,  # Default
+                volatility_window=20,  # Default
+                volatility_target=to_decimal("0.02"),  # Default 2%
                 max_total_positions=config.risk.max_total_positions,
                 max_positions_per_symbol=config.risk.max_positions_per_symbol,
-                max_portfolio_exposure=to_decimal(config.risk.max_portfolio_exposure),
-                var_strength_level=to_decimal(config.risk.get("var_strength_level", "0.95")),
+                max_portfolio_exposure=to_decimal("0.80"),  # Default 80%
+                var_strength_level=to_decimal("0.95"),  # Default 95%
             )
         else:
             # Use default configuration
