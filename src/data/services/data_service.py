@@ -694,6 +694,31 @@ class DataService(BaseComponent):
             self.logger.error(f"Failed to calculate MACD for {symbol}: {e}")
             return None
 
+    async def get_bollinger_bands(
+        self,
+        symbol: str,
+        period: int = 20,
+        std_dev: float = 2.0,
+        exchange: str = DEFAULT_EXCHANGE
+    ) -> dict[str, Decimal] | None:
+        """Calculate Bollinger Bands for a symbol.
+
+        Args:
+            symbol: Trading symbol
+            period: Period for SMA and standard deviation (default 20)
+            std_dev: Number of standard deviations (default 2.0)
+            exchange: Exchange name
+
+        Returns:
+            Dictionary with 'upper', 'middle', 'lower' band values or None if insufficient data
+        """
+        try:
+            indicators = self._get_technical_indicators()
+            return await indicators.calculate_bollinger_bands(symbol, period, std_dev)
+        except Exception as e:
+            self.logger.error(f"Failed to calculate Bollinger Bands for {symbol}: {e}")
+            return None
+
     async def health_check(self) -> HealthCheckResult:
         """Perform health check."""
         status = HealthStatus.HEALTHY

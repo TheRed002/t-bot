@@ -443,6 +443,26 @@ class TechnicalIndicators(BaseComponent):
             self.logger.error(f"MACD calculation failed for {symbol}: {e}")
             return None
 
+    async def calculate_bollinger_bands(self, symbol: str, period: int = 20, std_dev: float = 2.0) -> dict[str, Decimal] | None:
+        """Calculate Bollinger Bands using symbol - wrapper for strategy integration."""
+        try:
+            # Bollinger Bands = SMA ± (std_dev * standard deviation)
+            price_data = await self._get_price_data(symbol, period + 10)  # Buffer for calculation
+            if not price_data or len(price_data) < period:
+                self.logger.warning(f"Insufficient price data for Bollinger Bands calculation: {len(price_data) if price_data else 0} < {period}")
+                return None
+
+            prices = np.array([float(d.close) for d in price_data if hasattr(d, 'close') and d.close], dtype=np.float64)
+            if len(prices) < period:
+                self.logger.warning(f"Insufficient valid prices for Bollinger Bands calculation: {len(prices)} < {period}")
+                return None
+
+            return await self._calculate_bollinger_bands(prices, period, Decimal(str(std_dev)))
+
+        except Exception as e:
+            self.logger.error(f"Bollinger Bands calculation failed for {symbol}: {e}")
+            return None
+
     async def calculate_rsi(self, symbol: str, period: int) -> Decimal | None:
         """Calculate RSI using symbol - wrapper for strategy integration."""
         try:
