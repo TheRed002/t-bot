@@ -19,10 +19,22 @@ def register_error_handling_services(injector, config: Config | None = None) -> 
     Register all error handling services with the dependency injection container.
 
     Args:
-        injector: The dependency injection container
+        injector: The dependency injection container (DependencyInjector or DependencyContainer)
         config: Optional configuration to pass to services
     """
     logger.info("Registering error handling services with DI container")
+
+    # Determine if injector is DependencyInjector or DependencyContainer
+    # DependencyInjector has register_factory, DependencyContainer has register
+    has_register_factory = hasattr(injector, 'register_factory')
+
+    def _register_service(name: str, factory, singleton: bool = True):
+        """Helper to register with correct method based on container type."""
+        if has_register_factory:
+            _register_service(name, factory, singleton=singleton)
+        else:
+            # DependencyContainer uses register() directly
+            injector.register(name, factory, singleton=singleton)
 
     try:
         # Register SecuritySanitizer and SecurityRateLimiter first to avoid circular deps
@@ -45,8 +57,8 @@ def register_error_handling_services(injector, config: Config | None = None) -> 
                 logger.error(f"Failed to create SecurityRateLimiter: {e}")
                 raise
 
-        injector.register("SecuritySanitizer", security_sanitizer_factory, singleton=True)
-        injector.register("SecurityRateLimiter", security_rate_limiter_factory, singleton=True)
+        _register_service("SecuritySanitizer", security_sanitizer_factory, singleton=True)
+        _register_service("SecurityRateLimiter", security_rate_limiter_factory, singleton=True)
         logger.debug("Registered security components")
 
         # Register ErrorHandler as singleton with proper error handling
@@ -85,7 +97,7 @@ def register_error_handling_services(injector, config: Config | None = None) -> 
                 logger.error(f"Failed to create ErrorHandler: {e}")
                 raise
 
-        injector.register("ErrorHandler", error_handler_factory, singleton=True)
+        _register_service("ErrorHandler", error_handler_factory, singleton=True)
         logger.debug("Registered ErrorHandler")
 
         # Register ErrorContextFactory using simplified factory pattern
@@ -108,7 +120,7 @@ def register_error_handling_services(injector, config: Config | None = None) -> 
                     logger.error(error_msg)
                     raise
 
-        injector.register("ErrorContextFactory", context_factory_factory, singleton=True)
+        _register_service("ErrorContextFactory", context_factory_factory, singleton=True)
         logger.debug("Registered ErrorContextFactory with simplified factory pattern")
 
         # Register GlobalErrorHandler as singleton with dependency injection
@@ -135,7 +147,7 @@ def register_error_handling_services(injector, config: Config | None = None) -> 
                 logger.error(f"Failed to create GlobalErrorHandler: {e}")
                 raise
 
-        injector.register("GlobalErrorHandler", global_handler_factory, singleton=True)
+        _register_service("GlobalErrorHandler", global_handler_factory, singleton=True)
         logger.debug("Registered GlobalErrorHandler")
 
         # Register ErrorPatternAnalytics as singleton
@@ -157,7 +169,7 @@ def register_error_handling_services(injector, config: Config | None = None) -> 
                 logger.error(f"Failed to create ErrorPatternAnalytics: {e}")
                 raise
 
-        injector.register("ErrorPatternAnalytics", pattern_analytics_factory, singleton=True)
+        _register_service("ErrorPatternAnalytics", pattern_analytics_factory, singleton=True)
         logger.debug("Registered ErrorPatternAnalytics")
 
         # Register StateMonitor as singleton - this depends on other services
@@ -213,7 +225,7 @@ def register_error_handling_services(injector, config: Config | None = None) -> 
                 logger.error(f"Failed to create StateMonitor: {e}")
                 raise
 
-        injector.register("StateMonitor", state_monitor_factory, singleton=True)
+        _register_service("StateMonitor", state_monitor_factory, singleton=True)
         logger.debug("Registered StateMonitor")
 
         # Register ErrorHandlingService as singleton with all dependencies
@@ -280,7 +292,7 @@ def register_error_handling_services(injector, config: Config | None = None) -> 
                 logger.error(f"Failed to create ErrorHandlingService: {e}")
                 raise
 
-        injector.register("ErrorHandlingService", service_factory, singleton=True)
+        _register_service("ErrorHandlingService", service_factory, singleton=True)
         logger.debug("Registered ErrorHandlingService")
 
         # Register ErrorHandlerFactory using simplified pattern
@@ -300,7 +312,7 @@ def register_error_handling_services(injector, config: Config | None = None) -> 
                     _register_error_handlers(factory)
                     return factory
 
-            injector.register("ErrorHandlerFactory", error_handler_factory_factory, singleton=True)
+            _register_service("ErrorHandlerFactory", error_handler_factory_factory, singleton=True)
 
             # Set class-level dependency container
             ErrorHandlerFactory.set_dependency_container(injector)
@@ -321,7 +333,7 @@ def register_error_handling_services(injector, config: Config | None = None) -> 
                     # Fallback to empty chain
                     return ErrorHandlerChain([], None)
 
-            injector.register("ErrorHandlerChain", error_chain_factory, singleton=False)
+            _register_service("ErrorHandlerChain", error_chain_factory, singleton=False)
             logger.debug("Registered ErrorHandlerChain factory with dependency injection")
         except Exception as e:
             logger.warning(f"Failed to register ErrorHandlerChain factory: {e}")
