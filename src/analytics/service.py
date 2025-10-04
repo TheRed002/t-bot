@@ -30,6 +30,7 @@ from src.analytics.types import (
     RiskMetrics,
     StrategyMetrics,
 )
+from src.core.exceptions import ServiceError, ValidationError
 from src.core.types import Order, Position, Trade
 from src.utils.datetime_utils import get_current_utc_timestamp
 
