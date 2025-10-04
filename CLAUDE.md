@@ -8,6 +8,25 @@ Build a production-ready cryptocurrency trading bot with institutional-grade rel
 - **Directory**: `/mnt/e/Work/P-41 Trading/code/t-bot`
 - **Node**: 18.19.0 at `$HOME/.nvm/versions/node/v18.19.0/bin`
 
+## Module Context Protocol ⭐
+**ALWAYS** start with module REFERENCE.md before any work:
+
+1. **Read REFERENCE.md First**: `src/{module}/REFERENCE.md` provides:
+   - **BUSINESS CONTEXT**: Role, responsibilities, critical notes, usage patterns
+   - **INTEGRATION**: Dependencies, what uses this module, what it provides
+   - **DETECTED PATTERNS**: Financial, security, performance, architecture patterns
+   - **MODULE OVERVIEW**: File counts, class counts, key statistics
+   - **COMPLETE API REFERENCE**: Full class/method documentation with line numbers
+
+2. **Progressive Detail**: Use REFERENCE.md for structure understanding, then:
+   - Search tools (Grep/Glob) for specific patterns
+   - Read specific files only when REFERENCE.md insufficient
+   - Never read entire modules without consulting REFERENCE.md first
+
+3. **Keep Documentation Current**: 
+   - Update REFERENCE.md after changes using `python scripts/docs/reference_generator.py {module_name}`
+   - Generate all REFERENCE.md files using `python scripts/docs/reference_generator.py "*"`
+
 ## Critical Standards
 - **FOLLOW**: `CODING_STANDARDS.md` and `COMMON_PATTERNS.md` exactly
 - **Financial Precision**: ALWAYS use `Decimal`, NEVER `float` for money
@@ -56,11 +75,9 @@ from src.utils.decorators import retry, with_circuit_breaker
 ### Data & Infrastructure
 - `market-data-expert` - Real-time feeds & exchange APIs
 - `data-pipeline-maestro` - Stream processing & data integrity
-- `realtime-pipeline-architect` - High-throughput data pipelines
 - `postgres-timescale-architect` - Time-series DB optimization
 - `timeseries-db-optimizer` - Query performance & retention
 - `redis-cache-optimizer` - Cache warming & TTL strategies
-- `message-queue-architect` - RabbitMQ/Redis Streams setup
 - `celery-task-orchestrator` - Distributed task queues
 
 ### APIs & Integration
@@ -71,7 +88,6 @@ from src.utils.decorators import retry, with_circuit_breaker
 
 ### Security & Operations
 - `financial-security-expert` - Threat assessment & security
-- `cybersecurity-guardian` - Vulnerability analysis
 - `infrastructure-wizard` - Deployment & monitoring
 - `trading-ops-monitor` - Alerting & compliance
 - `config-management-expert` - Feature flags & hot-reload
@@ -84,15 +100,37 @@ from src.utils.decorators import retry, with_circuit_breaker
 
 ### Project Coordination
 - `strategic-project-coordinator` - High-level orchestration
-- `tactical-task-coordinator` - Daily task management
 - `pipeline-execution-orchestrator` - Multi-agent workflows
-- `knowledge-synthesis-orchestrator` - Capture patterns & learnings
 - `automation-orchestrator` - Self-healing systems
 
 ### Architecture & Design
 - `system-design-architect` - API contracts, data models
 - `integration-architect` - Find existing services first
 - `portfolio-simulation-architect` - Virtual portfolios & matching
+
+## Enhanced Agent Usage Patterns
+All patterns start with REFERENCE.md consultation:
+
+**Module Analysis**: `REFERENCE.md` → `{specialized-agent}` → specific files if needed
+
+**New Feature**: `REFERENCE.md` → `integration-architect` → `system-design-architect` → `code-guardian-enforcer`
+
+**Bug Investigation**: `REFERENCE.md` → `financial-qa-engineer` → targeted file reads → fix → `integration-test-architect`
+
+**Performance Issues**: `REFERENCE.md` → `performance-optimization-specialist` → `redis-cache-optimizer`
+
+**Trading Strategy**: `REFERENCE.md` → `algo-trading-specialist` → `backtest-simulation-expert` → `risk-management-expert`
+
+**Database Work**: `REFERENCE.md` → `postgres-timescale-architect` → `timeseries-db-optimizer`
+
+**API Development**: `REFERENCE.md` → `financial-api-architect` → `rate-limit-architect` → `auth-security-architect`
+
+## Context Management Strategy
+- **First**: Read module's REFERENCE.md for structure and interfaces
+- **Second**: Use search tools (Grep/Glob) for specific patterns if needed
+- **Third**: Read full files only when REFERENCE.md insufficient
+- **Always**: Update REFERENCE.md after significant structural changes
+- **Agents**: Provide REFERENCE.md context to agents for better performance
 
 ## Quality Commands (Run After Changes)
 ```bash
@@ -148,7 +186,7 @@ pytest tests/ -v --tb=short
 
 ## Save Non-Production Files
 Use `.claude_experiments/` for drafts, logs, experiments
-
+MENDATORY: Write all the .md files, temperory files, test scripts in `.claude_experiments/`
 ---
 
 ## MANDATORY Agent Checks (Run Frequently)
