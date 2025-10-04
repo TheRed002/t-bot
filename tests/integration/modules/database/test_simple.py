@@ -25,6 +25,7 @@ from tests.integration.infrastructure.conftest import clean_database
 
 
 @pytest.mark.integration
+@pytest.mark.asyncio
 async def test_simple_database_crud_operations(clean_database):
     """Test basic CRUD operations with real database."""
     db_service = DatabaseService(clean_database)
@@ -80,6 +81,7 @@ async def test_simple_database_crud_operations(clean_database):
 
 
 @pytest.mark.integration
+@pytest.mark.asyncio
 async def test_simple_redis_cache_operations(clean_database):
     """Test basic Redis cache operations."""
     # Use the Redis client from the clean database connection manager
@@ -111,6 +113,7 @@ async def test_simple_redis_cache_operations(clean_database):
 
 
 @pytest.mark.integration
+@pytest.mark.asyncio
 async def test_simple_database_health_check(clean_database):
     """Test simple database health checks."""
     db_service = DatabaseService(clean_database)
@@ -132,6 +135,7 @@ async def test_simple_database_health_check(clean_database):
 
 
 @pytest.mark.integration
+@pytest.mark.asyncio
 async def test_simple_model_validation(clean_database):
     """Test basic model validation with real database."""
     db_service = DatabaseService(clean_database)
@@ -195,6 +199,7 @@ async def test_simple_model_validation(clean_database):
 
 
 @pytest.mark.integration
+@pytest.mark.asyncio
 async def test_simple_session_management(clean_database):
     """Test basic database session management."""
     db_service = DatabaseService(clean_database)

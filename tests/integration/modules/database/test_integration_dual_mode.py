@@ -32,6 +32,7 @@ from src.database.models import Bot, Order, Position, Strategy, User
 
 
 @pytest.mark.integration
+@pytest.mark.asyncio
 async def test_database_connections(test_services):
     """Test database connections and health checks."""
     # Test database health
@@ -49,6 +50,7 @@ async def test_database_connections(test_services):
 
 
 @pytest.mark.integration
+@pytest.mark.asyncio
 async def test_model_persistence_and_relationships(database_service):
     """Test SQLAlchemy models with database persistence."""
     async with database_service.get_session() as session:
@@ -148,6 +150,7 @@ async def test_model_persistence_and_relationships(database_service):
 
 
 @pytest.mark.integration
+@pytest.mark.asyncio
 async def test_database_transactions_and_rollback(database_service):
     """Test database transactions with rollback scenarios."""
     # Test successful transaction
@@ -238,6 +241,7 @@ async def test_database_transactions_and_rollback(database_service):
 
 
 @pytest.mark.integration
+@pytest.mark.asyncio
 async def test_redis_cache_operations(redis_client):
     """Test Redis cache operations."""
     # Test basic operations
@@ -273,6 +277,7 @@ async def test_redis_cache_operations(redis_client):
 
 
 @pytest.mark.integration
+@pytest.mark.asyncio
 async def test_influxdb_time_series_operations(influxdb_client):
     """Test InfluxDB time-series operations."""
     # Write market data points
@@ -303,6 +308,7 @@ async def test_influxdb_time_series_operations(influxdb_client):
 
 
 @pytest.mark.integration
+@pytest.mark.asyncio
 async def test_complex_queries(database_service):
     """Test complex database queries."""
     async with database_service.get_session() as session:
@@ -384,6 +390,7 @@ async def test_complex_queries(database_service):
 
 
 @pytest.mark.integration
+@pytest.mark.asyncio
 async def test_batch_operations(database_service):
     """Test batch database operations."""
     async with database_service.get_session() as session:
@@ -422,6 +429,7 @@ async def test_batch_operations(database_service):
 
 
 @pytest.mark.integration
+@pytest.mark.asyncio
 async def test_concurrent_operations(test_services):
     """Test concurrent database and cache operations."""
     db_service = test_services["database"]
@@ -464,6 +472,7 @@ async def test_concurrent_operations(test_services):
 
 
 @pytest.mark.integration
+@pytest.mark.asyncio
 async def test_cache_with_database_consistency(test_services):
     """Test cache consistency with database operations."""
     db_service = test_services["database"]

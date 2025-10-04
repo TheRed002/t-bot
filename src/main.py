@@ -63,7 +63,6 @@ class Application:
             self.logger.info(
                 "Application initialized successfully",
                 app_name=self.config.app_name,
-                app_version=self.config.app_version,
                 environment=self.config.environment,
             )
 

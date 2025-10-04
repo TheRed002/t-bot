@@ -17,6 +17,7 @@ from tests.integration.infrastructure.conftest import clean_database
 
 
 @pytest.mark.integration
+@pytest.mark.asyncio
 async def test_real_database_connections_basic(clean_database):
     """Test basic database connections and table creation."""
     # Initialize real database service with clean database
@@ -67,6 +68,7 @@ async def test_real_database_connections_basic(clean_database):
 
 
 @pytest.mark.integration
+@pytest.mark.asyncio
 async def test_real_model_relationships(clean_database):
     """Test model relationships with real database."""
     # Initialize real database service with clean database
@@ -172,6 +174,7 @@ async def test_real_model_relationships(clean_database):
 
 
 @pytest.mark.integration
+@pytest.mark.asyncio
 async def test_real_transactions_and_rollback(clean_database):
     """Test database transactions with rollback."""
     # Initialize real database service with clean database
@@ -276,6 +279,7 @@ async def test_real_transactions_and_rollback(clean_database):
 
 
 @pytest.mark.integration
+@pytest.mark.asyncio
 async def test_real_redis_operations(clean_database):
     """Test Redis operations if available."""
     try:
@@ -317,6 +321,7 @@ async def test_real_redis_operations(clean_database):
 
 
 @pytest.mark.integration
+@pytest.mark.asyncio
 async def test_complex_queries(clean_database):
     """Test complex database queries."""
     # Initialize real database service with clean database

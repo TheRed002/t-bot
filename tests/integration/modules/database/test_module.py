@@ -26,6 +26,7 @@ from tests.integration.infrastructure.conftest import clean_database
 
 
 @pytest.mark.integration
+@pytest.mark.asyncio
 async def test_database_module_dependency_injection(clean_database):
     """Test database module integrates properly with DI container."""
     # Create DI container
@@ -72,6 +73,7 @@ async def test_database_module_dependency_injection(clean_database):
 
 
 @pytest.mark.integration
+@pytest.mark.asyncio
 async def test_database_service_interface_compliance(clean_database):
     """Test database service implements required interfaces correctly."""
     db_service = DatabaseService(clean_database)
@@ -99,6 +101,7 @@ async def test_database_service_interface_compliance(clean_database):
 
 
 @pytest.mark.integration
+@pytest.mark.asyncio
 async def test_database_module_boundaries(clean_database):
     """Test database module respects proper boundaries."""
     db_service = DatabaseService(clean_database)
@@ -137,6 +140,7 @@ async def test_database_module_boundaries(clean_database):
 
 
 @pytest.mark.integration
+@pytest.mark.asyncio
 async def test_database_service_error_handling(clean_database):
     """Test database service error handling and resilience."""
     db_service = DatabaseService(clean_database)
@@ -198,6 +202,7 @@ async def test_database_service_error_handling(clean_database):
 
 
 @pytest.mark.integration
+@pytest.mark.asyncio
 async def test_database_service_lifecycle_management(clean_database):
     """Test database service lifecycle management."""
     db_service = DatabaseService(clean_database)
@@ -225,6 +230,7 @@ async def test_database_service_lifecycle_management(clean_database):
 
 
 @pytest.mark.integration
+@pytest.mark.asyncio
 async def test_database_models_with_service_layer(clean_database):
     """Test database models work correctly with service layer."""
     db_service = DatabaseService(clean_database)

@@ -29,6 +29,7 @@ from tests.integration.infrastructure.conftest import clean_database
 
 
 @pytest.mark.integration
+@pytest.mark.asyncio
 async def test_real_error_handling_service_initialization():
     """Test error handling service initializes with real dependencies."""
     config = Config()
@@ -62,6 +63,7 @@ async def test_real_error_handling_service_initialization():
 
 
 @pytest.mark.integration
+@pytest.mark.asyncio
 async def test_real_error_handler_error_processing():
     """Test error handler processes errors with real error context creation."""
     from src.core.dependency_injection import DependencyInjector
@@ -113,6 +115,7 @@ async def test_real_error_handler_error_processing():
 
 
 @pytest.mark.integration
+@pytest.mark.asyncio
 async def test_real_pattern_analytics_error_tracking():
     """Test pattern analytics tracks errors with real data storage."""
     config = Config()
@@ -160,6 +163,7 @@ async def test_real_pattern_analytics_error_tracking():
 
 
 @pytest.mark.integration
+@pytest.mark.asyncio
 async def test_real_recovery_scenarios_execution():
     """Test recovery scenarios execute with real recovery logic."""
     config = Config()
@@ -203,6 +207,7 @@ async def test_real_recovery_scenarios_execution():
 
 
 @pytest.mark.integration
+@pytest.mark.asyncio
 async def test_real_connection_manager_operations():
     """Test connection manager with real connection handling."""
     config = Config()
@@ -238,6 +243,7 @@ async def test_real_connection_manager_operations():
 
 
 @pytest.mark.integration
+@pytest.mark.asyncio
 async def test_real_error_handling_end_to_end_flow():
     """Test complete error handling flow with real services."""
     config = Config()
@@ -283,6 +289,7 @@ async def test_real_error_handling_end_to_end_flow():
 
 
 @pytest.mark.integration
+@pytest.mark.asyncio
 async def test_real_error_context_transformation_and_validation():
     """Test error context transformation with real validation."""
     config = Config()
@@ -324,6 +331,7 @@ async def test_real_error_context_transformation_and_validation():
 
 
 @pytest.mark.integration
+@pytest.mark.asyncio
 async def test_real_circuit_breaker_functionality():
     """Test circuit breaker with real failure tracking."""
     from src.error_handling.decorators import with_circuit_breaker
@@ -352,6 +360,7 @@ async def test_real_circuit_breaker_functionality():
 
 
 @pytest.mark.integration
+@pytest.mark.asyncio
 async def test_real_retry_mechanism_with_backoff():
     """Test retry mechanism with real backoff timing."""
     from src.error_handling.decorators import with_retry
