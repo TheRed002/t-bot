@@ -667,11 +667,21 @@ class DataService(BaseComponent):
             self.logger.error(f"Failed to calculate EMA for {symbol}: {e}")
             return None
 
-    async def get_macd(self, symbol: str, exchange: str = DEFAULT_EXCHANGE) -> dict[str, Decimal] | None:
+    async def get_macd(
+        self,
+        symbol: str,
+        fast_period: int = 12,
+        slow_period: int = 26,
+        signal_period: int = 9,
+        exchange: str = DEFAULT_EXCHANGE
+    ) -> dict[str, Decimal] | None:
         """Calculate MACD (Moving Average Convergence Divergence) for a symbol.
 
         Args:
             symbol: Trading symbol
+            fast_period: Fast EMA period (default 12)
+            slow_period: Slow EMA period (default 26)
+            signal_period: Signal line period (default 9)
             exchange: Exchange name
 
         Returns:
@@ -679,13 +689,7 @@ class DataService(BaseComponent):
         """
         try:
             indicators = self._get_technical_indicators()
-            # Get recent prices for MACD calculation
-            recent_data = await self.get_recent_data(symbol, limit=50, exchange=exchange)
-            if not recent_data:
-                return None
-
-            prices = [data.close for data in recent_data]
-            return await indicators.macd(prices)
+            return await indicators.calculate_macd(symbol, fast_period, slow_period, signal_period)
         except Exception as e:
             self.logger.error(f"Failed to calculate MACD for {symbol}: {e}")
             return None

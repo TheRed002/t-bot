@@ -422,6 +422,27 @@ class TechnicalIndicators(BaseComponent):
             self.logger.error(f"EMA calculation failed for {symbol}: {e}")
             return None
 
+    async def calculate_macd(self, symbol: str, fast: int = 12, slow: int = 26, signal: int = 9) -> dict[str, Decimal] | None:
+        """Calculate MACD using symbol - wrapper for strategy integration."""
+        try:
+            # MACD needs more historical data for accurate calculation
+            # Need at least slow + signal periods of data
+            price_data = await self._get_price_data(symbol, limit=1000)  # Get all available data
+            if not price_data or len(price_data) < (slow + signal):
+                self.logger.warning(f"Insufficient price data for MACD calculation: {len(price_data) if price_data else 0} < {slow + signal}")
+                return None
+
+            prices = np.array([float(d.close) for d in price_data if hasattr(d, 'close') and d.close], dtype=np.float64)
+            if len(prices) < (slow + signal):
+                self.logger.warning(f"Insufficient valid prices for MACD calculation: {len(prices)} < {slow + signal}")
+                return None
+
+            return await self._calculate_macd(prices, fast, slow, signal)
+
+        except Exception as e:
+            self.logger.error(f"MACD calculation failed for {symbol}: {e}")
+            return None
+
     async def calculate_rsi(self, symbol: str, period: int) -> Decimal | None:
         """Calculate RSI using symbol - wrapper for strategy integration."""
         try:
