@@ -10,6 +10,7 @@ import logging
 import tempfile
 import os
 import json
+import inspect
 from pathlib import Path
 from decimal import Decimal
 from datetime import datetime, timezone, timedelta
@@ -625,6 +626,45 @@ def register_all_services_for_testing():
 
     logger.info("Registered all services for integration testing")
     return injector
+
+
+async def cleanup_di_container(injector):
+    """
+    Cleanup DI container and stop all services properly.
+
+    This prevents resource leaks (database connections, event loops, etc.)
+    that cause test timeouts when running multiple tests.
+
+    Args:
+        injector: DependencyInjector instance to cleanup
+    """
+    if not injector:
+        return
+
+    # Get all service names
+    service_names = []
+    if hasattr(injector, '_container'):
+        container = injector._container
+        service_names = list(container._services.keys())
+
+    # Stop services that have a stop() method
+    for service_name in service_names:
+        try:
+            service = injector.resolve(service_name)
+            if hasattr(service, 'stop') and callable(service.stop):
+                if inspect.iscoroutinefunction(service.stop):
+                    await service.stop()
+                else:
+                    service.stop()
+                logger.debug(f"Stopped service: {service_name}")
+        except Exception as e:
+            logger.warning(f"Failed to stop service {service_name}: {e}")
+
+    # Clear the container
+    if hasattr(injector, '_container'):
+        injector._container.clear()
+
+    logger.info("DI container cleanup complete")
 
 
 @pytest.fixture(scope="session", autouse=True)
