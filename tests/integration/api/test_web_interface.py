@@ -15,6 +15,7 @@ from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+import pytest_asyncio
 from fastapi.testclient import TestClient
 from httpx import AsyncClient
 
@@ -36,7 +37,7 @@ def client(app):
     return TestClient(app)
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def async_client(app):
     """Create async test client."""
     async with AsyncClient(app=app, base_url="http://test") as ac:

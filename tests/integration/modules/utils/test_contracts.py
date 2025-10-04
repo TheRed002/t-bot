@@ -14,6 +14,7 @@ from decimal import Decimal
 
 import pytest
 
+import pytest_asyncio
 from src.core.dependency_injection import injector
 from src.core.types import ValidationLevel
 from src.utils.interfaces import (
@@ -49,7 +50,7 @@ def setup_utils_services():
 class TestValidationServiceContract:
     """Test ValidationService contract compliance."""
 
-    @pytest.fixture
+    @pytest_asyncio.fixture
     async def validation_service(self, setup_utils_services):
         """Get validation service instance."""
         service = injector.resolve("ValidationServiceInterface")
@@ -311,7 +312,7 @@ class TestInterfaceCompliance:
 class TestDataValidationContracts:
     """Test data validation contracts across utils services."""
 
-    @pytest.fixture
+    @pytest_asyncio.fixture
     async def validation_service(self, setup_utils_services):
         """Get validation service instance."""
         service = injector.resolve("ValidationServiceInterface")
@@ -393,7 +394,7 @@ class TestDataValidationContracts:
 class TestPerformanceContracts:
     """Test performance contracts for utils services."""
 
-    @pytest.fixture
+    @pytest_asyncio.fixture
     async def validation_service(self, setup_utils_services):
         """Get validation service instance."""
         service = injector.resolve("ValidationServiceInterface")
@@ -500,7 +501,7 @@ class TestPerformanceContracts:
 class TestErrorContractConsistency:
     """Test error contract consistency across utils services."""
 
-    @pytest.fixture
+    @pytest_asyncio.fixture
     async def validation_service(self, setup_utils_services):
         """Get validation service instance."""
         service = injector.resolve("ValidationServiceInterface")

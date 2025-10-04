@@ -14,6 +14,7 @@ from collections.abc import AsyncGenerator
 
 import pytest
 
+import pytest_asyncio
 from src.core.caching.cache_manager import CacheManager
 from src.core.config import get_config
 from src.database.connection import DatabaseConnectionManager
@@ -56,7 +57,7 @@ def event_loop():
             logger.warning(f"Error closing event loop: {e}")
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def real_test_config():
     """Real configuration for infrastructure tests using Docker services."""
     config = get_config()
@@ -89,7 +90,7 @@ async def real_test_config():
     return config
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def clean_database() -> AsyncGenerator[DatabaseConnectionManager, None]:
     """
     Provides a clean database connection manager for each test.
@@ -315,7 +316,7 @@ async def clean_database() -> AsyncGenerator[DatabaseConnectionManager, None]:
             logger.warning(f"Error cancelling tasks: {e}")
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def real_cache_manager(clean_database) -> AsyncGenerator[CacheManager, None]:
     """
     Provides a real CacheManager connected to Redis for testing.
@@ -344,7 +345,7 @@ async def real_cache_manager(clean_database) -> AsyncGenerator[CacheManager, Non
             logger.warning(f"Error cleaning up cache manager: {e}")
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def real_database_service(clean_database) -> AsyncGenerator[DatabaseService, None]:
     """
     Provides a real DatabaseService connected to PostgreSQL for testing.
@@ -380,7 +381,7 @@ async def real_database_service(clean_database) -> AsyncGenerator[DatabaseServic
             logger.warning(f"Error cleaning up database service: {e}")
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def real_service_factory(clean_database) -> AsyncGenerator[RealServiceFactory, None]:
     """
     Provides a pre-configured RealServiceFactory for integration tests.
@@ -408,7 +409,7 @@ async def real_service_factory(clean_database) -> AsyncGenerator[RealServiceFact
             logger.warning(f"Error cleaning up service factory: {e}")
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def production_ready_test_base(clean_database) -> AsyncGenerator[ProductionReadyTestBase, None]:
     """
     Provides a ProductionReadyTestBase instance for infrastructure tests.
@@ -436,7 +437,7 @@ async def production_ready_test_base(clean_database) -> AsyncGenerator[Productio
             logger.warning(f"Error cleaning up test base: {e}")
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def real_container(real_service_factory):
     """
     Provides a fully configured DependencyContainer with real services.
@@ -458,7 +459,7 @@ async def real_container(real_service_factory):
 
 
 # Health check fixtures for verifying service states
-@pytest.fixture
+@pytest_asyncio.fixture
 async def verify_services_healthy(clean_database, real_cache_manager, real_database_service):
     """
     Verification fixture that ensures all services are healthy before tests run.

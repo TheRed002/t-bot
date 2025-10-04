@@ -14,6 +14,7 @@ from typing import List, Dict, Any, Optional
 
 import pytest
 
+import pytest_asyncio
 from src.core.types import (
     MarketData,
     Signal,
@@ -33,14 +34,14 @@ from .fixtures.real_service_fixtures import generate_realistic_market_data_seque
 class TestRealStrategyConfigurationPersistence:
     """Test real strategy configuration persistence to PostgreSQL."""
 
-    @pytest.fixture
+    @pytest_asyncio.fixture
     async def strategy_repository(self, clean_database):
         """Create real strategy repository with database connection."""
         repository = StrategyRepository(clean_database)
         yield repository
         await repository.cleanup()
 
-    @pytest.fixture
+    @pytest_asyncio.fixture
     async def signal_repository(self, clean_database):
         """Create real signal repository with database connection."""
         repository = SignalRepository(clean_database)
@@ -239,7 +240,7 @@ class TestRealStrategyConfigurationPersistence:
 class TestRealSignalPersistence:
     """Test real signal persistence to PostgreSQL with Decimal precision."""
 
-    @pytest.fixture
+    @pytest_asyncio.fixture
     async def signal_repository(self, clean_database):
         """Create real signal repository."""
         repository = SignalRepository(clean_database)
@@ -567,7 +568,7 @@ class TestRealSignalPersistence:
 class TestRealStrategyServiceDatabaseIntegration:
     """Test complete integration of StrategyService with database persistence."""
 
-    @pytest.fixture
+    @pytest_asyncio.fixture
     async def real_strategy_service(self, clean_database, strategy_service_container):
         """Create real strategy service with database integration."""
         service = StrategyService(

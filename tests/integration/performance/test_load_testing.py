@@ -16,6 +16,7 @@ from decimal import Decimal
 import psutil
 import pytest
 
+import pytest_asyncio
 from src.core.types import OrderRequest, OrderSide, OrderStatus, OrderType, TimeInForce
 from src.core.types.market import MarketData
 from src.exchanges.mock_exchange import MockExchange
@@ -83,7 +84,7 @@ class LoadTestMetrics:
 class TestHighFrequencyTradingLoad:
     """Test system performance under high-frequency trading scenarios using REAL services."""
 
-    @pytest.fixture(autouse=True)
+    @pytest_asyncio.fixture(autouse=True)
     async def setup(self, container, async_session):
         """Setup for high-frequency trading tests with REAL services."""
         self.load_metrics = LoadTestMetrics()
@@ -273,7 +274,7 @@ class TestHighFrequencyTradingLoad:
 class TestMemoryAndResourceLoad:
     """Test memory usage and resource management under load with REAL services."""
 
-    @pytest.fixture(autouse=True)
+    @pytest_asyncio.fixture(autouse=True)
     async def setup(self, container):
         """Setup memory and resource testing with REAL services."""
         self.resource_metrics = LoadTestMetrics()
@@ -381,7 +382,7 @@ class TestMemoryAndResourceLoad:
 class TestSystemIntegrationLoad:
     """Test full system integration under load conditions with REAL services."""
 
-    @pytest.fixture(autouse=True)
+    @pytest_asyncio.fixture(autouse=True)
     async def setup(self, container):
         """Setup system integration load testing with REAL services."""
         self.system_metrics = LoadTestMetrics()

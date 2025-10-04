@@ -11,6 +11,7 @@ Tests verify:
 
 import asyncio
 import pytest
+import pytest_asyncio
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -26,12 +27,12 @@ from src.risk_management.service import RiskService
 class TestStateModuleIntegration:
     """Test state module integration with other trading system modules."""
 
-    @pytest.fixture
+    @pytest_asyncio.fixture
     async def config(self):
         """Create test configuration."""
         return Config()
 
-    @pytest.fixture
+    @pytest_asyncio.fixture
     async def dependency_container(self):
         """Create DI container for testing."""
         container = DependencyContainer()
@@ -43,7 +44,7 @@ class TestStateModuleIntegration:
         
         return container
 
-    @pytest.fixture
+    @pytest_asyncio.fixture
     async def state_service(self, config, dependency_container):
         """Create state service with injected dependencies."""
         # Register state services in container

@@ -10,6 +10,7 @@ This test suite validates that:
 """
 
 import pytest
+import pytest_asyncio
 import asyncio
 from decimal import Decimal
 from datetime import datetime, timezone
@@ -29,7 +30,7 @@ from src.utils.interfaces import ValidationServiceInterface
 class TestUtilsModuleIntegration:
     """Test utils module integration patterns."""
 
-    @pytest.fixture(autouse=True)
+    @pytest_asyncio.fixture(autouse=True)
     async def setup_utils_services(self):
         """Setup utils services for testing."""
         # Clear any existing registrations

@@ -20,6 +20,7 @@ from typing import Any, Dict, List
 
 import pytest
 
+import pytest_asyncio
 from src.core.exceptions import ServiceError, StrategyError, ValidationError
 from src.core.types import (
     MarketData,
@@ -60,7 +61,7 @@ class TestRealStrategyFrameworkIntegration:
     persistence. No mocks are used for business logic components.
     """
 
-    @pytest.fixture(autouse=True)
+    @pytest_asyncio.fixture(autouse=True)
     async def cleanup_database_before_test(self, real_database_service_fixture):
         """
         Clean database before each test in this class.

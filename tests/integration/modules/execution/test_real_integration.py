@@ -19,6 +19,7 @@ from decimal import Decimal
 
 import pytest
 
+import pytest_asyncio
 # pytestmark = pytest.mark.skip("Real execution integration tests need comprehensive setup")  # ENABLED for real services testing
 
 from src.core.config import get_config
@@ -39,7 +40,7 @@ from src.risk_management.service import RiskService
 from tests.integration.infrastructure.conftest import clean_database
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def real_database_service(clean_database):
     """Create and manage a real DatabaseService for testing."""
     from src.database.service import DatabaseService

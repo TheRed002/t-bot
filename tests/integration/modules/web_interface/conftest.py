@@ -463,7 +463,7 @@ async def cleanup_test_data(clean_database):
     logger.info("Test data cleanup completed")
 
 
-@pytest.fixture(autouse=True)
+@pytest_asyncio.fixture(autouse=True)
 async def reset_service_state():
     """Reset service state between tests."""
     # This runs before each test

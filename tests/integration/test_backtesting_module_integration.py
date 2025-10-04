@@ -16,6 +16,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+import pytest_asyncio
 from src.backtesting.service import BacktestRequest, BacktestService
 from src.backtesting.interfaces import BacktestServiceInterface
 from src.core.dependency_injection import DependencyInjector
@@ -28,7 +29,7 @@ from src.utils.decimal_utils import to_decimal
 class TestBacktestingModuleIntegration:
     """Test backtesting module integration patterns."""
 
-    @pytest.fixture
+    @pytest_asyncio.fixture
     async def mock_config(self):
         """Create mock config."""
         config = MagicMock(spec=Config)
@@ -36,7 +37,7 @@ class TestBacktestingModuleIntegration:
         config.backtest_cache = {}
         return config
 
-    @pytest.fixture
+    @pytest_asyncio.fixture
     async def mock_dependencies(self):
         """Create mock service dependencies."""
         data_service = AsyncMock()
@@ -78,7 +79,7 @@ class TestBacktestingModuleIntegration:
             'MLService': None,
         }
 
-    @pytest.fixture
+    @pytest_asyncio.fixture
     async def dependency_injector(self, mock_config, mock_dependencies):
         """Create dependency injector with backtesting services."""
         injector = DependencyInjector()
@@ -97,7 +98,7 @@ class TestBacktestingModuleIntegration:
         
         return injector
 
-    @pytest.fixture
+    @pytest_asyncio.fixture
     async def backtest_service(self, mock_config, mock_dependencies, dependency_injector):
         """Create BacktestService with mocked dependencies."""
         service = BacktestService(

@@ -5,6 +5,7 @@ Provides common test fixtures, configuration, and utilities for integration test
 """
 
 import pytest
+import pytest_asyncio
 import asyncio
 import logging
 import tempfile
@@ -123,7 +124,7 @@ def integration_test_config():
     }
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def temp_directory():
     """Create temporary directory for test files."""
     temp_dir = tempfile.mkdtemp(prefix="tbot_integration_test_")
@@ -135,7 +136,7 @@ async def temp_directory():
     shutil.rmtree(temp_dir, ignore_errors=True)
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def mock_exchanges():
     """Create mock exchanges for testing."""
     exchanges = {
@@ -165,7 +166,7 @@ async def mock_exchanges():
                 pass
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def mock_strategies():
     """Create mock strategies for testing."""
     strategies = {
@@ -357,7 +358,7 @@ def sample_signals():
     return signals
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def performance_monitor():
     """Create performance monitor for testing."""
     monitor = PerformanceMonitor()
@@ -368,7 +369,7 @@ async def performance_monitor():
     monitor.stop()
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def mock_database():
     """Create mock database connection for testing."""
     
@@ -522,7 +523,7 @@ def mock_jwt_handler():
     return MockJWTHandler()
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def mock_websocket_manager():
     """Create mock WebSocket manager for testing."""
     
@@ -797,7 +798,7 @@ def test_data_generator():
     return TestDataGenerator()
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def load_test_config():
     """Configuration specific to load testing."""
     return {
@@ -840,7 +841,7 @@ async def load_test_config():
     }
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def system_monitor():
     """System resource monitor for performance testing."""
     import psutil
@@ -934,7 +935,7 @@ async def system_monitor():
     await monitor.stop_monitoring()
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def concurrent_test_executor():
     """Executor for running concurrent performance tests."""
     import concurrent.futures

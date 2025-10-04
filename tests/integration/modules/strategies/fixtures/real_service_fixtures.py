@@ -12,6 +12,7 @@ from typing import Any, AsyncGenerator
 
 import pytest
 
+import pytest_asyncio
 from src.core.config import Config
 from src.core.types import MarketData, StrategyConfig, StrategyType
 from src.strategies.dependencies import StrategyServiceContainer, create_strategy_service_container
@@ -20,7 +21,7 @@ from src.database.connection import DatabaseConnectionManager
 from src.database.models import Base
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def real_database_connection() -> AsyncGenerator[DatabaseConnectionManager, None]:
     """Create real database connection for testing."""
     from tests.conftest import clean_database
@@ -40,7 +41,7 @@ async def real_database_connection() -> AsyncGenerator[DatabaseConnectionManager
     await db_connection.cleanup()
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def real_strategy_service_container(
     real_database_connection,
 ) -> AsyncGenerator[StrategyServiceContainer, None]:
@@ -65,19 +66,19 @@ async def real_strategy_service_container(
     await container_builder.cleanup()
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def real_risk_manager(real_strategy_service_container):
     """Get real risk manager from container."""
     return real_strategy_service_container.risk_service
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def real_data_service(real_strategy_service_container):
     """Get real data service from container."""
     return real_strategy_service_container.data_service
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def real_execution_service(real_strategy_service_container):
     """Get real execution service from container."""
     return real_strategy_service_container.execution_service

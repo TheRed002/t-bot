@@ -31,7 +31,7 @@ from src.database.repository.audit import CapitalAuditLogRepository
 class TestDatabaseIntegrationWorkflows:
     """Test complete database workflows involving multiple components."""
 
-    @pytest.fixture
+    @pytest_asyncio.fixture
     async def integration_session(self, async_session):
         """Create a test session for integration tests."""
         return async_session

@@ -12,6 +12,7 @@ from decimal import Decimal
 
 import pytest
 
+import pytest_asyncio
 from src.analytics import (
     AnalyticsService,
     AnalyticsServiceFactory,
@@ -35,7 +36,7 @@ from tests.integration.infrastructure.conftest import (
 )
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def real_analytics_dependencies(clean_database, real_database_service):
     """Create analytics dependencies with REAL services."""
     from tests.integration.infrastructure.service_factory import RealServiceFactory
@@ -113,7 +114,7 @@ class TestAnalyticsDependencyInjection:
 class TestAnalyticsRepositoryIntegration:
     """Test analytics repository integration with real database module."""
 
-    @pytest.fixture
+    @pytest_asyncio.fixture
     async def real_analytics_repository(self, clean_database, real_database_service):
         """Create analytics repository with REAL database dependencies."""
         from src.analytics.services.data_transformation_service import DataTransformationService
@@ -341,7 +342,7 @@ class TestAnalyticsRepositoryIntegration:
 class TestAnalyticsServiceIntegration:
     """Test analytics service integration patterns with real services."""
 
-    @pytest.fixture
+    @pytest_asyncio.fixture
     async def real_analytics_service(self, real_analytics_dependencies):
         """Create analytics service with REAL dependencies."""
         injector = real_analytics_dependencies
@@ -456,7 +457,7 @@ class TestAnalyticsServiceIntegration:
 class TestAnalyticsDataFlow:
     """Test data flow between analytics and other modules with real services."""
 
-    @pytest.fixture
+    @pytest_asyncio.fixture
     async def real_analytics_service(self, real_analytics_dependencies):
         """Create analytics service with REAL dependencies."""
         injector = real_analytics_dependencies
@@ -569,7 +570,7 @@ class TestAnalyticsDataFlow:
 class TestAnalyticsErrorHandling:
     """Test analytics error handling and propagation with real services."""
 
-    @pytest.fixture
+    @pytest_asyncio.fixture
     async def real_analytics_service(self, real_analytics_dependencies):
         """Create analytics service with REAL dependencies."""
         injector = real_analytics_dependencies
@@ -671,7 +672,7 @@ class TestAnalyticsErrorHandling:
 class TestAnalyticsModuleBoundaries:
     """Test analytics module boundaries and contracts with real integration."""
 
-    @pytest.fixture
+    @pytest_asyncio.fixture
     async def real_analytics_service(self, real_analytics_dependencies):
         """Create analytics service with REAL dependencies."""
         injector = real_analytics_dependencies

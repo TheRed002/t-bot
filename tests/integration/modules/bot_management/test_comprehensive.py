@@ -19,6 +19,7 @@ from typing import Dict, Any
 
 import pytest
 
+import pytest_asyncio
 # Import real service fixtures from infrastructure
 from tests.integration.infrastructure.conftest import (
     clean_database,
@@ -65,7 +66,7 @@ from src.core.types.risk import RiskMetrics, PositionLimits, RiskLevel
 from src.state import StateType
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def dependency_container(clean_database, real_database_service, real_cache_manager):
     """Create and configure dependency container with REAL services."""
     from tests.integration.infrastructure.service_factory import RealServiceFactory
@@ -143,7 +144,7 @@ async def dependency_container(clean_database, real_database_service, real_cache
     await real_risk_service.stop()
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def bot_management_service(dependency_container):
     """Create bot management service with REAL dependencies."""
     # Get real services from container

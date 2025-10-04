@@ -16,6 +16,7 @@ import os
 from decimal import Decimal
 
 import pytest
+import pytest_asyncio
 from dotenv import load_dotenv
 
 from src.core.exceptions import ExchangeConnectionError, ExchangeError
@@ -45,7 +46,7 @@ def real_binance_config():
     }
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def real_binance_exchange(real_binance_config, container):
     """Real Binance exchange connected to testnet."""
     exchange = BinanceExchange(real_binance_config)

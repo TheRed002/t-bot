@@ -13,6 +13,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pandas as pd
 import pytest
 
+import pytest_asyncio
 from src.core.dependency_injection import DependencyInjector
 from src.core.exceptions import ModelError, ValidationError
 from src.core.types import Signal, SignalDirection
@@ -24,7 +25,7 @@ from src.ml.service import MLPipelineRequest, MLPipelineResponse, MLTrainingRequ
 class TestMLModuleIntegration:
     """Test ML module integration with other system modules."""
 
-    @pytest.fixture
+    @pytest_asyncio.fixture
     async def di_container(self):
         """Create DI container with ML services registered."""
         injector = DependencyInjector()
@@ -41,7 +42,7 @@ class TestMLModuleIntegration:
         register_ml_services(injector, config)
         return injector
 
-    @pytest.fixture
+    @pytest_asyncio.fixture
     async def ml_service(self, di_container):
         """Create ML service with real DI container and services."""
         # Get ML service from DI container

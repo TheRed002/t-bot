@@ -15,6 +15,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+import pytest_asyncio
 from src.core.dependency_injection import DependencyInjector
 from src.core.exceptions import DatabaseError, ValidationError
 from src.database.service import DatabaseService
@@ -32,7 +33,7 @@ logger = logging.getLogger(__name__)
 class TestDatabaseModuleIntegration:
     """Test database module integration patterns using real services."""
 
-    @pytest.fixture
+    @pytest_asyncio.fixture
     async def real_connection_manager(self, clean_database):
         """Create real connection manager."""
         return clean_database

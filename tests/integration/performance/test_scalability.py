@@ -16,6 +16,7 @@ from decimal import Decimal
 import psutil
 import pytest
 
+import pytest_asyncio
 from src.core.dependency_injection import DependencyContainer
 from src.core.types import (
     MarketData,
@@ -38,7 +39,7 @@ logger = logging.getLogger(__name__)
 class TestPerformanceScalability:
     """Performance and scalability integration tests using REAL services."""
 
-    @pytest.fixture(autouse=True)
+    @pytest_asyncio.fixture(autouse=True)
     async def setup(self, container):
         """Setup with REAL services from DI container."""
         self.container = container

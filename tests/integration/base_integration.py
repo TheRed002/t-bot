@@ -19,6 +19,7 @@ from datetime import datetime, timezone
 from typing import Dict, List, Any, Optional, AsyncGenerator, Callable
 from unittest.mock import Mock, AsyncMock, patch
 import pytest
+import pytest_asyncio
 import aiohttp
 import asyncpg
 
@@ -334,7 +335,7 @@ class BaseIntegrationTest(ABC):
         self.bot_instance = None
         self.performance_monitor = PerformanceMonitor()
     
-    @pytest.fixture(autouse=True)
+    @pytest_asyncio.fixture(autouse=True)
     async def setup_integration_test(self):
         """Setup common test infrastructure."""
         # Load test configuration

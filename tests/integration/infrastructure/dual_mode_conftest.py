@@ -13,6 +13,7 @@ from collections.abc import AsyncGenerator
 
 import pytest
 
+import pytest_asyncio
 from src.core.config import get_config
 from tests.integration.infrastructure.mock_services import (
     MockDatabaseService,
@@ -28,7 +29,7 @@ logger = logging.getLogger(__name__)
 USE_MOCK_SERVICES = os.getenv("USE_MOCK_SERVICES", "true").lower() == "true"
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def test_services() -> AsyncGenerator[dict, None]:
     """
     Provides test services (real or mock based on environment).
@@ -55,25 +56,25 @@ async def test_services() -> AsyncGenerator[dict, None]:
         )
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def database_service(test_services):
     """Provides database service (real or mock)."""
     return test_services["database"]
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def redis_client(test_services):
     """Provides Redis client (real or mock)."""
     return test_services["redis"]
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def influxdb_client(test_services):
     """Provides InfluxDB client (real or mock)."""
     return test_services["influxdb"]
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def db_session(database_service):
     """Provides a database session."""
     async with database_service.get_session() as session:
@@ -81,7 +82,7 @@ async def db_session(database_service):
         await session.rollback()
 
 
-@pytest.fixture(autouse=True)
+@pytest_asyncio.fixture(autouse=True)
 async def cleanup_between_tests(test_services):
     """Clean up data between tests."""
     yield

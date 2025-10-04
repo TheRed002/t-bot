@@ -14,6 +14,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+import pytest_asyncio
 pytestmark = pytest.mark.skip("Error handling module tests need comprehensive setup")
 
 from src.core.config import Config
@@ -23,13 +24,13 @@ from src.error_handling.di_registration import configure_error_handling_di
 from src.error_handling.service import ErrorHandlingService
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def config():
     """Test configuration fixture."""
     return Config()
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def dependency_container(config):
     """Dependency injection container with error handling configured."""
     container = DependencyContainer()
@@ -41,7 +42,7 @@ async def dependency_container(config):
     return container
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def error_handling_service(dependency_container):
     """Error handling service fixture."""
     service = dependency_container.resolve("ErrorHandlingService")

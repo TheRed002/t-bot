@@ -11,6 +11,7 @@ This test validates that the exchanges module properly integrates with other mod
 
 import asyncio
 import pytest
+import pytest_asyncio
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -86,7 +87,7 @@ def config():
     return config
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def exchange_factory(config, container):
     """Exchange factory instance."""
     from src.exchanges.base import BaseMockExchange

@@ -9,6 +9,7 @@ circular dependency prevention.
 import asyncio
 import logging
 import pytest
+import pytest_asyncio
 from typing import Dict, List, Any, Optional
 from unittest.mock import Mock, AsyncMock, patch
 from decimal import Decimal
@@ -487,7 +488,7 @@ class DependencyInjectionIntegrationTest(BaseIntegrationTest):
         return results
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def di_integration_test():
     """Create dependency injection integration test instance."""
     test = DependencyInjectionIntegrationTest()

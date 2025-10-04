@@ -13,6 +13,7 @@ from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+import pytest_asyncio
 from sqlalchemy import text
 
 from src.bot_management.bot_instance import BotInstance
@@ -31,7 +32,7 @@ from tests.integration.infrastructure.conftest import clean_database, real_test_
 
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def real_database_service(clean_database):
     """Create real database service for testing."""
     service_factory = RealServiceFactory()

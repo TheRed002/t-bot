@@ -8,6 +8,7 @@ ensuring that components work correctly together under realistic conditions.
 import asyncio
 import logging
 import pytest
+import pytest_asyncio
 from decimal import Decimal
 from datetime import datetime, timezone
 from typing import Dict, List, Any, Optional
@@ -688,7 +689,7 @@ class CrossModuleIntegrationTest(BaseIntegrationTest):
 
 
 # Pytest fixtures and test runners
-@pytest.fixture
+@pytest_asyncio.fixture
 async def cross_module_test():
     """Create cross-module integration test instance."""
     test = CrossModuleIntegrationTest()

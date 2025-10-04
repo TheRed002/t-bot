@@ -16,6 +16,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+import pytest_asyncio
 from src.core.base.interfaces import HealthStatus
 from src.core.config.service import ConfigService
 from src.core.dependency_injection import DependencyInjector
@@ -59,7 +60,7 @@ def mock_validation_service():
     return validation_service
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def real_database_service(clean_database):
     """Create real database service for integration testing."""
     service_factory = RealServiceFactory()
@@ -81,7 +82,7 @@ async def real_database_service(clean_database):
         await service_factory.cleanup()
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def real_dependency_injector(clean_database, mock_config_service, mock_validation_service):
     """Create dependency injector with real database services."""
     service_factory = RealServiceFactory()

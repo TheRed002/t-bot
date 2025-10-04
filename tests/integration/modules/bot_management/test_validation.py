@@ -8,6 +8,7 @@ Phase 5: Real service-based tests - NO MOCKS allowed except for external APIs.
 """
 
 import pytest
+import pytest_asyncio
 from decimal import Decimal
 
 from tests.integration.infrastructure.service_factory import RealServiceFactory
@@ -17,7 +18,7 @@ from src.core.types import BotConfiguration, BotStatus, BotPriority, BotType
 from src.core.exceptions import ServiceError, ValidationError
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def real_bot_services(clean_database):
     """Create real bot management services with real dependencies."""
     service_factory = RealServiceFactory()

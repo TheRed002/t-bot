@@ -8,6 +8,7 @@ This ensures error handling works properly in production scenarios.
 
 import asyncio
 import pytest
+import pytest_asyncio
 from decimal import Decimal
 from typing import Any, Dict
 from unittest.mock import AsyncMock, Mock, MagicMock
@@ -26,7 +27,7 @@ from src.error_handling.state_monitor import StateMonitor
 class TestErrorHandlingModuleIntegration:
     """Integration tests for error_handling module with real service dependencies."""
 
-    @pytest.fixture(autouse=True)
+    @pytest_asyncio.fixture(autouse=True)
     async def setup_services(self):
         """Setup services for testing with proper DI registration."""
         # Clear any existing registrations

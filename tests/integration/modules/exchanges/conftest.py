@@ -20,7 +20,7 @@ def config():
     return Config()
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def container(config):
     """Create DI injector with all real services registered."""
     from src.core.dependency_injection import DependencyInjector
@@ -42,7 +42,7 @@ async def container(config):
         pass
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def async_session(container):
     """Create mock async database session for testing."""
     # Create a mock session for tests that need it

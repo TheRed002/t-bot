@@ -10,6 +10,7 @@ This test suite validates that:
 """
 
 import pytest
+import pytest_asyncio
 import asyncio
 import time
 from decimal import Decimal, InvalidOperation
@@ -25,7 +26,7 @@ from src.utils.decorators import retry, circuit_breaker, time_execution
 class TestUtilsErrorHandlingIntegration:
     """Test utils module error handling integration."""
 
-    @pytest.fixture(autouse=True)
+    @pytest_asyncio.fixture(autouse=True)
     async def setup_services(self):
         """Setup services for testing."""
         injector.get_container().clear()

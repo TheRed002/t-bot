@@ -16,6 +16,7 @@ from typing import List, Dict, Any
 
 import pytest
 
+import pytest_asyncio
 from src.core.types import MarketData, Signal, SignalDirection, StrategyConfig, StrategyType
 from src.strategies.static.mean_reversion import MeanReversionStrategy
 from src.strategies.static.trend_following import TrendFollowingStrategy
@@ -33,7 +34,7 @@ from .utils.indicator_validation import IndicatorValidator, IndicatorAccuracyTes
 class TestRealMeanReversionSignalGeneration:
     """Test real mean reversion signal generation with actual Z-score calculations."""
 
-    @pytest.fixture
+    @pytest_asyncio.fixture
     async def real_mean_reversion_strategy(self, strategy_service_container):
         """Create real mean reversion strategy with dependencies."""
         config = StrategyConfig(
@@ -268,7 +269,7 @@ class TestRealMeanReversionSignalGeneration:
 class TestRealTrendFollowingSignalGeneration:
     """Test real trend following signal generation with actual MA crossovers."""
 
-    @pytest.fixture
+    @pytest_asyncio.fixture
     async def real_trend_following_strategy(self, strategy_service_container):
         """Create real trend following strategy with dependencies."""
         config = StrategyConfig(
@@ -436,7 +437,7 @@ class TestRealTrendFollowingSignalGeneration:
 class TestRealBreakoutSignalGeneration:
     """Test real breakout signal generation with actual support/resistance levels."""
 
-    @pytest.fixture
+    @pytest_asyncio.fixture
     async def real_breakout_strategy(self, strategy_service_container):
         """Create real breakout strategy with dependencies."""
         config = StrategyConfig(

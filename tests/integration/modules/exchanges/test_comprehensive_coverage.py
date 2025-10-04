@@ -27,6 +27,7 @@ from typing import Dict, Any
 
 import pytest
 
+import pytest_asyncio
 # Core imports that work with our architecture
 from src.core.config import Config
 from src.core.exceptions import (
@@ -67,7 +68,7 @@ class TestBaseExchangeIntegration:
             "sandbox": True
         }
     
-    @pytest.fixture
+    @pytest_asyncio.fixture
     async def mock_exchange(self, base_config, container) -> BaseMockExchange:
         """Create mock exchange for testing with DI container."""
         exchange = BaseMockExchange("test_mock", base_config)
@@ -320,7 +321,7 @@ class TestExchangeFactoryBasic:
 class TestFinancialPrecisionIntegration:
     """Test financial calculations with Decimal precision."""
 
-    @pytest.fixture
+    @pytest_asyncio.fixture
     async def mock_exchange(self, container):
         """Create mock exchange for precision testing with DI container."""
         config = {
@@ -410,7 +411,7 @@ class TestFinancialPrecisionIntegration:
 class TestErrorHandlingIntegration:
     """Test error handling and recovery scenarios."""
 
-    @pytest.fixture
+    @pytest_asyncio.fixture
     async def mock_exchange(self, container):
         """Create mock exchange for error testing with DI container."""
         config = {

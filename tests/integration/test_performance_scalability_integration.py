@@ -8,6 +8,7 @@ across integrated modules under realistic load conditions.
 import asyncio
 import logging
 import pytest
+import pytest_asyncio
 import time
 import psutil
 import statistics
@@ -578,7 +579,7 @@ class PerformanceScalabilityTest(BaseIntegrationTest):
         return results
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def performance_test():
     """Create performance and scalability test instance."""
     test = PerformanceScalabilityTest()

@@ -14,6 +14,7 @@ from decimal import Decimal
 
 import pytest
 
+import pytest_asyncio
 from src.database.models.audit import CapitalAuditLog
 from src.database.models.bot import Bot, Signal, Strategy
 from src.database.models.capital import CapitalAllocationDB, FundFlowDB
@@ -36,7 +37,7 @@ logger = logging.getLogger(__name__)
 class TestDatabaseIntegrationWorkflows:
     """Test complete database workflows involving multiple components using real services."""
 
-    @pytest.fixture
+    @pytest_asyncio.fixture
     async def real_repositories(self, clean_database):
         """Create repository instances with real database session."""
         service_factory = RealServiceFactory()

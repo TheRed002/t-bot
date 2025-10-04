@@ -14,6 +14,7 @@ from decimal import Decimal
 
 import pytest
 
+import pytest_asyncio
 from src.database.models.bot import Bot, Strategy
 from src.database.models.market_data import MarketDataRecord
 from src.database.models.trading import Order
@@ -26,7 +27,7 @@ from src.database.repository.trading import OrderRepository, PositionRepository
 class TestDatabasePerformanceIntegration:
     """Test database performance under various load conditions."""
 
-    @pytest.fixture
+    @pytest_asyncio.fixture
     async def session_factory(self):
         """Create session factory for performance testing with concurrent operations."""
         from src.database.connection import get_async_session

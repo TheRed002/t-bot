@@ -14,6 +14,7 @@ from typing import Dict, Any
 
 import pytest
 
+import pytest_asyncio
 # Import test infrastructure
 from tests.integration.infrastructure.service_factory import RealServiceFactory
 
@@ -46,7 +47,7 @@ from src.core.exceptions import (
 )
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def real_bot_services(clean_database):
     """Create real bot management services with real dependencies."""
     service_factory = RealServiceFactory()
